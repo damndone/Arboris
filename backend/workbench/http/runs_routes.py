@@ -54,6 +54,10 @@ from ..report_export import ReportExportError, export_report
 from ..report_store import list_ai_reports, save_ai_report
 from ..services.lmm_result_adapter import VersionedResultReadError
 from ..services.results_service import _model_results, _normalize_issue_stream
+from ..predictive_research.consumer_projection import (
+    read_prediction_evidence_from_run_root,
+)
+from ..predictive_research.schema import PayloadContractError
 from ..services.run_deletion import RunDeletionConfirmationError, RunDeletionService
 from ..services.run_service import (
     _mark_interrupted_if_dead,
@@ -204,6 +208,12 @@ async def run_endpoint(
     prediction_model_type: str = Form(""),
     prediction_cv_folds: str = Form("0"),
     prediction_sampling_method: str = Form(""),
+    prediction_data_structure: str | None = Form(None),
+    prediction_entity_column: str = Form(""),
+    prediction_group_column: str = Form(""),
+    prediction_time_column: str = Form(""),
+    prediction_final_holdout_fraction: str | None = Form(None),
+    prediction_shuffle: str | None = Form(None),
     iv_endog: str = Form(""),          # JSON array of column names, e.g. ["educ"]
     iv_instruments: str = Form(""),    # JSON array of column names
     did_mode: str = Form(""),
@@ -247,6 +257,12 @@ async def run_endpoint(
             "prediction_model_type": prediction_model_type,
             "prediction_cv_folds": prediction_cv_folds,
             "prediction_sampling_method": prediction_sampling_method,
+            "prediction_data_structure": prediction_data_structure,
+            "prediction_entity_column": prediction_entity_column,
+            "prediction_group_column": prediction_group_column,
+            "prediction_time_column": prediction_time_column,
+            "prediction_final_holdout_fraction": prediction_final_holdout_fraction,
+            "prediction_shuffle": prediction_shuffle,
             "iv_endog": iv_endog, "iv_instruments": iv_instruments,
             "did_mode": did_mode, "did_cohort_col": did_cohort_col,
             "did_treat_col": did_treat_col, "did_post_col": did_post_col,
@@ -382,6 +398,14 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
         ) from exc
     errors = _normalize_issue_stream(errors, model_results)
     preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
+    prediction_evidence = None
+    if (run_root / "prediction_results").is_dir():
+        try:
+            prediction_evidence = read_prediction_evidence_from_run_root(
+                run_root, consumer="table"
+            )
+        except (PayloadContractError, OSError, ValueError):
+            prediction_evidence = {"status": "unavailable"}
     return {
         **summary,
         "lineage": manifest.get("lineage", []),
@@ -389,6 +413,7 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
         "errors": errors,
         "model_results": model_results,
         "diagnostic_summary_preview": preview,
+        "prediction_evidence": prediction_evidence,
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the
         # run surface show that answer instead of leaving it in an artifact.

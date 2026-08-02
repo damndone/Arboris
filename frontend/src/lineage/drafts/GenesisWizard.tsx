@@ -173,6 +173,12 @@ export function GenesisWizard({
   const [predictionModelType, setPredictionModelType] = useState("");
   const [predictionCvFolds, setPredictionCvFolds] = useState(5);
   const [predictionSampling, setPredictionSampling] = useState("");
+  const [predictionDataStructure, setPredictionDataStructure] = useState("unknown");
+  const [predictionEntityColumn, setPredictionEntityColumn] = useState("");
+  const [predictionGroupColumn, setPredictionGroupColumn] = useState("");
+  const [predictionTimeColumn, setPredictionTimeColumn] = useState("");
+  const [predictionFinalHoldoutFraction, setPredictionFinalHoldoutFraction] = useState(0.2);
+  const [predictionShuffle, setPredictionShuffle] = useState(true);
   const [y, setY] = useState("");
   const [x, setX] = useState("");
   const [focal, setFocal] = useState<string[]>([]);
@@ -358,6 +364,19 @@ export function GenesisWizard({
       if (savedFolds !== null) setPredictionCvFolds(savedFolds);
       const savedSampling = firstString(modelParams.prediction_sampling_method);
       if (savedSampling) setPredictionSampling(savedSampling);
+      const savedStructure = firstString(modelParams.prediction_data_structure);
+      if (savedStructure) setPredictionDataStructure(savedStructure);
+      const savedGroup = firstString(modelParams.prediction_group_column);
+      if (savedGroup) setPredictionGroupColumn(savedGroup);
+      const savedEntity = firstString(modelParams.prediction_entity_column);
+      if (savedEntity) setPredictionEntityColumn(savedEntity);
+      const savedTime = firstString(modelParams.prediction_time_column);
+      if (savedTime) setPredictionTimeColumn(savedTime);
+      const savedHoldout = firstNumber(modelParams.prediction_final_holdout_fraction);
+      if (savedHoldout !== null) setPredictionFinalHoldoutFraction(savedHoldout);
+      if (typeof modelParams.prediction_shuffle === "boolean") {
+        setPredictionShuffle(modelParams.prediction_shuffle);
+      }
     }
     if (notify) onDraftUpdated?.(response);
   }
@@ -588,6 +607,12 @@ export function GenesisWizard({
       if (predictionModelType) params.prediction_model_type = predictionModelType;
       params.prediction_cv_folds = predictionCvFolds;
       if (predictionSampling) params.prediction_sampling_method = predictionSampling;
+      params.prediction_data_structure = predictionDataStructure;
+      if (predictionEntityColumn) params.prediction_entity_column = predictionEntityColumn;
+      if (predictionGroupColumn) params.prediction_group_column = predictionGroupColumn;
+      if (predictionTimeColumn) params.prediction_time_column = predictionTimeColumn;
+      params.prediction_final_holdout_fraction = predictionFinalHoldoutFraction;
+      params.prediction_shuffle = predictionShuffle;
     }
     if (!isIV && !usesDidRoles && !isDcdh && focal.length > 0) {
       params.focal_x = focal.filter((col) => exogColumns.includes(col));
@@ -634,6 +659,34 @@ export function GenesisWizard({
     }
     if (predictionEnabled && !predictionModelType) {
       setError("已开启预测，请选择算法 (algorithm)。");
+      return;
+    }
+    if (predictionEnabled && predictionDataStructure === "unknown") {
+      setError("预测必须声明数据结构 (IID、分组、时间或面板)。");
+      return;
+    }
+    if (
+      predictionEnabled &&
+      predictionDataStructure === "grouped" &&
+      !predictionGroupColumn
+    ) {
+      setError("分组预测必须指定分组列。");
+      return;
+    }
+    if (
+      predictionEnabled &&
+      predictionDataStructure === "panel" &&
+      !predictionEntityColumn
+    ) {
+      setError("面板预测必须指定个体列。");
+      return;
+    }
+    if (
+      predictionEnabled &&
+      (predictionDataStructure === "temporal" || predictionDataStructure === "panel") &&
+      !predictionTimeColumn
+    ) {
+      setError("时间或面板预测必须指定时间列。");
       return;
     }
     setBusy("model");
@@ -886,10 +939,23 @@ export function GenesisWizard({
             modelType={predictionModelType}
             cvFolds={predictionCvFolds}
             sampling={predictionSampling}
+            columns={columnNames}
+            dataStructure={predictionDataStructure}
+            entityColumn={predictionEntityColumn}
+            groupColumn={predictionGroupColumn}
+            timeColumn={predictionTimeColumn}
+            finalHoldoutFraction={predictionFinalHoldoutFraction}
+            shuffle={predictionShuffle}
             onEnabled={setPredictionEnabled}
             onModelType={setPredictionModelType}
             onCvFolds={setPredictionCvFolds}
             onSampling={setPredictionSampling}
+            onDataStructure={setPredictionDataStructure}
+            onEntityColumn={setPredictionEntityColumn}
+            onGroupColumn={setPredictionGroupColumn}
+            onTimeColumn={setPredictionTimeColumn}
+            onFinalHoldoutFraction={setPredictionFinalHoldoutFraction}
+            onShuffle={setPredictionShuffle}
           />}
           {modelType !== "time_series.arma_garch" &&
             modelType !== "panel_ols" &&

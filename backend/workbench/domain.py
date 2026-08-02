@@ -55,12 +55,14 @@ class ArtifactRecord:
     inputs: tuple[str, ...] = field(default_factory=tuple)
     config_hash: str = ""
     code_version: str = "0.1.0"
+    payload_contract: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "inputs", tuple(self.inputs))
+        object.__setattr__(self, "payload_contract", _freeze_value(self.payload_contract))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "artifact_id": self.artifact_id,
             "path": self.path,
             "artifact_type": self.artifact_type,
@@ -70,6 +72,9 @@ class ArtifactRecord:
             "config_hash": self.config_hash,
             "code_version": self.code_version,
         }
+        if self.payload_contract:
+            result["payload_contract"] = _to_plain(self.payload_contract)
+        return result
 
 
 @dataclass(frozen=True)

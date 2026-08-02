@@ -185,6 +185,18 @@ export type PostEstimationResult = {
   result: Record<string, unknown>;
 };
 
+export type PredictionResearchEvidence = {
+  status: "validated" | "unavailable";
+  consumer?: string;
+  model_id?: string;
+  structure?: { kind?: string; group_column?: string | null; time_column?: string | null };
+  split_parameters?: Record<string, unknown>;
+  oos?: { n?: number; metrics?: Record<string, number | null> };
+  baseline?: { model_id?: string; metrics?: Record<string, number | null> };
+  controls?: Array<{ control?: string; seed?: number | null; receipt?: Record<string, unknown> }>;
+  limits?: string[];
+};
+
 export type RunDetail = RunSummary & {
   lineage: Array<{ source: string; artifact_id: string }>;
   artifact_counts: Record<string, number>;
@@ -192,6 +204,7 @@ export type RunDetail = RunSummary & {
   model_results?: ModelResult[];
   diagnostic_summary_preview?: DiagnosticSummaryPreview;
   post_estimation_results?: PostEstimationResult[];
+  prediction_evidence?: PredictionResearchEvidence | null;
 };
 
 export type CoefficientRecord = {
@@ -394,6 +407,12 @@ export interface RunExtraParams {
   predictionModelType?: string;
   predictionCvFolds?: number;
   predictionSamplingMethod?: string;
+  predictionDataStructure?: string;
+  predictionEntityColumn?: string;
+  predictionGroupColumn?: string;
+  predictionTimeColumn?: string;
+  predictionFinalHoldoutFraction?: number;
+  predictionShuffle?: boolean;
   ivEndog?: string[];
   ivInstruments?: string[];
   didMode?: string;
@@ -511,6 +530,14 @@ export async function runWorkflow(
   if (extra?.predictionModelType) form.append("prediction_model_type", extra.predictionModelType);
   if (extra?.predictionCvFolds) form.append("prediction_cv_folds", String(extra.predictionCvFolds));
   if (extra?.predictionSamplingMethod) form.append("prediction_sampling_method", extra.predictionSamplingMethod);
+  if (extra?.predictionDataStructure !== undefined) form.append("prediction_data_structure", extra.predictionDataStructure);
+  if (extra?.predictionEntityColumn) form.append("prediction_entity_column", extra.predictionEntityColumn);
+  if (extra?.predictionGroupColumn) form.append("prediction_group_column", extra.predictionGroupColumn);
+  if (extra?.predictionTimeColumn) form.append("prediction_time_column", extra.predictionTimeColumn);
+  if (extra?.predictionFinalHoldoutFraction !== undefined) {
+    form.append("prediction_final_holdout_fraction", String(extra.predictionFinalHoldoutFraction));
+  }
+  if (extra?.predictionShuffle !== undefined) form.append("prediction_shuffle", String(extra.predictionShuffle));
   if (extra?.modelOptions !== undefined) {
     form.append("model_options", serializeModelOptions(extra.modelOptions));
   }

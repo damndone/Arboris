@@ -911,6 +911,9 @@ describe("runWorkflow panel+prediction params", () => {
       entityCol: "firm", timeCol: "yr", covariance: "robust",
       predictionModelType: "prediction_ridge", predictionCvFolds: 3,
       predictionSamplingMethod: "smote",
+      predictionDataStructure: "grouped", predictionGroupColumn: "firm",
+      predictionTimeColumn: "yr", predictionFinalHoldoutFraction: 0.25,
+      predictionShuffle: false,
       modelOptions: { random_slope: false, fit_method: "reml" },
     });
     expect(sent!.get("entity_col")).toBe("firm");
@@ -919,6 +922,11 @@ describe("runWorkflow panel+prediction params", () => {
     expect(sent!.get("prediction_model_type")).toBe("prediction_ridge");
     expect(sent!.get("prediction_cv_folds")).toBe("3");
     expect(sent!.get("prediction_sampling_method")).toBe("smote");
+    expect(sent!.get("prediction_data_structure")).toBe("grouped");
+    expect(sent!.get("prediction_group_column")).toBe("firm");
+    expect(sent!.get("prediction_time_column")).toBe("yr");
+    expect(sent!.get("prediction_final_holdout_fraction")).toBe("0.25");
+    expect(sent!.get("prediction_shuffle")).toBe("false");
     expect(sent!.get("model_options")).toBe(
       '{"random_slope":false,"fit_method":"reml"}',
     );

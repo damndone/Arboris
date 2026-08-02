@@ -705,6 +705,9 @@ describe("GenesisWizard", () => {
     fireEvent.change(screen.getByLabelText("cv_folds"), {
       target: { value: "7" },
     });
+    fireEvent.change(screen.getByLabelText("data structure"), {
+      target: { value: "iid" },
+    });
     fireEvent.change(screen.getByLabelText("sampling"), {
       target: { value: "smote" },
     });
@@ -723,6 +726,9 @@ describe("GenesisWizard", () => {
           prediction_model_type: "prediction_ridge",
           prediction_cv_folds: 7,
           prediction_sampling_method: "smote",
+          prediction_data_structure: "iid",
+          prediction_final_holdout_fraction: 0.2,
+          prediction_shuffle: true,
         },
       }),
     );

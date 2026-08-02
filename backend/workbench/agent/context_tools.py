@@ -24,6 +24,7 @@ from ..analysis_loop.time_series_compare import read_time_series_artifacts as _r
 from ..analysis_loop.plan import PlanDiff
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
+from ..predictive_research.consumer_projection import read_prediction_evidence_from_run_root
 from .context_compiler import resolve_registered_artifact
 from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .recipes.registry import build_option_vocabulary, validate_model_options_patch
@@ -3717,3 +3718,13 @@ def inspect_analysis_loop_context(
             "packet": payload,
         })
     return result
+
+
+def read_prediction_research_evidence(
+    run_root: Path,
+    *,
+    consumer: str = "agent",
+) -> dict[str, Any]:
+    """Read v1.8.6 prediction evidence through the shared projection."""
+
+    return read_prediction_evidence_from_run_root(run_root, consumer=consumer)

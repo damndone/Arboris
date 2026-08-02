@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
 
 from .artifacts import register_artifact, write_json
 from .econometrics.optional_deps import require_optional_dependency
+from .predictive_research.contracts import (
+    AvailabilitySpecV1,
+    ContractError,
+    FeatureRecipeV1,
+    SampleSpecV1,
+    SamplingSpecV1,
+    SplitPlanV1,
+    StructureSpecV1,
+)
+from .predictive_research.feature_recipe import apply_feature_recipe
+from .predictive_research.prediction_protocol import dataset_snapshot_hash, run_oos_prediction
+from .predictive_research.persistence import PredictionPersistenceAdmission
+from .predictive_research.split_kernel import build_split_plan
 
 _SUPPORTED_PREDICTION_MODEL_TYPES = {
     "prediction_lasso",
@@ -14,6 +28,198 @@ _SUPPORTED_PREDICTION_MODEL_TYPES = {
     "prediction_random_forest",
 }
 _SUPPORTED_SAMPLING_METHODS = {"smote", "oversample", "undersample"}
+
+
+def run_prediction_model_v186(
+    frame: pd.DataFrame,
+    run_root: Path,
+    *,
+    y: str,
+    x: list[str],
+    model_type: str,
+    model_id: str,
+    final_holdout_fraction: float,
+    cv_folds: int,
+    shuffle: bool,
+    random_seed: int,
+    data_structure: str = "unknown",
+    entity_column: str | None = None,
+    group_column: str | None = None,
+    time_column: str | None = None,
+    sampling: SamplingSpecV1 | None = None,
+    inputs: list[str] | None = None,
+    estimator_factory: Callable[[], Any] | None = None,
+    feature_recipe: FeatureRecipeV1 | None = None,
+) -> dict[str, Any]:
+    """Run the typed v1.8.6 protocol while keeping legacy callers unchanged."""
+
+    sampling_spec = sampling or SamplingSpecV1()
+    if any(
+        value is not None
+        for value in (
+            sampling_spec.sampling_weight,
+            sampling_spec.analysis_weight,
+            sampling_spec.frequency_weight,
+        )
+    ):
+        raise ContractError(
+            "PREDICTION_WEIGHT_UNSUPPORTED",
+            "the v1.8.6 generic estimator adapter does not yet support declared weight semantics",
+        )
+    structure = StructureSpecV1(
+        kind=data_structure,
+        group_column=group_column,
+        time_column=time_column,
+        entity_column=entity_column,
+        provenance="user_confirmed" if data_structure != "unknown" else "inferred",
+    )
+    structure.validate()
+    strategy = "grouped" if data_structure == "grouped" else data_structure
+    protocol_frame = frame.copy()
+    if feature_recipe is not None:
+        protocol_frame = apply_feature_recipe(protocol_frame, feature_recipe)
+    protocol_frame.index = [str(value) for value in frame.index]
+    groups = protocol_frame[group_column].astype(str).tolist() if data_structure == "grouped" and group_column else None
+    time_values = protocol_frame[time_column].tolist() if data_structure in {"temporal", "panel"} and time_column else None
+    split = build_split_plan(
+        row_refs=tuple(protocol_frame.index),
+        strategy=strategy,
+        groups=groups,
+        time_values=time_values,
+        final_holdout_fraction=final_holdout_fraction,
+        cv_folds=cv_folds,
+        shuffle=shuffle,
+        random_seed=random_seed,
+    )
+    profile_id = {
+        "grouped": "grouped_holdout_groupkfold",
+        "temporal": "temporal_holdout_rolling",
+    }.get(data_structure, "iid_holdout_kfold")
+    sample_spec = SampleSpecV1(
+        dataset_sha256=dataset_snapshot_hash(protocol_frame),
+        sampling=sampling_spec,
+        split_plan=SplitPlanV1(
+            strategy=strategy,
+            profile_id=profile_id,
+            profile_version=1,
+            effective_parameters={
+                **split.effective_parameters,
+                "group_column": group_column,
+                "time_column": time_column,
+                "model_id": model_id,
+            },
+        ),
+        structure=structure,
+        availability=AvailabilitySpecV1(kind="declared", reservation_policy="fail_closed", validation_status="declared"),
+        feature_recipe_ref=feature_recipe.content_hash if feature_recipe is not None else None,
+        split_plan_ref=split.content_hash,
+    )
+    if estimator_factory is None:
+        estimator_factory = _make_v186_estimator_factory(model_type, random_seed)
+    result = run_oos_prediction(
+        frame=protocol_frame,
+        target=y,
+        features=tuple(x),
+        sample_spec=sample_spec,
+        split_receipt=split,
+        estimator_factory=estimator_factory,
+        model_id=model_id,
+        control_seed=random_seed,
+    )
+
+    sample_payload = {**sample_spec.to_dict(), "sample_spec_hash": sample_spec.content_hash}
+    split_payload = {**split.to_dict(), "content_hash": split.content_hash}
+    prediction_payload = {"model_type": model_type, **result.prediction_packet}
+    evaluation_payload = {"model_type": model_type, **result.evaluation_packet}
+    control_payload = {"model_type": model_type, **result.control_packet}
+    artifact_inputs = inputs or ["cleaned_dataset"]
+    with PredictionPersistenceAdmission.admit(run_root) as persistence:
+        sample_path = ("prediction_splits", f"{model_id}.sample.json")
+        split_path = ("prediction_splits", f"{model_id}.json")
+        prediction_path = ("prediction_results", f"{model_id}.json")
+        evaluation_path = ("evaluation_results", f"{model_id}.json")
+        control_path = ("negative_controls", f"{model_id}.json")
+        recipe_path = ("prediction_splits", f"{model_id}.feature-recipe.json")
+        sample_sha = persistence.write_json(sample_path, sample_payload)
+        split_sha = persistence.write_json(split_path, split_payload)
+        prediction_sha = persistence.write_json(prediction_path, prediction_payload)
+        evaluation_sha = persistence.write_json(evaluation_path, evaluation_payload)
+        control_sha = persistence.write_json(control_path, control_payload)
+        if feature_recipe is not None:
+            recipe_sha = persistence.write_json(recipe_path, feature_recipe.to_dict())
+            persistence.register_artifact(
+                artifact_id=f"{model_id}_feature_recipe", relative_parts=recipe_path,
+                artifact_type="prediction_feature_recipe", step="prediction", inputs=artifact_inputs,
+                sha256=recipe_sha,
+                payload_contract={"payload_schema": "workbench.prediction.feature-recipe", "schema_version": 1},
+            )
+        persistence.register_artifact(
+            artifact_id=f"{model_id}_sample_spec", relative_parts=sample_path,
+            artifact_type="prediction_sample_spec", step="prediction", inputs=artifact_inputs,
+            sha256=sample_sha,
+            payload_contract={"payload_schema": "workbench.prediction.sample-spec", "schema_version": 1},
+        )
+        persistence.register_artifact(
+            artifact_id=f"{model_id}_split_plan", relative_parts=split_path,
+            artifact_type="prediction_split_plan", step="prediction", inputs=artifact_inputs,
+            sha256=split_sha,
+            payload_contract={"payload_schema": "workbench.prediction.split-plan", "schema_version": 1},
+        )
+        persistence.register_artifact(
+            artifact_id=model_id, relative_parts=prediction_path,
+            artifact_type="prediction_packet", step="prediction", inputs=artifact_inputs,
+            sha256=prediction_sha,
+            payload_contract={"payload_schema": "workbench.prediction.prediction-packet", "schema_version": 1},
+        )
+        persistence.register_artifact(
+            artifact_id=f"{model_id}_evaluation", relative_parts=evaluation_path,
+            artifact_type="evaluation_packet", step="prediction", inputs=[model_id],
+            sha256=evaluation_sha,
+            payload_contract={"payload_schema": "workbench.prediction.evaluation-packet", "schema_version": 1},
+        )
+        persistence.register_artifact(
+            artifact_id=f"{model_id}_controls", relative_parts=control_path,
+            artifact_type="negative_control_packet", step="prediction", inputs=[model_id],
+            sha256=control_sha,
+            payload_contract={"payload_schema": "workbench.prediction.negative-control-packet", "schema_version": 1},
+        )
+    return {
+        "protocol": "predictive_research_v1",
+        "model_type": model_type,
+        "sample_spec": sample_payload,
+        "split_plan": split_payload,
+        "prediction_packet": prediction_payload,
+        "evaluation_packet": evaluation_payload,
+        "control_packet": control_payload,
+    }
+
+
+def _make_v186_estimator_factory(model_type: str, random_seed: int) -> Callable[[], Any]:
+    sklearn_pipeline = require_optional_dependency(
+        "sklearn.pipeline", extra="ml", engine="scikit-learn", model_type=model_type, step="prediction"
+    )
+    sklearn_preprocessing = require_optional_dependency(
+        "sklearn.preprocessing", extra="ml", engine="scikit-learn", model_type=model_type, step="prediction"
+    )
+    sklearn_linear = require_optional_dependency(
+        "sklearn.linear_model", extra="ml", engine="scikit-learn", model_type=model_type, step="prediction"
+    )
+    sklearn_ensemble = require_optional_dependency(
+        "sklearn.ensemble", extra="ml", engine="scikit-learn", model_type=model_type, step="prediction"
+    )
+
+    def factory() -> Any:
+        if model_type == "prediction_lasso":
+            estimator = sklearn_linear.Lasso(alpha=1.0, random_state=random_seed, max_iter=5000)
+        elif model_type == "prediction_ridge":
+            estimator = sklearn_linear.Ridge(alpha=1.0)
+        elif model_type == "prediction_random_forest":
+            estimator = sklearn_ensemble.RandomForestRegressor(n_estimators=100, random_state=random_seed, n_jobs=1)
+        else:
+            raise ValueError(f"Unsupported v1.8.6 prediction model_type: {model_type}")
+        return sklearn_pipeline.make_pipeline(sklearn_preprocessing.StandardScaler(), estimator)
+
+    return factory
 
 
 def run_prediction_model(

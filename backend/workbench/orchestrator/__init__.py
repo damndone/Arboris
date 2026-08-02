@@ -74,7 +74,7 @@ from ..imputation import run_mice_imputation
 from ..metadata import infer_schema
 from ..narrative import build_claims
 from ..profiling import profile_frame
-from ..prediction import run_prediction_model
+from ..prediction import run_prediction_model, run_prediction_model_v186
 from ..projects import create_run
 from ..reporting import render_html_report
 from ..router import classify_dataset, detect_y_kind
@@ -186,6 +186,12 @@ def run_workflow(
     prediction_model_type: str = "",
     prediction_cv_folds: int = 0,
     prediction_sampling_method: str = "",
+    prediction_data_structure: str | None = None,
+    prediction_entity_column: str = "",
+    prediction_group_column: str = "",
+    prediction_time_column: str = "",
+    prediction_final_holdout_fraction: float | None = None,
+    prediction_shuffle: bool | None = None,
     iv_endog: list[str] | None = None,
     iv_instruments: list[str] | None = None,
     did_mode: str = "",
@@ -263,6 +269,12 @@ def run_workflow(
         "prediction_model_type": prediction_model_type,
         "prediction_cv_folds": str(prediction_cv_folds),
         "prediction_sampling_method": prediction_sampling_method,
+        "prediction_data_structure": prediction_data_structure,
+        "prediction_entity_column": prediction_entity_column,
+        "prediction_group_column": prediction_group_column,
+        "prediction_time_column": prediction_time_column,
+        "prediction_final_holdout_fraction": prediction_final_holdout_fraction,
+        "prediction_shuffle": prediction_shuffle,
         "did_mode": did_mode,
         "did_cohort_col": did_cohort_col,
         "did_treat_col": did_treat_col,
@@ -355,6 +367,12 @@ def run_workflow(
             prediction_model_type=prediction_model_type,
             prediction_cv_folds=prediction_cv_folds,
             prediction_sampling_method=prediction_sampling_method,
+            prediction_data_structure=prediction_data_structure,
+            prediction_entity_column=prediction_entity_column,
+            prediction_group_column=prediction_group_column,
+            prediction_time_column=prediction_time_column,
+            prediction_final_holdout_fraction=prediction_final_holdout_fraction,
+            prediction_shuffle=prediction_shuffle,
             iv_endog=iv_endog,
             iv_instruments=iv_instruments,
             did_mode=did_mode,
@@ -517,6 +535,12 @@ def _run_workflow(
     prediction_model_type: str = "",
     prediction_cv_folds: int = 0,
     prediction_sampling_method: str = "",
+    prediction_data_structure: str | None = None,
+    prediction_entity_column: str = "",
+    prediction_group_column: str = "",
+    prediction_time_column: str = "",
+    prediction_final_holdout_fraction: float | None = None,
+    prediction_shuffle: bool | None = None,
     iv_endog: list[str] | None = None,
     iv_instruments: list[str] | None = None,
     did_mode: str = "",
@@ -592,6 +616,12 @@ def _run_workflow(
     ctx.artifacts["_prediction_model_type"] = prediction_model_type
     ctx.artifacts["_prediction_cv_folds"] = prediction_cv_folds
     ctx.artifacts["_prediction_sampling_method"] = prediction_sampling_method
+    ctx.artifacts["_prediction_data_structure"] = prediction_data_structure
+    ctx.artifacts["_prediction_entity_column"] = prediction_entity_column
+    ctx.artifacts["_prediction_group_column"] = prediction_group_column
+    ctx.artifacts["_prediction_time_column"] = prediction_time_column
+    ctx.artifacts["_prediction_final_holdout_fraction"] = prediction_final_holdout_fraction
+    ctx.artifacts["_prediction_shuffle"] = prediction_shuffle
     ctx.artifacts["_iv_endog"] = [normalize_column_name(c) for c in (iv_endog or [])]
     ctx.artifacts["_iv_instruments"] = [normalize_column_name(c) for c in (iv_instruments or [])]
     ctx.artifacts["_did_mode"] = did_mode
@@ -632,6 +662,12 @@ def _run_workflow(
         "prediction_model_type": prediction_model_type,
         "prediction_cv_folds": prediction_cv_folds,
         "prediction_sampling_method": prediction_sampling_method,
+        "prediction_data_structure": prediction_data_structure,
+        "prediction_entity_column": prediction_entity_column,
+        "prediction_group_column": prediction_group_column,
+        "prediction_time_column": prediction_time_column,
+        "prediction_final_holdout_fraction": prediction_final_holdout_fraction,
+        "prediction_shuffle": prediction_shuffle,
         "model_options": normalized_model_options,
     }
     if model_options_binding is not None:

@@ -160,6 +160,23 @@ def _safe_int(value: str) -> int:
         return 0
 
 
+def _safe_float(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_bool(value: object) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _parse_json_str_array(raw: str, label: str) -> list[str]:
     if not raw.strip():
         return []
@@ -554,6 +571,10 @@ def _submit_run(
         form.get("entity_col", ""), form.get("time_col", ""), form.get("covariance", ""),
         form.get("prediction_model_type", ""), _safe_int(form.get("prediction_cv_folds", "0")),
         form.get("prediction_sampling_method", ""),
+        form.get("prediction_data_structure"), form.get("prediction_entity_column", ""),
+        form.get("prediction_group_column", ""),
+        form.get("prediction_time_column", ""), _safe_float(form.get("prediction_final_holdout_fraction")),
+        _safe_bool(form.get("prediction_shuffle")),
         iv_endog_list, iv_instruments_list,
         form.get("did_mode", ""), form.get("did_cohort_col", ""), form.get("did_treat_col", ""),
         form.get("did_post_col", ""), form.get("did_status_col", ""), form.get("did_treatment_path", ""),
@@ -584,6 +605,12 @@ def _bg_run(
     prediction_model_type: str = "",
     prediction_cv_folds: int = 0,
     prediction_sampling_method: str = "",
+    prediction_data_structure: str | None = None,
+    prediction_entity_column: str = "",
+    prediction_group_column: str = "",
+    prediction_time_column: str = "",
+    prediction_final_holdout_fraction: float | None = None,
+    prediction_shuffle: bool | None = None,
     iv_endog: list[str] | None = None,
     iv_instruments: list[str] | None = None,
     did_mode: str = "",
@@ -646,6 +673,12 @@ def _bg_run(
             prediction_model_type=prediction_model_type,
             prediction_cv_folds=prediction_cv_folds,
             prediction_sampling_method=prediction_sampling_method,
+            prediction_data_structure=prediction_data_structure,
+            prediction_entity_column=prediction_entity_column,
+            prediction_group_column=prediction_group_column,
+            prediction_time_column=prediction_time_column,
+            prediction_final_holdout_fraction=prediction_final_holdout_fraction,
+            prediction_shuffle=prediction_shuffle,
             iv_endog=iv_endog,
             iv_instruments=iv_instruments,
             did_mode=did_mode,

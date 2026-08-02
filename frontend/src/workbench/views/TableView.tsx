@@ -47,6 +47,7 @@ import {
 } from "../../runResult/useArmaGarchCharts";
 import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
 import { resolveTableRunScope } from "./tableRunScope";
+import { PredictionResearchEvidenceCard } from "../../runResult/PredictionResearchEvidenceCard";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -645,6 +646,8 @@ function RunResultsPanel({
           run {shortRunId(runId)}
         </span>
       </header>
+
+      <PredictionResearchEvidenceCard evidence={detail?.prediction_evidence} />
 
       {loading && (
         <div data-testid="table-view-loading" style={{ color: "var(--label-secondary)" }}>

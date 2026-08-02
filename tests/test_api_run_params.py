@@ -33,6 +33,9 @@ def test_run_endpoint_forwards_new_params(tmp_path):
             "entity_col": "firm", "time_col": "yr", "covariance": "robust",
             "prediction_model_type": "prediction_ridge", "prediction_cv_folds": "3",
             "prediction_sampling_method": "smote",
+            "prediction_data_structure": "grouped", "prediction_group_column": "firm",
+            "prediction_time_column": "yr", "prediction_final_holdout_fraction": "0.25",
+            "prediction_shuffle": "false",
             "model_options": "{}",
         }, files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")})
         # _bg_run runs on the executor thread — poll until _run_workflow is called.
@@ -49,6 +52,11 @@ def test_run_endpoint_forwards_new_params(tmp_path):
     assert kw["prediction_model_type"] == "prediction_ridge"
     assert kw["prediction_cv_folds"] == 3  # parsed to int
     assert kw["prediction_sampling_method"] == "smote"
+    assert kw["prediction_data_structure"] == "grouped"
+    assert kw["prediction_group_column"] == "firm"
+    assert kw["prediction_time_column"] == "yr"
+    assert kw["prediction_final_holdout_fraction"] == 0.25
+    assert kw["prediction_shuffle"] is False
     assert kw["model_options"] == {}
     assert kw["model_options_binding"] is None
 

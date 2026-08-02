@@ -6,11 +6,13 @@ import json
 import os
 import platform
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 from uuid import uuid4
 
 from . import __version__
 from .domain import ArtifactRecord
+from .predictive_research.schema import PayloadContractError, default_v1_prediction_registry
 
 PACKAGE_VERSION_NAMES = (
     "fastapi",
@@ -87,6 +89,8 @@ def register_artifact(
     artifact_type: str,
     step: str,
     inputs: list[str],
+    *,
+    payload_contract: Mapping[str, Any] | None = None,
 ) -> ArtifactRecord:
     resolved_run_root = run_root.resolve()
     resolved_path = path.resolve()
@@ -94,6 +98,26 @@ def register_artifact(
         relative_path = resolved_path.relative_to(resolved_run_root)
     except ValueError as exc:
         raise ValueError(f"artifact path must be inside run root: {path}") from exc
+    normalized_contract: dict[str, Any] = {}
+    if payload_contract is not None:
+        if not isinstance(payload_contract, Mapping):
+            raise PayloadContractError("ARTIFACT_PAYLOAD_CONTRACT_REQUIRED", "payload_contract must be an object")
+        normalized_contract = {
+            "payload_schema": payload_contract.get("payload_schema"),
+            "schema_version": payload_contract.get("schema_version"),
+        }
+        if normalized_contract["payload_schema"] is None or normalized_contract["schema_version"] is None:
+            raise PayloadContractError("ARTIFACT_PAYLOAD_CONTRACT_REQUIRED", "payload_schema and schema_version are required")
+        payload = read_json(resolved_path)
+        validated = default_v1_prediction_registry().validate(payload)
+        if (
+            validated.get("payload_schema") != normalized_contract["payload_schema"]
+            or validated.get("schema_version") != normalized_contract["schema_version"]
+        ):
+            raise PayloadContractError(
+                "ARTIFACT_PAYLOAD_CONTRACT_MISMATCH",
+                "record payload contract does not match payload",
+            )
     record = ArtifactRecord(
         artifact_id=artifact_id,
         path=relative_path.as_posix(),
@@ -102,6 +126,7 @@ def register_artifact(
         sha256=sha256_file(resolved_path),
         inputs=inputs,
         code_version=__version__,
+        payload_contract=normalized_contract,
     )
     index_path = run_root / "artifacts_index.json"
     index = read_json(index_path)

@@ -42,6 +42,7 @@ import { PacketPanel } from "./workbench/repeatedMeasures/PacketPanel";
 import { ArmaGarchDashboard } from "./runResult/ArmaGarchDashboard";
 import { useArmaGarchArtifacts } from "./runResult/useArmaGarchArtifacts";
 import { useArmaGarchCharts } from "./runResult/useArmaGarchCharts";
+import { PredictionResearchEvidenceCard } from "./runResult/PredictionResearchEvidenceCard";
 
 /** Stable identity so the loader effects do not re-run on every render. */
 const NO_GROUPS: ArtifactGroup[] = [];
@@ -273,8 +274,8 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
     if (artifactsState.status !== "loaded") return;
     const predId = artifactsState.groups
       .flatMap((g) => g.items)
-      .map((it) => it.artifact_id)
-      .find((id) => /^prediction_.*_1$/.test(id));
+      .find((it) => it.artifact_type === "prediction_result" && /^prediction_.*_1$/.test(it.artifact_id))
+      ?.artifact_id;
     if (!predId) {
       setPredictionResult(undefined);
       return;
@@ -535,6 +536,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       )}
       <ImputationSummary summary={imputationData} />
       <PredictionResultCard result={predictionResult} />
+      <PredictionResearchEvidenceCard evidence={detail?.prediction_evidence} />
       <IVDiagnosticsCard diagnostics={ivDiagnostics} />
       <DIDDiagnosticsCard diagnostics={didDiagnostics} />
       <CSDiagnosticsCard diagnostics={csDiagnostics} />

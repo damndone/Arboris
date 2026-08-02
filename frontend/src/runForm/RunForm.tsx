@@ -123,6 +123,12 @@ export function RunForm(props: RunFormProps) {
   const [predictionModelType, setPredictionModelType] = useState("");
   const [predictionCvFolds, setPredictionCvFolds] = useState(5);
   const [predictionSampling, setPredictionSampling] = useState("");
+  const [predictionDataStructure, setPredictionDataStructure] = useState("unknown");
+  const [predictionEntityColumn, setPredictionEntityColumn] = useState("");
+  const [predictionGroupColumn, setPredictionGroupColumn] = useState("");
+  const [predictionTimeColumn, setPredictionTimeColumn] = useState("");
+  const [predictionFinalHoldoutFraction, setPredictionFinalHoldoutFraction] = useState(0.2);
+  const [predictionShuffle, setPredictionShuffle] = useState(true);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [sheetName, setSheetName] = useState<string | undefined>(undefined);
   const [transpose, setTranspose] = useState(false);
@@ -320,8 +326,20 @@ export function RunForm(props: RunFormProps) {
       predictionEnabled,
       predictionModelType,
     });
-    setValidationError(err);
-    if (err) return;
+    const predictionContractError = predictionEnabled
+      ? predictionDataStructure === "unknown"
+        ? "Prediction requires an explicit data structure declaration"
+        : predictionDataStructure === "grouped" && !predictionGroupColumn
+          ? "Grouped prediction requires a group column"
+          : predictionDataStructure === "panel" && !predictionEntityColumn
+            ? "Panel prediction requires an entity column"
+          : (predictionDataStructure === "temporal" || predictionDataStructure === "panel") && !predictionTimeColumn
+            ? "Temporal or panel prediction requires a time column"
+            : null
+      : null;
+    const validationMessage = err ?? predictionContractError;
+    setValidationError(validationMessage);
+    if (validationMessage) return;
     setRequestState("working");
     setError(null);
     setActivity("Running workflow");
@@ -394,6 +412,12 @@ export function RunForm(props: RunFormProps) {
           predictionModelType: predictionEnabled ? predictionModelType : "",
           predictionCvFolds: predictionEnabled ? predictionCvFolds : undefined,
           predictionSamplingMethod: predictionEnabled ? predictionSampling : "",
+          predictionDataStructure: predictionEnabled ? predictionDataStructure : undefined,
+          predictionEntityColumn: predictionEnabled ? predictionEntityColumn : undefined,
+          predictionGroupColumn: predictionEnabled && predictionDataStructure === "grouped" ? predictionGroupColumn : undefined,
+          predictionTimeColumn: predictionEnabled ? predictionTimeColumn : undefined,
+          predictionFinalHoldoutFraction: predictionEnabled ? predictionFinalHoldoutFraction : undefined,
+          predictionShuffle: predictionEnabled ? predictionShuffle : undefined,
           ivEndog: isIV ? ivRole.endog : undefined,
           ivInstruments: isIV ? ivRole.instruments : undefined,
           didMode: usesDidRoles ? didRole.mode : undefined,
@@ -624,10 +648,23 @@ export function RunForm(props: RunFormProps) {
               modelType={predictionModelType}
               cvFolds={predictionCvFolds}
               sampling={predictionSampling}
+              columns={columnNames}
+              dataStructure={predictionDataStructure}
+              entityColumn={predictionEntityColumn}
+              groupColumn={predictionGroupColumn}
+              timeColumn={predictionTimeColumn}
+              finalHoldoutFraction={predictionFinalHoldoutFraction}
+              shuffle={predictionShuffle}
               onEnabled={setPredictionEnabled}
               onModelType={setPredictionModelType}
               onCvFolds={setPredictionCvFolds}
               onSampling={setPredictionSampling}
+              onDataStructure={setPredictionDataStructure}
+              onEntityColumn={setPredictionEntityColumn}
+              onGroupColumn={setPredictionGroupColumn}
+              onTimeColumn={setPredictionTimeColumn}
+              onFinalHoldoutFraction={setPredictionFinalHoldoutFraction}
+              onShuffle={setPredictionShuffle}
             />
           )}
           {validationError && (
