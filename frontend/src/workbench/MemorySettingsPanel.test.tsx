@@ -66,7 +66,11 @@ describe("MemorySettingsPanel", () => {
     render(<MemorySettingsPanel projectRoot="/project-a" />);
 
     expect(await screen.findByTestId("memory-settings-panel")).toHaveTextContent("Off");
-    fireEvent.click(screen.getByRole("button", { name: "Enable global library" }));
+    const globalSwitch = screen.getByRole("switch", { name: "Global library" });
+    expect(globalSwitch).toHaveAttribute("aria-checked", "false");
+    expect(globalSwitch).toHaveAttribute("title", expect.stringContaining("Off"));
+    expect(globalSwitch).toHaveStyle("width: 48px; height: 20px; min-height: 0;");
+    fireEvent.click(globalSwitch);
 
     expect(await screen.findByRole("dialog", { name: "Confirm memory change" })).toHaveTextContent("No automatic execution");
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
@@ -75,7 +79,16 @@ describe("MemorySettingsPanel", () => {
       "/project-a",
       { library_enabled: true, expected_revision: 0, confirmation_receipt: "receipt-1" },
     ));
-    expect(await screen.findByRole("button", { name: "Disable global library" })).toBeInTheDocument();
+    expect(await screen.findByRole("switch", { name: "Global library" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("renders the second confirmation as a visible modal instead of below the settings content", async () => {
+    render(<MemorySettingsPanel projectRoot="/project-a" />);
+    fireEvent.click(await screen.findByRole("switch", { name: "Global library" }));
+
+    const confirmation = await screen.findByRole("dialog", { name: "Confirm memory change" });
+    expect(confirmation).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByTestId("memory-confirmation-backdrop")).toHaveStyle({ position: "fixed", zIndex: "1000" });
   });
 
   it("shows enough safe context to archive the intended memory", async () => {
@@ -164,7 +177,7 @@ describe("MemorySettingsPanel", () => {
     render(<MemorySettingsPanel projectRoot="/project-a" />);
 
     expect(await screen.findByTestId("memory-settings-panel")).toHaveTextContent("Candidate review is temporarily unavailable");
-    expect(screen.getByRole("button", { name: "Enable global library" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Global library" })).toBeInTheDocument();
     expect(screen.getAllByText("No approved memory yet.")).toHaveLength(2);
   });
 
@@ -215,14 +228,13 @@ describe("MemorySettingsPanel", () => {
     const { rerender } = render(<MemorySettingsPanel projectRoot="/project-a" />);
     rerender(<MemorySettingsPanel projectRoot="/project-b" />);
 
-    expect(await screen.findByRole("button", { name: "Disable project library" })).toBeInTheDocument();
+    expect(await screen.findByRole("switch", { name: "Project library" })).toHaveAttribute("aria-checked", "true");
     await act(async () => {
       releaseFormerProject?.();
       await formerProject;
     });
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Disable project library" })).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "Enable project library" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Project library" })).toHaveAttribute("aria-checked", "true"));
   });
 
   it("does not refresh a former project after its candidate review returns", async () => {
@@ -263,14 +275,14 @@ describe("MemorySettingsPanel", () => {
       await Promise.resolve();
     });
     await waitFor(() => expect(fetchDomainMemorySettings).toHaveBeenCalledWith("/project-b"));
-    expect(await screen.findByRole("button", { name: "Disable project library" })).toBeInTheDocument();
+    expect(await screen.findByRole("switch", { name: "Project library" })).toHaveAttribute("aria-checked", "true");
 
     await act(async () => {
       releaseReview?.();
       await reviewResult;
     });
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Disable project library" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Project library" })).toHaveAttribute("aria-checked", "true"));
     expect(vi.mocked(fetchDomainMemorySettings).mock.calls.filter(([projectRoot]) => projectRoot === "/project-a")).toHaveLength(1);
   });
 
@@ -312,8 +324,8 @@ describe("MemorySettingsPanel", () => {
       await Promise.resolve();
     });
 
-    const projectButton = await screen.findByRole("button", { name: "Disable project library" });
-    expect(projectButton).toBeEnabled();
+    const projectSwitch = await screen.findByRole("switch", { name: "Project library" });
+    expect(projectSwitch).toBeEnabled();
     await act(async () => {
       rejectReview?.(new Error("DOMAIN_MEMORY_REVIEW_FAILED"));
       try {
@@ -324,7 +336,7 @@ describe("MemorySettingsPanel", () => {
     });
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Disable project library" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Project library" })).toBeEnabled();
   });
 
   it("does not render a former project's candidates while the current queue is loading", async () => {
@@ -362,7 +374,7 @@ describe("MemorySettingsPanel", () => {
     await screen.findByText("This candidate belongs only to project A.");
     rerender(<MemorySettingsPanel projectRoot="/project-b" />);
 
-    await screen.findByRole("button", { name: "Disable project library" });
+    await screen.findByRole("switch", { name: "Project library" });
     expect(screen.queryByText("This candidate belongs only to project A.")).not.toBeInTheDocument();
     await act(async () => {
       releaseCurrentCandidates?.();

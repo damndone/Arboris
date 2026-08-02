@@ -46,6 +46,14 @@ const buttonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
+const settingsSectionButtonStyle = (active: boolean): React.CSSProperties => ({
+  ...buttonStyle,
+  background: active ? "var(--accent, #0a84ff)" : "var(--bg-card-2, rgba(255,255,255,0.06))",
+  borderColor: active ? "var(--accent, #0a84ff)" : "var(--separator, #3a3a3c)",
+  color: active ? "#fff" : "var(--label, #f5f5f7)",
+  boxShadow: active ? "0 1px 2px rgba(10,132,255,0.22)" : "none",
+});
+
 export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerProps) {
   const [providers, setProviders] = useState<LlmProvider[]>([]);
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
@@ -201,8 +209,8 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
       </header>
 
       <nav aria-label="Settings sections" style={{ display: "flex", gap: 8, margin: "0 0 20px" }}>
-        <button type="button" aria-pressed={settingsSection === "providers"} onClick={() => setSettingsSection("providers")} style={buttonStyle}>LLM providers</button>
-        {projectRoot ? <button type="button" aria-pressed={settingsSection === "memory"} onClick={() => setSettingsSection("memory")} style={buttonStyle}>Memory</button> : null}
+        <button type="button" aria-pressed={settingsSection === "providers"} onClick={() => setSettingsSection("providers")} style={settingsSectionButtonStyle(settingsSection === "providers")}>LLM providers</button>
+        {projectRoot ? <button type="button" aria-pressed={settingsSection === "memory"} onClick={() => setSettingsSection("memory")} style={settingsSectionButtonStyle(settingsSection === "memory")}>Memory</button> : null}
       </nav>
 
       {settingsSection === "memory" && projectRoot ? <MemorySettingsPanel projectRoot={projectRoot} /> : <>

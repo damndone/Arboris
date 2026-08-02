@@ -790,6 +790,83 @@ def test_local_runtime_materializes_only_published_recipe_default_matches(
     )
 
 
+def test_local_runtime_materializes_only_published_native_default_matches(
+    tmp_path: Path,
+) -> None:
+    """A registered native default is preselected without provider family facts.
+
+    Notebook planning starts before the provider has selected a model family.
+    Native defaults therefore use the server-owned target registry to derive a
+    bounded family fact.  The memory predicate and target owner still have to
+    agree; the provider cannot broaden this lookup.
+    """
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    runtime = bootstrap_local_domain_memory_runtime(tmp_path / "domain-memory")
+    project_scope = runtime.project_scope(project_root)
+    runtime.preferences.update_project(
+        project_scope,
+        expected_revision=0,
+        library_enabled=True,
+        inherit_global=False,
+        candidate_generation_enabled=False,
+    )
+    store = runtime.service_for_project(project_root, create=True).store
+    _approved_memory_store(
+        tmp_path,
+        store=store,
+        memory_id="memory-ols-robust",
+        target_ref="model.genesis.ols.covariance.robust",
+        applicability_predicates=(
+            ApplicabilityPredicate("analysis_family", "equals", "ols"),
+        ),
+        verifier=MemoryVerifier("verify-ols-robust", 31_536_000),
+        last_validated_at=_current_verifier_time(),
+        expires_at=None,
+    )
+    _approved_memory_store(
+        tmp_path,
+        store=store,
+        memory_id="memory-panel-robust",
+        target_ref="model.genesis.panel_ols.covariance.robust",
+        applicability_predicates=(
+            ApplicabilityPredicate("analysis_family", "equals", "panel_ols"),
+        ),
+        verifier=MemoryVerifier("verify-panel-robust", 31_536_000),
+        last_validated_at=_current_verifier_time(),
+        expires_at=None,
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                domain_memory_runtime=runtime,
+                domain_memory_context_provider=None,
+                domain_memory_service=None,
+            )
+        )
+    )
+
+    projection = _domain_memory_projection(
+        request,
+        project_root,
+        object(),
+        "notebook-1",
+        context=_context(project_root),
+    )
+
+    assert projection is not None
+    assert [entry["memory_id"] for entry in projection["entries"]] == [
+        "memory-ols-robust",
+        "memory-panel-robust",
+    ]
+    assert all(
+        entry["apply_mode"] == "suggest_default"
+        and entry["apply_mode_reason"] == "verifier_current"
+        for entry in projection["entries"]
+    )
+
+
 def test_recipe_default_bridge_excludes_noncurrent_hints_and_bounds_projection(
     tmp_path: Path,
 ) -> None:

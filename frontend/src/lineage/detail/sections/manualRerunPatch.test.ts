@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildManualRerunPatch, normalizeForCompare } from "./manualRerunPatch";
+import {
+  buildManualRerunPatch,
+  buildManualRerunPatchId,
+  normalizeForCompare,
+} from "./manualRerunPatch";
 
 describe("manualRerunPatch", () => {
   it("builds a single-node patch with old and new values", () => {
@@ -45,6 +49,15 @@ describe("manualRerunPatch", () => {
   it("normalizes object keys deterministically", () => {
     expect(normalizeForCompare({ b: 2, a: 1 })).toBe(
       normalizeForCompare({ a: 1, b: 2 }),
+    );
+  });
+
+  it("changes the id when the same field is changed to a different value", () => {
+    const from = { model_type: "logit" };
+    expect(
+      buildManualRerunPatchId("nocv1:source", from, { model_type: "probit" }),
+    ).not.toBe(
+      buildManualRerunPatchId("nocv1:source", from, { model_type: "glm:binomial" }),
     );
   });
 });

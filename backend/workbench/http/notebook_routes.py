@@ -25,7 +25,10 @@ from ..agent.notebook.memory_defaults import (
     DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
 )
 from ..agent.recipe_contracts import RECIPE_CONTRACTS
-from ..agent.workflow_contracts import notebook_workflow_capability_ids
+from ..agent.workflow_contracts import (
+    MODEL_FAMILY_CONTRACTS,
+    notebook_workflow_capability_ids,
+)
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
 from ..agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
 from ..agent.notebook.errors import NotebookOptionError, OptionRevisionStale
@@ -342,8 +345,8 @@ def _domain_memory_projection(
             if generic_result.outcome == "not_used":
                 return None
             generic_result = _generic_fallback_retrieval(generic_result)
-            recipe_results = [
-                _recipe_default_retrieval(
+            default_results = [
+                _registered_default_retrieval(
                     runtime.retrieve_for_project(
                         root,
                         facts={
@@ -356,15 +359,46 @@ def _domain_memory_projection(
                         max_bytes=_DOMAIN_MEMORY_CONTEXT_MAX_BYTES,
                         vocabulary_version=DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
                     ),
-                    recipe_id=recipe_id,
+                    model_type=recipe_id,
                     target_refs=frozenset(recipe.memory_target_refs),
                 )
                 for recipe_id, recipe in sorted(RECIPE_CONTRACTS.items())
                 if _recipe_default_targets_are_published(recipe_id, recipe.memory_target_refs)
             ]
+            native_default_model_types = sorted(
+                {
+                    target.model_type
+                    for target_ref, target in DEFAULT_TARGET_CONTRACTS.items()
+                    if not _is_published_recipe_default_target(target_ref)
+                }
+            )
+            default_results.extend(
+                _registered_default_retrieval(
+                    runtime.retrieve_for_project(
+                        root,
+                        facts={
+                            **facts,
+                            "analysis_family": model_type,
+                            "model_family": model_type,
+                        },
+                        now=now,
+                        max_entries=_DOMAIN_MEMORY_CONTEXT_MAX_ENTRIES,
+                        max_bytes=_DOMAIN_MEMORY_CONTEXT_MAX_BYTES,
+                        vocabulary_version=DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
+                    ),
+                    model_type=model_type,
+                    target_refs=frozenset(
+                        target_ref
+                        for target_ref, target in DEFAULT_TARGET_CONTRACTS.items()
+                        if target.model_type == model_type
+                        and not _is_published_recipe_default_target(target_ref)
+                    ),
+                )
+                for model_type in native_default_model_types
+            )
             result = _merge_recipe_default_retrievals(
                 generic_result=generic_result,
-                recipe_results=recipe_results,
+                recipe_results=default_results,
             )
         except LocalDomainMemoryRuntimeError as error:
             raise WorkbenchAPIError(
@@ -429,16 +463,16 @@ def _recipe_default_targets_are_published(
     return True
 
 
-def _recipe_default_retrieval(
+def _registered_default_retrieval(
     result: DomainMemoryRetrieval,
     *,
-    recipe_id: str,
+    model_type: str,
     target_refs: frozenset[str],
 ) -> DomainMemoryRetrieval:
-    """Keep only current default targets owned by the retrieved Recipe.
+    """Keep only current default targets owned by one model family.
 
-    A generic memory predicate can truthfully match a server-derived Recipe
-    fact while its target reference belongs to a different Recipe.  Such a
+    A generic memory predicate can truthfully match a server-derived family
+    fact while its target reference belongs to a different family. Such a
     hint must never enter this preselection bridge: final proposal application
     would reject it too, but filtering it here prevents irrelevant model
     advice from influencing the provider before a model is chosen.
@@ -469,7 +503,7 @@ def _recipe_default_retrieval(
         is_exact_recipe_target = is_current_default and bool(refs) and all(
             ref in target_refs
             and (target := DEFAULT_TARGET_CONTRACTS.get(ref)) is not None
-            and target.model_type == recipe_id
+            and target.model_type == model_type
             for ref in refs
         )
         if is_exact_recipe_target:
@@ -484,6 +518,19 @@ def _recipe_default_retrieval(
     )
 
 
+def _recipe_default_retrieval(
+    result: DomainMemoryRetrieval,
+    *,
+    recipe_id: str,
+    target_refs: frozenset[str],
+) -> DomainMemoryRetrieval:
+    """Compatibility wrapper for Recipe-specific callers and tests."""
+
+    return _registered_default_retrieval(
+        result, model_type=recipe_id, target_refs=target_refs
+    )
+
+
 def _is_published_recipe_default_target(target_ref: str) -> bool:
     """Return whether a target belongs to a Recipe-specific default surface."""
 
@@ -492,6 +539,12 @@ def _is_published_recipe_default_target(target_ref: str) -> bool:
         return False
     recipe = RECIPE_CONTRACTS.get(target.model_type)
     return recipe is not None and target_ref in recipe.memory_target_refs
+
+
+def _is_published_default_target(target_ref: str) -> bool:
+    """Return whether a target belongs to the server-owned default registry."""
+
+    return target_ref in DEFAULT_TARGET_CONTRACTS
 
 
 def _generic_fallback_retrieval(
@@ -510,7 +563,7 @@ def _generic_fallback_retrieval(
         entry
         for entry in result.entries
         if not any(
-            _is_published_recipe_default_target(target_ref)
+            _is_published_default_target(target_ref)
             for target_ref in entry.recommended_target_refs
         )
     )
@@ -574,9 +627,9 @@ def _merge_recipe_default_retrievals(
             group_bytes += entry_bytes
         if not group:
             continue
-        recipe_id = _recipe_id_for_default_entry(group[0])
+        recipe_id = _default_model_type_for_entry(group[0])
         if recipe_id is None or any(
-            _recipe_id_for_default_entry(entry) != recipe_id for entry in group
+            _default_model_type_for_entry(entry) != recipe_id for entry in group
         ):
             continue
         if (
@@ -662,8 +715,8 @@ def _merge_recipe_default_retrievals(
     return result()
 
 
-def _recipe_id_for_default_entry(entry: Any) -> str | None:
-    """Return a published Recipe id only for an exact Recipe default entry."""
+def _default_model_type_for_entry(entry: Any) -> str | None:
+    """Return one server-registered model family for an exact default entry."""
 
     refs = getattr(entry, "recommended_target_refs", ())
     if not isinstance(refs, tuple):
@@ -671,11 +724,18 @@ def _recipe_id_for_default_entry(entry: Any) -> str | None:
     recipe_ids = {
         DEFAULT_TARGET_CONTRACTS[target_ref].model_type
         for target_ref in refs
-        if _is_published_recipe_default_target(target_ref)
+        if _is_published_default_target(target_ref)
     }
     if len(recipe_ids) != 1:
         return None
     return next(iter(recipe_ids))
+
+
+def _recipe_id_for_default_entry(entry: Any) -> str | None:
+    """Return a published Recipe id only for an exact Recipe default entry."""
+
+    model_type = _default_model_type_for_entry(entry)
+    return model_type if model_type in RECIPE_CONTRACTS else None
 
 
 def _draft(request: OptionDraftRequest) -> OptionDraft:
@@ -837,6 +897,64 @@ def _record_planning_terminal_error(
         )
 
 
+def _notebook_planner_manifest_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """Project only fields accepted by the published model-family contract.
+
+    The general engine capability manifest is also used by the manual rerun UI,
+    where a covariance selector may be useful for a different handler.  The
+    Notebook planner emits ``model.genesis`` proposals, so its provider-facing
+    catalog must be narrower: advertising an OLS-only field to a family whose
+    contract rejects it creates a provider-visible option that can never become
+    a valid Draft.
+    """
+
+    projected = dict(entry)
+    family = MODEL_FAMILY_CONTRACTS.get(str(entry.get("key")))
+    params = entry.get("params")
+    if family is not None and isinstance(params, list):
+        projected_params = [
+            dict(param)
+            for param in params
+            if not (
+                isinstance(param, Mapping)
+                and not family.allows_covariance
+                and param.get("key") == "covariance"
+            )
+        ]
+        if not any(param.get("key") == "y" for param in projected_params):
+            projected_params.insert(
+                1,
+                {
+                    "key": "y",
+                    "kind": "columns",
+                    "label": "Outcome (Y)",
+                    "required": True,
+                    "role": "y",
+                },
+            )
+        projected["params"] = projected_params
+        published_artifacts = capability_artifact_types(str(entry.get("key")))
+        if published_artifacts and not isinstance(projected.get("artifact_types"), Mapping):
+            projected["artifact_types"] = dict(published_artifacts)
+        option_vocabulary = build_option_vocabulary(str(entry.get("key")))
+        if option_vocabulary is not None:
+            fields = option_vocabulary.get("fields")
+            projected["notebook_model_options_policy"] = {
+                "supported": True,
+                "allowed_fields": sorted(fields) if isinstance(fields, Mapping) else [],
+                "forbidden_fields": [],
+                "submission_rule": "use_published_fields",
+            }
+        else:
+            projected["notebook_model_options_policy"] = {
+                "supported": False,
+                "allowed_fields": [],
+                "forbidden_fields": ["covariance", "model_options"],
+                "submission_rule": "omit_model_options",
+            }
+    return projected
+
+
 def _planning_agent(
     root: Path,
     service: NotebookService,
@@ -853,7 +971,7 @@ def _planning_agent(
         raise NotebookPlanningUnavailable(config.configuration_error_message())
     admitted_native = set(notebook_workflow_capability_ids())
     manifest = {
-        str(entry["key"]): dict(entry)
+        str(entry["key"]): _notebook_planner_manifest_entry(entry)
         for entry in build_capabilities().get("model_types", [])
         if (
             isinstance(entry, dict)
@@ -893,7 +1011,8 @@ def _planning_agent(
     dynamic_artifact_types = {
         capability: dict(item["artifact_types"])
         for capability, item in server_manifest.items()
-        if isinstance(item.get("artifact_types"), Mapping)
+        if capability not in manifest
+        and isinstance(item.get("artifact_types"), Mapping)
     }
     candidate_capabilities = tuple(
         dict.fromkeys(

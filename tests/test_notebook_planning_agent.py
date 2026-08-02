@@ -18,6 +18,7 @@ from workbench.agent.notebook.planning_agent import (
     NotebookPlanningContractError,
     NotebookPlanningTimeout,
     NotebookPlanningUnavailable,
+    _canonicalize_provider_option_batch,
     _parse_submissions,
     _submission,
     _strict_typed_proposal,
@@ -1223,7 +1224,7 @@ def test_provider_plan_without_total_deadline_allows_bounded_corrections(
         async def stream(self, request):
             self.requests.append(request)
             await asyncio.sleep(0.04)
-            if len(self.requests) < 3:
+            if len(self.requests) < 4:
                 yield ModelStreamEvent.tool_call_delta(
                     request.request_id,
                     {
@@ -1256,7 +1257,7 @@ def test_provider_plan_without_total_deadline_allows_bounded_corrections(
         initial_evidence=_evidence(),
     )
 
-    assert len(adapter.requests) == 3
+    assert len(adapter.requests) == 4
     assert len(result.option_drafts) == 1
 
 
@@ -1758,6 +1759,98 @@ def test_provider_correction_closes_option_batch_top_level_shape() -> None:
     assert "reasoning" in message
 
 
+def test_provider_correction_closes_option_submission_field_shape() -> None:
+    message = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "option submission fields are incomplete or unknown"
+        ),
+        context=object(),
+        evidence=DataEvidencePackV1("dataset:active", ()),
+        correction_number=1,
+    )
+
+    assert "rank, rationale, proposal, evidence_refs" in message
+    assert "comparative_claims, capability_id, and option_id" in message
+    assert "Do not add reasoning" in message
+
+
+def test_provider_option_envelope_is_repaired_once_from_server_evidence() -> None:
+    """Wrapper omissions do not consume a provider correction turn.
+
+    The model still supplies the executable proposal and rationale.  Evidence
+    references, the empty comparative-claim set, and the option identity are
+    deterministic server-owned envelope fields and can be filled without
+    weakening the later typed validation.
+    """
+
+    payload = _submit_call(capability_id="ols")
+    option = payload["options"][0]
+    option.pop("evidence_refs")
+    option.pop("comparative_claims")
+    option.pop("option_id")
+    option.pop("capability_id")
+    option["proposal"]["operation_id"] = "model.genesis"
+    option["proposal"]["target"] = {"dataset_source_id": "sha256:upload"}
+    option["proposal"]["changes"] = {
+        "model_params": {
+            "model_type": "ols",
+            "y": "outcome",
+            "x": ["treatment"],
+        }
+    }
+    normalized = _canonicalize_provider_option_batch(
+        payload,
+        evidence=_evidence(),
+        catalog={"ols": {"model_type": "ols"}},
+    )
+
+    parsed = _parse_submissions(normalized)
+    assert parsed[0].option_id == "option_1"
+    assert parsed[0].capability_id == "ols"
+    assert parsed[0].comparative_claims == ()
+    assert parsed[0].evidence_refs[0].evidence_id == "evidence:time"
+
+
+def test_model_options_policy_follows_nested_model_type_not_stale_capability_label() -> None:
+    payload = _submit_call(capability_id="ols")
+    option = payload["options"][0]
+    option["proposal"]["operation_id"] = "model.genesis"
+    option["proposal"]["target"] = {"dataset_source_id": "sha256:upload"}
+    option["proposal"]["changes"] = {
+        "model_params": {
+            "model_type": "logit",
+            "y": "outcome",
+            "x": ["treatment"],
+            "model_options": {"covariance": "robust"},
+        },
+        "model_options": {"covariance": "robust"},
+    }
+    submission = _submission(option)
+    normalized = NotebookPlanningAgent._strip_unsupported_model_options(
+        submission,
+        {
+            "ols": {
+                "model_type": "ols",
+                "notebook_model_options_policy": {
+                    "supported": True,
+                    "allowed_fields": ["covariance"],
+                },
+            },
+            "logit": {
+                "model_type": "logit",
+                "notebook_model_options_policy": {
+                    "supported": False,
+                    "allowed_fields": [],
+                },
+            },
+        },
+    )
+
+    changes = normalized.proposal.changes
+    assert "model_options" not in changes
+    assert "model_options" not in changes["model_params"]
+
+
 def test_provider_correction_omits_unsupported_model_options() -> None:
     message = NotebookPlanningAgent._correction_instruction(
         error=NotebookPlanningContractError(
@@ -1771,6 +1864,168 @@ def test_provider_correction_omits_unsupported_model_options() -> None:
 
     assert "omit model_options entirely" in message
     assert "related model family" in message
+
+
+def test_provider_correction_omits_legacy_covariance_for_non_ols_family() -> None:
+    message = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "typed proposal failed registry validation: "
+            "model.genesis logit does not accept OLS covariance settings"
+        ),
+        context=object(),
+        evidence=DataEvidencePackV1("dataset:active", ()),
+        correction_number=1,
+    )
+
+    assert "model_params.covariance" in message
+    assert "model_options" in message
+    assert "omit" in message
+
+
+def test_planner_drops_options_when_catalog_declares_family_has_no_options() -> None:
+    """A provider cannot keep retrying an explicitly unsupported option envelope."""
+
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "The binary outcome supports the registered family.",
+            "capability_id": "logit",
+            "option_id": "opt-logit",
+            "proposal": {
+                "proposal_id": "prop-logit",
+                "proposal_revision": 1,
+                "operation_id": "model.genesis",
+                "operation_version": "v1",
+                "target": {"dataset_source_id": "sha256:upload"},
+                "preconditions": {},
+                "changes": {
+                    "model_params": {
+                        "model_type": "logit",
+                        "y": "outcome",
+                        "x": ["x"],
+                        "model_options": {"covariance": "robust"},
+                    },
+                    "model_options": {"covariance": "robust"},
+                },
+            },
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:profile",
+                    "result_hash": "sha256:profile",
+                    "source_refs": ["profile:dataset"],
+                }
+            ],
+            "comparative_claims": [],
+        }
+    )
+    catalog = {
+        "logit": {
+            "model_type": "logit",
+            "notebook_model_options_policy": {
+                "supported": False,
+                "allowed_fields": [],
+                "forbidden_fields": ["covariance", "model_options"],
+                "submission_rule": "omit_model_options",
+            },
+        }
+    }
+
+    agent = NotebookPlanningAgent(adapter=TextOnlyAdapter(), capability_catalog=catalog)
+    normalized = agent._strip_unsupported_model_options(submission, catalog)
+
+    changes = normalized.proposal.changes
+    assert "model_options" not in changes
+    assert "model_options" not in changes["model_params"]
+
+
+def test_planner_drops_legacy_covariance_when_family_has_no_covariance_contract() -> None:
+    """A copied OLS legacy field must not create a retry for a non-OLS family."""
+
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "The binary outcome supports the registered family.",
+            "capability_id": "logit",
+            "option_id": "opt-logit-legacy-covariance",
+            "proposal": {
+                "proposal_id": "prop-logit-legacy-covariance",
+                "proposal_revision": 1,
+                "operation_id": "model.genesis",
+                "operation_version": "v1",
+                "target": {"dataset_source_id": "sha256:upload"},
+                "preconditions": {},
+                "changes": {
+                    "model_params": {
+                        "model_type": "logit",
+                        "y": "outcome",
+                        "x": ["x"],
+                        "covariance": "robust",
+                    },
+                    "model_options": {"covariance": "robust"},
+                },
+            },
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:profile",
+                    "result_hash": "sha256:profile",
+                    "source_refs": ["profile:dataset"],
+                }
+            ],
+            "comparative_claims": [],
+        }
+    )
+    catalog = {
+        "logit": {
+            "model_type": "logit",
+            "notebook_model_options_policy": {
+                "supported": False,
+                "allowed_fields": [],
+                "forbidden_fields": ["covariance", "model_options"],
+                "submission_rule": "omit_model_options",
+            },
+        }
+    }
+
+    normalized = NotebookPlanningAgent._strip_unsupported_model_options(
+        submission, catalog
+    )
+
+    changes = normalized.proposal.changes
+    assert "model_options" not in changes
+    assert "covariance" not in changes["model_params"]
+
+
+def test_provider_correction_keeps_ols_model_options_narrow() -> None:
+    message = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "model_options target contract rejected [OLS_MODEL_OPTIONS_UNKNOWN_FIELD]: "
+            "Model type ols rejected model_options: OLS model_options contains unsupported field(s): branches"
+        ),
+        context=object(),
+        evidence=DataEvidencePackV1("dataset:active", ()),
+        correction_number=1,
+    )
+
+    assert "OLS model_options may contain" in message
+    assert "covariance field" in message
+    assert "branches" in message
+    assert "operation.multi_step" in message
+
+
+def test_provider_correction_keeps_expected_artifact_with_selected_capability() -> None:
+    message = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "expected artifact failed published artifact vocabulary validation: "
+            "'logit_1' is not in the published artifact vocabulary"
+        ),
+        context=object(),
+        evidence=DataEvidencePackV1("dataset:active", ()),
+        correction_number=1,
+    )
+
+    assert "selected capability" in message
+    assert "logit_1" in message
+    assert "ols_1" in message
 
 
 def test_provider_prompt_separates_completed_and_partial_evidence_refs(
@@ -1965,7 +2220,7 @@ def test_provider_reuses_a_canonical_terminal_completed_inspection(
     ] == ["time_index.v1"]
 
 
-def test_provider_gets_server_owned_dataset_pin_after_invalid_submission(tmp_path: Path) -> None:
+def test_provider_normalizes_server_owned_dataset_pin_without_correction_turn(tmp_path: Path) -> None:
     upload_sha256 = "sha256:upload-123"
     context = _context(
         make_project(tmp_path),
@@ -1984,14 +2239,6 @@ def test_provider_gets_server_owned_dataset_pin_after_invalid_submission(tmp_pat
         "preconditions": genesis_preconditions,
         "changes": {"model_params": {"model_type": "ols", "y": "outcome", "x": ["treatment"]}},
     }
-    valid = _submit_call()
-    valid["options"][0]["proposal"] = {
-        **valid["options"][0]["proposal"],
-        "operation_id": "model.genesis",
-        "target": {"dataset_source_id": upload_sha256},
-        "preconditions": genesis_preconditions,
-        "changes": {"model_params": {"model_type": "ols", "y": "outcome", "x": ["treatment"]}},
-    }
     adapter = ScriptedAdapter(
         [
             {
@@ -2011,11 +2258,6 @@ def test_provider_gets_server_owned_dataset_pin_after_invalid_submission(tmp_pat
                 "tool_call_id": "submit-invalid",
                 "tool_id": "submit_notebook_option_batch",
                 "arguments": invalid,
-            },
-            {
-                "tool_call_id": "submit-valid",
-                "tool_id": "submit_notebook_option_batch",
-                "arguments": valid,
             },
         ]
     )
@@ -2031,12 +2273,208 @@ def test_provider_gets_server_owned_dataset_pin_after_invalid_submission(tmp_pat
     )
 
     assert len(result.option_drafts) == 1
-    correction_messages = adapter.requests[2].messages
-    assert "dataset-source proposal is not pinned to the source upload" in correction_messages[-1]["content"]
-    assert upload_sha256 in correction_messages[-1]["content"]
+    assert len(adapter.requests) == 2
+    assert result.option_drafts[0].proposal.target == {"dataset_source_id": upload_sha256}
 
 
-def test_provider_gets_correction_for_incomplete_genesis_preconditions(tmp_path: Path) -> None:
+def test_dataset_root_submission_is_canonicalized_to_server_owned_source_pin(
+    tmp_path: Path,
+) -> None:
+    """A provider cannot redirect a dataset-bound Notebook proposal.
+
+    The Notebook already has one immutable source projection.  A malformed
+    provider pin is therefore not a user choice that needs a retry; it is
+    server-owned envelope data and should be normalized before model-family
+    validation.  This keeps source binding as one generic boundary rule for
+    every native model family.
+    """
+
+    upload_sha256 = "sha256:canonical-upload"
+    context = _context(
+        make_project(tmp_path),
+        projection_source={"kind": "dataset", "upload_sha256": upload_sha256},
+    )
+    genesis_preconditions = {
+        "context_version": "node-operation-context/v1",
+        "context_fingerprint": freshness_dependency_fingerprint(context),
+        "owner_resolution": "single_candidate",
+    }
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "The source profile supports the declared model.",
+            "capability_id": "ols",
+            "option_id": "opt-ols-source-pin",
+            "proposal": {
+                "proposal_id": "prop-ols-source-pin",
+                "proposal_revision": 1,
+                "operation_id": "model.genesis",
+                "operation_version": "v1",
+                "target": {"dataset_source_id": "sha256:provider-guessed"},
+                "preconditions": genesis_preconditions,
+                "changes": {
+                    "model_params": {
+                        "model_type": "ols",
+                        "y": "outcome",
+                        "x": ["treatment"],
+                    }
+                },
+            },
+            "expected_artifacts": [
+                {
+                    "artifact_id": "ols_1",
+                    "artifact_type": "model_result",
+                    "required": True,
+                    "count": 1,
+                    "step": None,
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:time",
+                    "result_hash": "sha256:time-result",
+                    "source_refs": ["time_index:run_001"],
+                }
+            ],
+            "comparative_claims": [],
+        }
+    )
+
+    (normalized,) = NotebookPlanningAgent(
+        adapter=TextOnlyAdapter(),
+        capability_catalog={"ols": {"model_type": "ols"}},
+    )._validate_submissions(
+        context,
+        _evidence(),
+        (submission,),
+        {"ols": {"model_type": "ols"}},
+    )
+
+    assert normalized.proposal.target == {"dataset_source_id": upload_sha256}
+
+
+def test_native_capability_artifacts_are_canonicalized_from_published_vocabulary(
+    tmp_path: Path,
+) -> None:
+    """Native result ids are server output, not provider guesses."""
+
+    upload_sha256 = "sha256:canonical-artifact-upload"
+    context = _context(
+        make_project(tmp_path),
+        projection_source={"kind": "dataset", "upload_sha256": upload_sha256},
+    )
+    payload = _submit_call(capability_id="logit")
+    option = payload["options"][0]
+    option["proposal"] = {
+        **option["proposal"],
+        "operation_id": "model.genesis",
+        "target": {"dataset_source_id": upload_sha256},
+        "preconditions": {
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": freshness_dependency_fingerprint(context),
+            "owner_resolution": "single_candidate",
+        },
+        "changes": {
+            "model_params": {
+                "model_type": "logit",
+                "y": "outcome",
+                "x": ["treatment"],
+            }
+        },
+    }
+    option["expected_artifacts"] = [
+        {
+            "artifact_id": "provider_guess",
+            "artifact_type": "json",
+            "required": True,
+            "count": 1,
+            "step": None,
+        }
+    ]
+
+    (normalized,) = NotebookPlanningAgent(
+        adapter=TextOnlyAdapter(),
+        capability_catalog={"logit": {"model_type": "logit"}},
+    )._validate_submissions(
+        context,
+        _evidence(),
+        (_submission(option),),
+        {"logit": {"model_type": "logit"}},
+    )
+
+    assert normalized.expected_artifacts == (
+        ExpectedArtifact(
+            artifact_id="logit_1",
+            artifact_type="model_result",
+            required=True,
+            count=1,
+            step=None,
+        ),
+    )
+
+
+def test_genesis_stale_capability_label_is_bound_to_nested_model_family(
+    tmp_path: Path,
+) -> None:
+    """One stale wrapper label must not select OLS policy or artifacts."""
+
+    upload_sha256 = "sha256:stale-capability-label"
+    context = _context(
+        make_project(tmp_path),
+        projection_source={"kind": "dataset", "upload_sha256": upload_sha256},
+    )
+    option = _submit_call(capability_id="ols")["options"][0]
+    option["proposal"] = {
+        **option["proposal"],
+        "operation_id": "model.genesis",
+        "target": {"dataset_source_id": upload_sha256},
+        "preconditions": {
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": freshness_dependency_fingerprint(context),
+            "owner_resolution": "single_candidate",
+        },
+        "changes": {
+            "model_params": {
+                "model_type": "logit",
+                "y": "outcome",
+                "x": ["treatment"],
+                "model_options": {"covariance": "robust"},
+            },
+            "model_options": {"covariance": "robust"},
+        },
+    }
+    submission = _submission(option)
+    catalog = {
+        "ols": {
+            "model_type": "ols",
+            "notebook_model_options_policy": {
+                "supported": True,
+                "allowed_fields": ["covariance"],
+            },
+        },
+        "logit": {
+            "model_type": "logit",
+            "notebook_model_options_policy": {
+                "supported": False,
+                "allowed_fields": [],
+            },
+        },
+    }
+
+    normalized = NotebookPlanningAgent(
+        adapter=TextOnlyAdapter(), capability_catalog=catalog
+    )._validate_submissions(context, _evidence(), (submission,), catalog)
+
+    assert normalized[0].capability_id == "logit"
+    assert "model_options" not in normalized[0].proposal.changes
+    assert normalized[0].expected_artifacts == (
+        ExpectedArtifact("logit_1", "model_result", required=True, count=1, step=None),
+    )
+
+
+def test_provider_normalizes_incomplete_genesis_preconditions_without_correction_turn(
+    tmp_path: Path,
+) -> None:
     upload_sha256 = "sha256:upload-preconditions"
     context = _context(
         make_project(tmp_path),
@@ -2049,16 +2487,6 @@ def test_provider_gets_correction_for_incomplete_genesis_preconditions(tmp_path:
         "target": {"dataset_source_id": upload_sha256},
         "preconditions": {},
         "changes": {"model_params": {"model_type": "ols", "y": "outcome", "x": ["treatment"]}},
-    }
-    valid = invalid.copy()
-    valid["options"] = [dict(invalid["options"][0])]
-    valid["options"][0]["proposal"] = {
-        **invalid["options"][0]["proposal"],
-        "preconditions": {
-            "context_version": "node-operation-context/v1",
-            "context_fingerprint": freshness_dependency_fingerprint(context),
-            "owner_resolution": "single_candidate",
-        },
     }
     adapter = ScriptedAdapter(
         [
@@ -2080,11 +2508,6 @@ def test_provider_gets_correction_for_incomplete_genesis_preconditions(tmp_path:
                 "tool_id": "submit_notebook_option_batch",
                 "arguments": invalid,
             },
-            {
-                "tool_call_id": "submit-valid",
-                "tool_id": "submit_notebook_option_batch",
-                "arguments": valid,
-            },
         ]
     )
     agent = NotebookPlanningAgent(
@@ -2096,9 +2519,12 @@ def test_provider_gets_correction_for_incomplete_genesis_preconditions(tmp_path:
     result = agent.plan(context=context, initial_evidence=DataEvidencePackV1("dataset", ()))
 
     assert len(result.option_drafts) == 1
-    correction_messages = adapter.requests[2].messages
-    assert "model.genesis preconditions missing" in correction_messages[-1]["content"]
-    assert freshness_dependency_fingerprint(context) in correction_messages[-1]["content"]
+    assert len(adapter.requests) == 2
+    assert result.option_drafts[0].proposal.preconditions == {
+        "context_version": "node-operation-context/v1",
+        "context_fingerprint": freshness_dependency_fingerprint(context),
+        "owner_resolution": "single_candidate",
+    }
 
 
 def test_notebook_agent_accepts_did_genesis_with_family_timing_and_no_covariates(
@@ -2872,7 +3298,7 @@ def test_provider_gets_correction_for_duplicate_executable_options(tmp_path: Pat
     assert "fewer options" in correction
 
 
-def test_provider_gets_correction_for_undeclarable_required_artifact(tmp_path: Path) -> None:
+def test_provider_artifact_guess_is_ignored_for_published_capability(tmp_path: Path) -> None:
     invalid = _submit_call()
     invalid["options"][0]["expected_artifacts"] = [
         {
@@ -2903,11 +3329,6 @@ def test_provider_gets_correction_for_undeclarable_required_artifact(tmp_path: P
                 "tool_id": "submit_notebook_option_batch",
                 "arguments": invalid,
             },
-            {
-                "tool_call_id": "submit-valid",
-                "tool_id": "submit_notebook_option_batch",
-                "arguments": _submit_call(),
-            },
         ]
     )
     agent = NotebookPlanningAgent(
@@ -2922,12 +3343,21 @@ def test_provider_gets_correction_for_undeclarable_required_artifact(tmp_path: P
     )
 
     assert len(result.option_drafts) == 1
-    correction = adapter.requests[2].messages[-1]["content"]
-    assert "published artifact vocabulary" in correction
-    assert "do not invent" in correction
+    assert len(adapter.requests) == 2
+    assert result.option_drafts[0].expected_artifacts == (
+        ExpectedArtifact(
+            artifact_id="ets_1",
+            artifact_type="model_result",
+            required=True,
+            count=1,
+            step=None,
+        ),
+    )
 
 
-def test_provider_gets_correction_for_missing_capability_result_artifact(tmp_path: Path) -> None:
+def test_provider_missing_capability_artifact_is_filled_from_published_vocabulary(
+    tmp_path: Path,
+) -> None:
     invalid = _submit_call()
     invalid["options"][0]["expected_artifacts"] = []
     adapter = ScriptedAdapter(
@@ -2950,11 +3380,6 @@ def test_provider_gets_correction_for_missing_capability_result_artifact(tmp_pat
                 "tool_id": "submit_notebook_option_batch",
                 "arguments": invalid,
             },
-            {
-                "tool_call_id": "submit-valid",
-                "tool_id": "submit_notebook_option_batch",
-                "arguments": _submit_call(),
-            },
         ]
     )
     agent = NotebookPlanningAgent(
@@ -2969,9 +3394,16 @@ def test_provider_gets_correction_for_missing_capability_result_artifact(tmp_pat
     )
 
     assert len(result.option_drafts) == 1
-    correction = adapter.requests[2].messages[-1]["content"]
-    assert "capability required artifact(s) missing" in correction
-    assert "ets_1" in correction
+    assert len(adapter.requests) == 2
+    assert result.option_drafts[0].expected_artifacts == (
+        ExpectedArtifact(
+            artifact_id="ets_1",
+            artifact_type="model_result",
+            required=True,
+            count=1,
+            step=None,
+        ),
+    )
 
 
 def test_provider_gets_bounded_correction_for_malformed_typed_fields(tmp_path: Path) -> None:

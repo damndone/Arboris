@@ -693,6 +693,7 @@ function ForestWorkbench({
     <NotebookOnlyShell
       projectRoot={projectRoot}
       activeRunId={notebookActiveRunId}
+      onOpenMemorySettings={() => setSettingsOpen(true)}
       onMaterializedDraft={(response) => {
         draftHandlers.onForkDraft(response);
         void refetch();
@@ -827,10 +828,12 @@ function HomeOnlyShell({
 function NotebookOnlyShell({
   projectRoot,
   activeRunId,
+  onOpenMemorySettings,
   onMaterializedDraft,
 }: {
   projectRoot: string;
   activeRunId: string | null;
+  onOpenMemorySettings: () => void;
   onMaterializedDraft: (response: NotebookMaterializationResponse) => void;
 }) {
   const navigate = useNavigate();
@@ -875,6 +878,7 @@ function NotebookOnlyShell({
       <NotebookRouteView
         projectRoot={projectRoot}
         activeRunId={activeRunId}
+        onOpenMemorySettings={onOpenMemorySettings}
         onMaterializedDraft={onMaterializedDraft}
       />
     </div>

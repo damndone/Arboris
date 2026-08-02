@@ -44,9 +44,9 @@ describe("WorkbenchHomeView", () => {
     expect(screen.getByTestId("workbench-home-recent-/tmp/other")).toBeInTheDocument();
     expect(screen.queryByTestId("graph-workbench")).toBeNull();
     fireEvent.click(screen.getByTestId("workbench-home-new-project"));
-    fireEvent.click(screen.getByTestId("workbench-home-settings"));
     expect(onCreateProject).toHaveBeenCalledOnce();
-    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("workbench-home-settings")).not.toBeInTheDocument();
+    expect(screen.queryByText("LLM settings")).not.toBeInTheDocument();
 
     expect(await screen.findByTestId("workbench-home-llm-ready")).toHaveTextContent("1.0M tokens");
     expect(screen.getByTestId("workbench-home-llm-ready")).toHaveTextContent("Supported");

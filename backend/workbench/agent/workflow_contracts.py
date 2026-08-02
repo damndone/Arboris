@@ -333,6 +333,7 @@ def _build_panel_ols_model_params(
         "y": branch["outcome"],
         "x": list(predictors),
         "covariance": covariance,
+        "model_options": {"covariance": covariance},
         "entity_col": spec.get("entity_col"),
         "time_col": spec.get("time_col"),
     }
@@ -589,6 +590,48 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         ),
         allows_covariance=False,
         validate_branch_frame=_validate_count_outcome("negative_binomial"),
+    ),
+    "glm:binomial": ModelFamilyContract(
+        family="glm:binomial",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_generalized_model_params("glm:binomial"),
+        expected_artifacts=("glm_1",),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message=(
+            "model.genesis glm:binomial does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        validate_branch_frame=_validate_binary_outcome("glm:binomial"),
+    ),
+    "glm:poisson": ModelFamilyContract(
+        family="glm:poisson",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_generalized_model_params("glm:poisson"),
+        expected_artifacts=("glm_1",),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message=(
+            "model.genesis glm:poisson does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        validate_branch_frame=_validate_count_outcome("glm:poisson"),
+    ),
+    "glm:negative_binomial": ModelFamilyContract(
+        family="glm:negative_binomial",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_generalized_model_params("glm:negative_binomial"),
+        expected_artifacts=("glm_1",),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message=(
+            "model.genesis glm:negative_binomial does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        validate_branch_frame=_validate_count_outcome("glm:negative_binomial"),
     ),
     "panel_ols": ModelFamilyContract(
         family="panel_ols",
@@ -1006,7 +1049,8 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         fields={
             "model_family": (
                 "Registered workflow-executable model family: ols, logit, probit, poisson, "
-                "negative_binomial, panel_ols, iv_2sls, did, cs_did, sa_did, or dcdh. "
+                "negative_binomial, glm:binomial, glm:poisson, glm:negative_binomial, "
+                "panel_ols, iv_2sls, did, cs_did, sa_did, or dcdh. "
                 "Every branch in one step uses this same family."
             ),
             "covariance": "Default covariance for every branch.",

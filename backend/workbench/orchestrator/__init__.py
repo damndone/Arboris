@@ -228,7 +228,7 @@ def run_workflow(
     )
     normalized_model_options = bound_model_options.payload
     effective_covariance = covariance
-    if model_type == "ols" and normalized_model_options:
+    if model_type in {"ols", "panel_ols"} and normalized_model_options:
         from ..contracts.model.ols import effective_ols_covariance
 
         effective_covariance = effective_ols_covariance(
@@ -548,7 +548,7 @@ def _run_workflow(
         {} if model_options is None else model_options
     )
     effective_covariance = covariance
-    if model_type == "ols" and normalized_model_options:
+    if model_type in {"ols", "panel_ols"} and normalized_model_options:
         from ..contracts.model.ols import effective_ols_covariance
 
         effective_covariance = effective_ols_covariance(

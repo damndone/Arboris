@@ -17,6 +17,9 @@ from workbench.llm.client import (
 from workbench.llm.config import LLMConfig
 
 
+_TRANSIENT_UPSTREAM_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+
 def _to_openai_wire_messages(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -247,7 +250,7 @@ class OpenAICompatibleModelAdapter:
         model = self.config.model.casefold()
         is_deepseek = "deepseek" in provider or host == "api.deepseek.com"
         if is_deepseek and model.startswith("deepseek-v4"):
-            return {"thinking": {"type": "disabled"}, "max_tokens": 4096}
+            return {"thinking": {"type": "disabled"}, "max_tokens": 8192}
         return {}
 
     async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
@@ -259,6 +262,7 @@ class OpenAICompatibleModelAdapter:
         wire_tools = _to_openai_tool_descriptors(request.tools)
         for attempt in range(2):
             received_event = False
+            public_progress = False
             try:
                 request_config = (
                     {"model_config": request.model_config}
@@ -293,19 +297,23 @@ class OpenAICompatibleModelAdapter:
                         delta = item.get("delta")
                         if isinstance(delta, str) and delta:
                             received_event = True
+                            public_progress = True
                             yield ModelStreamEvent.text_delta(request.request_id, delta)
                     elif event_type == "tool_call":
                         tool_call = item.get("tool_call")
                         if isinstance(tool_call, dict):
                             received_event = True
+                            public_progress = True
                             yield ModelStreamEvent.tool_call_delta(request.request_id, tool_call)
                     elif event_type == "provider_activity":
                         # Providers such as DeepSeek may stream private
-                        # reasoning before a public tool call. It is activity,
-                        # not user-visible Agent content, but it must prevent a
-                        # second expensive request when the stream later ends
-                        # without a completion.
+                        # reasoning before a public tool call. It is not
+                        # user-visible Agent content. If that is the *only*
+                        # progress before a disconnect, a single retry is safe:
+                        # no public answer or typed tool call has been emitted.
                         received_event = True
+                        if item.get("public") is True:
+                            public_progress = True
                     elif event_type == "done":
                         finish_reason = item.get("finish_reason")
                         yield ModelStreamEvent(
@@ -317,12 +325,23 @@ class OpenAICompatibleModelAdapter:
                         return
                 raise LLMUpstreamError("LLM provider ended the stream without a completion")
             except LLMUpstreamError as exc:
-                # A malformed 2xx body or transient network error has no
-                # trustworthy response status. Retry it once; never retry a
-                # provider-auth/request rejection such as 401/422.
-                if attempt == 0 and not received_event and exc.upstream_status is None:
+                # A malformed 2xx body, transient network error, or explicitly
+                # transient upstream status may recover on one immediate retry.
+                # Never retry a provider-auth/request rejection such as 401/422,
+                # and never replay a request after public stream content began.
+                if (
+                    attempt == 0
+                    and not public_progress
+                    and (
+                        exc.upstream_status is None
+                        or exc.upstream_status in _TRANSIENT_UPSTREAM_STATUSES
+                    )
+                ):
                     continue
-                yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
+                error_label = type(exc).__name__
+                if exc.upstream_status is not None:
+                    error_label += f":upstream_{exc.upstream_status}"
+                yield ModelStreamEvent.from_error(request.request_id, error_label)
                 return
             except Exception as exc:
                 yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)

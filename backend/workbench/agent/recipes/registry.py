@@ -149,6 +149,7 @@ def _option_vocabulary_builders() -> dict[str, BuildVocabulary]:
     return {
         ARMA_GARCH_PACK_ID: build_arma_garch_option_vocabulary,
         "ols": _build_ols_option_vocabulary,
+        "panel_ols": _build_ols_option_vocabulary,
     }
 
 
@@ -185,6 +186,7 @@ def _patch_validators() -> dict[str, PatchValidator]:
     return {
         ARMA_GARCH_PACK_ID: validate_arma_garch_model_options_patch,
         "ols": _validate_ols_model_options_patch,
+        "panel_ols": _validate_ols_model_options_patch,
     }
 
 

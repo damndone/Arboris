@@ -25,6 +25,7 @@ import { useRerun } from "../RerunContext";
 import type { NodeOperationContextV1 } from "../../api/nodeOperationContext";
 import {
   buildManualRerunPatch,
+  buildManualRerunPatchId,
   type ManualRerunPatch,
 } from "./manualRerunPatch";
 
@@ -97,7 +98,11 @@ function EditableOperation({
   const onSubmit = async () => {
     if (!previewPatch) {
       const patch = buildManualRerunPatch({
-        patchId: `patch_${context.context_fingerprint}_${Object.keys(overrides).join("_")}`,
+        patchId: buildManualRerunPatchId(
+          context.context_fingerprint,
+          initial,
+          values,
+        ),
         sourceContextFingerprint: context.context_fingerprint,
         editableSchemaVersion:
           "editableSchemaVersion" in node && typeof node.editableSchemaVersion === "string"

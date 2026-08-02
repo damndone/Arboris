@@ -39,6 +39,7 @@ const controlStyle: React.CSSProperties = {
 };
 
 const buttonStyle: React.CSSProperties = {
+  minHeight: 0,
   border: "1px solid var(--separator, #3a3a3c)",
   borderRadius: 8,
   padding: "6px 10px",
@@ -46,6 +47,55 @@ const buttonStyle: React.CSSProperties = {
   color: "var(--label, #f5f5f7)",
   cursor: "pointer",
 };
+
+const confirmationBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 1000,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20,
+  background: "rgba(0, 0, 0, 0.28)",
+};
+
+const confirmationDialogStyle: React.CSSProperties = {
+  width: "min(100%, 440px)",
+  boxSizing: "border-box",
+  border: "1px solid var(--separator, #3a3a3c)",
+  borderRadius: 12,
+  padding: 18,
+  background: "var(--bg-card, #fff)",
+  color: "var(--label, #1c1c1e)",
+  boxShadow: "0 18px 48px rgba(0, 0, 0, 0.22)",
+};
+
+const switchTrackStyle = (enabled: boolean, disabled: boolean): React.CSSProperties => ({
+  position: "relative",
+  flex: "0 0 auto",
+  width: 48,
+  height: 20,
+  minHeight: 0,
+  padding: 2,
+  border: "none",
+  borderRadius: 999,
+  background: enabled ? "var(--accent, #0a84ff)" : "var(--switch-off, #78788066)",
+  boxShadow: enabled ? "inset 0 0 0 1px rgba(0,0,0,0.08)" : "inset 0 0 0 1px rgba(0,0,0,0.12)",
+  cursor: disabled ? "wait" : "pointer",
+  opacity: disabled ? 0.6 : 1,
+  transition: "background-color 160ms ease, box-shadow 160ms ease",
+});
+
+const switchThumbStyle = (enabled: boolean): React.CSSProperties => ({
+  display: "block",
+  width: 16,
+  height: 16,
+  borderRadius: "50%",
+  background: "#fff",
+  boxShadow: "0 1px 3px rgba(0,0,0,0.28)",
+  transform: enabled ? "translateX(28px)" : "translateX(0)",
+  transition: "transform 160ms ease",
+});
 
 export function MemorySettingsPanel({ projectRoot }: { projectRoot: string }) {
   const [settings, setSettings] = useState<DomainMemorySettings | null>(null);
@@ -227,8 +277,18 @@ export function MemorySettingsPanel({ projectRoot }: { projectRoot: string }) {
   ) => (
     <div style={controlStyle}>
       <span><strong>{label}</strong><br /><small>{enabled ? "On" : "Off"} · Hints only · No automatic execution</small></span>
-      <button type="button" disabled={busy} onClick={onClick} style={buttonStyle}>
-        {enabled ? `Disable ${label.toLowerCase()}` : `Enable ${label.toLowerCase()}`}
+      <button
+        type="button"
+        role="switch"
+        aria-label={label}
+        aria-checked={enabled}
+        aria-disabled={busy}
+        disabled={busy}
+        onClick={onClick}
+        title={`${enabled ? "On" : "Off"} · ${label}. Hints only; no automatic execution.`}
+        style={switchTrackStyle(enabled, busy)}
+      >
+        <span aria-hidden="true" style={switchThumbStyle(enabled)} />
       </button>
     </div>
   );
@@ -314,12 +374,16 @@ export function MemorySettingsPanel({ projectRoot }: { projectRoot: string }) {
       </section>
       {renderLibrary("global")}
       {renderLibrary("project")}
-      {pending ? <div role="dialog" aria-label="Confirm memory change" style={{ marginTop: 20, border: "1px solid var(--separator, #3a3a3c)", borderRadius: 10, padding: 16 }}>
-        <strong>Confirm memory change</strong>
-        <p>{pending.summary}</p>
-        <p>No automatic execution will occur.</p>
-        <button type="button" disabled={busy} onClick={() => void confirmPending()} style={buttonStyle}>Confirm</button>
-        <button type="button" disabled={busy} onClick={() => setPending(null)} style={{ ...buttonStyle, marginLeft: 8 }}>Cancel</button>
+      {pending ? <div data-testid="memory-confirmation-backdrop" style={confirmationBackdropStyle}>
+        <div role="dialog" aria-modal="true" aria-label="Confirm memory change" style={confirmationDialogStyle}>
+          <strong>Confirm memory change</strong>
+          <p>{pending.summary}</p>
+          <p>No automatic execution will occur.</p>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button type="button" disabled={busy} onClick={() => setPending(null)} style={buttonStyle}>Cancel</button>
+            <button type="button" disabled={busy} onClick={() => void confirmPending()} style={buttonStyle}>Confirm</button>
+          </div>
+        </div>
       </div> : null}
     </section>
   );

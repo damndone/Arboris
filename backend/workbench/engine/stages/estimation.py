@@ -499,7 +499,14 @@ def _seal_lmm_executed_input_before_fit(
 CORE_PACK = AnalysisPack(
     pack_id="core",
     model_handlers=[
-        ModelHandler("panel_ols", "panel_ols_1", ("continuous",), _fit_panel_ols),
+        ModelHandler(
+            "panel_ols",
+            "panel_ols_1",
+            ("continuous",),
+            _fit_panel_ols,
+            validate_model_options=validate_ols_model_options,
+            model_options_contract=OLS_MODEL_OPTIONS_CONTRACT,
+        ),
         ModelHandler("probit", "probit_1", ("binary",), _fit_probit),
         ModelHandler("negative_binomial", "negative_binomial_1", ("count",), _fit_negative_binomial),
         ModelHandler("glm", "glm_1", ("count", "continuous", "binary"), _fit_glm),

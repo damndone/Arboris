@@ -238,7 +238,7 @@ async def async_stream_chat_completion(
                         # signal internal so the adapter does not retry a
                         # request after a disconnect halfway through a typed
                         # submission.
-                        yield {"type": "provider_activity"}
+                        yield {"type": "provider_activity", "public": True}
                     candidate_finish_reason = choice.get("finish_reason")
                     if candidate_finish_reason is not None:
                         if not isinstance(candidate_finish_reason, str) or not candidate_finish_reason:

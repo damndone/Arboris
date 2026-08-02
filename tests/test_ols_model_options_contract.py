@@ -25,6 +25,17 @@ def test_ols_model_options_binds_as_a_server_owned_contract() -> None:
     assert bound.binding.input_contract_version == "ols_model_options@1.0"
 
 
+def test_panel_ols_reuses_the_published_covariance_model_options_contract() -> None:
+    bound = bind_new_model_options("panel_ols", {"covariance": "clustered"})
+
+    assert bound.payload == {"covariance": "clustered"}
+    assert bound.binding is not None
+    assert bound.binding.owner_model_type == "panel_ols"
+    assert bound.binding.owner_model_id == "panel_ols_1"
+    assert bound.binding.producer_version == "ols@1.0"
+    assert bound.binding.input_contract_version == "ols_model_options@1.0"
+
+
 @pytest.mark.parametrize("covariance", ["robust", "clustered", "unadjusted"])
 def test_ols_model_options_accepts_the_published_covariance_values(
     covariance: str,
@@ -69,6 +80,10 @@ def test_ols_agent_vocabulary_is_bounded_to_covariance() -> None:
     ]
 
 
+def test_panel_ols_agent_vocabulary_is_published_by_the_same_owner_contract() -> None:
+    assert build_option_vocabulary("panel_ols") == build_option_vocabulary("ols")
+
+
 def test_ols_genesis_keeps_the_bound_agent_envelope_and_legacy_covariance_projection() -> None:
     normalized = normalize_ols_genesis_model_params(
         {"model_type": "ols", "model_options": {"covariance": "unadjusted"}}
@@ -76,6 +91,20 @@ def test_ols_genesis_keeps_the_bound_agent_envelope_and_legacy_covariance_projec
 
     assert normalized["covariance"] == "unadjusted"
     assert normalized["model_options"] == {"covariance": "unadjusted"}
+
+
+def test_panel_ols_genesis_projects_nested_covariance_to_legacy_execution_input() -> None:
+    normalized = normalize_ols_genesis_model_params(
+        {
+            "model_type": "panel_ols",
+            "model_options": {"covariance": "clustered"},
+            "entity_col": "firm",
+            "time_col": "yr",
+        }
+    )
+
+    assert normalized["covariance"] == "clustered"
+    assert normalized["model_options"] == {"covariance": "clustered"}
 
 
 def test_nested_ols_covariance_changes_the_actual_fit_and_persisted_execution_input(

@@ -368,6 +368,24 @@ describe("NotebookRouteView", () => {
     expect(screen.getByTestId("location-search")).not.toHaveTextContent("domain_memory_use");
   });
 
+  it("opens shared Settings directly when the host provides the memory-settings action", async () => {
+    const onOpenMemorySettings = vi.fn();
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+        <NotebookRouteView
+          projectRoot="/tmp/project"
+          activeRunId="run_head"
+          onOpenMemorySettings={onOpenMemorySettings}
+        />
+      </MemoryRouter>,
+    );
+
+    await screen.findByTestId("notebook-manage-memory");
+    fireEvent.click(screen.getByTestId("notebook-manage-memory"));
+
+    expect(onOpenMemorySettings).toHaveBeenCalledOnce();
+  });
+
   it("renders a typed API failure without pretending the notebook is empty", async () => {
     vi.mocked(ensureNotebookProjection).mockRejectedValue(
       Object.assign(new Error("project missing"), { code: "PROJECT_NOT_FOUND" }),

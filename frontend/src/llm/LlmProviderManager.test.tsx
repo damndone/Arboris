@@ -139,10 +139,18 @@ describe("LlmProviderManager", () => {
     render(<LlmProviderManager projectRoot="/project-a" onBack={vi.fn()} />);
     await screen.findByTestId("llm-provider-manager");
 
+    const providersSection = screen.getByRole("button", { name: "LLM providers" });
+    const memorySection = screen.getByRole("button", { name: "Memory" });
+    expect(providersSection).toHaveAttribute("aria-pressed", "true");
+    expect(memorySection).toHaveAttribute("aria-pressed", "false");
+
     fireEvent.click(screen.getByRole("button", { name: "Memory" }));
 
     expect(await screen.findByTestId("memory-settings-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("llm-provider-list")).not.toBeInTheDocument();
+    expect(providersSection).toHaveAttribute("aria-pressed", "false");
+    expect(memorySection).toHaveAttribute("aria-pressed", "true");
+    expect(memorySection).toHaveStyle({ background: "var(--accent, #0a84ff)", color: "#fff" });
   });
 
   it("backs out and opens the editor for add and edit", async () => {

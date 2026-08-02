@@ -1351,8 +1351,8 @@ def test_async_stream_chat_completion_assembles_split_typed_tool_call(monkeypatc
         ]
 
     assert asyncio.run(scenario()) == [
-        {"type": "provider_activity"},
-        {"type": "provider_activity"},
+            {"type": "provider_activity", "public": True},
+            {"type": "provider_activity", "public": True},
         {
             "type": "tool_call",
             "tool_call": {
@@ -1409,14 +1409,16 @@ def test_async_stream_chat_completion_forwards_safe_model_request_config(monkeyp
     assert payload["max_tokens"] == 4096
 
 
-def test_openai_adapter_does_not_retry_after_private_reasoning_activity(monkeypatch) -> None:
+def test_openai_adapter_retries_after_private_reasoning_only(monkeypatch) -> None:
     attempts = 0
 
     async def fake_stream(*_args, **_kwargs):
         nonlocal attempts
         attempts += 1
         yield {"type": "provider_activity"}
-        raise llm_client.LLMUpstreamError("stream ended without completion")
+        if attempts == 1:
+            raise llm_client.LLMUpstreamError("stream ended without completion")
+        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat"}
 
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
@@ -1436,8 +1438,8 @@ def test_openai_adapter_does_not_retry_after_private_reasoning_activity(monkeypa
         ]
 
     events = asyncio.run(scenario())
-    assert attempts == 1
-    assert events[-1].type == "error"
+    assert attempts == 2
+    assert events[-1].type == "done"
 
 
 def test_openai_adapter_does_not_retry_after_partial_tool_call_activity(monkeypatch) -> None:
@@ -1469,6 +1471,38 @@ def test_openai_adapter_does_not_retry_after_partial_tool_call_activity(monkeypa
     events = asyncio.run(scenario())
     assert len(seen) == 1
     assert events[-1].type == "error"
+
+
+def test_openai_adapter_retries_transient_provider_status_before_failing(monkeypatch) -> None:
+    attempts = 0
+
+    async def fake_stream(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise llm_client.LLMUpstreamError("temporary outage", upstream_status=503)
+        yield {"type": "done", "finish_reason": "stop", "model": "test-model"}
+
+    monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
+
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(
+            LLMConfig(
+                base_url="https://api.example.test",
+                api_key=API_KEY,
+                model="test-model",
+            )
+        )
+        return [
+            event
+            async for event in adapter.stream(
+                ModelRequest(messages=[{"role": "user", "content": "plan"}])
+            )
+        ]
+
+    events = asyncio.run(scenario())
+    assert attempts == 2
+    assert events[-1].type == "done"
 
 
 def test_openai_adapter_retries_after_complete_non_object_tool_json(monkeypatch) -> None:
@@ -1612,7 +1646,7 @@ def test_deepseek_v4_adapter_does_not_advertise_named_tool_choice() -> None:
     assert adapter.supports_named_tool_choice() is False
     assert adapter.planning_request_config() == {
         "thinking": {"type": "disabled"},
-        "max_tokens": 4096,
+        "max_tokens": 8192,
     }
 
 

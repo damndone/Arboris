@@ -42,13 +42,27 @@ from workbench.http.notebook_routes import (
 
 
 def test_notebook_workflow_capability_admission_uses_published_contracts() -> None:
-    from workbench.agent.workflow_contracts import notebook_workflow_capability_ids
+    from workbench.agent.notebook.vocabulary import capability_artifact_types
+    from workbench.agent.workflow_contracts import (
+        MODEL_FAMILY_CONTRACTS,
+        notebook_workflow_capability_ids,
+    )
 
     admitted = set(notebook_workflow_capability_ids())
 
-    assert {"ols", "panel_ols", "logit", "iv_2sls", "cs_did", "time_series.ets"} <= admitted
-    assert "glm:poisson" not in admitted
-    assert "glm:negative_binomial" not in admitted
+    assert set(MODEL_FAMILY_CONTRACTS) <= admitted
+    assert all(capability_artifact_types(family) for family in MODEL_FAMILY_CONTRACTS)
+    assert {
+        "ols",
+        "panel_ols",
+        "logit",
+        "iv_2sls",
+        "cs_did",
+        "glm:binomial",
+        "glm:poisson",
+        "glm:negative_binomial",
+        "time_series.ets",
+    } <= admitted
 
 
 def test_notebook_route_projects_trusted_capability_completion_refs() -> None:
@@ -506,6 +520,154 @@ def test_real_planner_reads_current_server_owned_custom_projection(
     assert planner.adapter.config.timeout_s == notebook_routes.NOTEBOOK_PROVIDER_TIMEOUT_S
     assert "binding" not in planner.capability_catalog["custom.ols"]
     assert "entrypoint_ref" not in planner.capability_catalog["custom.ols"]
+
+
+def test_real_planner_catalog_matches_model_family_covariance_contract(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The provider catalog must not advertise OLS-only fields to other families."""
+
+    from workbench.llm.config import LLMConfig
+
+    project = make_project(tmp_path, name="project.family-catalog")
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,x,z\n0,1,2\n1,2,3\n",
+        filename="data.csv",
+    )
+    service = NotebookService(project)
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "data.csv",
+            "sheet_names": [],
+        },
+        created_by="test",
+        available_capabilities=["ols", "panel_ols", "logit", "poisson"],
+    )
+    context = service.compile_context(notebook.notebook_id)
+    trace = _trace(project, notebook.notebook_id, notebook.run_family_id)
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes.load_llm_config",
+        lambda: LLMConfig(
+            base_url="https://provider.invalid",
+            api_key="test-key",
+            model="test-model",
+        ),
+    )
+
+    planner = _planning_agent(
+        project,
+        service,
+        notebook.notebook_id,
+        context,
+        trace,
+    )
+
+    assert "covariance" in {
+        str(item.get("key"))
+        for item in planner.capability_catalog["ols"].get("params", [])
+    }
+    assert planner.capability_catalog["ols"]["notebook_model_options_policy"] == {
+        "supported": True,
+        "allowed_fields": ["covariance"],
+        "forbidden_fields": [],
+        "submission_rule": "use_published_fields",
+    }
+    assert planner.capability_catalog["panel_ols"]["notebook_model_options_policy"] == {
+        "supported": True,
+        "allowed_fields": ["covariance"],
+        "forbidden_fields": [],
+        "submission_rule": "use_published_fields",
+    }
+    for capability_id in ("ols", "logit", "poisson"):
+        assert "y" in {
+            str(item.get("key"))
+            for item in planner.capability_catalog[capability_id].get("params", [])
+        }
+    assert planner.capability_catalog["logit"]["artifact_types"] == {
+        "logit_1": "model_result"
+    }
+    for capability_id in ("logit", "poisson"):
+        assert "covariance" not in {
+            str(item.get("key"))
+            for item in planner.capability_catalog[capability_id].get("params", [])
+        }
+        assert planner.capability_catalog[capability_id]["notebook_model_options_policy"] == {
+            "supported": False,
+            "allowed_fields": [],
+            "forbidden_fields": ["covariance", "model_options"],
+            "submission_rule": "omit_model_options",
+        }
+
+
+def test_real_planner_uses_builtin_artifact_vocabulary_for_native_family(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A dynamic custom projection must not replace a native family contract."""
+
+    from workbench.llm.config import LLMConfig
+
+    project = make_project(tmp_path, name="project.native-artifact-vocabulary")
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,x,z\n0,1,2\n1,2,3\n",
+        filename="data.csv",
+    )
+    service = NotebookService(project)
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "data.csv",
+            "sheet_names": [],
+        },
+        created_by="test",
+        available_capabilities=["ols", "logit"],
+    )
+    context = service.compile_context(notebook.notebook_id)
+    trace = _trace(project, notebook.notebook_id, notebook.run_family_id)
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes.load_llm_config",
+        lambda: LLMConfig(
+            base_url="https://provider.invalid",
+            api_key="test-key",
+            model="test-model",
+        ),
+    )
+
+    class NativeShadowProjection:
+        def planner_projections(self, *, scope_candidates):
+            return (
+                {
+                    "key": "ols",
+                    "label": "shadow OLS",
+                    "model_type": "ols",
+                    "notebook_proposal_adapters": ["model.genesis"],
+                    "params": [],
+                    "artifact_types": {"shadow_ols": "model_result"},
+                },
+            )
+
+    service.capability_bindings = NativeShadowProjection()
+    planner = _planning_agent(
+        project,
+        service,
+        notebook.notebook_id,
+        context,
+        trace,
+    )
+
+    assert planner._published_artifact_types("ols") == {
+        "ols_1": "model_result"
+    }
+    assert planner.capability_catalog["ols"]["artifact_types"] == {
+        "ols_1": "model_result"
+    }
+    assert planner.capability_catalog["ols"]["model_options_vocabulary"][
+        "fields"
+    ]["covariance"]["allowed_values"] == ["robust", "clustered", "unadjusted"]
 
 
 def test_real_planner_binds_recipe_source_before_owner_validation(
@@ -1046,7 +1208,11 @@ def test_projection_route_compiles_verified_dataset_without_inventing_run(tmp_pa
     notebook = projection.json()
     assert notebook["projection_source"]["kind"] == "dataset"
     assert notebook["active_head_run_id"] is None
-    assert "glm:poisson" not in notebook["available_capabilities"]
+    assert {
+        "glm:binomial",
+        "glm:poisson",
+        "glm:negative_binomial",
+    } <= set(notebook["available_capabilities"])
     assert "time_series.ets" in notebook["available_capabilities"]
     assert list((project / "runs").iterdir()) == []
 

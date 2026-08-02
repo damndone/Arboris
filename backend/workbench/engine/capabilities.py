@@ -260,6 +260,14 @@ _MODEL_PARAMS: dict[str, list[dict]] = {
     "panel_ols": _COMMON_MODEL_PARAMS + [
         {"key": "entity_col", "kind": "columns", "label": "Entity", "required": False, "role": "entity"},
         {"key": "time_col", "kind": "columns", "label": "Time", "required": False, "role": "time"},
+        {
+            "key": "model_options",
+            "kind": "object",
+            "label": "Panel OLS model options",
+            "required": False,
+            "role": "model_options",
+            "value": {},
+        },
     ],
     "iv_2sls": _COMMON_MODEL_PARAMS + [
         {"key": "iv_endog", "kind": "columns", "label": "Endogenous", "required": True, "role": "endog"},

@@ -533,6 +533,63 @@ def _submission(value: Any) -> AgentOptionSubmission:
     )
 
 
+def _canonicalize_provider_option_batch(
+    value: Any,
+    *,
+    evidence: DataEvidencePackV1,
+    catalog: Mapping[str, Mapping[str, Any]],
+) -> Any:
+    """Fill only deterministic, server-owned option envelope fields.
+
+    The model chooses the analysis and its human explanation.  It does not
+    choose the evidence hashes, result vocabulary, or a stable option label.
+    Older providers also omit ``comparative_claims`` when there is no claim;
+    an empty list is the only truthful value in that case.  Repairing these
+    envelope omissions before the strict parser prevents a harmless wrapper
+    mismatch from consuming another provider turn, while all executable
+    fields still pass the normal typed validators below.
+    """
+
+    if not isinstance(value, Mapping) or set(value) != {"options"}:
+        return value
+    raw_options = value.get("options")
+    if not isinstance(raw_options, list):
+        return value
+    completed_refs = [
+        {
+            "evidence_id": record.evidence_id,
+            "result_hash": record.result_hash,
+            "source_refs": list(record.source_refs),
+        }
+        for record in evidence.records
+        if record.status == "completed"
+    ]
+    normalized: list[Any] = []
+    for index, raw in enumerate(raw_options, start=1):
+        if not isinstance(raw, Mapping):
+            normalized.append(raw)
+            continue
+        item = dict(raw)
+        if "comparative_claims" not in item:
+            item["comparative_claims"] = []
+        if "evidence_refs" not in item and completed_refs:
+            item["evidence_refs"] = list(completed_refs)
+        if "option_id" not in item:
+            rank = item.get("rank")
+            item["option_id"] = (
+                f"option_{rank}" if type(rank) is int and rank > 0 else f"option_{index}"
+            )
+        if "capability_id" not in item:
+            proposal = item.get("proposal")
+            changes = proposal.get("changes") if isinstance(proposal, Mapping) else None
+            model_params = changes.get("model_params") if isinstance(changes, Mapping) else None
+            model_type = model_params.get("model_type") if isinstance(model_params, Mapping) else None
+            if isinstance(model_type, str) and model_type in catalog:
+                item["capability_id"] = model_type
+        normalized.append(item)
+    return {"options": normalized}
+
+
 class NotebookPlanningAgent:
     """A two-tool, bounded planning loop over the existing model adapter."""
 
@@ -548,7 +605,7 @@ class NotebookPlanningAgent:
         proposal_validator: ProposalValidator | None = None,
         available_inspections: Sequence[str] | None = None,
         max_inspection_rounds: int = 5,
-        max_contract_corrections: int = 2,
+        max_contract_corrections: int = 4,
         model_timeout_s: float = 120.0,
         planning_timeout_s: float | None = None,
     ) -> None:
@@ -570,8 +627,8 @@ class NotebookPlanningAgent:
         )
         if max_inspection_rounds < 1 or max_inspection_rounds > 5:
             raise ValueError("max_inspection_rounds must be between 1 and 5")
-        if max_contract_corrections < 0 or max_contract_corrections > 2:
-            raise ValueError("max_contract_corrections must be between 0 and 2")
+        if max_contract_corrections < 0 or max_contract_corrections > 4:
+            raise ValueError("max_contract_corrections must be between 0 and 4")
         self.max_inspection_rounds = max_inspection_rounds
         self.max_contract_corrections = max_contract_corrections
         if model_timeout_s <= 0:
@@ -1076,6 +1133,11 @@ class NotebookPlanningAgent:
                 )
                 continue
             try:
+                arguments = _canonicalize_provider_option_batch(
+                    arguments,
+                    evidence=evidence,
+                    catalog=catalog,
+                )
                 submissions = _parse_submissions(arguments, max_options=max_options)
                 submissions = self._validate_submissions(
                     context, evidence, submissions, catalog, max_options=max_options
@@ -1324,6 +1386,13 @@ class NotebookPlanningAgent:
                 "reasoning, explanation, evidence, metadata, or any other sibling "
                 "field; put option-specific rationale inside each option.rationale."
             )
+        elif message == "option submission fields are incomplete or unknown":
+            remediation = (
+                "Each item in options must contain exactly these fields: rank, rationale, "
+                "proposal, evidence_refs, comparative_claims, capability_id, and option_id; "
+                "assumptions and expected_artifacts are optional. Do not add reasoning, "
+                "explanation, evidence, metadata, or other provider fields to an option."
+            )
         elif message == "option evidence ref is missing, changed, or incomplete":
             completed = [
                 {
@@ -1459,12 +1528,28 @@ class NotebookPlanningAgent:
                 "the same proposal but omit model_options entirely. Do not borrow "
                 "covariance or any other option from a related model family."
             )
+        elif "OLS_MODEL_OPTIONS_UNKNOWN_FIELD" in message:
+            remediation = (
+                "For a standalone OLS model.genesis proposal, OLS model_options may contain "
+                "only the server-published covariance field. Remove branches and every "
+                "other nested key; put the exact y and x columns in model_params. If the "
+                "user needs multiple OLS branches, submit operation.multi_step with its "
+                "published step vocabulary instead of placing branches inside model_options."
+            )
         elif "model_options target contract rejected" in message:
             remediation = (
                 "Resubmit the same typed proposal only after correcting model_options against the "
                 "server-published target contract. Preserve the exact nested field names and value types "
                 "shown in capability_catalog.notebook_model_options_contract or model_options_vocabulary; "
                 "send a patch, not a new alias vocabulary. Do not guess a model setting."
+            )
+        elif "does not accept OLS covariance settings" in message:
+            remediation = (
+                "The selected model family does not accept OLS covariance settings. "
+                "omit model_params.covariance and changes.model_options entirely; "
+                "submit only the model_type, evidence-backed y/x, and family-required "
+                "fields published for the selected capability. Do not borrow covariance "
+                "or model_options from OLS or another related family."
             )
         elif message.startswith("typed proposal fields are incomplete or unknown:"):
             remediation = (
@@ -1486,6 +1571,13 @@ class NotebookPlanningAgent:
                 "Resubmit at most three options in one submit_notebook_option_batch call. "
                 "Keep only genuinely distinct supported paths; do not split one analysis "
                 "across multiple calls or silently invent a fourth option."
+            )
+        elif "expected artifact failed published artifact vocabulary validation" in message:
+            remediation = (
+                "Keep every required expected_artifact aligned with the selected capability: "
+                "logit uses logit_1, probit uses probit_1, and OLS uses ols_1. Do not mix a "
+                "result id from another model family. Use the exact artifact_type published "
+                "for that capability, and do not invent a new artifact id."
             )
         elif "published artifact vocabulary validation" in message:
             remediation = (
@@ -1564,7 +1656,7 @@ class NotebookPlanningAgent:
         return (
             "Workbench rejected the previous Notebook tool call; it was not executed "
             "and is not evidence. This is bounded contract correction attempt "
-            f"{correction_number}/2. {message}. {remediation}"
+            f"#{correction_number}. {message}. {remediation}"
         )
 
     async def _call_model(
@@ -1806,6 +1898,9 @@ class NotebookPlanningAgent:
             raise NotebookPlanningContractError("option ranks must be unique")
         normalized_submissions: list[AgentOptionSubmission] = []
         for submission in submissions:
+            submission = self._canonicalize_server_owned_pins(context, submission)
+            submission = self._canonicalize_provider_capability_id(submission, catalog)
+            submission = self._strip_unsupported_model_options(submission, catalog)
             # Recipe options are canonically nested under model_params.  Keep
             # the accepted top-level compatibility envelope useful for model
             # providers, but normalize it before memory defaults are applied;
@@ -2145,27 +2240,25 @@ class NotebookPlanningAgent:
                 else self._published_artifact_types(submission.capability_id)
             )
             canonical_expected_artifacts = submission.expected_artifacts
-            if operation_id == "operation.multi_step":
-                # A model-genesis workflow registers one primary result in
-                # each sibling Run. The server derives its primary artifact
-                # contract from the validated executable steps: letting the
-                # provider guess artifact ids, branch count, or registry step
-                # makes a non-executable presentation field block an otherwise
-                # valid analysis plan.
+            if published_artifacts:
+                # Artifact ids and types are server output.  The provider may
+                # describe them for humans, but its guess must never make a
+                # valid native capability fail admission.  A composed workflow
+                # registers one primary result per declared branch; a regular
+                # capability registers one primary result.
                 canonical_expected_artifacts = tuple(
                     ExpectedArtifact(
                         artifact_id=artifact_id,
                         artifact_type=artifact_type,
                         required=True,
-                        count=workflow_artifact_counts[artifact_id],
+                        count=(
+                            workflow_artifact_counts[artifact_id]
+                            if operation_id == "operation.multi_step"
+                            else 1
+                        ),
                         step=None,
                     )
                     for artifact_id, artifact_type in sorted(published_artifacts.items())
-                )
-            elif published_artifacts and not submission.expected_artifacts:
-                raise NotebookPlanningContractError(
-                    "capability required artifact(s) missing: "
-                    + ", ".join(sorted(published_artifacts))
                 )
             try:
                 build_artifact_contract(
@@ -2278,6 +2371,171 @@ class NotebookPlanningAgent:
                 "option batch contains duplicate executable proposals"
             )
         return tuple(normalized_submissions)
+
+    @staticmethod
+    def _canonicalize_server_owned_pins(
+        context: NotebookPlanningContextV1,
+        submission: AgentOptionSubmission,
+    ) -> AgentOptionSubmission:
+        """Replace provider-guessed source pins with the current server pins.
+
+        A Notebook is already bound to one dataset (or one active run).  The
+        provider therefore does not get to choose a different upload by
+        spelling a different hash, nor does it get to reconstruct the context
+        preconditions from prose.  Those fields are envelope data owned by the
+        server.  Canonicalizing them once here removes a whole class of
+        correction turns while preserving the fail-closed validation of all
+        user/model fields.
+        """
+
+        proposal = submission.proposal
+        source = context.projection_source
+        if not isinstance(source, Mapping):
+            return submission
+
+        expected_target: Mapping[str, Any] | None = None
+        expected_preconditions: Mapping[str, Any] | None = None
+        operation_id = proposal.operation_id
+
+        if source.get("kind") == "dataset":
+            upload_sha256 = source.get("upload_sha256")
+            if not isinstance(upload_sha256, str) or not upload_sha256:
+                return submission
+            if operation_id in {"model.genesis", "model.custom"} and (
+                "dataset_source_id" in proposal.target or operation_id == "model.genesis"
+            ):
+                expected_target = {"dataset_source_id": upload_sha256}
+                expected_preconditions = NotebookPlanningAgent._execution_pins(context)[
+                    "genesis_preconditions"
+                ]
+            elif operation_id == "operation.multi_step":
+                workflow_source = NotebookPlanningAgent._execution_pins(context).get(
+                    "workflow_source"
+                )
+                if isinstance(workflow_source, Mapping):
+                    expected_target = workflow_source["target"]
+                    expected_preconditions = workflow_source["preconditions"]
+
+        if expected_target is None or expected_preconditions is None:
+            return submission
+        if (
+            proposal.target == dict(expected_target)
+            and proposal.preconditions == dict(expected_preconditions)
+        ):
+            return submission
+        return replace(
+            submission,
+            proposal=replace(
+                proposal,
+                target=dict(expected_target),
+                preconditions=dict(expected_preconditions),
+            ),
+        )
+
+    @staticmethod
+    def _canonicalize_provider_capability_id(
+        submission: AgentOptionSubmission,
+        catalog: Mapping[str, Mapping[str, Any]],
+    ) -> AgentOptionSubmission:
+        """Bind a Genesis envelope to the model family it actually selects.
+
+        ``capability_id`` is a provider-facing label, while
+        ``changes.model_params.model_type`` is the executable family.  Models
+        occasionally retain the label from an earlier candidate (for example
+        ``ols``) after changing the proposal to ``logit``.  Treating that
+        stale label as authoritative produces misleading downstream failures:
+        the wrong model-options policy is applied and the wrong artifact
+        vocabulary is selected.  The server already publishes the family
+        catalog, so binding the label to an exact registered model type is a
+        deterministic envelope repair.  It never invents a family or changes
+        executable model parameters.
+        """
+
+        proposal = submission.proposal
+        if proposal.operation_id != "model.genesis":
+            return submission
+        changes = proposal.changes
+        model_params = changes.get("model_params")
+        model_type = (
+            model_params.get("model_type")
+            if isinstance(model_params, Mapping)
+            else None
+        )
+        if not isinstance(model_type, str) or not model_type:
+            return submission
+        declaration = catalog.get(model_type)
+        if not isinstance(declaration, Mapping):
+            return submission
+        declared_model_type = declaration.get("model_type")
+        if declared_model_type is not None and declared_model_type != model_type:
+            return submission
+        if submission.capability_id == model_type:
+            return submission
+        return replace(submission, capability_id=model_type)
+
+    @staticmethod
+    def _strip_unsupported_model_options(
+        submission: AgentOptionSubmission,
+        catalog: Mapping[str, Mapping[str, Any]],
+    ) -> AgentOptionSubmission:
+        """Apply an explicit server policy that a family has no option envelope.
+
+        The provider-facing catalog is advisory input to an untrusted model. A
+        model can still copy an OLS ``model_options`` object into a family that
+        explicitly publishes ``supported: false``. Removing that envelope at
+        the typed-planning boundary is safe canonicalization: the selected
+        family has declared that it cannot consume those fields, and retaining
+        them would only force a bounded retry (or fail after the user waits).
+        Families with no explicit policy are left unchanged so a missing
+        catalog entry never silently weakens a newly registered contract.
+        """
+
+        if submission.proposal.operation_id != "model.genesis":
+            return submission
+        declaration = catalog.get(submission.capability_id)
+        policy = declaration.get("notebook_model_options_policy") if declaration else None
+        model_params = submission.proposal.changes.get("model_params")
+        model_type = model_params.get("model_type") if isinstance(model_params, Mapping) else None
+        # The capability id is an admission label; the nested model_type owns
+        # the actual option contract.  Providers occasionally keep the former
+        # label from an earlier candidate while changing the latter.  Resolve
+        # the policy by the actual family as well, so an OLS covariance cannot
+        # leak into logit/GLM/DID merely because the wrapper label was stale.
+        if isinstance(model_type, str):
+            model_declaration = catalog.get(model_type)
+            model_policy = (
+                model_declaration.get("notebook_model_options_policy")
+                if model_declaration
+                else None
+            )
+            if isinstance(model_policy, Mapping):
+                policy = model_policy
+        if not isinstance(policy, Mapping) or policy.get("supported") is not False:
+            return submission
+
+        changes = dict(submission.proposal.changes)
+        changed = False
+        if "model_options" in changes:
+            changes.pop("model_options", None)
+            changed = True
+        model_params = changes.get("model_params")
+        if isinstance(model_params, Mapping) and "model_options" in model_params:
+            normalized_params = dict(model_params)
+            normalized_params.pop("model_options", None)
+            changes["model_params"] = normalized_params
+            changed = True
+        model_params = changes.get("model_params")
+        if isinstance(model_params, Mapping) and "covariance" in model_params:
+            normalized_params = dict(model_params)
+            normalized_params.pop("covariance", None)
+            changes["model_params"] = normalized_params
+            changed = True
+        if not changed:
+            return submission
+        return replace(
+            submission,
+            proposal=replace(submission.proposal, changes=changes),
+        )
 
 
 def _parse_submissions(

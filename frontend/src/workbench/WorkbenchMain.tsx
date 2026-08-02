@@ -57,7 +57,11 @@ export function WorkbenchMain({
       {state.view === "pipeline" && <PipelineView />}
       {state.view === "report" && <ReportView projectRoot={projectRoot} />}
       {state.view === "notebook" && (
-        <NotebookRouteView projectRoot={projectRoot} activeRunId={notebookActiveRunId} />
+        <NotebookRouteView
+          projectRoot={projectRoot}
+          activeRunId={notebookActiveRunId}
+          onOpenMemorySettings={onOpenSettings}
+        />
       )}
     </div>
   );

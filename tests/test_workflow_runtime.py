@@ -43,6 +43,9 @@ def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -
         "probit",
         "poisson",
         "negative_binomial",
+        "glm:binomial",
+        "glm:poisson",
+        "glm:negative_binomial",
         "panel_ols",
         "iv_2sls",
         "did",
@@ -67,13 +70,24 @@ def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -
     assert panel.result_shape == "coefficient_intervals"
     assert callable(panel.build_model_params)
 
-    for family in ("logit", "probit", "poisson", "negative_binomial"):
+    for family in (
+        "logit",
+        "probit",
+        "poisson",
+        "negative_binomial",
+        "glm:binomial",
+        "glm:poisson",
+        "glm:negative_binomial",
+    ):
         generalized = MODEL_FAMILY_CONTRACTS[family]
-        assert generalized.expected_artifacts == (
-            f"{family}_1",
-            f"diagnostics_{family}_1",
-            "diagnostic_summary",
-        )
+        if family.startswith("glm:"):
+            assert generalized.expected_artifacts == ("glm_1",)
+        else:
+            assert generalized.expected_artifacts == (
+                f"{family}_1",
+                f"diagnostics_{family}_1",
+                "diagnostic_summary",
+            )
         assert generalized.result_shape == "coefficient_intervals"
         assert generalized.allows_covariance is False
         assert generalized.builds_native_params is False

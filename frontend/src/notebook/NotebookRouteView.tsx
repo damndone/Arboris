@@ -463,12 +463,14 @@ export interface NotebookRouteViewProps {
   projectRoot: string;
   activeRunId?: string | null;
   onMaterializedDraft?: (response: NotebookMaterializationResponse) => void;
+  onOpenMemorySettings?: () => void;
 }
 
 export function NotebookRouteView({
   projectRoot,
   activeRunId = null,
   onMaterializedDraft,
+  onOpenMemorySettings,
 }: NotebookRouteViewProps) {
   const agent = useAgentSurfaceOptional();
   const workbench = useWorkbenchOptional();
@@ -1243,6 +1245,10 @@ export function NotebookRouteView({
           data-testid="notebook-manage-memory"
           className="nb-button"
           onClick={() => {
+            if (onOpenMemorySettings) {
+              onOpenMemorySettings();
+              return;
+            }
             const next = new URLSearchParams(searchParams);
             next.set("memory_settings", "1");
             setSearchParams(next);
