@@ -1351,6 +1351,8 @@ def test_async_stream_chat_completion_assembles_split_typed_tool_call(monkeypatc
         ]
 
     assert asyncio.run(scenario()) == [
+        {"type": "provider_activity"},
+        {"type": "provider_activity"},
         {
             "type": "tool_call",
             "tool_call": {
@@ -1438,6 +1440,90 @@ def test_openai_adapter_does_not_retry_after_private_reasoning_activity(monkeypa
     assert events[-1].type == "error"
 
 
+def test_openai_adapter_does_not_retry_after_partial_tool_call_activity(monkeypatch) -> None:
+    seen = _install_async_upstream(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            content=(
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"submit_notebook_option_batch","arguments":"{\\"options\\":"}}]},"finish_reason":null}]}\n\n'
+            ),
+        ),
+    )
+
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(
+            LLMConfig(
+                base_url="https://api.example.com/v1",
+                api_key=API_KEY,
+                model="test-model",
+            )
+        )
+        return [
+            event
+            async for event in adapter.stream(
+                ModelRequest(messages=[{"role": "user", "content": "submit"}])
+            )
+        ]
+
+    events = asyncio.run(scenario())
+    assert len(seen) == 1
+    assert events[-1].type == "error"
+
+
+def test_openai_adapter_retries_after_complete_non_object_tool_json(monkeypatch) -> None:
+    responses = iter(
+        [
+            httpx.Response(
+                200,
+                content=(
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-bad","function":{"name":"submit_notebook_option_batch","arguments":"[]"}}]},"finish_reason":"tool_calls"}]}'
+                    b"\n\n"
+                ),
+            ),
+            httpx.Response(
+                200,
+                content=(
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-good","function":{"name":"submit_notebook_option_batch","arguments":"{\\"options\\":[]}"}}]},"finish_reason":"tool_calls"}]}'
+                    b"\n\n"
+                ),
+            ),
+        ]
+    )
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return next(responses)
+
+    monkeypatch.setattr(
+        llm_client,
+        "_async_client_factory",
+        lambda config: httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), timeout=config.timeout_s
+        ),
+    )
+
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(
+            LLMConfig(
+                base_url="https://api.example.com/v1",
+                api_key=API_KEY,
+                model="test-model",
+            )
+        )
+        return [
+            event
+            async for event in adapter.stream(
+                ModelRequest(messages=[{"role": "user", "content": "submit"}])
+            )
+        ]
+
+    events = asyncio.run(scenario())
+    assert len(seen) == 2
+    assert [event.type for event in events] == ["tool_call_delta", "done"]
+
+
 def test_openai_adapter_stops_one_no_progress_stream_without_retry(monkeypatch) -> None:
     attempts = 0
 
@@ -1469,6 +1555,48 @@ def test_openai_adapter_stops_one_no_progress_stream_without_retry(monkeypatch) 
     assert attempts == 1
     assert events[-1].type == "error"
     assert events[-1].error == "provider_no_progress"
+
+
+def test_openai_adapter_abort_event_interrupts_a_hung_provider_stream(monkeypatch) -> None:
+    started = asyncio.Event()
+
+    async def fake_stream(*_args, **_kwargs):
+        started.set()
+        await asyncio.Event().wait()
+        yield {"type": "done", "finish_reason": "stop", "model": "test-model"}
+
+    monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
+
+    async def scenario():
+        abort_event = asyncio.Event()
+        adapter = OpenAICompatibleModelAdapter(
+            LLMConfig(
+                base_url="https://api.example.com/v1",
+                api_key=API_KEY,
+                model="test-model",
+            ),
+            idle_timeout_s=1.0,
+        )
+
+        async def collect():
+            return [
+                event
+                async for event in adapter.stream(
+                    ModelRequest(
+                        messages=[{"role": "user", "content": "cancel"}],
+                        abort_event=abort_event,
+                    )
+                )
+            ]
+
+        task = asyncio.create_task(collect())
+        await started.wait()
+        abort_event.set()
+        return await asyncio.wait_for(task, timeout=0.1)
+
+    events = asyncio.run(scenario())
+    assert events[-1].type == "error"
+    assert events[-1].error == "aborted"
 
 
 def test_deepseek_v4_adapter_does_not_advertise_named_tool_choice() -> None:

@@ -228,6 +228,17 @@ async def async_stream_chat_completion(
                         )
                     for raw_tool_call in raw_tool_calls:
                         _merge_stream_tool_call(tool_fragments, raw_tool_call)
+                    if raw_tool_calls and any(
+                        _is_json_argument_prefix(str(fragment.get("arguments", "")))
+                        for fragment in tool_fragments.values()
+                    ):
+                        # A tool call is assembled only after the provider sends
+                        # a finish reason, but receiving any valid fragment is
+                        # already actionable provider progress. Keep that
+                        # signal internal so the adapter does not retry a
+                        # request after a disconnect halfway through a typed
+                        # submission.
+                        yield {"type": "provider_activity"}
                     candidate_finish_reason = choice.get("finish_reason")
                     if candidate_finish_reason is not None:
                         if not isinstance(candidate_finish_reason, str) or not candidate_finish_reason:
@@ -304,6 +315,21 @@ def _merge_stream_tool_call(
         if not isinstance(arguments, str):
             raise LLMUpstreamError("LLM provider returned an unexpected streaming response shape")
         fragment["arguments"] = f"{fragment.get('arguments', '')}{arguments}"
+
+
+def _is_json_argument_prefix(raw_arguments: str) -> bool:
+    """Tell a recoverable partial JSON prefix from an invalid payload."""
+
+    trimmed = raw_arguments.rstrip()
+    if not trimmed:
+        return True
+    try:
+        parsed = json.loads(trimmed)
+    except json.JSONDecodeError as exc:
+        if "Unterminated string" in exc.msg:
+            return True
+        return exc.pos >= len(trimmed)
+    return isinstance(parsed, dict)
 
 
 def _complete_stream_tool_calls(

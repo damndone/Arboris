@@ -160,6 +160,46 @@ class ModelStreamEvent:
         return cls(type="error", request_id=request_id, error=message)
 
 
+async def _next_stream_item_or_signal(
+    stream: AsyncIterator[dict[str, Any]],
+    abort_event: Any | None,
+    timeout_s: float,
+) -> tuple[str, dict[str, Any] | None]:
+    """Wait for provider progress, cancellation, or the idle boundary."""
+
+    next_item = asyncio.create_task(stream.__anext__())
+    abort_waiter = (
+        asyncio.create_task(abort_event.wait())
+        if abort_event is not None
+        else None
+    )
+    try:
+        waiters = {next_item}
+        if abort_waiter is not None:
+            waiters.add(abort_waiter)
+        completed, _ = await asyncio.wait(
+            waiters,
+            timeout=timeout_s,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if not completed:
+            return "timeout", None
+        if abort_waiter is not None and abort_waiter in completed:
+            return "aborted", None
+        try:
+            return "item", next_item.result()
+        except StopAsyncIteration:
+            return "eof", None
+    finally:
+        if not next_item.done():
+            next_item.cancel()
+        await asyncio.gather(next_item, return_exceptions=True)
+        if abort_waiter is not None:
+            if not abort_waiter.done():
+                abort_waiter.cancel()
+            await asyncio.gather(abort_waiter, return_exceptions=True)
+
+
 class ModelAdapter(Protocol):
     """Provider adapter boundary consumed by AgentCore."""
 
@@ -220,24 +260,31 @@ class OpenAICompatibleModelAdapter:
         for attempt in range(2):
             received_event = False
             try:
+                request_config = (
+                    {"model_config": request.model_config}
+                    if request.model_config
+                    else {}
+                )
                 stream = async_stream_chat_completion(
                     wire_messages,
                     self.config,
                     tools=wire_tools if request.tools else None,
-                    model_config=request.model_config,
+                    **request_config,
                 )
                 while True:
-                    try:
-                        item = await asyncio.wait_for(
-                            stream.__anext__(), timeout=self.idle_timeout_s
-                        )
-                    except StopAsyncIteration:
-                        break
-                    except asyncio.TimeoutError:
+                    signal, item = await _next_stream_item_or_signal(
+                        stream, abort_event, self.idle_timeout_s
+                    )
+                    if signal == "timeout":
                         yield ModelStreamEvent.from_error(
                             request.request_id, "provider_no_progress"
                         )
                         return
+                    if signal == "aborted":
+                        yield ModelStreamEvent.from_error(request.request_id, "aborted")
+                        return
+                    if signal == "eof":
+                        break
                     if abort_event is not None and abort_event.is_set():
                         yield ModelStreamEvent.from_error(request.request_id, "aborted")
                         return
