@@ -2527,6 +2527,43 @@ def test_provider_normalizes_incomplete_genesis_preconditions_without_correction
     }
 
 
+def test_provider_normalizes_custom_dataset_pin_without_provider_guess(
+    tmp_path: Path,
+) -> None:
+    """Custom dataset proposals use the same source-owned pin as Genesis."""
+
+    upload_sha256 = "sha256:custom-source-pin"
+    context = _context(
+        make_project(tmp_path),
+        projection_source={"kind": "dataset", "upload_sha256": upload_sha256},
+    )
+    option = _submit_call(capability_id="custom-capability")["options"][0]
+    option["proposal"] = {
+        **option["proposal"],
+        "operation_id": "model.custom",
+        "target": {},
+        "preconditions": {},
+        "changes": {
+            "operation": "fit",
+            "input_handle": "dataset:active",
+            "parameters": {},
+            "consumer_slots": ["result"],
+        },
+    }
+    submission = _submission(option)
+
+    normalized = NotebookPlanningAgent._canonicalize_server_owned_pins(
+        context, submission
+    )
+
+    assert normalized.proposal.target == {"dataset_source_id": upload_sha256}
+    assert normalized.proposal.preconditions == {
+        "context_version": "node-operation-context/v1",
+        "context_fingerprint": freshness_dependency_fingerprint(context),
+        "owner_resolution": "single_candidate",
+    }
+
+
 def test_notebook_agent_accepts_did_genesis_with_family_timing_and_no_covariates(
     tmp_path: Path,
 ) -> None:

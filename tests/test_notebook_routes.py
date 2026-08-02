@@ -36,6 +36,7 @@ from workbench.http import notebook_routes
 from workbench.http.notebook_routes import (
     _execution_results_packet,
     _planning_agent,
+    _no_eligible_capability_message,
     _supports_rerun_model_options,
     _trace,
 )
@@ -63,6 +64,17 @@ def test_notebook_workflow_capability_admission_uses_published_contracts() -> No
         "glm:negative_binomial",
         "time_series.ets",
     } <= admitted
+
+
+def test_no_eligible_run_capability_explains_source_data_recovery() -> None:
+    message = _no_eligible_capability_message(
+        proposal_adapter="model.rerun",
+        source_model_type="probit",
+    )
+
+    assert "probit" in message
+    assert "no editable model_options contract" in message
+    assert "Start new analysis from source data" in message
 
 
 def test_notebook_route_projects_trusted_capability_completion_refs() -> None:

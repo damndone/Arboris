@@ -10,7 +10,7 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 6/49 (12.2%; 12.2 per 100 events)
+- Failure frequency: 6/50 (12.0%; 12.0 per 100 events)
 - Repeat rate: 0/6 (0.0%)
 - Recurrence rate: 0/6 (0.0%)
 - MTTR: median=0 ms (sample=3; unresolved=3)
@@ -74,6 +74,7 @@ COMPLETED
 - A retrieval fixture must use the exact snapshot reference and hash returned by its source binding, not a syntactic placeholder digest.
 - Introduce the declarative family registry before admitting additional workflow model families.
 - Manual rerun idempotency keys must include the exact normalized edit, not only the edited field names.
+- Normalize server-owned dataset pins for every dataset-rooted Notebook operation and explain capability admission failures at the operation boundary.
 - Persist the typed memory metadata before adding a runtime path that can alter proposal defaults.
 - Retry only status-classified transient upstream failures before any public activity is emitted; never retry authentication, request, or partial-content failures.
 - Start a dependent formal line instead of dropping an existing three-segment backend allowlist entry or editing a frozen manifest.
@@ -130,3 +131,4 @@ COMPLETED
 - #47: `6fd4d7ac-0c1c-4e71-8e87-8e110a9a0c84` | 2026-08-02T10:17:18.000Z | GATE/notebook_model_family_contracts_browser_passed | incident=`6fd4d7ac-0c1c-4e71-8e87-8e110a9a0c84` | lesson_key=`notebook-family-contract-single-admission` | event_sha256=`7201411edc7cd2600097096554105146804288f17970011b2057c183e5a8a8b8`
 - #48: `c54a3cf3-0a87-46dd-9d76-47e5c3f4a22f` | 2026-08-02T11:04:00.000Z | GATE/notebook_contract_normalization_browser_passed | incident=`d5e7c4fb-f9b8-4ef0-9c9f-1bc2a79a5d31` | lesson_key=`notebook-server-owned-contract-normalization` | event_sha256=`add1dabd8fd425d9d6ae7b5079dd25532c53f2a27665e1108e7633cb0bdb593f`
 - #49: `d2f4f4a1-1b6b-4c7f-8c5e-7b2f6d1a9e31` | 2026-08-02T11:23:33.067Z | STATE_CHANGE/v1_8_5_model_family_completed | incident=`d9f1e7a2-4c6b-4d8e-9a1f-2b3c5d7e8f90` | lesson_key=`model-family-closeout-on-final-tree` | event_sha256=`c9a5583ecc164333106c1e6a8807d030f6c6b1db3328e9a15746e2ef5713bd25`
+- #50: `4a4f2f25-1c9b-4e3d-a3f5-8bde7f1156f2` | 2026-08-02T12:00:00.000Z | REVIEW/notebook_contract_boundary_fix | incident=`4a4f2f25-1c9b-4e3d-a3f5-8bde7f1156f2` | lesson_key=`notebook-contract-boundary-normalization` | event_sha256=`934e788a7de818e6f7fa2c5dba2ef216849828daba10325e94ef936be4974946`

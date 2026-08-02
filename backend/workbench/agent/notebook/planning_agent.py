@@ -2401,9 +2401,12 @@ class NotebookPlanningAgent:
             upload_sha256 = source.get("upload_sha256")
             if not isinstance(upload_sha256, str) or not upload_sha256:
                 return submission
-            if operation_id in {"model.genesis", "model.custom"} and (
-                "dataset_source_id" in proposal.target or operation_id == "model.genesis"
-            ):
+            if operation_id in {"model.genesis", "model.custom"}:
+                # Both native Genesis and an experimental custom capability are
+                # dataset-rooted when the Notebook projection is a dataset. The
+                # upload pin is server-owned in both cases; requiring the
+                # provider to spell it first made custom proposals fail one
+                # correction turn before this canonicalizer could help.
                 expected_target = {"dataset_source_id": upload_sha256}
                 expected_preconditions = NotebookPlanningAgent._execution_pins(context)[
                     "genesis_preconditions"

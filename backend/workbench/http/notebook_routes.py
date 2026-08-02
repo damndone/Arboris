@@ -1061,7 +1061,10 @@ def _planning_agent(
     }
     if not catalog:
         raise NotebookNoEligibleCapability(
-            "the Notebook has no server-registered executable capability"
+            _no_eligible_capability_message(
+                proposal_adapter=proposal_adapter,
+                source_model_type=source_model_type,
+            )
         )
 
     def execute_inspections(requests, current):
@@ -1182,6 +1185,27 @@ def _supports_rerun_model_options(declaration: Mapping[str, Any]) -> bool:
         isinstance(item, Mapping) and item.get("key") == "model_options"
         for item in (params or ())
     )
+
+
+def _no_eligible_capability_message(
+    *,
+    proposal_adapter: str,
+    source_model_type: str | None,
+) -> str:
+    """Explain an empty planner catalog without weakening fail-closed admission."""
+
+    if proposal_adapter == "model.rerun" and source_model_type:
+        return (
+            f"the active run model {source_model_type!r} has no editable "
+            "model_options contract, so no rerun capability is eligible; "
+            "choose Start new analysis from source data to plan a new typed analysis"
+        )
+    if proposal_adapter == "model.rerun":
+        return (
+            "the active run has no server-pinned model capability eligible for rerun; "
+            "choose Start new analysis from source data to plan a new typed analysis"
+        )
+    return "the Notebook has no server-registered executable capability"
 
 
 def _source_model_type(root: Path, context: NotebookPlanningContextV1) -> str | None:
