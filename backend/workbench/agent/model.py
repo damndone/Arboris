@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from workbench.llm.client import (
@@ -13,6 +15,9 @@ from workbench.llm.client import (
     async_stream_chat_completion,
 )
 from workbench.llm.config import LLMConfig
+
+
+_TRANSIENT_UPSTREAM_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 
 def _to_openai_wire_messages(
@@ -158,6 +163,46 @@ class ModelStreamEvent:
         return cls(type="error", request_id=request_id, error=message)
 
 
+async def _next_stream_item_or_signal(
+    stream: AsyncIterator[dict[str, Any]],
+    abort_event: Any | None,
+    timeout_s: float,
+) -> tuple[str, dict[str, Any] | None]:
+    """Wait for provider progress, cancellation, or the idle boundary."""
+
+    next_item = asyncio.create_task(stream.__anext__())
+    abort_waiter = (
+        asyncio.create_task(abort_event.wait())
+        if abort_event is not None
+        else None
+    )
+    try:
+        waiters = {next_item}
+        if abort_waiter is not None:
+            waiters.add(abort_waiter)
+        completed, _ = await asyncio.wait(
+            waiters,
+            timeout=timeout_s,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if not completed:
+            return "timeout", None
+        if abort_waiter is not None and abort_waiter in completed:
+            return "aborted", None
+        try:
+            return "item", next_item.result()
+        except StopAsyncIteration:
+            return "eof", None
+    finally:
+        if not next_item.done():
+            next_item.cancel()
+        await asyncio.gather(next_item, return_exceptions=True)
+        if abort_waiter is not None:
+            if not abort_waiter.done():
+                abort_waiter.cancel()
+            await asyncio.gather(abort_waiter, return_exceptions=True)
+
+
 class ModelAdapter(Protocol):
     """Provider adapter boundary consumed by AgentCore."""
 
@@ -168,8 +213,45 @@ class ModelAdapter(Protocol):
 class OpenAICompatibleModelAdapter:
     """Adapt OpenAI-compatible public SSE to the normalized stream contract."""
 
-    def __init__(self, config: LLMConfig) -> None:
+    def __init__(self, config: LLMConfig, *, idle_timeout_s: float = 90.0) -> None:
         self.config = config
+        if idle_timeout_s <= 0:
+            raise ValueError("idle_timeout_s must be positive")
+        self.idle_timeout_s = float(idle_timeout_s)
+
+    def supports_named_tool_choice(self) -> bool:
+        """Return whether this provider accepts a named ``tool_choice``.
+
+        DeepSeek V4 thinking models accept function tools but reject the
+        ``tool_choice`` request field.  The planner still publishes only the
+        single typed submission tool for those models; omitting this optional
+        field preserves the same tool-surface restriction without turning a
+        provider capability mismatch into a planning failure.
+        """
+
+        provider = self.config.provider_name.casefold()
+        host = (urlparse(self.config.base_url).hostname or "").casefold()
+        model = self.config.model.casefold()
+        is_deepseek = "deepseek" in provider or host == "api.deepseek.com"
+        return not (is_deepseek and model.startswith("deepseek-v4"))
+
+    def planning_request_config(self) -> dict[str, Any]:
+        """Return a bounded provider-specific config for typed planning.
+
+        DeepSeek V4 enables high-effort thinking by default. Notebook planning
+        already supplies bounded evidence and requires a typed tool call, so a
+        non-thinking request avoids spending several minutes on private
+        reasoning that cannot be shown or used as evidence. The generic
+        adapter leaves other providers unchanged.
+        """
+
+        provider = self.config.provider_name.casefold()
+        host = (urlparse(self.config.base_url).hostname or "").casefold()
+        model = self.config.model.casefold()
+        is_deepseek = "deepseek" in provider or host == "api.deepseek.com"
+        if is_deepseek and model.startswith("deepseek-v4"):
+            return {"thinking": {"type": "disabled"}, "max_tokens": 8192}
+        return {}
 
     async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         abort_event = request.abort_event
@@ -180,12 +262,33 @@ class OpenAICompatibleModelAdapter:
         wire_tools = _to_openai_tool_descriptors(request.tools)
         for attempt in range(2):
             received_event = False
+            public_progress = False
             try:
-                async for item in async_stream_chat_completion(
+                request_config = (
+                    {"model_config": request.model_config}
+                    if request.model_config
+                    else {}
+                )
+                stream = async_stream_chat_completion(
                     wire_messages,
                     self.config,
                     tools=wire_tools if request.tools else None,
-                ):
+                    **request_config,
+                )
+                while True:
+                    signal, item = await _next_stream_item_or_signal(
+                        stream, abort_event, self.idle_timeout_s
+                    )
+                    if signal == "timeout":
+                        yield ModelStreamEvent.from_error(
+                            request.request_id, "provider_no_progress"
+                        )
+                        return
+                    if signal == "aborted":
+                        yield ModelStreamEvent.from_error(request.request_id, "aborted")
+                        return
+                    if signal == "eof":
+                        break
                     if abort_event is not None and abort_event.is_set():
                         yield ModelStreamEvent.from_error(request.request_id, "aborted")
                         return
@@ -194,12 +297,23 @@ class OpenAICompatibleModelAdapter:
                         delta = item.get("delta")
                         if isinstance(delta, str) and delta:
                             received_event = True
+                            public_progress = True
                             yield ModelStreamEvent.text_delta(request.request_id, delta)
                     elif event_type == "tool_call":
                         tool_call = item.get("tool_call")
                         if isinstance(tool_call, dict):
                             received_event = True
+                            public_progress = True
                             yield ModelStreamEvent.tool_call_delta(request.request_id, tool_call)
+                    elif event_type == "provider_activity":
+                        # Providers such as DeepSeek may stream private
+                        # reasoning before a public tool call. It is not
+                        # user-visible Agent content. If that is the *only*
+                        # progress before a disconnect, a single retry is safe:
+                        # no public answer or typed tool call has been emitted.
+                        received_event = True
+                        if item.get("public") is True:
+                            public_progress = True
                     elif event_type == "done":
                         finish_reason = item.get("finish_reason")
                         yield ModelStreamEvent(
@@ -211,12 +325,23 @@ class OpenAICompatibleModelAdapter:
                         return
                 raise LLMUpstreamError("LLM provider ended the stream without a completion")
             except LLMUpstreamError as exc:
-                # A malformed 2xx body or transient network error has no
-                # trustworthy response status. Retry it once; never retry a
-                # provider-auth/request rejection such as 401/422.
-                if attempt == 0 and not received_event and exc.upstream_status is None:
+                # A malformed 2xx body, transient network error, or explicitly
+                # transient upstream status may recover on one immediate retry.
+                # Never retry a provider-auth/request rejection such as 401/422,
+                # and never replay a request after public stream content began.
+                if (
+                    attempt == 0
+                    and not public_progress
+                    and (
+                        exc.upstream_status is None
+                        or exc.upstream_status in _TRANSIENT_UPSTREAM_STATUSES
+                    )
+                ):
                     continue
-                yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
+                error_label = type(exc).__name__
+                if exc.upstream_status is not None:
+                    error_label += f":upstream_{exc.upstream_status}"
+                yield ModelStreamEvent.from_error(request.request_id, error_label)
                 return
             except Exception as exc:
                 yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)

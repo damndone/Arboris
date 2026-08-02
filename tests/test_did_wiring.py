@@ -25,6 +25,36 @@ def test_did_model_type_maps_to_continuous():
     assert _MODEL_TYPE_MAP.get("did") == "continuous"
 
 
+def test_did_capabilities_declare_native_timing_fields_and_optional_covariates():
+    """The generic Notebook form must not expose DID as an OLS-shaped model."""
+
+    from workbench.engine.capabilities import build_capabilities
+
+    capabilities = {
+        item["key"]: item
+        for item in build_capabilities()["model_types"]
+        if item["key"] in {"cs_did", "sa_did", "dcdh"}
+    }
+    assert set(capabilities) == {"cs_did", "sa_did", "dcdh"}
+    for model_type in ("cs_did", "sa_did"):
+        params = {item["key"]: item for item in capabilities[model_type]["params"]}
+        assert set(params) == {"model_type", "x", "entity_col", "time_col", "cohort_col"}
+        assert params["x"]["required"] is False
+        assert params["entity_col"]["required"] is True
+        assert params["time_col"]["required"] is True
+        assert params["cohort_col"]["required"] is True
+    dcdh_params = {item["key"]: item for item in capabilities["dcdh"]["params"]}
+    assert set(dcdh_params) == {
+        "model_type",
+        "x",
+        "entity_col",
+        "time_col",
+        "treatment_path_col",
+    }
+    assert dcdh_params["x"]["required"] is False
+    assert "covariance" not in dcdh_params
+
+
 import numpy as np
 from workbench.orchestrator import run_workflow as _rw
 from workbench.projects import create_project

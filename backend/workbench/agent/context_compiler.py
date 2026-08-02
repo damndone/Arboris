@@ -194,7 +194,12 @@ def attach_domain_memory_projection(
     }
     if set(projection) != required:
         raise ValueError("domain memory projection has an invalid contract shape")
-    if projection["contract_version"] != "domain-memory-context-input/v1":
+    version = projection["contract_version"]
+    if version not in {
+        "domain-memory-context-input/v1",
+        "domain-memory-context-input/v2",
+        "domain-memory-context-input/v3",
+    }:
         raise ValueError("domain memory projection contract_version is unsupported")
     if projection["memory_authority"] != "non_authoritative":
         raise ValueError("domain memory projection must declare non_authoritative")
@@ -217,8 +222,19 @@ def attach_domain_memory_projection(
         "match_reason",
         "memory_authority",
     }
+    v2_entry_fields = entry_fields | {
+        "apply_mode",
+        "apply_mode_reason",
+        "memory_source",
+    }
+    v3_entry_fields = v2_entry_fields | {"vocabulary_version", "source_scope_ref"}
     for entry in projection["entries"]:
-        if not isinstance(entry, dict) or set(entry) != entry_fields:
+        expected_entry_fields = {
+            "domain-memory-context-input/v1": entry_fields,
+            "domain-memory-context-input/v2": v2_entry_fields,
+            "domain-memory-context-input/v3": v3_entry_fields,
+        }[version]
+        if not isinstance(entry, dict) or set(entry) != expected_entry_fields:
             raise ValueError("domain memory entry has an invalid contract shape")
         if entry["memory_authority"] != "non_authoritative_hint":
             raise ValueError("domain memory entry must be a non_authoritative_hint")
@@ -239,6 +255,27 @@ def attach_domain_memory_projection(
             "match_reason",
         )):
             raise ValueError("domain memory entry list fields are invalid")
+        if version in {"domain-memory-context-input/v2", "domain-memory-context-input/v3"}:
+            if entry["apply_mode"] not in {"inform_only", "suggest_default"}:
+                raise ValueError("domain memory entry apply_mode is invalid")
+            if not isinstance(entry["apply_mode_reason"], str) or not entry["apply_mode_reason"]:
+                raise ValueError("domain memory entry apply_mode_reason is invalid")
+            source = entry["memory_source"]
+            if (
+                not isinstance(source, dict)
+                or set(source) != {"memory_id", "revision"}
+                or source["memory_id"] != entry["memory_id"]
+                or source["revision"] != entry["revision"]
+            ):
+                raise ValueError("domain memory entry source is invalid")
+        if version == "domain-memory-context-input/v3":
+            if entry["vocabulary_version"] is not None and (
+                not isinstance(entry["vocabulary_version"], str)
+                or not entry["vocabulary_version"]
+            ):
+                raise ValueError("domain memory entry vocabulary_version is invalid")
+            if not isinstance(entry["source_scope_ref"], str) or not entry["source_scope_ref"]:
+                raise ValueError("domain memory entry source_scope_ref is invalid")
     omission_fields = {"memory_id", "revision", "reason"}
     for omission in projection["omissions"]:
         if not isinstance(omission, dict) or set(omission) != omission_fields:
@@ -247,7 +284,7 @@ def attach_domain_memory_projection(
             raise ValueError("domain memory omission revision is invalid")
         if not all(isinstance(omission[key], str) and omission[key] for key in omission_fields - {"revision"}):
             raise ValueError("domain memory omission contains an invalid text field")
-    if len(canonical_json_v1(projection)) > 8192:
+    if len(canonical_json_v1(projection).encode("utf-8")) > 8192:
         raise ValueError("domain memory projection exceeds its byte budget")
 
     attached = replace(context, domain_memory_projection=dict(projection))

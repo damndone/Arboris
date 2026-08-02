@@ -7,6 +7,36 @@ export interface ManualRerunPatch {
   changes: Array<{ field_id: string; old_value: unknown; new_value: unknown }>;
 }
 
+/**
+ * Build an idempotency key for one exact edit.
+ *
+ * The source context and changed field names alone are not sufficient: a user
+ * may legitimately change `logit -> probit` and then `logit -> glm:binomial`
+ * on the same source node. Those are different requests and must not collide
+ * in the server's manual-patch index.
+ */
+export function buildManualRerunPatchId(
+  sourceContextFingerprint: string,
+  initialValues: Record<string, unknown>,
+  currentValues: Record<string, unknown>,
+): string {
+  const canonical = Object.keys(currentValues)
+    .sort()
+    .flatMap((key) => {
+      const oldValue = initialValues[key];
+      const newValue = currentValues[key];
+      return normalizeForCompare(oldValue) === normalizeForCompare(newValue)
+        ? []
+        : [[key, normalizeForCompare(oldValue), normalizeForCompare(newValue)]];
+    });
+  let hash = 2166136261;
+  for (const char of JSON.stringify(canonical)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return `patch_${sourceContextFingerprint}_${hash.toString(16)}`;
+}
+
 export function buildManualRerunPatch(input: {
   patchId: string;
   sourceContextFingerprint: string;

@@ -851,11 +851,26 @@ def _validate_genesis_for_execution(
             )
         )
     model_type = model_params.get("model_type") or model.get("model_type")
-    required_model_fields = [
-        ("model_type", model_type),
-        ("y", model_params.get("y")),
-    ]
-    if model_type != "time_series.arma_garch":
+    from ..agent.recipe_contracts import (
+        RecipeValidationError,
+        recipe_contract_for_model_type,
+    )
+
+    recipe_contract = recipe_contract_for_model_type(model_type)
+    required_model_fields = [("model_type", model_type)]
+    if recipe_contract is None:
+        required_model_fields.append(("y", model_params.get("y")))
+    else:
+        table_columns = tuple(
+            str(column)
+            for column in (table.get("columns") or [])
+            if isinstance(column, str) and column
+        )
+        try:
+            recipe_contract.validate_genesis_params(model_params, columns=table_columns)
+        except RecipeValidationError as exc:
+            checks.append(check("GENESIS_RECIPE_INVALID", str(exc), node_id="model_1"))
+    if _genesis_model_requires_predictors(model_type):
         required_model_fields.append(("x", model_params.get("x")))
     missing = [key for key, value in required_model_fields if not value]
     if missing:
@@ -896,6 +911,29 @@ def _validate_genesis_for_execution(
         result["validated_execution_mode"] = mode
         result["validated_draft_hash"] = compute_executable_draft_hash(draft)
     return result
+
+
+def _genesis_model_requires_predictors(model_type: Any) -> bool:
+    """Return the owning contract's predictor requirement for a Genesis model.
+
+    Genesis remains able to validate legacy model types that have not been
+    admitted to Agent workflows.  Those retain the conservative historical
+    requirement.  A workflow-admitted family, however, owns this rule through
+    its ModelFamilyContract, so a DID effect estimate with no covariates is not
+    accidentally rejected as an incomplete OLS request.
+    """
+
+    from ..agent.recipe_contracts import recipe_contract_for_model_type
+
+    recipe_contract = recipe_contract_for_model_type(model_type)
+    if recipe_contract is not None:
+        return recipe_contract.requires_nonempty_predictors
+    from ..agent.workflow_contracts import OperationValidationError, model_family_contract
+
+    try:
+        return model_family_contract(model_type).requires_nonempty_predictors
+    except OperationValidationError:
+        return True
 
 
 def validate_draft_for_execution(

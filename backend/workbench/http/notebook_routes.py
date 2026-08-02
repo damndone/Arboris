@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from dataclasses import replace
+import json
 from pathlib import Path
 import threading
 from typing import Any, Literal, Mapping
@@ -12,11 +13,21 @@ from typing import Any, Literal, Mapping
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..canonical import canonical_json_v1
 from ..agent.context_compiler import (
     NotebookPlanningContextV1,
     attach_domain_memory_projection,
     freshness_dependency_fingerprint,
     generation_context_hash,
+)
+from ..agent.notebook.memory_defaults import (
+    DEFAULT_TARGET_CONTRACTS,
+    DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
+)
+from ..agent.recipe_contracts import RECIPE_CONTRACTS
+from ..agent.workflow_contracts import (
+    MODEL_FAMILY_CONTRACTS,
+    notebook_workflow_capability_ids,
 )
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
 from ..agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
@@ -34,8 +45,11 @@ from ..agent.trace import (
     record_compiled_context,
     record_domain_memory_retrieval,
 )
-from ..domain_memory.preferences import DomainMemoryPreferences
-from ..domain_memory.service import DomainMemoryService
+from ..domain_memory.local_runtime import (
+    LocalDomainMemoryRuntime,
+    LocalDomainMemoryRuntimeError,
+)
+from ..domain_memory.retrieval import DomainMemoryRetrieval
 from ..api_errors import WorkbenchAPIError
 from ..contracts.agent.notebook_option import ExpectedArtifact
 from ..engine.capabilities import build_capabilities
@@ -53,14 +67,18 @@ from ..capability_factory.execution_authorization import (
 
 router = APIRouter()
 
-NOTEBOOK_PROVIDER_TIMEOUT_S = 120.0
+NOTEBOOK_PROVIDER_TIMEOUT_S = 300.0
 
-# The total planning budget, owned here and passed explicitly to the planner
-# rather than left to its internal derivation. One value serves both the
-# enforcement and the number published to the UI: a route timeout, a planner
-# budget and an on-screen expectation that drift apart is what left a live
-# request looking hung at 68s with cancellation as the only recourse.
-NOTEBOOK_PLANNING_DEADLINE_S = 180.0
+# A local user can cancel a planning pass at any time. Do not impose a short
+# aggregate deadline across its bounded provider turns: a valid inspect →
+# correction → submit conversation can legitimately outlast it. Each provider
+# call still has the five-minute timeout above, and inspection/correction turn
+# limits remain owned by NotebookPlanningAgent.
+NOTEBOOK_PLANNING_DEADLINE_S: float | None = None
+_DOMAIN_MEMORY_CONTEXT_MAX_ENTRIES = 8
+_DOMAIN_MEMORY_CONTEXT_MAX_BYTES = 8192
+_DOMAIN_MEMORY_CONTEXT_MAX_OMISSIONS = 32
+_RECIPE_DEFAULT_SCAN_INCOMPLETE_REASONS = frozenset({"entry_budget", "byte_budget"})
 _ACTIVE_PLANNING_ATTEMPTS: dict[
     tuple[str, str, str], asyncio.Task[Any]
 ] = {}
@@ -267,8 +285,6 @@ def _compile(
     *,
     focused_run_id: str | None = None,
     request: Request | None = None,
-    domain_memory_use: bool = False,
-    domain_memory_iteration: bool = False,
 ) -> tuple[NotebookPlanningContextV1, TraceWriter]:
     notebook = service.get_notebook(notebook_id)
     trace = _notebook_trace(root, service, notebook.notebook_id)
@@ -281,8 +297,6 @@ def _compile(
         service,
         notebook_id,
         context=context,
-        use=domain_memory_use,
-        iteration=domain_memory_iteration,
     )
     if projection is not None:
         context = attach_domain_memory_projection(context, projection)
@@ -298,8 +312,6 @@ def _domain_memory_projection(
     notebook_id: str,
     *,
     context: NotebookPlanningContextV1 | None = None,
-    use: bool,
-    iteration: bool,
 ) -> dict[str, Any] | None:
     """Ask only the server-owned provider for an already-bounded projection.
 
@@ -310,42 +322,104 @@ def _domain_memory_projection(
     freshness dependencies.
     """
 
-    if not use:
-        return None
     provider = getattr(request.app.state, "domain_memory_context_provider", None) if request else None
-    if provider is None:
-        service_provider = getattr(request.app.state, "domain_memory_service", None) if request else None
-        if isinstance(service_provider, DomainMemoryService):
-            return _default_domain_memory_projection(
-                service_provider,
-                context=context,
-                preferences=DomainMemoryPreferences(
-                    cross_project_domain_memory_use=use,
-                    cross_project_domain_memory_iteration=iteration,
-                ),
+    runtime = getattr(request.app.state, "domain_memory_runtime", None) if request else None
+    if isinstance(runtime, LocalDomainMemoryRuntime):
+        if context is None:
+            raise WorkbenchAPIError(
+                status_code=503,
+                code="DOMAIN_MEMORY_CONTEXT_UNAVAILABLE",
+                message="A compiled Notebook context is required before memory retrieval.",
             )
-        return {
-            "contract_version": "domain-memory-context-input/v1",
-            "retrieval_ref": "retrieval:unavailable",
-            "scope_ref": "scope:unavailable",
-            "outcome": "blocked",
-            "reason": "DOMAIN_MEMORY_UNAVAILABLE",
-            "entries": [],
-            "omissions": [],
-            "bounded": True,
-            "preference_ref": "preference:unavailable",
-            "memory_authority": "non_authoritative",
-        }
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            facts = _domain_memory_facts(context)
+            generic_result = runtime.retrieve_for_project(
+                root,
+                facts=facts,
+                now=now,
+                max_entries=_DOMAIN_MEMORY_CONTEXT_MAX_ENTRIES,
+                max_bytes=_DOMAIN_MEMORY_CONTEXT_MAX_BYTES,
+                vocabulary_version=DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
+            )
+            if generic_result.outcome == "not_used":
+                return None
+            generic_result = _generic_fallback_retrieval(generic_result)
+            default_results = [
+                _registered_default_retrieval(
+                    runtime.retrieve_for_project(
+                        root,
+                        facts={
+                            **facts,
+                            "analysis_family": recipe_id,
+                            "model_family": recipe.model_family,
+                        },
+                        now=now,
+                        max_entries=_DOMAIN_MEMORY_CONTEXT_MAX_ENTRIES,
+                        max_bytes=_DOMAIN_MEMORY_CONTEXT_MAX_BYTES,
+                        vocabulary_version=DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
+                    ),
+                    model_type=recipe_id,
+                    target_refs=frozenset(recipe.memory_target_refs),
+                )
+                for recipe_id, recipe in sorted(RECIPE_CONTRACTS.items())
+                if _recipe_default_targets_are_published(recipe_id, recipe.memory_target_refs)
+            ]
+            native_default_model_types = sorted(
+                {
+                    target.model_type
+                    for target_ref, target in DEFAULT_TARGET_CONTRACTS.items()
+                    if not _is_published_recipe_default_target(target_ref)
+                }
+            )
+            default_results.extend(
+                _registered_default_retrieval(
+                    runtime.retrieve_for_project(
+                        root,
+                        facts={
+                            **facts,
+                            "analysis_family": model_type,
+                            "model_family": model_type,
+                        },
+                        now=now,
+                        max_entries=_DOMAIN_MEMORY_CONTEXT_MAX_ENTRIES,
+                        max_bytes=_DOMAIN_MEMORY_CONTEXT_MAX_BYTES,
+                        vocabulary_version=DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
+                    ),
+                    model_type=model_type,
+                    target_refs=frozenset(
+                        target_ref
+                        for target_ref, target in DEFAULT_TARGET_CONTRACTS.items()
+                        if target.model_type == model_type
+                        and not _is_published_recipe_default_target(target_ref)
+                    ),
+                )
+                for model_type in native_default_model_types
+            )
+            result = _merge_recipe_default_retrievals(
+                generic_result=generic_result,
+                recipe_results=default_results,
+            )
+        except LocalDomainMemoryRuntimeError as error:
+            raise WorkbenchAPIError(
+                status_code=503,
+                code="DOMAIN_MEMORY_UNAVAILABLE",
+                message="The local memory runtime is unavailable.",
+            ) from error
+        # Default-off is intentionally invisible to planning. The absence of a
+        # projection means no memory participated; an enabled-but-empty library
+        # remains observable as a bounded empty projection.
+        return result.to_context_projection()
+    if provider is None:
+        # A legacy service object has no local preference authority. Do not let
+        # its mere presence implicitly turn memory on for every project.
+        return None
     projection = provider(
         request=request,
         project_root=root,
         notebook_service=service,
         notebook_id=notebook_id,
         context=context,
-        preferences=DomainMemoryPreferences(
-            cross_project_domain_memory_use=use,
-            cross_project_domain_memory_iteration=iteration,
-        ),
     )
     if projection is not None and not isinstance(projection, dict):
         raise WorkbenchAPIError(
@@ -356,41 +430,312 @@ def _domain_memory_projection(
     return projection
 
 
-def _default_domain_memory_projection(
-    service: DomainMemoryService,
-    *,
-    context: NotebookPlanningContextV1 | None,
-    preferences: DomainMemoryPreferences,
-) -> dict[str, Any]:
-    """Use the configured server-owned store without inventing request scope.
+def _domain_memory_facts(context: NotebookPlanningContextV1) -> dict[str, Any]:
+    """Project a small, server-compiled applicability vocabulary for retrieval."""
 
-    The compiled Notebook context is the direct canonical fallback when a
-    deployment has not installed a persisted ProjectContextIndex provider.
-    Facts are a small scalar projection used only for applicability matching;
-    they never grant source access or capability authority.
-    """
-
-    if context is None:
-        raise WorkbenchAPIError(
-            status_code=503,
-            code="DOMAIN_MEMORY_CONTEXT_UNAVAILABLE",
-            message="A compiled Notebook context is required before memory retrieval.",
-        )
     facts: dict[str, Any] = {}
     for source in (context.analysis_contract, context.user_focus):
         for key in ("analysis_family", "model_family", "goal", "domain", "data_kind"):
             value = source.get(key)
             if isinstance(value, str) and value and len(value) <= 128:
                 facts.setdefault(key, value)
-    result = service.retrieve(
-        requester=service.store.scope,
-        global_preferences=preferences,
-        facts=facts,
-        now=datetime.now(timezone.utc).isoformat(),
-        max_entries=8,
-        max_bytes=8192,
+    return facts
+
+
+def _recipe_default_targets_are_published(
+    recipe_id: str,
+    target_refs: tuple[str, ...],
+) -> bool:
+    """Admit only a Recipe's exact registry-owned suggestion surface.
+
+    The planner has not selected a Recipe yet, so this bridge may broaden the
+    *server-derived lookup facts* to each published Recipe.  It must not turn
+    an opaque memory target into a writable field or accept a target that the
+    current Recipe did not publish.
+    """
+
+    if not target_refs:
+        return False
+    for target_ref in target_refs:
+        target = DEFAULT_TARGET_CONTRACTS.get(target_ref)
+        if target is None or target.model_type != recipe_id:
+            return False
+    return True
+
+
+def _registered_default_retrieval(
+    result: DomainMemoryRetrieval,
+    *,
+    model_type: str,
+    target_refs: frozenset[str],
+) -> DomainMemoryRetrieval:
+    """Keep only current default targets owned by one model family.
+
+    A generic memory predicate can truthfully match a server-derived family
+    fact while its target reference belongs to a different family. Such a
+    hint must never enter this preselection bridge: final proposal application
+    would reject it too, but filtering it here prevents irrelevant model
+    advice from influencing the provider before a model is chosen.
+    """
+
+    # A retrieval truncation hides a candidate value.  Keeping the visible
+    # entries would make a high-risk default depend on result ordering, so the
+    # exact Recipe path fails closed until the candidate set is complete.
+    if any(
+        omission.reason in _RECIPE_DEFAULT_SCAN_INCOMPLETE_REASONS
+        for omission in result.omissions
+    ):
+        return replace(
+            result,
+            outcome="empty",
+            reason="recipe_default_scan_incomplete",
+            entries=(),
+        )
+
+    kept = []
+    for entry in result.entries:
+        refs = entry.recommended_target_refs
+        is_current_default = (
+            entry.apply_mode == "suggest_default"
+            and entry.apply_mode_reason == "verifier_current"
+            and entry.vocabulary_version == DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION
+        )
+        is_exact_recipe_target = is_current_default and bool(refs) and all(
+            ref in target_refs
+            and (target := DEFAULT_TARGET_CONTRACTS.get(ref)) is not None
+            and target.model_type == model_type
+            for ref in refs
+        )
+        if is_exact_recipe_target:
+            kept.append(entry)
+    if len(kept) == len(result.entries):
+        return result
+    return replace(
+        result,
+        outcome="used" if kept else "empty",
+        reason="retrieved" if kept else "no_eligible_memory",
+        entries=tuple(kept),
     )
-    return result.to_context_projection()
+
+
+def _recipe_default_retrieval(
+    result: DomainMemoryRetrieval,
+    *,
+    recipe_id: str,
+    target_refs: frozenset[str],
+) -> DomainMemoryRetrieval:
+    """Compatibility wrapper for Recipe-specific callers and tests."""
+
+    return _registered_default_retrieval(
+        result, model_type=recipe_id, target_refs=target_refs
+    )
+
+
+def _is_published_recipe_default_target(target_ref: str) -> bool:
+    """Return whether a target belongs to a Recipe-specific default surface."""
+
+    target = DEFAULT_TARGET_CONTRACTS.get(target_ref)
+    if target is None:
+        return False
+    recipe = RECIPE_CONTRACTS.get(target.model_type)
+    return recipe is not None and target_ref in recipe.memory_target_refs
+
+
+def _is_published_default_target(target_ref: str) -> bool:
+    """Return whether a target belongs to the server-owned default registry."""
+
+    return target_ref in DEFAULT_TARGET_CONTRACTS
+
+
+def _generic_fallback_retrieval(
+    result: DomainMemoryRetrieval,
+) -> DomainMemoryRetrieval:
+    """Keep generic hints, but never leak Recipe default targets through them.
+
+    A Recipe target is admissible only through its own lookup, where current
+    verifier status, target ownership, and scan completeness have been
+    checked.  This preserves ordinary generic-memory guidance (including OLS
+    defaults outside a Recipe) without letting a declared or guessed family
+    bypass the Recipe-specific authority boundary.
+    """
+
+    entries = tuple(
+        entry
+        for entry in result.entries
+        if not any(
+            _is_published_default_target(target_ref)
+            for target_ref in entry.recommended_target_refs
+        )
+    )
+    if len(entries) == len(result.entries):
+        return result
+    return replace(
+        result,
+        outcome="used" if entries else "empty",
+        reason="retrieved" if entries else "no_eligible_memory",
+        entries=entries,
+    )
+
+
+def _merge_recipe_default_retrievals(
+    *,
+    generic_result: DomainMemoryRetrieval,
+    recipe_results: list[DomainMemoryRetrieval],
+) -> DomainMemoryRetrieval:
+    """Merge a bounded default preselection without expanding omissions.
+
+    The generic lookup remains the public explanation of memory omissions.
+    Per-Recipe lookups exist only to make an exact registered default visible
+    before the provider selects a model, so their internal predicate and
+    entry-budget misses must not multiply the public context packet. Exact
+    Recipe defaults take the bounded entry slots first; generic hints retain
+    their historic fallback role and cannot displace one.
+    """
+
+    entries_with_origin: list[tuple[Any, str | None]] = []
+    selected_ids: set[tuple[str, int]] = set()
+    used_bytes = 0
+
+    def encoded_size(entry: Any) -> int:
+        return len(
+            json.dumps(
+                entry.to_dict(),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+
+    # A Recipe result is an atomic default candidate group.  Filling the
+    # global entry budget one entry at a time could hide a later conflicting
+    # target from the same Recipe, so admit the group whole or not at all.
+    for result in recipe_results:
+        group: list[Any] = []
+        group_ids: set[tuple[str, int]] = set()
+        group_bytes = 0
+        for entry in result.entries:
+            identity = (entry.memory_id, entry.revision)
+            if identity in selected_ids or identity in group_ids:
+                group = []
+                break
+            entry_bytes = encoded_size(entry)
+            if entry_bytes > _DOMAIN_MEMORY_CONTEXT_MAX_BYTES:
+                group = []
+                break
+            group_ids.add(identity)
+            group.append(entry)
+            group_bytes += entry_bytes
+        if not group:
+            continue
+        recipe_id = _default_model_type_for_entry(group[0])
+        if recipe_id is None or any(
+            _default_model_type_for_entry(entry) != recipe_id for entry in group
+        ):
+            continue
+        if (
+            len(entries_with_origin) + len(group) > _DOMAIN_MEMORY_CONTEXT_MAX_ENTRIES
+            or used_bytes + group_bytes > _DOMAIN_MEMORY_CONTEXT_MAX_BYTES
+        ):
+            continue
+        selected_ids.update(group_ids)
+        entries_with_origin.extend((entry, recipe_id) for entry in group)
+        used_bytes += group_bytes
+
+    # Generic entries have no published Recipe-default target, so they cannot
+    # materialize a model setting and may use any remaining bounded slots.
+    for entry in generic_result.entries:
+        identity = (entry.memory_id, entry.revision)
+        if identity in selected_ids or len(entries_with_origin) >= _DOMAIN_MEMORY_CONTEXT_MAX_ENTRIES:
+            continue
+        entry_bytes = encoded_size(entry)
+        if (
+            entry_bytes > _DOMAIN_MEMORY_CONTEXT_MAX_BYTES
+            or used_bytes + entry_bytes > _DOMAIN_MEMORY_CONTEXT_MAX_BYTES
+        ):
+            continue
+        selected_ids.add(identity)
+        entries_with_origin.append((entry, None))
+        used_bytes += entry_bytes
+    omissions = list(
+        omission
+        for omission in generic_result.omissions
+        if (omission.memory_id, omission.revision) not in selected_ids
+    )[:_DOMAIN_MEMORY_CONTEXT_MAX_OMISSIONS]
+
+    def result() -> DomainMemoryRetrieval:
+        entries = tuple(entry for entry, _origin in entries_with_origin)
+        return DomainMemoryRetrieval(
+            retrieval_ref=generic_result.retrieval_ref,
+            scope_ref=generic_result.scope_ref,
+            outcome="used" if entries else "empty",
+            reason="retrieved" if entries else "no_eligible_memory",
+            entries=entries,
+            omissions=tuple(omissions),
+            bounded=True,
+            preference_ref=generic_result.preference_ref,
+        )
+
+    # ``LocalDomainMemoryRuntime`` budgets entry bytes, while this API projects
+    # an envelope that also contains identifiers/reasons for omitted entries.
+    # Enforce the real, complete context budget here.  Omission detail is
+    # discarded first; if entries must be removed, generic hints are weakest.
+    # Recipe defaults are removed as an entire Recipe group, never partially,
+    # so a byte budget cannot manufacture a false unambiguous default.
+    while (
+        len(canonical_json_v1(result().to_context_projection()).encode("utf-8"))
+        > _DOMAIN_MEMORY_CONTEXT_MAX_BYTES
+    ):
+        if omissions:
+            omissions.pop()
+            continue
+        generic_index = next(
+            (
+                index
+                for index in range(len(entries_with_origin) - 1, -1, -1)
+                if entries_with_origin[index][1] is None
+            ),
+            None,
+        )
+        if generic_index is not None:
+            entries_with_origin.pop(generic_index)
+            continue
+        recipe_ids = [
+            origin
+            for _entry, origin in entries_with_origin
+            if origin is not None
+        ]
+        if not recipe_ids:
+            break
+        recipe_id = recipe_ids[-1]
+        entries_with_origin[:] = [
+            (entry, origin)
+            for entry, origin in entries_with_origin
+            if origin != recipe_id
+        ]
+    return result()
+
+
+def _default_model_type_for_entry(entry: Any) -> str | None:
+    """Return one server-registered model family for an exact default entry."""
+
+    refs = getattr(entry, "recommended_target_refs", ())
+    if not isinstance(refs, tuple):
+        return None
+    recipe_ids = {
+        DEFAULT_TARGET_CONTRACTS[target_ref].model_type
+        for target_ref in refs
+        if _is_published_default_target(target_ref)
+    }
+    if len(recipe_ids) != 1:
+        return None
+    return next(iter(recipe_ids))
+
+
+def _recipe_id_for_default_entry(entry: Any) -> str | None:
+    """Return a published Recipe id only for an exact Recipe default entry."""
+
+    model_type = _default_model_type_for_entry(entry)
+    return model_type if model_type in RECIPE_CONTRACTS else None
 
 
 def _draft(request: OptionDraftRequest) -> OptionDraft:
@@ -421,9 +766,8 @@ def _context_packet(context: NotebookPlanningContextV1) -> dict[str, Any]:
     packet = context.to_dict()
     packet["generation_context_hash"] = generation_context_hash(context)
     packet["freshness_dependency_fingerprint"] = freshness_dependency_fingerprint(context)
-    # Published so a planning surface can show the budget it is running against
-    # instead of an open-ended elapsed counter.
-    packet["planning_deadline_s"] = NOTEBOOK_PLANNING_DEADLINE_S
+    if NOTEBOOK_PLANNING_DEADLINE_S is not None:
+        packet["planning_deadline_s"] = NOTEBOOK_PLANNING_DEADLINE_S
     return packet
 
 
@@ -532,6 +876,85 @@ def _notebook_error(exc: NotebookOptionError) -> WorkbenchAPIError:
     )
 
 
+def _record_planning_terminal_error(
+    trace: TraceWriter | None,
+    *,
+    code: str,
+    fatal: bool,
+    detail: str,
+) -> None:
+    """Persist one bounded terminal outcome for a planning attempt.
+
+    A planning failure is a user-visible product event, not merely an HTTP
+    response. Provider bodies and prompts never enter this record: the typed
+    code is sufficient for replay, diagnosis, and the UI timeline.
+    """
+
+    if trace is not None:
+        trace.emit(
+            "operation.error",
+            payload={"code": code, "fatal": fatal, "detail": detail},
+        )
+
+
+def _notebook_planner_manifest_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """Project only fields accepted by the published model-family contract.
+
+    The general engine capability manifest is also used by the manual rerun UI,
+    where a covariance selector may be useful for a different handler.  The
+    Notebook planner emits ``model.genesis`` proposals, so its provider-facing
+    catalog must be narrower: advertising an OLS-only field to a family whose
+    contract rejects it creates a provider-visible option that can never become
+    a valid Draft.
+    """
+
+    projected = dict(entry)
+    family = MODEL_FAMILY_CONTRACTS.get(str(entry.get("key")))
+    params = entry.get("params")
+    if family is not None and isinstance(params, list):
+        projected_params = [
+            dict(param)
+            for param in params
+            if not (
+                isinstance(param, Mapping)
+                and not family.allows_covariance
+                and param.get("key") == "covariance"
+            )
+        ]
+        if not any(param.get("key") == "y" for param in projected_params):
+            projected_params.insert(
+                1,
+                {
+                    "key": "y",
+                    "kind": "columns",
+                    "label": "Outcome (Y)",
+                    "required": True,
+                    "role": "y",
+                },
+            )
+        projected["params"] = projected_params
+        published_artifacts = capability_artifact_types(str(entry.get("key")))
+        if published_artifacts and not isinstance(projected.get("artifact_types"), Mapping):
+            projected["artifact_types"] = dict(published_artifacts)
+        option_vocabulary = build_option_vocabulary(str(entry.get("key")))
+        if option_vocabulary is not None:
+            fields = option_vocabulary.get("fields")
+            projected["notebook_model_options_policy"] = {
+                "supported": True,
+                "allowed_fields": sorted(fields) if isinstance(fields, Mapping) else [],
+                "forbidden_fields": [],
+                "submission_rule": "use_published_fields",
+            }
+        else:
+            projected["notebook_model_options_policy"] = {
+                "supported": False,
+                "allowed_fields": [],
+                "forbidden_fields": ["covariance", "model_options"],
+                "submission_rule": "omit_model_options",
+            }
+    return projected
+
+
 def _planning_agent(
     root: Path,
     service: NotebookService,
@@ -546,10 +969,14 @@ def _planning_agent(
     config = load_llm_config()
     if not config.is_configured():
         raise NotebookPlanningUnavailable(config.configuration_error_message())
+    admitted_native = set(notebook_workflow_capability_ids())
     manifest = {
-        str(entry["key"]): dict(entry)
+        str(entry["key"]): _notebook_planner_manifest_entry(entry)
         for entry in build_capabilities().get("model_types", [])
-        if isinstance(entry, dict) and entry.get("key") not in {None, "auto"}
+        if (
+            isinstance(entry, dict)
+            and entry.get("key") in admitted_native
+        )
     }
     proposal_adapter = (
         "model.genesis"
@@ -584,10 +1011,16 @@ def _planning_agent(
     dynamic_artifact_types = {
         capability: dict(item["artifact_types"])
         for capability, item in server_manifest.items()
-        if isinstance(item.get("artifact_types"), Mapping)
+        if capability not in manifest
+        and isinstance(item.get("artifact_types"), Mapping)
     }
     candidate_capabilities = tuple(
-        dict.fromkeys((*context.available_capabilities, *server_manifest))
+        dict.fromkeys(
+            (
+                *(capability for capability in context.available_capabilities if capability in manifest),
+                *server_manifest,
+            )
+        )
     )
     catalog = {
         capability: {
@@ -628,7 +1061,10 @@ def _planning_agent(
     }
     if not catalog:
         raise NotebookNoEligibleCapability(
-            "the Notebook has no server-registered executable capability"
+            _no_eligible_capability_message(
+                proposal_adapter=proposal_adapter,
+                source_model_type=source_model_type,
+            )
         )
 
     def execute_inspections(requests, current):
@@ -666,6 +1102,7 @@ def _planning_agent(
             return
 
         if proposal.operation_id == "model.genesis":
+            from ..agent.recipe_contracts import recipe_contract_for_model_type
             from ..model_options import bind_new_model_options
 
             model_params = changes.get("model_params") or {}
@@ -678,6 +1115,16 @@ def _planning_agent(
             if payload:
                 if not isinstance(model_type, str) or not model_type:
                     raise ValueError("MODEL_OPTIONS_EXPLICIT_MODEL_REQUIRED")
+                recipe_contract = recipe_contract_for_model_type(model_type)
+                if recipe_contract is not None:
+                    source = _context.projection_source or {}
+                    source_hash = source.get("upload_sha256") if isinstance(source, Mapping) else None
+                    if not isinstance(source_hash, str) or not source_hash:
+                        raise ValueError("RECIPE_SOURCE_BINDING_INVALID")
+                    payload = recipe_contract.bind_server_owned_options(
+                        payload,
+                        source_reference=f"upload:{source_hash}",
+                    )
                 bind_new_model_options(model_type, payload)
 
     notebook_config = (
@@ -738,6 +1185,27 @@ def _supports_rerun_model_options(declaration: Mapping[str, Any]) -> bool:
         isinstance(item, Mapping) and item.get("key") == "model_options"
         for item in (params or ())
     )
+
+
+def _no_eligible_capability_message(
+    *,
+    proposal_adapter: str,
+    source_model_type: str | None,
+) -> str:
+    """Explain an empty planner catalog without weakening fail-closed admission."""
+
+    if proposal_adapter == "model.rerun" and source_model_type:
+        return (
+            f"the active run model {source_model_type!r} has no editable "
+            "model_options contract, so no rerun capability is eligible; "
+            "choose Start new analysis from source data to plan a new typed analysis"
+        )
+    if proposal_adapter == "model.rerun":
+        return (
+            "the active run has no server-pinned model capability eligible for rerun; "
+            "choose Start new analysis from source data to plan a new typed analysis"
+        )
+    return "the Notebook has no server-registered executable capability"
 
 
 def _source_model_type(root: Path, context: NotebookPlanningContextV1) -> str | None:
@@ -830,11 +1298,11 @@ def ensure_notebook_projection_endpoint(
             message="Provide exactly one of from_run_id or dataset.",
         )
     try:
+        admitted_native = set(notebook_workflow_capability_ids())
         available_capabilities = tuple(
             str(entry["key"])
             for entry in build_capabilities().get("model_types", [])
-            if isinstance(entry, dict)
-            and entry.get("key") not in {None, "auto"}
+            if isinstance(entry, dict) and entry.get("key") in admitted_native
         )
         notebook = service.ensure_default_projection(
             from_run_id=body.from_run_id,
@@ -869,11 +1337,11 @@ def ensure_notebook_dataset_projection_from_run_endpoint(
 
     _root, service = _service(request, project_root)
     try:
+        admitted_native = set(notebook_workflow_capability_ids())
         available_capabilities = tuple(
             str(entry["key"])
             for entry in build_capabilities().get("model_types", [])
-            if isinstance(entry, dict)
-            and entry.get("key") not in {None, "auto"}
+            if isinstance(entry, dict) and entry.get("key") in admitted_native
         )
         notebook = service.ensure_dataset_projection_from_run(
             from_run_id=body.from_run_id,
@@ -940,8 +1408,6 @@ def compile_notebook_context_endpoint(
     project_root: str,
     notebook_id: str,
     focused_run_id: str | None = None,
-    domain_memory_use: bool = False,
-    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
     root, service = _service(request, project_root)
     try:
@@ -951,8 +1417,6 @@ def compile_notebook_context_endpoint(
             notebook_id,
             focused_run_id=focused_run_id,
             request=request,
-            domain_memory_use=domain_memory_use,
-            domain_memory_iteration=domain_memory_iteration,
         )
         return _context_packet(context)
     except NotebookOptionError as exc:
@@ -1009,10 +1473,10 @@ async def propose_options_endpoint(
     project_root: str,
     notebook_id: str,
     body: ProposeOptionsRequest,
-    domain_memory_use: bool = False,
-    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
     root, service = _service(request, project_root)
+    trace: TraceWriter | None = None
+    planning_started = False
     try:
         notebook = service.get_notebook(notebook_id)
         if notebook.user_focus.get("interaction_mode") == "action":
@@ -1025,8 +1489,6 @@ async def propose_options_endpoint(
             service,
             notebook_id,
             request=request,
-            domain_memory_use=domain_memory_use,
-            domain_memory_iteration=domain_memory_iteration,
         )
         recommendation_decision = None
         drafts = (
@@ -1035,33 +1497,42 @@ async def propose_options_endpoint(
             else []
         )
         if not drafts:
-            agent = _planning_agent(root, service, notebook_id, context, trace)
-            initial_evidence = _baseline_planning_evidence(
-                service, notebook_id, context, trace
-            )
-            attempt_key = (
-                _planning_attempt_key(root, notebook_id, body.attempt_id)
-                if body.attempt_id is not None
-                else None
-            )
-            current_task = asyncio.current_task()
-            if attempt_key is not None and current_task is not None:
-                with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
-                    active = _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key)
-                    if active is not None and not active.done():
-                        raise WorkbenchAPIError(
-                            status_code=409,
-                            code="NOTEBOOK_PLANNING_ATTEMPT_ACTIVE",
-                            message="Notebook planning attempt is already active",
-                        )
-                    _ACTIVE_PLANNING_ATTEMPTS[attempt_key] = current_task
+            planning_started = True
+            attempt_key = None
+            current_task = None
             try:
+                agent = _planning_agent(root, service, notebook_id, context, trace)
+                initial_evidence = _baseline_planning_evidence(
+                    service, notebook_id, context, trace
+                )
+                attempt_key = (
+                    _planning_attempt_key(root, notebook_id, body.attempt_id)
+                    if body.attempt_id is not None
+                    else None
+                )
+                current_task = asyncio.current_task()
+                if attempt_key is not None and current_task is not None:
+                    with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
+                        active = _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key)
+                        if active is not None and not active.done():
+                            raise WorkbenchAPIError(
+                                status_code=409,
+                                code="NOTEBOOK_PLANNING_ATTEMPT_ACTIVE",
+                                message="Notebook planning attempt is already active",
+                            )
+                        _ACTIVE_PLANNING_ATTEMPTS[attempt_key] = current_task
                 result = await _run_planning_agent(
                     agent,
                     context=context,
                     initial_evidence=initial_evidence,
                 )
             except asyncio.CancelledError as exc:
+                _record_planning_terminal_error(
+                    trace,
+                    code="NOTEBOOK_PLANNING_CANCELLED",
+                    fatal=False,
+                    detail="notebook planning cancelled by user",
+                )
                 raise WorkbenchAPIError(
                     status_code=409,
                     code="NOTEBOOK_PLANNING_CANCELLED",
@@ -1093,8 +1564,6 @@ async def propose_options_endpoint(
                 service,
                 notebook_id,
                 request=request,
-                domain_memory_use=domain_memory_use,
-                domain_memory_iteration=domain_memory_iteration,
             )
             drafts, recommendation_decision = service.derive_server_recommendation(
                 notebook_id,
@@ -1142,14 +1611,49 @@ async def propose_options_endpoint(
             "trace_id": trace.trace_id,
         }
     except NotebookOptionError as exc:
+        if planning_started:
+            _record_planning_terminal_error(
+                trace,
+                code=exc.code,
+                fatal=True,
+                detail="notebook planning failed",
+            )
         raise _notebook_error(exc) from exc
     except NotebookNoEligibleCapability as exc:
+        if planning_started:
+            _record_planning_terminal_error(
+                trace,
+                code=exc.code,
+                fatal=True,
+                detail="notebook planning failed",
+            )
         raise WorkbenchAPIError(status_code=409, code=exc.code, message=str(exc)) from exc
     except NotebookPlanningContractError as exc:
+        if planning_started:
+            _record_planning_terminal_error(
+                trace,
+                code=exc.code,
+                fatal=True,
+                detail="notebook planning failed",
+            )
         raise WorkbenchAPIError(status_code=422, code=exc.code, message=str(exc)) from exc
     except NotebookPlanningUnavailable as exc:
+        if planning_started:
+            _record_planning_terminal_error(
+                trace,
+                code=exc.code,
+                fatal=True,
+                detail="notebook planning failed",
+            )
         raise WorkbenchAPIError(status_code=409, code=exc.code, message=str(exc)) from exc
     except (OSError, ValueError, KeyError) as exc:
+        if planning_started:
+            _record_planning_terminal_error(
+                trace,
+                code="NOTEBOOK_REQUEST_INVALID",
+                fatal=True,
+                detail="notebook planning failed",
+            )
         raise _request_error(exc) from exc
 
 
@@ -1159,8 +1663,6 @@ def list_options_endpoint(
     project_root: str,
     notebook_id: str,
     focused_run_id: str | None = None,
-    domain_memory_use: bool = False,
-    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
     """Return the current options against one freshly compiled context.
 
@@ -1178,8 +1680,6 @@ def list_options_endpoint(
             notebook_id,
             focused_run_id=focused_run_id,
             request=request,
-            domain_memory_use=domain_memory_use,
-            domain_memory_iteration=domain_memory_iteration,
         )
         options = service.list_options(notebook_id, context=context)
         revisions = [

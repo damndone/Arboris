@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib
 import json
 from pathlib import Path
@@ -10,6 +11,7 @@ import pytest
 
 from workbench.agent.core import AgentCore
 from workbench.agent.chains import ChainStore
+from workbench.agent.context_tools import InspectTimeSeriesSummaryRequest
 from workbench.agent.events import AgentEventStream
 from workbench.agent.model import ModelStreamEvent
 from workbench.agent.operations import OperationRecordStore
@@ -2031,6 +2033,9 @@ def test_time_series_summary_reads_only_bounded_public_artifacts(
         "effective_model_type": "time_series.arma_garch",
     }
     (run_root / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    run_inputs = json.loads((run_root / "run_inputs.json").read_text(encoding="utf-8"))
+    run_inputs["form"]["model_type"] = "time_series.arma_garch"
+    (run_root / "run_inputs.json").write_text(json.dumps(run_inputs), encoding="utf-8")
     artifact_root = run_root / "artifacts" / "time_series"
     artifact_root.mkdir(parents=True)
     for artifact_id, payload in _artifacts().items():
@@ -2101,6 +2106,7 @@ def test_time_series_summary_reads_blocked_manifest_and_frozen_run_input(
         "model_type": "time_series.arma_garch",
         "model_options": _contract(),
     }
+    run_inputs["form"]["model_type"] = "time_series.arma_garch"
     (run_root / "run_inputs.json").write_text(json.dumps(run_inputs), encoding="utf-8")
     artifact_root = run_root / "artifacts" / "time_series"
     artifact_root.mkdir(parents=True)
@@ -2156,6 +2162,224 @@ def test_time_series_summary_reads_blocked_manifest_and_frozen_run_input(
     assert summary["terminal_code"] == "LOG_REQUIRES_POSITIVE_VALUES"
     assert summary["recommended_actions"][0]["changes"] == {
         "model_options": {"transform": "level", "transform_confirmed": True}
+    }
+
+
+def test_time_series_summary_projects_a_registered_ets_result_without_raw_series(
+    tmp_path: Path,
+) -> None:
+    """ETS uses its registered model-result artifact, never an OLS fallback."""
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    run_root = project_root / "runs" / "run-a"
+    manifest = json.loads((run_root / "run_manifest.json").read_text(encoding="utf-8"))
+    manifest["model_routing"] = {
+        "requested_model_type": "time_series.ets",
+        "effective_model_type": "time_series.ets",
+    }
+    (run_root / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    run_inputs = json.loads((run_root / "run_inputs.json").read_text(encoding="utf-8"))
+    run_inputs["form"]["model_type"] = "time_series.ets"
+    (run_root / "run_inputs.json").write_text(json.dumps(run_inputs), encoding="utf-8")
+    payload = {
+        "result": {
+            "contract_version": "1.1",
+            "model_type": "time_series.ets",
+            "specification": {
+                "error": "add",
+                "trend": None,
+                "seasonal": None,
+                "seasonal_periods": None,
+                "damped_trend": False,
+                "canonical": "ETS(A,N,N)",
+            },
+            "endog": "sales",
+            "n_obs": 12,
+            "n_excluded": 0,
+            "exclusion_reasons": {},
+            "params": {"smoothing_level": 0.4},
+            "aic": 21.5,
+            "bic": 22.1,
+            "log_likelihood": -8.7,
+            "sigma2": 0.8,
+            "convergence_code": "converged",
+            "fit_method": "statsmodels.ets.mle",
+            "result_identity": "ets-result-identity",
+            "time_index_semantics": "regular_calendar",
+        },
+        "sample_fingerprint": "sample-fingerprint",
+        "diagnostics": [],
+        "producer_version": "time_series.ets@1.1",
+    }
+    artifact_path = run_root / "model_results" / "ets_1.json"
+    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    artifact_path.write_bytes(encoded)
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "artifact_id": "ets_1",
+                        "artifact_type": "model_result",
+                        "path": "model_results/ets_1.json",
+                        "sha256": hashlib.sha256(encoded).hexdigest(),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-ets-summary",
+                "tool_id": "inspect_time_series_summary",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    summary = result.output["time_series_summary"]
+    assert summary["available"] is True
+    assert summary["model_type"] == "time_series.ets"
+    assert summary["specification"]["canonical"] == "ETS(A,N,N)"
+    assert summary["evidence_ref"]["artifact_id"] == "ets_1"
+    assert summary.get("sample_fingerprint") is None
+    assert "ols" not in json.dumps(summary).lower()
+
+    from workbench.agent.recipes.ets import build_ets_public_result_view
+
+    malformed_params = build_ets_public_result_view(
+        {"result": {**payload["result"], "params": "not-a-map"}},
+        artifact_id="ets_1",
+        artifact_sha256="a" * 64,
+    )
+    assert malformed_params == {
+        "available": False,
+        "reason_code": "ETS_PUBLIC_RESULT_MALFORMED",
+    }
+    malformed_number = build_ets_public_result_view(
+        {"result": {**payload["result"], "aic": float("inf")}},
+        artifact_id="ets_1",
+        artifact_sha256="a" * 64,
+    )
+    assert malformed_number == {
+        "available": False,
+        "reason_code": "ETS_PUBLIC_RESULT_MALFORMED",
+    }
+    bounded = build_ets_public_result_view(
+        {
+            "result": {
+                **payload["result"],
+                "exclusion_reasons": {f"reason-{index}": 1 for index in range(20_000)},
+            }
+        },
+        artifact_id="ets_1",
+        artifact_sha256="a" * 64,
+    )
+    assert bounded["available"] is True
+    assert len(bounded["sample"]["exclusion_reasons"]) <= 16
+    assert bounded["sample"]["exclusion_reasons_omitted"] == 19_984
+
+    payload["result"] = {"model_type": "time_series.ets"}
+    corrupted = json.dumps(payload, sort_keys=True).encode("utf-8")
+    artifact_path.write_bytes(corrupted)
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "artifact_id": "ets_1",
+                        "artifact_type": "model_result",
+                        "path": "model_results/ets_1.json",
+                        "sha256": hashlib.sha256(corrupted).hexdigest(),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    malformed = provider.inspect_time_series_summary(
+        InspectTimeSeriesSummaryRequest(
+            request_id="malformed-ets-summary",
+            owner_run_id="run-a",
+            op_node_id="model:ols_1",
+            active_head_run_id="run-a",
+        )
+    )
+    assert malformed["time_series_summary"] == {
+        "available": False,
+        "reason_code": "ETS_PUBLIC_RESULT_MALFORMED",
+    }
+
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "artifact_id": "ets_1",
+                        "artifact_type": "model_result",
+                        "path": "model_results/ets_1.json",
+                        "sha256": "0" * 64,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    tampered = provider.inspect_time_series_summary(
+        InspectTimeSeriesSummaryRequest(
+            request_id="tampered-ets-summary",
+            owner_run_id="run-a",
+            op_node_id="model:ols_1",
+            active_head_run_id="run-a",
+        )
+    )
+    assert tampered["time_series_summary"] == {
+        "available": False,
+        "reason_code": "ETS_PUBLIC_RESULT_UNAVAILABLE",
+    }
+
+
+def test_time_series_summary_rejects_manifest_and_input_model_conflict(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    run_root = project_root / "runs" / "run-a"
+    manifest = json.loads((run_root / "run_manifest.json").read_text(encoding="utf-8"))
+    manifest["model_routing"] = {
+        "requested_model_type": "time_series.ets",
+        "effective_model_type": "time_series.ets",
+    }
+    (run_root / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    run_inputs = json.loads((run_root / "run_inputs.json").read_text(encoding="utf-8"))
+    run_inputs["form"]["model_type"] = "time_series.arma_garch"
+    (run_root / "run_inputs.json").write_text(json.dumps(run_inputs), encoding="utf-8")
+
+    provider = _load_provider_type()(project_root)
+    result = provider.inspect_time_series_summary(
+        InspectTimeSeriesSummaryRequest(
+            request_id="conflicting-time-series-summary",
+            owner_run_id="run-a",
+            op_node_id="model:ols_1",
+            active_head_run_id="run-a",
+        )
+    )
+
+    assert result["time_series_summary"] == {
+        "available": False,
+        "reason_code": "TIME_SERIES_MODEL_IDENTITY_CONFLICT",
     }
 
 

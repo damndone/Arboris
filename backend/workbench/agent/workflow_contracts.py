@@ -6,7 +6,10 @@ import re
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
+
+import numpy as np
+import pandas as pd
 
 from .operations import OperationValidationError
 
@@ -258,6 +261,667 @@ class StepSpecContract:
         }
 
 
+ModelParameterBuilder = Callable[[Mapping[str, Any], Mapping[str, Any], list[str], str], dict[str, Any]]
+ModelFamilySpecValidator = Callable[[Mapping[str, Any]], None]
+ModelFamilyDataValidator = Callable[[pd.DataFrame, Mapping[str, Any]], None]
+
+
+@dataclass(frozen=True)
+class ModelFamilyContract:
+    """The complete workflow admission contract for one model family.
+
+    The contract separates a family from the runtime's execution mechanics:
+    validation, Genesis parameters, required evidence, and result semantics all
+    travel together.  A future family therefore cannot silently inherit OLS
+    diagnostics or coefficient-interval assumptions merely because it reaches
+    the generic workflow executor.
+    """
+
+    family: str
+    required_spec_fields: tuple[str, ...]
+    required_spec_field_mode: str
+    forbidden_spec_fields: tuple[str, ...]
+    build_model_params: ModelParameterBuilder
+    expected_artifacts: tuple[str, ...]
+    result_shape: str
+    missing_required_fields_message: str | None = None
+    forbidden_spec_fields_message: str | None = None
+    cluster_requires_entity: bool = False
+    allows_categorical_terms: bool = True
+    allows_polynomial_terms: bool = True
+    requires_nonempty_predictors: bool = True
+    allows_covariance: bool = True
+    requires_branch_figures: bool = False
+    context_spec_fields: tuple[str, ...] = ()
+    column_spec_fields: tuple[str, ...] = ()
+    builds_native_params: bool = False
+    validate_spec: ModelFamilySpecValidator | None = None
+    validate_branch_frame: ModelFamilyDataValidator | None = None
+
+    def __post_init__(self) -> None:
+        if self.required_spec_field_mode not in {"all", "any"}:
+            raise ValueError("ModelFamilyContract required_spec_field_mode is invalid")
+        if self.result_shape not in {
+            "coefficient_intervals",
+            "effect_estimate_bundle",
+            "event_study_bundle",
+        }:
+            raise ValueError("ModelFamilyContract result_shape is invalid")
+        if not self.family or not self.expected_artifacts:
+            raise ValueError("ModelFamilyContract requires family and expected artifacts")
+        if not set(self.column_spec_fields) <= set(self.context_spec_fields):
+            raise ValueError("ModelFamilyContract column fields must be context fields")
+
+
+def _build_ols_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "ols",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "covariance": covariance,
+        "model_options": {"covariance": covariance},
+    }
+
+
+def _build_panel_ols_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "panel_ols",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "covariance": covariance,
+        "model_options": {"covariance": covariance},
+        "entity_col": spec.get("entity_col"),
+        "time_col": spec.get("time_col"),
+    }
+
+
+def _build_generalized_model_params(
+    model_type: str,
+) -> ModelParameterBuilder:
+    def _build(
+        spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+    ) -> dict[str, Any]:
+        return {
+            "model_type": model_type,
+            "y": branch["outcome"],
+            "x": list(predictors),
+        }
+
+    return _build
+
+
+def _require_outcome_values(
+    frame: pd.DataFrame, branch: Mapping[str, Any], family: str
+) -> pd.Series:
+    outcome = branch.get("outcome")
+    if not isinstance(outcome, str) or outcome not in frame.columns:
+        raise OperationValidationError(
+            f"model.genesis {family} requires an available outcome before execution"
+        )
+    values = pd.to_numeric(frame[outcome], errors="coerce").dropna()
+    if values.empty or not np.isfinite(values).all():
+        raise OperationValidationError(
+            f"model.genesis {family} requires finite numeric outcome values before execution"
+        )
+    return values
+
+
+def _validate_binary_outcome(
+    family: str,
+) -> ModelFamilyDataValidator:
+    def _validate(frame: pd.DataFrame, branch: Mapping[str, Any]) -> None:
+        values = _require_outcome_values(frame, branch, family)
+        if not values.isin((0, 1)).all():
+            raise OperationValidationError(
+                f"model.genesis {family} requires a binary 0/1 outcome before execution"
+            )
+
+    return _validate
+
+
+def _validate_count_outcome(
+    family: str,
+) -> ModelFamilyDataValidator:
+    def _validate(frame: pd.DataFrame, branch: Mapping[str, Any]) -> None:
+        values = _require_outcome_values(frame, branch, family)
+        if (values < 0).any() or not np.isclose(values, np.round(values)).all():
+            raise OperationValidationError(
+                f"model.genesis {family} requires a non-negative integer count outcome before execution"
+            )
+
+    return _validate
+
+
+def _build_iv_2sls_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "iv_2sls",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "iv_endog": list(spec["iv_endog"]),
+        "iv_instruments": list(spec["iv_instruments"]),
+        "covariance": covariance,
+    }
+
+
+def _build_did_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    model_params = {
+        "model_type": "did",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "entity_col": spec["entity_col"],
+        "time_col": spec["time_col"],
+        "did_mode": spec["did_mode"],
+        "covariance": covariance,
+    }
+    for field_name in ("did_cohort_col", "did_treat_col", "did_post_col", "did_status_col"):
+        value = spec.get(field_name)
+        if value is not None:
+            model_params[field_name] = value
+    return model_params
+
+
+def _require_column_list(spec: Mapping[str, Any], field_name: str, family: str) -> list[str]:
+    value = spec.get(field_name)
+    if not isinstance(value, list) or not value or any(
+        not isinstance(item, str) or not item for item in value
+    ):
+        raise OperationValidationError(
+            f"model.genesis {family} requires a non-empty {field_name} column list"
+        )
+    if len(set(value)) != len(value):
+        raise OperationValidationError(
+            f"model.genesis {family} {field_name} must not contain duplicate columns"
+        )
+    return list(value)
+
+
+def _validate_iv_2sls_spec(spec: Mapping[str, Any]) -> None:
+    from ..engine.iv_spec import IVSpecError, validate_iv_spec
+
+    endog = _require_column_list(spec, "iv_endog", "iv_2sls")
+    instruments = _require_column_list(spec, "iv_instruments", "iv_2sls")
+    for branch in spec["branches"]:
+        try:
+            validate_iv_spec(
+                y=str(branch["outcome"]),
+                exog=[str(item) for item in branch["predictors"]],
+                endog=endog,
+                instruments=instruments,
+            )
+        except IVSpecError as exc:
+            raise OperationValidationError(f"model.genesis iv_2sls: {exc}") from exc
+
+
+def _require_column(spec: Mapping[str, Any], field_name: str, family: str) -> str:
+    value = spec.get(field_name)
+    if not isinstance(value, str) or not value:
+        raise OperationValidationError(
+            f"model.genesis {family} requires {field_name} for the selected treatment definition"
+        )
+    return value
+
+
+def _validate_did_spec(spec: Mapping[str, Any]) -> None:
+    mode = spec.get("did_mode")
+    if mode not in {"cohort", "two_by_two", "status"}:
+        raise OperationValidationError(
+            "model.genesis did requires did_mode: cohort, two_by_two, or status"
+        )
+    if mode == "cohort":
+        _require_column(spec, "did_cohort_col", "did")
+    elif mode == "two_by_two":
+        _require_column(spec, "did_treat_col", "did")
+        _require_column(spec, "did_post_col", "did")
+    else:
+        _require_column(spec, "did_status_col", "did")
+
+
+def _build_cs_did_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "cs_did",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "entity_col": spec["entity_col"],
+        "time_col": spec["time_col"],
+        "did_mode": "cohort",
+        "did_cohort_col": spec["cohort_col"],
+    }
+
+
+def _build_sa_did_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "sa_did",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "entity_col": spec["entity_col"],
+        "time_col": spec["time_col"],
+        "did_mode": "cohort",
+        "did_cohort_col": spec["cohort_col"],
+    }
+
+
+def _build_dcdh_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "dcdh",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "entity_col": spec["entity_col"],
+        "time_col": spec["time_col"],
+        "did_treatment_path": spec["treatment_path_col"],
+    }
+
+
+MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
+    "ols": ModelFamilyContract(
+        family="ols",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_ols_model_params,
+        expected_artifacts=("ols_1", "diagnostic_summary"),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message="model.genesis ols does not accept panel entity_col or time_col",
+        requires_branch_figures=True,
+    ),
+    "logit": ModelFamilyContract(
+        family="logit",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_generalized_model_params("logit"),
+        expected_artifacts=("logit_1", "diagnostics_logit_1", "diagnostic_summary"),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message="model.genesis logit does not accept panel entity_col or time_col",
+        allows_covariance=False,
+        validate_branch_frame=_validate_binary_outcome("logit"),
+    ),
+    "probit": ModelFamilyContract(
+        family="probit",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_generalized_model_params("probit"),
+        expected_artifacts=("probit_1", "diagnostics_probit_1", "diagnostic_summary"),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message="model.genesis probit does not accept panel entity_col or time_col",
+        allows_covariance=False,
+        validate_branch_frame=_validate_binary_outcome("probit"),
+    ),
+    "poisson": ModelFamilyContract(
+        family="poisson",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_generalized_model_params("poisson"),
+        expected_artifacts=("poisson_1", "diagnostics_poisson_1", "diagnostic_summary"),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message="model.genesis poisson does not accept panel entity_col or time_col",
+        allows_covariance=False,
+        validate_branch_frame=_validate_count_outcome("poisson"),
+    ),
+    "negative_binomial": ModelFamilyContract(
+        family="negative_binomial",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_generalized_model_params("negative_binomial"),
+        expected_artifacts=(
+            "negative_binomial_1",
+            "diagnostics_negative_binomial_1",
+            "diagnostic_summary",
+        ),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message=(
+            "model.genesis negative_binomial does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        validate_branch_frame=_validate_count_outcome("negative_binomial"),
+    ),
+    "glm:binomial": ModelFamilyContract(
+        family="glm:binomial",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_generalized_model_params("glm:binomial"),
+        expected_artifacts=("glm_1",),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message=(
+            "model.genesis glm:binomial does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        validate_branch_frame=_validate_binary_outcome("glm:binomial"),
+    ),
+    "glm:poisson": ModelFamilyContract(
+        family="glm:poisson",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_generalized_model_params("glm:poisson"),
+        expected_artifacts=("glm_1",),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message=(
+            "model.genesis glm:poisson does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        validate_branch_frame=_validate_count_outcome("glm:poisson"),
+    ),
+    "glm:negative_binomial": ModelFamilyContract(
+        family="glm:negative_binomial",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_generalized_model_params("glm:negative_binomial"),
+        expected_artifacts=("glm_1",),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message=(
+            "model.genesis glm:negative_binomial does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        validate_branch_frame=_validate_count_outcome("glm:negative_binomial"),
+    ),
+    "panel_ols": ModelFamilyContract(
+        family="panel_ols",
+        required_spec_fields=("entity_col", "time_col"),
+        required_spec_field_mode="any",
+        forbidden_spec_fields=(),
+        build_model_params=_build_panel_ols_model_params,
+        expected_artifacts=("panel_ols_1",),
+        result_shape="coefficient_intervals",
+        missing_required_fields_message=(
+            "model.genesis panel_ols requires entity_col or time_col"
+        ),
+        cluster_requires_entity=True,
+        allows_categorical_terms=False,
+        context_spec_fields=("entity_col", "time_col"),
+        column_spec_fields=("entity_col", "time_col"),
+    ),
+    "iv_2sls": ModelFamilyContract(
+        family="iv_2sls",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_iv_2sls_model_params,
+        expected_artifacts=(
+            "iv_2sls_1",
+            "diagnostics_iv_2sls_1",
+            "iv_diagnostics",
+            "diagnostic_summary",
+        ),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message="model.genesis iv_2sls does not accept panel entity_col or time_col",
+        requires_nonempty_predictors=False,
+        context_spec_fields=("iv_endog", "iv_instruments"),
+        column_spec_fields=("iv_endog", "iv_instruments"),
+        builds_native_params=True,
+        validate_spec=_validate_iv_2sls_spec,
+    ),
+    "did": ModelFamilyContract(
+        family="did",
+        required_spec_fields=("entity_col", "time_col"),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=(),
+        build_model_params=_build_did_model_params,
+        expected_artifacts=(
+            "did_1",
+            "diagnostics_did_1",
+            "did_diagnostics",
+            "diagnostic_summary",
+        ),
+        result_shape="coefficient_intervals",
+        missing_required_fields_message="model.genesis did requires entity_col and time_col",
+        requires_nonempty_predictors=False,
+        context_spec_fields=(
+            "entity_col",
+            "time_col",
+            "did_mode",
+            "did_cohort_col",
+            "did_treat_col",
+            "did_post_col",
+            "did_status_col",
+        ),
+        column_spec_fields=(
+            "entity_col",
+            "time_col",
+            "did_cohort_col",
+            "did_treat_col",
+            "did_post_col",
+            "did_status_col",
+        ),
+        builds_native_params=True,
+        validate_spec=_validate_did_spec,
+    ),
+    "cs_did": ModelFamilyContract(
+        family="cs_did",
+        required_spec_fields=("entity_col", "time_col", "cohort_col"),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=(),
+        build_model_params=_build_cs_did_model_params,
+        expected_artifacts=("cs_did_1", "cs_did"),
+        result_shape="effect_estimate_bundle",
+        missing_required_fields_message=(
+            "model.genesis cs_did requires entity_col, time_col, and cohort_col"
+        ),
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        requires_nonempty_predictors=False,
+        allows_covariance=False,
+        context_spec_fields=("entity_col", "time_col", "cohort_col"),
+        column_spec_fields=("entity_col", "time_col", "cohort_col"),
+        builds_native_params=True,
+    ),
+    "sa_did": ModelFamilyContract(
+        family="sa_did",
+        required_spec_fields=("entity_col", "time_col", "cohort_col"),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=(),
+        build_model_params=_build_sa_did_model_params,
+        expected_artifacts=("sa_did_1", "sa_did"),
+        result_shape="effect_estimate_bundle",
+        missing_required_fields_message=(
+            "model.genesis sa_did requires entity_col, time_col, and cohort_col"
+        ),
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        requires_nonempty_predictors=False,
+        allows_covariance=False,
+        context_spec_fields=("entity_col", "time_col", "cohort_col"),
+        column_spec_fields=("entity_col", "time_col", "cohort_col"),
+        builds_native_params=True,
+    ),
+    "dcdh": ModelFamilyContract(
+        family="dcdh",
+        required_spec_fields=("entity_col", "time_col", "treatment_path_col"),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=(),
+        build_model_params=_build_dcdh_model_params,
+        expected_artifacts=("dcdh_1", "dcdh"),
+        result_shape="event_study_bundle",
+        missing_required_fields_message=(
+            "model.genesis dcdh requires entity_col, time_col, and treatment_path_col"
+        ),
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        requires_nonempty_predictors=False,
+        allows_covariance=False,
+        context_spec_fields=("entity_col", "time_col", "treatment_path_col"),
+        column_spec_fields=("entity_col", "time_col", "treatment_path_col"),
+        builds_native_params=True,
+    ),
+}
+
+MODEL_FAMILY_SPEC_FIELDS = frozenset(
+    field_name
+    for contract in MODEL_FAMILY_CONTRACTS.values()
+    for field_name in contract.context_spec_fields
+)
+
+
+def notebook_workflow_capability_ids() -> tuple[str, ...]:
+    """Return the native capabilities admitted to the Notebook planner.
+
+    The manual capability manifest is intentionally broader than the typed
+    Notebook workflow surface. A handler or legacy UI alias is not enough to
+    make a model workflow-executable: it must have the shared family contract
+    or a published Recipe contract that defines its input and result boundary.
+    Importing Recipes lazily keeps the contract module free of an import cycle.
+    """
+
+    from .recipe_contracts import RECIPE_CONTRACTS
+
+    return tuple(sorted({*MODEL_FAMILY_CONTRACTS, *RECIPE_CONTRACTS}))
+
+
+def model_family_contract(model_family: Any) -> ModelFamilyContract:
+    if not isinstance(model_family, str) or model_family not in MODEL_FAMILY_CONTRACTS:
+        raise OperationValidationError(
+            "model.genesis model_family must be a workflow-executable family: "
+            + " or ".join(MODEL_FAMILY_CONTRACTS)
+        )
+    return MODEL_FAMILY_CONTRACTS[model_family]
+
+
+def family_context_columns(
+    contract: ModelFamilyContract, spec: Mapping[str, Any]
+) -> tuple[str, ...]:
+    """Project only source-column fields, preserving declared lists elementwise."""
+
+    values: list[str] = []
+    for field_name in contract.column_spec_fields:
+        value = spec.get(field_name)
+        if value is None:
+            continue
+        if isinstance(value, str) and value:
+            values.append(value)
+            continue
+        if isinstance(value, list) and value and all(
+            isinstance(item, str) and item for item in value
+        ):
+            values.extend(value)
+            continue
+        raise OperationValidationError(
+            f"model.genesis {contract.family} {field_name} must declare source column names"
+        )
+    return tuple(dict.fromkeys(values))
+
+
+def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
+    """Validate family-owned Genesis semantics and return its exact contract."""
+
+    from ..contracts.model.ols import OLS_COVARIANCE_VALUES
+    from ..model_terms import ModelTermError, validate_branch_terms
+
+    contract = model_family_contract(spec.get("model_family"))
+    declared_family_fields = {
+        field_name
+        for field_name in MODEL_FAMILY_SPEC_FIELDS
+        if spec.get(field_name) is not None
+    }
+    unexpected_family_fields = sorted(
+        declared_family_fields - set(contract.context_spec_fields)
+    )
+    family_fields = set(contract.required_spec_fields) | set(contract.forbidden_spec_fields)
+    dimensions: dict[str, str | None] = {}
+    for field_name in family_fields:
+        value = spec.get(field_name)
+        if value is not None and (not isinstance(value, str) or not value):
+            raise OperationValidationError(
+                f"model.genesis {field_name} must be a non-empty string"
+            )
+        dimensions[field_name] = value
+    forbidden = [field_name for field_name in contract.forbidden_spec_fields if dimensions[field_name] is not None]
+    if forbidden:
+        raise OperationValidationError(
+            contract.forbidden_spec_fields_message
+            or "model.genesis contains a field the selected family does not accept"
+        )
+    if unexpected_family_fields:
+        raise OperationValidationError(
+            f"model.genesis {contract.family} does not accept "
+            + ", ".join(unexpected_family_fields)
+        )
+    required_values = [dimensions[field_name] for field_name in contract.required_spec_fields]
+    missing_required = (
+        contract.required_spec_field_mode == "all" and any(value is None for value in required_values)
+    ) or (
+        contract.required_spec_field_mode == "any" and contract.required_spec_fields and not any(required_values)
+    )
+    if missing_required:
+        raise OperationValidationError(
+            contract.missing_required_fields_message
+            or "model.genesis is missing a family-required field"
+        )
+    branches = spec.get("branches")
+    if not isinstance(branches, list) or not branches:
+        raise OperationValidationError("model.genesis step requires a non-empty branches list")
+    seen: set[str] = set()
+    for branch in branches:
+        if not isinstance(branch, Mapping):
+            raise OperationValidationError("each model branch must be an object")
+        branch_id = branch.get("branch_id")
+        if not isinstance(branch_id, str) or not branch_id.strip():
+            raise OperationValidationError("each model branch requires a branch_id")
+        if branch_id in seen:
+            raise OperationValidationError(f"duplicate model branch_id: {branch_id}")
+        seen.add(branch_id)
+        predictors = branch.get("predictors")
+        if not isinstance(predictors, list) or (
+            contract.requires_nonempty_predictors and not predictors
+        ):
+            raise OperationValidationError(f"model branch {branch_id} requires predictors")
+        if not branch.get("outcome"):
+            raise OperationValidationError(f"model branch {branch_id} requires an outcome")
+        if branch.get("outcome") in predictors:
+            raise OperationValidationError(
+                f"model branch {branch_id} outcome must not also be a predictor"
+            )
+        covariance = branch.get("covariance", spec.get("covariance"))
+        if not contract.allows_covariance and covariance is not None:
+            raise OperationValidationError(
+                f"model.genesis {contract.family} does not accept OLS covariance settings"
+            )
+        if contract.allows_covariance and covariance is not None and covariance not in OLS_COVARIANCE_VALUES:
+            raise OperationValidationError(
+                f"model branch {branch_id} covariance must be one of: "
+                + ", ".join(OLS_COVARIANCE_VALUES)
+            )
+        if contract.cluster_requires_entity and covariance == "clustered" and not dimensions.get("entity_col"):
+            raise OperationValidationError(
+                "model.genesis clustered panel_ols requires entity_col"
+            )
+        if not contract.allows_categorical_terms and branch.get("categorical"):
+            raise OperationValidationError(
+                f"model.genesis {contract.family} does not accept categorical expansion"
+            )
+        if not contract.allows_polynomial_terms and branch.get("polynomials"):
+            raise OperationValidationError(
+                f"model.genesis {contract.family} does not accept polynomial expansion"
+            )
+        try:
+            validate_branch_terms(branch)
+        except ModelTermError as exc:
+            raise OperationValidationError(
+                f"model branch {branch_id}: {exc}"
+            ) from exc
+    family_context_columns(contract, spec)
+    if contract.validate_spec is not None:
+        contract.validate_spec(spec)
+    return contract
+
+
 WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
     "statistical.explore": StepSpecContract(
         summary=(
@@ -384,7 +1048,9 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         summary="Estimate one or more models from the source table.",
         fields={
             "model_family": (
-                "Registered workflow-executable model family: ols or panel_ols. "
+                "Registered workflow-executable model family: ols, logit, probit, poisson, "
+                "negative_binomial, glm:binomial, glm:poisson, glm:negative_binomial, "
+                "panel_ols, iv_2sls, did, cs_did, sa_did, or dcdh. "
                 "Every branch in one step uses this same family."
             ),
             "covariance": "Default covariance for every branch.",
@@ -393,6 +1059,15 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
                 "clustered panel covariance requires entity_col."
             ),
             "time_col": "Optional panel time column for time fixed effects.",
+            "cohort_col": "First-treatment period for cs_did or sa_did (0 for never treated).",
+            "treatment_path_col": "Binary treatment path for dcdh, which may switch on and off.",
+            "iv_endog": "Non-empty endogenous-regressor column list for iv_2sls.",
+            "iv_instruments": "Non-empty instrument column list for iv_2sls; must not overlap endog or predictors.",
+            "did_mode": "TWFE DID treatment definition: cohort, two_by_two, or status.",
+            "did_cohort_col": "First-treatment period for did_mode cohort (0 for never treated).",
+            "did_treat_col": "Treatment-group indicator for did_mode two_by_two.",
+            "did_post_col": "Post-period indicator for did_mode two_by_two.",
+            "did_status_col": "Absorbing treatment-status indicator for did_mode status.",
             "branches": (
                 "List of {branch_id, outcome, predictors[, categorical]"
                 "[, polynomials][, covariance]}; one estimated model per entry. "
@@ -425,6 +1100,15 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             "covariance": "string",
             "entity_col": "string",
             "time_col": "string",
+            "cohort_col": "string",
+            "treatment_path_col": "string",
+            "iv_endog": "list",
+            "iv_instruments": "list",
+            "did_mode": "string",
+            "did_cohort_col": "string",
+            "did_treat_col": "string",
+            "did_post_col": "string",
+            "did_status_col": "string",
             "branches": "list",
             "categorical": "list",
             "polynomials": "list",
@@ -677,9 +1361,9 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
             if isinstance(group, Mapping) and group.get("source_column"):
                 columns.add(str(group["source_column"]))
     elif extractor_key == "model.genesis":
-        for field_name in ("entity_col", "time_col"):
-            if spec.get(field_name):
-                columns.add(str(spec[field_name]))
+        columns.update(
+            family_context_columns(model_family_contract(spec.get("model_family")), spec)
+        )
         for branch in spec.get("branches", []) or []:
             if isinstance(branch, Mapping):
                 if branch.get("outcome"):
@@ -861,75 +1545,7 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
         if not isinstance(spec.get("summarize_columns"), list) or not spec["summarize_columns"]:
             raise OperationValidationError("derived_group_summarize requires summarize_columns")
     elif validator_key == "model.genesis":
-        from ..contracts.model.ols import OLS_COVARIANCE_VALUES
-        from ..model_terms import ModelTermError, validate_branch_terms
-
-        model_family = spec.get("model_family")
-        if model_family not in {"ols", "panel_ols"}:
-            raise OperationValidationError(
-                "model.genesis model_family must be a workflow-executable family: "
-                "ols or panel_ols"
-            )
-        entity_col = spec.get("entity_col")
-        time_col = spec.get("time_col")
-        if entity_col is not None and (not isinstance(entity_col, str) or not entity_col):
-            raise OperationValidationError("model.genesis entity_col must be a non-empty string")
-        if time_col is not None and (not isinstance(time_col, str) or not time_col):
-            raise OperationValidationError("model.genesis time_col must be a non-empty string")
-        if model_family == "ols" and (entity_col is not None or time_col is not None):
-            raise OperationValidationError(
-                "model.genesis ols does not accept panel entity_col or time_col"
-            )
-        if model_family == "panel_ols" and not entity_col and not time_col:
-            raise OperationValidationError(
-                "model.genesis panel_ols requires entity_col or time_col"
-            )
-        branches = spec.get("branches")
-        if not isinstance(branches, list) or not branches:
-            raise OperationValidationError("model.genesis step requires a non-empty branches list")
-        seen: set[str] = set()
-        for branch in branches:
-            if not isinstance(branch, Mapping):
-                raise OperationValidationError("each model branch must be an object")
-            branch_id = branch.get("branch_id")
-            if not isinstance(branch_id, str) or not branch_id.strip():
-                raise OperationValidationError("each model branch requires a branch_id")
-            if branch_id in seen:
-                raise OperationValidationError(f"duplicate model branch_id: {branch_id}")
-            seen.add(branch_id)
-            predictors = branch.get("predictors")
-            if not isinstance(predictors, list) or not predictors:
-                raise OperationValidationError(f"model branch {branch_id} requires predictors")
-            if not branch.get("outcome"):
-                raise OperationValidationError(f"model branch {branch_id} requires an outcome")
-            if branch.get("outcome") in predictors:
-                raise OperationValidationError(
-                    f"model branch {branch_id} outcome must not also be a predictor"
-                )
-            covariance = branch.get("covariance", spec.get("covariance"))
-            if covariance is not None and covariance not in OLS_COVARIANCE_VALUES:
-                raise OperationValidationError(
-                    f"model branch {branch_id} covariance must be one of: "
-                    + ", ".join(OLS_COVARIANCE_VALUES)
-                )
-            if model_family == "panel_ols":
-                if covariance == "clustered" and not entity_col:
-                    raise OperationValidationError(
-                        "model.genesis clustered panel_ols requires entity_col"
-                    )
-                if branch.get("categorical"):
-                    raise OperationValidationError(
-                        "model.genesis panel_ols does not accept categorical expansion; "
-                        "declare entity_col/time_col for absorbed effects"
-                    )
-            # Derived terms are validated by the module that also builds them,
-            # so a spec that passes here cannot mean something else at execution.
-            try:
-                validate_branch_terms(branch)
-            except ModelTermError as exc:
-                raise OperationValidationError(
-                    f"model branch {branch_id}: {exc}"
-                ) from exc
+        validate_model_genesis_spec(spec)
     elif validator_key == "model.joint_f_test":
         selectors = spec.get("term_selectors")
         if not isinstance(selectors, list) or not selectors:

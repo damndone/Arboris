@@ -100,7 +100,7 @@ def _source_params_from_schema(editable_schema: list[dict[str, Any]]) -> dict[st
 
 
 def normalize_ols_genesis_model_params(model_params: Mapping[str, Any]) -> dict[str, Any]:
-    """Keep the OLS Agent envelope and project it to legacy covariance.
+    """Keep the linear-model Agent envelope and project it to legacy covariance.
 
     The top-level field remains part of the executable Draft schema for human
     controls and backward-compatible run inputs. It is a projection of the
@@ -109,7 +109,7 @@ def normalize_ols_genesis_model_params(model_params: Mapping[str, Any]) -> dict[
     dropping the server-owned contract before execution.
     """
     normalized = dict(model_params)
-    if normalized.get("model_type") != "ols" or "model_options" not in normalized:
+    if normalized.get("model_type") not in {"ols", "panel_ols"} or "model_options" not in normalized:
         return normalized
     from ..contracts.model.ols import validate_ols_model_options
 
@@ -303,6 +303,7 @@ def create_genesis_draft(
     filename: str,
     sheet_names: tuple[str, ...],
     columns: tuple[str, ...],
+    model_family: str = "regression",
     model_params: Mapping[str, Any] | None = None,
     exploration_context: Mapping[str, Any] | None = None,
     notebook_provenance: Mapping[str, str] | None = None,
@@ -326,7 +327,7 @@ def create_genesis_draft(
     model_node: dict[str, Any] = {
         "node_id": "model_1",
         "node_type": "model",
-        "model_family": "regression",
+        "model_family": model_family,
         "model_type": requested_model_type if isinstance(requested_model_type, str) else None,
         "params": dict(model_params or {}),
         "status": "pending",

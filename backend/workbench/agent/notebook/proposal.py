@@ -10,7 +10,11 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from ...canonical import sha256_canonical
-from ...contracts.agent.notebook_option import ExpectedArtifact, EvidenceRef
+from ...contracts.agent.notebook_option import (
+    EvidenceRef,
+    ExpectedArtifact,
+    MemoryDefaultSource,
+)
 
 CANONICAL_PROPOSAL_HASH_PREFIX = "prop1:"
 
@@ -26,6 +30,17 @@ class TypedProposal:
     changes: dict[str, Any] = field(default_factory=dict)
     operation_version: str = "v1"
     proposal_revision: int = 1
+    memory_default_sources: tuple[MemoryDefaultSource, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.memory_default_sources, (tuple, list)):
+            raise ValueError("memory_default_sources must be a tuple or list")
+        sources = tuple(self.memory_default_sources)
+        if any(not isinstance(item, MemoryDefaultSource) for item in sources):
+            raise ValueError("memory_default_sources must contain MemoryDefaultSource records")
+        if len({(item.memory_id, item.revision, item.target_ref) for item in sources}) != len(sources):
+            raise ValueError("memory_default_sources must be unique")
+        object.__setattr__(self, "memory_default_sources", sources)
 
     def canonical_hash(self) -> str:
         """Content identity, deliberately excluding `proposal_id`.
@@ -42,11 +57,12 @@ class TypedProposal:
                 "target": self.target,
                 "preconditions": self.preconditions,
                 "changes": self.changes,
+                "memory_default_sources": [item.to_dict() for item in self.memory_default_sources],
             }
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "proposal_id": self.proposal_id,
             "proposal_revision": self.proposal_revision,
             "operation_id": self.operation_id,
@@ -55,6 +71,11 @@ class TypedProposal:
             "preconditions": dict(self.preconditions),
             "changes": dict(self.changes),
         }
+        if self.memory_default_sources:
+            payload["memory_default_sources"] = [
+                item.to_dict() for item in self.memory_default_sources
+            ]
+        return payload
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "TypedProposal":
@@ -66,6 +87,10 @@ class TypedProposal:
             changes=dict(value.get("changes") or {}),
             operation_version=str(value.get("operation_version", "v1")),
             proposal_revision=int(value.get("proposal_revision", 1)),
+            memory_default_sources=tuple(
+                MemoryDefaultSource.from_dict(item)
+                for item in value.get("memory_default_sources", ())
+            ),
         )
 
 

@@ -28,7 +28,7 @@ def _services(tmp_path: Path) -> tuple[DomainMemoryService, MemoryCandidateStore
     runtime = CuratorRuntime(candidates)
     runtime.generate(_summary(), resolve_preferences(SCOPE, DomainMemoryPreferences(cross_project_domain_memory_iteration=True)))
     candidate = candidates.latest(next(iter({item.candidate_id for item in candidates.pending(SCOPE)})))
-    candidates.transition(candidate.candidate_id, expected_revision=candidate.revision, status="needs_review")
+    assert candidate.status == "needs_review"
     return service, candidates, conflicts
 
 

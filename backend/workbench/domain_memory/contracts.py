@@ -12,14 +12,24 @@ from .scope import DomainMemoryScopeError, MemoryScope
 
 
 DOMAIN_MEMORY_CONTRACT_VERSION = "domain-memory/v1"
-CONTENT_CONTRACT_VERSION = "domain-memory-content-revision/v1"
-CANDIDATE_CONTRACT_VERSION = "domain-memory-candidate/v1"
+CONTENT_CONTRACT_VERSION = "domain-memory-content-revision/v2"
+LEGACY_CONTENT_CONTRACT_VERSION = "domain-memory-content-revision/v1"
+CANDIDATE_CONTRACT_VERSION = "domain-memory-candidate/v2"
+LEGACY_CANDIDATE_CONTRACT_VERSION = "domain-memory-candidate/v1"
 APPROVAL_CONTRACT_VERSION = "domain-memory-approval/v1"
 VALIDITY_CONTRACT_VERSION = "domain-memory-validity/v1"
 
 MEMORY_KINDS = frozenset(
-    {"workflow_lesson", "capability_caveat", "inspection_hint", "user_working_preference", "reporting_preference"}
+    {
+        "workflow_lesson",
+        "capability_caveat",
+        "inspection_hint",
+        "user_working_preference",
+        "reporting_preference",
+        "project_domain_fact",
+    }
 )
+APPLY_MODES = frozenset({"inform_only", "suggest_default"})
 EFFECT_KINDS = frozenset(
     {"candidate_retrieval_hint", "inspection_plan_hint", "assumption_check_hint", "known_caveat", "reporting_preference"}
 )
@@ -81,6 +91,12 @@ def _optional_id(value: Any, field_name: str) -> str | None:
     if value is None:
         return None
     return _identifier(value, field_name)
+
+
+def _optional_timestamp(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _text(value, field_name, maximum=64)
 
 
 def _refs(value: Any, field_name: str, *, maximum: int) -> tuple[str, ...]:
@@ -169,6 +185,38 @@ class SourceSummaryRef:
         return cls(**dict(value))
 
 
+@dataclass(frozen=True, slots=True)
+class MemoryVerifier:
+    """Opaque verifier pointer plus the maximum age of its last successful check."""
+
+    verifier_id: str
+    valid_for_seconds: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "verifier_id", _identifier(self.verifier_id, "verifier_id"))
+        if (
+            not isinstance(self.valid_for_seconds, int)
+            or isinstance(self.valid_for_seconds, bool)
+            or not 60 <= self.valid_for_seconds <= 31_536_000
+        ):
+            raise DomainMemoryContractError("valid_for_seconds must be between one minute and one year")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"verifier_id": self.verifier_id, "valid_for_seconds": self.valid_for_seconds}
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "MemoryVerifier":
+        if not isinstance(value, Mapping) or set(value) != {"verifier_id", "valid_for_seconds"}:
+            raise DomainMemoryContractError("verifier fields are invalid")
+        return cls(**dict(value))
+
+
+def _verifier(value: Any) -> MemoryVerifier | None:
+    if value is None:
+        return None
+    return value if isinstance(value, MemoryVerifier) else MemoryVerifier.from_dict(value)
+
+
 def _predicates(value: Any) -> tuple[ApplicabilityPredicate, ...]:
     if not isinstance(value, (list, tuple)) or len(value) > _MAX_PREDICATES:
         raise DomainMemoryContractError("applicability_predicates exceed their bounded field limit")
@@ -215,6 +263,12 @@ class DomainMemoryContentRevision:
     supersedes_revision: int | None
     conflicts_with: tuple[str, ...]
     created_by: str
+    apply_mode: str = "inform_only"
+    vocabulary_version: str | None = None
+    verifier: MemoryVerifier | None = None
+    last_validated_at: str | None = None
+    expires_at: str | None = None
+    serialized_contract_version: str = field(init=False, default=CONTENT_CONTRACT_VERSION, repr=False, compare=False)
     content_hash: str = field(init=False)
 
     CONTRACT_VERSION: ClassVar[str] = CONTENT_CONTRACT_VERSION
@@ -248,7 +302,13 @@ class DomainMemoryContentRevision:
                 raise DomainMemoryContractError("supersedes_revision must be older than revision")
         object.__setattr__(self, "conflicts_with", _refs(self.conflicts_with, "conflicts_with", maximum=_MAX_CONFLICTS))
         object.__setattr__(self, "created_by", _identifier(self.created_by, "created_by"))
-        object.__setattr__(self, "content_hash", domain_digest("workbench.domain-memory.content/v1", self._semantic_dict()))
+        if self.apply_mode not in APPLY_MODES:
+            raise DomainMemoryContractError("apply_mode is not registered")
+        object.__setattr__(self, "vocabulary_version", _optional_id(self.vocabulary_version, "vocabulary_version"))
+        object.__setattr__(self, "verifier", _verifier(self.verifier))
+        object.__setattr__(self, "last_validated_at", _optional_timestamp(self.last_validated_at, "last_validated_at"))
+        object.__setattr__(self, "expires_at", _optional_timestamp(self.expires_at, "expires_at"))
+        object.__setattr__(self, "content_hash", domain_digest("workbench.domain-memory.content/v2", self._semantic_dict()))
 
     def _semantic_dict(self) -> dict[str, Any]:
         return {
@@ -267,17 +327,45 @@ class DomainMemoryContentRevision:
             "supersedes_revision": self.supersedes_revision,
             "conflicts_with": list(self.conflicts_with),
             "created_by": self.created_by,
+            "apply_mode": self.apply_mode,
+            "vocabulary_version": self.vocabulary_version,
+            "verifier": self.verifier.to_dict() if self.verifier else None,
+            "last_validated_at": self.last_validated_at,
+            "expires_at": self.expires_at,
         }
 
     def to_dict(self) -> dict[str, Any]:
+        if self.serialized_contract_version == LEGACY_CONTENT_CONTRACT_VERSION:
+            return {
+                "contract_version": LEGACY_CONTENT_CONTRACT_VERSION,
+                **self._legacy_semantic_dict(),
+                "content_hash": self.content_hash,
+            }
         return {"contract_version": self.CONTRACT_VERSION, **self._semantic_dict(), "content_hash": self.content_hash}
 
     @classmethod
     def from_dict(cls, value: Any) -> "DomainMemoryContentRevision":
-        expected = {"contract_version", *cls._field_names(), "content_hash"}
-        if not isinstance(value, Mapping) or set(value) != expected or value.get("contract_version") != cls.CONTRACT_VERSION:
+        if not isinstance(value, Mapping):
             raise DomainMemoryContractError("domain memory content fields are invalid")
-        item = cls(**{key: value[key] for key in cls._field_names()})
+        contract_version = value.get("contract_version")
+        if contract_version == cls.CONTRACT_VERSION:
+            expected = {"contract_version", *cls._field_names(), "content_hash"}
+            if set(value) != expected:
+                raise DomainMemoryContractError("domain memory content fields are invalid")
+            item = cls(**{key: value[key] for key in cls._field_names()})
+        elif contract_version == LEGACY_CONTENT_CONTRACT_VERSION:
+            expected = {"contract_version", *cls._legacy_field_names(), "content_hash"}
+            if set(value) != expected:
+                raise DomainMemoryContractError("domain memory content fields are invalid")
+            item = cls(**{key: value[key] for key in cls._legacy_field_names()})
+            expected_hash = domain_digest("workbench.domain-memory.content/v1", item._legacy_semantic_dict())
+            if value["content_hash"] != expected_hash:
+                raise DomainMemoryContractError("content_hash does not match immutable content")
+            object.__setattr__(item, "serialized_contract_version", LEGACY_CONTENT_CONTRACT_VERSION)
+            object.__setattr__(item, "content_hash", expected_hash)
+            return item
+        else:
+            raise DomainMemoryContractError("domain memory content fields are invalid")
         if value["content_hash"] != item.content_hash:
             raise DomainMemoryContractError("content_hash does not match immutable content")
         return item
@@ -288,7 +376,19 @@ class DomainMemoryContentRevision:
             "memory_id", "revision", "scope", "domain_tags", "memory_kind", "applicability_predicates",
             "compact_lesson", "recommended_effect_kind", "recommended_target_refs", "source_summary_refs",
             "evidence_status", "review_after", "supersedes_revision", "conflicts_with", "created_by",
+            "apply_mode", "vocabulary_version", "verifier", "last_validated_at", "expires_at",
         )
+
+    @staticmethod
+    def _legacy_field_names() -> tuple[str, ...]:
+        return (
+            "memory_id", "revision", "scope", "domain_tags", "memory_kind", "applicability_predicates",
+            "compact_lesson", "recommended_effect_kind", "recommended_target_refs", "source_summary_refs",
+            "evidence_status", "review_after", "supersedes_revision", "conflicts_with", "created_by",
+        )
+
+    def _legacy_semantic_dict(self) -> dict[str, Any]:
+        return {key: value for key, value in self._semantic_dict().items() if key in self._legacy_field_names()}
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,6 +407,10 @@ class MemoryCandidate:
     status: str
     created_at: str
     expires_at: str | None = None
+    apply_mode: str = "inform_only"
+    vocabulary_version: str | None = None
+    verifier: MemoryVerifier | None = None
+    last_validated_at: str | None = None
 
     CONTRACT_VERSION: ClassVar[str] = CANDIDATE_CONTRACT_VERSION
 
@@ -331,8 +435,12 @@ class MemoryCandidate:
         if self.status not in CANDIDATE_STATES:
             raise DomainMemoryContractError("candidate status is not registered")
         object.__setattr__(self, "created_at", _text(self.created_at, "created_at", maximum=64))
-        if self.expires_at is not None:
-            object.__setattr__(self, "expires_at", _text(self.expires_at, "expires_at", maximum=64))
+        object.__setattr__(self, "expires_at", _optional_timestamp(self.expires_at, "expires_at"))
+        if self.apply_mode not in APPLY_MODES:
+            raise DomainMemoryContractError("apply_mode is not registered")
+        object.__setattr__(self, "vocabulary_version", _optional_id(self.vocabulary_version, "vocabulary_version"))
+        object.__setattr__(self, "verifier", _verifier(self.verifier))
+        object.__setattr__(self, "last_validated_at", _optional_timestamp(self.last_validated_at, "last_validated_at"))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -351,15 +459,28 @@ class MemoryCandidate:
             "status": self.status,
             "created_at": self.created_at,
             "expires_at": self.expires_at,
+            "apply_mode": self.apply_mode,
+            "vocabulary_version": self.vocabulary_version,
+            "verifier": self.verifier.to_dict() if self.verifier else None,
+            "last_validated_at": self.last_validated_at,
         }
 
     @classmethod
     def from_dict(cls, value: Any) -> "MemoryCandidate":
-        if not isinstance(value, Mapping) or set(value) != {
+        legacy_fields = {
             "contract_version", "candidate_id", "revision", "scope", "memory_kind", "domain_tags",
             "applicability_predicates", "compact_lesson", "recommended_effect_kind", "recommended_target_refs",
             "source_summary_refs", "created_from_manifest_ref", "status", "created_at", "expires_at",
-        } or value.get("contract_version") != cls.CONTRACT_VERSION:
+        }
+        current_fields = legacy_fields | {"apply_mode", "vocabulary_version", "verifier", "last_validated_at"}
+        if not isinstance(value, Mapping) or value.get("contract_version") not in {
+            cls.CONTRACT_VERSION,
+            LEGACY_CANDIDATE_CONTRACT_VERSION,
+        }:
+            raise DomainMemoryContractError("memory candidate fields are invalid")
+        if value["contract_version"] == cls.CONTRACT_VERSION and set(value) != current_fields:
+            raise DomainMemoryContractError("memory candidate fields are invalid")
+        if value["contract_version"] == LEGACY_CANDIDATE_CONTRACT_VERSION and set(value) != legacy_fields:
             raise DomainMemoryContractError("memory candidate fields are invalid")
         data = dict(value)
         data.pop("contract_version")

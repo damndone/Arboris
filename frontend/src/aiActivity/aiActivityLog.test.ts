@@ -59,6 +59,35 @@ describe("aiActivityLog", () => {
     expect(hist[0].question).toBe("on nk1");
   });
 
+  it("retains terminal Notebook plans and failed report attempts per project", () => {
+    appendAiActivity("/p/a", {
+      kind: "notebook_plan",
+      id: makeActivityId(),
+      at: "2026-08-01T16:30:00Z",
+      notebook_id: "nb_1",
+      interaction_mode: "plan",
+      goal: "Forecast the series.",
+      status: "error",
+      error: "NOTEBOOK_PLANNING_UNAVAILABLE",
+    });
+    appendAiActivity("/p/a", {
+      kind: "report_generate",
+      id: makeActivityId(),
+      at: "2026-08-01T16:31:00Z",
+      run_id: "run1",
+      instruction: "write it",
+      fact_count: 5,
+      excluded_count: 0,
+      status: "error",
+      error: "LLM unavailable",
+    });
+
+    expect(loadAiActivity("/p/a")).toEqual([
+      expect.objectContaining({ kind: "report_generate", status: "error" }),
+      expect.objectContaining({ kind: "notebook_plan", status: "error" }),
+    ]);
+  });
+
   it("dispatches the live-refresh event on append", () => {
     const listener = vi.fn();
     window.addEventListener(AI_ACTIVITY_EVENT, listener);

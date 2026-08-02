@@ -28,10 +28,18 @@ export interface DomainMemoryHint {
   recommended_target_refs: string[];
   source_summary_refs: string[];
   match_reason: string[];
+  apply_mode?: "inform_only" | "suggest_default";
+  apply_mode_reason?: string;
+  vocabulary_version?: string | null;
+  source_scope_ref?: string;
+  memory_source?: { memory_id: string; revision: number };
 }
 
 export interface DomainMemoryRetrievalProjection {
-  contract_version?: "domain-memory-context-input/v1";
+  contract_version?:
+    | "domain-memory-context-input/v1"
+    | "domain-memory-context-input/v2"
+    | "domain-memory-context-input/v3";
   retrieval_ref?: string;
   scope_ref?: string;
   outcome: "used" | "not_used" | "empty" | "blocked";
@@ -50,4 +58,46 @@ export interface DomainMemoryCandidate {
   memory_kind: string;
   compact_lesson: string;
   source_summary_refs: string[];
+}
+
+export interface DomainMemoryCandidateQueue {
+  candidates: DomainMemoryCandidate[];
+  memory_authority: "server_owned";
+}
+
+export interface DomainMemorySettings {
+  global: { revision: number; library_enabled: boolean };
+  project: {
+    revision: number;
+    library_enabled: boolean;
+    inherit_global: boolean;
+    candidate_generation_enabled: boolean;
+  };
+  memory_authority: "server_owned";
+}
+
+export interface MemorySettingsConfirmation {
+  receipt: string;
+  action: string;
+  scope_ref: string;
+  expected_revision?: number;
+  target_count: number;
+  expires_at: string;
+}
+
+export interface DomainMemoryLibraryEntry {
+  memory_id: string;
+  revision: number;
+  state: "active" | "stale" | "archived";
+  validity_revision: number;
+  memory_kind: string;
+  domain_tags: string[];
+  compact_lesson: string;
+  apply_mode: "inform_only" | "suggest_default";
+}
+
+export interface DomainMemoryLibrary {
+  library: "global" | "project";
+  entries: DomainMemoryLibraryEntry[];
+  memory_authority: "server_owned";
 }

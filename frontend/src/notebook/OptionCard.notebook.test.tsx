@@ -40,6 +40,50 @@ describe("OptionCard — the canonical option, rendered as the packet states it"
     expect(screen.getByTestId("option-pins")).toHaveTextContent("supersedes rev 1");
   });
 
+  it("makes a server-applied memory default visible with its immutable source", () => {
+    render(
+      <OptionCard
+        option={option({
+          contract_version: "1.3",
+          memory_default_sources: [
+            {
+              memory_id: "memory-ols-covariance",
+              revision: 2,
+              target_ref: "model.genesis.ols.covariance.robust",
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("option-memory-default-sources")).toHaveTextContent(
+      "memory-ols-covariance · rev 2 · model.genesis.ols.covariance.robust",
+    );
+  });
+
+  it("renders server-owned target metadata and the safe restore value for a memory default", () => {
+    const memoryOption = {
+      ...option(),
+      contract_version: "1.4",
+      memory_default_sources: [
+        {
+          memory_id: "memory-panel-covariance",
+          revision: 4,
+          target_ref: "model.genesis.panel_ols.covariance.robust",
+          target_label: "Covariance estimator",
+          method_risk: "medium",
+          restore_value: null,
+        },
+      ],
+    } as unknown as NotebookOptionRevision;
+
+    render(<OptionCard option={memoryOption} />);
+
+    expect(screen.getByTestId("option-memory-default-sources")).toHaveTextContent(
+      "Covariance estimator · rev 4 · Medium method risk · Restore: use the model default",
+    );
+  });
+
   it("uses the batch decision instead of display rank for recommendation styling", () => {
     const v11 = (overrides: Partial<NotebookOptionRevision> = {}) =>
       option({

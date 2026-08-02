@@ -219,6 +219,17 @@ function ForestWorkbench({
     setSettingsOpen(true);
   }, [settingsRequestVersion]);
 
+  // Notebook memory is configured from the shared Settings surface. Keep the
+  // navigation intent in the URL so a view remount cannot lose it, then remove
+  // it once consumed so back/refresh does not repeatedly reopen Settings.
+  useEffect(() => {
+    if (searchParams.get("memory_settings") !== "1") return;
+    setSettingsOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("memory_settings");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   // A run can be terminal before the project forest scanner has written its
   // head-set entry. Keep a focused deep link alive through that short window
   // instead of making the user refresh the page manually.
@@ -455,7 +466,7 @@ function ForestWorkbench({
   });
 
   if (settingsOpen) {
-    return <LlmProviderManager onBack={() => setSettingsOpen(false)} />;
+    return <LlmProviderManager projectRoot={projectRoot} onBack={() => setSettingsOpen(false)} />;
   }
   if (error !== null && forest === null) {
     return (
@@ -682,6 +693,7 @@ function ForestWorkbench({
     <NotebookOnlyShell
       projectRoot={projectRoot}
       activeRunId={notebookActiveRunId}
+      onOpenMemorySettings={() => setSettingsOpen(true)}
       onMaterializedDraft={(response) => {
         draftHandlers.onForkDraft(response);
         void refetch();
@@ -816,10 +828,12 @@ function HomeOnlyShell({
 function NotebookOnlyShell({
   projectRoot,
   activeRunId,
+  onOpenMemorySettings,
   onMaterializedDraft,
 }: {
   projectRoot: string;
   activeRunId: string | null;
+  onOpenMemorySettings: () => void;
   onMaterializedDraft: (response: NotebookMaterializationResponse) => void;
 }) {
   const navigate = useNavigate();
@@ -864,6 +878,7 @@ function NotebookOnlyShell({
       <NotebookRouteView
         projectRoot={projectRoot}
         activeRunId={activeRunId}
+        onOpenMemorySettings={onOpenMemorySettings}
         onMaterializedDraft={onMaterializedDraft}
       />
     </div>

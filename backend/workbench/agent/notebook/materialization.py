@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, TYPE_CHECKING
 from uuid import uuid4
+
+import pandas as pd
 
 from ...canonical import sha256_canonical
 from ...contracts.agent.notebook_option import (
@@ -15,6 +18,7 @@ from ...contracts.agent.notebook_option import (
 )
 from ...engine.capabilities import COVARIANCE_UI, build_capabilities
 from ...lineage.pipeline_drafts import PipelineDraftStore, StoredDraft, schema_hash
+from ...lineage.upload_store import verify_upload
 from ...model_options import (
     ModelOptionsError,
     bind_new_model_options,
@@ -26,12 +30,24 @@ from ...services.draft_materialization import (
 )
 from ..context_compiler import NotebookPlanningContextV1
 from ..trace import TraceWriter
+from ..workflow_contracts import (
+    MODEL_FAMILY_SPEC_FIELDS,
+    OperationValidationError,
+    family_context_columns,
+    model_family_contract,
+    validate_model_genesis_spec,
+)
+from ..recipe_contracts import (
+    RecipeValidationError,
+    recipe_contract_for_model_type,
+)
 from .errors import (
     OptionLifecycleTransitionInvalid,
     OptionMaterializationFailed,
     OptionRevisionStale,
 )
 from .freshness import assert_executable
+from .evidence import MAX_SOURCE_ROWS
 
 if TYPE_CHECKING:
     from .service import NotebookService
@@ -73,6 +89,7 @@ class NotebookOptionMaterializer:
         notebook = self.service.get_notebook(notebook_id)
         view = self.service.store.read_option(notebook_id, option_id)
         current = view.current_revision
+        self.service._assert_current_memory_default_sources(view, context)
         binding_ref = getattr(current, "capability_resolution_binding_ref", None)
         if binding_ref is not None:
             self.service._assert_current_capability_binding(current)
@@ -581,7 +598,7 @@ class NotebookOptionMaterializer:
         allowed_table = {"sheet_name", "transpose"}
         if set(table_params) - allowed_table:
             raise _fail("genesis materialization received unknown table params")
-        allowed_model = {
+        base_allowed_model = {
             "model_type",
             "y",
             "x",
@@ -590,9 +607,9 @@ class NotebookOptionMaterializer:
             "model_options",
             "entity_col",
             "time_col",
+            "cohort_col",
+            "treatment_path_col",
         }
-        if set(model_params) - allowed_model:
-            raise _fail("genesis materialization received unknown model params")
         model_type = model_params.get("model_type")
         if not isinstance(model_type, str) or not model_type:
             raise _fail("genesis model_params requires model_type")
@@ -603,29 +620,82 @@ class NotebookOptionMaterializer:
         capability = next(
             entry for entry in capability_entries if str(entry.get("key")) == model_type
         )
+        recipe_contract = recipe_contract_for_model_type(model_type)
+        try:
+            family_contract = model_family_contract(model_type)
+        except OperationValidationError:
+            family_contract = None
+        if recipe_contract is not None:
+            allowed_model = set(recipe_contract.allowed_model_param_fields)
+        else:
+            allowed_model = base_allowed_model | set(
+                family_contract.context_spec_fields if family_contract is not None else ()
+            )
+        if set(model_params) - allowed_model:
+            raise _fail("genesis materialization received unknown model params")
         try:
             model_params = normalize_ols_genesis_model_params(model_params)
         except ValueError as exc:
             raise _fail(str(exc)) from exc
-        y = model_params.get("y")
-        if not isinstance(y, str) or not y:
-            raise _fail("genesis model_params requires evidence-backed y")
-        if y not in columns:
-            raise _fail("genesis y is not a column in the verified dataset", column=y)
-        panel_dimensions = {
+        if recipe_contract is not None:
+            try:
+                model_params["model_options"] = recipe_contract.bind_server_owned_options(
+                    model_params.get("model_options"),
+                    source_reference=f"upload:{source.upload_sha256}",
+                )
+                recipe_contract.validate_genesis_params(model_params, columns=columns)
+            except RecipeValidationError as exc:
+                raise _fail(str(exc)) from exc
+            y: str | None = None
+        else:
+            y = model_params.get("y")
+            if not isinstance(y, str) or not y:
+                raise _fail("genesis model_params requires evidence-backed y")
+            if y not in columns:
+                raise _fail("genesis y is not a column in the verified dataset", column=y)
+        declared_dimensions = {
             key: model_params.get(key)
-            for key in ("entity_col", "time_col")
+            for key in ("entity_col", "time_col", "cohort_col", "treatment_path_col")
             if model_params.get(key) is not None
+        }
+        family_builds_native_params = bool(
+            family_contract is not None and family_contract.builds_native_params
+        )
+        if family_builds_native_params:
+            accepted_dimensions = set(family_contract.context_spec_fields)
+            unexpected_dimensions = sorted(set(declared_dimensions) - accepted_dimensions)
+            if unexpected_dimensions:
+                raise _fail(
+                    f"genesis {model_type} does not accept " + ", ".join(unexpected_dimensions)
+                )
+            missing_dimensions = [
+                field_name
+                for field_name in family_contract.required_spec_fields
+                if field_name not in declared_dimensions
+            ]
+            if missing_dimensions:
+                raise _fail(
+                    family_contract.missing_required_fields_message
+                    or f"genesis {model_type} requires family timing fields"
+                )
+        panel_dimensions = {
+            key: value
+            for key, value in declared_dimensions.items()
+            if key in {"entity_col", "time_col"}
         }
         if model_type == "panel_ols" and not panel_dimensions:
             raise _fail(
                 "genesis panel_ols requires an evidence-backed entity_col or time_col"
             )
-        if model_type != "panel_ols" and panel_dimensions:
+        if model_type != "panel_ols" and panel_dimensions and not family_builds_native_params:
             raise _fail(
                 "genesis non-panel model does not accept entity_col or time_col"
             )
-        for field_name, value in panel_dimensions.items():
+        if not family_builds_native_params and any(
+            key in declared_dimensions for key in ("cohort_col", "treatment_path_col")
+        ):
+            raise _fail("genesis selected model does not accept DID timing fields")
+        for field_name, value in declared_dimensions.items():
             if not isinstance(value, str) or not value:
                 raise _fail(
                     f"genesis {field_name} must be a non-empty evidence-backed column"
@@ -639,27 +709,35 @@ class NotebookOptionMaterializer:
         # required parameter with role "x". Univariate models (ETS, ARMA-GARCH, ...)
         # declare none, so the model-agnostic Notebook must not demand one; keying
         # this to a capability signal keeps every future model working unpatched.
-        model_requires_x = any(
-            isinstance(param, dict)
-            and param.get("role") == "x"
-            and param.get("required")
-            for param in capability.get("params", [])
+        model_requires_x = (
+            recipe_contract.requires_nonempty_predictors
+            if recipe_contract is not None
+            else family_contract.requires_nonempty_predictors
+            if family_contract is not None
+            else any(
+                isinstance(param, dict)
+                and param.get("role") == "x"
+                and param.get("required")
+                for param in capability.get("params", [])
+            )
         )
+        x = model_params.get("x", [])
+        if not isinstance(x, list) or any(not isinstance(item, str) or not item for item in x):
+            raise _fail("genesis x must be an evidence-backed column list")
         if model_requires_x:
-            x = model_params.get("x")
             if (
-                not isinstance(x, list)
-                or not x
-                or any(not isinstance(item, str) or not item for item in x)
+                not x
             ):
                 raise _fail("genesis model_params requires non-empty evidence-backed x")
-            missing_x = sorted(set(x) - set(columns))
-            if missing_x:
-                raise _fail(
-                    "genesis x contains columns absent from the verified dataset",
-                    columns=missing_x,
-                )
+        missing_x = sorted(set(x) - set(columns))
+        if missing_x:
+            raise _fail(
+                "genesis x contains columns absent from the verified dataset",
+                columns=missing_x,
+            )
         if "covariance" in model_params:
+            if family_contract is not None and not family_contract.allows_covariance:
+                raise _fail(f"genesis {model_type} does not accept OLS covariance settings")
             allowed_covariance = {str(entry["key"]) for entry in COVARIANCE_UI}
             if model_params["covariance"] not in allowed_covariance:
                 raise _fail("genesis covariance is not a registered option")
@@ -670,12 +748,54 @@ class NotebookOptionMaterializer:
                 ).payload
             except ModelOptionsError as exc:
                 raise _fail("genesis model_options failed validation", reason=exc.code) from exc
+        if recipe_contract is not None:
+            try:
+                recipe_contract.validate_input_preflight(
+                    model_params,
+                    source=self._read_recipe_preflight_source(
+                        source, recipe_contract, model_params
+                    ),
+                )
+            except RecipeValidationError as exc:
+                raise _fail(str(exc)) from exc
+        if family_contract is not None:
+            family_spec: dict[str, Any] = {
+                "model_family": model_type,
+                "branches": [
+                    {"branch_id": "notebook", "outcome": y, "predictors": list(x)}
+                ],
+            }
+            for field_name in MODEL_FAMILY_SPEC_FIELDS:
+                if field_name in model_params:
+                    family_spec[field_name] = model_params[field_name]
+            if "covariance" in model_params:
+                family_spec["covariance"] = model_params["covariance"]
+            try:
+                validated_contract = validate_model_genesis_spec(family_spec)
+                missing_family_columns = sorted(
+                    set(family_context_columns(validated_contract, family_spec)) - set(columns)
+                )
+            except OperationValidationError as exc:
+                raise _fail(str(exc)) from exc
+            if missing_family_columns:
+                raise _fail(
+                    "genesis family fields contain columns absent from the verified dataset",
+                    columns=missing_family_columns,
+                )
+        if family_builds_native_params:
+            model_params = family_contract.build_model_params(
+                family_spec,
+                {"outcome": y, "predictors": x},
+                list(x),
+                str(model_params.get("covariance", "unadjusted")),
+            )
         draft = create_genesis_draft(
             self.service.project_root,
             upload_sha256=source.upload_sha256 or "",
             filename=source.filename or "dataset.csv",
             sheet_names=tuple(source.sheet_names),
             columns=columns,
+            model_family=(recipe_contract.model_family if recipe_contract is not None else "regression"),
             notebook_provenance=provenance,
             draft_id=draft_id,
         )
@@ -693,6 +813,63 @@ class NotebookOptionMaterializer:
         except Exception:
             store.delete(draft.draft["draft_id"])
             raise
+
+    def _read_recipe_preflight_source(
+        self,
+        source: Any,
+        recipe_contract: Any,
+        model_params: Mapping[str, object],
+    ) -> pd.DataFrame:
+        """Read only a Recipe's declared columns, completely or not at all.
+
+        Evidence inspection can report a truncated sample. Admission cannot:
+        a sample cannot prove there are no later duplicate timestamps, gaps, or
+        transform-ineligible values.  This keeps the existing bounded source
+        policy while rejecting a source that exceeds it instead of inspecting a
+        prefix and treating the result as complete.
+        """
+
+        upload_sha256 = getattr(source, "upload_sha256", None)
+        if not isinstance(upload_sha256, str) or not upload_sha256:
+            raise _fail(
+                "RECIPE_PREFLIGHT_SOURCE_UNAVAILABLE: the pinned upload identity is missing"
+            )
+        try:
+            path = verify_upload(self.service.project_root, upload_sha256)
+            columns = list(dict.fromkeys(recipe_contract.source_columns(model_params)))
+            suffix = Path(getattr(source, "filename", "") or "").suffix.lower()
+            read_limit = MAX_SOURCE_ROWS + 1
+            if suffix == ".csv":
+                frame = pd.read_csv(path, usecols=columns, nrows=read_limit)
+            elif suffix in {".xlsx", ".xls"}:
+                with pd.ExcelFile(path) as workbook:
+                    sheet_names = tuple(getattr(source, "sheet_names", ()) or ())
+                    sheet = sheet_names[0] if sheet_names else workbook.sheet_names[0]
+                    frame = pd.read_excel(
+                        workbook,
+                        sheet_name=sheet,
+                        usecols=columns,
+                        nrows=read_limit,
+                    )
+            else:
+                raise ValueError(f"unsupported dataset upload type: {suffix or 'unknown'}")
+        except RecipeValidationError:
+            raise
+        except (ImportError, OSError, TypeError, UnicodeError, ValueError) as exc:
+            raise _fail(
+                "RECIPE_PREFLIGHT_SOURCE_UNAVAILABLE: the verified source could not be opened"
+            ) from exc
+        if len(frame) > MAX_SOURCE_ROWS:
+            raise _fail(
+                "RECIPE_PREFLIGHT_SOURCE_BOUNDED: the complete source exceeds the preflight row limit"
+            )
+        try:
+            verify_upload(self.service.project_root, upload_sha256)
+        except (OSError, ValueError) as exc:
+            raise _fail(
+                "RECIPE_PREFLIGHT_SOURCE_UNAVAILABLE: the verified source changed during preflight"
+            ) from exc
+        return frame
 
     def _materialize_custom_dataset(
         self,

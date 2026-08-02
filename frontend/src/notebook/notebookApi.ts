@@ -1,6 +1,5 @@
 import { apiUrl, readResponse } from "../api";
 import type { PipelineDraftResponse } from "../api";
-import type { DomainMemoryPreferences } from "./domainMemoryContracts";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
@@ -43,15 +42,6 @@ export interface NotebookContextResponse {
    * live request is progressing or hung. */
   planning_deadline_s?: number;
   [key: string]: unknown;
-}
-
-function domainMemoryQuery(preferences?: DomainMemoryPreferences): string {
-  if (!preferences) return "";
-  const params = new URLSearchParams({
-    domain_memory_use: String(preferences.cross_project_domain_memory_use),
-    domain_memory_iteration: String(preferences.cross_project_domain_memory_iteration),
-  });
-  return `?${params.toString()}`;
 }
 
 export interface NotebookOptionsResponse {
@@ -184,11 +174,10 @@ export function updateNotebookFocus(
 export function compileNotebookContext(
   projectRoot: string,
   notebookId: string,
-  preferences?: DomainMemoryPreferences,
 ): Promise<NotebookContextResponse> {
   return readNotebookResponse<NotebookContextResponse>(
     projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/context/compile${domainMemoryQuery(preferences)}`,
+    `/notebooks/${encodeURIComponent(notebookId)}/context/compile`,
     { method: "POST" },
   );
 }
@@ -197,12 +186,11 @@ export function proposeNotebookOptions(
   projectRoot: string,
   notebookId: string,
   count = 3,
-  preferences?: DomainMemoryPreferences,
   planning?: NotebookPlanningRequest,
 ): Promise<NotebookOptionsResponse> {
   return readNotebookResponse<NotebookOptionsResponse>(
     projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/options/propose${domainMemoryQuery(preferences)}`,
+    `/notebooks/${encodeURIComponent(notebookId)}/options/propose`,
     {
       method: "POST",
       headers: jsonHeaders,
@@ -230,11 +218,10 @@ export function cancelNotebookPlanning(
 export function listNotebookOptions(
   projectRoot: string,
   notebookId: string,
-  preferences?: DomainMemoryPreferences,
 ): Promise<NotebookOptionsResponse> {
   return readNotebookResponse<NotebookOptionsResponse>(
     projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/options${domainMemoryQuery(preferences)}`,
+    `/notebooks/${encodeURIComponent(notebookId)}/options`,
   );
 }
 

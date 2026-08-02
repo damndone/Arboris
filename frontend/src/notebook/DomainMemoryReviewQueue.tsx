@@ -18,10 +18,17 @@ export function DomainMemoryReviewQueue({ candidates, onReview }: DomainMemoryRe
             <li key={`${candidate.candidate_id}@${candidate.revision}`}>
               <p>{candidate.compact_lesson}</p>
               <small>{`${candidate.memory_kind} · sources ${candidate.source_summary_refs.join(", ")}`}</small>
-              <div>
-                <button type="button" data-testid={`domain-memory-review-approve-${candidate.candidate_id}`} onClick={() => onReview(candidate.candidate_id, "approved", candidate.revision)}>Approve memory</button>
-                <button type="button" data-testid={`domain-memory-review-reject-${candidate.candidate_id}`} onClick={() => onReview(candidate.candidate_id, "rejected", candidate.revision)}>Reject</button>
-              </div>
+              {candidate.status === "needs_review" ? (
+                <div>
+                  <button type="button" data-testid={`domain-memory-review-approve-${candidate.candidate_id}`} onClick={() => onReview(candidate.candidate_id, "approved", candidate.revision)}>Approve memory</button>
+                  <button type="button" data-testid={`domain-memory-review-reject-${candidate.candidate_id}`} onClick={() => onReview(candidate.candidate_id, "rejected", candidate.revision)}>Reject</button>
+                </div>
+              ) : (
+                <div>
+                  <small>Awaiting readiness review. It cannot be approved yet.</small>
+                  <button type="button" data-testid={`domain-memory-review-reject-${candidate.candidate_id}`} onClick={() => onReview(candidate.candidate_id, "rejected", candidate.revision)}>Discard candidate</button>
+                </div>
+              )}
             </li>
           ))}
         </ul>

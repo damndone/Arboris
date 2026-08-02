@@ -39,11 +39,12 @@ class DomainMemoryService:
     def retrieve(
         self, *, requester: MemoryScope, global_preferences: DomainMemoryPreferences, facts: Mapping[str, Any], now: str,
         override: DomainMemoryRequestOverride | None = None, max_entries: int = 8, max_bytes: int = 8192,
+        vocabulary_version: str | None = None,
     ) -> DomainMemoryRetrieval:
         effective = self.effective_preferences(global_preferences, override)
         return retrieve_domain_memory(
             self.store, requester=requester, preferences=effective, facts=facts, now=now,
-            max_entries=max_entries, max_bytes=max_bytes,
+            max_entries=max_entries, max_bytes=max_bytes, vocabulary_version=vocabulary_version,
         )
 
     def create_candidate(
@@ -79,6 +80,8 @@ class DomainMemoryService:
             recommended_effect_kind=candidate.recommended_effect_kind, recommended_target_refs=candidate.recommended_target_refs,
             source_summary_refs=candidate.source_summary_refs, evidence_status="observed_once", review_after=review_after,
             supersedes_revision=revision - 1 if revision > 1 else None, conflicts_with=(), created_by=approver_id,
+            apply_mode=candidate.apply_mode, vocabulary_version=candidate.vocabulary_version,
+            verifier=candidate.verifier, last_validated_at=candidate.last_validated_at, expires_at=candidate.expires_at,
         )
         self.store.append_content(content)
         current = self.store.current_approval(content.memory_id)

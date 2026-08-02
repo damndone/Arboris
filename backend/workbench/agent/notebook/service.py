@@ -32,6 +32,8 @@ from ...contracts.agent.notebook_option import (
     NotebookOptionRevision,
     NotebookOptionRevisionV11,
     NotebookOptionRevisionV12,
+    NotebookOptionRevisionV13,
+    NotebookOptionRevisionV14,
     OptionExecution,
     RecommendationDecision,
     RecommendationDecisionV11,
@@ -99,6 +101,10 @@ from .freshness import (
     assert_executable,
     evaluate_option_freshness,
     freshness_details,
+)
+from .memory_defaults import (
+    MemoryDefaultApplicationError,
+    validate_memory_default_sources,
 )
 from .proposal import OptionDraft, TypedProposal
 from .recommendation import (
@@ -1002,6 +1008,8 @@ class NotebookService:
                 )
                 and getattr(current, "capability_resolution_binding_ref", None)
                 == (binding.content_digest if binding is not None else None)
+                and tuple(getattr(current, "memory_default_sources", ()))
+                == proposal.memory_default_sources
             )
             if not same_semantics:
                 raise OptionBatchInvalid(
@@ -1049,16 +1057,29 @@ class NotebookService:
             else f"batch_{uuid4().hex}"
         )
         created_at = _now()
-        revisions: list[NotebookOptionRevision | NotebookOptionRevisionV11] = []
+        revisions: list[
+            NotebookOptionRevision
+            | NotebookOptionRevisionV11
+            | NotebookOptionRevisionV12
+            | NotebookOptionRevisionV13
+            | NotebookOptionRevisionV14
+        ] = []
         for draft, (proposal, contract, risk_level), binding in zip(
             drafts, prepared, bindings
         ):
             option_id = draft.option_id or f"opt_{uuid4().hex}"
             revision: NotebookOptionRevision | NotebookOptionRevisionV11
             if recommendation_decision is not None:
-                revision_type = (
-                    NotebookOptionRevisionV12 if binding is not None else NotebookOptionRevisionV11
-                )
+                if binding is not None:
+                    revision_type = NotebookOptionRevisionV12
+                elif proposal.memory_default_sources:
+                    revision_type = (
+                        NotebookOptionRevisionV14
+                        if all(source.has_display_metadata for source in proposal.memory_default_sources)
+                        else NotebookOptionRevisionV13
+                    )
+                else:
+                    revision_type = NotebookOptionRevisionV11
                 revision_kwargs = {
                     "option_id": option_id,
                     "option_revision": 1,
@@ -1093,6 +1114,8 @@ class NotebookService:
                             ),
                         }
                     )
+                if proposal.memory_default_sources:
+                    revision_kwargs["memory_default_sources"] = proposal.memory_default_sources
                 revision = revision_type(**revision_kwargs)
             else:
                 revision = NotebookOptionRevision(
@@ -1254,7 +1277,13 @@ class NotebookService:
             )
         batch = batch_id or recommendation_decision.batch_id
         created_at = _now()
-        revisions: list[NotebookOptionRevision | NotebookOptionRevisionV11] = []
+        revisions: list[
+            NotebookOptionRevision
+            | NotebookOptionRevisionV11
+            | NotebookOptionRevisionV12
+            | NotebookOptionRevisionV13
+            | NotebookOptionRevisionV14
+        ] = []
         stored: list[StoredRevision | None] = []
         for draft, (proposal, contract, risk_level), prior, binding in zip(
             drafts, prepared, existing, bindings
@@ -1292,9 +1321,16 @@ class NotebookService:
                 revision_number = current.option_revision + 1
                 lifecycle_status = prior.lifecycle_status
                 supersedes = current.option_revision
-            revision_type = (
-                NotebookOptionRevisionV12 if binding is not None else NotebookOptionRevisionV11
-            )
+            if binding is not None:
+                revision_type = NotebookOptionRevisionV12
+            elif proposal.memory_default_sources:
+                revision_type = (
+                    NotebookOptionRevisionV14
+                    if all(source.has_display_metadata for source in proposal.memory_default_sources)
+                    else NotebookOptionRevisionV13
+                )
+            else:
+                revision_type = NotebookOptionRevisionV11
             revision_kwargs = {
                 "option_id": option_id,
                 "option_revision": revision_number,
@@ -1330,6 +1366,8 @@ class NotebookService:
                         ),
                     }
                 )
+            if proposal.memory_default_sources:
+                revision_kwargs["memory_default_sources"] = proposal.memory_default_sources
             revision = revision_type(**revision_kwargs)
             revisions.append(revision)
             stored.append(
@@ -1500,25 +1538,64 @@ class NotebookService:
                 },
             )
 
-        revision = replace(
-            current,
-            option_revision=current.option_revision + 1,
-            generation_context_id=context.context_id,
-            generation_context_hash=generation_context_hash(context),
-            freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
-            typed_proposal_id=proposal.proposal_id,
-            typed_proposal_revision=proposal.proposal_revision,
-            artifact_contract=contract,
-            rationale=draft.rationale,
-            assumptions=tuple(draft.assumptions),
-            risk_level=risk_level,
-            lifecycle_status=view.lifecycle_status,
-            freshness_status=FRESH,
-            validation_status="valid",
-            rank=draft.rank,
-            created_at=_now(),
-            supersedes_option_revision=current.option_revision,
-        )
+        revision_values = {
+            "option_revision": current.option_revision + 1,
+            "generation_context_id": context.context_id,
+            "generation_context_hash": generation_context_hash(context),
+            "freshness_dependency_fingerprint": freshness_dependency_fingerprint(context),
+            "typed_proposal_id": proposal.proposal_id,
+            "typed_proposal_revision": proposal.proposal_revision,
+            "artifact_contract": contract,
+            "rationale": draft.rationale,
+            "assumptions": tuple(draft.assumptions),
+            "risk_level": risk_level,
+            "lifecycle_status": view.lifecycle_status,
+            "freshness_status": FRESH,
+            "validation_status": "valid",
+            "rank": draft.rank,
+            "created_at": _now(),
+            "supersedes_option_revision": current.option_revision,
+        }
+        if isinstance(current, NotebookOptionRevisionV12):
+            revision = replace(current, **revision_values)
+        elif isinstance(current, NotebookOptionRevisionV11):
+            v11_values = {
+                "option_id": current.option_id,
+                "notebook_id": current.notebook_id,
+                "run_family_id": current.run_family_id,
+                "batch_id": current.batch_id,
+                "evidence_refs": current.evidence_refs,
+                "comparative_claims": current.comparative_claims,
+                "recommendation_decision_id": current.recommendation_decision_id,
+                "recommendation_status": current.recommendation_status,
+                **revision_values,
+            }
+            if proposal.memory_default_sources:
+                revision_type = (
+                    NotebookOptionRevisionV14
+                    if all(source.has_display_metadata for source in proposal.memory_default_sources)
+                    else NotebookOptionRevisionV13
+                )
+                revision = revision_type(
+                    **v11_values,
+                    memory_default_sources=proposal.memory_default_sources,
+                )
+            else:
+                revision = NotebookOptionRevisionV11(**v11_values)
+        else:
+            if proposal.memory_default_sources:
+                raise OptionValidationFailed(
+                    "a legacy option cannot adopt a memory-derived default through revalidation",
+                    option_id=option_id,
+                    operation_id=proposal.operation_id,
+                    validation_issues=[
+                        {
+                            "code": "MEMORY_DEFAULT_LEGACY_REVISION_UNSUPPORTED",
+                            "detail": "generate a new evidence-backed option instead",
+                        }
+                    ],
+                )
+            revision = replace(current, **revision_values)
         self._append_revision(
             notebook_id,
             StoredRevision(
@@ -3116,6 +3193,35 @@ class NotebookService:
                     batch_id=batch_id,
                 )
 
+    def _assert_current_memory_default_sources(
+        self,
+        view: OptionView,
+        context: NotebookPlanningContextV1,
+    ) -> None:
+        """Require a v1.3 default's immutable source to still be current.
+
+        Memory is intentionally excluded from the generic freshness fingerprint:
+        a visible hint must not make unrelated option context stale. A source
+        that actually changed a Draft is different, so it receives this narrow
+        materialization-time fail-closed check.
+        """
+
+        proposal = view.current_stored_revision.proposal
+        if not proposal.memory_default_sources:
+            return
+        try:
+            validate_memory_default_sources(
+                proposal,
+                context.domain_memory_projection,
+            )
+        except MemoryDefaultApplicationError as error:
+            raise OptionRevisionStale(
+                "a server-applied memory default is no longer current; replan before materializing",
+                option_id=view.option_id,
+                option_revision=view.current_revision.option_revision,
+                reason="memory_default_source_not_current",
+            ) from error
+
     def _published_artifact_types(
         self,
         capability_id: str,
@@ -3244,6 +3350,32 @@ class NotebookService:
                         {"code": "CUSTOM_PROPOSAL_BINDING_INVALID", "detail": str(error)}
                     ],
                 ) from error
+        if proposal.memory_default_sources and binding is not None:
+            raise OptionValidationFailed(
+                "a memory-default revision cannot combine with a capability binding without an explicit combined contract",
+                option_id=draft.option_id,
+                operation_id=proposal.operation_id,
+                validation_issues=[
+                    {
+                        "code": "MEMORY_DEFAULT_CAPABILITY_BINDING_UNSUPPORTED",
+                        "detail": "memory defaults are only admitted for server-registered native targets",
+                    }
+                ],
+            )
+        try:
+            validate_memory_default_sources(
+                proposal,
+                context.domain_memory_projection,
+            )
+        except MemoryDefaultApplicationError as error:
+            raise OptionValidationFailed(
+                "memory-derived proposal default is no longer current",
+                option_id=draft.option_id,
+                operation_id=proposal.operation_id,
+                validation_issues=[
+                    {"code": "MEMORY_DEFAULT_SOURCE_INVALID", "detail": str(error)}
+                ],
+            ) from error
         try:
             definition = self.registry.require(
                 proposal.operation_id, proposal.operation_version
@@ -3270,7 +3402,10 @@ class NotebookService:
                 validation_issues=[{"code": "OPERATION_VALIDATION", "detail": str(error)}],
             ) from error
         try:
-            self._validate_target_model_options(proposal)
+            self._validate_target_model_options(
+                proposal,
+                projection_source=notebook.projection_source,
+            )
         except Exception as error:
             code = getattr(error, "code", "MODEL_OPTIONS_PATCH_INVALID")
             raise OptionValidationFailed(
@@ -3383,7 +3518,12 @@ class NotebookService:
             canonical_changes["expected_artifacts"] = list(expected_artifacts)
         return replace(proposal, changes=canonical_changes)
 
-    def _validate_target_model_options(self, proposal: TypedProposal) -> None:
+    def _validate_target_model_options(
+        self,
+        proposal: TypedProposal,
+        *,
+        projection_source: Any,
+    ) -> None:
         """Validate model-specific options before persisting an Option revision."""
 
         changes = proposal.changes
@@ -3420,6 +3560,7 @@ class NotebookService:
             return
 
         if proposal.operation_id == "model.genesis":
+            from ..recipe_contracts import recipe_contract_for_model_type
             from ...model_options import bind_new_model_options
 
             model_params = changes.get("model_params") or {}
@@ -3443,6 +3584,15 @@ class NotebookService:
                         {"model_type": model_type, "model_options": payload}
                     )
                     return
+                recipe_contract = recipe_contract_for_model_type(model_type)
+                if recipe_contract is not None:
+                    source_hash = getattr(projection_source, "upload_sha256", None)
+                    payload = recipe_contract.bind_server_owned_options(
+                        payload,
+                        source_reference=f"upload:{source_hash}"
+                        if isinstance(source_hash, str) and source_hash
+                        else "",
+                    )
                 bind_new_model_options(model_type, payload)
 
     def _append_revision(self, notebook_id: str, stored: StoredRevision) -> None:

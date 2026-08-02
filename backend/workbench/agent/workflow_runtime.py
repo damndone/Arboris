@@ -46,7 +46,11 @@ from ..statistical_exploration import (
 from ..services.draft_materialization import create_genesis_draft
 from ..services.draft_service import execute_genesis_draft
 from .workflow import WorkflowDraft, WorkflowExecutionError, WorkflowStepResult
-from .workflow_contracts import workflow_dispatcher_key
+from .workflow_contracts import (
+    family_context_columns,
+    model_family_contract,
+    workflow_dispatcher_key,
+)
 
 
 _NUMERIC_DERIVATION_SCHEMA = "workflow-derived-numeric.v1"
@@ -812,7 +816,9 @@ def _execute_model_genesis_branches(
     # tied the executor to one plan's length and ordering.
     branch_spec = step.spec if step is not None else draft.steps[7].spec
     model_family = str(branch_spec["model_family"])
-    primary_model_artifact_id = f"{model_family}_1"
+    family_contract = model_family_contract(model_family)
+    family_source_columns = family_context_columns(family_contract, branch_spec)
+    primary_model_artifact_id = family_contract.expected_artifacts[0]
     workflow_step_id = str(step.step_id) if step is not None else "legacy-model-genesis"
     for branch in branch_spec["branches"]:
         branch_id = str(branch["branch_id"])
@@ -828,8 +834,10 @@ def _execute_model_genesis_branches(
             )
         except ModelTermError as exc:
             raise WorkflowExecutionError(
-                f"OLS branch {branch_id} derived terms: {exc}"
+                f"{model_family} branch {branch_id} derived terms: {exc}"
             ) from exc
+        if family_contract.validate_branch_frame is not None:
+            family_contract.validate_branch_frame(branch_frame, branch)
         # A branch can have no branch-local dummy/polynomial expansion and
         # still depend on an upstream numeric derivation.  Reusing the original
         # upload in that case would silently discard a declared column before
@@ -878,11 +886,7 @@ def _execute_model_genesis_branches(
                     or (
                         str(branch["outcome"]),
                         *[str(c) for c in branch["predictors"]],
-                        *[
-                            str(column)
-                            for column in (branch_spec.get("entity_col"), branch_spec.get("time_col"))
-                            if column
-                        ],
+                        *family_source_columns,
                     )
                 ),
                 options={"quantile_method": STATA_QUANTILE_METHOD},
@@ -908,17 +912,9 @@ def _execute_model_genesis_branches(
                 "covariance": branch_covariance,
                 "workflow_plan_fingerprint": draft.plan_fingerprint,
             }
-            model_params: dict[str, Any] = {
-                "model_type": model_family,
-                "y": branch["outcome"],
-                "x": list(branch_predictors),
-                "covariance": branch_covariance,
-            }
-            if model_family == "ols":
-                model_params["model_options"] = {"covariance": branch_covariance}
-            else:
-                model_params["entity_col"] = branch_spec.get("entity_col")
-                model_params["time_col"] = branch_spec.get("time_col")
+            model_params = family_contract.build_model_params(
+                branch_spec, branch, list(branch_predictors), branch_covariance
+            )
             stored = create_genesis_draft(
                 root,
                 upload_sha256=branch_upload_sha,
@@ -955,23 +951,26 @@ def _execute_model_genesis_branches(
             raise WorkflowExecutionError(f"{model_family} branch {branch_id} did not complete")
         run_artifacts = _read_artifacts_index(run_root).get("artifacts", [])
         ids = [str(item["artifact_id"]) for item in run_artifacts if item.get("artifact_id")]
-        if primary_model_artifact_id not in ids:
+        missing_artifacts = sorted(set(family_contract.expected_artifacts) - set(ids))
+        if missing_artifacts:
             raise WorkflowExecutionError(
-                f"{model_family} branch {branch_id} is missing model evidence"
+                f"{model_family} branch {branch_id} is missing required evidence: "
+                + ", ".join(missing_artifacts)
             )
-        if model_family == "ols" and "diagnostic_summary" not in ids:
-            raise WorkflowExecutionError(f"OLS branch {branch_id} is missing diagnostics")
         model_result = read_json(
             run_root / "model_results" / f"{primary_model_artifact_id}.json"
         )
-        if "ci_lower" not in json.dumps(model_result) or "ci_upper" not in json.dumps(model_result):
+        if (
+            family_contract.result_shape == "coefficient_intervals"
+            and ("ci_lower" not in json.dumps(model_result) or "ci_upper" not in json.dumps(model_result))
+        ):
             raise WorkflowExecutionError(
                 f"{model_family} branch {branch_id} is missing coefficient confidence intervals"
             )
         missing_figures = sorted(required_branch_figures(branch_predictors) - set(ids))
-        if model_family == "ols" and missing_figures:
+        if family_contract.requires_branch_figures and missing_figures:
             raise WorkflowExecutionError(
-                f"OLS branch {branch_id} is missing residual/fitted diagnostics: "
+                f"{model_family} branch {branch_id} is missing required diagnostics: "
                 + ", ".join(missing_figures)
             )
         artifact_ids.extend(f"{run_id}:{artifact_id}" for artifact_id in ids)
@@ -987,8 +986,10 @@ def _execute_model_genesis_branches(
                     # recorded here the refit could only guess, and would
                     # report inference for a model nobody estimated.
                     "covariance": branch_covariance,
-                    "entity_col": branch_spec.get("entity_col"),
-                    "time_col": branch_spec.get("time_col"),
+                    **{
+                        field_name: branch_spec.get(field_name)
+                        for field_name in family_contract.context_spec_fields
+                    },
                     "outcome": str(branch["outcome"]),
                     "predictors": [str(item) for item in branch["predictors"]],
                     "categorical": [str(item) for item in branch.get("categorical", []) or []],

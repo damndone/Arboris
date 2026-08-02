@@ -323,15 +323,28 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
         fact_count: includedFacts.length,
         excluded_count: excludedIds.size,
         report_record_id: record.id,
+        status: "completed",
       });
     } catch (err) {
       // Leaving the previously restored report on screen next to a failure
       // invites reading it as this attempt's output. It is not lost -- it is
       // still in Report history -- but it must not stand in for a result that
       // was never produced.
+      const failure = err instanceof Error ? err.message : "Report generation failed";
+      appendAiActivity(historyRoot, {
+        kind: "report_generate",
+        id: makeActivityId(),
+        at: new Date().toISOString(),
+        run_id: table.scope.run_id,
+        instruction,
+        fact_count: includedFacts.length,
+        excluded_count: excludedIds.size,
+        status: "error",
+        error: failure.length <= 500 ? failure : `${failure.slice(0, 499)}…`,
+      });
       if (activeRunIdRef.current === runId) {
         setCurrent(null);
-        setError(err instanceof Error ? err.message : "Report generation failed");
+        setError(failure);
       }
     } finally {
       setGeneratingRunId((currentRunId) => currentRunId === runId ? null : currentRunId);

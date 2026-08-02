@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from .candidate_store import MemoryCandidateStore
+from .candidate_store import MemoryCandidateStore, MemoryCandidateStoreConflict
 from .contracts import MemoryCandidate
 from .curator_contracts import AcceptedAnalysisSummary
 from .curator_eligibility import CuratorEligibilityDecision, CuratorPolicy, check_curator_eligibility
@@ -35,11 +35,35 @@ class CuratorRuntime:
                 recommended_target_refs=observation.recommended_target_refs,
                 source_summary_refs=observation.source_summary_refs,
                 created_from_manifest_ref=summary.summary_ref,
-                status="proposed",
+                # Curator eligibility is the bounded readiness check for this
+                # producer. Its output is therefore ready for the existing
+                # explicit user-review boundary, not an inert intermediate
+                # state that the review API cannot approve.
+                status="needs_review",
                 created_at=summary.created_at,
             )
-            created.append(self.candidate_store.append(candidate))
+            created.append(self._append_reviewable_candidate(candidate))
         return tuple(created)
+
+    def _append_reviewable_candidate(self, candidate: MemoryCandidate) -> MemoryCandidate:
+        """Append a reviewable candidate, progressing a matching legacy record."""
+
+        try:
+            return self.candidate_store.append(candidate)
+        except MemoryCandidateStoreConflict:
+            current = self.candidate_store.latest(candidate.candidate_id)
+            if current.status == "proposed" and current == replace(candidate, status="proposed"):
+                try:
+                    return self.candidate_store.transition(
+                        candidate.candidate_id,
+                        expected_revision=current.revision,
+                        status="needs_review",
+                    )
+                except MemoryCandidateStoreConflict:
+                    current = self.candidate_store.latest(candidate.candidate_id)
+            if current.status == "needs_review" and replace(current, revision=candidate.revision) == candidate:
+                return current
+            raise
 
 
 __all__ = ["CuratorRuntime"]

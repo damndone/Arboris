@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotebookRouteView } from "./NotebookRouteView";
 import { readCanonicalFixture } from "./fixtures/canonicalMocks";
 import { uploadDataset } from "../api";
+import { loadAiActivity } from "../aiActivity/aiActivityLog";
 import {
   AgentSurfaceContext,
   type AgentSurfaceContextValue,
@@ -32,6 +33,10 @@ import {
   updateNotebookFocus,
   type NotebookMaterializationResponse,
 } from "./notebookApi";
+import {
+  listDomainMemoryCandidates,
+  reviewDomainMemoryCandidate,
+} from "./domainMemoryApi";
 
 vi.mock("./notebookApi", () => ({
   cancelNotebookPlanning: vi.fn(),
@@ -46,6 +51,11 @@ vi.mock("./notebookApi", () => ({
   proposeNotebookOptions: vi.fn(),
   recordNotebookDecision: vi.fn(),
   updateNotebookFocus: vi.fn(),
+}));
+
+vi.mock("./domainMemoryApi", () => ({
+  listDomainMemoryCandidates: vi.fn(),
+  reviewDomainMemoryCandidate: vi.fn(),
 }));
 
 vi.mock("../api", () => ({
@@ -117,6 +127,7 @@ const context = {
 describe("NotebookRouteView", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    window.localStorage.clear();
     vi.mocked(uploadDataset).mockResolvedValue({ sha256: "a".repeat(64), filename: "data.csv" });
     vi.mocked(ensureNotebookProjection).mockResolvedValue({
       notebook_id: "nb_1",
@@ -164,6 +175,103 @@ describe("NotebookRouteView", () => {
       attempt_id: "attempt-test",
       status: "cancelled",
     });
+    vi.mocked(listDomainMemoryCandidates).mockResolvedValue({
+      candidates: [],
+      memory_authority: "server_owned",
+    });
+    vi.mocked(reviewDomainMemoryCandidate).mockResolvedValue({
+      automatic_execution: false,
+    });
+  });
+
+  it("loads the current project's candidate queue and dispatches explicit review", async () => {
+    vi.mocked(listDomainMemoryCandidates).mockResolvedValue({
+      candidates: [{
+        candidate_id: "candidate-notebook",
+        revision: 3,
+        status: "needs_review",
+        memory_kind: "workflow_lesson",
+        compact_lesson: "Use the declared time index.",
+        source_summary_refs: ["binding-1"],
+      }],
+      memory_authority: "server_owned",
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId("domain-memory-review-queue")).toBeInTheDocument();
+    expect(listDomainMemoryCandidates).toHaveBeenCalledWith("/tmp/project");
+    fireEvent.click(screen.getByTestId("domain-memory-review-approve-candidate-notebook"));
+
+    await waitFor(() => expect(reviewDomainMemoryCandidate).toHaveBeenCalledWith(
+      "/tmp/project",
+      "candidate-notebook",
+      expect.objectContaining({
+        decision: "approved",
+        expected_revision: 3,
+        actor_id: "local-user",
+      }),
+    ));
+    await waitFor(() => expect(listDomainMemoryCandidates).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId("domain-memory-review-status")).toBeNull();
+  });
+
+  it("keeps a candidate queue failure visible without inventing a local fallback", async () => {
+    vi.mocked(listDomainMemoryCandidates).mockRejectedValue(
+      Object.assign(new Error("candidate store unavailable"), {
+        code: "DOMAIN_MEMORY_CANDIDATES_UNAVAILABLE",
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId("domain-memory-candidate-error")).toHaveTextContent(
+      "DOMAIN_MEMORY_CANDIDATES_UNAVAILABLE",
+    );
+    expect(screen.queryByTestId("domain-memory-review-queue")).toBeNull();
+  });
+
+  it("does not render a former project's queue after the project changes", async () => {
+    vi.mocked(listDomainMemoryCandidates).mockImplementation(async (root) => {
+      if (root === "/tmp/project-a") {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return {
+          candidates: [{
+            candidate_id: "candidate-old",
+            revision: 1,
+            status: "needs_review",
+            memory_kind: "workflow_lesson",
+            compact_lesson: "Old project only.",
+            source_summary_refs: [],
+          }],
+          memory_authority: "server_owned",
+        };
+      }
+      return { candidates: [], memory_authority: "server_owned" };
+    });
+
+    const view = render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+        <NotebookRouteView projectRoot="/tmp/project-a" activeRunId="run_head" />
+      </MemoryRouter>,
+    );
+    view.rerender(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+        <NotebookRouteView projectRoot="/tmp/project-b" activeRunId="run_head" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(listDomainMemoryCandidates).toHaveBeenCalledWith("/tmp/project-b"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Old project only.")).toBeNull();
   });
 
   it("creates a notebook, compiles context, proposes options, and renders the real surface", async () => {
@@ -194,12 +302,88 @@ describe("NotebookRouteView", () => {
       "/tmp/project",
       "nb_1",
       3,
-      undefined,
       {
         attemptId: expect.stringMatching(/^attempt_/),
         signal: expect.any(AbortSignal),
       },
     );
+  });
+
+  it("accepts a valid v2 domain-memory projection when no memory is eligible", async () => {
+    const memoryContext = {
+      ...context,
+      domain_memory_projection: {
+        contract_version: "domain-memory-context-input/v3" as const,
+        retrieval_ref: "retrieval-memory-empty",
+        scope_ref: "scope-memory-private",
+        outcome: "empty" as const,
+        reason: "no_eligible_memory",
+        entries: [],
+        omissions: [{
+          memory_id: "memory-unadjusted",
+          revision: 1,
+          reason: "predicate_mismatch",
+        }],
+        bounded: true,
+        preference_ref: "preference-memory",
+        memory_authority: "non_authoritative" as const,
+      },
+    };
+    vi.mocked(compileNotebookContext).mockResolvedValue(memoryContext);
+    vi.mocked(listNotebookOptions).mockResolvedValue({
+      context: memoryContext,
+      options: [],
+      trace_id: "trace_memory_empty",
+    });
+    vi.mocked(proposeNotebookOptions).mockResolvedValue({
+      context: memoryContext,
+      options: [],
+      trace_id: "trace_memory_empty",
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("notebook-surface")).toHaveAttribute("data-state", "empty"),
+    );
+    expect(screen.queryByTestId("notebook-error")).toBeNull();
+  });
+
+  it("opens shared Settings through a navigation intent instead of local memory switches", async () => {
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    await screen.findByTestId("notebook-manage-memory");
+    fireEvent.click(screen.getByTestId("notebook-manage-memory"));
+
+    expect(screen.getByTestId("location-search")).toHaveTextContent('"memory_settings":"1"');
+    expect(screen.getByTestId("location-search")).not.toHaveTextContent("domain_memory_use");
+  });
+
+  it("opens shared Settings directly when the host provides the memory-settings action", async () => {
+    const onOpenMemorySettings = vi.fn();
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+        <NotebookRouteView
+          projectRoot="/tmp/project"
+          activeRunId="run_head"
+          onOpenMemorySettings={onOpenMemorySettings}
+        />
+      </MemoryRouter>,
+    );
+
+    await screen.findByTestId("notebook-manage-memory");
+    fireEvent.click(screen.getByTestId("notebook-manage-memory"));
+
+    expect(onOpenMemorySettings).toHaveBeenCalledOnce();
   });
 
   it("renders a typed API failure without pretending the notebook is empty", async () => {
@@ -835,6 +1019,14 @@ describe("NotebookRouteView", () => {
     expect(attemptId).toMatch(/^attempt_/);
     expect(screen.queryByTestId("notebook-planning-progress")).toBeNull();
     expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument();
+    expect(loadAiActivity("/tmp/project")).toEqual([
+      expect.objectContaining({
+        kind: "notebook_plan",
+        notebook_id: "nb_1",
+        status: "cancelled",
+        error: "NOTEBOOK_PLANNING_CANCELLED",
+      }),
+    ]);
 
     resolvePlanning({ context, options: [late], trace_id: "trace_1" });
     await Promise.resolve();
@@ -913,6 +1105,15 @@ describe("NotebookRouteView", () => {
         "NOTEBOOK_PLANNING_TIMEOUT",
       ),
     );
+    expect(loadAiActivity("/tmp/project")).toEqual([
+      expect.objectContaining({
+        kind: "notebook_plan",
+        notebook_id: "nb_1",
+        interaction_mode: "plan",
+        status: "error",
+        error: "NOTEBOOK_PLANNING_TIMEOUT",
+      }),
+    ]);
     expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument();
     expect(screen.getByTestId("notebook-retry-planning")).toHaveTextContent("Retry");
   });

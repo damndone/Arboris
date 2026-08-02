@@ -139,6 +139,7 @@ function ActivityRow({
     return <EventActivityRow record={record} stamp={stamp} openNavigation={openNavigation} />;
   }
   if (record.kind === "report_generate") {
+    const failed = record.status === "error";
     return (
       <div
         data-testid="ai-activity-report"
@@ -148,8 +149,36 @@ function ActivityRow({
           {stamp} · report{record.model ? ` · ${record.model}` : ""} · run{" "}
           {record.run_id} · {record.fact_count} facts
           {record.excluded_count > 0 ? ` · ${record.excluded_count} excluded` : ""}
+          {failed ? " · failed" : ""}
         </div>
         <div style={{ marginTop: 3 }}>{record.instruction}</div>
+        {failed && (
+          <div style={{ marginTop: 3, color: "var(--danger, #b00020)" }}>
+            {record.error ?? "Report generation failed"}
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (record.kind === "notebook_plan") {
+    const terminal = record.status === "completed"
+      ? `${record.option_count ?? 0} option${record.option_count === 1 ? "" : "s"}`
+      : record.status === "cancelled" ? "cancelled" : "failed";
+    return (
+      <div
+        data-testid="ai-activity-notebook-plan"
+        style={{ border: "1px solid var(--separator)", borderRadius: 6, padding: "6px 10px" }}
+      >
+        <div style={{ color: "var(--label-tertiary)", fontSize: 10.5 }}>
+          {stamp} · Notebook {record.interaction_mode} · {terminal}
+          {record.trace_id ? ` · trace ${record.trace_id}` : ""}
+        </div>
+        <div style={{ fontWeight: 600, margin: "3px 0" }}>{record.goal}</div>
+        {record.status !== "completed" && (
+          <div style={{ color: "var(--danger, #b00020)" }}>
+            {record.error ?? "Notebook planning failed"}
+          </div>
+        )}
       </div>
     );
   }

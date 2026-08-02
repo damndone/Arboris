@@ -20,4 +20,17 @@ describe("DomainMemoryReviewQueue", () => {
     expect(onReview).toHaveBeenCalledWith("candidate-1", "approved", 2);
     expect(screen.queryByText(/run analysis/i)).not.toBeInTheDocument();
   });
+
+  it("does not present a proposed candidate as ready for user approval", () => {
+    render(
+      <DomainMemoryReviewQueue
+        candidates={[{ candidate_id: "candidate-proposed", revision: 1, status: "proposed", memory_kind: "workflow_lesson", compact_lesson: "Await independent readiness review.", source_summary_refs: ["binding-1"] }]}
+        onReview={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/awaiting readiness review/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("domain-memory-review-approve-candidate-proposed")).not.toBeInTheDocument();
+    expect(screen.getByTestId("domain-memory-review-reject-candidate-proposed")).toHaveTextContent("Discard candidate");
+  });
 });

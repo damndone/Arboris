@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { uploadDataset } from "../api";
+import {
+  appendAiActivity,
+  makeActivityId,
+  type NotebookPlanActivityRecord,
+} from "../aiActivity/aiActivityLog";
 
 import {
   cancelNotebookPlanning,
@@ -22,6 +27,10 @@ import {
   type NotebookInteractionMode,
   type NotebookRecord,
 } from "./notebookApi";
+import {
+  listDomainMemoryCandidates,
+  reviewDomainMemoryCandidate,
+} from "./domainMemoryApi";
 import { NotebookSurface } from "./NotebookSurface";
 import { useAgentSurfaceOptional } from "../workbench/agent/AgentSurfaceContext";
 import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
@@ -45,7 +54,7 @@ import {
   type TraceEvent,
 } from "./contracts";
 import type {
-  DomainMemoryPreferences,
+  DomainMemoryCandidate,
   DomainMemoryRetrievalProjection,
 } from "./domainMemoryContracts";
 
@@ -59,6 +68,11 @@ interface ActivePlanningRequest {
   attemptId: string;
   controller: AbortController;
   promise: Promise<NotebookPlanningResponse>;
+  projectRoot: string;
+  notebookId: string;
+  interactionMode: NotebookInteractionMode;
+  goal: string;
+  activityRecorded: boolean;
   /**
    * When this planning attempt actually began, in epoch milliseconds.
    *
@@ -81,14 +95,13 @@ function proposeNotebookOptionsOnce(
   projectRoot: string,
   notebookId: string,
   refreshToken: number,
-  preferences: DomainMemoryPreferences | undefined,
   interactionMode: NotebookInteractionMode,
+  goal: string,
 ): ActivePlanningRequest {
   const maxOptions = interactionMode === "action" ? 1 : 3;
   const scopeKey = JSON.stringify({
     projectRoot,
     notebookId,
-    preferences: preferences ?? null,
     interactionMode,
   });
   const requestKey = `${scopeKey}:${refreshToken}`;
@@ -99,21 +112,21 @@ function proposeNotebookOptionsOnce(
     `${Date.now()}_${Math.random().toString(16).slice(2)}`
   }`;
   const controller = new AbortController();
-  const promise = preferences
-    ? proposeNotebookOptions(projectRoot, notebookId, maxOptions, preferences, {
-        attemptId,
-        signal: controller.signal,
-      })
-    : proposeNotebookOptions(projectRoot, notebookId, maxOptions, undefined, {
-        attemptId,
-        signal: controller.signal,
-      });
+  const promise = proposeNotebookOptions(projectRoot, notebookId, maxOptions, {
+    attemptId,
+    signal: controller.signal,
+  });
   const request = {
     scopeKey,
     requestKey,
     attemptId,
     controller,
     promise,
+    projectRoot,
+    notebookId,
+    interactionMode,
+    goal: boundedActivityText(goal),
+    activityRecorded: false,
     startedAt: Date.now(),
   };
   planningRequests.set(scopeKey, request);
@@ -123,13 +136,58 @@ function proposeNotebookOptionsOnce(
     }
   };
   void promise.then(release, release);
+  void promise.then(
+    (response) => {
+      recordNotebookPlanningActivity(request, {
+        status: "completed",
+        option_count: response.options.length,
+        trace_id: response.trace_id,
+      });
+    },
+    (error: unknown) => {
+      const failure = failurePacket(error);
+      recordNotebookPlanningActivity(request, {
+        status: controller.signal.aborted || failure.code === "NOTEBOOK_PLANNING_CANCELLED"
+          ? "cancelled"
+          : "error",
+        error: failure.code,
+      });
+    },
+  );
   return request;
+}
+
+function recordNotebookPlanningActivity(
+  request: ActivePlanningRequest,
+  outcome: Pick<NotebookPlanActivityRecord, "status" | "option_count" | "trace_id" | "error">,
+) {
+  if (request.activityRecorded) return;
+  request.activityRecorded = true;
+  appendAiActivity(request.projectRoot, {
+    kind: "notebook_plan",
+    id: makeActivityId(),
+    at: new Date().toISOString(),
+    notebook_id: request.notebookId,
+    interaction_mode: request.interactionMode,
+    goal: request.goal,
+    ...outcome,
+  });
+}
+
+function boundedActivityText(value: string, maximum = 500): string {
+  const normalized = value.trim();
+  return normalized.length <= maximum
+    ? normalized
+    : `${normalized.slice(0, Math.max(0, maximum - 1))}…`;
 }
 
 function failurePacket(error: unknown): { code: string; message: string } {
   const candidate = error as ApiErrorLike | null;
+  const code = typeof candidate?.code === "string" && candidate.code.trim()
+    ? candidate.code
+    : "NOTEBOOK_LOAD_FAILED";
   return {
-    code: candidate?.code ?? "NOTEBOOK_LOAD_FAILED",
+    code,
     message: error instanceof Error ? error.message : "Notebook request failed",
   };
 }
@@ -166,7 +224,9 @@ function optionalDomainMemoryProjection(value: unknown): DomainMemoryRetrievalPr
   if (value === null || value === undefined) return null;
   const item = recordValue(value);
   if (
-    item.contract_version !== "domain-memory-context-input/v1" ||
+    (item.contract_version !== "domain-memory-context-input/v1" &&
+      item.contract_version !== "domain-memory-context-input/v2" &&
+      item.contract_version !== "domain-memory-context-input/v3") ||
     item.memory_authority !== "non_authoritative" ||
     item.bounded !== true ||
     typeof item.retrieval_ref !== "string" ||
@@ -403,12 +463,14 @@ export interface NotebookRouteViewProps {
   projectRoot: string;
   activeRunId?: string | null;
   onMaterializedDraft?: (response: NotebookMaterializationResponse) => void;
+  onOpenMemorySettings?: () => void;
 }
 
 export function NotebookRouteView({
   projectRoot,
   activeRunId = null,
   onMaterializedDraft,
+  onOpenMemorySettings,
 }: NotebookRouteViewProps) {
   const agent = useAgentSurfaceOptional();
   const workbench = useWorkbenchOptional();
@@ -438,21 +500,92 @@ export function NotebookRouteView({
   } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [reloadToken, setReloadToken] = useState(0);
-  const [domainMemoryPreferences, setDomainMemoryPreferences] = useState<DomainMemoryPreferences>({
-    cross_project_domain_memory_use: false,
-    cross_project_domain_memory_iteration: false,
-  });
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [notebookIntent, setNotebookIntent] = useState("");
   const [notebookInteractionMode, setNotebookInteractionMode] =
     useState<NotebookInteractionMode>("plan");
+  const [domainMemoryCandidates, setDomainMemoryCandidates] = useState<DomainMemoryCandidate[] | undefined>(undefined);
+  const [domainMemoryCandidateError, setDomainMemoryCandidateError] = useState<string | null>(null);
+  const [domainMemoryReviewBusy, setDomainMemoryReviewBusy] = useState(false);
+  const domainMemoryProjectRootRef = useRef(projectRoot);
+  domainMemoryProjectRootRef.current = projectRoot;
   const initializationClaimedRef = useRef(false);
   const lastLoadKeyRef = useRef<string | null>(null);
   const lastReadyViewRef = useRef<NotebookReadyView | null>(null);
   const activePlanningRef = useRef<ActivePlanningRequest | null>(null);
   const completedPlanningTokenRef = useRef(0);
   const loadGenerationRef = useRef(0);
+  const domainMemoryGenerationRef = useRef(0);
+
+  const loadDomainMemoryCandidates = useCallback(async () => {
+    const generation = domainMemoryGenerationRef.current + 1;
+    domainMemoryGenerationRef.current = generation;
+    setDomainMemoryCandidates(undefined);
+    setDomainMemoryCandidateError(null);
+    if (!notebookId) return;
+    try {
+      const response = await listDomainMemoryCandidates(projectRoot);
+      if (generation !== domainMemoryGenerationRef.current) return;
+      setDomainMemoryCandidates(response.candidates);
+    } catch (error: unknown) {
+      if (generation !== domainMemoryGenerationRef.current) return;
+      const failure = failurePacket(error);
+      setDomainMemoryCandidateError(`${failure.code}: ${failure.message}`);
+    }
+  }, [notebookId, projectRoot]);
+
+  useEffect(() => {
+    setDomainMemoryReviewBusy(false);
+    void loadDomainMemoryCandidates();
+    return () => {
+      domainMemoryGenerationRef.current += 1;
+    };
+  }, [loadDomainMemoryCandidates]);
+
+  const reviewNotebookMemoryCandidate = useCallback(async (
+    candidateId: string,
+    decision: "approved" | "rejected",
+    revision: number,
+  ) => {
+    if (domainMemoryReviewBusy) return;
+    const requestedProjectRoot = projectRoot;
+    const generation = domainMemoryGenerationRef.current;
+    setDomainMemoryReviewBusy(true);
+    setDomainMemoryCandidateError(null);
+    try {
+      const now = new Date();
+      await reviewDomainMemoryCandidate(projectRoot, candidateId, decision === "approved"
+        ? {
+            decision,
+            expected_revision: revision,
+            actor_id: "local-user",
+            approved_at: now.toISOString(),
+            review_after: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+          }
+        : {
+            decision,
+            expected_revision: revision,
+            actor_id: "local-user",
+          });
+      if (
+        generation !== domainMemoryGenerationRef.current ||
+        domainMemoryProjectRootRef.current !== requestedProjectRoot
+      ) return;
+      await loadDomainMemoryCandidates();
+    } catch (error: unknown) {
+      if (
+        generation !== domainMemoryGenerationRef.current ||
+        domainMemoryProjectRootRef.current !== requestedProjectRoot
+      ) return;
+      const failure = failurePacket(error);
+      setDomainMemoryCandidateError(`${failure.code}: ${failure.message}`);
+    } finally {
+      if (domainMemoryProjectRootRef.current === requestedProjectRoot) {
+        setDomainMemoryReviewBusy(false);
+      }
+    }
+  }, [domainMemoryReviewBusy, loadDomainMemoryCandidates, projectRoot]);
 
   const load = useCallback(async () => {
     const generation = loadGenerationRef.current + 1;
@@ -515,22 +648,15 @@ export function NotebookRouteView({
       const interactionMode = persistedInteractionMode(notebook);
       setNotebookInteractionMode(interactionMode);
 
-      const memoryRequestPreferences =
-        domainMemoryPreferences.cross_project_domain_memory_use ||
-        domainMemoryPreferences.cross_project_domain_memory_iteration
-          ? domainMemoryPreferences
-          : undefined;
-      const compiled = memoryRequestPreferences
-        ? await compileNotebookContext(projectRoot, notebook.notebook_id, memoryRequestPreferences)
-        : await compileNotebookContext(projectRoot, notebook.notebook_id);
+      const compiled = await compileNotebookContext(projectRoot, notebook.notebook_id);
       let snapshot: NotebookPlanningResponse;
       if (explicitReplan && userGoal) {
         const request = proposeNotebookOptionsOnce(
             projectRoot,
             notebook.notebook_id,
             refreshToken,
-            memoryRequestPreferences,
             interactionMode,
+            userGoal,
           );
         activePlanningRef.current = request;
         setPlanningError(null);
@@ -540,17 +666,15 @@ export function NotebookRouteView({
         snapshot = await request.promise;
         completedPlanningTokenRef.current = refreshToken;
       } else {
-        snapshot = memoryRequestPreferences
-          ? await listNotebookOptions(projectRoot, notebook.notebook_id, memoryRequestPreferences)
-          : await listNotebookOptions(projectRoot, notebook.notebook_id);
+        snapshot = await listNotebookOptions(projectRoot, notebook.notebook_id);
       }
       if (snapshot.options.length === 0 && userGoal) {
         const request = proposeNotebookOptionsOnce(
           projectRoot,
           notebook.notebook_id,
           refreshToken,
-          memoryRequestPreferences,
           interactionMode,
+          userGoal,
         );
         activePlanningRef.current = request;
         setPlanningError(null);
@@ -617,7 +741,6 @@ export function NotebookRouteView({
     }
   }, [
     activeRunId,
-    domainMemoryPreferences,
     notebookId,
     projectRoot,
     reloadToken,
@@ -633,9 +756,6 @@ export function NotebookRouteView({
       activeRunId,
       refreshToken,
       reloadToken,
-      domainMemoryUse: domainMemoryPreferences.cross_project_domain_memory_use,
-      domainMemoryIteration:
-        domainMemoryPreferences.cross_project_domain_memory_iteration,
     });
     if (lastLoadKeyRef.current === loadKey) return;
     lastLoadKeyRef.current = loadKey;
@@ -649,8 +769,6 @@ export function NotebookRouteView({
     void load();
   }, [
     activeRunId,
-    domainMemoryPreferences.cross_project_domain_memory_iteration,
-    domainMemoryPreferences.cross_project_domain_memory_use,
     load,
     notebookId,
     projectRoot,
@@ -742,6 +860,10 @@ export function NotebookRouteView({
       planningRequests.delete(active.scopeKey);
     }
     active.controller.abort();
+    recordNotebookPlanningActivity(active, {
+      status: "cancelled",
+      error: "NOTEBOOK_PLANNING_CANCELLED",
+    });
     setPlanning(false);
     setPlanningStartedAt(undefined);
     setPlanningError(null);
@@ -1054,7 +1176,7 @@ export function NotebookRouteView({
               type="button"
               data-testid={`notebook-choice-${notebook.notebook_id}`}
               onClick={() => openRouteNotebook(notebook)}
-            >
+    >
               <strong>{notebook.title || "Untitled analysis"}</strong>
               <span>{notebook.active_head_run_id ?? "No completed Run"}</span>
             </button>
@@ -1105,8 +1227,36 @@ export function NotebookRouteView({
           dismissSelectionSurface();
         }
       }}
-    >
+      >
       {uploadError ? <p role="alert" data-testid="notebook-source-restart-error">{uploadError}</p> : null}
+      {domainMemoryCandidateError ? (
+        <p
+          role="status"
+          data-testid="domain-memory-candidate-error"
+          aria-live="polite"
+        >
+          {domainMemoryCandidateError}
+        </p>
+      ) : null}
+      <section aria-label="Notebook memory" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <span>Memory is managed per project in Settings and never applies automatically.</span>
+        <button
+          type="button"
+          data-testid="notebook-manage-memory"
+          className="nb-button"
+          onClick={() => {
+            if (onOpenMemorySettings) {
+              onOpenMemorySettings();
+              return;
+            }
+            const next = new URLSearchParams(searchParams);
+            next.set("memory_settings", "1");
+            setSearchParams(next);
+          }}
+        >
+          Manage memory
+        </button>
+      </section>
       <NotebookSurface
         view={view}
         projectRoot={projectRoot}
@@ -1142,12 +1292,14 @@ export function NotebookRouteView({
         onSelectionFollowUp={askInSideChat}
         onSelectionSaveNote={(selection) => onSelectionAction(selection, "note")}
         onSelectionDefer={(selection) => onSelectionAction(selection, "defer")}
-        domainMemoryPreferences={domainMemoryPreferences}
-        onDomainMemoryPreferencesChange={(preferences) => {
-          setDomainMemoryPreferences(preferences);
-          setRefreshToken((token) => token + 1);
-        }}
+        domainMemoryCandidates={domainMemoryCandidates}
+        onDomainMemoryCandidateReview={reviewNotebookMemoryCandidate}
       />
+      {domainMemoryReviewBusy ? (
+        <p data-testid="domain-memory-review-status" aria-live="polite">
+          Saving memory review…
+        </p>
+      ) : null}
       {selectionDraft ? (
         <section className="nb-selection-composer" data-testid="notebook-selection-composer">
           <header className="nb-selection-composer-header">

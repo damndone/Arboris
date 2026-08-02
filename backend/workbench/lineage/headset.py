@@ -200,6 +200,11 @@ def build_headset(
     each NodeView as `annotate(view, manifest, form)` with the manifest + run_inputs.form
     of the run that produced it (editable decoration + 2B.4 value backfill)."""
     nodes: dict[str, dict] = {}
+    # `graph.json` is immutable, but a later run can legitimately improve a
+    # shared node's human-facing presentation (for example, a model label
+    # corrected after its original result was cached).  Keep that presentation
+    # in the serve-time projection rather than rewriting historical evidence.
+    presentation_created_at: dict[str, str] = {}
     edges: list[dict] = []
     edge_seen: set[tuple[str, str]] = set()
     heads: list[dict] = []
@@ -270,8 +275,15 @@ def build_headset(
                     except Exception:
                         pass
                 nodes[key] = view
+                presentation_created_at[key] = str(node.get("created_at") or "")
             elif run_id not in nodes[key]["runs"]:
                 nodes[key]["runs"].append(run_id)
+                incoming_created_at = str(node.get("created_at") or "")
+                if incoming_created_at > presentation_created_at.get(key, ""):
+                    for field in ("display_label", "summary"):
+                        if field in node:
+                            nodes[key][field] = node[field]
+                    presentation_created_at[key] = incoming_created_at
 
         for edge in graph.get("edges", {}).values():
             src = keymap.get(edge["source_id"])

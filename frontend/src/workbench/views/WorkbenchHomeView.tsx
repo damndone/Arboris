@@ -253,16 +253,6 @@ export function WorkbenchHomeView({
                 New project
               </button>
             )}
-            {onOpenSettings && (
-              <button
-                type="button"
-                data-testid="workbench-home-settings"
-                onClick={onOpenSettings}
-                style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid var(--separator, #3a3a3c)", background: "transparent", color: "var(--label, #f5f5f7)", cursor: "pointer" }}
-              >
-                LLM settings
-              </button>
-            )}
           </div>
         </header>
 

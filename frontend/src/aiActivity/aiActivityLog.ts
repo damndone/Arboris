@@ -32,10 +32,29 @@ export interface ReportActivityRecord extends AiActivityBase {
   fact_count: number;
   excluded_count: number;
   /** Pointer into reportHistory — full text + fact snapshot live there. */
-  report_record_id: string;
+  report_record_id?: string;
+  /** Missing on records written before terminal outcomes were captured. */
+  status?: "completed" | "error";
+  /** Bounded user-visible failure summary; never a provider payload. */
+  error?: string;
 }
 
-export type AiActivityRecord = AskAiActivityRecord | ReportActivityRecord;
+export interface NotebookPlanActivityRecord extends AiActivityBase {
+  kind: "notebook_plan";
+  notebook_id: string;
+  interaction_mode: "plan" | "action";
+  goal: string;
+  status: "completed" | "error" | "cancelled";
+  option_count?: number;
+  trace_id?: string;
+  /** Bounded API code or user-visible failure summary. */
+  error?: string;
+}
+
+export type AiActivityRecord =
+  | AskAiActivityRecord
+  | ReportActivityRecord
+  | NotebookPlanActivityRecord;
 
 const MAX_RECORDS = 50;
 export const AI_ACTIVITY_EVENT = "workbench:ai-activity";

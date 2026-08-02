@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { LlmProviderEditor } from "./LlmProviderEditor";
+import { MemorySettingsPanel } from "../workbench/MemorySettingsPanel";
 import {
   activateLlmProvider,
   deleteLlmProvider,
@@ -12,6 +13,7 @@ import type { LlmProvider } from "./llmTypes";
 
 export interface LlmProviderManagerProps {
   onBack: () => void;
+  projectRoot?: string;
 }
 
 type ProbeState = "idle" | "loading" | "success" | "error";
@@ -44,7 +46,15 @@ const buttonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-export function LlmProviderManager({ onBack }: LlmProviderManagerProps) {
+const settingsSectionButtonStyle = (active: boolean): React.CSSProperties => ({
+  ...buttonStyle,
+  background: active ? "var(--accent, #0a84ff)" : "var(--bg-card-2, rgba(255,255,255,0.06))",
+  borderColor: active ? "var(--accent, #0a84ff)" : "var(--separator, #3a3a3c)",
+  color: active ? "#fff" : "var(--label, #f5f5f7)",
+  boxShadow: active ? "0 1px 2px rgba(10,132,255,0.22)" : "none",
+});
+
+export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerProps) {
   const [providers, setProviders] = useState<LlmProvider[]>([]);
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
   const [editingProvider, setEditingProvider] = useState<LlmProvider | null | undefined>(undefined);
@@ -54,6 +64,7 @@ export function LlmProviderManager({ onBack }: LlmProviderManagerProps) {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [probeStates, setProbeStates] = useState<Record<string, ProbeState>>({});
+  const [settingsSection, setSettingsSection] = useState<"providers" | "memory">("providers");
 
   async function refreshProviders() {
     setLoading(true);
@@ -190,12 +201,19 @@ export function LlmProviderManager({ onBack }: LlmProviderManagerProps) {
           ← Back
         </button>
         <h1 id="llm-provider-manager-title" style={{ margin: 0, fontFamily: "var(--font-serif, serif)", fontSize: 25 }}>
-          LLM Providers
+          Settings
         </h1>
-        <button type="button" onClick={() => { setIsCopy(false); setEditingProvider(null); }} style={{ ...buttonStyle, marginLeft: "auto" }}>
+        {settingsSection === "providers" ? <button type="button" onClick={() => { setIsCopy(false); setEditingProvider(null); }} style={{ ...buttonStyle, marginLeft: "auto" }}>
           + Add provider
-        </button>
+        </button> : null}
       </header>
+
+      <nav aria-label="Settings sections" style={{ display: "flex", gap: 8, margin: "0 0 20px" }}>
+        <button type="button" aria-pressed={settingsSection === "providers"} onClick={() => setSettingsSection("providers")} style={settingsSectionButtonStyle(settingsSection === "providers")}>LLM providers</button>
+        {projectRoot ? <button type="button" aria-pressed={settingsSection === "memory"} onClick={() => setSettingsSection("memory")} style={settingsSectionButtonStyle(settingsSection === "memory")}>Memory</button> : null}
+      </nav>
+
+      {settingsSection === "memory" && projectRoot ? <MemorySettingsPanel projectRoot={projectRoot} /> : <>
 
       {error && <div role="alert" data-testid="llm-provider-manager-error" style={{ color: "var(--danger, #ff453a)", marginBottom: 14 }}>{error}</div>}
       {status && <div aria-live="polite" data-testid="llm-provider-manager-status" style={{ color: "var(--green, #30d158)", marginBottom: 14 }}>{status}</div>}
@@ -291,6 +309,7 @@ export function LlmProviderManager({ onBack }: LlmProviderManagerProps) {
           );
         })}
       </div>
+      </>}
     </div>
   );
 }

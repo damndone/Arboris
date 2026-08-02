@@ -181,6 +181,66 @@ describe("contracts — a packet that does not match the lock is rejected, not c
 });
 
 describe("contracts — v1.1 evidence, decision, and materialization records", () => {
+  it("reads a v1.3 option revision with server-applied memory-default provenance", () => {
+    const option = parseNotebookOptionRevision({
+      ...readV11Fixture("notebook_option_revision_v11"),
+      contract_version: "1.3",
+      memory_default_sources: [
+        {
+          memory_id: "memory-ols-covariance",
+          revision: 2,
+          target_ref: "model.genesis.ols.covariance.robust",
+        },
+      ],
+    });
+
+    if (option.contract_version !== "1.3") throw new Error("expected a v1.3 option fixture");
+    expect(option.memory_default_sources).toEqual([
+      {
+        memory_id: "memory-ols-covariance",
+        revision: 2,
+        target_ref: "model.genesis.ols.covariance.robust",
+      },
+    ]);
+  });
+
+  it("reads a v1.4 option revision with server-owned target display metadata", () => {
+    const option = parseNotebookOptionRevision({
+      ...readV11Fixture("notebook_option_revision_v11"),
+      contract_version: "1.4",
+      memory_default_sources: [
+        {
+          memory_id: "memory-panel-covariance",
+          revision: 4,
+          target_ref: "model.genesis.panel_ols.covariance.clustered",
+          target_label: "Covariance estimator",
+          method_risk: "high",
+          restore_value: null,
+        },
+      ],
+    });
+
+    if (option.contract_version !== "1.4") throw new Error("expected a v1.4 option fixture");
+    expect(option.memory_default_sources).toEqual([
+      {
+        memory_id: "memory-panel-covariance",
+        revision: 4,
+        target_ref: "model.genesis.panel_ols.covariance.clustered",
+        target_label: "Covariance estimator",
+        method_risk: "high",
+        restore_value: null,
+      },
+    ]);
+  });
+
+  it("rejects a v1.3 option without memory-default provenance", () => {
+    const raw = {
+      ...readV11Fixture("notebook_option_revision_v11"),
+      contract_version: "1.3",
+    };
+    expect(() => parseNotebookOptionRevision(raw)).toThrow("memory_default_sources");
+  });
+
   it("reads a v1.1 option revision with evidence and a materialized lifecycle", () => {
     const option = parseNotebookOptionRevision(readV11Fixture("notebook_option_revision_v11"));
     if (option.contract_version !== "1.1") throw new Error("expected a v1.1 option fixture");
