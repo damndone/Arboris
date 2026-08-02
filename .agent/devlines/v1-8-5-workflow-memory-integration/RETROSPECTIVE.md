@@ -6,28 +6,38 @@
 
 ## Final status
 
-STARTED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: N/A (sample=0)
-- Repeat rate: N/A (sample=0)
-- Recurrence rate: N/A (sample=0)
-- MTTR: N/A (sample=0; unresolved=0)
+- Failure frequency: 12/42 (28.6%; 28.6 per 100 events)
+- Repeat rate: 1/12 (8.3%)
+- Recurrence rate: 1/11 (9.1%)
+- MTTR: median=134000 ms (sample=5; unresolved=5)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/12 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
 ## All failures
 
-- None recorded.
+- #4 2026-08-01T05:51:40.000Z `tdd_red_before_did_model_family_admission`; cause_status: `known`; cause: The model-family registry only declares OLS and Panel, so the workflow validator rejects a DID request before its own timing-field contract can be enforced.; resolution: `accepted`; lesson: Admit a model family through a full declarative contract before allowing a planner or runtime to build its draft parameters.
+- #5 2026-08-01T05:57:16.000Z `tdd_red_before_did_workflow_admission`; cause_status: `known`; cause: Genesis Draft validation still treats an empty predictor list as incomplete for every non-time-series model, even when the selected DID family contract explicitly permits an unadjusted effect estimate without covariates.; resolution: `accepted`; lesson: Genesis Draft validation must consult the selected model-family contract instead of assigning OLS predictor requirements to every family.
+- #7 2026-08-01T06:01:30.000Z `tdd_red_before_did_notebook_contract_wiring`; cause_status: `known`; cause: The published capability schema exposes DID families through the generic OLS parameter list, and Notebook materialization rejects the family-owned timing fields before it can build canonical estimator parameters.; resolution: `accepted`; lesson: A workflow-admitted family needs one declared input shape across capability publication, proposal validation, materialization, and Draft execution.
+- #8 2026-08-01T06:03:30.000Z `tdd_red_before_did_planner_contract_wiring`; cause_status: `known`; cause: The typed Notebook planner still hardcodes a non-empty predictor requirement for every non-time-series genesis proposal and does not validate family-owned timing fields against evidence.; resolution: `accepted`; lesson: Notebook proposal validation must use the model-family contract for required source fields and predictor cardinality, not a non-time-series shortcut.
+- #13 2026-08-01T06:18:30.000Z `tdd_red_before_memory_default_application`; cause_status: `known`; cause: Approved domain-memory retrieval records expose a target reference but the Notebook has no server-owned default target registry, no atomic application boundary, and no immutable provenance record.; resolution: `accepted`; lesson: Memory target references must resolve through a server registry to an exact validated value; compact natural-language lessons must never be parsed as executable defaults.
+- #15 2026-08-01T06:26:49.000Z `tdd_red_before_memory_default_ui_provenance`; cause_status: `known`; cause: The frontend option parser admits only revisions through v1.2, so a server-generated v1.3 memory-default provenance packet is rejected.; resolution: `accepted`; lesson: A backend packet version must receive a strict frontend parser and a visible consumer before it is persisted.
+- #18 2026-08-01T06:31:00.000Z `tdd_red_before_domain_memory_gate_preflight`; cause_status: `known`; cause: The domain-memory runtime has no nonblocking preflight collector or gate integration, so approved memory validity is invisible between retrievals.; resolution: `accepted`; lesson: Runtime omission and gate visibility are separate controls; a nonblocking preflight needs its own tested collector.
+- #19 2026-08-01T06:38:00.000Z `memory_default_provenance_survives_revalidation_without_source`; cause_status: `known`; cause: The individual revalidation path used dataclasses.replace on the prior v1.3 revision, so it retained old memory_default_sources even when the new typed proposal carried none.; resolution: `resolved`; lesson: A revision version that encodes provenance must be selected from the new proposal, never inherited solely from the prior revision class.
 
 ## All errors
 
-- None recorded.
+- #14 2026-08-01T06:25:38.000Z `memory_default_vocabulary_id_contract_violation`; cause_status: `known`; cause: The first Notebook memory-default vocabulary identifier used a path separator even though the existing retrieval contract requires an opaque bounded id.; resolution: `resolved`; lesson: Vocabulary version identifiers must be checked against the retrieval wire contract before connecting a new consumer.
+- #20 2026-08-01T06:39:00.000Z `memory_revalidation_v11_constructor_missing_batch`; cause_status: `known`; cause: The initial v1.3-to-v1.1 revalidation constructor preserved evidence fields but omitted the mandatory batch_id field.; resolution: `resolved`; lesson: When changing immutable packet versions, reconstruct from the complete contract field set rather than a partial display subset.
+- #25 2026-08-01T07:19:44.000Z `approved_memory_projection_rejected_in_notebook_ui`; cause_status: `known`; cause: A locally configured, approved and verifier-current suggest_default memory caused the Notebook UI to reject the compiled domain-memory projection before planning.; resolution: `open`; lesson: A unit-level projection parser is insufficient; exercise the deployed HTTP context shape with an approved current memory before declaring the UI lifecycle integrated.
+- #28 2026-08-01T07:33:32.000Z `approved_memory_projection_v2_ui_remediated`; cause_status: `known`; cause: The Notebook route-level optional projection parser accepted only v1 even though the shared domain-memory contract already permits v1 and v2.; resolution: `resolved`; lesson: Route-level parsers must evolve with the shared wire contract and require a browser round-trip test for each supported version.
 
 ## All gaps
 
@@ -39,20 +49,95 @@ STARTED
 
 ## Root causes and solutions
 
-- None recorded.
+- `browser-memory-projection-contract-must-roundtrip`: occurrences=2; cause_status: `known`; root cause: A locally configured, approved and verifier-current suggest_default memory caused the Notebook UI to reject the compiled domain-memory projection before planning.; solution: `open`
+- `complete-v11-fields-when-removing-memory-provenance`: occurrences=1; cause_status: `known`; root cause: The initial v1.3-to-v1.1 revalidation constructor preserved evidence fields but omitted the mandatory batch_id field.; solution: `resolved`
+- `did-genesis-empty-predictors-contract`: occurrences=1; cause_status: `known`; root cause: Genesis Draft validation still treats an empty predictor list as incomplete for every non-time-series model, even when the selected DID family contract explicitly permits an unadjusted effect estimate without covariates.; solution: `accepted`
+- `did-model-family-contract-before-workflow-admission`: occurrences=1; cause_status: `known`; root cause: The model-family registry only declares OLS and Panel, so the workflow validator rejects a DID request before its own timing-field contract can be enforced.; solution: `accepted`
+- `did-notebook-family-contract-wiring`: occurrences=1; cause_status: `known`; root cause: The published capability schema exposes DID families through the generic OLS parameter list, and Notebook materialization rejects the family-owned timing fields before it can build canonical estimator parameters.; solution: `accepted`
+- `did-planner-family-contract-wiring`: occurrences=1; cause_status: `known`; root cause: The typed Notebook planner still hardcodes a non-empty predictor requirement for every non-time-series genesis proposal and does not validate family-owned timing fields against evidence.; solution: `accepted`
+- `memory-default-target-registry-before-application`: occurrences=1; cause_status: `known`; root cause: Approved domain-memory retrieval records expose a target reference but the Notebook has no server-owned default target registry, no atomic application boundary, and no immutable provenance record.; solution: `accepted`
+- `memory-provenance-version-from-new-proposal-on-revalidation`: occurrences=1; cause_status: `known`; root cause: The individual revalidation path used dataclasses.replace on the prior v1.3 revision, so it retained old memory_default_sources even when the new typed proposal carried none.; solution: `resolved`
+- `opaque-vocabulary-id-before-consumer-wiring`: occurrences=1; cause_status: `known`; root cause: The first Notebook memory-default vocabulary identifier used a path separator even though the existing retrieval contract requires an opaque bounded id.; solution: `resolved`
+- `tdd-domain-memory-preflight-before-gate-wiring`: occurrences=1; cause_status: `known`; root cause: The domain-memory runtime has no nonblocking preflight collector or gate integration, so approved memory validity is invisible between retrievals.; solution: `accepted`
+- `tdd-memory-default-provenance-ui-before-persistence`: occurrences=1; cause_status: `known`; root cause: The frontend option parser admits only revisions through v1.2, so a server-generated v1.3 memory-default provenance packet is rejected.; solution: `accepted`
 
 ## Added tests
 
-- No test evidence recorded.
+- `RED: NotebookRouteView v2 empty projection test failed with NOTEBOOK_LOAD_FAILED; GREEN: same test passed after permitting v1 or v2 while retaining every other structural validation; browser at 5179 rendered the v2 empty state without error.`
+- `pytest DID/model-family: 43 passed; pytest notebook/memory/routes/gate: 116 passed, 1 skipped; frontend contracts and OptionCard: 49 passed; tsc --noEmit: exit 0; git diff --check: exit 0`
 
 ## New rules
 
-- No rule candidate recorded.
+- `browser-memory-projection-contract-must-roundtrip`: line experience occurrence(s)=2
+- `complete-v11-fields-when-removing-memory-provenance`: line experience occurrence(s)=1
+- `did-genesis-empty-predictors-contract`: line experience occurrence(s)=1
+- `did-model-family-contract-before-workflow-admission`: line experience occurrence(s)=1
+- `did-notebook-family-contract-wiring`: line experience occurrence(s)=1
+- `did-planner-family-contract-wiring`: line experience occurrence(s)=1
+- `memory-default-target-registry-before-application`: line experience occurrence(s)=1
+- `memory-provenance-version-from-new-proposal-on-revalidation`: line experience occurrence(s)=1
+- `opaque-vocabulary-id-before-consumer-wiring`: line experience occurrence(s)=1
+- `tdd-domain-memory-preflight-before-gate-wiring`: line experience occurrence(s)=1
+- `tdd-memory-default-provenance-ui-before-persistence`: line experience occurrence(s)=1
 
 ## Future guidance
 
-- No guidance recorded.
+- A backend packet version must receive a strict frontend parser and a visible consumer before it is persisted.
+- A confirmation is not usable merely because it exists in the DOM; destructive or state-changing confirmation must be visible in the current viewport and expose modal semantics.
+- A revision version that encodes provenance must be selected from the new proposal, never inherited solely from the prior revision class.
+- A unit-level projection parser is insufficient; exercise the deployed HTTP context shape with an approved current memory before declaring the UI lifecycle integrated.
+- A workflow-admitted family needs one declared input shape across capability publication, proposal validation, materialization, and Draft execution.
+- Admit a model family through a full declarative contract before allowing a planner or runtime to build its draft parameters.
+- Component-level compact buttons must explicitly neutralize shared minimum dimensions; visual acceptance must inspect computed layout, not only inline style declarations.
+- Genesis Draft validation must consult the selected model-family contract instead of assigning OLS predictor requirements to every family.
+- Memory target references must resolve through a server registry to an exact validated value; compact natural-language lessons must never be parsed as executable defaults.
+- Notebook proposal validation must use the model-family contract for required source fields and predictor cardinality, not a non-time-series shortcut.
+- Route-level parsers must evolve with the shared wire contract and require a browser round-trip test for each supported version.
+- Runtime omission and gate visibility are separate controls; a nonblocking preflight needs its own tested collector.
+- Vocabulary version identifiers must be checked against the retrieval wire contract before connecting a new consumer.
+- When changing immutable packet versions, reconstruct from the complete contract field set rather than a partial display subset.
 
 ## Event index
 
 - #1: `0c3981bb-54c8-422b-b38e-725c9340e7df` | 2026-08-01T05:49:43.776Z | STATE_CHANGE/line_started | incident=`58bf272f-b31d-4486-abb1-2999808fa69a` | lesson_key=`frozen-context-before-start` | event_sha256=`7462a6607b41189f566534f1d973f467f21a2a47f948dbf05d810bb07d508bdd`
+- #2: `83cfb613-5d6e-42c5-a287-63229a4469c3` | 2026-08-01T05:51:10.112Z | STATE_CHANGE/context_rescope_required | incident=`3c7444dc-e108-4ddd-93d3-03ef6a5fd7f9` | lesson_key=`context-pack-rescope` | event_sha256=`54c9c009681b393c1f185751705245c8e6555c4026d6adcd84bbce981e485e17`
+- #3: `6675baab-81d4-4505-81d3-aa4d37ece7af` | 2026-08-01T05:51:10.117Z | STATE_CHANGE/context_rescoped | incident=`4ae76505-d5f1-4c11-ae13-950940db1246` | lesson_key=`context-pack-rescope` | event_sha256=`814ed8955788f88114094db22951bae0f371ce4bdc6ab81143a7ad3836ca0d6d`
+- #4: `697cd86b-719a-442d-829c-c26631d74463` | 2026-08-01T05:51:40.000Z | FAILURE/tdd_red_before_did_model_family_admission | incident=`5cd1efc7-013b-462a-b21a-211d601725da` | lesson_key=`did-model-family-contract-before-workflow-admission` | event_sha256=`147cf0fbcb48c56798e049f7f59e23b03399fa9adeb74eb65c754190948f5692`
+- #5: `3fb0fa93-c1e4-4a4b-aec2-3eea07b31ddb` | 2026-08-01T05:57:16.000Z | FAILURE/tdd_red_before_did_workflow_admission | incident=`3fb0fa93-c1e4-4a4b-aec2-3eea07b31ddb` | lesson_key=`did-genesis-empty-predictors-contract` | event_sha256=`7b348a692e7ae9c0bdb42cbf43c848067fa93d66adda31a31a13e03b02e21052`
+- #6: `2a58c35c-8e56-4d75-8b0e-1cb88b562708` | 2026-08-01T05:59:30.000Z | GATE/did_workflow_contract_execution_passed | incident=`3fb0fa93-c1e4-4a4b-aec2-3eea07b31ddb` | lesson_key=`did-genesis-empty-predictors-contract` | event_sha256=`8d87950fc22143cb89867415cbc780bff57fb1606298186fbee90773d3e72b60`
+- #7: `b860e2d4-4d72-4945-8c49-bdd2e4b59b9a` | 2026-08-01T06:01:30.000Z | FAILURE/tdd_red_before_did_notebook_contract_wiring | incident=`b860e2d4-4d72-4945-8c49-bdd2e4b59b9a` | lesson_key=`did-notebook-family-contract-wiring` | event_sha256=`932599b319009263b3a343d4395dc5ecfa8fb5acc966f4899d0cf970c1746558`
+- #8: `f8791268-c876-4e77-aea3-cf36bf6c6f91` | 2026-08-01T06:03:30.000Z | FAILURE/tdd_red_before_did_planner_contract_wiring | incident=`f8791268-c876-4e77-aea3-cf36bf6c6f91` | lesson_key=`did-planner-family-contract-wiring` | event_sha256=`985f63a5b0240f6aef2e9e64fd4e509822a04bba18fae69a6269f1f928e66619`
+- #9: `15f1eb7b-a890-4be6-bac7-26a67ab50852` | 2026-08-01T06:06:30.000Z | GATE/did_notebook_contract_wiring_passed | incident=`b860e2d4-4d72-4945-8c49-bdd2e4b59b9a` | lesson_key=`did-notebook-family-contract-wiring` | event_sha256=`23846480cc734a53e5a710ffe1e844ef56401947bd013155084e588e0db250ee`
+- #10: `d4c7f8ba-3ebd-4ee8-9017-5707b8ce5c0d` | 2026-08-01T06:11:30.000Z | GATE/did_workflow_notebook_checkpoint_passed | incident=`d4c7f8ba-3ebd-4ee8-9017-5707b8ce5c0d` | lesson_key=`did-end-to-end-contract-checkpoint` | event_sha256=`9ff87d8851fb4d75ea49732ac8a104cd689ef6a168d4c52c796e2b71562c9657`
+- #11: `100278e1-1986-4811-a531-964f5e338e2a` | 2026-08-01T06:15:29.864Z | STATE_CHANGE/context_rescope_required | incident=`2eb46115-b340-45aa-a428-708c79cf7ccf` | lesson_key=`context-pack-rescope` | event_sha256=`a4696e3c9e94b0139e555d0fc678ccaafab70d24c987499acba8e20ff5df45ed`
+- #12: `0e0d05e2-912c-47fb-9ea6-f271620ff014` | 2026-08-01T06:15:29.874Z | STATE_CHANGE/context_rescoped | incident=`4b5b0cef-519d-4ae8-a3cc-8705df920096` | lesson_key=`context-pack-rescope` | event_sha256=`8f8c0056ec2ff869e122074c1dd12c7700cc9ed1773f5bf440ab58cb34e5882b`
+- #13: `d6e2cc8f-784a-4a13-80ab-bf6cc0385b77` | 2026-08-01T06:18:30.000Z | FAILURE/tdd_red_before_memory_default_application | incident=`d6e2cc8f-784a-4a13-80ab-bf6cc0385b77` | lesson_key=`memory-default-target-registry-before-application` | event_sha256=`3dda49d0506e93b8d98f6c23ddf54b27d5e6c093831c11adab96e6ec0898501f`
+- #14: `5eaebd41-1bae-4665-a85e-552dfed0abf2` | 2026-08-01T06:25:38.000Z | ERROR/memory_default_vocabulary_id_contract_violation | incident=`5eaebd41-1bae-4665-a85e-552dfed0abf2` | lesson_key=`opaque-vocabulary-id-before-consumer-wiring` | event_sha256=`c933c8d7c9bcbf00d829b272a98ab96378bc718227465f54914e0c70d39e9764`
+- #15: `3c1bf40d-e19e-4612-8a8a-2dbcb2394c8e` | 2026-08-01T06:26:49.000Z | FAILURE/tdd_red_before_memory_default_ui_provenance | incident=`3c1bf40d-e19e-4612-8a8a-2dbcb2394c8e` | lesson_key=`tdd-memory-default-provenance-ui-before-persistence` | event_sha256=`89517740594974a36dc79a9bdb14ef9e5e090825df487eb17adaf3b07a9f4931`
+- #16: `4db087b2-1efe-4267-973c-a69f54e99054` | 2026-08-01T06:30:31.336Z | STATE_CHANGE/context_rescope_required | incident=`bd808a9d-4785-4ab9-9259-0d45438275a4` | lesson_key=`context-pack-rescope` | event_sha256=`4debd22a930a28e46ea246b0fb471846e99d071d33a50ed46089fb7e1abeeb1a`
+- #17: `553a4da9-171f-4bdf-a16f-4f49e66b48ab` | 2026-08-01T06:30:31.347Z | STATE_CHANGE/context_rescoped | incident=`74a4e323-edf2-405b-abd0-98ffd4f5de62` | lesson_key=`context-pack-rescope` | event_sha256=`f24e9fa320d0e6cde617ffb44204c0a7abc1adbc1c5adf5c9054b710740014df`
+- #18: `7af9609e-e191-4bc5-ae26-73f5f637e7fd` | 2026-08-01T06:31:00.000Z | FAILURE/tdd_red_before_domain_memory_gate_preflight | incident=`7af9609e-e191-4bc5-ae26-73f5f637e7fd` | lesson_key=`tdd-domain-memory-preflight-before-gate-wiring` | event_sha256=`61b1f28eaff181de4bd323197e3f6ad60edd4ec2505c3d4f425036231f6b656b`
+- #19: `4bf2f223-27a3-42ed-878c-173beaaedbf5` | 2026-08-01T06:38:00.000Z | FAILURE/memory_default_provenance_survives_revalidation_without_source | incident=`4bf2f223-27a3-42ed-878c-173beaaedbf5` | lesson_key=`memory-provenance-version-from-new-proposal-on-revalidation` | event_sha256=`a1cfd64c878d28395d1786abb025bc5cd2cb72fc0004a791bcdf7c7ea099542a`
+- #20: `d3159ea7-0a2a-45e3-8c3c-16cc3dd76100` | 2026-08-01T06:39:00.000Z | ERROR/memory_revalidation_v11_constructor_missing_batch | incident=`4bf2f223-27a3-42ed-878c-173beaaedbf5` | lesson_key=`complete-v11-fields-when-removing-memory-provenance` | event_sha256=`6b7232defc7fcdef12810ddba58cc0946799795cba74c1c5062b91f6670c93d1`
+- #21: `d578af81-be1e-4a8f-badc-bffab89b2184` | 2026-08-01T06:44:38.000Z | GATE/typed_memory_and_model_family_focused_regression_green | incident=`d578af81-be1e-4a8f-badc-bffab89b2184` | lesson_key=`focused-regression-before-memory-model-family-checkpoint` | event_sha256=`2cee94731239f0349885ff025cd6cd4eea0decf6c9a7da543fd3d3ac1df78183`
+- #22: `acac33fa-89ad-411d-935c-f115208f61a8` | 2026-08-01T06:57:12.000Z | GATE/cs_did_source_notebook_browser_e2e_passed | incident=`acac33fa-89ad-411d-935c-f115208f61a8` | lesson_key=`browser-e2e-source-bound-notebook-model-family` | event_sha256=`859db953ba381fc808ee624d75de7a6787ba45440225a58e6f50e348586782e4`
+- #23: `2dcd5ae1-fc74-4548-9294-e8d383df66d4` | 2026-08-01T07:05:30.000Z | GATE/sa_did_source_notebook_browser_e2e_passed | incident=`2dcd5ae1-fc74-4548-9294-e8d383df66d4` | lesson_key=`browser-e2e-source-bound-notebook-sa-did` | event_sha256=`934cd8d27643462d8baf23636e0759b1960649ef86ee35103fff82e774c271d7`
+- #24: `d7f8c186-310d-4322-bbd1-89c15ed290d2` | 2026-08-01T07:08:00.000Z | GATE/dcdh_source_notebook_browser_e2e_passed | incident=`d7f8c186-310d-4322-bbd1-89c15ed290d2` | lesson_key=`browser-e2e-source-bound-notebook-dcdh` | event_sha256=`7713db5029b2b48ccff2292a0b6985a1f2d5af2ac1c44592067bee94b6ca9097`
+- #25: `edc4d774-245d-44df-9f2a-7a6d8ff698c7` | 2026-08-01T07:19:44.000Z | ERROR/approved_memory_projection_rejected_in_notebook_ui | incident=`edc4d774-245d-44df-9f2a-7a6d8ff698c7` | lesson_key=`browser-memory-projection-contract-must-roundtrip` | event_sha256=`18c6166f2d7f5e300f82c942bfaa160780805046fef45c179756642735c1a149`
+- #26: `459ae3c6-30c2-447c-bfa2-a9b75b326878` | 2026-08-01T07:24:22.567Z | STATE_CHANGE/context_rescope_required | incident=`587a984d-e0ac-46e4-90b5-30b33a82c025` | lesson_key=`context-pack-rescope` | event_sha256=`88a35f848bd92dadcea08f5dae2cea78345d3c01c1c62600cb1ceed80e3c742d`
+- #27: `f705da40-7a36-406d-850e-a19ff3ed5cfc` | 2026-08-01T07:24:22.584Z | STATE_CHANGE/context_rescoped | incident=`2eb654d1-fb0f-4997-822b-5ccd5337e555` | lesson_key=`context-pack-rescope` | event_sha256=`53b5e4651c980d2bca93f832a5a0194c840a039d9514410e002fc55e0b43171b`
+- #28: `ce626131-fa15-4108-8ce7-32b145cb54d3` | 2026-08-01T07:33:32.000Z | ERROR/approved_memory_projection_v2_ui_remediated | incident=`edc4d774-245d-44df-9f2a-7a6d8ff698c7` | lesson_key=`browser-memory-projection-contract-must-roundtrip` | event_sha256=`88e3e0e1d85e3b0800d8ac87f0d298d4e428b3c02be901081f865be2219935e9`
+- #29: `3c0761a7-320c-4b9e-8dbd-3934fcc2c370` | 2026-08-01T07:33:32.000Z | GATE/typed_memory_suggest_default_browser_e2e_passed | incident=`3c0761a7-320c-4b9e-8dbd-3934fcc2c370` | lesson_key=`typed-memory-suggest-default-browser-e2e` | event_sha256=`f974f26406293880c6ff89e634d0bc3dde9d0a3f899d9c1fb9ac5052ab6d7766`
+- #30: `0d1a6daa-869c-463e-b4de-d211d73ea093` | 2026-08-02T05:59:03.372Z | STATE_CHANGE/context_rescope_required | incident=`2c96f355-0f56-428c-8394-708f35c3dc64` | lesson_key=`context-pack-rescope` | event_sha256=`3cf4e221fd7b578988a64000b3bcaa75f9abbbda79085f2a1032f415160d49b4`
+- #31: `4d11041c-846f-4d14-8e98-c93ff26817b8` | 2026-08-02T05:59:03.391Z | STATE_CHANGE/context_rescoped | incident=`26814d56-f7df-4393-8985-da06ad279029` | lesson_key=`context-pack-rescope` | event_sha256=`271f345437339f83ea3410660c62ec2d2471f075f954f741e46d8270bacd362e`
+- #32: `2ec733a4-3f37-4f65-9fb2-a951f32b3fcb` | 2026-08-02T02:00:00.000Z | GATE/settings_memory_switch_ui_passed | incident=`2ec733a4-3f37-4f65-9fb2-a951f32b3fcb` | lesson_key=`settings-memory-switches-retain-confirmation-boundary` | event_sha256=`cb189b078e0737e90a4214d5066e0f90faf02078edf918e4751a540a88ab43d2`
+- #33: `032cc821-607e-4318-a47f-32f7d285101b` | 2026-08-02T07:18:25.038Z | STATE_CHANGE/context_rescope_required | incident=`632b4592-9b92-4603-b005-5bfd1897c6fc` | lesson_key=`context-pack-rescope` | event_sha256=`2390682ec0fbfdc84be661e9da92e7adc30102f89fae8d6b788adccb7a0bc4c0`
+- #34: `5114910b-549f-44b8-8282-a0b1fcd97839` | 2026-08-02T07:18:25.055Z | STATE_CHANGE/context_rescoped | incident=`40875fd4-c2a4-4d5c-b0c8-6d175d771d30` | lesson_key=`context-pack-rescope` | event_sha256=`f062809e57464fa91ea3b1a6769ac6db6078e0eff98b69b8af1b1c4431a30e4b`
+- #35: `70a0f5fd-f250-4d7c-8351-8398c4312592` | 2026-08-02T07:18:46.044Z | STATE_CHANGE/context_rescope_required | incident=`99f4d47f-8b51-483c-80f6-750c24fad7a1` | lesson_key=`context-pack-rescope` | event_sha256=`1a0e349473a87ff8971ab88f9c09f01779743b9413eb2aa3ea631e63dcbce94f`
+- #36: `a8e9950f-54eb-47f6-9df3-abcf33756f98` | 2026-08-02T07:18:46.063Z | STATE_CHANGE/context_rescoped | incident=`f3edbea4-8929-4ff0-b910-7df78ea54706` | lesson_key=`context-pack-rescope` | event_sha256=`a490c66f0747f3db300b93ee35d1bfd5120a2d704d4d045de052d3e4af217e40`
+- #37: `f9c49e5e-5a41-43db-8e8b-f1012cf5a994` | 2026-08-02T07:19:21.000Z | GATE/home_memory_settings_ui_passed | incident=`f9c49e5e-5a41-43db-8e8b-f1012cf5a994` | lesson_key=`shared-memory-settings-route` | event_sha256=`d0e7882970909b4fe524c0d361e87bebaef70bbda945b0cc5940e2da1d481346`
+- #38: `4a4397be-3120-4b21-b77a-078ae995e5a4` | 2026-08-02T07:24:46.000Z | GATE/memory_switch_height_ui_passed | incident=`4a4397be-3120-4b21-b77a-078ae995e5a4` | lesson_key=`memory-switch-height-acceptance` | event_sha256=`478848e3117d882368e13b288ab6a9412c6655e696c7949eff630e862e604904`
+- #39: `df4f9912-3d3b-4234-84e8-57e85280ce9f` | 2026-08-02T07:28:02.000Z | REVIEW/memory_switch_minheight_override_fixed | incident=`df4f9912-3d3b-4234-84e8-57e85280ce9f` | lesson_key=`compact-button-minheight-override` | event_sha256=`51a9fa58784e9b210f29082b96edc3ce6863d8946457360878e3b53c54e5db83`
+- #40: `d8bdb795-3db7-4af3-aeaf-90349f5fb973` | 2026-08-02T07:31:43.000Z | REVIEW/memory_confirmation_modal_visibility_fixed | incident=`d8bdb795-3db7-4af3-aeaf-90349f5fb973` | lesson_key=`memory-confirmation-must-be-visible` | event_sha256=`97f6001e42a62a1f14b1ad1bebbf62f42c0eade1f08b08a57c6348d9a32f005c`
+- #41: `7e3f6f7d-5469-4ac4-9a17-8aa82c198e75` | 2026-08-02T09:29:09.000Z | GATE/memory_settings_confirmation_browser_passed | incident=`7e3f6f7d-5469-4ac4-9a17-8aa82c198e75` | lesson_key=`memory-settings-confirmation-browser-evidence` | event_sha256=`4251e4bd398341f24b0ffb8fd5531a95bf5b139bf929b5f1d7674f093eed106b`
+- #42: `e3a5c7d9-2f4b-4a6e-8c1d-5b7e9f2a3d40` | 2026-08-02T11:23:33.067Z | STATE_CHANGE/v1_8_5_typed_memory_completed | incident=`f4b6d8e1-3a5c-4f7b-9d2e-6c8a1b3e5f70` | lesson_key=`typed-memory-closeout-with-consumer-evidence` | event_sha256=`3c464f4eeec77c49218e6e8eb923a05e04396e244f4c81f55c37fa74c547a181`

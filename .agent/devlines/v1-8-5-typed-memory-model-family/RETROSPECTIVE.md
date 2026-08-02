@@ -6,24 +6,28 @@
 
 ## Final status
 
-STARTED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: N/A (sample=0)
-- Repeat rate: N/A (sample=0)
-- Recurrence rate: N/A (sample=0)
-- MTTR: N/A (sample=0; unresolved=0)
+- Failure frequency: 6/49 (12.2%; 12.2 per 100 events)
+- Repeat rate: 0/6 (0.0%)
+- Recurrence rate: 0/6 (0.0%)
+- MTTR: median=0 ms (sample=3; unresolved=3)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/13 (0.0%)
 - Same-state retry rate: N/A (sample=0)
-- Token waste: N/A (sample=0)
+- Token waste: N/A (sample=0; coverage=0/1)
 
 ## All failures
 
-- None recorded.
+- #4 2026-08-01T05:30:30.000Z `tdd_red_before_model_family_contract`; cause_status: `known`; cause: The workflow module has no explicit ModelFamilyContract registry; OLS and Panel behavior remains distributed across family conditionals.; resolution: `accepted`; lesson: Introduce the declarative family registry before admitting additional workflow model families.
+- #7 2026-08-01T05:41:14.000Z `tdd_red_before_typed_memory_validity_contract`; cause_status: `known`; cause: MemoryCandidate has no typed apply_mode, vocabulary, verifier, or validation fields, so approved memory cannot safely control a default's applicability.; resolution: `accepted`; lesson: Persist the typed memory metadata before adding a runtime path that can alter proposal defaults.
+- #28 2026-08-02T08:16:32.000Z `contract_check`; cause_status: `known`; cause: A real Notebook planning retry rejected panel_ols model_options even though the v1.8.5 memory defaults published covariance targets for that family.; resolution: `resolved`; lesson: A memory target and a provider vocabulary must have the same executable model-options owner contract.
+- #32 2026-08-02T08:25:30.000Z `rerun_patch_id_collided_across_values`; cause_status: `known`; cause: The browser rerun patch id used only the source context and changed field names, so changing the same model field to a second value collided with an earlier idempotency record.; resolution: `resolved`; lesson: Manual rerun idempotency keys must include the exact normalized edit, not only the edited field names.
+- #36 2026-08-02T08:30:00.000Z `provider_transient_status_was_not_retried`; cause_status: `known`; cause: A transient provider response status (503) failed immediately instead of receiving one bounded retry before the Notebook planning attempt was classified as unavailable.; resolution: `resolved`; lesson: Retry only status-classified transient upstream failures before any public activity is emitted; never retry authentication, request, or partial-content failures.
 
 ## All errors
 
@@ -31,28 +35,98 @@ STARTED
 
 ## All gaps
 
-- None recorded.
+- #6 2026-08-01T05:38:52.000Z `rescope_blocked_by_legacy_three_segment_path`; cause_status: `known`; cause: The initial Context Pack legitimately includes backend/workbench/figure_context.py, but FMS rescope rejects backend paths with fewer than four path segments. Retaining that frozen path while adding the required Draft/schema integration paths is therefore impossible.; resolution: `open`; lesson: Start a dependent formal line instead of dropping an existing three-segment backend allowlist entry or editing a frozen manifest.
 
 ## All waste
 
-- None recorded.
+- #8 2026-08-01T05:44:50.000Z `typed_memory_test_fixture_source_hash_mismatch`; cause_status: `known`; cause: The new retrieval test used the old synthetic source hash while binding a newly generated redacted summary snapshot. The existing source-integrity guard correctly omitted the memory.; resolution: `accepted`; lesson: A retrieval fixture must use the exact snapshot reference and hash returned by its source binding, not a syntactic placeholder digest.
 
 ## Root causes and solutions
 
-- None recorded.
+- `bounded-transient-provider-retry`: occurrences=1; cause_status: `known`; root cause: A transient provider response status (503) failed immediately instead of receiving one bounded retry before the Notebook planning attempt was classified as unavailable.; solution: `resolved`
+- `fms-rescope-cannot-retain-three-segment-backend-path`: occurrences=1; cause_status: `known`; root cause: The initial Context Pack legitimately includes backend/workbench/figure_context.py, but FMS rescope rejects backend paths with fewer than four path segments. Retaining that frozen path while adding the required Draft/schema integration paths is therefore impossible.; solution: `open`
+- `manual-rerun-idempotency-key-includes-edit`: occurrences=1; cause_status: `known`; root cause: The browser rerun patch id used only the source context and changed field names, so changing the same model field to a second value collided with an earlier idempotency record.; solution: `resolved`
+- `model-family-contract-first`: occurrences=1; cause_status: `known`; root cause: The workflow module has no explicit ModelFamilyContract registry; OLS and Panel behavior remains distributed across family conditionals.; solution: `accepted`
+- `panel-model-options-contract-alignment`: occurrences=1; cause_status: `known`; root cause: A real Notebook planning retry rejected panel_ols model_options even though the v1.8.5 memory defaults published covariance targets for that family.; solution: `resolved`
+- `typed-memory-contract-before-runtime-application`: occurrences=1; cause_status: `known`; root cause: MemoryCandidate has no typed apply_mode, vocabulary, verifier, or validation fields, so approved memory cannot safely control a default's applicability.; solution: `accepted`
+- `typed-memory-retrieval-fixture-must-bind-real-summary-hash`: occurrences=1; cause_status: `known`; root cause: The new retrieval test used the old synthetic source hash while binding a newly generated redacted summary snapshot. The existing source-integrity guard correctly omitted the memory.; solution: `accepted`
 
 ## Added tests
 
-- No test evidence recorded.
+- `TDD red: transient status 503 attempted once; after the fix the targeted retry test and the provider test module pass.`
+- `tests/test_llm_providers.py: 109 passed; targeted transient retry, partial activity, private reasoning, and non-object tool tests: 4 passed.`
+- `tests/test_ols_model_options_contract.py tests/test_panel_covariance.py`
+- `tests/test_ols_model_options_contract.py::test_panel_ols_reuses_the_published_covariance_model_options_contract`
 
 ## New rules
 
-- No rule candidate recorded.
+- `bounded-transient-provider-retry`: line experience occurrence(s)=1
+- `fms-rescope-cannot-retain-three-segment-backend-path`: line experience occurrence(s)=1
+- `manual-rerun-idempotency-key-includes-edit`: line experience occurrence(s)=1
+- `model-family-contract-first`: line experience occurrence(s)=1
+- `panel-model-options-contract-alignment`: line experience occurrence(s)=1
+- `typed-memory-contract-before-runtime-application`: line experience occurrence(s)=1
+- `typed-memory-retrieval-fixture-must-bind-real-summary-hash`: line experience occurrence(s)=1
 
 ## Future guidance
 
-- No guidance recorded.
+- A memory target and a provider vocabulary must have the same executable model-options owner contract.
+- A retrieval fixture must use the exact snapshot reference and hash returned by its source binding, not a syntactic placeholder digest.
+- Introduce the declarative family registry before admitting additional workflow model families.
+- Manual rerun idempotency keys must include the exact normalized edit, not only the edited field names.
+- Persist the typed memory metadata before adding a runtime path that can alter proposal defaults.
+- Retry only status-classified transient upstream failures before any public activity is emitted; never retry authentication, request, or partial-content failures.
+- Start a dependent formal line instead of dropping an existing three-segment backend allowlist entry or editing a frozen manifest.
+- Use the CLI-generated lowercase formal filename rather than legacy naming assumptions.
 
 ## Event index
 
 - #1: `4b33ff36-de76-45c4-95dc-fd89add7b15e` | 2026-08-01T05:21:00.082Z | STATE_CHANGE/line_started | incident=`0e443e16-0011-48af-af04-7782e1246338` | lesson_key=`frozen-context-before-start` | event_sha256=`42404f40da2541c01e696b9d7adfcaff66a7118ac3c3bd497dca97bbd7ec7c1c`
+- #2: `73c929ed-20c9-426b-9a51-d057d183c734` | 2026-08-01T05:22:35.000Z | REVIEW/formal_context_pack_path_verified | incident=`4a957d88-e36e-4f9d-8598-1508337a6988` | lesson_key=`formal-context-pack-filename` | event_sha256=`1dfd235dbd460c43aa3a2051e7dbae2ca40876e77cf3ca2795529d6e1f7d67bd`
+- #3: `bab95f28-fd27-49d4-a9ee-fe84af824968` | 2026-08-01T05:25:33.000Z | GATE/v185_focused_baseline_passed | incident=`d32e25da-1d81-4f80-983e-3a7045eee5aa` | lesson_key=`v185-focused-baseline` | event_sha256=`08285b08a2ed079a37ad172534b89ce7586db364c93e4483e723420725c39da8`
+- #4: `a06efb22-b1b7-4d6d-a317-15f365f50575` | 2026-08-01T05:30:30.000Z | FAILURE/tdd_red_before_model_family_contract | incident=`8f9b7425-3163-42cd-9eeb-551cc5ba3ec3` | lesson_key=`model-family-contract-first` | event_sha256=`ef0d4f2218114a44c71be1bfb67fc2d4938b02cf7726b62a35309986622ebf50`
+- #5: `ef51dd74-563c-4b2d-90d8-cd9c0ea9e62b` | 2026-08-01T05:33:12.000Z | GATE/model_family_contract_core_passed | incident=`2e9dbd3a-b0c4-445a-a0bb-89550428b8a9` | lesson_key=`model-family-contract-core-green` | event_sha256=`d3f1c9c473564f1250e7673d4ed33589ea2df8b49ad01bd0f0390023f74c2cc0`
+- #6: `f29f54b3-067c-41f0-87ef-3e5c07bcb416` | 2026-08-01T05:38:52.000Z | GAP/rescope_blocked_by_legacy_three_segment_path | incident=`dc7acfc3-7f1c-4e8b-8126-4dc3179003b7` | lesson_key=`fms-rescope-cannot-retain-three-segment-backend-path` | event_sha256=`0f8118aafd555397cf37b0c819af6700df1334b201368a290068ffbd36e85861`
+- #7: `24c286e8-0fa7-43cd-979e-05dbeef000ec` | 2026-08-01T05:41:14.000Z | FAILURE/tdd_red_before_typed_memory_validity_contract | incident=`ef9389ce-430a-4696-999f-82dd164e3ad0` | lesson_key=`typed-memory-contract-before-runtime-application` | event_sha256=`cd4e64cee105588154091a7cda92746431a81e1d70a9a788e780382ecf547056`
+- #8: `07bd4059-286c-4bc2-855f-236de23e86e1` | 2026-08-01T05:44:50.000Z | WASTE/typed_memory_test_fixture_source_hash_mismatch | incident=`30751b99-114c-43ad-9b57-611d76e063d5` | lesson_key=`typed-memory-retrieval-fixture-must-bind-real-summary-hash` | event_sha256=`a5455b5fa65386daa51939510bf96fc2d4484640945f87a46ec91c3f2a53928e`
+- #9: `d5d3ecbc-1a7b-403a-aef1-31216892ba1b` | 2026-08-01T05:45:30.000Z | GATE/typed_memory_validity_contract_passed | incident=`760b52d5-2b37-45b7-9440-e7ed9d62aceb` | lesson_key=`typed-memory-validity-contract-green` | event_sha256=`7ca3cb2aae346c48b175809c4118ebcfa9428b7c2ff3fd5237136a42c583b60e`
+- #10: `d26adba6-6aec-416a-9788-495194c5daac` | 2026-08-02T08:06:42.292Z | STATE_CHANGE/context_rescope_required | incident=`c5c3ad1f-8531-4d35-832d-f4981059ce9e` | lesson_key=`context-pack-rescope` | event_sha256=`8300336b9ac1603ffb329e0b3a4664dd666fbfdfc6f87ed722aa9bb33d560ed0`
+- #11: `b2e5b92a-2acf-4686-8784-e218761bb5d2` | 2026-08-02T08:06:42.299Z | STATE_CHANGE/context_rescoped | incident=`f0956968-1c7b-4e23-a57e-ea1c2460ccae` | lesson_key=`context-pack-rescope` | event_sha256=`ed73c451abcedd01de3ed9ef67e6f7c11663a554082b0d0ad86134799368fa9f`
+- #12: `2f46f9f7-540e-4b55-b1c4-11b49a674747` | 2026-08-02T08:06:45.650Z | STATE_CHANGE/context_rescope_required | incident=`ebe3ebb8-4380-4744-ab4c-6feefe28ae99` | lesson_key=`context-pack-rescope` | event_sha256=`79d269982771bea2d606b0df0fa054ce419317ab478a08387bde75081c1f2fab`
+- #13: `3307e137-1bf4-4821-b1b9-b73021a60844` | 2026-08-02T08:06:45.657Z | STATE_CHANGE/context_rescoped | incident=`55d97620-6ad8-4dac-af22-d68673866d86` | lesson_key=`context-pack-rescope` | event_sha256=`5e25e422d2ce113087281462351328ff6632636a6fd8faff0f46c7f593ba66ca`
+- #14: `84d97f93-07cf-4770-8979-050599e6adec` | 2026-08-02T08:06:57.272Z | STATE_CHANGE/context_rescope_required | incident=`280b091e-d943-4d30-b948-6c009e81a545` | lesson_key=`context-pack-rescope` | event_sha256=`78e9454f824871fb60e79230b69e2d22a23a6e3c6f6ca7913955c5d3b092f46b`
+- #15: `e47b64d8-c36e-4fca-ae81-deb8e3eb1b02` | 2026-08-02T08:06:57.279Z | STATE_CHANGE/context_rescoped | incident=`c4900a52-554b-4bbb-be93-c95883ec8f86` | lesson_key=`context-pack-rescope` | event_sha256=`23de5a2228ece8020625b71daea2490f93d4ab65c193de2bbdb2883244068345`
+- #16: `2285a788-875b-4c9e-9ee9-142b02fc138c` | 2026-08-02T08:07:00.589Z | STATE_CHANGE/context_rescope_required | incident=`033780fc-fd84-491d-b0b9-d1ad9da4848e` | lesson_key=`context-pack-rescope` | event_sha256=`a2581c9e7e427616d351179a979406496c06875fa4530a0c7c03fa9a7c25dabc`
+- #17: `775deb8d-bc7c-4914-80e3-d4fa8b517d3f` | 2026-08-02T08:07:00.597Z | STATE_CHANGE/context_rescoped | incident=`462638ed-e0eb-4796-ac5b-3bffe53d4d46` | lesson_key=`context-pack-rescope` | event_sha256=`512a8c6512e9c20aac6c380c9076d120d638e5afd41ccc37bc7d6cb4c15155e5`
+- #18: `77a71ff9-03b2-41d3-8d90-3bc9c6359890` | 2026-08-02T08:08:10.796Z | STATE_CHANGE/context_rescope_required | incident=`baec2f65-5271-4037-93ed-946b71b1c2d8` | lesson_key=`context-pack-rescope` | event_sha256=`6f1b7b2d177d2df2e44f2d6901e1641ff7e683f35f3744997ab2c3fca950436c`
+- #19: `5d0dd575-f395-4d31-ad01-652663ad1b2f` | 2026-08-02T08:08:10.806Z | STATE_CHANGE/context_rescoped | incident=`647fdc9c-3c91-430b-a0ac-7f74990fdd81` | lesson_key=`context-pack-rescope` | event_sha256=`85e086631141558ed1e17bdd9a092ac28b374d79e8115c9de77e3a445a2c7e18`
+- #20: `8179148f-fe13-4d95-a737-385ad3f8f22d` | 2026-08-02T08:08:10.940Z | STATE_CHANGE/context_rescope_required | incident=`0ebace3f-80ec-43a0-9fac-cce400f69d01` | lesson_key=`context-pack-rescope` | event_sha256=`a66b8fa5e1031db5e0322151829cb4c688c7998f207220df5e89da2cf896cb4f`
+- #21: `1f255616-63f0-47a0-be78-ed82b6586767` | 2026-08-02T08:08:10.949Z | STATE_CHANGE/context_rescoped | incident=`883226de-2169-4875-8e0f-9691aba40f17` | lesson_key=`context-pack-rescope` | event_sha256=`f660d954d288bbff19f3257bdf7ccc777cd4d2932c643e3c10db587d3cc2435a`
+- #22: `c32a51a8-52d5-49f4-a536-2f23e42902a3` | 2026-08-02T08:08:11.082Z | STATE_CHANGE/context_rescope_required | incident=`5d59262f-a7d2-48de-9186-816d9c3c84dc` | lesson_key=`context-pack-rescope` | event_sha256=`af193f0728747174695ccd80d37f2f830600ae55911703baf152bdb9869d7dde`
+- #23: `8dfaa552-c863-4214-9f21-ee81f7e7c652` | 2026-08-02T08:08:11.092Z | STATE_CHANGE/context_rescoped | incident=`21f6a99f-13ac-4173-b9e7-38c5a1ab90f3` | lesson_key=`context-pack-rescope` | event_sha256=`679df1fd21ee0aa4bcc52233ef22e5c082123a44115e6a3904806391aac0f7eb`
+- #24: `0fd9c7f7-568b-40b1-87a9-dc912065b4c0` | 2026-08-02T08:08:11.226Z | STATE_CHANGE/context_rescope_required | incident=`0068d928-d7bc-4b81-9125-e2b492c618c0` | lesson_key=`context-pack-rescope` | event_sha256=`262b8c67a2c2319f632d7e1d16ad4abe7be5180de7179e8d722880c5cc730664`
+- #25: `cf72b72c-19af-4ea6-b3e2-cc74c96d2a52` | 2026-08-02T08:08:11.238Z | STATE_CHANGE/context_rescoped | incident=`3c397b18-695c-4ac2-8b66-173628aeae3b` | lesson_key=`context-pack-rescope` | event_sha256=`563930c3e8350639bd9f870b751cee1d961f8793deb411d1f52c48667128e26c`
+- #26: `15636a10-82bf-4571-ae20-358454f7da3e` | 2026-08-02T08:08:11.369Z | STATE_CHANGE/context_rescope_required | incident=`e515cb3f-a065-4432-bedc-18af5dc6f438` | lesson_key=`context-pack-rescope` | event_sha256=`830693a2a8622723baa0cdde8b83fa4e0ba4ae5a3bf860c0109984fe10e9dee1`
+- #27: `f7e5c95e-0177-49e3-8cc9-db4b838f228d` | 2026-08-02T08:08:11.380Z | STATE_CHANGE/context_rescoped | incident=`15a86ceb-7782-467e-b16a-930a3b5b1acd` | lesson_key=`context-pack-rescope` | event_sha256=`b59a9f11ae406ec5d806c74849e4c065e4139d1fea6bae16d143681e10d63e6f`
+- #28: `3f2bd8fd-9363-4d46-91e5-a1e1a1c64a7a` | 2026-08-02T08:16:32.000Z | FAILURE/contract_check | incident=`7b0b6dca-17c4-4a17-96e1-66f8425e6f8e` | lesson_key=`panel-model-options-contract-alignment` | event_sha256=`a19bbe77d603850c390fc2d899f5b9296c4f45890501b66ad22c8e1fbc5ef135`
+- #29: `d11cd7ce-7f92-4b55-a395-e1350d02eb47` | 2026-08-02T08:16:33.000Z | GATE/targeted_tests | incident=`e0d72e4d-7c7d-4d95-a08a-1b93ce2f5bd8` | lesson_key=`panel-model-options-targeted-gate` | event_sha256=`ddc2afd2b741d2e59c688fcb72d546f408467a9c44ee0917997cb9786b5b6d86`
+- #30: `3f4f5acd-7f8c-491d-bcf1-f0456a7bd2ca` | 2026-08-02T08:23:06.720Z | STATE_CHANGE/context_rescope_required | incident=`4af9ab89-590c-42ac-ad33-957481e89705` | lesson_key=`context-pack-rescope` | event_sha256=`d7c1d3a648f25595c564531eab9f91bdf3360a419ec9134fa270214cf8331bc1`
+- #31: `42d52ba1-899c-4866-bfd1-6a8ba1b95c22` | 2026-08-02T08:23:06.733Z | STATE_CHANGE/context_rescoped | incident=`e3eb6872-ef99-4993-8892-3408cca0544d` | lesson_key=`context-pack-rescope` | event_sha256=`0dd6fe7fecf0585582e14da37be4d0b8d3f1e29f39b18826c1324e9231873bcc`
+- #32: `a5d66857-4f9b-4b1d-91e7-8e0f8878c27e` | 2026-08-02T08:25:30.000Z | FAILURE/rerun_patch_id_collided_across_values | incident=`e36a95f7-7407-4db4-b05a-c05db6f7e60b` | lesson_key=`manual-rerun-idempotency-key-includes-edit` | event_sha256=`0482f7bf43c53028ce6bc8688f47cd8becedfbf00bbc488e765f35211e805a08`
+- #33: `d994ebd8-9e32-45c2-9d17-dbf73b07dffd` | 2026-08-02T08:27:10.000Z | GATE/model_family_browser_acceptance_glm_passed | incident=`9e16d01c-b3d9-4ee5-9d03-93d24e7cf7e9` | lesson_key=`browser-rerun-model-switch-exercises-repeated-edit` | event_sha256=`c5a8178226a1fb47b44f58dac516fb7bee79e742fa152414079a43aab3fabe98`
+- #34: `8611d698-ef57-4d03-88c5-7e069fffdaa9` | 2026-08-02T08:26:09.107Z | STATE_CHANGE/context_rescope_required | incident=`4c90d53c-9371-4807-9b8e-24720bdd6865` | lesson_key=`context-pack-rescope` | event_sha256=`798796603182661115d6c9d5d78118619b186e16e337352cca07b1d04fa473c8`
+- #35: `2881742d-6127-4e36-866d-5ef13e07e8e5` | 2026-08-02T08:26:09.122Z | STATE_CHANGE/context_rescoped | incident=`608f4bb7-92b3-4c0c-a205-973867f28a64` | lesson_key=`context-pack-rescope` | event_sha256=`fc8bcc0497e19e909174c703bc40d9d48b5d6e738fc527641704517515a836e7`
+- #36: `7f0de9bb-2d48-4cc8-bd7f-79f68f2c0c5b` | 2026-08-02T08:30:00.000Z | FAILURE/provider_transient_status_was_not_retried | incident=`3c20c0b7-cc9e-4ec4-a38f-4e31ce1b4a62` | lesson_key=`bounded-transient-provider-retry` | event_sha256=`964393a64db99b22b6e9a825e27da65ee56c022f1c8ab588c183584d8f057104`
+- #37: `c0c13f7b-1ef1-4d61-9fc7-8e1d4e76f5b1` | 2026-08-02T08:31:00.000Z | GATE/provider_transient_retry_verified | incident=`f0d9b51d-6bb7-4f9b-8c19-5e5c6ef9332d` | lesson_key=`provider-retry-contract-verified` | event_sha256=`d872f551003f9c1ae80a7417360fa3d153834437d55f0e83b13e53464505990c`
+- #38: `d49f298a-b5dc-4dfc-b3c9-26ec66a2f131` | 2026-08-02T08:35:55.359Z | STATE_CHANGE/context_rescope_required | incident=`b29823ef-d3be-4684-bca8-0e3ddede80de` | lesson_key=`context-pack-rescope` | event_sha256=`191e9eca1d2d4c3e20a71ddaf8246f1f0c2ca411977ebf321c5fd1c046b8bd63`
+- #39: `5e35ee2b-5139-426d-b0de-c14c8adc48e1` | 2026-08-02T08:35:55.374Z | STATE_CHANGE/context_rescoped | incident=`08596780-c167-4b28-99fe-69575dd6c3f0` | lesson_key=`context-pack-rescope` | event_sha256=`9870ea49e37e4656d7271f1a2053ff61971088f7aebf86bc9236f250efd9fa3d`
+- #40: `a78a872f-1ac3-4a64-974a-2da9983a5070` | 2026-08-02T08:44:45.583Z | STATE_CHANGE/context_rescope_required | incident=`e0d5bd00-b6b5-4ca2-8791-e5faa0334bdc` | lesson_key=`context-pack-rescope` | event_sha256=`0fd2a18c6cfe3c6cf844ba29dff46545b4aabd8d46145defe0aad2fadc8d0e02`
+- #41: `4bd6317a-0d4e-4104-91ed-115b6cb53f35` | 2026-08-02T08:44:45.598Z | STATE_CHANGE/context_rescoped | incident=`6c79f502-63b9-4ae6-b77a-c70d95bfd0c4` | lesson_key=`context-pack-rescope` | event_sha256=`95edabb8d2d3aa88a63a58ba0138ec626f2c619ed87c4a724f762d6e144ce2d4`
+- #42: `f2ec5a80-64be-4d9e-93d3-2d7e3ef4b9f1` | 2026-08-02T09:29:09.000Z | GATE/model_family_browser_acceptance_glm_iv_twfe_passed | incident=`f2ec5a80-64be-4d9e-93d3-2d7e3ef4b9f1` | lesson_key=`model-family-browser-evidence-is-family-specific` | event_sha256=`01c80180395e52162b058a84a37d83d5027cdc2caf085389aa683de071c33396`
+- #43: `e8e53b6e-78d4-4e20-a8f9-2ac8ea60a5c8` | 2026-08-02T09:29:09.000Z | GATE/notebook_real_provider_browser_acceptance_passed | incident=`e8e53b6e-78d4-4e20-a8f9-2ac8ea60a5c8` | lesson_key=`browser-acceptance-must-refresh-non-reloading-backend` | event_sha256=`d19e8c2f7b3a017c72dcc252e1ff42786657152b958d83a11a6e5b9715ab997f`
+- #44: `b5d90a4d-6cae-48f2-ae64-0eab2eaf6ce0` | 2026-08-02T09:29:09.000Z | GATE/provider_private_reasoning_recovery_verified | incident=`b5d90a4d-6cae-48f2-ae64-0eab2eaf6ce0` | lesson_key=`private-provider-activity-retry-boundary` | event_sha256=`cb429046d944a33b5fb5541f79e43225693c9399394807587c58f8b76a94a850`
+- #45: `aa59d5b9-4b55-4361-8d61-bf3856052400` | 2026-08-02T09:41:29.000Z | GATE/notebook_server_owned_envelopes_canonicalized | incident=`46bdfcf6-4211-44ba-9974-d18746e61594` | lesson_key=`notebook-server-owned-envelope-canonicalization` | event_sha256=`c2bf5b278796242bfdc1b8b5ac78ff7449a52617e8ab8fcb0db1a1b84739a4e2`
+- #46: `1ed0d846-c930-4a06-aaf1-0bb7279e6dd4` | 2026-08-02T09:45:48.000Z | GATE/notebook_canonical_envelope_browser_replan_passed | incident=`1ed0d846-c930-4a06-aaf1-0bb7279e6dd4` | lesson_key=`notebook-canonicalization-browser-replan` | event_sha256=`c5dc7fb543de21bb6651091f6a6969c3c6951e4f22975e07bd20e4d808e1353b`
+- #47: `6fd4d7ac-0c1c-4e71-8e87-8e110a9a0c84` | 2026-08-02T10:17:18.000Z | GATE/notebook_model_family_contracts_browser_passed | incident=`6fd4d7ac-0c1c-4e71-8e87-8e110a9a0c84` | lesson_key=`notebook-family-contract-single-admission` | event_sha256=`7201411edc7cd2600097096554105146804288f17970011b2057c183e5a8a8b8`
+- #48: `c54a3cf3-0a87-46dd-9d76-47e5c3f4a22f` | 2026-08-02T11:04:00.000Z | GATE/notebook_contract_normalization_browser_passed | incident=`d5e7c4fb-f9b8-4ef0-9c9f-1bc2a79a5d31` | lesson_key=`notebook-server-owned-contract-normalization` | event_sha256=`add1dabd8fd425d9d6ae7b5079dd25532c53f2a27665e1108e7633cb0bdb593f`
+- #49: `d2f4f4a1-1b6b-4c7f-8c5e-7b2f6d1a9e31` | 2026-08-02T11:23:33.067Z | STATE_CHANGE/v1_8_5_model_family_completed | incident=`d9f1e7a2-4c6b-4d8e-9a1f-2b3c5d7e8f90` | lesson_key=`model-family-closeout-on-final-tree` | event_sha256=`c9a5583ecc164333106c1e6a8807d030f6c6b1db3328e9a15746e2ef5713bd25`
