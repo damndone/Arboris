@@ -50,21 +50,16 @@ def run_prediction_model_v186(
     inputs: list[str] | None = None,
     estimator_factory: Callable[[], Any] | None = None,
     feature_recipe: FeatureRecipeV1 | None = None,
+    graph_recorder: Any | None = None,
 ) -> dict[str, Any]:
     """Run the typed v1.8.6 protocol while keeping legacy callers unchanged."""
 
     sampling_spec = sampling or SamplingSpecV1()
-    if any(
-        value is not None
-        for value in (
-            sampling_spec.sampling_weight,
-            sampling_spec.analysis_weight,
-            sampling_spec.frequency_weight,
-        )
-    ):
+    sampling_spec.validate()
+    if sampling_spec.sampling_weight is not None or sampling_spec.analysis_weight is not None:
         raise ContractError(
             "PREDICTION_WEIGHT_UNSUPPORTED",
-            "the v1.8.6 generic estimator adapter does not yet support declared weight semantics",
+            "the v1.8.6 generic estimator adapter does not support sampling_weight or analysis_weight",
         )
     structure = StructureSpecV1(
         kind=data_structure,
@@ -74,6 +69,25 @@ def run_prediction_model_v186(
         provenance="user_confirmed" if data_structure != "unknown" else "inferred",
     )
     structure.validate()
+    if data_structure in {"temporal", "panel"}:
+        required_columns = (
+            [time_column] if data_structure == "temporal" else [entity_column, time_column]
+        )
+        missing_columns = [column for column in required_columns if not column or column not in frame.columns]
+        if missing_columns:
+            code = (
+                "PREDICTION_TIME_COLUMN_MISSING"
+                if data_structure == "temporal"
+                else "PREDICTION_PANEL_COLUMN_MISSING"
+            )
+            raise ContractError(
+                code,
+                f"{data_structure} prediction requires declared columns present in the dataset: {missing_columns}",
+            )
+        raise ContractError(
+            "PREDICTION_SPLIT_PROFILE_NOT_SUPPORTED",
+            f"{data_structure} prediction requires a registered safety profile in a future release",
+        )
     strategy = "grouped" if data_structure == "grouped" else data_structure
     protocol_frame = frame.copy()
     if feature_recipe is not None:
@@ -183,6 +197,16 @@ def run_prediction_model_v186(
             sha256=control_sha,
             payload_contract={"payload_schema": "workbench.prediction.negative-control-packet", "schema_version": 1},
         )
+    if graph_recorder is not None:
+        _record_prediction_graph(
+            graph_recorder,
+            model_id=model_id,
+            model_type=model_type,
+            sample_spec=sample_payload,
+            split_plan=split_payload,
+            evaluation=evaluation_payload,
+            control=control_payload,
+        )
     return {
         "protocol": "predictive_research_v1",
         "model_type": model_type,
@@ -192,6 +216,79 @@ def run_prediction_model_v186(
         "evaluation_packet": evaluation_payload,
         "control_packet": control_payload,
     }
+
+
+def _record_prediction_graph(
+    recorder: Any,
+    *,
+    model_id: str,
+    model_type: str,
+    sample_spec: dict[str, Any],
+    split_plan: dict[str, Any],
+    evaluation: dict[str, Any],
+    control: dict[str, Any],
+) -> None:
+    """Record the bounded research chain without making packet internals nodes."""
+
+    recorder.record_stage(
+        "prediction:dataset_snapshot",
+        "Dataset Snapshot",
+        payload_ref="processed/cleaned_dataset.parquet",
+        summary=f"Snapshot {sample_spec.get('dataset_ref', {}).get('dataset_sha256', '')}",
+    )
+    recorder.record_stage(
+        "prediction:task",
+        "Prediction Task",
+        summary=f"{model_type} for {model_id}",
+    )
+    recorder.record_stage(
+        "prediction:split_plan",
+        "Split Plan",
+        payload_ref=f"prediction_splits/{model_id}.json",
+        summary=f"{split_plan.get('strategy', 'unknown')} / {split_plan.get('content_hash', '')}",
+    )
+    recorder.record_model(
+        "prediction:baseline",
+        "Baseline Model",
+        payload_ref=f"evaluation_results/{model_id}.json",
+        summary=str(evaluation.get("baseline", {}).get("model_id", "mean_regressor")),
+    )
+    recorder.record_model(
+        "prediction:candidate",
+        "Candidate Model",
+        payload_ref=f"prediction_results/{model_id}.json",
+        summary=model_type,
+    )
+    recorder.record_stage(
+        "prediction:evaluation",
+        "Evaluation",
+        payload_ref=f"evaluation_results/{model_id}.json",
+        summary=f"OOS n={evaluation.get('oos', {}).get('n', '—')}",
+    )
+    recorder.record_stage(
+        "prediction:negative_controls",
+        "Negative Controls",
+        payload_ref=f"negative_controls/{model_id}.json",
+        summary=f"{len(control.get('controls', []))} control receipt(s)",
+    )
+    recorder.record_stage(
+        "prediction:result",
+        "Prediction Result",
+        payload_ref=f"evaluation_results/{model_id}.json",
+        summary="Typed predictive-research evidence",
+    )
+    edges = (
+        ("prediction:e:dataset-task", "prediction:dataset_snapshot", "prediction:task"),
+        ("prediction:e:task-split", "prediction:task", "prediction:split_plan"),
+        ("prediction:e:split-baseline", "prediction:split_plan", "prediction:baseline"),
+        ("prediction:e:split-candidate", "prediction:split_plan", "prediction:candidate"),
+        ("prediction:e:baseline-evaluation", "prediction:baseline", "prediction:evaluation"),
+        ("prediction:e:candidate-evaluation", "prediction:candidate", "prediction:evaluation"),
+        ("prediction:e:evaluation-controls", "prediction:evaluation", "prediction:negative_controls"),
+        ("prediction:e:controls-result", "prediction:negative_controls", "prediction:result"),
+    )
+    for edge_id, source_id, target_id in edges:
+        recorder.record_edge(edge_id, source_id, target_id, op="predictive_research")
 
 
 def _make_v186_estimator_factory(model_type: str, random_seed: int) -> Callable[[], Any]:

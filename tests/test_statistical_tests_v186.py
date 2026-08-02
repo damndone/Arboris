@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import workbench.statistical_tests as statistical_tests
 
 from workbench.statistical_tests import (
     cohens_d,
@@ -85,3 +86,30 @@ def test_new_statistics_fail_closed_on_empty_or_nonfinite_input() -> None:
         one_sample_t_test([1.0, float("nan")], population_mean=0.0)
     with pytest.raises(ValueError, match="at least two"):
         posthoc_anova({"only": [1.0]}, correction="tukey")
+
+
+def test_statistics_evidence_packet_is_typed_and_keeps_independent_results() -> None:
+    results = [
+        one_sample_t_test([1.0, 1.2, 0.8, 1.1], population_mean=0.0),
+        *variance_and_normality_tests(GROUPS),
+    ]
+
+    builder = getattr(statistical_tests, "build_statistics_evidence_packet", None)
+    assert callable(builder), "statistics evidence packet producer is missing"
+    packet = builder(
+        results,
+        dataset_sha256="a" * 64,
+        lineage_parent="prediction:dataset_snapshot",
+    )
+
+    assert packet["payload_schema"] == "workbench.statistics.evidence-packet"
+    assert packet["schema_version"] == 1
+    assert packet["dataset_ref"] == {"dataset_sha256": "a" * 64}
+    assert packet["lineage_parent"] == "prediction:dataset_snapshot"
+    assert {row["test_type"] for row in packet["results"]} == {
+        "one_sample_t_test",
+        "levene",
+        "bartlett",
+        "shapiro_wilk",
+    }
+    assert all("effect_size" in row and "assumptions" in row for row in packet["results"])

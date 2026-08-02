@@ -186,15 +186,41 @@ export type PostEstimationResult = {
 };
 
 export type PredictionResearchEvidence = {
-  status: "validated" | "unavailable";
+  status: "validated" | "legacy" | "unavailable";
   consumer?: string;
   model_id?: string;
+  protocol?: string;
+  validation?: string;
+  comparability?: string;
+  message?: string;
+  legacy_artifacts?: Array<{
+    artifact_id?: string;
+    model_id?: string;
+    model_type?: string;
+    status?: string;
+    nobs?: number;
+    cv_folds?: number;
+    sampling_method?: string | null;
+    metrics?: Record<string, number | null>;
+  }>;
+  development?: { cv?: Array<Record<string, unknown>> };
   structure?: { kind?: string; group_column?: string | null; time_column?: string | null };
+  split_plan_hash?: string;
   split_parameters?: Record<string, unknown>;
   oos?: { n?: number; metrics?: Record<string, number | null> };
   baseline?: { model_id?: string; metrics?: Record<string, number | null> };
-  controls?: Array<{ control?: string; seed?: number | null; receipt?: Record<string, unknown> }>;
+  controls?: PredictionControlEvidence[];
   limits?: string[];
+};
+
+export type PredictionControlEvidence = {
+  control?: string;
+  seed?: number | null;
+  status?: string;
+  metrics?: Record<string, number | null>;
+  metric_gap?: Record<string, number | null>;
+  fold_importance?: Array<Record<string, unknown>>;
+  receipt?: Record<string, unknown>;
 };
 
 export type RunDetail = RunSummary & {

@@ -40,8 +40,9 @@ import {
   fetchRunArtifacts,
   fetchRunDetail,
 } from "../api";
-import type { PostEstimationResult } from "../api";
+import type { PostEstimationResult, PredictionResearchEvidence } from "../api";
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
+import { PredictionResearchReportSections } from "./PredictionResearchReportSections";
 
 const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
   "ts.analysis_contract",
@@ -82,6 +83,7 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
   const [figureContextLoading, setFigureContextLoading] = useState(false);
   const [figureInventoryError, setFigureInventoryError] = useState<string | null>(null);
   const [postEstimation, setPostEstimation] = useState<PostEstimationResult[]>([]);
+  const [predictionEvidence, setPredictionEvidence] = useState<PredictionResearchEvidence | null>(null);
 
   // Declared post-estimation results are server-computed scalars with artifact
   // provenance, so they belong in the deterministic fact table. A failure here
@@ -91,15 +93,22 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
     const runId = activeRunId;
     if (!runId || !projectRoot) {
       setPostEstimation([]);
+      setPredictionEvidence(null);
       return;
     }
     let cancelled = false;
     void fetchRunDetail(projectRoot, runId)
       .then((detail) => {
-        if (!cancelled) setPostEstimation(detail.post_estimation_results ?? []);
+        if (!cancelled) {
+          setPostEstimation(detail.post_estimation_results ?? []);
+          setPredictionEvidence(detail.prediction_evidence ?? null);
+        }
       })
       .catch(() => {
-        if (!cancelled) setPostEstimation([]);
+        if (!cancelled) {
+          setPostEstimation([]);
+          setPredictionEvidence(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -507,6 +516,8 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
           {figureInventoryError}
         </div>
       )}
+
+      <PredictionResearchReportSections evidence={predictionEvidence} />
 
       {current ? (
         <ReportBody

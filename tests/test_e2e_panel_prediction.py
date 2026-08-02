@@ -102,6 +102,7 @@ def test_e2e_prediction_artifact_fetchable(tmp_path: Path):
             "x": "x",
             "prediction_model_type": "prediction_ridge",
             "prediction_cv_folds": "3",
+            "prediction_data_structure": "iid",
         },
         files={"file": ("lin.csv", io.BytesIO(_linear_csv()), "text/csv")},
     )

@@ -723,3 +723,106 @@ def variance_and_normality_tests(groups: Mapping[str, Sequence[float]]) -> list[
             assumptions=["independent observations", "sample size is within Shapiro-Wilk operating range"],
         ),
     ]
+
+
+def build_statistics_evidence_packet(
+    results: Sequence[Mapping[str, Any]],
+    *,
+    dataset_sha256: str,
+    lineage_parent: str,
+    producer_code_version: str = "workbench-v1.8.6",
+) -> dict[str, Any]:
+    """Build the versioned, model-selection-independent statistics packet.
+
+    The packet deliberately keeps each test result intact.  Consumers may
+    summarize or display it, but this producer does not rank results or turn
+    posthoc/effect-size evidence into a model-selection decision.
+    """
+
+    if (
+        not isinstance(dataset_sha256, str)
+        or len(dataset_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in dataset_sha256)
+    ):
+        raise ValueError("dataset_sha256 must be a lowercase sha256 digest")
+    if not isinstance(lineage_parent, str) or not lineage_parent.strip():
+        raise ValueError("lineage_parent is required")
+    if not isinstance(producer_code_version, str) or not producer_code_version.strip():
+        raise ValueError("producer_code_version is required")
+    if not isinstance(results, Sequence) or isinstance(results, (str, bytes)) or not results:
+        raise ValueError("statistics evidence packet requires at least one result")
+
+    normalized: list[dict[str, Any]] = []
+    required = {
+        "test_id",
+        "test_version",
+        "test_type",
+        "nobs",
+        "statistic",
+        "p_value",
+        "effect_size",
+        "assumptions",
+        "warnings",
+    }
+    for result in results:
+        if not isinstance(result, Mapping):
+            raise ValueError("each statistical evidence result must be an object")
+        missing = required - result.keys()
+        if missing:
+            raise ValueError(f"statistical evidence result is missing fields: {sorted(missing)}")
+        if not isinstance(result["test_id"], str) or not result["test_id"].strip():
+            raise ValueError("statistical evidence test_id is required")
+        if result["test_version"] != 1:
+            raise ValueError("unsupported statistical evidence test version")
+        if not isinstance(result["test_type"], str) or not result["test_type"].strip():
+            raise ValueError("statistical evidence test_type is required")
+        if not isinstance(result["nobs"], int) or result["nobs"] < 2:
+            raise ValueError("statistical evidence nobs must be an integer of at least two")
+        if result["statistic"] is not None and not _is_finite_number(result["statistic"]):
+            raise ValueError("statistical evidence statistic must be finite or null")
+        if result["p_value"] is not None and not _is_finite_number(result["p_value"]):
+            raise ValueError("statistical evidence p_value must be finite or null")
+        if not isinstance(result["assumptions"], list) or not all(
+            isinstance(item, str) for item in result["assumptions"]
+        ):
+            raise ValueError("statistical evidence assumptions must be a string list")
+        if not isinstance(result["warnings"], list) or not all(
+            isinstance(item, str) for item in result["warnings"]
+        ):
+            raise ValueError("statistical evidence warnings must be a string list")
+        normalized_result = dict(result)
+        _reject_nonfinite_values(normalized_result)
+        normalized.append(normalized_result)
+
+    packet = {
+        "payload_schema": "workbench.statistics.evidence-packet",
+        "schema_version": 1,
+        "producer": {
+            "component": "workbench.statistical_tests",
+            "code_version": producer_code_version,
+        },
+        "dataset_ref": {"dataset_sha256": dataset_sha256},
+        "lineage_parent": lineage_parent,
+        "results": normalized,
+        "limits": [
+            "independent statistical evidence; not a model-selection decision",
+        ],
+    }
+    from .predictive_research.schema import default_v1_prediction_registry
+
+    return default_v1_prediction_registry().validate(packet)
+
+
+def _is_finite_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+
+
+def _reject_nonfinite_values(value: Any) -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("statistical evidence cannot contain non-finite values")
+    if isinstance(value, Mapping):
+        for child in value.values():
+            _reject_nonfinite_values(child)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            _reject_nonfinite_values(child)

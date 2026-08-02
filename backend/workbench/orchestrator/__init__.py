@@ -74,7 +74,7 @@ from ..imputation import run_mice_imputation
 from ..metadata import infer_schema
 from ..narrative import build_claims
 from ..profiling import profile_frame
-from ..prediction import run_prediction_model, run_prediction_model_v186
+from ..prediction import run_prediction_model
 from ..projects import create_run
 from ..reporting import render_html_report
 from ..router import classify_dataset, detect_y_kind

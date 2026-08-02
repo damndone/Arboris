@@ -118,10 +118,10 @@ class DiagnosticsStage:
         from ...domain import GuardrailIssue, Severity
         from ...econometrics.optional_deps import OptionalDependencyNotInstalled
         from ...predictive_research.contracts import ContractError
+        from ...prediction import run_prediction_model_v186
 
         compute_diagnostics = _orch.compute_diagnostics
         run_time_series_diagnostics = _orch.run_time_series_diagnostics
-        run_prediction_model = _orch.run_prediction_model
         create_figures = _orch.create_figures
 
         run_root = env.run_root
@@ -333,42 +333,45 @@ class DiagnosticsStage:
             cv_folds = req_pred_folds or config.prediction_cv_folds
             sampling_method = req_pred_sampling or config.prediction_sampling_method
             try:
-                if req_pred_structure is not None:
-                    if sampling_method:
-                        raise ContractError(
-                            "PREDICTION_SAMPLING_UNSUPPORTED",
-                            "legacy sampling methods are not accepted by the v1.8.6 typed prediction protocol",
-                        )
-                    run_prediction_model_v186(
-                        modeling_frame,
-                        run_root,
-                        y=normalized_y,
-                        x=normalized_x,
-                        model_type=prediction_model_type,
-                        model_id=prediction_model_id,
-                        final_holdout_fraction=req_pred_holdout if req_pred_holdout is not None else 0.2,
-                        cv_folds=cv_folds,
-                        shuffle=req_pred_shuffle if req_pred_shuffle is not None else True,
-                        random_seed=config.random_seed,
-                        data_structure=str(req_pred_structure),
-                        entity_column=req_pred_entity or None,
-                        group_column=req_pred_group or None,
-                        time_column=req_pred_time or None,
-                        inputs=model_input_ids,
+                imputation_request = ctx.artifacts.get("_imputation_request")
+                imputation_method = (
+                    imputation_request.get("method")
+                    if isinstance(imputation_request, dict)
+                    else getattr(config, "imputation_method", "")
+                )
+                if imputation_method == "mice":
+                    raise ContractError(
+                        "PREDICTION_MICE_FOLD_LOCAL_REQUIRED",
+                        "MICE must be fitted inside each prediction training fold before prediction is enabled",
                     )
-                else:
-                    run_prediction_model(
-                        modeling_frame,
-                        run_root,
-                        y=normalized_y,
-                        x=normalized_x,
-                        model_type=prediction_model_type,
-                        model_id=prediction_model_id,
-                        cv_folds=cv_folds,
-                        random_seed=config.random_seed,
-                        inputs=model_input_ids,
-                        sampling_method=sampling_method,
+                if not req_pred_structure:
+                    raise ContractError(
+                        "PREDICTION_DATA_STRUCTURE_UNKNOWN",
+                        "new prediction runs require an explicit data structure declaration",
                     )
+                if sampling_method:
+                    raise ContractError(
+                        "PREDICTION_SAMPLING_UNSUPPORTED",
+                        "legacy sampling methods are not accepted by the v1.8.6 typed prediction protocol",
+                    )
+                run_prediction_model_v186(
+                    modeling_frame,
+                    run_root,
+                    y=normalized_y,
+                    x=normalized_x,
+                    model_type=prediction_model_type,
+                    model_id=prediction_model_id,
+                    final_holdout_fraction=req_pred_holdout if req_pred_holdout is not None else 0.2,
+                    cv_folds=cv_folds,
+                    shuffle=req_pred_shuffle if req_pred_shuffle is not None else True,
+                    random_seed=config.random_seed,
+                    data_structure=str(req_pred_structure),
+                    entity_column=req_pred_entity or None,
+                    group_column=req_pred_group or None,
+                    time_column=req_pred_time or None,
+                    inputs=model_input_ids,
+                    graph_recorder=env.recorder,
+                )
             except OptionalDependencyNotInstalled as dep_exc:
                 # Prediction is supplementary; missing optional deps should
                 # not block the econometric workflow.  Write a structured

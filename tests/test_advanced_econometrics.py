@@ -10,6 +10,7 @@ from workbench.econometrics.runner import (
     run_probit,
 )
 from workbench.artifacts import read_json
+from workbench import prediction
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
 
@@ -696,12 +697,10 @@ def test_prediction_failure_in_workflow_writes_structured_issue_and_continues(
     monkeypatch, tmp_path,
 ):
     """Prediction ValueError must not crash the econometric workflow."""
-    import workbench.orchestrator as orchestrator
-
     def fake_prediction(*args, **kwargs):
         raise ValueError("Too few samples for prediction")
 
-    monkeypatch.setattr(orchestrator, "run_prediction_model", fake_prediction)
+    monkeypatch.setattr(prediction, "run_prediction_model_v186", fake_prediction)
 
     source = tmp_path / "data.csv"
     pd.DataFrame(
@@ -716,6 +715,7 @@ def test_prediction_failure_in_workflow_writes_structured_issue_and_continues(
 
     result = run_workflow(
         project.root, [source], mode="auto", y="y", x=["x"],
+        prediction_model_type="prediction_lasso", prediction_data_structure="iid",
     )
 
     run_root = project.root / "runs" / result["run_id"]
@@ -739,7 +739,6 @@ def test_prediction_missing_dependency_in_workflow_continues_workflow(
     monkeypatch, tmp_path,
 ):
     """Prediction OptionalDependencyNotInstalled must not crash the workflow."""
-    import workbench.orchestrator as orchestrator
     from workbench.econometrics.optional_deps import OptionalDependencyNotInstalled
 
     def fake_prediction(*args, **kwargs):
@@ -747,7 +746,7 @@ def test_prediction_missing_dependency_in_workflow_continues_workflow(
             extra="ml", package="sklearn", model_type="prediction_lasso",
         )
 
-    monkeypatch.setattr(orchestrator, "run_prediction_model", fake_prediction)
+    monkeypatch.setattr(prediction, "run_prediction_model_v186", fake_prediction)
 
     source = tmp_path / "data.csv"
     pd.DataFrame(
@@ -762,6 +761,7 @@ def test_prediction_missing_dependency_in_workflow_continues_workflow(
 
     result = run_workflow(
         project.root, [source], mode="auto", y="y", x=["x"],
+        prediction_model_type="prediction_lasso", prediction_data_structure="iid",
     )
 
     run_root = project.root / "runs" / result["run_id"]
