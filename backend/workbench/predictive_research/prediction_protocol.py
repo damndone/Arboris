@@ -215,25 +215,57 @@ def dataset_snapshot_hash(frame: pd.DataFrame) -> str:
     return hashlib.sha256(metadata + values).hexdigest()
 
 
-def _rmse(actual: pd.Series, predicted: list[float]) -> float:
-    errors = [(float(left) - float(right)) ** 2 for left, right in zip(actual, predicted, strict=True)]
-    return math.sqrt(sum(errors) / len(errors)) if errors else float("nan")
+def _metric_weights(actual: pd.Series, sample_weight: pd.Series | None) -> list[float]:
+    if sample_weight is None:
+        return [1.0] * len(actual)
+    aligned = sample_weight.reindex(actual.index)
+    return [float(value) for value in aligned]
 
 
-def _r2(actual: pd.Series, predicted: list[float]) -> float | None:
+def _rmse(actual: pd.Series, predicted: list[float], weights: list[float]) -> float:
+    errors = [
+        weight * (float(left) - float(right)) ** 2
+        for left, right, weight in zip(actual, predicted, weights, strict=True)
+    ]
+    total_weight = sum(weights)
+    return math.sqrt(sum(errors) / total_weight) if total_weight > 0 else float("nan")
+
+
+def _r2(actual: pd.Series, predicted: list[float], weights: list[float]) -> float | None:
     values = [float(value) for value in actual]
     if len(values) < 2:
         return None
-    mean = sum(values) / len(values)
-    total = sum((value - mean) ** 2 for value in values)
+    total_weight = sum(weights)
+    if total_weight <= 0:
+        return None
+    mean = sum(weight * value for value, weight in zip(values, weights, strict=True)) / total_weight
+    total = sum(
+        weight * (value - mean) ** 2 for value, weight in zip(values, weights, strict=True)
+    )
     if total == 0:
         return None
-    residual = sum((value - estimate) ** 2 for value, estimate in zip(values, predicted, strict=True))
+    residual = sum(
+        weight * (value - estimate) ** 2
+        for value, estimate, weight in zip(values, predicted, weights, strict=True)
+    )
     return 1.0 - residual / total
 
 
-def _metrics(actual: pd.Series, predicted: list[float]) -> dict[str, float | None]:
-    return {"r2": _r2(actual, predicted), "rmse": _rmse(actual, predicted)}
+def _metrics(
+    actual: pd.Series,
+    predicted: list[float],
+    *,
+    sample_weight: pd.Series | None = None,
+) -> dict[str, float | None]:
+    """Evaluation metrics.
+
+    A declared frequency weight is an observation count, so it has to enter the
+    metric as well as the fit; an unweighted metric would describe a sample that
+    was never observed.
+    """
+
+    weights = _metric_weights(actual, sample_weight)
+    return {"r2": _r2(actual, predicted, weights), "rmse": _rmse(actual, predicted, weights)}
 
 
 def _average_metric(rows: list[dict[str, Any]], metric: str) -> float | None:
@@ -409,7 +441,7 @@ def run_oos_prediction(
             "fold": fold,
             "n_train": len(training_rows),
             "n_validation": len(validation_rows),
-            "metrics": _metrics(validation_target, cv_predictions),
+            "metrics": _metrics(validation_target, cv_predictions, sample_weight=frequency_weights),
         }
         cv_metrics.append(observed_fold)
 
@@ -430,7 +462,7 @@ def run_oos_prediction(
                     "fold": fold,
                     "n_train": len(training_rows),
                     "n_validation": len(validation_rows),
-                    "metrics": _metrics(validation_target, permutation_predictions),
+                    "metrics": _metrics(validation_target, permutation_predictions, sample_weight=frequency_weights),
                 }
             )
 
@@ -458,9 +490,10 @@ def run_oos_prediction(
                 shuffled_predictions = [
                     float(value) for value in noise_estimator.predict(shuffled_validation)
                 ]
+                importance_weights = _metric_weights(validation_target, frequency_weights)
                 feature_importance[feature_name] = (
-                    _rmse(validation_target, shuffled_predictions)
-                    - _rmse(validation_target, noise_base_predictions)
+                    _rmse(validation_target, shuffled_predictions, importance_weights)
+                    - _rmse(validation_target, noise_base_predictions, importance_weights)
                 )
             ordered_features = sorted(
                 feature_importance,
@@ -553,7 +586,7 @@ def run_oos_prediction(
         permutation_receipt = dict(permutation_control.receipt)
         permutation_receipt.update(
             {
-                "metrics": _metrics(frame.loc[final_rows, target], permutation_predictions),
+                "metrics": _metrics(frame.loc[final_rows, target], permutation_predictions, sample_weight=frequency_weights),
                 "n_train": len(development_rows),
                 "n_evaluation": len(final_rows),
                 "fit_scope": "development_only",
@@ -594,7 +627,7 @@ def run_oos_prediction(
         noise_receipt = dict(noise_control.receipt)
         noise_receipt.update(
             {
-                "metrics": _metrics(frame.loc[final_rows, target], noise_predictions),
+                "metrics": _metrics(frame.loc[final_rows, target], noise_predictions, sample_weight=frequency_weights),
                 "n_train": len(development_rows),
                 "n_evaluation": len(final_rows),
                 "fit_scope": "development_only",
@@ -622,8 +655,8 @@ def run_oos_prediction(
         "split_plan_hash": split_receipt.content_hash,
         "sample_spec_hash": sample_spec.content_hash,
         "model_id": model_id,
-        "baseline": {"model_id": "mean_regressor", "metrics": _metrics(frame.loc[final_rows, target], baseline_predictions)},
-        "oos": {"n": len(final_rows), "metrics": _metrics(frame.loc[final_rows, target], final_predictions)},
+        "baseline": {"model_id": "mean_regressor", "metrics": _metrics(frame.loc[final_rows, target], baseline_predictions, sample_weight=frequency_weights)},
+        "oos": {"n": len(final_rows), "metrics": _metrics(frame.loc[final_rows, target], final_predictions, sample_weight=frequency_weights)},
         "cv": cv_metrics,
         "controls": controls,
         "preprocessing": preprocessing,

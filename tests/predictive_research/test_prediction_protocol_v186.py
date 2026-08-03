@@ -269,3 +269,32 @@ def test_oos_prediction_rejects_temporal_profile_before_execution() -> None:
 
     assert error.value.code == "PREDICTION_SPLIT_PROFILE_NOT_SUPPORTED"
     assert RecordingMeanEstimator.fits == []
+
+
+def test_frequency_weighted_metrics_match_row_expansion_oracle(tmp_path) -> None:
+    """Frequency weights are counts, so evaluation metrics must count them too.
+
+    An unweighted metric silently reports the performance of a sample that
+    does not exist.
+    """
+    import math
+
+    from workbench.predictive_research.prediction_protocol import _metrics
+
+    actual = pd.Series([1.0, 2.0, 3.0, 4.0])
+    predicted = [1.5, 2.5, 2.0, 4.5]
+    counts = pd.Series([1, 1, 5, 1])
+
+    expanded_actual = pd.Series(
+        [value for value, count in zip(actual, counts, strict=True) for _ in range(count)]
+    )
+    expanded_predicted = [
+        value for value, count in zip(predicted, counts, strict=True) for _ in range(count)
+    ]
+
+    oracle = _metrics(expanded_actual, expanded_predicted)
+    weighted = _metrics(actual, predicted, sample_weight=counts)
+
+    assert weighted["rmse"] == pytest.approx(oracle["rmse"], rel=1e-12)
+    assert weighted["r2"] == pytest.approx(oracle["r2"], rel=1e-12)
+    assert not math.isclose(weighted["rmse"], _metrics(actual, predicted)["rmse"])
