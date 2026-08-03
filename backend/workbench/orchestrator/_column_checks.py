@@ -259,12 +259,21 @@ def _check_dropped_variables(
     def _in_coefficients(var: str) -> bool:
         if var in coefficients:
             return True
-        if var in categorical_vars:
-            sq = f"C(Q('{var}'))[T."
-            dq = f'C(Q("{var}"))[T.'
-            for cterm in coefficients:
-                if isinstance(cterm, str) and (sq in cterm or dq in cterm):
-                    return True
+        # Multi-equation families (multinomial logit, quantile regression across
+        # quantiles) name coefficients "<equation>:<term>".  The term is still
+        # estimated, so the equation prefix must not read as a dropped variable.
+        sq = f"C(Q('{var}'))[T."
+        dq = f'C(Q("{var}"))[T.'
+        for cterm in coefficients:
+            if not isinstance(cterm, str):
+                continue
+            if var in categorical_vars and (sq in cterm or dq in cterm):
+                return True
+            _, separator, term = cterm.partition(":")
+            if separator and term == var:
+                return True
+            if separator and var in categorical_vars and (sq in term or dq in term):
+                return True
         return False
 
     dropped: list[dict[str, str]] = []

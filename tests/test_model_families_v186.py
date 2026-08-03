@@ -150,3 +150,28 @@ def test_ordinal_logit_thresholds_are_named_by_the_declared_outcome_levels(tmp_p
     threshold_names = [name for name in result["coefficients"] if "/" in name]
     assert threshold_names == ["1/2", "2/3"], threshold_names
     assert "0/1" not in result["coefficients"]
+
+
+def test_multinomial_logit_does_not_report_an_estimated_variable_as_dropped(tmp_path: Path) -> None:
+    """A predictor that has coefficients was not dropped.
+
+    Multinomial coefficients are named "<outcome>:<term>", so a name-equality
+    check reads every estimated predictor as collinear and tells the user their
+    variable was discarded.
+    """
+    frame = pd.DataFrame({
+        "choice": ["a" if i % 3 == 0 else "b" if i % 3 == 1 else "c" for i in range(120)],
+        "x": [float(i) for i in range(120)],
+    })
+    run_root = _run(tmp_path, frame, model_type="multinomial_logit", y="choice", x=["x"])
+    result = read_json(run_root / "model_results" / "multinomial_logit_1.json")
+    assert any(name.endswith(":x") for name in result["coefficients"])
+
+    errors_path = run_root / "errors.json"
+    issues = read_json(errors_path)["issues"] if errors_path.exists() else []
+    dropped = [
+        issue for issue in issues
+        if issue.get("code") == "VARIABLE_DROPPED"
+        and issue.get("evidence", {}).get("variable") == "x"
+    ]
+    assert dropped == [], dropped
