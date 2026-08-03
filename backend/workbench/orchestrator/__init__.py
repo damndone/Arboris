@@ -207,6 +207,9 @@ def run_workflow(
     cs_cluster_var: str = "",
     honest_did: bool = False,
     model_options: dict[str, object] | None = None,
+    frequency_weight: str = "",
+    analysis_weight: str = "",
+    sampling_weight: str = "",
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
     from ..lineage.hashing import dag_hash
@@ -275,6 +278,9 @@ def run_workflow(
         "prediction_time_column": prediction_time_column,
         "prediction_final_holdout_fraction": prediction_final_holdout_fraction,
         "prediction_shuffle": prediction_shuffle,
+        "frequency_weight": frequency_weight,
+        "analysis_weight": analysis_weight,
+        "sampling_weight": sampling_weight,
         "did_mode": did_mode,
         "did_cohort_col": did_cohort_col,
         "did_treat_col": did_treat_col,
@@ -389,6 +395,9 @@ def run_workflow(
             honest_did=honest_did,
             model_options=normalized_model_options,
             model_options_binding=model_options_binding,
+            frequency_weight=frequency_weight,
+            analysis_weight=analysis_weight,
+            sampling_weight=sampling_weight,
             stop_reason=stop_reason,
         )
     except OptionalDependencyNotInstalled as exc:
@@ -557,6 +566,9 @@ def _run_workflow(
     honest_did: bool = False,
     model_options: dict[str, object] | None = None,
     model_options_binding: dict[str, str] | None = None,
+    frequency_weight: str = "",
+    analysis_weight: str = "",
+    sampling_weight: str = "",
     lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
@@ -622,6 +634,9 @@ def _run_workflow(
     ctx.artifacts["_prediction_time_column"] = prediction_time_column
     ctx.artifacts["_prediction_final_holdout_fraction"] = prediction_final_holdout_fraction
     ctx.artifacts["_prediction_shuffle"] = prediction_shuffle
+    ctx.artifacts["_frequency_weight"] = frequency_weight
+    ctx.artifacts["_analysis_weight"] = analysis_weight
+    ctx.artifacts["_sampling_weight"] = sampling_weight
     ctx.artifacts["_iv_endog"] = [normalize_column_name(c) for c in (iv_endog or [])]
     ctx.artifacts["_iv_instruments"] = [normalize_column_name(c) for c in (iv_instruments or [])]
     ctx.artifacts["_did_mode"] = did_mode
@@ -668,6 +683,9 @@ def _run_workflow(
         "prediction_time_column": prediction_time_column,
         "prediction_final_holdout_fraction": prediction_final_holdout_fraction,
         "prediction_shuffle": prediction_shuffle,
+        "frequency_weight": frequency_weight,
+        "analysis_weight": analysis_weight,
+        "sampling_weight": sampling_weight,
         "model_options": normalized_model_options,
     }
     if model_options_binding is not None:

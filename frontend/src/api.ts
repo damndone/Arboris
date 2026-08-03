@@ -439,6 +439,9 @@ export interface RunExtraParams {
   predictionTimeColumn?: string;
   predictionFinalHoldoutFraction?: number;
   predictionShuffle?: boolean;
+  frequencyWeight?: string;
+  analysisWeight?: string;
+  samplingWeight?: string;
   ivEndog?: string[];
   ivInstruments?: string[];
   didMode?: string;
@@ -564,6 +567,9 @@ export async function runWorkflow(
     form.append("prediction_final_holdout_fraction", String(extra.predictionFinalHoldoutFraction));
   }
   if (extra?.predictionShuffle !== undefined) form.append("prediction_shuffle", String(extra.predictionShuffle));
+  if (extra?.frequencyWeight) form.append("frequency_weight", extra.frequencyWeight);
+  if (extra?.analysisWeight) form.append("analysis_weight", extra.analysisWeight);
+  if (extra?.samplingWeight) form.append("sampling_weight", extra.samplingWeight);
   if (extra?.modelOptions !== undefined) {
     form.append("model_options", serializeModelOptions(extra.modelOptions));
   }

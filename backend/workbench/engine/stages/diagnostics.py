@@ -117,7 +117,7 @@ class DiagnosticsStage:
         from ...artifacts import register_artifact, write_json
         from ...domain import GuardrailIssue, Severity
         from ...econometrics.optional_deps import OptionalDependencyNotInstalled
-        from ...predictive_research.contracts import ContractError
+        from ...predictive_research.contracts import ContractError, SamplingSpecV1
         from ...prediction import run_prediction_model_v186
 
         compute_diagnostics = _orch.compute_diagnostics
@@ -146,6 +146,9 @@ class DiagnosticsStage:
         req_pred_time = ctx.artifacts.get("_prediction_time_column") or ""
         req_pred_holdout = ctx.artifacts.get("_prediction_final_holdout_fraction")
         req_pred_shuffle = ctx.artifacts.get("_prediction_shuffle")
+        req_frequency_weight = str(ctx.artifacts.get("_frequency_weight") or "").strip()
+        req_analysis_weight = str(ctx.artifacts.get("_analysis_weight") or "").strip()
+        req_sampling_weight = str(ctx.artifacts.get("_sampling_weight") or "").strip()
         routing = ctx.artifacts["_routing"]
         time_candidates = ctx.artifacts["_time_candidates"]
 
@@ -369,6 +372,11 @@ class DiagnosticsStage:
                     entity_column=req_pred_entity or None,
                     group_column=req_pred_group or None,
                     time_column=req_pred_time or None,
+                    sampling=SamplingSpecV1(
+                        frequency_weight=req_frequency_weight or None,
+                        analysis_weight=req_analysis_weight or None,
+                        sampling_weight=req_sampling_weight or None,
+                    ),
                     inputs=model_input_ids,
                     graph_recorder=env.recorder,
                 )

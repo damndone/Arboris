@@ -547,6 +547,8 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         expected_artifacts=("ols_1", "diagnostic_summary"),
         result_shape="coefficient_intervals",
         forbidden_spec_fields_message="model.genesis ols does not accept panel entity_col or time_col",
+        allows_weights=("frequency", "analysis"),
+        supported_split_kinds=("iid", "grouped"),
         requires_branch_figures=True,
     ),
     "logit": ModelFamilyContract(

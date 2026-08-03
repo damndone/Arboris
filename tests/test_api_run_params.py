@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from workbench.api import app, _parse_json_str_array
+from workbench.artifacts import read_json
 
 
 def _csv() -> bytes:
@@ -36,6 +37,9 @@ def test_run_endpoint_forwards_new_params(tmp_path):
             "prediction_data_structure": "grouped", "prediction_group_column": "firm",
             "prediction_time_column": "yr", "prediction_final_holdout_fraction": "0.25",
             "prediction_shuffle": "false",
+            "frequency_weight": "freq",
+            "analysis_weight": "analytic",
+            "sampling_weight": "sample",
             "model_options": "{}",
         }, files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")})
         # _bg_run runs on the executor thread — poll until _run_workflow is called.
@@ -57,8 +61,52 @@ def test_run_endpoint_forwards_new_params(tmp_path):
     assert kw["prediction_time_column"] == "yr"
     assert kw["prediction_final_holdout_fraction"] == 0.25
     assert kw["prediction_shuffle"] is False
+    assert kw["frequency_weight"] == "freq"
+    assert kw["analysis_weight"] == "analytic"
+    assert kw["sampling_weight"] == "sample"
     assert kw["model_options"] == {}
     assert kw["model_options_binding"] is None
+
+
+def test_run_endpoint_executes_frequency_weight_in_ols_packet(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "weighted"}
+    ).json()["project_root"]
+    frame = pd.DataFrame(
+        {
+            "y": [1.0 + 2.0 * index + (5.0 if index % 3 == 0 else 0.0) for index in range(36)],
+            "x": [float(index) for index in range(36)],
+            "freq": [1.0 if index < 18 else 8.0 for index in range(36)],
+        }
+    )
+    response = client.post(
+        "/runs",
+        data={
+            "project_root": root,
+            "mode": "auto",
+            "model_type": "ols",
+            "y": "y",
+            "x": "x",
+            "frequency_weight": "freq",
+            "covariance": "unadjusted",
+        },
+        files={"file": ("weighted.csv", io.BytesIO(frame.to_csv(index=False).encode()), "text/csv")},
+    )
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+    terminal = None
+    for _ in range(100):
+        detail = client.get(f"/runs/{run_id}", params={"project_root": root}).json()
+        terminal = detail.get("status")
+        if terminal in {"completed", "failed", "blocked", "partial"}:
+            break
+        time.sleep(0.1)
+    assert terminal == "completed"
+    model = read_json(
+        tmp_path / "weighted" / "runs" / run_id / "model_results" / "ols_1.json"
+    )
+    assert model["weights"] == {"kind": "frequency", "column": "freq", "executed": True}
 
 
 def test_run_endpoint_forwards_cs_params(tmp_path):

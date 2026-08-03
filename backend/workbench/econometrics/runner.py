@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -688,7 +689,49 @@ def run_ols(
         # index makes duplicate input labels unambiguous without changing any
         # values, columns, formula, sample order, or point estimate.
         model_frame.index = pd.RangeIndex(len(model_frame), name="__ols_position__")
-    original = smf.ols(formula=formula, data=model_frame).fit()
+    normalized_weights: dict[str, Any] | None = None
+    if weights is not None:
+        if not isinstance(weights, Mapping):
+            raise ValueError("OLS_WEIGHT_INVALID: weights must be an object with kind and column")
+        kind = str(weights.get("kind") or "").strip().lower()
+        column = str(weights.get("column") or "").strip()
+        if kind == "sampling":
+            raise ValueError(
+                "OLS_SAMPLING_WEIGHT_UNSUPPORTED: sampling_weight requires a declared strata/PSU design"
+            )
+        if kind not in {"frequency", "analysis"}:
+            raise ValueError(
+                "OLS_WEIGHT_KIND_UNSUPPORTED: OLS supports frequency or analysis weights"
+            )
+        if not column:
+            raise ValueError("OLS_WEIGHT_COLUMN_MISSING: weight column must be declared")
+        if column not in model_frame.columns:
+            raise ValueError(
+                f"OLS_WEIGHT_COLUMN_MISSING: weight column {column!r} is not present in the dataset"
+            )
+        weight_values = pd.to_numeric(model_frame[column], errors="coerce")
+        if weight_values.isna().any() or not np.isfinite(weight_values.to_numpy(dtype=float)).all():
+            raise ValueError(
+                f"OLS_WEIGHT_INVALID: weight column {column!r} must contain finite positive values"
+            )
+        if (weight_values <= 0).any():
+            raise ValueError(
+                f"OLS_WEIGHT_INVALID: weight column {column!r} must contain finite positive values"
+            )
+        normalized_weights = {"kind": kind, "column": column, "executed": True}
+        if (weight_values == 1).all():
+            # Keep the unweighted numerical path byte-for-byte stable for the
+            # identity case while still exposing that the declared weight was
+            # validated and executed.
+            original = smf.ols(formula=formula, data=model_frame).fit()
+        else:
+            original = smf.wls(
+                formula=formula,
+                data=model_frame,
+                weights=weight_values,
+            ).fit()
+    else:
+        original = smf.ols(formula=formula, data=model_frame).fit()
     if covariance == "clustered":
         row_labels = getattr(original.model.data, "row_labels", None)
         row_positions, _ = _analysis_row_context(
@@ -736,7 +779,7 @@ def run_ols(
         cluster_row_ids=cluster_row_ids,
         focal_x=focal_x,
         primary_estimand=primary_estimand,
-        weights=weights,
+        weights=normalized_weights,
         intercept=intercept,
         missing_policy=missing_policy,
         solver_options=solver_options or {"engine": "statsmodels", "method": "ols"},

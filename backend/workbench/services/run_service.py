@@ -583,6 +583,9 @@ def _submit_run(
         str(form.get("honest_did", "false")).lower() == "true",
         model_options,
         model_options_binding,
+        form.get("frequency_weight", ""),
+        form.get("analysis_weight", ""),
+        form.get("sampling_weight", ""),
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -627,6 +630,9 @@ def _bg_run(
     honest_did: bool = False,
     model_options: dict[str, object] | None = None,
     model_options_binding: dict[str, str] | None = None,
+    frequency_weight: str = "",
+    analysis_weight: str = "",
+    sampling_weight: str = "",
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -695,6 +701,9 @@ def _bg_run(
             honest_did=honest_did,
             model_options=model_options,
             model_options_binding=model_options_binding,
+            frequency_weight=frequency_weight,
+            analysis_weight=analysis_weight,
+            sampling_weight=sampling_weight,
             lmm_execution_admission=lmm_execution_admission,
             stop_reason=_stop_reason,
         )

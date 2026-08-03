@@ -179,6 +179,9 @@ export function GenesisWizard({
   const [predictionTimeColumn, setPredictionTimeColumn] = useState("");
   const [predictionFinalHoldoutFraction, setPredictionFinalHoldoutFraction] = useState(0.2);
   const [predictionShuffle, setPredictionShuffle] = useState(true);
+  const [frequencyWeight, setFrequencyWeight] = useState("");
+  const [analysisWeight, setAnalysisWeight] = useState("");
+  const [samplingWeight, setSamplingWeight] = useState("");
   const [y, setY] = useState("");
   const [x, setX] = useState("");
   const [focal, setFocal] = useState<string[]>([]);
@@ -378,6 +381,9 @@ export function GenesisWizard({
         setPredictionShuffle(modelParams.prediction_shuffle);
       }
     }
+    setFrequencyWeight(firstString(modelParams.frequency_weight));
+    setAnalysisWeight(firstString(modelParams.analysis_weight));
+    setSamplingWeight(firstString(modelParams.sampling_weight));
     if (notify) onDraftUpdated?.(response);
   }
 
@@ -614,6 +620,9 @@ export function GenesisWizard({
       params.prediction_final_holdout_fraction = predictionFinalHoldoutFraction;
       params.prediction_shuffle = predictionShuffle;
     }
+    if (frequencyWeight) params.frequency_weight = frequencyWeight;
+    if (analysisWeight) params.analysis_weight = analysisWeight;
+    if (samplingWeight) params.sampling_weight = samplingWeight;
     if (!isIV && !usesDidRoles && !isDcdh && focal.length > 0) {
       params.focal_x = focal.filter((col) => exogColumns.includes(col));
     }
@@ -933,6 +942,35 @@ export function GenesisWizard({
               onChange={setDcdhValue}
             />
           )}
+          <div className="ios-group" aria-label="Weight settings">
+            <p className="ios-hint">
+              权重会写入本次 Run 的证据。frequency / analysis 可用于 OLS；sampling 目前会明确拒绝，直到 strata/PSU 设计完成。
+            </p>
+            <label className="ios-field">
+              <span>频数权重 frequency weight（可选）</span>
+              <select aria-label="frequency weight" value={frequencyWeight}
+                onChange={(e) => setFrequencyWeight(e.target.value)}>
+                <option value="">(不使用)</option>
+                {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
+              </select>
+            </label>
+            <label className="ios-field">
+              <span>分析权重 analysis weight（可选）</span>
+              <select aria-label="analysis weight" value={analysisWeight}
+                onChange={(e) => setAnalysisWeight(e.target.value)}>
+                <option value="">(不使用)</option>
+                {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
+              </select>
+            </label>
+            <label className="ios-field">
+              <span>抽样权重 sampling weight（当前会拒绝）</span>
+              <select aria-label="sampling weight" value={samplingWeight}
+                onChange={(e) => setSamplingWeight(e.target.value)}>
+                <option value="">(不使用)</option>
+                {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
+              </select>
+            </label>
+          </div>
           {modelType !== "time_series.arma_garch" && <PredictionControls
             capabilities={capabilities}
             enabled={predictionEnabled}

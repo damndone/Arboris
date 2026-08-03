@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from workbench.agent.workflow_contracts import ModelFamilyContract
+from workbench.agent.workflow_contracts import ModelFamilyContract, validate_model_genesis_spec
 import pytest
 
 
@@ -42,4 +42,10 @@ def test_model_family_rejects_undeclared_crosscut_capabilities(
     from workbench.agent.workflow_contracts import OperationValidationError, validate_model_genesis_spec
 
     with pytest.raises(OperationValidationError, match=message):
-        validate_model_genesis_spec(_ols_spec(**{field: value}))
+        validate_model_genesis_spec(_ols_spec(model_family="logit", **{field: value}))
+
+
+def test_ols_contract_accepts_declared_weight_and_grouped_split() -> None:
+    assert validate_model_genesis_spec(
+        _ols_spec(weight_kind="frequency", split_kind="grouped")
+    ).family == "ols"

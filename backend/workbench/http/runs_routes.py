@@ -214,6 +214,9 @@ async def run_endpoint(
     prediction_time_column: str = Form(""),
     prediction_final_holdout_fraction: str | None = Form(None),
     prediction_shuffle: str | None = Form(None),
+    frequency_weight: str = Form(""),
+    analysis_weight: str = Form(""),
+    sampling_weight: str = Form(""),
     iv_endog: str = Form(""),          # JSON array of column names, e.g. ["educ"]
     iv_instruments: str = Form(""),    # JSON array of column names
     did_mode: str = Form(""),
@@ -263,6 +266,9 @@ async def run_endpoint(
             "prediction_time_column": prediction_time_column,
             "prediction_final_holdout_fraction": prediction_final_holdout_fraction,
             "prediction_shuffle": prediction_shuffle,
+            "frequency_weight": frequency_weight,
+            "analysis_weight": analysis_weight,
+            "sampling_weight": sampling_weight,
             "iv_endog": iv_endog, "iv_instruments": iv_instruments,
             "did_mode": did_mode, "did_cohort_col": did_cohort_col,
             "did_treat_col": did_treat_col, "did_post_col": did_post_col,
