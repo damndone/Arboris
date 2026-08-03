@@ -1,3 +1,7 @@
+from pathlib import Path
+
+from workbench.graph_recorder import GraphRecorder
+from workbench.graph_store import GraphStore
 from workbench.lineage.hashing import node_hash, PIPELINE_VERSION
 
 
@@ -29,3 +33,17 @@ def test_runid_time_not_in_op_spec_path():
     a = node_hash(["h1"], {"model_type": "ols"}, PIPELINE_VERSION)
     b = node_hash(["h1"], {"model_type": "ols"}, PIPELINE_VERSION)
     assert a == b
+
+
+def test_graph_node_hash_survives_recorder_and_store_roundtrip(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="identity-run", store=store)
+    recorder.record_stage(
+        node_id="stage:dataset",
+        display_label="Dataset",
+        node_hash="sha256:dataset-identity",
+    )
+    recorder.flush()
+
+    graph = store.read("identity-run")
+    assert graph.nodes["stage:dataset"].node_hash == "sha256:dataset-identity"

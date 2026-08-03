@@ -21,6 +21,7 @@ from .predictive_research.feature_recipe import apply_feature_recipe
 from .predictive_research.prediction_protocol import dataset_snapshot_hash, run_oos_prediction
 from .predictive_research.persistence import PredictionPersistenceAdmission
 from .predictive_research.split_kernel import build_split_plan
+from .lineage.hashing import node_hash
 
 _SUPPORTED_PREDICTION_MODEL_TYPES = {
     "prediction_lasso",
@@ -141,11 +142,20 @@ def run_prediction_model_v186(
         control_seed=random_seed,
     )
 
-    sample_payload = {**sample_spec.to_dict(), "sample_spec_hash": sample_spec.content_hash}
+    sample_payload = {
+        **sample_spec.to_dict(),
+        "sample_spec_hash": sample_spec.content_hash,
+        "transformation_hash": sample_spec.transformation_hash,
+        "evaluation_hash": sample_spec.evaluation_hash,
+    }
     split_payload = {**split.to_dict(), "content_hash": split.content_hash}
-    prediction_payload = {"model_type": model_type, **result.prediction_packet}
-    evaluation_payload = {"model_type": model_type, **result.evaluation_packet}
-    control_payload = {"model_type": model_type, **result.control_packet}
+    identity_fields = {
+        "transformation_identity_hash": sample_spec.transformation_hash,
+        "evaluation_identity_hash": sample_spec.evaluation_hash,
+    }
+    prediction_payload = {"model_type": model_type, **identity_fields, **result.prediction_packet}
+    evaluation_payload = {"model_type": model_type, **identity_fields, **result.evaluation_packet}
+    control_payload = {"model_type": model_type, **identity_fields, **result.control_packet}
     artifact_inputs = inputs or ["cleaned_dataset"]
     with PredictionPersistenceAdmission.admit(run_root) as persistence:
         sample_path = ("prediction_splits", f"{model_id}.sample.json")
@@ -230,52 +240,117 @@ def _record_prediction_graph(
 ) -> None:
     """Record the bounded research chain without making packet internals nodes."""
 
+    transformation_identity = str(sample_spec.get("transformation_hash", ""))
+    evaluation_identity = str(sample_spec.get("evaluation_hash", ""))
+    dataset_hash = node_hash(
+        [],
+        {
+            "protocol": "predictive_research_v1",
+            "node": "dataset_snapshot",
+            "transformation_identity": transformation_identity,
+        },
+    )
+    task_hash = node_hash(
+        [dataset_hash],
+        {
+            "protocol": "predictive_research_v1",
+            "node": "task",
+            "model_id": model_id,
+            "model_type": model_type,
+        },
+    )
+    split_hash = node_hash(
+        [task_hash],
+        {
+            "protocol": "predictive_research_v1",
+            "node": "split_plan",
+            "evaluation_identity": evaluation_identity,
+        },
+    )
+    baseline_hash = node_hash(
+        [split_hash],
+        {"protocol": "predictive_research_v1", "node": "baseline", "model_id": model_id},
+    )
+    candidate_hash = node_hash(
+        [split_hash],
+        {
+            "protocol": "predictive_research_v1",
+            "node": "candidate",
+            "model_id": model_id,
+            "model_type": model_type,
+        },
+    )
+    evaluation_hash = node_hash(
+        [baseline_hash, candidate_hash],
+        {
+            "protocol": "predictive_research_v1",
+            "node": "evaluation",
+            "evaluation_identity": evaluation_identity,
+        },
+    )
+    controls_hash = node_hash(
+        [evaluation_hash],
+        {"protocol": "predictive_research_v1", "node": "negative_controls", "model_id": model_id},
+    )
+    result_hash = node_hash(
+        [controls_hash],
+        {"protocol": "predictive_research_v1", "node": "result", "model_id": model_id},
+    )
+
     recorder.record_stage(
         "prediction:dataset_snapshot",
         "Dataset Snapshot",
         payload_ref="processed/cleaned_dataset.parquet",
         summary=f"Snapshot {sample_spec.get('dataset_ref', {}).get('dataset_sha256', '')}",
+        node_hash=dataset_hash,
     )
     recorder.record_stage(
         "prediction:task",
         "Prediction Task",
         summary=f"{model_type} for {model_id}",
+        node_hash=task_hash,
     )
     recorder.record_stage(
         "prediction:split_plan",
         "Split Plan",
         payload_ref=f"prediction_splits/{model_id}.json",
         summary=f"{split_plan.get('strategy', 'unknown')} / {split_plan.get('content_hash', '')}",
+        node_hash=split_hash,
     )
     recorder.record_model(
         "prediction:baseline",
         "Baseline Model",
         payload_ref=f"evaluation_results/{model_id}.json",
         summary=str(evaluation.get("baseline", {}).get("model_id", "mean_regressor")),
+        node_hash=baseline_hash,
     )
     recorder.record_model(
         "prediction:candidate",
         "Candidate Model",
         payload_ref=f"prediction_results/{model_id}.json",
         summary=model_type,
+        node_hash=candidate_hash,
     )
     recorder.record_stage(
         "prediction:evaluation",
         "Evaluation",
         payload_ref=f"evaluation_results/{model_id}.json",
         summary=f"OOS n={evaluation.get('oos', {}).get('n', '—')}",
+        node_hash=evaluation_hash,
     )
     recorder.record_stage(
         "prediction:negative_controls",
         "Negative Controls",
         payload_ref=f"negative_controls/{model_id}.json",
         summary=f"{len(control.get('controls', []))} control receipt(s)",
+        node_hash=controls_hash,
     )
     recorder.record_stage(
         "prediction:result",
         "Prediction Result",
         payload_ref=f"evaluation_results/{model_id}.json",
         summary="Typed predictive-research evidence",
+        node_hash=result_hash,
     )
     edges = (
         ("prediction:e:dataset-task", "prediction:dataset_snapshot", "prediction:task"),
@@ -329,9 +404,17 @@ def run_prediction_model(
     model_id: str,
     cv_folds: int = 5,
     random_seed: int = 20260429,
+    shuffle: bool = True,
     inputs: list[str] | None = None,
     sampling_method: str = "",
 ) -> dict[str, Any]:
+    """Replay the historical prediction artifact path only.
+
+    New runs must use :func:`run_prediction_model_v186`, whose explicit
+    structure and persisted SplitPlan contract are fail-closed.  This helper
+    remains for historical artifact replay and keeps its shuffle choice
+    explicit so callers cannot mistake the old random split for the typed path.
+    """
     if model_type not in _SUPPORTED_PREDICTION_MODEL_TYPES:
         raise ValueError(f"Unsupported prediction model_type: {model_type}")
 
@@ -412,7 +495,8 @@ def run_prediction_model(
         X,
         target,
         test_size=test_size,
-        random_state=random_seed,
+        shuffle=shuffle,
+        random_state=random_seed if shuffle else None,
     )
     if sampling_method:
         _validate_sampling_target(target, sampling_method)
@@ -429,7 +513,11 @@ def run_prediction_model(
         pipeline,
         X,
         target,
-        cv=folds,
+        cv=sklearn_model_selection.KFold(
+            n_splits=folds,
+            shuffle=shuffle,
+            random_state=random_seed if shuffle else None,
+        ),
         scoring="r2",
     )
     result = {

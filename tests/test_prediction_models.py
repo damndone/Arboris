@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import pandas as pd
@@ -349,3 +350,9 @@ def test_prediction_sampling_rejects_continuous_target(tmp_path: Path):
         assert "requires a discrete target" in str(exc)
     else:
         raise AssertionError("Expected sampling target validation error")
+
+
+def test_legacy_prediction_helper_is_explicitly_historical_and_declares_shuffle():
+    signature = inspect.signature(run_prediction_model)
+    assert "shuffle" in signature.parameters
+    assert "historical" in (run_prediction_model.__doc__ or "").lower()

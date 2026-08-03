@@ -291,6 +291,8 @@ class ModelFamilyContract:
     allows_polynomial_terms: bool = True
     requires_nonempty_predictors: bool = True
     allows_covariance: bool = True
+    allows_weights: tuple[str, ...] = ()
+    supported_split_kinds: tuple[str, ...] = ()
     requires_branch_figures: bool = False
     context_spec_fields: tuple[str, ...] = ()
     column_spec_fields: tuple[str, ...] = ()
@@ -311,6 +313,16 @@ class ModelFamilyContract:
             raise ValueError("ModelFamilyContract requires family and expected artifacts")
         if not set(self.column_spec_fields) <= set(self.context_spec_fields):
             raise ValueError("ModelFamilyContract column fields must be context fields")
+        allowed_weight_kinds = {"sampling", "analysis", "frequency"}
+        if any(weight not in allowed_weight_kinds for weight in self.allows_weights):
+            raise ValueError("ModelFamilyContract allows_weights contains an unknown weight kind")
+        if len(set(self.allows_weights)) != len(self.allows_weights):
+            raise ValueError("ModelFamilyContract allows_weights must not contain duplicates")
+        allowed_split_kinds = {"iid", "grouped", "temporal", "panel"}
+        if any(split not in allowed_split_kinds for split in self.supported_split_kinds):
+            raise ValueError("ModelFamilyContract supported_split_kinds contains an unknown split kind")
+        if len(set(self.supported_split_kinds)) != len(self.supported_split_kinds):
+            raise ValueError("ModelFamilyContract supported_split_kinds must not contain duplicates")
 
 
 def _build_ols_model_params(
@@ -825,6 +837,26 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     from ..model_terms import ModelTermError, validate_branch_terms
 
     contract = model_family_contract(spec.get("model_family"))
+    weight_kind = spec.get("weight_kind")
+    if weight_kind is not None:
+        if weight_kind not in {"sampling", "analysis", "frequency"}:
+            raise OperationValidationError(
+                "model.genesis weight_kind must be sampling, analysis, or frequency"
+            )
+        if weight_kind not in contract.allows_weights:
+            raise OperationValidationError(
+                f"model.genesis {contract.family} does not accept weight_kind {weight_kind}"
+            )
+    split_kind = spec.get("split_kind")
+    if split_kind is not None:
+        if split_kind not in {"iid", "grouped", "temporal", "panel"}:
+            raise OperationValidationError(
+                "model.genesis split_kind must be iid, grouped, temporal, or panel"
+            )
+        if split_kind not in contract.supported_split_kinds:
+            raise OperationValidationError(
+                f"model.genesis {contract.family} does not accept split_kind {split_kind}"
+            )
     declared_family_fields = {
         field_name
         for field_name in MODEL_FAMILY_SPEC_FIELDS

@@ -196,6 +196,7 @@ class Node:
     summary: str | None = None
     annotations: tuple = ()  # reserved for V1.6 AI; tuple of Annotation
     stage: Stage | None = None
+    node_hash: str | None = None  # deterministic identity for cache/evidence joins
 
 
 @dataclass(frozen=True)

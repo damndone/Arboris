@@ -274,3 +274,33 @@ class SampleSpecV1:
     def content_hash(self) -> str:
         encoded = json.dumps(_canonical(self.to_dict()), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
         return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+    @property
+    def transformation_hash(self) -> str:
+        """Identity for the data-transformation layer, independent of splitting."""
+
+        payload = {
+            "payload_schema": "workbench.prediction.sample-transformation-identity",
+            "schema_version": 1,
+            "dataset_ref": {"dataset_sha256": self.dataset_sha256, "row_identity": self.row_identity},
+            "sampling": self.sampling.to_dict(),
+            "structure": self.structure.to_dict(),
+            "availability": self.availability.to_dict(),
+            "feature_recipe_ref": self.feature_recipe_ref,
+        }
+        encoded = json.dumps(_canonical(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+    @property
+    def evaluation_hash(self) -> str:
+        """Identity for evaluation, which must change with the effective split plan."""
+
+        payload = {
+            "payload_schema": "workbench.prediction.evaluation-identity",
+            "schema_version": 1,
+            "transformation_hash": self.transformation_hash,
+            "split_plan": self.split_plan.to_dict(),
+            "split_plan_ref": self.split_plan_ref,
+        }
+        encoded = json.dumps(_canonical(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        return "sha256:" + hashlib.sha256(encoded).hexdigest()
