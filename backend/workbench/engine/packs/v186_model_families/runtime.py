@@ -171,6 +171,19 @@ def fit_ordinal(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
     model = OrderedModel(codes, exog, distr="logit")
     fitted = model.fit(method=str(options.get("optimizer", "bfgs")), maxiter=int(options.get("maxiter", 500)), disp=False)
     names = [str(name) for name in fitted.params.index]
+    # statsmodels names the cutpoints from the internal 0-based codes, which
+    # would report a boundary against an outcome level the user never declared.
+    # Relabel them with the declared levels while preserving their order.
+    threshold_labels = [
+        f"{categories[position]}/{categories[position + 1]}"
+        for position in range(len(categories) - 1)
+    ]
+    threshold_positions = [
+        position for position, name in enumerate(names) if name not in exog.columns
+    ]
+    if len(threshold_positions) == len(threshold_labels):
+        for label, position in zip(threshold_labels, threshold_positions, strict=True):
+            names[position] = label
     coefficient_map = _fit_stats(fitted, names)
     slope_names = [name for name in names if name in exog.columns]
     odds_ratios = {name: {"odds_ratio": _json_safe(np.exp(float(fitted.params[name])))} for name in slope_names}

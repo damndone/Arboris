@@ -131,3 +131,22 @@ def test_survival_cox_fails_closed_when_event_column_is_missing(tmp_path: Path) 
     assert result["status"] == "failed"
     issues = read_json(project.root / "runs" / result["run_id"] / "errors.json")["issues"]
     assert issues[0]["code"] == "SURVIVAL_EVENT_REQUIRED"
+
+
+def test_ordinal_logit_thresholds_are_named_by_the_declared_outcome_levels(tmp_path: Path) -> None:
+    """Cutpoints must be labelled with the levels a reader can actually see.
+
+    Naming them from the internal 0-based codes points users at an outcome
+    level that does not exist in their data.
+    """
+    frame = pd.DataFrame({
+        "rating": [1, 2, 3, 1, 2, 3, 2, 3, 1, 2, 3, 2] * 5,
+        "x": [float(i) / 5 for i in range(60)],
+    })
+    run_root = _run(tmp_path, frame, model_type="ordinal_logit", y="rating", x=["x"])
+    result = read_json(run_root / "model_results" / "ordinal_logit_1.json")
+
+    assert result["outcome_levels"] == ["1", "2", "3"]
+    threshold_names = [name for name in result["coefficients"] if "/" in name]
+    assert threshold_names == ["1/2", "2/3"], threshold_names
+    assert "0/1" not in result["coefficients"]
