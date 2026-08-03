@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import pandas as pd
 
 from workbench.artifacts import read_json
@@ -76,3 +78,66 @@ def test_undeclared_logit_weight_fails_before_result_artifact(tmp_path) -> None:
     errors = read_json(run_root / "errors.json")
     assert errors["issues"][-1]["code"] == "MODEL_WEIGHT_UNSUPPORTED"
     assert not (run_root / "model_results" / "logit_1.json").exists()
+
+
+def test_ols_frequency_weight_matches_row_expansion_oracle() -> None:
+    """A frequency weight means "this row occurred w times".
+
+    The only correct reference is the dataset with each row physically
+    repeated w times: coefficients, standard errors, nobs and residual
+    degrees of freedom must all agree with that expansion.
+    """
+    frame = _frame()
+    expanded = frame.loc[frame.index.repeat(frame["freq"].astype(int))].reset_index(drop=True)
+
+    oracle, _ = run_ols(expanded, y="y", x=["x"], robust=False, model_id="oracle")
+    weighted, _ = run_ols(
+        frame,
+        y="y",
+        x=["x"],
+        robust=False,
+        model_id="weighted",
+        weights={"kind": "frequency", "column": "freq"},
+    )
+
+    assert weighted["nobs"] == oracle["nobs"] == 27
+    for term in ("Intercept", "x"):
+        for field in ("estimate", "std_error", "p_value", "ci_lower", "ci_upper"):
+            assert weighted["coefficients"][term][field] == pytest.approx(
+                oracle["coefficients"][term][field], rel=1e-9, abs=1e-12
+            ), f"{term}.{field} diverged from the row-expansion oracle"
+
+
+def test_ols_frequency_weight_matches_row_expansion_oracle_under_robust_covariance() -> None:
+    frame = _frame()
+    expanded = frame.loc[frame.index.repeat(frame["freq"].astype(int))].reset_index(drop=True)
+
+    oracle, _ = run_ols(expanded, y="y", x=["x"], robust=True, model_id="oracle")
+    weighted, _ = run_ols(
+        frame,
+        y="y",
+        x=["x"],
+        robust=True,
+        model_id="weighted",
+        weights={"kind": "frequency", "column": "freq"},
+    )
+
+    for term in ("Intercept", "x"):
+        assert weighted["coefficients"][term]["std_error"] == pytest.approx(
+            oracle["coefficients"][term]["std_error"], rel=1e-9, abs=1e-12
+        )
+
+
+def test_ols_frequency_weight_rejects_non_integer_counts() -> None:
+    frame = _frame()
+    frame.loc[0, "freq"] = 2.5
+
+    with pytest.raises(ValueError, match="OLS_FREQUENCY_WEIGHT_NOT_INTEGER"):
+        run_ols(
+            frame,
+            y="y",
+            x=["x"],
+            robust=False,
+            model_id="fractional",
+            weights={"kind": "frequency", "column": "freq"},
+        )

@@ -627,6 +627,106 @@ def apply_ols_covariance(original: Any, covariance: str, *, groups: Any = None) 
     raise ValueError(f"unsupported OLS covariance estimator: {covariance}")
 
 
+_MAX_FREQUENCY_EXPANDED_ROWS = 5_000_000
+
+
+def _normalize_ols_weight_spec(
+    frame: pd.DataFrame, weights: Any
+) -> tuple[str | None, str, Any]:
+    """Validate a declared weight spec without deciding how to execute it."""
+
+    if weights is None:
+        return None, "", None
+    if not isinstance(weights, Mapping):
+        raise ValueError("OLS_WEIGHT_INVALID: weights must be an object with kind and column")
+    kind = str(weights.get("kind") or "").strip().lower()
+    column = str(weights.get("column") or "").strip()
+    if kind == "sampling":
+        raise ValueError(
+            "OLS_SAMPLING_WEIGHT_UNSUPPORTED: sampling_weight requires a declared "
+            "strata/PSU design; declare strata/PSU through the existing "
+            "entity_col + covariance=clustered channel"
+        )
+    if kind not in {"frequency", "analysis"}:
+        raise ValueError(
+            "OLS_WEIGHT_KIND_UNSUPPORTED: OLS supports frequency or analysis weights"
+        )
+    if not column:
+        raise ValueError("OLS_WEIGHT_COLUMN_MISSING: weight column must be declared")
+    if column not in frame.columns:
+        raise ValueError(
+            f"OLS_WEIGHT_COLUMN_MISSING: weight column {column!r} is not present in the dataset"
+        )
+    values = pd.to_numeric(frame[column], errors="coerce")
+    if values.isna().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
+        raise ValueError(
+            f"OLS_WEIGHT_INVALID: weight column {column!r} must contain finite positive values"
+        )
+    if (values <= 0).any():
+        raise ValueError(
+            f"OLS_WEIGHT_INVALID: weight column {column!r} must contain finite positive values"
+        )
+    return kind, column, values
+
+
+def _frequency_weight_counts(values: Any, column: str) -> Any:
+    """Frequency weights are observation counts, so they must be whole numbers."""
+
+    numeric = values.to_numpy(dtype=float)
+    rounded = np.rint(numeric)
+    if not np.allclose(numeric, rounded, rtol=0.0, atol=1e-9):
+        raise ValueError(
+            f"OLS_FREQUENCY_WEIGHT_NOT_INTEGER: frequency_weight column {column!r} must "
+            "contain whole observation counts; declare analysis_weight for fractional "
+            "weights"
+        )
+    counts = rounded.astype(np.int64)
+    total = int(counts.sum())
+    if total > _MAX_FREQUENCY_EXPANDED_ROWS:
+        raise ValueError(
+            f"OLS_FREQUENCY_WEIGHT_TOO_LARGE: frequency_weight column {column!r} expands "
+            f"the analysis sample to {total} rows, above the {_MAX_FREQUENCY_EXPANDED_ROWS} "
+            "row limit"
+        )
+    return counts
+
+
+def _expand_rows_by_frequency(
+    frame: pd.DataFrame,
+    counts: Any,
+    *,
+    row_ids: list[str] | tuple[str, ...] | None,
+    cluster_row_ids: list[str] | tuple[str, ...] | None,
+) -> tuple[pd.DataFrame, Any, Any]:
+    """Repeat each analysis row by its observation count, provenance included."""
+
+    if (counts == 1).all():
+        # Every row was observed once: expansion is the identity, so leave the
+        # frame, its index and its row identifiers byte-for-byte untouched.
+        return frame, row_ids, cluster_row_ids
+    positions = np.repeat(np.arange(len(frame), dtype=np.int64), counts)
+    occurrences = np.concatenate([np.arange(count, dtype=np.int64) for count in counts])
+    expanded = frame.iloc[positions].reset_index(drop=True)
+
+    def _expand_ids(values: Any) -> list[str]:
+        # The repeated copies are distinct analysis rows, so they need distinct
+        # identifiers; the first copy keeps the original id so provenance for an
+        # unrepeated row never changes.
+        expanded_ids: list[str] = []
+        for position, occurrence in zip(positions, occurrences, strict=True):
+            identifier = str(values[position])
+            expanded_ids.append(
+                identifier if occurrence == 0 else f"{identifier}#frequency:{occurrence}"
+            )
+        return expanded_ids
+
+    if row_ids is not None:
+        row_ids = _expand_ids(row_ids)
+    if cluster_row_ids is not None:
+        cluster_row_ids = _expand_ids(cluster_row_ids)
+    return expanded, row_ids, cluster_row_ids
+
+
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str,
     categorical_x: set[str] | None = None,
@@ -647,6 +747,18 @@ def run_ols(
     frame = _ensure_numeric_y(frame, y)
     frame = _ensure_numeric_x(frame, x)
     cat = categorical_x or set()
+    weight_kind, weight_column, weight_values = _normalize_ols_weight_spec(frame, weights)
+    frequency_counts: Any = None
+    if weight_kind == "frequency":
+        # A frequency weight declares "this row was observed w times".  The
+        # only faithful execution is the dataset with each row physically
+        # repeated w times: it makes nobs, residual degrees of freedom and
+        # every covariance estimator correct by construction instead of
+        # requiring a per-estimator correction factor.
+        frequency_counts = _frequency_weight_counts(weight_values, weight_column)
+        frame, row_ids, cluster_row_ids = _expand_rows_by_frequency(
+            frame, frequency_counts, row_ids=row_ids, cluster_row_ids=cluster_row_ids
+        )
     if cluster_col is not None and (cluster_col == y or cluster_col in x):
         raise ValueError(
             "OLS_CLUSTER_FIELD_CONFLICT: entity_col cannot be y or an OLS X/formula column."
@@ -690,36 +802,14 @@ def run_ols(
         # values, columns, formula, sample order, or point estimate.
         model_frame.index = pd.RangeIndex(len(model_frame), name="__ols_position__")
     normalized_weights: dict[str, Any] | None = None
-    if weights is not None:
-        if not isinstance(weights, Mapping):
-            raise ValueError("OLS_WEIGHT_INVALID: weights must be an object with kind and column")
-        kind = str(weights.get("kind") or "").strip().lower()
-        column = str(weights.get("column") or "").strip()
-        if kind == "sampling":
-            raise ValueError(
-                "OLS_SAMPLING_WEIGHT_UNSUPPORTED: sampling_weight requires a declared strata/PSU design"
-            )
-        if kind not in {"frequency", "analysis"}:
-            raise ValueError(
-                "OLS_WEIGHT_KIND_UNSUPPORTED: OLS supports frequency or analysis weights"
-            )
-        if not column:
-            raise ValueError("OLS_WEIGHT_COLUMN_MISSING: weight column must be declared")
-        if column not in model_frame.columns:
-            raise ValueError(
-                f"OLS_WEIGHT_COLUMN_MISSING: weight column {column!r} is not present in the dataset"
-            )
-        weight_values = pd.to_numeric(model_frame[column], errors="coerce")
-        if weight_values.isna().any() or not np.isfinite(weight_values.to_numpy(dtype=float)).all():
-            raise ValueError(
-                f"OLS_WEIGHT_INVALID: weight column {column!r} must contain finite positive values"
-            )
-        if (weight_values <= 0).any():
-            raise ValueError(
-                f"OLS_WEIGHT_INVALID: weight column {column!r} must contain finite positive values"
-            )
-        normalized_weights = {"kind": kind, "column": column, "executed": True}
-        if (weight_values == 1).all():
+    if weight_kind is not None:
+        normalized_weights = {"kind": weight_kind, "column": weight_column, "executed": True}
+    if weight_kind == "analysis":
+        # An analysis weight stays weighted least squares: it rescales each
+        # row's contribution without claiming the row was observed more than
+        # once, so nobs remains the row count.
+        analysis_weights = pd.to_numeric(model_frame[weight_column], errors="coerce")
+        if (analysis_weights == 1).all():
             # Keep the unweighted numerical path byte-for-byte stable for the
             # identity case while still exposing that the declared weight was
             # validated and executed.
@@ -728,9 +818,11 @@ def run_ols(
             original = smf.wls(
                 formula=formula,
                 data=model_frame,
-                weights=weight_values,
+                weights=analysis_weights,
             ).fit()
     else:
+        # Unweighted, or a frequency weight already executed by expanding the
+        # analysis rows above.
         original = smf.ols(formula=formula, data=model_frame).fit()
     if covariance == "clustered":
         row_labels = getattr(original.model.data, "row_labels", None)
