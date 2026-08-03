@@ -3,8 +3,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from openpyxl import load_workbook
 
 from workbench.artifacts import read_json
+from workbench.agent.context_tools import _bounded_statistics_evidence
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
 
@@ -50,6 +52,42 @@ def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
     model_result = read_json(run_root / "model_results" / "ols_1.json")
     assert model_result["model_id"] == "ols_1"
     assert "x" in model_result["coefficients"]
+
+
+def test_normal_run_persists_typed_advanced_statistics_evidence(tmp_path: Path):
+    source = tmp_path / "grouped.csv"
+    pd.DataFrame(
+        {
+            "y": [1.0, 1.2, 0.9, 2.0, 2.2, 1.8, 3.0, 3.1, 2.9] * 4,
+            "x": list(range(36)),
+            "region": ["north"] * 12 + ["south"] * 12 + ["west"] * 12,
+        }
+    ).to_csv(source, index=False)
+    project = create_project(tmp_path, "advanced-statistics")
+
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x", "region"],
+        model_type="ols",
+    )
+
+    assert result["status"] == "completed"
+    run_root = project.root / "runs" / result["run_id"]
+    packet = read_json(run_root / "statistical_tests" / "evidence.json")
+    assert packet["payload_schema"] == "workbench.statistics.evidence-packet"
+    test_types = {row["test_type"] for row in packet["results"]}
+    assert {"anova_posthoc", "cohens_d", "levene", "bartlett", "shapiro_wilk"} <= test_types
+    agent_evidence = _bounded_statistics_evidence(run_root)
+    assert agent_evidence["payload_schema"] == "workbench.statistics.evidence-packet"
+    assert agent_evidence["results"][0]["test_type"] in test_types
+    report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
+    assert "Statistical Evidence" in report_html
+    assert "Table 1" in report_html
+    workbook = load_workbook(run_root / "exports" / "tables.xlsx", read_only=True)
+    assert {"coefficients", "table_1", "statistical_evidence"} <= set(workbook.sheetnames)
 
 
 def test_run_workflow_blocks_missing_model_columns(tmp_path: Path):

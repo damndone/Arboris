@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import pandas as pd
 import workbench.statistical_tests as statistical_tests
 
 from workbench.statistical_tests import (
@@ -12,6 +13,7 @@ from workbench.statistical_tests import (
     posthoc_anova,
     variance_and_normality_tests,
     wilcoxon_signed_rank,
+    run_statistical_tests,
 )
 
 
@@ -113,3 +115,53 @@ def test_statistics_evidence_packet_is_typed_and_keeps_independent_results() -> 
         "shapiro_wilk",
     }
     assert all("effect_size" in row and "assumptions" in row for row in packet["results"])
+
+
+def test_normal_statistical_loop_exposes_advanced_evidence_family() -> None:
+    frame = pd.DataFrame(
+        {
+            "y": [1.0, 1.2, 0.9, 2.0, 2.2, 1.8, 3.0, 3.1, 2.9],
+            "region": ["north"] * 3 + ["south"] * 3 + ["west"] * 3,
+        }
+    )
+
+    results = run_statistical_tests(
+        frame,
+        analysis_columns=["y", "region"],
+        dataset_sha256="a" * 64,
+        lineage_parent="cleaned_dataset",
+    )
+
+    evidence = results["evidence"]
+    assert evidence["payload_schema"] == "workbench.statistics.evidence-packet"
+    test_types = {row["test_type"] for row in evidence["results"]}
+    assert {"anova_posthoc", "cohens_d", "levene", "bartlett", "shapiro_wilk"} <= test_types
+    assert all("assumptions" in row and "warnings" in row for row in evidence["results"])
+
+
+def test_reference_and_pairing_semantics_are_required_for_special_tests() -> None:
+    frame = pd.DataFrame(
+        {
+            "before": [1.0, 1.2, 0.9, 1.1],
+            "after": [1.2, 1.3, 1.1, 1.4],
+        }
+    )
+    without_semantics = run_statistical_tests(
+        frame,
+        analysis_columns=["before", "after"],
+        dataset_sha256="b" * 64,
+        lineage_parent="cleaned_dataset",
+    )
+    without_types = {row["test_type"] for row in without_semantics["evidence"]["results"]}
+    assert not {"one_sample_t_test", "paired_t_test", "wilcoxon_signed_rank"} & without_types
+
+    with_semantics = run_statistical_tests(
+        frame,
+        analysis_columns=["before", "after"],
+        dataset_sha256="b" * 64,
+        lineage_parent="cleaned_dataset",
+        reference_means={"before": 0.0},
+        paired_columns=[("before", "after")],
+    )
+    with_types = {row["test_type"] for row in with_semantics["evidence"]["results"]}
+    assert {"one_sample_t_test", "paired_t_test", "wilcoxon_signed_rank"} <= with_types

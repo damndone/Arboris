@@ -13,6 +13,7 @@ def build_report_view_model(
     *,
     descriptive_stats: list[dict[str, Any]] | None = None,
     statistical_tests: dict[str, Any] | None = None,
+    statistical_evidence: dict[str, Any] | None = None,
     exploration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     diagnostics = summary.get("diagnostics", {})
@@ -122,6 +123,11 @@ def build_report_view_model(
         "causal_caution": causal_text,
         "descriptive_stats": ds,
         "statistical_tests": st,
+        "statistical_evidence": (
+            statistical_evidence
+            if statistical_evidence is not None
+            else _load_if_exists(run_root / "statistical_tests" / "evidence.json")
+        ),
         "exploration": exploration,
         "model_diagnostics": model_diag,
         "model_quality": summary.get("model_quality"),

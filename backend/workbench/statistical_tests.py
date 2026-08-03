@@ -22,6 +22,7 @@ TEST_FAMILIES = {
     "nonparametric": "nonparametric.json",
     "chi_square": "chi_square.json",
     "fisher_exact": "fisher_exact.json",
+    "evidence": "evidence.json",
 }
 
 
@@ -29,6 +30,10 @@ def run_statistical_tests(
     frame: pd.DataFrame,
     *,
     analysis_columns: list[str],
+    dataset_sha256: str | None = None,
+    lineage_parent: str | None = None,
+    reference_means: Mapping[str, float] | None = None,
+    paired_columns: Sequence[tuple[str, str]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     columns = [column for column in analysis_columns if column in frame.columns]
     results: dict[str, dict[str, Any]] = {
@@ -80,7 +85,25 @@ def run_statistical_tests(
         if row is not None:
             results["fisher_exact"]["results"].append(row)
 
+    # Keep the historical eight-family FDR scope stable. The new evidence
+    # packet is assembled only after this correction pass.
     _apply_multiple_testing_correction(results)
+    advanced = _build_advanced_evidence_results(
+        frame,
+        numeric=numeric,
+        categorical=binary + [column for column in multi if column not in binary],
+        reference_means=reference_means,
+        paired_columns=paired_columns,
+    )
+    evidence_payload = _statistics_evidence_payload(
+        advanced,
+        dataset_sha256=dataset_sha256,
+        lineage_parent=lineage_parent,
+    )
+    if advanced:
+        _apply_multiple_testing_correction({"evidence": evidence_payload})
+        evidence_payload["correction_scope"] = "advanced_evidence_family"
+    results["evidence"] = evidence_payload
     return results
 
 
@@ -91,8 +114,13 @@ def write_statistical_test_artifacts(
     tests_dir = run_root / "statistical_tests"
     tests_dir.mkdir(parents=True, exist_ok=True)
     for family, filename in TEST_FAMILIES.items():
+        payload = results.get(family)
+        if not isinstance(payload, dict):
+            continue
+        if family == "evidence" and not payload.get("results"):
+            continue
         path = tests_dir / filename
-        write_json(path, results[family])
+        write_json(path, payload)
         register_artifact(
             run_root,
             f"statistical_tests_{family}",
@@ -101,6 +129,222 @@ def write_statistical_test_artifacts(
             "statistical_tests",
             ["cleaned_dataset"],
         )
+
+
+def _statistics_evidence_payload(
+    results: list[dict[str, Any]],
+    *,
+    dataset_sha256: str | None,
+    lineage_parent: str | None,
+) -> dict[str, Any]:
+    if dataset_sha256 is not None and lineage_parent is not None and results:
+        return build_statistics_evidence_packet(
+            results,
+            dataset_sha256=dataset_sha256,
+            lineage_parent=lineage_parent,
+        )
+    payload = {
+        "payload_schema": "workbench.statistics.evidence-packet",
+        "schema_version": 1,
+        "producer": {
+            "component": "workbench.statistical_tests",
+            "code_version": "workbench-v1.8.6",
+        },
+        "dataset_ref": {"dataset_sha256": None},
+        "lineage_parent": lineage_parent,
+        "results": results,
+        "limits": [
+            "standalone statistical loop call has no persisted dataset identity",
+            "independent statistical evidence; not a model-selection decision",
+        ],
+    }
+    if dataset_sha256 is not None:
+        payload["dataset_ref"] = {"dataset_sha256": dataset_sha256}
+    return payload
+
+
+def _build_advanced_evidence_results(
+    frame: pd.DataFrame,
+    *,
+    numeric: Sequence[str],
+    categorical: Sequence[str],
+    reference_means: Mapping[str, float] | None,
+    paired_columns: Sequence[tuple[str, str]] | None,
+) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    for outcome in numeric:
+        for group in categorical:
+            if group == outcome:
+                continue
+            grouped = _finite_groups(frame, outcome, group)
+            if grouped is None:
+                continue
+            labels, arrays = grouped
+            group_map = dict(zip(labels, arrays, strict=True))
+            for left_index, right_index in combinations(range(len(arrays)), 2):
+                try:
+                    evidence.append(
+                        _cohens_d_evidence(
+                            arrays[left_index],
+                            arrays[right_index],
+                            test_id=(
+                                f"cohens_d:{outcome}:{group}:"
+                                f"{labels[left_index]}:{labels[right_index]}"
+                            ),
+                            labels=(labels[left_index], labels[right_index]),
+                        )
+                    )
+                except ValueError:
+                    continue
+            if len(arrays) >= 3:
+                try:
+                    posthoc = posthoc_anova(group_map, correction="tukey")
+                    posthoc["test_id"] = f"anova_posthoc:{outcome}:{group}"
+                    posthoc["source_id"] = f"statistical_tests.evidence.anova_posthoc.{outcome}.{group}"
+                    evidence.append(posthoc)
+                    anova = _anova(frame, outcome, group)
+                    evidence.append(
+                        _effect_evidence(
+                            eta_squared(group_map),
+                            test_id=f"eta_squared:{outcome}:{group}",
+                            statistic=anova.get("statistic") if anova else None,
+                            p_value=anova.get("p_value") if anova else None,
+                            assumptions=["independent observations", "group membership is declared"],
+                        )
+                    )
+                    evidence.append(
+                        _effect_evidence(
+                            omega_squared(group_map),
+                            test_id=f"omega_squared:{outcome}:{group}",
+                            statistic=anova.get("statistic") if anova else None,
+                            p_value=anova.get("p_value") if anova else None,
+                            assumptions=["independent observations", "group membership is declared"],
+                        )
+                    )
+                except ValueError:
+                    # Degenerate groups are not evidence; retain old families.
+                    pass
+            evidence.extend(_safe_variance_evidence(grouped, outcome, group))
+
+    for column, population_mean in (reference_means or {}).items():
+        if column not in numeric:
+            continue
+        observations = pd.to_numeric(frame[column], errors="coerce").dropna().tolist()
+        try:
+            result = one_sample_t_test(observations, population_mean=float(population_mean))
+        except (TypeError, ValueError):
+            continue
+        result["test_id"] = f"one_sample_t_test:{column}"
+        result["source_id"] = f"statistical_tests.evidence.one_sample_t_test.{column}"
+        evidence.append(result)
+
+    for pair in paired_columns or ():
+        if not isinstance(pair, (tuple, list)) or len(pair) != 2:
+            continue
+        left, right = pair
+        if not isinstance(left, str) or not isinstance(right, str):
+            continue
+        if left not in numeric or right not in numeric or left == right:
+            continue
+        paired = _pairwise(frame, [left, right])
+        left_values = pd.to_numeric(paired[left], errors="coerce").dropna().tolist()
+        right_values = pd.to_numeric(paired[right], errors="coerce").dropna().tolist()
+        if len(left_values) != len(right_values):
+            continue
+        for test_name, test_fn in (
+            ("paired_t_test", paired_t_test),
+            ("wilcoxon_signed_rank", wilcoxon_signed_rank),
+        ):
+            try:
+                result = test_fn(left_values, right_values)
+            except (TypeError, ValueError):
+                continue
+            result["test_id"] = f"{test_name}:{left}:{right}"
+            result["source_id"] = f"statistical_tests.evidence.{test_name}.{left}.{right}"
+            evidence.append(result)
+    return evidence
+
+
+def _finite_groups(
+    frame: pd.DataFrame,
+    outcome: str,
+    group: str,
+) -> tuple[list[str], list[list[float]]] | None:
+    pair = _pairwise(frame, [outcome, group])
+    group_series = _as_series(pair, group)
+    if group_series is None:
+        return None
+    labels = sorted(group_series.dropna().unique().tolist(), key=str)
+    valid_labels: list[str] = []
+    arrays: list[list[float]] = []
+    for label in labels:
+        values = pd.to_numeric(
+            pair.loc[group_series == label, outcome], errors="coerce"
+        ).dropna().tolist()
+        if len(values) >= 2 and all(math.isfinite(float(value)) for value in values):
+            valid_labels.append(str(label))
+            arrays.append([float(value) for value in values])
+    if len(arrays) < 2:
+        return None
+    return valid_labels, arrays
+
+
+def _cohens_d_evidence(
+    left: Sequence[float],
+    right: Sequence[float],
+    *,
+    test_id: str,
+    labels: Sequence[str],
+) -> dict[str, Any]:
+    effect = cohens_d(left, right)
+    statistic, p_value = stats.ttest_ind(left, right, equal_var=False)
+    return _evidence_result(
+        test_id=test_id,
+        test_type="cohens_d",
+        nobs=len(left) + len(right),
+        statistic=statistic,
+        p_value=p_value,
+        effect_size=effect,
+        assumptions=[
+            "independent observations",
+            f"comparison is between declared groups {labels[0]} and {labels[1]}",
+        ],
+    )
+
+
+def _effect_evidence(
+    effect: dict[str, Any],
+    *,
+    test_id: str,
+    statistic: float | None,
+    p_value: float | None,
+    assumptions: list[str],
+) -> dict[str, Any]:
+    return _evidence_result(
+        test_id=test_id,
+        test_type=str(effect["effect_size_name"]),
+        nobs=int(effect["nobs"]),
+        statistic=statistic,
+        p_value=p_value,
+        effect_size=effect,
+        assumptions=assumptions,
+    )
+
+
+def _safe_variance_evidence(
+    grouped: tuple[list[str], list[list[float]]],
+    outcome: str,
+    group: str,
+) -> list[dict[str, Any]]:
+    labels, arrays = grouped
+    try:
+        results = variance_and_normality_tests(dict(zip(labels, arrays, strict=True)))
+    except ValueError:
+        return []
+    for result in results:
+        result["test_id"] = f"{result['test_id']}:{outcome}:{group}"
+        result["source_id"] = f"statistical_tests.evidence.{result['test_type']}.{outcome}.{group}"
+    return results
 
 
 _MAX_TEST_SUMMARIES_PER_FAMILY = 15
@@ -113,6 +357,8 @@ def summarize_statistical_tests(
     y_related: list[dict[str, Any]] = []
     other: list[dict[str, Any]] = []
     for family in TEST_FAMILIES:
+        if family == "evidence":
+            continue
         for row in results.get(family, {}).get("results", []):
             summary = _summary_row(row)
             if y and _involves_variable(row, y):

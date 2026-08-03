@@ -117,13 +117,13 @@
     </section>
 
     {% if view_model.descriptive_stats %}
-    <section id="descriptive-stats">
+    <section id="table-1" aria-label="Table 1 descriptive statistics">
       <h2>Descriptive Statistics</h2>
       <table>
-        <thead><tr><th>Column</th><th>Dtype</th><th>Count</th><th>Missing</th><th>Mean</th><th>Std</th></tr></thead>
+        <thead><tr><th>Column</th><th>Label</th><th>Dtype</th><th>Count</th><th>Missing</th><th>Mean</th><th>Std</th></tr></thead>
         <tbody>
           {% for row in view_model.descriptive_stats %}
-          <tr><td>{{ row.column }}</td><td>{{ row.dtype }}</td><td>{{ row.count }}</td><td>{{ "%.1f"|format(row.missing_rate * 100) }}%</td><td>{{ row.mean if row.mean is not none else "—" }}</td><td>{{ row.std if row.std is not none else "—" }}</td></tr>
+          <tr><td>{{ row.column }}</td><td>{{ row.label if row.label is defined else row.column }}</td><td>{{ row.dtype }}</td><td>{{ row.count }}</td><td>{{ "%.1f"|format(row.missing_rate * 100) }}%</td><td>{{ row.mean if row.mean is not none else "—" }}</td><td>{{ row.std if row.std is not none else "—" }}</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -160,6 +160,31 @@
         {% endfor %}
       </ul>
       {% endif %}
+    </section>
+    {% endif %}
+
+    {% if view_model.statistical_evidence and view_model.statistical_evidence.results %}
+    <section id="statistical-evidence">
+      <h2>Statistical Evidence</h2>
+      {% if view_model.statistical_evidence.correction_scope %}
+      <p>Multiple-testing correction scope: {{ view_model.statistical_evidence.correction_scope }}</p>
+      {% endif %}
+      <table>
+        <thead><tr><th>Test</th><th>N</th><th>Statistic</th><th>p-value</th><th>Effect size</th><th>Assumptions</th><th>Comparisons / CI</th></tr></thead>
+        <tbody>
+        {% for row in view_model.statistical_evidence.results %}
+          <tr>
+            <td>{{ row.test_type }}</td>
+            <td>{{ row.nobs }}</td>
+            <td>{{ row.statistic if row.statistic is not none else "—" }}</td>
+            <td>{{ row.p_value_corrected if row.p_value_corrected is defined else row.p_value if row.p_value is not none else "—" }}</td>
+            <td>{{ row.effect_size.effect_size_name if row.effect_size is mapping and row.effect_size.effect_size_name is defined else "—" }}{% if row.effect_size is mapping and row.effect_size.value is defined %}: {{ row.effect_size.value }}{% endif %}</td>
+            <td>{{ row.assumptions|join(", ") }}</td>
+            <td>{% if row.comparisons is defined %}{% for comparison in row.comparisons %}{{ comparison.group1 }} vs {{ comparison.group2 }}: [{{ comparison.ci_low }}, {{ comparison.ci_high }}]{% if not loop.last %}; {% endif %}{% endfor %}{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
     </section>
     {% endif %}
   </body>

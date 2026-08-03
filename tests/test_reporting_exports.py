@@ -207,6 +207,45 @@ def test_report_renders_statistical_tests_section(tmp_path: Path):
     assert b"Statistical tests" in pdf_path.read_bytes()
 
 
+def test_report_renders_typed_statistical_evidence_and_preserves_table_fields(tmp_path: Path):
+    project = create_project(tmp_path, "evidence-report")
+    run = create_run(project.root, mode="auto")
+    report = {
+        "title": "Evidence Report",
+        "facts": [],
+        "claims": [],
+        "descriptive_stats": [{"column": "y", "dtype": "float64", "count": 9, "missing": 0, "missing_rate": 0.0, "mean": 2.0, "std": 0.8}],
+        "statistical_tests": {"y_related": [], "other": [], "other_truncated": 0},
+        "statistical_evidence": {
+            "payload_schema": "workbench.statistics.evidence-packet",
+            "schema_version": 1,
+            "correction_scope": "advanced_evidence_family",
+            "results": [
+                {
+                    "test_type": "anova_posthoc",
+                    "test_id": "anova_posthoc:y:region",
+                    "nobs": 9,
+                    "statistic": 12.0,
+                    "p_value": 0.01,
+                    "p_value_corrected": 0.02,
+                    "effect_size": {"effect_size_name": "eta_squared", "value": 0.7},
+                    "assumptions": ["independent observations"],
+                    "warnings": [],
+                }
+            ],
+        },
+        "warnings": [],
+    }
+
+    html_path = render_html_report(report, run.root)
+    html = html_path.read_text(encoding="utf-8")
+
+    assert "Statistical Evidence" in html
+    assert "anova_posthoc" in html
+    assert "eta_squared" in html
+    assert "advanced_evidence_family" in html
+
+
 def test_report_formats_tiny_variable_importance_p_values(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     run = create_run(project.root, mode="auto")

@@ -38,9 +38,16 @@ class StatisticalTestsStage:
         stat_analysis_columns = [normalized_y] + [
             v for v in normalized_x if v != (exposure_col or "")
         ]
+        dataset_sha256 = str(ctx.artifacts.get("_upload_hash") or "")
+        if len(dataset_sha256) != 64 or any(
+            character not in "0123456789abcdef" for character in dataset_sha256
+        ):
+            dataset_sha256 = None
         statistical_tests = run_statistical_tests(
             cleaned,
             analysis_columns=stat_analysis_columns,
+            dataset_sha256=dataset_sha256,
+            lineage_parent=str(ctx.data.artifact_id or "cleaned_dataset"),
         )
         write_statistical_test_artifacts(run_root, statistical_tests)
         statistical_test_summaries = summarize_statistical_tests(

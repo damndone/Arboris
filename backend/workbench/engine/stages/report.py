@@ -195,6 +195,7 @@ class ReportStage:
             "warnings": issue_dicts,
             "descriptive_stats": descriptive_stats,
             "statistical_tests": statistical_test_summaries,
+            "statistical_evidence": statistical_tests.get("evidence"),
             "variable_importance": variable_importance,
             "diagnostics": diagnostic_artifacts,
         }
@@ -257,6 +258,7 @@ class ReportStage:
                     diagnostic_summary, run_root,
                     descriptive_stats=descriptive_stats,
                     statistical_tests=statistical_test_summaries,
+                    statistical_evidence=statistical_tests.get("evidence"),
                 )
             render_html_report(view_model, run_root)
             report_render_status = "complete"
@@ -286,7 +288,13 @@ class ReportStage:
             else:
                 export_pdf(report, run_root)
                 export_xlsx(
-                    {"coefficients": _xlsx_export_rows(_coefficient_rows_for_models(model_results))},
+                    {
+                        "coefficients": _xlsx_export_rows(_coefficient_rows_for_models(model_results)),
+                        "table_1": _xlsx_export_rows(descriptive_stats),
+                        "statistical_evidence": _xlsx_export_rows(
+                            (statistical_tests.get("evidence") or {}).get("results", [])
+                        ),
+                    },
                     run_root,
                 )
             env.step("export", "complete", "Exported PDF and XLSX")

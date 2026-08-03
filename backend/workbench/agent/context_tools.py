@@ -1387,6 +1387,7 @@ class NodeOperationContextProvider:
             summary_status=summary_status,
             preview=preview,
             model_results=model_results,
+            run_root=run_root,
         )
         omitted_sections = ["raw_model_results"]
         if result_summary["coefficient_rows_omitted"]:
@@ -2739,12 +2740,87 @@ def _read_diagnostic_summary(run_root: Path) -> tuple[dict[str, Any] | None, str
     return value, "complete"
 
 
+def _bounded_statistics_evidence(
+    run_root: Path,
+    *,
+    limit: int = 8,
+) -> dict[str, Any] | None:
+    """Expose the typed normal-Run statistics packet to Agent consumers.
+
+    The packet is already schema-owned at write time. This read projection
+    keeps the exact numeric fields while applying the same bounded public
+    result budget used for other Agent evidence.
+    """
+
+    packet_path = run_root / "statistical_tests" / "evidence.json"
+    try:
+        packet = read_json(packet_path)
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    if not isinstance(packet, dict):
+        return None
+    if packet.get("payload_schema") != "workbench.statistics.evidence-packet":
+        return None
+    raw_results = packet.get("results")
+    if not isinstance(raw_results, list):
+        return None
+    budget = _PublicResultBudget()
+    bounded_results: list[dict[str, Any]] = []
+    for row in raw_results[: max(0, limit)]:
+        if not isinstance(row, dict):
+            continue
+        bounded: dict[str, Any] = {}
+        for key in (
+            "test_id",
+            "test_version",
+            "test_type",
+            "nobs",
+            "statistic",
+            "p_value",
+            "p_value_corrected",
+            "effect_size",
+            "assumptions",
+            "warnings",
+            "correction",
+            "family",
+        ):
+            if key not in row:
+                continue
+            bounded[key] = _bounded_public_result_value(row[key], budget=budget)
+        comparisons = row.get("comparisons")
+        if isinstance(comparisons, list):
+            bounded["comparisons"] = [
+                _bounded_public_result_value(
+                    {
+                        key: comparison[key]
+                        for key in ("group1", "group2", "mean_difference", "ci_low", "ci_high", "p_value", "correction")
+                        if key in comparison
+                    },
+                    budget=budget,
+                )
+                for comparison in comparisons[:8]
+                if isinstance(comparison, dict)
+            ]
+        bounded_results.append(bounded)
+    return {
+        "payload_schema": packet.get("payload_schema"),
+        "schema_version": packet.get("schema_version"),
+        "dataset_ref": packet.get("dataset_ref"),
+        "lineage_parent": packet.get("lineage_parent"),
+        "correction_scope": packet.get("correction_scope"),
+        "results": bounded_results,
+        "result_count": len(raw_results),
+        "results_omitted": max(len(raw_results) - len(bounded_results), 0),
+    }
+
+
 def _bounded_result_summary(
     summary: dict[str, Any] | None,
     *,
     summary_status: str,
     preview: dict[str, Any],
     model_results: list[dict[str, Any]],
+    run_root: Path,
 ) -> dict[str, Any]:
     identity = summary.get("model_identity") if isinstance(summary, dict) else None
     identity = identity if isinstance(identity, dict) else {}
@@ -2798,6 +2874,7 @@ def _bounded_result_summary(
     coefficient_rows_omitted = max(len(coefficient_rows) - 8, 0)
 
     run_status = preview.get("run_status")
+    statistical_evidence = _bounded_statistics_evidence(run_root)
     return {
         "available": summary_status == "complete" and preview.get("available") is True,
         "summary_status": summary_status,
@@ -2821,6 +2898,7 @@ def _bounded_result_summary(
         ),
         "run_status": run_status if isinstance(run_status, dict) else None,
         "persisted_models": _bounded_persisted_model_facts(model_results),
+        "statistical_evidence": statistical_evidence,
     }
 
 
