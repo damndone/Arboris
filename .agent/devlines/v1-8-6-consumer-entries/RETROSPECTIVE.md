@@ -10,14 +10,14 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 1/27 (3.7%; 3.7 per 100 events)
+- Failure frequency: 1/28 (3.6%; 3.6 per 100 events)
 - Repeat rate: 0/1 (0.0%)
 - Recurrence rate: 0/1 (0.0%)
 - MTTR: median=0 ms (sample=1; unresolved=0)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/1 (0.0%)
+- Gate waste rate: 0/2 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -82,3 +82,4 @@ CONTEXT_RESCOPED
 - #25: `724c4e73-d445-40a9-bcdc-70003f3c47e5` | 2026-08-03T12:02:51.946Z | STATE_CHANGE/context_rescope_required | incident=`0f1c098f-0201-40da-8d5f-d29e71e9a334` | lesson_key=`context-pack-rescope` | event_sha256=`6bbd213cba16948fee6a8ea18f0039c9edffcab8f5874c17e8ef01ad6e6cf7ed`
 - #26: `6345333e-a4f6-4786-b506-6115d5fab8df` | 2026-08-03T12:02:51.957Z | STATE_CHANGE/context_rescoped | incident=`c3141b20-5e25-4bbb-983b-8fb29645ccf5` | lesson_key=`context-pack-rescope` | event_sha256=`a6415b4b1429702eaeadeb18e584f7a15ddf00517d2b804a4717d54c3e5bdab6`
 - #27: `c3d4c1f1-3dd5-4ced-b9a6-1bcbd1cb5f4c` | 2026-08-03T12:03:23.000Z | GATE/full_backend_gate_host_sandbox | incident=`f7a6242a-aac8-4fd8-a73e-97a0ec0301d0` | lesson_key=`host-sandbox-gate-separation` | event_sha256=`c68b84590bb95820cbe4f68253d2a7606627976f453a17cac22fc98ac0020fa3`
+- #28: `5a0e101a-8b2c-4d75-9855-653247c5f6c4` | 2026-08-03T12:05:12.000Z | GATE/focused_consumer_gate_passed | incident=`d75647a7-3700-4429-b773-58aa94a9df3b` | lesson_key=`consumer-vocabulary-completeness` | event_sha256=`95daf61fc4e6c3bff3b42dbef05d8d14fe7f7997d5dc5cf423a2ea475293a2e4`
