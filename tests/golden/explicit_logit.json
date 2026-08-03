@@ -31,6 +31,9 @@
     "statistical_tests_anova": [
       "cleaned_dataset"
     ],
+    "statistical_tests_evidence": [
+      "cleaned_dataset"
+    ],
     "statistical_tests_chi_square": [
       "cleaned_dataset"
     ],

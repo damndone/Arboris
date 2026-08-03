@@ -85,6 +85,22 @@ def test_lmm_pack_is_explicitly_declared_and_available_only_through_the_pack_loa
             "workbench.engine.packs.ets.declaration",
             "time_series.ets",
         ),
+        PackDeclaration(
+            "workbench.engine.packs.v186_model_families.ordinal_logit",
+            "ordinal_logit",
+        ),
+        PackDeclaration(
+            "workbench.engine.packs.v186_model_families.multinomial_logit",
+            "multinomial_logit",
+        ),
+        PackDeclaration(
+            "workbench.engine.packs.v186_model_families.survival_cox",
+            "survival_cox",
+        ),
+        PackDeclaration(
+            "workbench.engine.packs.v186_model_families.quantile_regression",
+            "quantile_regression",
+        ),
     )
     bootstrap_builtin_packs()
     assert LMM_MODEL_TYPE in MODEL_REGISTRY
@@ -392,7 +408,7 @@ def test_builtin_lmm_declaration_is_idempotent_for_capabilities() -> None:
     before = build_capabilities()
     bootstrap_builtin_packs()
 
-    assert len(BUILTIN_PACK_DECLARATIONS) == 3
+    assert len(BUILTIN_PACK_DECLARATIONS) == 7
     assert any(item["key"] == LMM_MODEL_TYPE for item in before["model_types"])
     assert build_capabilities() == before
 
