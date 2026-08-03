@@ -96,6 +96,69 @@ def test_v186_entrypoint_persists_typed_prediction_evidence(tmp_path: Path) -> N
     }
 
 
+def test_v186_mice_preprocessing_is_fit_inside_each_prediction_scope(tmp_path: Path) -> None:
+    run_root = make_run_root(tmp_path)
+    frame = make_frame()
+    frame["x2"] = [float(index % 4) for index in range(len(frame))]
+    frame.loc[[1, 7], "x"] = float("nan")
+    frame.loc[[3, 9], "x2"] = float("nan")
+
+    result = run_prediction_model_v186(
+        frame,
+        run_root,
+        y="y",
+        x=["x", "x2"],
+        model_type="test_mean",
+        model_id="prediction_test_mean_1",
+        final_holdout_fraction=0.25,
+        cv_folds=3,
+        shuffle=True,
+        random_seed=9,
+        data_structure="iid",
+        estimator_factory=MeanEstimator,
+        imputation_method="mice",
+        imputation_max_iter=2,
+    )
+
+    preprocessing = result["prediction_packet"]["preprocessing"]
+    assert preprocessing["method"] == "mice"
+    assert preprocessing["fit_scope"] == "fold_local"
+    assert preprocessing["optional_dependency_status"] == "available"
+    for fold in preprocessing["folds"]:
+        assert set(fold["fit_row_refs"]).isdisjoint(fold["apply_row_refs"])
+        assert fold["fit_partition"] == "development_only"
+    final_scope = preprocessing["final_holdout"]
+    assert final_scope["fit_partition"] == "development_only"
+    assert set(final_scope["fit_row_refs"]).isdisjoint(final_scope["apply_row_refs"])
+    assert result["evaluation_packet"]["assumptions"]["preprocessing_fit_scope"] == "development_only"
+    assert (run_root / "prediction_results" / "prediction_test_mean_1.json").is_file()
+
+
+def test_v186_rejects_full_table_imputation_input_before_persistence(tmp_path: Path) -> None:
+    run_root = make_run_root(tmp_path)
+
+    with pytest.raises(ContractError) as error:
+        run_prediction_model_v186(
+            make_frame(),
+            run_root,
+            y="y",
+            x=["x"],
+            model_type="test_mean",
+            model_id="prediction_test_mean_1",
+            final_holdout_fraction=0.25,
+            cv_folds=3,
+            shuffle=True,
+            random_seed=9,
+            data_structure="iid",
+            estimator_factory=MeanEstimator,
+            inputs=["imputed_dataset"],
+            imputation_method="mice",
+        )
+
+    assert error.value.code == "PREDICTION_FULL_TABLE_IMPUTATION_UNSUPPORTED"
+    assert not (run_root / "prediction_results").exists()
+
+
 def test_v186_entrypoint_records_one_user_visible_prediction_graph_chain(tmp_path: Path) -> None:
     run_root = make_run_root(tmp_path)
     recorder = RecordingGraphStub()

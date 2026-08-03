@@ -342,11 +342,6 @@ class DiagnosticsStage:
                     if isinstance(imputation_request, dict)
                     else getattr(config, "imputation_method", "")
                 )
-                if imputation_method == "mice":
-                    raise ContractError(
-                        "PREDICTION_MICE_FOLD_LOCAL_REQUIRED",
-                        "MICE must be fitted inside each prediction training fold before prediction is enabled",
-                    )
                 if not req_pred_structure:
                     raise ContractError(
                         "PREDICTION_DATA_STRUCTURE_UNKNOWN",
@@ -357,8 +352,13 @@ class DiagnosticsStage:
                         "PREDICTION_SAMPLING_UNSUPPORTED",
                         "legacy sampling methods are not accepted by the v1.8.6 typed prediction protocol",
                     )
+                prediction_inputs = (
+                    ["cleaned_dataset"]
+                    if imputation_method == "mice"
+                    else model_input_ids
+                )
                 run_prediction_model_v186(
-                    modeling_frame,
+                    cleaned if imputation_method == "mice" else modeling_frame,
                     run_root,
                     y=normalized_y,
                     x=normalized_x,
@@ -377,8 +377,11 @@ class DiagnosticsStage:
                         analysis_weight=req_analysis_weight or None,
                         sampling_weight=req_sampling_weight or None,
                     ),
-                    inputs=model_input_ids,
+                    inputs=prediction_inputs,
                     graph_recorder=env.recorder,
+                    imputation_method=imputation_method or None,
+                    imputation_max_iter=getattr(config, "imputation_max_iter", 10),
+                    imputation_max_missing_rate=getattr(config, "max_missing_rate", 0.4),
                 )
             except OptionalDependencyNotInstalled as dep_exc:
                 # Prediction is supplementary; missing optional deps should

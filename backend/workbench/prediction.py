@@ -52,11 +52,20 @@ def run_prediction_model_v186(
     estimator_factory: Callable[[], Any] | None = None,
     feature_recipe: FeatureRecipeV1 | None = None,
     graph_recorder: Any | None = None,
+    imputation_method: str | None = None,
+    imputation_max_iter: int = 10,
+    imputation_max_missing_rate: float = 0.4,
 ) -> dict[str, Any]:
     """Run the typed v1.8.6 protocol while keeping legacy callers unchanged."""
 
     sampling_spec = sampling or SamplingSpecV1()
     sampling_spec.validate()
+    artifact_inputs = inputs or ["cleaned_dataset"]
+    if imputation_method == "mice" and "imputed_dataset" in artifact_inputs:
+        raise ContractError(
+            "PREDICTION_FULL_TABLE_IMPUTATION_UNSUPPORTED",
+            "prediction MICE must receive the cleaned snapshot and fit inside each split scope",
+        )
     if sampling_spec.sampling_weight is not None or sampling_spec.analysis_weight is not None:
         raise ContractError(
             "PREDICTION_WEIGHT_UNSUPPORTED",
@@ -140,6 +149,9 @@ def run_prediction_model_v186(
         estimator_factory=estimator_factory,
         model_id=model_id,
         control_seed=random_seed,
+        imputation_method=imputation_method,
+        imputation_max_iter=imputation_max_iter,
+        imputation_max_missing_rate=imputation_max_missing_rate,
     )
 
     sample_payload = {
@@ -156,7 +168,6 @@ def run_prediction_model_v186(
     prediction_payload = {"model_type": model_type, **identity_fields, **result.prediction_packet}
     evaluation_payload = {"model_type": model_type, **identity_fields, **result.evaluation_packet}
     control_payload = {"model_type": model_type, **identity_fields, **result.control_packet}
-    artifact_inputs = inputs or ["cleaned_dataset"]
     with PredictionPersistenceAdmission.admit(run_root) as persistence:
         sample_path = ("prediction_splits", f"{model_id}.sample.json")
         split_path = ("prediction_splits", f"{model_id}.json")

@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from workbench.artifacts import read_json, write_json
+from workbench.econometrics.optional_deps import OptionalDependencyNotInstalled
 from workbench.orchestrator import run_workflow
 from workbench import prediction
 from workbench.prediction import run_prediction_model_v186
@@ -57,14 +58,12 @@ def test_new_prediction_without_structure_is_blocked_before_legacy_split(
     assert any(issue["code"] == "PREDICTION_DATA_STRUCTURE_UNKNOWN" for issue in issues)
 
 
-def test_prediction_run_with_full_table_mice_is_fail_closed_before_prediction(
+def test_prediction_run_with_mice_uses_fold_local_preprocessing(
     tmp_path: Path,
 ) -> None:
     y = [float(1 + 2 * i) for i in range(40)]
     x1 = [float(i) for i in range(40)]
     x2 = [float(i % 5) for i in range(40)]
-    for index in (5, 11, 17, 23):
-        y[index] = float("nan")
     for index in (7, 13, 19, 29):
         x1[index] = float("nan")
     source = tmp_path / "data.csv"
@@ -85,9 +84,56 @@ def test_prediction_run_with_full_table_mice_is_fail_closed_before_prediction(
     )
 
     run_root = project.root / "runs" / result["run_id"]
+    packet = read_json(run_root / "prediction_results" / "prediction_ridge_1.json")
+    assert packet["preprocessing"]["method"] == "mice"
+    assert packet["preprocessing"]["fit_scope"] == "fold_local"
+    assert packet["preprocessing"]["final_holdout"]["fit_partition"] == "development_only"
+
+
+def test_prediction_mice_missing_dependency_is_structured_and_has_no_packet(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    import workbench.predictive_research.prediction_protocol as protocol
+
+    real_require = protocol.require_optional_dependency
+
+    def missing_mice_dependency(module_name: str, **kwargs: object):
+        if kwargs.get("model_type") == "prediction_mice":
+            raise OptionalDependencyNotInstalled(
+                extra="ml",
+                package="sklearn.impute",
+                model_type="prediction_mice",
+                step="prediction",
+                engine="scikit-learn",
+            )
+        return real_require(module_name, **kwargs)
+
+    monkeypatch.setattr(protocol, "require_optional_dependency", missing_mice_dependency)
+    source = tmp_path / "data.csv"
+    pd.DataFrame(
+        {"y": [float(i * 2 + 1) for i in range(40)], "x1": [float(i) for i in range(40)], "x2": [float(i % 5) for i in range(40)]}
+    ).to_csv(source, index=False)
+    project = create_project(tmp_path, "prediction_mice_optional_dependency")
+
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x1", "x2"],
+        model_type="ols",
+        imputation={"method": "mice"},
+        prediction_model_type="prediction_ridge",
+        prediction_cv_folds=3,
+        prediction_data_structure="iid",
+    )
+
+    run_root = project.root / "runs" / result["run_id"]
     issues = read_json(run_root / "errors.json")["issues"]
+    issue = next(issue for issue in issues if issue["code"] == "OPTIONAL_DEPENDENCY_MISSING")
+    assert issue["evidence"]["step"] == "prediction"
+    assert "pip install" in issue["evidence"]["install"]
     assert not (run_root / "prediction_results").exists()
-    assert any(issue["code"] == "PREDICTION_MICE_FOLD_LOCAL_REQUIRED" for issue in issues)
 
 
 def test_workflow_persists_prediction_graph_chain_without_packet_internals_as_nodes(

@@ -14,6 +14,7 @@ import pandas as pd
 from .contracts import ContractError, SampleSpecV1
 from .controls import add_seeded_noise_feature, permute_target
 from .split_kernel import SplitAssignment, SplitPlanReceipt
+from ..econometrics.optional_deps import require_optional_dependency
 
 
 class Estimator(Protocol):
@@ -27,6 +28,116 @@ class OOSPredictionResult:
     prediction_packet: dict[str, Any]
     evaluation_packet: dict[str, Any]
     control_packet: dict[str, Any]
+
+
+@dataclass
+class _FoldLocalMiceState:
+    columns: tuple[str, ...]
+    transformer: Any
+
+    def transform(self, frame: pd.DataFrame, rows: list[str]) -> pd.DataFrame:
+        scoped = frame.loc[rows].copy()
+        values = self.transformer.transform(
+            scoped.loc[:, list(self.columns)].to_numpy(dtype=float, copy=True)
+        )
+        scoped.loc[:, list(self.columns)] = values
+        return scoped
+
+
+def _fit_fold_local_mice(
+    frame: pd.DataFrame,
+    rows: list[str],
+    *,
+    features: tuple[str, ...],
+    max_iter: int,
+    max_missing_rate: float,
+    random_seed: int,
+) -> _FoldLocalMiceState:
+    numeric_columns = tuple(
+        column for column in features if pd.api.types.is_numeric_dtype(frame[column])
+    )
+    missing_columns = [column for column in features if frame.loc[rows, column].isna().any()]
+    unsupported_missing = [column for column in missing_columns if column not in numeric_columns]
+    if unsupported_missing:
+        raise ContractError(
+            "PREDICTION_MICE_NON_NUMERIC_MISSING",
+            f"fold-local MICE only supports missing numeric features: {unsupported_missing}",
+        )
+    if not numeric_columns:
+        raise ContractError(
+            "PREDICTION_MICE_NO_NUMERIC_FEATURES",
+            "fold-local MICE requires at least one numeric prediction feature",
+        )
+    missing_rates = frame.loc[rows, list(numeric_columns)].isna().mean()
+    excessive = [
+        column for column, rate in missing_rates.items()
+        if float(rate) > max_missing_rate
+    ]
+    if excessive:
+        raise ContractError(
+            "PREDICTION_MICE_MISSING_RATE_UNSUPPORTED",
+            f"fold-local MICE missing rate exceeds the configured limit for: {excessive}",
+        )
+    if len(rows) < 2:
+        raise ContractError(
+            "PREDICTION_MICE_FOLD_TOO_SMALL",
+            "each fold-local MICE training scope requires at least two rows",
+        )
+
+    require_optional_dependency(
+        "sklearn.experimental",
+        extra="ml",
+        engine="scikit-learn",
+        model_type="prediction_mice",
+        step="prediction",
+    )
+    # Importing this module enables the experimental IterativeImputer feature
+    # before importing the public imputer class.  IterativeImputer implements
+    # chained equations while keeping fit/transform state explicit per scope.
+    from sklearn.experimental import enable_iterative_imputer  # noqa: F401
+
+    sklearn_impute = require_optional_dependency(
+        "sklearn.impute",
+        extra="ml",
+        engine="scikit-learn",
+        model_type="prediction_mice",
+        step="prediction",
+    )
+    transformer = sklearn_impute.IterativeImputer(
+        max_iter=max(1, int(max_iter)),
+        random_state=random_seed,
+        sample_posterior=False,
+        keep_empty_features=True,
+    )
+    try:
+        transformer.fit(
+            frame.loc[rows, list(numeric_columns)].to_numpy(dtype=float, copy=True)
+        )
+    except (TypeError, ValueError) as exc:
+        raise ContractError(
+            "PREDICTION_MICE_FOLD_FIT_FAILED",
+            f"fold-local MICE could not fit on the training scope: {exc}",
+        ) from exc
+    return _FoldLocalMiceState(columns=numeric_columns, transformer=transformer)
+
+
+def _scope_record(
+    *,
+    fit_rows: list[str],
+    apply_rows: list[str],
+    fit_partition: str,
+    apply_partition: str,
+    fold: int | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "fit_row_refs": list(fit_rows),
+        "apply_row_refs": list(apply_rows),
+        "fit_partition": fit_partition,
+        "apply_partition": apply_partition,
+    }
+    if fold is not None:
+        record["fold"] = fold
+    return record
 
 
 def _frequency_weights(
@@ -154,6 +265,9 @@ def run_oos_prediction(
     estimator_factory: Callable[[], Estimator],
     model_id: str,
     control_seed: int | None = None,
+    imputation_method: str | None = None,
+    imputation_max_iter: int = 10,
+    imputation_max_missing_rate: float = 0.4,
 ) -> OOSPredictionResult:
     """Fit CV and final models without allowing final rows into development evidence."""
 
@@ -186,6 +300,12 @@ def run_oos_prediction(
         "iid_holdout_kfold",
         "grouped_holdout_groupkfold",
     }))
+    normalized_imputation = (imputation_method or "").strip().lower()
+    if normalized_imputation not in {"", "mice"}:
+        raise ContractError(
+            "PREDICTION_IMPUTATION_UNSUPPORTED",
+            f"unsupported prediction preprocessing method: {imputation_method!r}",
+        )
     frequency_weight_column, frequency_weights = _frequency_weights(frame, sample_spec)
     if sample_spec.split_plan_ref is not None and sample_spec.split_plan_ref != split_receipt.content_hash:
         raise ContractError(
@@ -200,10 +320,10 @@ def run_oos_prediction(
         raise ValueError("split binding does not match frame row identity")
     if target not in frame.columns or any(feature not in frame.columns for feature in features):
         raise ContractError("PREDICTION_INPUT_COLUMN_MISSING", "target and features must be present in the dataset")
-    if frame[list(features) + [target]].isna().any().any():
+    if frame[target].isna().any():
         raise ContractError(
-            "PREDICTION_INPUT_MISSING_UNRESOLVED",
-            "missing values require an explicit fold-local preprocessing plan",
+            "PREDICTION_TARGET_MISSING_UNRESOLVED",
+            "prediction evaluation requires an observed target in every split partition",
         )
 
     final_rows = _rows_for(assignments, partition="final_holdout")
@@ -213,6 +333,18 @@ def run_oos_prediction(
     folds = sorted({assignment.cv_fold for assignment in assignments.values() if assignment.cv_fold is not None})
     if len(folds) < 2:
         raise ContractError("PREDICTION_SPLIT_CV_INVALID", "at least two development CV folds are required")
+
+    preprocessing: dict[str, Any] | None = None
+    if normalized_imputation == "mice":
+        preprocessing = {
+            "method": "mice",
+            "fit_scope": "fold_local",
+            "optional_dependency_status": "available",
+            "folds": [],
+            "final_holdout": None,
+            "max_iter": max(1, int(imputation_max_iter)),
+            "max_missing_rate": float(imputation_max_missing_rate),
+        }
 
     cv_metrics: list[dict[str, Any]] = []
     permutation_cv_metrics: list[dict[str, Any]] = []
@@ -241,15 +373,38 @@ def run_oos_prediction(
             training_rows = [row_ref for row_ref in development_rows if row_ref not in validation_rows]
         if not training_rows:
             continue
+        if preprocessing is not None:
+            fold_mice = _fit_fold_local_mice(
+                frame,
+                training_rows,
+                features=features,
+                max_iter=imputation_max_iter,
+                max_missing_rate=imputation_max_missing_rate,
+                random_seed=(control_seed or 0) + fold + 1,
+            )
+            training_scope = fold_mice.transform(frame, training_rows)
+            validation_scope = fold_mice.transform(frame, validation_rows)
+            preprocessing["folds"].append(
+                _scope_record(
+                    fit_rows=training_rows,
+                    apply_rows=validation_rows,
+                    fit_partition="development_only",
+                    apply_partition="development_cv_validation",
+                    fold=fold,
+                )
+            )
+        else:
+            training_scope = frame.loc[training_rows].copy()
+            validation_scope = frame.loc[validation_rows].copy()
         estimator = estimator_factory()
         _fit_estimator(
             estimator,
-            frame.loc[training_rows, list(features)],
+            training_scope.loc[:, list(features)],
             frame.loc[training_rows, target],
             frequency_weights.loc[training_rows] if frequency_weights is not None else None,
         )
         validation_target = frame.loc[validation_rows, target]
-        cv_predictions = [float(value) for value in estimator.predict(frame.loc[validation_rows, list(features)])]
+        cv_predictions = [float(value) for value in estimator.predict(validation_scope.loc[:, list(features)])]
         observed_fold = {
             "fold": fold,
             "n_train": len(training_rows),
@@ -262,13 +417,13 @@ def run_oos_prediction(
             permutation_estimator = estimator_factory()
             _fit_estimator(
                 permutation_estimator,
-                frame.loc[training_rows, list(features)],
+                training_scope.loc[:, list(features)],
                 permutation_control.values.loc[training_rows],
                 frequency_weights.loc[training_rows] if frequency_weights is not None else None,
             )
             permutation_predictions = [
                 float(value)
-                for value in permutation_estimator.predict(frame.loc[validation_rows, list(features)])
+                for value in permutation_estimator.predict(validation_scope.loc[:, list(features)])
             ]
             permutation_cv_metrics.append(
                 {
@@ -280,13 +435,16 @@ def run_oos_prediction(
             )
 
             noise_estimator = estimator_factory()
+            noise_training = noise_control.frame.loc[training_rows, list(noise_features)].copy()
+            noise_validation = noise_control.frame.loc[validation_rows, list(noise_features)].copy()
+            noise_training.loc[:, list(features)] = training_scope.loc[:, list(features)].to_numpy()
+            noise_validation.loc[:, list(features)] = validation_scope.loc[:, list(features)].to_numpy()
             _fit_estimator(
                 noise_estimator,
-                noise_control.frame.loc[training_rows, list(noise_features)],
+                noise_training,
                 frame.loc[training_rows, target],
                 frequency_weights.loc[training_rows] if frequency_weights is not None else None,
             )
-            noise_validation = noise_control.frame.loc[validation_rows, list(noise_features)]
             noise_base_predictions = [
                 float(value) for value in noise_estimator.predict(noise_validation)
             ]
@@ -321,15 +479,35 @@ def run_oos_prediction(
     if len(cv_metrics) < 2:
         raise ContractError("PREDICTION_SPLIT_CV_INVALID", "at least two non-empty development CV fits are required")
 
+    if preprocessing is not None:
+        final_mice = _fit_fold_local_mice(
+            frame,
+            development_rows,
+            features=features,
+            max_iter=imputation_max_iter,
+            max_missing_rate=imputation_max_missing_rate,
+            random_seed=(control_seed or 0) + 100_000,
+        )
+        development_scope = final_mice.transform(frame, development_rows)
+        final_scope = final_mice.transform(frame, final_rows)
+        preprocessing["final_holdout"] = _scope_record(
+            fit_rows=development_rows,
+            apply_rows=final_rows,
+            fit_partition="development_only",
+            apply_partition="final_holdout",
+        )
+    else:
+        development_scope = frame.loc[development_rows].copy()
+        final_scope = frame.loc[final_rows].copy()
     final_estimator = estimator_factory()
     _fit_estimator(
         final_estimator,
-        frame.loc[development_rows, list(features)],
+        development_scope.loc[:, list(features)],
         frame.loc[development_rows, target],
         frequency_weights.loc[development_rows] if frequency_weights is not None else None,
     )
     final_predictions = [
-        float(value) for value in final_estimator.predict(frame.loc[final_rows, list(features)])
+        float(value) for value in final_estimator.predict(final_scope.loc[:, list(features)])
     ]
     baseline_value = float(frame.loc[development_rows, target].mean())
     baseline_predictions = [baseline_value] * len(final_rows)
@@ -337,15 +515,19 @@ def run_oos_prediction(
     controls: list[dict[str, Any]] = []
     if control_seed is not None and permutation_control is not None and noise_control is not None:
         permutation_estimator = estimator_factory()
+        noise_development = noise_control.frame.loc[development_rows, list(noise_features)].copy()
+        noise_final = noise_control.frame.loc[final_rows, list(noise_features)].copy()
+        noise_development.loc[:, list(features)] = development_scope.loc[:, list(features)].to_numpy()
+        noise_final.loc[:, list(features)] = final_scope.loc[:, list(features)].to_numpy()
         _fit_estimator(
             permutation_estimator,
-            frame.loc[development_rows, list(features)],
+            development_scope.loc[:, list(features)],
             permutation_control.values.loc[development_rows],
             frequency_weights.loc[development_rows] if frequency_weights is not None else None,
         )
         permutation_predictions = [
             float(value)
-            for value in permutation_estimator.predict(frame.loc[final_rows, list(features)])
+            for value in permutation_estimator.predict(final_scope.loc[:, list(features)])
         ]
         observed_cv_r2 = _average_metric(cv_metrics, "r2")
         permuted_cv_r2 = _average_metric(permutation_cv_metrics, "r2")
@@ -386,13 +568,12 @@ def run_oos_prediction(
         noise_estimator = estimator_factory()
         _fit_estimator(
             noise_estimator,
-            noise_control.frame.loc[development_rows, list(noise_features)],
+            noise_development,
             frame.loc[development_rows, target],
             frequency_weights.loc[development_rows] if frequency_weights is not None else None,
         )
         noise_predictions = [
-            float(value)
-            for value in noise_estimator.predict(noise_control.frame.loc[final_rows, list(noise_features)])
+            float(value) for value in noise_estimator.predict(noise_final)
         ]
         noise_top_count = sum(
             1 for fold in noise_fold_importance if fold.get("noise_rank") == 1
@@ -445,9 +626,13 @@ def run_oos_prediction(
         "oos": {"n": len(final_rows), "metrics": _metrics(frame.loc[final_rows, target], final_predictions)},
         "cv": cv_metrics,
         "controls": controls,
+        "preprocessing": preprocessing,
         "assumptions": {
             "final_holdout_isolated": True,
             "fit_scope": "development_only",
+            "preprocessing_fit_scope": (
+                "development_only" if preprocessing is not None else "not_requested"
+            ),
             "temporal_cv_is_prior_only": sample_spec.split_plan.strategy == "temporal",
             "frequency_weight_column": frequency_weight_column,
             "frequency_weight_executed": frequency_weight_column is not None,
@@ -466,6 +651,7 @@ def run_oos_prediction(
         "oos_metrics": evaluation["oos"]["metrics"],
         "baseline": evaluation["baseline"],
         "controls": controls,
+        "preprocessing": preprocessing,
         "assumptions": evaluation["assumptions"],
         "limits": evaluation["limits"],
     }
