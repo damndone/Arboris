@@ -128,6 +128,7 @@ def build_report_view_model(
             if statistical_evidence is not None
             else _load_if_exists(run_root / "statistical_tests" / "evidence.json")
         ),
+        "model_family_evidence": summary.get("model_family_evidence"),
         "exploration": exploration,
         "model_diagnostics": model_diag,
         "model_quality": summary.get("model_quality"),

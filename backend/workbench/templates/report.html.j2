@@ -111,6 +111,14 @@
     </section>
     {% endif %}
 
+    {% if view_model.model_family_evidence %}
+    <section id="model-family-evidence">
+      <h2>Model-family evidence</h2>
+      <p>Exact family-specific estimates and diagnostics are retained in the typed packet below.</p>
+      <pre>{{ view_model.model_family_evidence | tojson(indent=2) }}</pre>
+    </section>
+    {% endif %}
+
     <section id="causal-caution">
       <h2>Causal Caution</h2>
       <p>{{ view_model.causal_caution }}</p>

@@ -28,6 +28,10 @@ _MODEL_METADATA: dict[str, dict[str, str]] = {
     "prediction_lasso":          {"model_id": "prediction_lasso_1",          "engine": "scikit-learn"},
     "prediction_ridge":          {"model_id": "prediction_ridge_1",          "engine": "scikit-learn"},
     "prediction_random_forest":  {"model_id": "prediction_random_forest_1",  "engine": "scikit-learn"},
+    "ordinal_logit":             {"model_id": "ordinal_logit_1",             "engine": "statsmodels"},
+    "multinomial_logit":         {"model_id": "multinomial_logit_1",         "engine": "statsmodels"},
+    "survival_cox":               {"model_id": "survival_cox_1",               "engine": "statsmodels"},
+    "quantile_regression":        {"model_id": "quantile_regression_1",        "engine": "statsmodels"},
 }
 
 # Maximum length of root_cause string in failure evidence to avoid
@@ -94,6 +98,10 @@ _MODEL_TYPE_MAP = {
     "cs_did": "continuous",
     "sa_did": "continuous",
     "dcdh": "continuous",
+    "ordinal_logit": "ordinal",
+    "multinomial_logit": "nominal",
+    "survival_cox": "survival",
+    "quantile_regression": "continuous",
 }
 _SUPPORTED_GLM_FAMILIES = {"binomial", "poisson", "negative_binomial"}
 _PREDICTION_MODEL_TYPES = {

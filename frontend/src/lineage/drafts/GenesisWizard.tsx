@@ -38,6 +38,13 @@ import {
   createDefaultArmaGarchValue,
   type ArmaGarchControlValue,
 } from "../../runForm/ArmaGarchControls";
+import {
+  V186ModelControls,
+  defaultV186ModelOptions,
+  isV186ModelType,
+  normalizeV186ModelOptions,
+  type V186ModelOptionsByType,
+} from "../../runForm/V186ModelControls";
 
 type BusyState =
   | "resume"
@@ -138,6 +145,8 @@ export function GenesisWizard({
   const [armaGarchValue, setArmaGarchValue] = useState<ArmaGarchControlValue>(
     createDefaultArmaGarchValue,
   );
+  const [v186ModelOptionsByType, setV186ModelOptionsByType] =
+    useState<V186ModelOptionsByType>({});
   const [armaGarchPreflight, setArmaGarchPreflight] =
     useState<ArmaGarchTransformPreflight | null>(null);
   const [armaGarchPreflightError, setArmaGarchPreflightError] =
@@ -286,6 +295,12 @@ export function GenesisWizard({
           armaGarchValueFromModelOptions(savedOptions as Record<string, unknown>, current),
         );
       }
+    }
+    if (isV186ModelType(savedType)) {
+      setV186ModelOptionsByType((current) => ({
+        ...current,
+        [savedType]: normalizeV186ModelOptions(savedType, modelParams.model_options),
+      }));
     }
     const savedImputation = firstString(modelParams.imputation);
     if (savedImputation) {
@@ -582,6 +597,10 @@ export function GenesisWizard({
         `upload:${sourceFilename}`,
       );
     }
+    if (isV186ModelType(modelType)) {
+      params.model_options =
+        v186ModelOptionsByType[modelType] ?? defaultV186ModelOptions(modelType);
+    }
     if (isIV) {
       if (ivRole.endog.length > 0) params.iv_endog = ivRole.endog;
       if (ivRole.instruments.length > 0) params.iv_instruments = ivRole.instruments;
@@ -660,6 +679,14 @@ export function GenesisWizard({
       (!lmmValue.subject_id || !lmmValue.time || !lmmValue.group)
     ) {
       setError("LMM 需要指定受试者、时间和组别列。");
+      return;
+    }
+    if (
+      modelType === "survival_cox" &&
+      (!v186ModelOptionsByType.survival_cox?.event_column ||
+        typeof v186ModelOptionsByType.survival_cox.event_column !== "string")
+    ) {
+      setError("Survival / Cox 需要指定 event 列。");
       return;
     }
     if (modelType === "panel_ols" && entityCol && timeCol && entityCol === timeCol) {
@@ -762,6 +789,9 @@ export function GenesisWizard({
           (modelType === "linear_mixed_effects" ? lmmRolesConfigured : xColumns.length > 0)),
   );
   const canRun = Boolean(draftId && modelConfigured);
+  const activeV186ModelOptions = isV186ModelType(modelType)
+    ? v186ModelOptionsByType[modelType] ?? defaultV186ModelOptions(modelType)
+    : null;
 
   return (
     <div data-testid="genesis-wizard" style={{ display: "grid", gap: 18 }}>
@@ -900,6 +930,19 @@ export function GenesisWizard({
               transformPreflightError={armaGarchPreflightError}
               value={armaGarchValue}
               onChange={setArmaGarchValue}
+            />
+          )}
+          {isV186ModelType(modelType) && activeV186ModelOptions && (
+            <V186ModelControls
+              modelType={modelType}
+              columns={columnNames}
+              options={activeV186ModelOptions}
+              onChange={(options) => {
+                setV186ModelOptionsByType((current) => ({
+                  ...current,
+                  [modelType]: options,
+                }));
+              }}
             />
           )}
           {modelType === "iv_2sls" && (

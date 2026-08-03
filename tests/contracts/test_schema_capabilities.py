@@ -140,6 +140,9 @@ def test_capabilities_sample_has_mice():
 def test_capabilities_groups_are_a_known_set():
     """Group is a UI rendering hint — must be from a small fixed vocabulary."""
     sample = json.loads((ROOT / "capabilities.sample.json").read_text())
-    allowed = {"auto", "Linear", "Binary", "Count", "Panel", "GLM", "IV", "DID"}
+    allowed = {
+        "auto", "Linear", "Binary", "Count", "Panel", "GLM", "IV", "DID",
+        "Ordinal", "Nominal", "Survival", "Quantile",
+    }
     groups = {m["group"] for m in sample["model_types"]}
     assert groups.issubset(allowed), f"unknown groups: {groups - allowed}"

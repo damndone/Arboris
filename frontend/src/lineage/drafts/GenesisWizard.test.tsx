@@ -16,6 +16,10 @@ vi.mock("../../capabilities/useCapabilities", () => ({
         { key: "iv_2sls", label: "IV / 2SLS", group: "IV" },
         { key: "dcdh", label: "DCDH DID", group: "DID" },
         { key: "time_series.arma_garch", label: "ARMA-GARCH", group: "Time series" },
+        { key: "ordinal_logit", label: "Ordinal logit", group: "Ordinal" },
+        { key: "multinomial_logit", label: "Multinomial logit", group: "Nominal" },
+        { key: "survival_cox", label: "Survival / Cox", group: "Survival" },
+        { key: "quantile_regression", label: "Quantile regression", group: "Robust / distributional" },
       ],
       imputation_methods: [],
       covariance_options: [{ key: "robust", label: "Robust" }],
@@ -641,6 +645,148 @@ describe("GenesisWizard", () => {
       /请选择算法|algorithm/,
     );
     expect(api.patchDraftNode).toHaveBeenCalledTimes(1);
+  });
+
+  it("configures survival Cox columns and persists model_options", async () => {
+    const survivalPreview: api.FilePreview = {
+      ...preview(),
+      columnCount: 4,
+      columns: [
+        { name: "duration", dtype: "numeric", missingRate: 0, uniqueCount: 3, suggestedRole: "y" },
+        { name: "event", dtype: "numeric", missingRate: 0, uniqueCount: 2, suggestedRole: "x" },
+        { name: "group", dtype: "string", missingRate: 0, uniqueCount: 2, suggestedRole: "x" },
+        { name: "age", dtype: "numeric", missingRate: 0, uniqueCount: 3, suggestedRole: "x" },
+      ],
+      previewRows: [{ duration: 10, event: 1, group: "A", age: 40 }],
+      suggestedY: "duration",
+      suggestedX: ["age"],
+    };
+    const withColumns = (response: api.PipelineDraftResponse): api.PipelineDraftResponse => ({
+      ...response,
+      draft: {
+        ...response.draft,
+        graph: {
+          ...response.draft.graph,
+          nodes: response.draft.graph.nodes.map((node) =>
+            node.node_type === "input.upload" || node.node_type === "table"
+              ? { ...node, columns: ["duration", "event", "group", "age"] }
+              : node,
+          ),
+        },
+      },
+    });
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+    vi.spyOn(api, "previewFile").mockResolvedValue(survivalPreview);
+    vi.spyOn(api, "uploadDataset").mockResolvedValue({ sha256: sha, filename: "survival.csv" });
+    vi.spyOn(api, "createGenesisDraft").mockResolvedValue(withColumns(draftResponse("h1")));
+    vi.spyOn(api, "patchDraftNode")
+      .mockResolvedValueOnce(withColumns(draftResponse("h2", "configured", "pending")))
+      .mockResolvedValueOnce(withColumns(draftResponse("h3", "configured", "configured")));
+
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Dataset file"), {
+      target: { files: [new File(["duration,event,group,age\n10,1,A,40"], "survival.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(await screen.findByTestId("genesis-save-table"));
+    await waitFor(() => expect(api.patchDraftNode).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "survival_cox" },
+    });
+    expect(screen.getByLabelText("survival event column")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("survival event column"), {
+      target: { value: "event" },
+    });
+    fireEvent.change(screen.getByLabelText("survival group column"), {
+      target: { value: "group" },
+    });
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+
+    await waitFor(() =>
+      expect(api.patchDraftNode).toHaveBeenNthCalledWith(2, "/proj", "draft_g1", "model_1", {
+        params: {
+          model_type: "survival_cox",
+          y: "duration",
+          x: ["age"],
+          covariance: "robust",
+          model_options: {
+            event_column: "event",
+            group_column: "group",
+            ties: "breslow",
+          },
+        },
+      }),
+    );
+  });
+
+  it("persists quantile defaults and bootstrap configuration", async () => {
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+    vi.spyOn(api, "previewFile").mockResolvedValue(preview());
+    vi.spyOn(api, "uploadDataset").mockResolvedValue({ sha256: sha, filename: "data.csv" });
+    vi.spyOn(api, "createGenesisDraft").mockResolvedValue(draftResponse("h1"));
+    vi.spyOn(api, "patchDraftNode")
+      .mockResolvedValueOnce(draftResponse("h2", "configured", "pending"))
+      .mockResolvedValueOnce(draftResponse("h3", "configured", "configured"));
+
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Dataset file"), {
+      target: { files: [new File(["y,x\n1,2"], "data.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(await screen.findByTestId("genesis-save-table"));
+    await waitFor(() => expect(api.patchDraftNode).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "quantile_regression" },
+    });
+    expect(screen.getByLabelText("quantiles")).toHaveValue("0.25, 0.5, 0.75");
+    fireEvent.change(screen.getByLabelText("bootstrap reps"), {
+      target: { value: "200" },
+    });
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+
+    await waitFor(() =>
+      expect(api.patchDraftNode).toHaveBeenNthCalledWith(2, "/proj", "draft_g1", "model_1", {
+        params: {
+          model_type: "quantile_regression",
+          y: "y",
+          x: ["x"],
+          covariance: "robust",
+          model_options: {
+            quantiles: [0.25, 0.5, 0.75],
+            bootstrap_reps: 200,
+            random_state: 0,
+          },
+        },
+      }),
+    );
+  });
+
+  it("keeps ordinal and multinomial model families selectable with options", async () => {
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+    vi.spyOn(api, "previewFile").mockResolvedValue(preview());
+    vi.spyOn(api, "uploadDataset").mockResolvedValue({ sha256: sha, filename: "data.csv" });
+    vi.spyOn(api, "createGenesisDraft").mockResolvedValue(draftResponse("h1"));
+    vi.spyOn(api, "patchDraftNode").mockResolvedValue(draftResponse("h2", "configured", "pending"));
+
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Dataset file"), {
+      target: { files: [new File(["y,x\n1,2"], "data.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(await screen.findByTestId("genesis-save-table"));
+    await waitFor(() => expect(api.patchDraftNode).toHaveBeenCalledTimes(1));
+
+    const modelSelect = screen.getByLabelText("model type");
+    expect(screen.getByRole("option", { name: "Ordinal logit" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Multinomial logit" })).toBeInTheDocument();
+
+    fireEvent.change(modelSelect, { target: { value: "ordinal_logit" } });
+    expect(screen.getByLabelText("ordinal model options")).toHaveValue(
+      '{"optimizer":"bfgs","maxiter":500}',
+    );
+    fireEvent.change(modelSelect, { target: { value: "multinomial_logit" } });
+    expect(screen.getByLabelText("multinomial model options")).toHaveValue(
+      '{"maxiter":500}',
+    );
   });
 
   it("patches dCDH and prediction params with the same field names as legacy Submit", async () => {

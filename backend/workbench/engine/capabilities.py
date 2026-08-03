@@ -19,6 +19,91 @@ class CapabilityDeclaration:
     params: Sequence[dict[str, object]]
 
 
+def _v186_model_params(
+    option_fields: Sequence[str], *, options_required: bool = False
+) -> list[dict[str, object]]:
+    return [
+        {"key": "model_type", "kind": "select", "label": "Model", "role": "model"},
+        {
+            "key": "x",
+            "kind": "columns",
+            "label": "Regressors (X)",
+            "required": True,
+            "role": "x",
+        },
+        {
+            "key": "model_options",
+            "kind": "json",
+            "label": "Model options",
+            "required": options_required,
+            "role": "model_options",
+            "options": list(option_fields),
+            "value": {},
+        },
+    ]
+
+
+# The pack declaration supplies executable ownership; this table owns the
+# stable public vocabulary shown to the Agent and model editor. Keeping the
+# option fields here prevents a pack's display metadata from silently drifting
+# away from the shared workflow contract.
+V186_MODEL_CAPABILITY_METADATA: dict[str, dict[str, object]] = {
+    "ordinal_logit": {
+        "label": "Ordinal logit",
+        "group": "Ordinal",
+        "description": (
+            "Ordered categorical outcome with probabilities, odds ratios, "
+            "marginal effects, and a parallel-lines diagnostic."
+        ),
+        "requires": ["ordered_outcome"],
+        "model_options_fields": ["optimizer", "maxiter"],
+        "model_options_required": [],
+        "params": _v186_model_params(["optimizer", "maxiter"]),
+    },
+    "multinomial_logit": {
+        "label": "Multinomial logit",
+        "group": "Nominal",
+        "description": (
+            "Nominal categorical outcome with probabilities, relative-risk "
+            "ratios, and marginal effects."
+        ),
+        "requires": ["nominal_outcome"],
+        "model_options_fields": ["maxiter", "base_category"],
+        "model_options_required": [],
+        "params": _v186_model_params(["maxiter", "base_category"]),
+    },
+    "survival_cox": {
+        "label": "Cox survival model",
+        "group": "Survival",
+        "description": (
+            "Cox proportional-hazards model with Kaplan-Meier, log-rank, "
+            "risk-set, censoring, and Schoenfeld evidence."
+        ),
+        "requires": ["survival_outcome", "event_column"],
+        "model_options_fields": ["event_column", "group_column", "entry_column", "ties"],
+        "model_options_required": ["event_column"],
+        "params": _v186_model_params(
+            ["event_column", "group_column", "entry_column", "ties"],
+            options_required=True,
+        ),
+    },
+    "quantile_regression": {
+        "label": "Quantile regression",
+        "group": "Quantile",
+        "description": (
+            "Multiple conditional quantiles with confidence intervals, optional "
+            "bootstrap intervals, and cross-quantile comparisons."
+        ),
+        "requires": ["continuous_outcome"],
+        "model_options_fields": ["quantiles", "bootstrap_reps", "random_state"],
+        "model_options_required": [],
+        "params": _v186_model_params(
+            ["quantiles", "bootstrap_reps", "random_state"]
+        ),
+    },
+}
+
+
 _DECLARED_CAPABILITIES: dict[str, CapabilityDeclaration] = {}
 _RESERVED_DECLARATION_MODEL_TYPES = frozenset({"auto", "glm", "poisson_rate"})
 
@@ -317,6 +402,21 @@ def build_capabilities() -> dict:
     # present, otherwise the UI could offer a model the engine cannot resolve.
     for key in registered_declared_model_types():
         declaration = _DECLARED_CAPABILITIES[key]
+        metadata = V186_MODEL_CAPABILITY_METADATA.get(key)
+        if metadata is not None:
+            entry = {
+                "key": key,
+                "label": metadata["label"],
+                "group": metadata["group"],
+                "description": metadata["description"],
+                "schema_id": f"{key}@v1",
+                "params": [dict(param) for param in metadata["params"]],
+            }
+            requires = metadata.get("requires")
+            if requires:
+                entry["requires"] = list(requires)
+            model_types.append(entry)
+            continue
         entry: dict[str, object] = {
             "key": declaration.model_type,
             "label": declaration.label,

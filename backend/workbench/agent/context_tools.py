@@ -2875,6 +2875,7 @@ def _bounded_result_summary(
 
     run_status = preview.get("run_status")
     statistical_evidence = _bounded_statistics_evidence(run_root)
+    model_family_evidence = _bounded_model_family_evidence(run_root, model_results)
     return {
         "available": summary_status == "complete" and preview.get("available") is True,
         "summary_status": summary_status,
@@ -2899,7 +2900,95 @@ def _bounded_result_summary(
         "run_status": run_status if isinstance(run_status, dict) else None,
         "persisted_models": _bounded_persisted_model_facts(model_results),
         "statistical_evidence": statistical_evidence,
+        "model_family_evidence": model_family_evidence,
     }
+
+
+def _bounded_model_family_evidence(
+    run_root: Path,
+    model_results: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Project exact, bounded evidence for v1.8.6 non-linear model families.
+
+    The raw model result remains outside the Agent boundary. This projection
+    keeps the packet's numeric authority while exposing only family-owned
+    fields, with fixed list/depth budgets so probabilities and survival rows
+    cannot become an unbounded data-export channel.
+    """
+
+    primary = next((item for item in model_results if isinstance(item, dict)), None)
+    if not isinstance(primary, dict):
+        return None
+    model_type = primary.get("model_type")
+    budget = _PublicResultBudget()
+    if model_type == "ordinal_logit":
+        diagnostic_path = run_root / "model_results" / "diagnostics_ordinal_logit_1.json"
+        diagnostic = read_json(diagnostic_path) if diagnostic_path.is_file() else {}
+        return _bounded_public_result_value(
+            {
+                "contract": "workbench.ordinal_logit.result.v1",
+                "model_type": model_type,
+                "outcome_levels": primary.get("outcome_levels"),
+                "odds_ratios": primary.get("odds_ratios"),
+                "marginal_effects": primary.get("marginal_effects"),
+                "predicted_probabilities": (primary.get("predicted_probabilities") or [])[:8],
+                "parallel_lines": diagnostic.get("parallel_lines") if isinstance(diagnostic, dict) else None,
+            },
+            budget=budget,
+        )
+    if model_type == "multinomial_logit":
+        diagnostic_path = run_root / "model_results" / "diagnostics_multinomial_logit_1.json"
+        diagnostic = read_json(diagnostic_path) if diagnostic_path.is_file() else {}
+        return _bounded_public_result_value(
+            {
+                "contract": "workbench.multinomial_logit.result.v1",
+                "model_type": model_type,
+                "outcome_levels": primary.get("outcome_levels"),
+                "base_category": primary.get("base_category"),
+                "relative_risk_ratios": primary.get("relative_risk_ratios"),
+                "marginal_effects": primary.get("marginal_effects"),
+                "predicted_probabilities": {
+                    key: value[:8]
+                    for key, value in (primary.get("predicted_probabilities") or {}).items()
+                    if isinstance(key, str) and isinstance(value, list)
+                },
+                "diagnostic": diagnostic,
+            },
+            budget=budget,
+        )
+    if model_type == "survival_cox":
+        packet_path = run_root / "survival" / "evidence.json"
+        packet = read_json(packet_path) if packet_path.is_file() else None
+        if not isinstance(packet, dict):
+            return None
+        return _bounded_public_result_value(
+            {
+                "contract": packet.get("contract"),
+                "model_type": model_type,
+                "duration_column": packet.get("duration_column"),
+                "event_column": packet.get("event_column"),
+                "nobs": packet.get("nobs"),
+                "censoring": packet.get("censoring"),
+                "kaplan_meier": (packet.get("kaplan_meier") or [])[:16],
+                "log_rank": packet.get("log_rank"),
+                "risk_set": (packet.get("risk_set") or [])[:16],
+                "schoenfeld": (packet.get("schoenfeld") or [])[:8],
+            },
+            budget=budget,
+        )
+    if model_type == "quantile_regression":
+        return _bounded_public_result_value(
+            {
+                "contract": "workbench.quantile_regression.result.v1",
+                "model_type": model_type,
+                "quantiles": primary.get("quantiles"),
+                "fits": primary.get("fits"),
+                "bootstrap": primary.get("bootstrap"),
+                "cross_quantile_comparisons": primary.get("cross_quantile_comparisons"),
+            },
+            budget=budget,
+        )
+    return None
 
 
 def _bounded_persisted_model_facts(

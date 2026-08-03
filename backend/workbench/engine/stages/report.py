@@ -83,7 +83,7 @@ class ReportStage:
             _safe_flush_recorder,
             _write_manifest,
         )
-        from ...artifacts import register_artifact, write_json
+        from ...artifacts import read_json, register_artifact, write_json
         from ...domain import GuardrailIssue, Severity
 
         build_diagnostic_summary = _orch.build_diagnostic_summary
@@ -126,8 +126,35 @@ class ReportStage:
         started_at = ctx.artifacts["_started_at"]
 
         descriptive_stats = _build_descriptive_stats(cleaned, categorical_vars=categorical_vars)
-        model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson", "poisson_rate": "Poisson (rate model)", "panel_ols": "Panel OLS"}
+        model_family_display = {
+            "ols": "OLS",
+            "ols_robust": "OLS (robust SE)",
+            "logit": "Logit",
+            "ordinal_logit": "Ordinal logit",
+            "multinomial_logit": "Multinomial logit",
+            "survival_cox": "Survival / Cox",
+            "quantile_regression": "Quantile regression",
+            "poisson": "Poisson",
+            "poisson_rate": "Poisson (rate model)",
+            "panel_ols": "Panel OLS",
+        }
         primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
+        family_evidence: dict[str, Any] | None = None
+        family_evidence_path = {
+            "ordinal_logit": run_root / "model_results" / "diagnostics_ordinal_logit_1.json",
+            "multinomial_logit": run_root / "model_results" / "diagnostics_multinomial_logit_1.json",
+            "survival_cox": run_root / "survival" / "evidence.json",
+        }.get(primary_type)
+        if family_evidence_path is not None and family_evidence_path.is_file():
+            family_evidence = read_json(family_evidence_path)
+        elif primary_type == "quantile_regression" and model_results:
+            family_evidence = {
+                "contract": "workbench.quantile_regression.result.v1",
+                "quantiles": model_results[0][1].get("quantiles", []),
+                "fits": model_results[0][1].get("fits", {}),
+                "bootstrap": model_results[0][1].get("bootstrap", {}),
+                "cross_quantile_comparisons": model_results[0][1].get("cross_quantile_comparisons", []),
+            }
         if effective_exposure_col:
             facts = [
                 f"Model: Poisson rate model with log({effective_exposure_col}) as offset",
@@ -198,6 +225,7 @@ class ReportStage:
             "statistical_evidence": statistical_tests.get("evidence"),
             "variable_importance": variable_importance,
             "diagnostics": diagnostic_artifacts,
+            "model_family_evidence": family_evidence,
         }
         if primary_type in ("poisson", "poisson_rate"):
             poisson_diag = diagnostic_artifacts.get("poisson_1", {})
@@ -229,6 +257,8 @@ class ReportStage:
             coercions=coercion_actions,
             imputation=imputation_summary,
         )
+        if family_evidence is not None:
+            diagnostic_summary["model_family_evidence"] = family_evidence
         write_json(run_root / "diagnostic_summary.json", diagnostic_summary)
         register_artifact(run_root, "diagnostic_summary", run_root / "diagnostic_summary.json", "metadata", "diagnostics", [])
 
@@ -293,6 +323,9 @@ class ReportStage:
                         "table_1": _xlsx_export_rows(descriptive_stats),
                         "statistical_evidence": _xlsx_export_rows(
                             (statistical_tests.get("evidence") or {}).get("results", [])
+                        ),
+                        "model_family_evidence": _xlsx_export_rows(
+                            [{"evidence": family_evidence}] if family_evidence is not None else []
                         ),
                     },
                     run_root,
