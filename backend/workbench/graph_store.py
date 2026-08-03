@@ -261,6 +261,7 @@ def _node_from_json(d: dict[str, Any], *, schema_version: int) -> Node:
         summary=d.get("summary"),
         annotations=tuple(d.get("annotations", ())),
         stage=stage,
+        node_hash=d.get("node_hash"),
     )
 
 

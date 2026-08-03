@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from workbench.graph_recorder import GraphRecorder
 from workbench.graph_store import GraphStore
@@ -47,3 +48,32 @@ def test_graph_node_hash_survives_recorder_and_store_roundtrip(tmp_path: Path):
 
     graph = store.read("identity-run")
     assert graph.nodes["stage:dataset"].node_hash == "sha256:dataset-identity"
+
+
+def test_legacy_graph_without_node_hash_remains_readable(tmp_path: Path):
+    run_root = tmp_path / "legacy-run"
+    run_root.mkdir()
+    (run_root / "graph.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "run_id": "legacy-run",
+                "nodes": {
+                    "stage:raw": {
+                        "id": "stage:raw",
+                        "kind": "dataset_stage",
+                        "display_label": "Raw",
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "parent_stage_id": None,
+                        "branch_id": "main",
+                    }
+                },
+                "edges": {},
+                "branches": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    graph = GraphStore(runs_root=tmp_path).read("legacy-run")
+    assert graph.nodes["stage:raw"].node_hash is None
