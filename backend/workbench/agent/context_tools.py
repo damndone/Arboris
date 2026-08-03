@@ -175,6 +175,13 @@ class InspectProjectNotebookWorkflowResultsRequest:
     run_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class InspectProjectStatisticalEvidenceRequest:
+    """Read the persisted statistics evidence packet for visible project runs."""
+
+    run_ids: tuple[str, ...]
+
+
 class OperationContractUnavailableError(ValueError):
     """The selected node has no resolvable contract for the requested operation."""
 
@@ -953,6 +960,18 @@ class NodeOperationContextProvider:
                 )
             )
 
+        def inspect_project_statistical_evidence(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered project scope")
+            return self.inspect_project_statistical_evidence(
+                InspectProjectStatisticalEvidenceRequest(
+                    run_ids=tuple(str(run_id) for run_id in arguments["run_ids"])
+                )
+            )
+
         def inspect_project_notebook_workflow_results(
             arguments: dict[str, Any],
             context: ToolContext,
@@ -1157,6 +1176,37 @@ class NodeOperationContextProvider:
                 scope_requirements=("project",),
                 max_output_budget=8192,
                 handler=inspect_project_notebook_workflow_results,
+            ),
+            ToolDefinition(
+                tool_id="inspect_project_statistical_evidence",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_ids"],
+                    "properties": {
+                        "run_ids": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 16,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project",),
+                max_output_budget=8192,
+                handler=inspect_project_statistical_evidence,
+                description=(
+                    "Read the persisted statistical evidence packet for the named runs: "
+                    "ANOVA post-hoc multiple comparisons with their correction method "
+                    "(Tukey, Bonferroni), Cohen's d, eta squared, omega squared, and the "
+                    "Levene, Bartlett and Shapiro-Wilk assumption checks. Call this for "
+                    "any question about statistical tests, effect sizes, post-hoc "
+                    "comparisons or assumption checks - these are produced by every "
+                    "ordinary run and do not require a Notebook workflow receipt."
+                ),
             ),
         ]
 
@@ -1799,6 +1849,24 @@ class NodeOperationContextProvider:
         return {
             "transforms": values,
             "omitted_sections": ["raw_model_results", "raw_rows"],
+        }
+
+    def inspect_project_statistical_evidence(
+        self,
+        request: InspectProjectStatisticalEvidenceRequest,
+    ) -> dict[str, Any]:
+        """Read the statistics evidence packet for named, visible project runs."""
+
+        runs: list[dict[str, Any]] = []
+        for run_id in sorted(set(request.run_ids)):
+            run_root = self._project_run_root(run_id)
+            evidence = _bounded_statistics_evidence(run_root)
+            if evidence is None:
+                continue
+            runs.append({"run_id": run_id, "statistical_evidence": evidence})
+        return {
+            "runs": runs,
+            "omitted_sections": ["raw_artifact_payloads", "raw_rows"],
         }
 
     def inspect_project_notebook_workflow_results(
@@ -2764,9 +2832,44 @@ def _bounded_statistics_evidence(
     raw_results = packet.get("results")
     if not isinstance(raw_results, list):
         return None
+    # Pairwise Cohen's d outnumbers every other family by an order of
+    # magnitude, so a first-N budget spends the whole allowance on it and the
+    # Agent concludes that post-hoc, effect-size and assumption tests were
+    # never run.  Round-robin across families so each one is represented.
+    priority_types = {
+        "anova_posthoc",
+        "posthoc_anova",
+        "cohens_d",
+        "eta_squared",
+        "omega_squared",
+        "levene",
+        "bartlett",
+        "shapiro_wilk",
+    }
+    families: dict[str, list[dict[str, Any]]] = {}
+    for row in raw_results:
+        if not isinstance(row, dict):
+            continue
+        families.setdefault(str(row.get("test_type") or ""), []).append(row)
+    ordered_families = sorted(families, key=lambda name: (name not in priority_types, name))
+    selected_results: list[dict[str, Any]] = []
+    depth = 0
+    while len(selected_results) < max(0, limit):
+        progressed = False
+        for name in ordered_families:
+            rows = families[name]
+            if depth >= len(rows):
+                continue
+            progressed = True
+            selected_results.append(rows[depth])
+            if len(selected_results) >= max(0, limit):
+                break
+        if not progressed:
+            break
+        depth += 1
     budget = _PublicResultBudget()
     bounded_results: list[dict[str, Any]] = []
-    for row in raw_results[: max(0, limit)]:
+    for row in selected_results:
         if not isinstance(row, dict):
             continue
         bounded: dict[str, Any] = {}

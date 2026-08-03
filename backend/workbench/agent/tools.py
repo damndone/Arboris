@@ -261,9 +261,10 @@ class ToolDefinition:
     handler: ToolHandler
     scope_requirements: tuple[str, ...] = ()
     max_output_budget: int | None = None
+    description: str = ""
 
     def descriptor(self) -> dict[str, Any]:
-        return {
+        descriptor: dict[str, Any] = {
             "tool_id": self.tool_id,
             "version": self.version,
             "input_schema": self.input_schema,
@@ -271,6 +272,11 @@ class ToolDefinition:
             "scope_requirements": list(self.scope_requirements),
             "max_output_budget": self.max_output_budget,
         }
+        if self.description:
+            # The model selects tools from this descriptor alone, so evidence a
+            # tool carries has to be stated here or it is unreachable in practice.
+            descriptor["description"] = self.description
+        return descriptor
 
 
 class ToolRegistry:
