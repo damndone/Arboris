@@ -32,8 +32,14 @@ from ..data_operations import (
     DataColumnCastSpecV1,
     DataColumnCastValidationError,
     DataColumnsCastSpecV1,
+    FeatureRecipeOperationSpecV1,
+    DataTransformSpecV1,
+    apply_data_transform,
+    apply_feature_recipe_operation,
     preview_data_column_cast,
     preview_data_columns_cast,
+    preview_feature_recipe,
+    preview_data_transform,
     resolve_data_column_cast_context,
 )
 from ..code_execution import (
@@ -88,6 +94,44 @@ class DataColumnsCastRequest(BaseModel):
 class DataColumnsCastConfirmRequest(DataColumnsCastRequest):
     preview_fingerprint: str = Field(min_length=1, max_length=200)
     session_id: str = Field(default="agent_data_ui", min_length=1, max_length=200)
+
+
+class FeatureRecipeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_run_id: str = Field(min_length=1, max_length=200)
+    source_node_id: str = Field(min_length=1, max_length=300)
+    source_artifact_id: str = Field(min_length=1, max_length=200)
+    recipe_id: str = Field(min_length=1, max_length=200)
+    operation_id: Literal["derived_variable", "recode", "interaction", "log", "ratio"]
+    inputs: list[str] = Field(min_length=1, max_length=2)
+    output: str = Field(min_length=1, max_length=200)
+    output_type: str = Field(default="numeric", min_length=1, max_length=40)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    fit_scope: Literal["stateless", "date_local", "period_fitted"] = "stateless"
+    missing_policy: str = Field(default="fail_closed", min_length=1, max_length=40)
+    outlier_policy: str = Field(default="preserve", min_length=1, max_length=40)
+
+
+class FeatureRecipeConfirmRequest(FeatureRecipeRequest):
+    preview_fingerprint: str = Field(min_length=1, max_length=200)
+
+
+class DataTransformRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_run_id: str = Field(min_length=1, max_length=200)
+    source_node_id: str = Field(min_length=1, max_length=300)
+    source_artifact_id: str = Field(min_length=1, max_length=200)
+    operation: Literal["merge", "append", "reshape", "subset"]
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    secondary_run_id: str | None = Field(default=None, max_length=200)
+    secondary_node_id: str | None = Field(default=None, max_length=300)
+    secondary_artifact_id: str | None = Field(default=None, max_length=200)
+
+
+class DataTransformConfirmRequest(DataTransformRequest):
+    preview_fingerprint: str = Field(min_length=1, max_length=200)
 
 
 class CodeExecuteRequest(BaseModel):
@@ -185,6 +229,92 @@ def _batch_preview_or_error(root, spec: DataColumnsCastSpecV1, *, confirm: bool)
                 else "The typed data operation cannot be previewed."
             ),
             details={"operation_id": "data.columns.cast", "reason": str(exc)},
+        ) from exc
+
+
+def _feature_recipe_spec(body: FeatureRecipeRequest) -> FeatureRecipeOperationSpecV1:
+    from ..predictive_research.contracts import FeatureRecipeV1
+
+    try:
+        recipe = FeatureRecipeV1(
+            recipe_id=body.recipe_id,
+            operation_id=body.operation_id,
+            operation_version=1,
+            inputs=tuple(body.inputs),
+            outputs=(body.output,),
+            output_types=(body.output_type,),
+            parameters=body.parameters,
+            fit_scope=body.fit_scope,
+            source_artifact=body.source_artifact_id,
+            lineage_parent=body.source_node_id,
+            missing_policy=body.missing_policy,
+            outlier_policy=body.outlier_policy,
+        )
+        return FeatureRecipeOperationSpecV1(
+            source_run_id=body.source_run_id,
+            source_node_id=body.source_node_id,
+            source_artifact_id=body.source_artifact_id,
+            recipe=recipe,
+        )
+    except (TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_INVALID",
+            message="The typed FeatureRecipe specification is invalid.",
+            details={"operation_id": "data.feature_recipe", "reason": str(exc)},
+        ) from exc
+
+
+def _feature_recipe_preview_or_error(root, spec: FeatureRecipeOperationSpecV1, *, confirm: bool):
+    try:
+        return preview_feature_recipe(root, spec)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409 if confirm else 422,
+            code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            message=(
+                "The FeatureRecipe source changed before confirmation."
+                if confirm
+                else "The typed FeatureRecipe cannot be previewed."
+            ),
+            details={"operation_id": "data.feature_recipe", "reason": str(exc)},
+        ) from exc
+
+
+def _data_transform_spec(body: DataTransformRequest) -> DataTransformSpecV1:
+    try:
+        return DataTransformSpecV1(
+            source_run_id=body.source_run_id,
+            source_node_id=body.source_node_id,
+            source_artifact_id=body.source_artifact_id,
+            operation=body.operation,
+            parameters=body.parameters,
+            secondary_run_id=body.secondary_run_id,
+            secondary_node_id=body.secondary_node_id,
+            secondary_artifact_id=body.secondary_artifact_id,
+        )
+    except (TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_INVALID",
+            message="The typed data transform specification is invalid.",
+            details={"operation_id": f"data.{body.operation}", "reason": str(exc)},
+        ) from exc
+
+
+def _data_transform_preview_or_error(root, spec: DataTransformSpecV1, *, confirm: bool):
+    try:
+        return preview_data_transform(root, spec)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409 if confirm else 422,
+            code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            message=(
+                "The data transform source changed before confirmation."
+                if confirm
+                else "The typed data transform cannot be previewed."
+            ),
+            details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
         ) from exc
 
 
@@ -697,6 +827,83 @@ async def confirm_columns_cast(
         "operation": record.to_dict(),
         "status": record.status,
     }
+
+
+@router.post("/data-operations/feature-recipe/preview")
+def preview_feature_recipe_route(project_root: str, body: FeatureRecipeRequest) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _feature_recipe_spec(body)
+    preview = _feature_recipe_preview_or_error(root, spec, confirm=False)
+    return {"spec": spec.to_dict(), "preview": preview.to_dict()}
+
+
+@router.post("/data-operations/feature-recipe/confirm")
+def confirm_feature_recipe_route(
+    project_root: str,
+    body: FeatureRecipeConfirmRequest,
+) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _feature_recipe_spec(body)
+    preview = _feature_recipe_preview_or_error(root, spec, confirm=True)
+    if preview.fingerprint != body.preview_fingerprint:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The FeatureRecipe preview fingerprint no longer matches the source data.",
+            details={"expected": preview.fingerprint, "received": body.preview_fingerprint},
+        )
+    if preview.status != "ready":
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_BLOCKED",
+            message="The FeatureRecipe preview has blocking validation failures.",
+            details={"reason": preview.reason, "next_step": preview.next_step},
+        )
+    try:
+        effect = apply_feature_recipe_operation(root, spec, preview)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The FeatureRecipe could not be applied because its source changed.",
+            details={"operation_id": "data.feature_recipe", "reason": str(exc)},
+        ) from exc
+    return {"status": "completed", "effect": effect.to_dict(), "preview": preview.to_dict()}
+
+
+@router.post("/data-operations/transform/preview")
+def preview_data_transform_route(project_root: str, body: DataTransformRequest) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _data_transform_spec(body)
+    preview = _data_transform_preview_or_error(root, spec, confirm=False)
+    return {"spec": spec.to_dict(), "preview": preview.to_dict()}
+
+
+@router.post("/data-operations/transform/confirm")
+def confirm_data_transform_route(
+    project_root: str,
+    body: DataTransformConfirmRequest,
+) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _data_transform_spec(body)
+    preview = _data_transform_preview_or_error(root, spec, confirm=True)
+    if preview.fingerprint != body.preview_fingerprint:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The data transform preview fingerprint no longer matches the source data.",
+            details={"expected": preview.fingerprint, "received": body.preview_fingerprint},
+        )
+    try:
+        effect = apply_data_transform(root, spec, preview)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The data transform could not be applied because its source changed.",
+            details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
+        ) from exc
+    return {"status": "completed", "effect": effect.to_dict(), "preview": preview.to_dict()}
 
 
 @router.post("/data-operations/code-execute/preview")

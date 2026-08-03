@@ -68,6 +68,71 @@ def test_column_cast_routes_preview_confirm_and_reload_readback(tmp_path: Path) 
         assert readback.json()["operation"]["record_id"] == operation["record_id"]
 
 
+def test_feature_recipe_routes_preview_confirm_and_expose_typed_child(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"x": [2.0, 3.0], "z": [4.0, 5.0]}),
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "recipe_id": "recipe_interaction",
+        "operation_id": "interaction",
+        "inputs": ["x", "z"],
+        "output": "xz",
+        "parameters": {"left": "x", "right": "z"},
+    }
+    with TestClient(app) as client:
+        preview_response = client.post(
+            "/data-operations/feature-recipe/preview",
+            params={"project_root": str(project)},
+            json=request,
+        )
+        assert preview_response.status_code == 200
+        preview = preview_response.json()["preview"]
+        assert preview["status"] == "ready"
+        assert "xz" in preview["output_columns"]
+        confirm_response = client.post(
+            "/data-operations/feature-recipe/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+    assert confirm_response.status_code == 200
+    effect = confirm_response.json()["effect"]
+    assert effect["child_node_id"].startswith("feature-recipe:")
+
+
+def test_data_transform_routes_preview_confirm_subset(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"id": [1, 2], "value": [10, 20], "drop": [0, 1]}),
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "operation": "subset",
+        "parameters": {"columns": ["id", "value"], "equals": {"id": 2}},
+    }
+    with TestClient(app) as client:
+        preview_response = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json=request,
+        )
+        assert preview_response.status_code == 200
+        preview = preview_response.json()["preview"]
+        assert preview["row_count_after"] == 1
+        confirm_response = client.post(
+            "/data-operations/transform/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+    assert confirm_response.status_code == 200
+    assert confirm_response.json()["effect"]["child_node_id"].startswith("data-subset:")
+
+
 def test_column_cast_context_resolves_existing_columns_from_dataset_node(tmp_path: Path) -> None:
     project, run_id, artifact_id = _source_project(
         tmp_path,

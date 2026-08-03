@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 import pandas as pd
 
@@ -20,6 +20,8 @@ from .artifacts import (
     write_text_durable,
 )
 from .graph_model import BranchRef, Edge, Graph, Node, NodeKind, Stage, Trust
+from .predictive_research.contracts import FeatureRecipeV1
+from .predictive_research.feature_recipe import apply_feature_recipe
 
 DataCastTarget = Literal["numeric", "string", "datetime"]
 ALLOWED_CAST_TARGETS = frozenset({"numeric", "string", "datetime"})
@@ -31,6 +33,390 @@ _SCHEMA_SIDECAR_SUFFIX = ".schema.json"
 
 class DataColumnCastValidationError(ValueError):
     """Raised when a typed cast cannot be resolved or safely previewed."""
+
+
+@dataclass(frozen=True)
+class FeatureRecipeOperationSpecV1:
+    source_run_id: str
+    source_node_id: str
+    source_artifact_id: str
+    recipe: FeatureRecipeV1
+    operation_id: str = "data.feature_recipe"
+    operation_version: str = "v1"
+
+    def __post_init__(self) -> None:
+        for field_name in ("source_run_id", "source_node_id", "source_artifact_id"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} must be a non-empty string")
+        if not isinstance(self.recipe, FeatureRecipeV1):
+            raise TypeError("recipe must be a FeatureRecipeV1")
+        self.recipe.validate()
+        if self.recipe.source_artifact != self.source_artifact_id:
+            raise ValueError("recipe source_artifact must match source_artifact_id")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "operation_id": self.operation_id,
+            "operation_version": self.operation_version,
+            "source_run_id": self.source_run_id,
+            "source_node_id": self.source_node_id,
+            "source_artifact_id": self.source_artifact_id,
+            "recipe": self.recipe.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class FeatureRecipePreview:
+    spec: FeatureRecipeOperationSpecV1
+    source_sha256: str
+    row_count: int
+    input_columns: tuple[str, ...]
+    output_columns: tuple[str, ...]
+    schema_fingerprint_before: str
+    schema_fingerprint_after: str
+    fingerprint: str
+    downstream_invalidation: tuple[str, ...] = ()
+    status: str = "ready"
+    reason: str | None = None
+    next_step: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "operation_id": self.spec.operation_id,
+            "operation_version": self.spec.operation_version,
+            "source_run_id": self.spec.source_run_id,
+            "source_node_id": self.spec.source_node_id,
+            "source_artifact_id": self.spec.source_artifact_id,
+            "recipe": self.spec.recipe.to_dict(),
+            "source_sha256": self.source_sha256,
+            "row_count": self.row_count,
+            "input_columns": list(self.input_columns),
+            "output_columns": list(self.output_columns),
+            "schema_fingerprint_before": self.schema_fingerprint_before,
+            "schema_fingerprint_after": self.schema_fingerprint_after,
+            "fingerprint": self.fingerprint,
+            "downstream_invalidation": list(self.downstream_invalidation),
+            "status": self.status,
+            "reason": self.reason,
+            "next_step": self.next_step,
+        }
+
+
+@dataclass(frozen=True)
+class FeatureRecipeEffect:
+    execution_key: str
+    artifact_id: str
+    artifact_path: str
+    recipe_artifact_id: str
+    recipe_path: str
+    child_node_id: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "execution_key": self.execution_key,
+            "artifact_id": self.artifact_id,
+            "artifact_path": self.artifact_path,
+            "recipe_artifact_id": self.recipe_artifact_id,
+            "recipe_path": self.recipe_path,
+            "child_node_id": self.child_node_id,
+        }
+
+
+DataTransformOperation = Literal["merge", "append", "reshape", "subset"]
+
+
+@dataclass(frozen=True)
+class DataTransformSpecV1:
+    source_run_id: str
+    source_node_id: str
+    source_artifact_id: str
+    operation: DataTransformOperation
+    parameters: Mapping[str, Any] = field(default_factory=dict)
+    secondary_run_id: str | None = None
+    secondary_node_id: str | None = None
+    secondary_artifact_id: str | None = None
+    operation_version: str = "v1"
+
+    def __post_init__(self) -> None:
+        for field_name in ("source_run_id", "source_node_id", "source_artifact_id"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} must be a non-empty string")
+        if self.operation not in {"merge", "append", "reshape", "subset"}:
+            raise ValueError("operation must be merge, append, reshape, or subset")
+        if self.operation in {"merge", "append"}:
+            if not all((self.secondary_run_id, self.secondary_node_id, self.secondary_artifact_id)):
+                raise ValueError(f"{self.operation} requires a secondary source artifact")
+        if not isinstance(self.parameters, Mapping):
+            raise ValueError("parameters must be an object")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "operation_id": f"data.{self.operation}",
+            "operation_version": self.operation_version,
+            "source_run_id": self.source_run_id,
+            "source_node_id": self.source_node_id,
+            "source_artifact_id": self.source_artifact_id,
+            "secondary_run_id": self.secondary_run_id,
+            "secondary_node_id": self.secondary_node_id,
+            "secondary_artifact_id": self.secondary_artifact_id,
+            "parameters": dict(self.parameters),
+        }
+
+
+@dataclass(frozen=True)
+class DataTransformPreview:
+    spec: DataTransformSpecV1
+    source_sha256: str
+    secondary_source_sha256: str | None
+    row_count_before: int
+    row_count_after: int
+    input_columns: tuple[str, ...]
+    output_columns: tuple[str, ...]
+    schema_fingerprint_before: str
+    schema_fingerprint_after: str
+    fingerprint: str
+    downstream_invalidation: tuple[str, ...] = ()
+    status: str = "ready"
+    reason: str | None = None
+    next_step: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.spec.to_dict(),
+            "source_sha256": self.source_sha256,
+            "secondary_source_sha256": self.secondary_source_sha256,
+            "row_count_before": self.row_count_before,
+            "row_count_after": self.row_count_after,
+            "input_columns": list(self.input_columns),
+            "output_columns": list(self.output_columns),
+            "schema_fingerprint_before": self.schema_fingerprint_before,
+            "schema_fingerprint_after": self.schema_fingerprint_after,
+            "fingerprint": self.fingerprint,
+            "downstream_invalidation": list(self.downstream_invalidation),
+            "status": self.status,
+            "reason": self.reason,
+            "next_step": self.next_step,
+        }
+
+
+def _transform_source_spec(run_id: str, node_id: str, artifact_id: str) -> DataColumnCastSpecV1:
+    return DataColumnCastSpecV1(
+        source_run_id=run_id,
+        source_node_id=node_id,
+        source_artifact_id=artifact_id,
+        column="__data_operation_source__",
+        target_dtype="string",
+    )
+
+
+def _execute_data_transform(
+    left: pd.DataFrame,
+    spec: DataTransformSpecV1,
+    right: pd.DataFrame | None,
+) -> pd.DataFrame:
+    parameters = dict(spec.parameters)
+    if spec.operation == "append":
+        if right is None:
+            raise DataColumnCastValidationError("append requires a secondary frame")
+        return pd.concat([left, right], ignore_index=True, sort=False)
+    if spec.operation == "merge":
+        if right is None:
+            raise DataColumnCastValidationError("merge requires a secondary frame")
+        keys = parameters.get("keys")
+        if not isinstance(keys, list) or not keys or any(not isinstance(key, str) for key in keys):
+            raise DataColumnCastValidationError("merge requires a non-empty list of join keys")
+        missing_left = [key for key in keys if key not in left.columns]
+        missing_right = [key for key in keys if key not in right.columns]
+        if missing_left or missing_right:
+            raise DataColumnCastValidationError(
+                f"merge keys missing: left={missing_left}, right={missing_right}"
+            )
+        if left.duplicated(keys).any() and right.duplicated(keys).any():
+            raise DataColumnCastValidationError(
+                "DATA_MERGE_MANY_TO_MANY_BLOCKED; next_step=declare a one-to-one or one-to-many key contract"
+            )
+        how = parameters.get("how", "left")
+        if how not in {"left", "right", "inner", "outer"}:
+            raise DataColumnCastValidationError("merge how must be left, right, inner, or outer")
+        try:
+            merged = left.merge(right, on=keys, how=how, suffixes=("_left", "_right"), validate="many_to_one")
+        except (pd.errors.MergeError, ValueError) as exc:
+            raise DataColumnCastValidationError(f"merge key contract rejected: {exc}") from exc
+        max_growth = float(parameters.get("max_growth_factor", 3.0))
+        if not math.isfinite(max_growth) or max_growth <= 0:
+            raise DataColumnCastValidationError("max_growth_factor must be finite and positive")
+        if len(merged) > max(1, len(left)) * max_growth:
+            raise DataColumnCastValidationError(
+                "DATA_MERGE_ROW_EXPANSION_BLOCKED; next_step=inspect key uniqueness or raise the explicit growth limit"
+            )
+        return merged
+    if spec.operation == "reshape":
+        direction = parameters.get("direction")
+        if direction == "wide_to_long":
+            id_columns = parameters.get("id_columns")
+            value_columns = parameters.get("value_columns")
+            if not isinstance(id_columns, list) or not isinstance(value_columns, list) or not id_columns or not value_columns:
+                raise DataColumnCastValidationError("wide_to_long requires id_columns and value_columns")
+            return left.melt(
+                id_vars=id_columns,
+                value_vars=value_columns,
+                var_name=str(parameters.get("var_name", "variable")),
+                value_name=str(parameters.get("value_name", "value")),
+            )
+        if direction == "long_to_wide":
+            index = parameters.get("index")
+            columns = parameters.get("columns")
+            values = parameters.get("values")
+            if not isinstance(index, list) or not isinstance(columns, str) or not isinstance(values, str):
+                raise DataColumnCastValidationError("long_to_wide requires index, columns, and values")
+            try:
+                return left.pivot(index=index, columns=columns, values=values).reset_index()
+            except (ValueError, KeyError) as exc:
+                raise DataColumnCastValidationError(
+                    f"long_to_wide has duplicate or missing keys: {exc}"
+                ) from exc
+        raise DataColumnCastValidationError("reshape direction must be wide_to_long or long_to_wide")
+    if spec.operation == "subset":
+        columns = parameters.get("columns")
+        if not isinstance(columns, list) or not columns:
+            raise DataColumnCastValidationError("subset requires an explicit non-empty columns list")
+        missing = [column for column in columns if column not in left.columns]
+        if missing:
+            raise DataColumnCastValidationError(f"subset columns missing: {missing}")
+        result = left.loc[:, columns].copy()
+        filters = parameters.get("equals", {})
+        if not isinstance(filters, Mapping):
+            raise DataColumnCastValidationError("subset equals filters must be an object")
+        for column, value in filters.items():
+            if column not in result.columns:
+                raise DataColumnCastValidationError(f"subset filter column missing: {column}")
+            result = result[result[column] == value]
+        row_indices = parameters.get("row_indices")
+        if row_indices is not None:
+            if not isinstance(row_indices, list) or any(not isinstance(index, int) for index in row_indices):
+                raise DataColumnCastValidationError("subset row_indices must be a list of integers")
+            result = result.iloc[row_indices]
+        return result.reset_index(drop=True)
+    raise DataColumnCastValidationError(f"unsupported data operation: {spec.operation}")
+
+
+def preview_data_transform(project_root: Path | str, spec: DataTransformSpecV1) -> DataTransformPreview:
+    left_root, graph, _node, left_artifact, left_path = _resolve_source(
+        project_root, _transform_source_spec(spec.source_run_id, spec.source_node_id, spec.source_artifact_id)
+    )
+    left = _read_frame(left_path)
+    right = None
+    right_artifact = None
+    if spec.secondary_run_id and spec.secondary_node_id and spec.secondary_artifact_id:
+        _right_root, _right_graph, _right_node, right_artifact, right_path = _resolve_source(
+            project_root,
+            _transform_source_spec(spec.secondary_run_id, spec.secondary_node_id, spec.secondary_artifact_id),
+        )
+        right = _read_frame(right_path)
+    output = _execute_data_transform(left, spec, right)
+    source_sha = str(left_artifact.get("sha256") or sha256_file(left_path))
+    secondary_sha = (
+        str(right_artifact.get("sha256") or "") if right_artifact is not None else None
+    )
+    before = _schema_fingerprint(left)
+    after = _schema_fingerprint(output)
+    identity = {
+        "spec": spec.to_dict(),
+        "source_sha256": source_sha,
+        "secondary_source_sha256": secondary_sha,
+        "schema_before": before,
+        "schema_after": after,
+        "row_count_after": len(output),
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return DataTransformPreview(
+        spec=spec,
+        source_sha256=source_sha,
+        secondary_source_sha256=secondary_sha,
+        row_count_before=len(left),
+        row_count_after=len(output),
+        input_columns=tuple(str(column) for column in left.columns),
+        output_columns=tuple(str(column) for column in output.columns),
+        schema_fingerprint_before=before,
+        schema_fingerprint_after=after,
+        fingerprint=fingerprint,
+        downstream_invalidation=tuple(
+            node_id for node_id, candidate in graph.nodes.items() if candidate.kind == NodeKind.MODEL
+        ),
+    )
+
+
+def apply_data_transform(
+    project_root: Path | str,
+    spec: DataTransformSpecV1,
+    preview: DataTransformPreview,
+    *,
+    execution_key_value: str | None = None,
+) -> FeatureRecipeEffect:
+    if preview.spec != spec:
+        raise DataColumnCastValidationError("preview spec does not match data operation spec")
+    fresh = preview_data_transform(project_root, spec)
+    if fresh.fingerprint != preview.fingerprint:
+        raise DataColumnCastValidationError("data operation preview is stale")
+    left_root, graph, _node, left_artifact, left_path = _resolve_source(
+        project_root, _transform_source_spec(spec.source_run_id, spec.source_node_id, spec.source_artifact_id)
+    )
+    right = None
+    if spec.secondary_run_id and spec.secondary_node_id and spec.secondary_artifact_id:
+        _right_root, _right_graph, _right_node, _right_artifact, right_path = _resolve_source(
+            project_root,
+            _transform_source_spec(spec.secondary_run_id, spec.secondary_node_id, spec.secondary_artifact_id),
+        )
+        right = _read_frame(right_path)
+    output = _execute_data_transform(_read_frame(left_path), spec, right)
+    execution = execution_key_value or f"exec_{fresh.fingerprint[:32]}"
+    suffix = execution.removeprefix("exec_")
+    artifact_id = f"{spec.operation}_{suffix}"
+    recipe_artifact_id = f"{spec.operation}_recipe_{suffix}"
+    relative_dir = Path("derived") / "data_operations" / spec.operation / suffix
+    artifact_rel = (relative_dir / "data.csv").as_posix()
+    recipe_rel = (relative_dir / "recipe.json").as_posix()
+    artifact_path = left_root / artifact_rel
+    recipe_path = left_root / recipe_rel
+    _write_frame_artifact(artifact_path, output, "csv")
+    recipe_payload = {
+        "payload_schema": "workbench.data-operation",
+        "schema_version": 1,
+        "execution_key": execution,
+        "spec": spec.to_dict(),
+        "preview": fresh.to_dict(),
+        "result": {"artifact_id": artifact_id, "path": artifact_rel},
+    }
+    if recipe_path.exists() and read_json(recipe_path) != recipe_payload:
+        raise DataColumnCastValidationError("deterministic data operation path is occupied")
+    if not recipe_path.exists():
+        write_json(recipe_path, recipe_payload)
+    inputs = [spec.source_artifact_id]
+    if spec.secondary_artifact_id:
+        inputs.append(spec.secondary_artifact_id)
+    _ensure_registered_artifact(left_root, artifact_id=artifact_id, path=artifact_path, artifact_type="derived_data", step=f"data.{spec.operation}", inputs=inputs)
+    _ensure_registered_artifact(left_root, artifact_id=recipe_artifact_id, path=recipe_path, artifact_type="metadata", step=f"data.{spec.operation}", inputs=inputs + [artifact_id])
+    child_node_id = f"data-{spec.operation}:{suffix}"
+    _graph_store_for(left_root).mutate(
+        spec.source_run_id,
+        lambda current: current if child_node_id in current.nodes else _commit_data_transform_graph_child(
+            current, spec=spec, preview=fresh, artifact_rel=artifact_rel, recipe_rel=recipe_rel,
+            child_node_id=child_node_id, execution_key=execution,
+        ),
+    )
+    _ensure_node_index_entry(
+        left_root,
+        child_node_id=child_node_id,
+        node_hash=sha256_file(artifact_path),
+        artifact_rel=artifact_rel,
+        producing_stage=f"data.{spec.operation}",
+        create_if_missing=True,
+    )
+    return FeatureRecipeEffect(execution, artifact_id, artifact_rel, recipe_artifact_id, recipe_rel, child_node_id)
 
 
 @dataclass(frozen=True)
@@ -140,6 +526,153 @@ class DataColumnCastEffect:
             "recipe_path": self.recipe_path,
             "child_node_id": self.child_node_id,
         }
+
+
+def preview_feature_recipe(
+    project_root: Path | str,
+    spec: FeatureRecipeOperationSpecV1,
+) -> FeatureRecipePreview:
+    """Preview one registered FeatureRecipe without mutating project state."""
+
+    source_spec = DataColumnCastSpecV1(
+        source_run_id=spec.source_run_id,
+        source_node_id=spec.source_node_id,
+        source_artifact_id=spec.source_artifact_id,
+        column=str(spec.recipe.inputs[0]),
+        target_dtype="string",
+    )
+    run_root, graph, _node, artifact, source_path = _resolve_source(project_root, source_spec)
+    frame = _read_frame(source_path)
+    before = _schema_fingerprint(frame)
+    try:
+        output = apply_feature_recipe(frame, spec.recipe)
+    except Exception as exc:  # noqa: BLE001 - convert engine failures to preview evidence
+        raise DataColumnCastValidationError(str(exc)) from exc
+    outputs = tuple(spec.recipe.outputs)
+    if spec.recipe.missing_policy == "fail_closed":
+        missing_outputs = [column for column in outputs if output[column].isna().any()]
+        if missing_outputs:
+            raise DataColumnCastValidationError(
+                "FeatureRecipe produced missing values in fail-closed output(s): "
+                + ", ".join(missing_outputs)
+            )
+    after = _schema_fingerprint(output)
+    source_sha = str(artifact.get("sha256") or sha256_file(source_path))
+    identity = {
+        "spec": spec.to_dict(),
+        "source_sha256": source_sha,
+        "schema_before": before,
+        "schema_after": after,
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return FeatureRecipePreview(
+        spec=spec,
+        source_sha256=source_sha,
+        row_count=len(output),
+        input_columns=tuple(str(column) for column in frame.columns),
+        output_columns=tuple(str(column) for column in output.columns),
+        schema_fingerprint_before=before,
+        schema_fingerprint_after=after,
+        fingerprint=fingerprint,
+        downstream_invalidation=tuple(
+            node_id for node_id, candidate in graph.nodes.items() if candidate.kind == NodeKind.MODEL
+        ),
+    )
+
+
+def apply_feature_recipe_operation(
+    project_root: Path | str,
+    spec: FeatureRecipeOperationSpecV1,
+    preview: FeatureRecipePreview,
+    *,
+    execution_key_value: str | None = None,
+) -> FeatureRecipeEffect:
+    """Materialize a deterministic typed FeatureRecipe child and Graph node."""
+
+    if preview.spec != spec:
+        raise DataColumnCastValidationError("preview spec does not match operation spec")
+    fresh = preview_feature_recipe(project_root, spec)
+    if fresh.fingerprint != preview.fingerprint:
+        raise DataColumnCastValidationError("feature recipe preview is stale")
+    if fresh.status != "ready":
+        raise DataColumnCastValidationError("feature recipe preview is blocked")
+    source_spec = DataColumnCastSpecV1(
+        source_run_id=spec.source_run_id,
+        source_node_id=spec.source_node_id,
+        source_artifact_id=spec.source_artifact_id,
+        column=str(spec.recipe.inputs[0]),
+        target_dtype="string",
+    )
+    run_root, graph, _node, source_artifact, source_path = _resolve_source(project_root, source_spec)
+    frame = _read_frame(source_path)
+    output = apply_feature_recipe(frame, spec.recipe)
+    execution = execution_key_value or f"exec_{fresh.fingerprint[:32]}"
+    suffix = execution.removeprefix("exec_")
+    artifact_id = f"feature_recipe_{suffix}"
+    recipe_artifact_id = f"feature_recipe_recipe_{suffix}"
+    relative_dir = Path("derived") / "feature_recipe" / suffix
+    artifact_rel = (relative_dir / "data.csv").as_posix()
+    recipe_rel = (relative_dir / "recipe.json").as_posix()
+    artifact_path = run_root / artifact_rel
+    recipe_path = run_root / recipe_rel
+    _write_frame_artifact(artifact_path, output, "csv")
+    recipe_payload = {
+        **spec.recipe.to_dict(),
+        "execution_key": execution,
+        "source_sha256": str(source_artifact.get("sha256") or sha256_file(source_path)),
+        "result": {"artifact_id": artifact_id, "path": artifact_rel},
+    }
+    if recipe_path.exists() and read_json(recipe_path) != recipe_payload:
+        raise DataColumnCastValidationError("deterministic feature recipe path is occupied")
+    if not recipe_path.exists():
+        write_json(recipe_path, recipe_payload)
+    _ensure_registered_artifact(
+        run_root,
+        artifact_id=artifact_id,
+        path=artifact_path,
+        artifact_type="derived_data",
+        step=spec.recipe.operation_id,
+        inputs=[spec.source_artifact_id],
+    )
+    _ensure_registered_artifact(
+        run_root,
+        artifact_id=recipe_artifact_id,
+        path=recipe_path,
+        artifact_type="metadata",
+        step=spec.recipe.operation_id,
+        inputs=[spec.source_artifact_id, artifact_id],
+    )
+    child_node_id = f"feature-recipe:{suffix}"
+    _graph_store_for(run_root).mutate(
+        spec.source_run_id,
+        lambda current: current if child_node_id in current.nodes else _commit_feature_recipe_graph_child(
+            current,
+            spec=spec,
+            preview=fresh,
+            artifact_rel=artifact_rel,
+            recipe_rel=recipe_rel,
+            child_node_id=child_node_id,
+            execution_key=execution,
+        ),
+    )
+    _ensure_node_index_entry(
+        run_root,
+        child_node_id=child_node_id,
+        node_hash=sha256_file(artifact_path),
+        artifact_rel=artifact_rel,
+        producing_stage=spec.recipe.operation_id,
+        create_if_missing=True,
+    )
+    return FeatureRecipeEffect(
+        execution_key=execution,
+        artifact_id=artifact_id,
+        artifact_path=artifact_rel,
+        recipe_artifact_id=recipe_artifact_id,
+        recipe_path=recipe_rel,
+        child_node_id=child_node_id,
+    )
 
 
 def preview_data_column_cast(
@@ -938,21 +1471,27 @@ def _ensure_node_index_entry(
     node_hash: str,
     artifact_rel: str,
     producing_stage: str = "data.column.cast",
+    create_if_missing: bool = False,
 ) -> None:
     """Give the derived child node a Merkle identity in node_index.json.
 
     The derived artifact's content hash is the child's natural identity (same
     convention as stage:raw using the upload hash). Legacy runs without a
-    node_index stay opaque, so a missing file is left absent, and the write is
-    idempotent for one execution key.
+    node_index stay opaque unless the operation explicitly opts into creating a
+    child-only index. New typed data-management operations use that opt-in so
+    their graph nodes remain addressable even when the source run predates the
+    incremental lineage index.
     """
 
     from .lineage.node_index import NODE_INDEX_FILENAME
 
     index_path = run_root / NODE_INDEX_FILENAME
     if not index_path.is_file():
-        return
-    index = read_json(index_path)
+        if not create_if_missing:
+            return
+        index = {}
+    else:
+        index = read_json(index_path)
     entry = {
         "node_hash": node_hash,
         "producing_stage": producing_stage,
@@ -1082,6 +1621,151 @@ def _commit_graph_child(
         forked_from_node_id=spec.source_node_id,
         head_node_ids=(child_node_id,),
     )
+    return Graph(
+        schema_version=graph.schema_version,
+        run_id=graph.run_id,
+        nodes=nodes,
+        edges=edges,
+        branches=branches,
+        legacy=graph.legacy,
+    )
+
+
+def _commit_feature_recipe_graph_child(
+    graph: Graph,
+    *,
+    spec: FeatureRecipeOperationSpecV1,
+    preview: FeatureRecipePreview,
+    artifact_rel: str,
+    recipe_rel: str,
+    child_node_id: str,
+    execution_key: str,
+) -> Graph:
+    branch_id = f"feature-recipe:{execution_key.removeprefix('exec_')[:20]}"
+    child = Node(
+        id=child_node_id,
+        kind=NodeKind.DATASET_STAGE,
+        display_label=f"Derived {spec.recipe.operation_id}",
+        created_at=datetime.now(timezone.utc).isoformat(),
+        parent_stage_id=spec.source_node_id,
+        branch_id=branch_id,
+        trust=Trust.OK,
+        payload_ref=artifact_rel,
+        summary=(
+            f"{spec.recipe.operation_id} → {', '.join(spec.recipe.outputs)}; "
+            f"{preview.row_count} rows; downstream rerun required"
+        ),
+        annotations=(
+            {
+                "type": "data_operation",
+                "operation_id": spec.recipe.operation_id,
+                "execution_key": execution_key,
+                "recipe_path": recipe_rel,
+                "schema_fingerprint": preview.schema_fingerprint_after,
+                "typed_payload": spec.recipe.to_dict(),
+            },
+        ),
+        stage=Stage.TRANSFORM,
+    )
+    nodes = _mark_downstream_invalidation(
+        {**graph.nodes, child_node_id: child},
+        reason="feature_recipe",
+        source_node_id=spec.source_node_id,
+        child_node_id=child_node_id,
+    )
+    edges = dict(graph.edges)
+    edge_id = f"edge:{child_node_id}"
+    edges[edge_id] = Edge(
+        id=edge_id,
+        source_id=spec.source_node_id,
+        target_id=child_node_id,
+        op=spec.operation_id,
+        params={
+            "recipe_operation_id": spec.recipe.operation_id,
+            "recipe_id": spec.recipe.recipe_id,
+            "execution_key": execution_key,
+            "schema_fingerprint_before": preview.schema_fingerprint_before,
+            "schema_fingerprint_after": preview.schema_fingerprint_after,
+        },
+    )
+    branches = dict(graph.branches)
+    branches[branch_id] = BranchRef(
+        id=branch_id,
+        forked_from_node_id=spec.source_node_id,
+        head_node_ids=(child_node_id,),
+    )
+    return Graph(
+        schema_version=graph.schema_version,
+        run_id=graph.run_id,
+        nodes=nodes,
+        edges=edges,
+        branches=branches,
+        legacy=graph.legacy,
+    )
+
+
+def _commit_data_transform_graph_child(
+    graph: Graph,
+    *,
+    spec: DataTransformSpecV1,
+    preview: DataTransformPreview,
+    artifact_rel: str,
+    recipe_rel: str,
+    child_node_id: str,
+    execution_key: str,
+) -> Graph:
+    branch_id = f"data-{spec.operation}:{execution_key.removeprefix('exec_')[:20]}"
+    child = Node(
+        id=child_node_id,
+        kind=NodeKind.DATASET_STAGE,
+        display_label=f"{spec.operation.title()} data",
+        created_at=datetime.now(timezone.utc).isoformat(),
+        parent_stage_id=spec.source_node_id,
+        branch_id=branch_id,
+        trust=Trust.OK,
+        payload_ref=artifact_rel,
+        summary=(
+            f"{spec.operation}: {preview.row_count_before} → {preview.row_count_after} rows; "
+            "downstream rerun required"
+        ),
+        annotations=(
+            {
+                "type": "data_operation",
+                "operation_id": f"data.{spec.operation}",
+                "execution_key": execution_key,
+                "recipe_path": recipe_rel,
+                "schema_fingerprint": preview.schema_fingerprint_after,
+                "typed_payload": spec.to_dict(),
+            },
+        ),
+        stage=Stage.TRANSFORM,
+    )
+    nodes = _mark_downstream_invalidation(
+        {**graph.nodes, child_node_id: child},
+        reason=f"data_{spec.operation}",
+        source_node_id=spec.source_node_id,
+        child_node_id=child_node_id,
+    )
+    edges = dict(graph.edges)
+    edge_id = f"edge:{child_node_id}"
+    edges[edge_id] = Edge(
+        id=edge_id,
+        source_id=spec.source_node_id,
+        target_id=child_node_id,
+        op=f"data.{spec.operation}",
+        params={"execution_key": execution_key, "parameters": dict(spec.parameters)},
+    )
+    if spec.secondary_node_id and spec.secondary_run_id:
+        secondary_id = f"{spec.secondary_run_id}:{spec.secondary_node_id}"
+        edges[f"edge:{child_node_id}:secondary"] = Edge(
+            id=f"edge:{child_node_id}:secondary",
+            source_id=secondary_id,
+            target_id=child_node_id,
+            op=f"data.{spec.operation}",
+            params={"role": "secondary_input", "execution_key": execution_key},
+        )
+    branches = dict(graph.branches)
+    branches[branch_id] = BranchRef(branch_id, spec.source_node_id, (child_node_id,))
     return Graph(
         schema_version=graph.schema_version,
         run_id=graph.run_id,

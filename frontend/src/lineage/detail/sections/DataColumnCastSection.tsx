@@ -3,15 +3,23 @@ import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
 import {
+  confirmFeatureRecipe,
+  confirmDataTransform,
   confirmDataColumnsCast,
   fetchDataColumnCastContext,
   fetchDataColumnCastRecordByChildNode,
+  previewFeatureRecipe,
+  previewDataTransform,
   previewDataColumnsCast,
   type DataCastOutputFormat,
   type DataColumnCastContext,
   type DataColumnCastOperationRecord,
   type DataColumnCastTarget,
   type DataColumnsCastPreview,
+  type DataTransformOperation,
+  type DataTransformPreview,
+  type FeatureRecipeOperation,
+  type FeatureRecipePreview,
 } from "../../dataOperations";
 
 interface DataOperationAnnotation {
@@ -52,6 +60,120 @@ function backendNodeId(node: GraphViewNode): string {
 interface CastRow {
   column: string;
   target_dtype: DataColumnCastTarget;
+}
+
+function FeatureRecipeBuilder({
+  projectRoot,
+  sourceRunId,
+  sourceNodeId,
+  sourceContext,
+}: {
+  projectRoot: string;
+  sourceRunId: string;
+  sourceNodeId: string;
+  sourceContext: DataColumnCastContext;
+}) {
+  const columns = sourceContext.columns.map((column) => column.name);
+  const [operation, setOperation] = useState<FeatureRecipeOperation>("interaction");
+  const [inputOne, setInputOne] = useState(columns[0] ?? "");
+  const [inputTwo, setInputTwo] = useState(columns[1] ?? columns[0] ?? "");
+  const [output, setOutput] = useState("derived_value");
+  const [operator, setOperator] = useState<"add" | "subtract" | "multiply">("add");
+  const [mapping, setMapping] = useState('{"1":"one","2":"two"}');
+  const [preview, setPreview] = useState<FeatureRecipePreview | null>(null);
+  const [status, setStatus] = useState<"idle" | "previewing" | "confirming" | "complete" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const request = useMemo(() => {
+    let parameters: Record<string, unknown>;
+    if (operation === "interaction") parameters = { left: inputOne, right: inputTwo };
+    else if (operation === "derived_variable") parameters = { operator };
+    else if (operation === "log") parameters = { input: inputOne, base: "e" };
+    else if (operation === "ratio") parameters = { numerator: inputOne, denominator: inputTwo, zero_policy: "fail_closed" };
+    else {
+      try {
+        parameters = { input: inputOne, mapping: JSON.parse(mapping) };
+      } catch {
+        parameters = { input: inputOne, mapping: {} };
+      }
+    }
+    const inputs = operation === "log" || operation === "recode" ? [inputOne] : [inputOne, inputTwo];
+    return {
+      source_run_id: sourceRunId,
+      source_node_id: sourceNodeId,
+      source_artifact_id: sourceContext.source_artifact_id,
+      recipe_id: `recipe_${operation}`,
+      operation_id: operation,
+      inputs,
+      output,
+      output_type: operation === "recode" ? "string" : "numeric",
+      parameters,
+      fit_scope: "stateless" as const,
+      missing_policy: "fail_closed",
+      outlier_policy: "preserve",
+    };
+  }, [inputOne, inputTwo, mapping, operation, operator, output, sourceContext.source_artifact_id, sourceNodeId, sourceRunId]);
+
+  async function handlePreview() {
+    setStatus("previewing");
+    setError(null);
+    try {
+      const response = await previewFeatureRecipe(projectRoot, request);
+      setPreview(response.preview);
+      setStatus("idle");
+    } catch (reason: unknown) {
+      setStatus("error");
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function handleConfirm() {
+    if (!preview || preview.status !== "ready") return;
+    setStatus("confirming");
+    setError(null);
+    try {
+      await confirmFeatureRecipe(projectRoot, { ...request, preview_fingerprint: preview.fingerprint });
+      setStatus("complete");
+    } catch (reason: unknown) {
+      setStatus("error");
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  const secondInputNeeded = operation === "interaction" || operation === "derived_variable" || operation === "ratio";
+  return (
+    <div data-testid="feature-recipe-builder" style={{ borderTop: "1px solid var(--separator)", paddingTop: 10, marginTop: 8 }}>
+      <strong>Derived variable / recode</strong>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+        <label>Operation <select aria-label="Feature operation" value={operation} onChange={(event) => { setOperation(event.target.value as FeatureRecipeOperation); setPreview(null); }}>
+          <option value="derived_variable">add / subtract / multiply</option>
+          <option value="recode">recode</option>
+          <option value="interaction">interaction</option>
+          <option value="log">log</option>
+          <option value="ratio">ratio</option>
+        </select></label>
+        <label>Input <select aria-label="Feature input" value={inputOne} onChange={(event) => { setInputOne(event.target.value); setPreview(null); }}>
+          {columns.map((column) => <option key={column} value={column}>{column}</option>)}
+        </select></label>
+        {secondInputNeeded && <label>Second input <select aria-label="Feature second input" value={inputTwo} onChange={(event) => { setInputTwo(event.target.value); setPreview(null); }}>
+          {columns.map((column) => <option key={column} value={column}>{column}</option>)}
+        </select></label>}
+        {operation === "derived_variable" && <label>Operator <select aria-label="Feature operator" value={operator} onChange={(event) => setOperator(event.target.value as typeof operator)}>
+          <option value="add">add</option><option value="subtract">subtract</option><option value="multiply">multiply</option>
+        </select></label>}
+        {operation === "recode" && <label>Mapping JSON <input aria-label="Recode mapping" value={mapping} onChange={(event) => { setMapping(event.target.value); setPreview(null); }} /></label>}
+        <label>Output <input aria-label="Feature output" value={output} onChange={(event) => { setOutput(event.target.value); setPreview(null); }} /></label>
+      </div>
+      <div style={{ color: "var(--label-tertiary)", marginTop: 5 }}>Preview is required. The source stays unchanged and downstream models are marked for rerun.</div>
+      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+        <button type="button" data-testid="feature-recipe-preview" disabled={!inputOne || !output || status === "previewing" || status === "confirming"} onClick={() => void handlePreview()}>{status === "previewing" ? "Previewing…" : "Preview transform"}</button>
+        {preview?.status === "ready" && <button type="button" data-testid="feature-recipe-confirm" disabled={status === "confirming"} onClick={() => void handleConfirm()}>{status === "confirming" ? "Saving…" : "Confirm transform"}</button>}
+      </div>
+      {preview && <div data-testid="feature-recipe-preview-result">{preview.status} · {preview.row_count} rows · output: {preview.output_columns.join(", ")}</div>}
+      {error && <div data-testid="feature-recipe-error">{error}</div>}
+      {status === "complete" && <div data-testid="feature-recipe-complete">Typed transform saved as a child data node.</div>}
+    </div>
+  );
 }
 
 /** Render the typed schema diff from any data operation's record.
@@ -97,6 +219,94 @@ function ProvenanceDiff({ record }: { record: DataColumnCastOperationRecord }) {
           {c.column}: {c.before_dtype} → {c.after_dtype}
         </div>
       ))}
+    </div>
+  );
+}
+
+function DataTransformBuilder({
+  projectRoot,
+  sourceRunId,
+  sourceNodeId,
+  sourceContext,
+}: {
+  projectRoot: string;
+  sourceRunId: string;
+  sourceNodeId: string;
+  sourceContext: DataColumnCastContext;
+}) {
+  const columns = sourceContext.columns.map((column) => column.name);
+  const [operation, setOperation] = useState<DataTransformOperation>("subset");
+  const [columnsText, setColumnsText] = useState(columns.join(","));
+  const [filterText, setFilterText] = useState("{}");
+  const [keysText, setKeysText] = useState(columns[0] ?? "");
+  const [secondaryRunId, setSecondaryRunId] = useState("");
+  const [secondaryNodeId, setSecondaryNodeId] = useState("stage:source");
+  const [secondaryArtifactId, setSecondaryArtifactId] = useState("");
+  const [preview, setPreview] = useState<DataTransformPreview | null>(null);
+  const [status, setStatus] = useState<"idle" | "previewing" | "confirming" | "complete" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const request = useMemo(() => {
+    let parameters: Record<string, unknown>;
+    if (operation === "subset") {
+      let equals: Record<string, unknown> = {};
+      try { equals = JSON.parse(filterText) as Record<string, unknown>; } catch { /* server returns typed validation error */ }
+      parameters = { columns: columnsText.split(",").map((value) => value.trim()).filter(Boolean), equals };
+    } else if (operation === "merge") {
+      parameters = { keys: keysText.split(",").map((value) => value.trim()).filter(Boolean), how: "left" };
+    } else if (operation === "reshape") {
+      parameters = { direction: "wide_to_long", id_columns: columns.slice(0, 1), value_columns: columns.slice(1), var_name: "variable", value_name: "value" };
+    } else {
+      parameters = {};
+    }
+    return {
+      source_run_id: sourceRunId,
+      source_node_id: sourceNodeId,
+      source_artifact_id: sourceContext.source_artifact_id,
+      operation,
+      parameters,
+      ...(operation === "merge" || operation === "append"
+        ? { secondary_run_id: secondaryRunId, secondary_node_id: secondaryNodeId, secondary_artifact_id: secondaryArtifactId }
+        : {}),
+    };
+  }, [columns, columnsText, filterText, keysText, operation, secondaryArtifactId, secondaryNodeId, secondaryRunId, sourceContext.source_artifact_id, sourceNodeId, sourceRunId]);
+
+  async function handlePreview() {
+    setStatus("previewing"); setError(null);
+    try { const response = await previewDataTransform(projectRoot, request); setPreview(response.preview); setStatus("idle"); }
+    catch (reason: unknown) { setStatus("error"); setError(reason instanceof Error ? reason.message : String(reason)); }
+  }
+  async function handleConfirm() {
+    if (!preview || preview.status !== "ready") return;
+    setStatus("confirming"); setError(null);
+    try { await confirmDataTransform(projectRoot, { ...request, preview_fingerprint: preview.fingerprint }); setStatus("complete"); }
+    catch (reason: unknown) { setStatus("error"); setError(reason instanceof Error ? reason.message : String(reason)); }
+  }
+
+  return (
+    <div data-testid="data-transform-builder" style={{ borderTop: "1px solid var(--separator)", paddingTop: 10, marginTop: 8 }}>
+      <strong>Merge / append / reshape / subset</strong>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+        <label>Operation <select aria-label="Data transform operation" value={operation} onChange={(event) => { setOperation(event.target.value as DataTransformOperation); setPreview(null); }}>
+          <option value="subset">subset</option><option value="merge">merge</option><option value="append">append</option><option value="reshape">reshape wide → long</option>
+        </select></label>
+        {(operation === "subset" || operation === "reshape") && <label>Columns <input aria-label="Transform columns" value={columnsText} onChange={(event) => setColumnsText(event.target.value)} /></label>}
+        {operation === "subset" && <label>Equals JSON <input aria-label="Subset equals" value={filterText} onChange={(event) => setFilterText(event.target.value)} /></label>}
+        {operation === "merge" && <label>Join keys <input aria-label="Merge keys" value={keysText} onChange={(event) => setKeysText(event.target.value)} /></label>}
+        {(operation === "merge" || operation === "append") && <>
+          <label>Right run <input aria-label="Secondary run" value={secondaryRunId} onChange={(event) => setSecondaryRunId(event.target.value)} /></label>
+          <label>Right node <input aria-label="Secondary node" value={secondaryNodeId} onChange={(event) => setSecondaryNodeId(event.target.value)} /></label>
+          <label>Right artifact <input aria-label="Secondary artifact" value={secondaryArtifactId} onChange={(event) => setSecondaryArtifactId(event.target.value)} /></label>
+        </>}
+      </div>
+      <div style={{ color: "var(--label-tertiary)", marginTop: 5 }}>All transforms are previewed, fingerprinted, confirmed, and written as a visible child node.</div>
+      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+        <button type="button" data-testid="data-transform-preview" disabled={status === "previewing" || status === "confirming"} onClick={() => void handlePreview()}>{status === "previewing" ? "Previewing…" : "Preview data transform"}</button>
+        {preview?.status === "ready" && <button type="button" data-testid="data-transform-confirm" disabled={status === "confirming"} onClick={() => void handleConfirm()}>{status === "confirming" ? "Saving…" : "Confirm data transform"}</button>}
+      </div>
+      {preview && <div data-testid="data-transform-preview-result">{preview.status} · rows {preview.row_count_before} → {preview.row_count_after}</div>}
+      {error && <div data-testid="data-transform-error">{error}</div>}
+      {status === "complete" && <div data-testid="data-transform-complete">Data transform saved as a child data node.</div>}
     </div>
   );
 }
@@ -429,6 +639,22 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
           <div data-testid="data-cast-complete" style={{ color: "var(--accent-positive, #4caf50)" }}>
             Cast confirmed · Operation Record {operationId ?? "created"} · new child data node created
           </div>
+        )}
+        {sourceContext && sourceRunId && sourceNodeId && projectRoot && (
+          <FeatureRecipeBuilder
+            projectRoot={projectRoot}
+            sourceRunId={sourceRunId}
+            sourceNodeId={sourceNodeId}
+            sourceContext={sourceContext}
+          />
+        )}
+        {sourceContext && sourceRunId && sourceNodeId && projectRoot && (
+          <DataTransformBuilder
+            projectRoot={projectRoot}
+            sourceRunId={sourceRunId}
+            sourceNodeId={sourceNodeId}
+            sourceContext={sourceContext}
+          />
         )}
       </div>
     </section>

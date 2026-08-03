@@ -3,12 +3,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DataColumnCastSection } from "./DataColumnCastSection";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 
-const { resolvedMock, contextMock, previewMock, confirmMock, recordMock } = vi.hoisted(() => ({
+const {
+  resolvedMock,
+  contextMock,
+  previewMock,
+  confirmMock,
+  recordMock,
+  featurePreviewMock,
+  featureConfirmMock,
+  transformPreviewMock,
+  transformConfirmMock,
+} = vi.hoisted(() => ({
   resolvedMock: { current: null as unknown },
   contextMock: { current: null as unknown },
   previewMock: vi.fn(),
   confirmMock: vi.fn(),
   recordMock: vi.fn(),
+  featurePreviewMock: vi.fn(),
+  featureConfirmMock: vi.fn(),
+  transformPreviewMock: vi.fn(),
+  transformConfirmMock: vi.fn(),
 }));
 
 vi.mock("../NodeOperationContextProvider", () => ({
@@ -22,6 +36,10 @@ vi.mock("../../dataOperations", () => ({
   previewDataColumnsCast: (...args: unknown[]) => previewMock("preview", ...args),
   confirmDataColumnsCast: (...args: unknown[]) => confirmMock(...args),
   fetchDataColumnCastRecordByChildNode: (...args: unknown[]) => recordMock(...args),
+  previewFeatureRecipe: (...args: unknown[]) => featurePreviewMock(...args),
+  confirmFeatureRecipe: (...args: unknown[]) => featureConfirmMock(...args),
+  previewDataTransform: (...args: unknown[]) => transformPreviewMock(...args),
+  confirmDataTransform: (...args: unknown[]) => transformConfirmMock(...args),
 }));
 
 function node(): GraphViewNode {
@@ -50,6 +68,10 @@ describe("DataColumnCastSection", () => {
     };
     previewMock.mockReset();
     recordMock.mockReset();
+    featurePreviewMock.mockReset();
+    featureConfirmMock.mockReset();
+    transformPreviewMock.mockReset();
+    transformConfirmMock.mockReset();
     previewMock.mockImplementation((...args: unknown[]) => {
       if (args[0] === "preview") {
         const request = args[2] as { casts: Array<{ column: string; target_dtype: string }> };
@@ -90,6 +112,24 @@ describe("DataColumnCastSection", () => {
       status: "completed",
       operation: { record_id: "op-1", status: "completed" },
     });
+    featurePreviewMock.mockResolvedValue({
+      preview: {
+        status: "ready",
+        fingerprint: "feature-fp-1",
+        row_count: 2,
+        output_columns: ["age", "name", "derived_value"],
+      },
+    });
+    transformPreviewMock.mockResolvedValue({
+      preview: {
+        status: "ready",
+        fingerprint: "transform-fp-1",
+        row_count_before: 2,
+        row_count_after: 2,
+      },
+    });
+    featureConfirmMock.mockResolvedValue({ status: "completed" });
+    transformConfirmMock.mockResolvedValue({ status: "completed" });
   });
 
   it("renders the schema diff of a code.execute child, not just who made it", async () => {
@@ -289,5 +329,26 @@ describe("DataColumnCastSection", () => {
       output_format: "csv",
       preview_fingerprint: "fp-1",
     });
+  });
+
+  it("exposes feature recipes and data transforms from the dataset node", async () => {
+    render(<DataColumnCastSection node={node()} />);
+
+    await waitFor(() => expect(screen.getByTestId("feature-recipe-builder")).toBeInTheDocument());
+    expect(screen.getByTestId("data-transform-builder")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("feature-recipe-preview"));
+    await waitFor(() => expect(screen.getByTestId("feature-recipe-preview-result")).toHaveTextContent("ready"));
+    expect(featurePreviewMock).toHaveBeenCalledWith("/tmp/project", expect.objectContaining({
+      operation_id: "interaction",
+      source_artifact_id: "cleaned_dataset",
+    }));
+
+    fireEvent.click(screen.getByTestId("data-transform-preview"));
+    await waitFor(() => expect(screen.getByTestId("data-transform-preview-result")).toHaveTextContent("ready"));
+    expect(transformPreviewMock).toHaveBeenCalledWith("/tmp/project", expect.objectContaining({
+      operation: "subset",
+      source_node_id: "stage:cleaned",
+    }));
   });
 });
