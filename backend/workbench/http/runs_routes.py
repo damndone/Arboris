@@ -61,6 +61,7 @@ from ..predictive_research.schema import PayloadContractError
 from ..services.run_deletion import RunDeletionConfirmationError, RunDeletionService
 from ..services.run_service import (
     _mark_interrupted_if_dead,
+    _normalize_labels,
     _read_upload_bytes,
     _sse_frame,
     _submit_run,
@@ -233,6 +234,7 @@ async def run_endpoint(
     honest_did: bool = Form(False),
     focal_x: str = Form(""),  # v1.6.5 role layer: comma-joined focal columns
     model_options: str = Form("{}"),
+    labels: str = Form("{}"),
 ) -> dict[str, str]:
     _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     root = Path(project_root)
@@ -242,6 +244,10 @@ async def run_endpoint(
         parsed_model_options = parse_model_options(model_options)
     except ModelOptionsError as exc:
         raise HTTPException(status_code=422, detail=exc.code) from exc
+    try:
+        parsed_labels = _normalize_labels(parse_model_options(labels))
+    except (ModelOptionsError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"INVALID_LABELS: {exc}") from exc
 
     events = get_event_manager()
     if not events.try_acquire_slot():
@@ -279,6 +285,8 @@ async def run_endpoint(
             "focal_x": focal_x,
             "model_options": parsed_model_options,
         }
+        if parsed_labels:
+            form["labels"] = parsed_labels
         started_at = datetime.now(timezone.utc).isoformat()
         try:
             result = _submit_run(

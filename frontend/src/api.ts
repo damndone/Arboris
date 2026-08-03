@@ -462,6 +462,8 @@ export interface RunExtraParams {
   /** Model-pack-specific options. The backend treats this as a typed JSON
    * object and leaves semantic validation to the registered model handler. */
   modelOptions?: Record<string, unknown>;
+  /** Explicit variable/value labels for Table 1, reports, and figure axes. */
+  labels?: Record<string, unknown>;
 }
 
 function serializeModelOptions(value: Record<string, unknown>): string {
@@ -572,6 +574,9 @@ export async function runWorkflow(
   if (extra?.samplingWeight) form.append("sampling_weight", extra.samplingWeight);
   if (extra?.modelOptions !== undefined) {
     form.append("model_options", serializeModelOptions(extra.modelOptions));
+  }
+  if (extra?.labels !== undefined) {
+    form.append("labels", serializeModelOptions(extra.labels));
   }
   form.append("file", file);
   const response = await fetch(apiUrl("/runs"), { method: "POST", body: form });

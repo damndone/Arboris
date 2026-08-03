@@ -128,10 +128,10 @@
     <section id="table-1" aria-label="Table 1 descriptive statistics">
       <h2>Descriptive Statistics</h2>
       <table>
-        <thead><tr><th>Column</th><th>Label</th><th>Dtype</th><th>Count</th><th>Missing</th><th>Mean</th><th>Std</th></tr></thead>
+        <thead><tr><th>Column</th><th>Label</th><th>Label source</th><th>Value labels</th><th>Dtype</th><th>Count</th><th>Missing</th><th>Mean</th><th>Std</th></tr></thead>
         <tbody>
-          {% for row in view_model.descriptive_stats %}
-          <tr><td>{{ row.column }}</td><td>{{ row.label if row.label is defined else row.column }}</td><td>{{ row.dtype }}</td><td>{{ row.count }}</td><td>{{ "%.1f"|format(row.missing_rate * 100) }}%</td><td>{{ row.mean if row.mean is not none else "—" }}</td><td>{{ row.std if row.std is not none else "—" }}</td></tr>
+        {% for row in view_model.descriptive_stats %}
+          <tr><td>{{ row.column }}</td><td>{{ row.label if row.label is defined else row.column }}</td><td>{{ row.label_source if row.label_source is defined else "column_name_fallback" }}</td><td>{{ row.value_labels|tojson if row.value_labels is defined else "{}" }}</td><td>{{ row.dtype }}</td><td>{{ row.count }}</td><td>{{ "%.1f"|format(row.missing_rate * 100) }}%</td><td>{{ row.mean if row.mean is not none else "—" }}</td><td>{{ row.std if row.std is not none else "—" }}</td></tr>
           {% endfor %}
         </tbody>
       </table>

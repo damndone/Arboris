@@ -210,12 +210,14 @@ def run_workflow(
     frequency_weight: str = "",
     analysis_weight: str = "",
     sampling_weight: str = "",
+    labels: dict[str, object] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
     from ..lineage.hashing import dag_hash
     from ..lineage.run_inputs import write_run_inputs
     from ..lineage.upload_store import store_upload_bytes
     from ..model_options import ModelOptionsError, bind_new_model_options
+    from ..services.run_service import _normalize_labels
 
     project_root = Path(project_root)
     if model_type == "linear_mixed_effects":
@@ -236,6 +238,7 @@ def run_workflow(
         model_type, {} if model_options is None else model_options
     )
     normalized_model_options = bound_model_options.payload
+    normalized_labels = _normalize_labels(labels)
     effective_covariance = covariance
     if model_type in {"ols", "panel_ols"} and normalized_model_options:
         from ..contracts.model.ols import effective_ols_covariance
@@ -297,6 +300,8 @@ def run_workflow(
     }
     if model_options_binding is not None:
         direct_form["model_options_binding"] = model_options_binding
+    if normalized_labels:
+        direct_form["labels"] = normalized_labels
     upload_path = input_files[0] if input_files else None
     upload_bytes = upload_path.read_bytes() if upload_path is not None else b""
     upload_filename = upload_path.name if upload_path is not None else None
@@ -320,6 +325,8 @@ def run_workflow(
     }
     if model_options_binding is not None:
         executable_payload["model_options_binding"] = model_options_binding
+    if normalized_labels:
+        executable_payload["labels"] = normalized_labels
     write_run_inputs(
         run.root,
         form=direct_form,
@@ -398,6 +405,7 @@ def run_workflow(
             frequency_weight=frequency_weight,
             analysis_weight=analysis_weight,
             sampling_weight=sampling_weight,
+            labels=normalized_labels,
             stop_reason=stop_reason,
         )
     except OptionalDependencyNotInstalled as exc:
@@ -569,6 +577,7 @@ def _run_workflow(
     frequency_weight: str = "",
     analysis_weight: str = "",
     sampling_weight: str = "",
+    labels: dict[str, object] | None = None,
     lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
@@ -579,10 +588,12 @@ def _run_workflow(
     """
     from ..engine.stages import PIPELINE
     from ..model_options import canonicalize_model_options
+    from ..services.run_service import _normalize_labels
 
     normalized_model_options = canonicalize_model_options(
         {} if model_options is None else model_options
     )
+    normalized_labels = _normalize_labels(labels)
     effective_covariance = covariance
     if model_type in {"ols", "panel_ols"} and normalized_model_options:
         from ..contracts.model.ols import effective_ols_covariance
@@ -637,6 +648,7 @@ def _run_workflow(
     ctx.artifacts["_frequency_weight"] = frequency_weight
     ctx.artifacts["_analysis_weight"] = analysis_weight
     ctx.artifacts["_sampling_weight"] = sampling_weight
+    ctx.artifacts["_labels"] = normalized_labels
     ctx.artifacts["_iv_endog"] = [normalize_column_name(c) for c in (iv_endog or [])]
     ctx.artifacts["_iv_instruments"] = [normalize_column_name(c) for c in (iv_instruments or [])]
     ctx.artifacts["_did_mode"] = did_mode
@@ -688,6 +700,8 @@ def _run_workflow(
         "sampling_weight": sampling_weight,
         "model_options": normalized_model_options,
     }
+    if normalized_labels:
+        form["labels"] = normalized_labels
     if model_options_binding is not None:
         form["model_options_binding"] = model_options_binding
     cfg = {

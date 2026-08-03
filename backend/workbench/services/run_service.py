@@ -61,6 +61,41 @@ _STRUCTURAL_FOCAL_FAMILIES = {"iv_2sls", "did", "cs_did", "sa_did", "dcdh"}
 _LMM_MODEL_TYPE = "linear_mixed_effects"
 
 
+def _normalize_labels(value: object) -> dict[str, object]:
+    """Validate the explicit JSON label declaration without touching data values."""
+
+    if value is None or value == "":
+        return {}
+    payload = canonicalize_model_options(value)
+    allowed = {"variable_labels", "value_labels"}
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ValueError(f"labels contains unknown field(s): {', '.join(unknown)}")
+
+    variable_labels = payload.get("variable_labels", {})
+    value_labels = payload.get("value_labels", {})
+    if not isinstance(variable_labels, Mapping) or not isinstance(value_labels, Mapping):
+        raise ValueError("labels.variable_labels and labels.value_labels must be objects")
+
+    normalized_variables: dict[str, str] = {}
+    for column, label in variable_labels.items():
+        if not isinstance(column, str) or not column or not isinstance(label, str) or not label:
+            raise ValueError("labels.variable_labels must map non-empty column names to labels")
+        normalized_variables[column] = label
+
+    normalized_values: dict[str, dict[str, str]] = {}
+    for column, mapping in value_labels.items():
+        if not isinstance(column, str) or not column or not isinstance(mapping, Mapping):
+            raise ValueError("labels.value_labels must map columns to objects")
+        normalized_mapping: dict[str, str] = {}
+        for raw_value, label in mapping.items():
+            if not isinstance(raw_value, str) or not isinstance(label, str) or not label:
+                raise ValueError("labels.value_labels entries must map string values to labels")
+            normalized_mapping[raw_value] = label
+        normalized_values[column] = normalized_mapping
+    return {"variable_labels": normalized_variables, "value_labels": normalized_values}
+
+
 class LmmExecutionAdmissionError(RuntimeError):
     """Closed pre-fit LMM admission failure with no path or parser detail."""
 
@@ -423,6 +458,7 @@ def _submit_run(
         if bound_model_options.binding is not None
         else None
     )
+    labels = _normalize_labels(form.get("labels", {}))
     if form.get("model_type", "auto") == "ols" and model_options:
         from ..contracts.model.ols import effective_ols_covariance
 
@@ -441,6 +477,10 @@ def _submit_run(
     # another boundary could later mistake for a C2-approved candidate.
     execution_profile = _require_lmm_frozen_containment(form.get("model_type", "auto"))
     form = {**form, "model_options": model_options}
+    if labels:
+        form["labels"] = labels
+    else:
+        form.pop("labels", None)
     if model_options_binding is not None:
         form["model_options_binding"] = model_options_binding
 
@@ -586,6 +626,7 @@ def _submit_run(
         form.get("frequency_weight", ""),
         form.get("analysis_weight", ""),
         form.get("sampling_weight", ""),
+        labels,
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -633,6 +674,7 @@ def _bg_run(
     frequency_weight: str = "",
     analysis_weight: str = "",
     sampling_weight: str = "",
+    labels: dict[str, object] | None = None,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -704,6 +746,7 @@ def _bg_run(
             frequency_weight=frequency_weight,
             analysis_weight=analysis_weight,
             sampling_weight=sampling_weight,
+            labels=labels,
             lmm_execution_admission=lmm_execution_admission,
             stop_reason=_stop_reason,
         )

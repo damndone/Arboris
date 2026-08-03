@@ -68,6 +68,59 @@ def test_run_endpoint_forwards_new_params(tmp_path):
     assert kw["model_options_binding"] is None
 
 
+def test_run_endpoint_forwards_explicit_labels(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "labels"}
+    ).json()["project_root"]
+    with patch(
+        "workbench.services.run_service._run_workflow",
+        return_value={"run_id": "r", "status": "succeeded"},
+    ) as m:
+        resp = client.post(
+            "/runs",
+            data={
+                "project_root": root,
+                "mode": "auto",
+                "model_type": "ols",
+                "y": "y",
+                "x": "x",
+                "labels": '{"variable_labels":{"y":"Outcome"},"value_labels":{"x":{"0":"Control"}}}',
+            },
+            files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")},
+        )
+        for _ in range(100):
+            if m.call_args is not None:
+                break
+            time.sleep(0.05)
+    assert resp.status_code == 200
+    assert m.call_args.kwargs["labels"] == {
+        "variable_labels": {"y": "Outcome"},
+        "value_labels": {"x": {"0": "Control"}},
+    }
+
+
+def test_run_endpoint_rejects_invalid_labels_shape(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "invalid-labels"}
+    ).json()["project_root"]
+    response = client.post(
+        "/runs",
+        data={
+            "project_root": root,
+            "mode": "auto",
+            "model_type": "ols",
+            "y": "y",
+            "x": "x",
+            "labels": '{"unexpected":{}}',
+        },
+        files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")},
+    )
+    assert response.status_code == 422
+    assert "INVALID_LABELS" in response.json()["detail"]
+
+
 def test_run_endpoint_executes_frequency_weight_in_ols_packet(tmp_path):
     client = TestClient(app)
     root = client.post(

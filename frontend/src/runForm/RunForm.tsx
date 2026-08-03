@@ -30,6 +30,12 @@ import {
   createDefaultArmaGarchValue,
   type ArmaGarchControlValue,
 } from "./ArmaGarchControls";
+import {
+  V186ModelControls,
+  isV186ModelType,
+  normalizeV186ModelOptions,
+  type V186ModelOptionsByType,
+} from "./V186ModelControls";
 
 type RequestState = "idle" | "working";
 
@@ -86,6 +92,8 @@ export function RunForm(props: RunFormProps) {
     useState<ArmaGarchTransformPreflight | null>(null);
   const [armaGarchPreflightError, setArmaGarchPreflightError] =
     useState<string | null>(null);
+  const [v186ModelOptionsByType, setV186ModelOptionsByType] =
+    useState<V186ModelOptionsByType>({});
   // V1.5.4.4: IV role assignment (endog / instruments) over the X selection.
   const [ivRole, setIvRole] = useState<IVRoleValue>({
     endog: [],
@@ -262,6 +270,12 @@ export function RunForm(props: RunFormProps) {
   } else {
     if (y.trim() === "") runErrors.y = "Required";
     if (modelType !== "linear_mixed_effects" && xColumns.length === 0) runErrors.x = "Provide at least one column";
+  }
+  if (isV186ModelType(modelType)) {
+    const options = normalizeV186ModelOptions(modelType, v186ModelOptionsByType[modelType]);
+    if (modelType === "survival_cox" && !String(options.event_column ?? "").trim()) {
+      runErrors.survivalEvent = "Select an event column";
+    }
   }
   if (modelType === "linear_mixed_effects") {
     for (const key of ["subject_id", "time", "group"] as const) {
@@ -444,7 +458,9 @@ export function RunForm(props: RunFormProps) {
                     armaGarchValue,
                     `upload:${file.name}`,
                   )
-                : undefined,
+                : isV186ModelType(modelType)
+                  ? normalizeV186ModelOptions(modelType, v186ModelOptionsByType[modelType])
+                  : undefined,
           // v1.6.5 role layer: declare focal only for user-focal families and
           // only over the columns actually posted as x. Structural families
           // (IV/DID/CS/SA/dCDH) get nothing — focal/treatment is structural.
@@ -555,6 +571,22 @@ export function RunForm(props: RunFormProps) {
               onChange={setModelType}
             />
           </label>
+          {isV186ModelType(modelType) && (
+            <>
+              <V186ModelControls
+                modelType={modelType}
+                columns={columnNames}
+                options={normalizeV186ModelOptions(modelType, v186ModelOptionsByType[modelType])}
+                onChange={(next) => setV186ModelOptionsByType((current) => ({
+                  ...current,
+                  [modelType]: next,
+                }))}
+              />
+              {runErrors.survivalEvent && (
+                <span className="field-error">{runErrors.survivalEvent}</span>
+              )}
+            </>
+          )}
           <ImputationControls
             capabilities={capabilities}
             value={imputationMethod}

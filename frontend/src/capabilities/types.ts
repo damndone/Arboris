@@ -1,4 +1,4 @@
-export type ModelGroup = "auto" | "Linear" | "Binary" | "Count" | "Panel" | "GLM" | "IV" | "DID" | "Causal" | "Time Series";
+export type ModelGroup = "auto" | "Linear" | "Binary" | "Count" | "Panel" | "GLM" | "IV" | "DID" | "Causal" | "Time Series" | "Ordinal" | "Nominal" | "Survival" | "Quantile";
 
 export interface EditableControlSpec {
   key: string;

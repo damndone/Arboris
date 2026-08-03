@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .artifacts import register_artifact
+from .artifacts import register_artifact, write_json
 
 # Cap how many panels a grid figure shows, so a wide dataset can't produce a
 # gigantic unreadable (and slow) figure.
@@ -107,6 +107,22 @@ def create_figures(
         did_event_study=did_event_study,
     )
 
+    variable_labels = frame.attrs.get("variable_labels", {})
+    if isinstance(variable_labels, dict) and variable_labels and "scatter_plots" in figures:
+        x_columns = [column for column in continuous if column != outcome_column]
+        if x_columns and outcome_column:
+            x_column = x_columns[0]
+            write_json(
+                figures_dir / "figure_labels.json",
+                {
+                    "scatter_plots": {
+                        "x_label": _label_for(frame, x_column),
+                        "y_label": _label_for(frame, outcome_column),
+                        "title": f"{_label_for(frame, outcome_column)} versus {_label_for(frame, x_column)}",
+                    }
+                },
+            )
+
     return figures
 
 
@@ -173,6 +189,25 @@ def _numeric_series(frame: pd.DataFrame, column: str) -> pd.Series:
     return pd.to_numeric(frame[column], errors="coerce").dropna()
 
 
+def _label_for(frame: pd.DataFrame, column: str) -> str:
+    labels = frame.attrs.get("variable_labels", {})
+    if isinstance(labels, dict):
+        label = labels.get(str(column))
+        if isinstance(label, str) and label:
+            return label
+    return str(column)
+
+
+def _value_label_for(frame: pd.DataFrame, column: str, value: object) -> str:
+    labels = frame.attrs.get("value_labels", {})
+    mapping = labels.get(str(column)) if isinstance(labels, dict) else None
+    if isinstance(mapping, dict):
+        label = mapping.get(str(value))
+        if isinstance(label, str) and label:
+            return label
+    return str(value)
+
+
 def _save(fig, path: Path, run_root: Path, artifact_id: str, figures: dict[str, str]) -> None:
     fig.tight_layout()
     fig.savefig(path)
@@ -205,9 +240,9 @@ def write_statistical_scatter(
         raise ValueError("scatter requires at least one complete x/y row")
     fig, ax = plt.subplots(figsize=(6.4, 4.2))
     ax.scatter(aligned["x"], aligned["y"], alpha=0.65, s=18, color="#54a24b")
-    ax.set_xlabel(x_column)
-    ax.set_ylabel(y_column)
-    ax.set_title(f"{y_column} versus {x_column} (N={len(aligned)})")
+    ax.set_xlabel(_label_for(frame, x_column))
+    ax.set_ylabel(_label_for(frame, y_column))
+    ax.set_title(f"{_label_for(frame, y_column)} versus {_label_for(frame, x_column)} (N={len(aligned)})")
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path)
@@ -307,11 +342,11 @@ def _plot_category_counts(frame, columns, figures_dir, run_root, figures) -> Non
         ax = axes[i // cols][i % cols]
         counts = frame[column].dropna().value_counts().head(_MAX_CATEGORY_LEVELS)
         if len(counts) > 0:
-            labels = [str(idx) for idx in counts.index]
+            labels = [_value_label_for(frame, column, idx) for idx in counts.index]
             ax.bar(labels, counts.to_numpy(), color="#72b7b2")
             ax.tick_params(axis="x", labelrotation=45, labelsize=8)
             drew = True
-        ax.set_title(column, fontsize=9)
+        ax.set_title(_label_for(frame, column), fontsize=9)
     _hide_unused(axes, len(columns), rows, cols)
     if drew:
         _save(fig, figures_dir / "category_counts.png", run_root, "category_counts", figures)
@@ -341,8 +376,8 @@ def _plot_scatter(frame, outcome, x_continuous, mt, figures_dir, run_root, figur
                 slope, intercept = np.polyfit(aligned["x"], aligned["y"], 1)
                 xs = np.linspace(aligned["x"].min(), aligned["x"].max(), 50)
                 ax.plot(xs, slope * xs + intercept, color="#b279a2", linewidth=1.5)
-        ax.set_xlabel(xcol, fontsize=8)
-        ax.set_ylabel(outcome, fontsize=8)
+        ax.set_xlabel(_label_for(frame, xcol), fontsize=8)
+        ax.set_ylabel(_label_for(frame, outcome), fontsize=8)
     _hide_unused(axes, len(x_continuous), rows, cols)
     if drew:
         _save(fig, figures_dir / "scatter_plots.png", run_root, "scatter_plots", figures)
@@ -365,9 +400,9 @@ def _plot_group_boxplots(frame, outcome, x_categorical, figures_dir, run_root, f
         groups = [(str(lvl), g) for lvl, g in zip(levels, groups) if len(g) > 0]
         if groups:
             ax.boxplot([g for _, g in groups])
-            ax.set_xticklabels([lvl for lvl, _ in groups], rotation=45, ha="right", fontsize=8)
-            ax.set_ylabel(outcome, fontsize=8)
-            ax.set_title(xcol, fontsize=9)
+            ax.set_xticklabels([_value_label_for(frame, xcol, lvl) for lvl, _ in groups], rotation=45, ha="right", fontsize=8)
+            ax.set_ylabel(_label_for(frame, outcome), fontsize=8)
+            ax.set_title(_label_for(frame, xcol), fontsize=9)
             drew = True
     _hide_unused(axes, len(x_categorical), rows, cols)
     if drew:

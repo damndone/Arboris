@@ -15,6 +15,10 @@ vi.mock("../capabilities/useCapabilities", () => ({
         { key: "cs_did", label: "Callaway-Sant'Anna", group: "Causal" },
         { key: "sa_did", label: "Sun-Abraham", group: "Causal" },
         { key: "time_series.arma_garch", label: "ARMA-GARCH", group: "Time Series" },
+        { key: "ordinal_logit", label: "Ordinal logit", group: "Ordinal" },
+        { key: "multinomial_logit", label: "Multinomial logit", group: "Nominal" },
+        { key: "survival_cox", label: "Survival / Cox", group: "Survival" },
+        { key: "quantile_regression", label: "Quantile regression", group: "Quantile" },
       ],
       imputation_methods: [],
       covariance_options: [
@@ -144,6 +148,26 @@ describe("RunForm IV wiring", () => {
     const extra = call[9];
     expect(extra?.ivEndog).toBeUndefined();
     expect(extra?.ivInstruments).toBeUndefined();
+  });
+
+  it("renders v1.8.6 model controls and posts model options from the ordinary Run form", async () => {
+    const spy = vi.spyOn(api, "runWorkflow").mockResolvedValue(RUN_RESPONSE);
+    renderForm();
+    fillForm();
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "ordinal_logit" },
+    });
+    expect(screen.getByLabelText("ordinal model options")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("ordinal model options"), {
+      target: { value: '{"optimizer":"lbfgs","maxiter":800}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /run workflow/i }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(spy.mock.calls[0]?.[9]?.modelOptions).toEqual({
+      optimizer: "lbfgs",
+      maxiter: 800,
+    });
   });
 });
 
