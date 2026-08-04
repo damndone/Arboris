@@ -185,6 +185,44 @@ export type PostEstimationResult = {
   result: Record<string, unknown>;
 };
 
+export type PredictionResearchEvidence = {
+  status: "validated" | "legacy" | "unavailable";
+  consumer?: string;
+  model_id?: string;
+  protocol?: string;
+  validation?: string;
+  comparability?: string;
+  message?: string;
+  legacy_artifacts?: Array<{
+    artifact_id?: string;
+    model_id?: string;
+    model_type?: string;
+    status?: string;
+    nobs?: number;
+    cv_folds?: number;
+    sampling_method?: string | null;
+    metrics?: Record<string, number | null>;
+  }>;
+  development?: { cv?: Array<Record<string, unknown>> };
+  structure?: { kind?: string; group_column?: string | null; time_column?: string | null };
+  split_plan_hash?: string;
+  split_parameters?: Record<string, unknown>;
+  oos?: { n?: number; metrics?: Record<string, number | null> };
+  baseline?: { model_id?: string; metrics?: Record<string, number | null> };
+  controls?: PredictionControlEvidence[];
+  limits?: string[];
+};
+
+export type PredictionControlEvidence = {
+  control?: string;
+  seed?: number | null;
+  status?: string;
+  metrics?: Record<string, number | null>;
+  metric_gap?: Record<string, number | null>;
+  fold_importance?: Array<Record<string, unknown>>;
+  receipt?: Record<string, unknown>;
+};
+
 export type RunDetail = RunSummary & {
   lineage: Array<{ source: string; artifact_id: string }>;
   artifact_counts: Record<string, number>;
@@ -192,6 +230,15 @@ export type RunDetail = RunSummary & {
   model_results?: ModelResult[];
   diagnostic_summary_preview?: DiagnosticSummaryPreview;
   post_estimation_results?: PostEstimationResult[];
+  prediction_evidence?: PredictionResearchEvidence | null;
+  /** Durable deterministic report packets projected from diagnostic_summary. */
+  table_1?: Array<Record<string, unknown>>;
+  statistical_evidence?: Record<string, unknown> | null;
+  labels?: {
+    variable_labels?: Record<string, string>;
+    value_labels?: Record<string, Record<string, string>>;
+  };
+  model_family_evidence?: Record<string, unknown> | null;
 };
 
 export type CoefficientRecord = {
@@ -394,6 +441,15 @@ export interface RunExtraParams {
   predictionModelType?: string;
   predictionCvFolds?: number;
   predictionSamplingMethod?: string;
+  predictionDataStructure?: string;
+  predictionEntityColumn?: string;
+  predictionGroupColumn?: string;
+  predictionTimeColumn?: string;
+  predictionFinalHoldoutFraction?: number;
+  predictionShuffle?: boolean;
+  frequencyWeight?: string;
+  analysisWeight?: string;
+  samplingWeight?: string;
   ivEndog?: string[];
   ivInstruments?: string[];
   didMode?: string;
@@ -414,6 +470,8 @@ export interface RunExtraParams {
   /** Model-pack-specific options. The backend treats this as a typed JSON
    * object and leaves semantic validation to the registered model handler. */
   modelOptions?: Record<string, unknown>;
+  /** Explicit variable/value labels for Table 1, reports, and figure axes. */
+  labels?: Record<string, unknown>;
 }
 
 function serializeModelOptions(value: Record<string, unknown>): string {
@@ -511,8 +569,22 @@ export async function runWorkflow(
   if (extra?.predictionModelType) form.append("prediction_model_type", extra.predictionModelType);
   if (extra?.predictionCvFolds) form.append("prediction_cv_folds", String(extra.predictionCvFolds));
   if (extra?.predictionSamplingMethod) form.append("prediction_sampling_method", extra.predictionSamplingMethod);
+  if (extra?.predictionDataStructure !== undefined) form.append("prediction_data_structure", extra.predictionDataStructure);
+  if (extra?.predictionEntityColumn) form.append("prediction_entity_column", extra.predictionEntityColumn);
+  if (extra?.predictionGroupColumn) form.append("prediction_group_column", extra.predictionGroupColumn);
+  if (extra?.predictionTimeColumn) form.append("prediction_time_column", extra.predictionTimeColumn);
+  if (extra?.predictionFinalHoldoutFraction !== undefined) {
+    form.append("prediction_final_holdout_fraction", String(extra.predictionFinalHoldoutFraction));
+  }
+  if (extra?.predictionShuffle !== undefined) form.append("prediction_shuffle", String(extra.predictionShuffle));
+  if (extra?.frequencyWeight) form.append("frequency_weight", extra.frequencyWeight);
+  if (extra?.analysisWeight) form.append("analysis_weight", extra.analysisWeight);
+  if (extra?.samplingWeight) form.append("sampling_weight", extra.samplingWeight);
   if (extra?.modelOptions !== undefined) {
     form.append("model_options", serializeModelOptions(extra.modelOptions));
+  }
+  if (extra?.labels !== undefined) {
+    form.append("labels", serializeModelOptions(extra.labels));
   }
   form.append("file", file);
   const response = await fetch(apiUrl("/runs"), { method: "POST", body: form });

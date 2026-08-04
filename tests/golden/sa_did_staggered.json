@@ -21,7 +21,6 @@
     "kde_plots": [],
     "raw_data.csv": [],
     "report_html": [],
-    "report_pdf": [],
     "sa_did": [
       "cleaned_dataset"
     ],
@@ -50,7 +49,6 @@
     "statistical_tests_t_tests": [
       "cleaned_dataset"
     ],
-    "tables_xlsx": [],
     "time_trend": []
   },
   "error_codes": [

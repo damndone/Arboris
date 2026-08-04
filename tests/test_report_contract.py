@@ -37,7 +37,9 @@ def test_packet_rejects_duplicate_fact_or_figure_ids() -> None:
 def test_response_normalizes_only_existing_numeric_fact_shorthand() -> None:
     packet = validate_report_packet(_packet())
     text = "estimate 2.0 [[c:1]]; p 0.01 [[c:5]]\n[[fig:coef_plot]]\n[[fig:event_study]]"
-    assert validate_report_response(text, packet) == (
+    normalized = validate_report_response(text, packet)
+    assert isinstance(normalized, str)
+    assert normalized == (
         "estimate 2.0 [[c:c1]]; p 0.01 [[c:c5]]\n"
         "[[fig:coef_plot]]\n[[fig:event_study]]"
     )
@@ -60,3 +62,56 @@ def test_response_contract_fails_closed(text: str, message: str) -> None:
     packet = validate_report_packet(_packet())
     with pytest.raises(ReportContractError, match=message):
         validate_report_response(text, packet)
+
+
+def test_packet_preserves_optional_journal_quality_metadata() -> None:
+    packet = _packet()
+    packet.update(
+        {
+            "report_standard": "journal_full_v1",
+            "required_capabilities": ["regression", "diagnostics.robustness"],
+            "excluded_fact_ids": ["c5"],
+        }
+    )
+
+    contract = validate_report_packet(packet)
+
+    assert contract.report_standard == "journal_full_v1"
+    assert contract.required_capabilities == (
+        "regression",
+        "diagnostics.robustness",
+    )
+    assert contract.excluded_fact_ids == frozenset({"c5"})
+
+
+def test_report_packet_preserves_capability_provider_manifest() -> None:
+    packet = _packet()
+    packet.update(
+        {
+            "report_standard": "journal_full_v1",
+            "required_capabilities": ["regression"],
+            "capability_manifest": [
+                {
+                    "capability_id": "regression",
+                    "provider_id": "evidence.estimation.v1",
+                    "availability": "available",
+                    "validation_level": "internal_only",
+                    "report_modules": ["model-estimation"],
+                    "limitations": [],
+                }
+            ],
+        }
+    )
+
+    contract = validate_report_packet(packet)
+
+    assert contract.capability_manifest[0]["provider_id"] == "evidence.estimation.v1"
+
+
+def test_packet_preserves_excluded_fact_outside_selected_fact_table() -> None:
+    packet = _packet()
+    packet["excluded_fact_ids"] = ["c99"]
+
+    contract = validate_report_packet(packet)
+
+    assert contract.excluded_fact_ids == frozenset({"c99"})

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "event_id": "1d6f9c5e-23ec-4c1a-9c6d-2b8a8d5e3f10",
+  "timestamp": "2026-08-04T13:10:38.000Z",
+  "type": "REVIEW",
+  "subtype": "node_panel_browser_state_residue",
+  "stage": "review",
+  "cause_status": "known",
+  "cause": "The browser acceptance deliberately exercised the new node panel Float, Pin, and Collapse controls, but the resulting persisted floating state was left in the user's active Workbench tab. The screenshot showed the node panel overlaying the workspace in the expected floating/collapsed state, but that state was not an acceptable handoff state.",
+  "evidence": {
+    "kind": "browser_test_command",
+    "ref": "Current Workbench tab was restored after docking the node panel: no node-panel-floating portal; PanelHost active-kind=node and data-collapsed=false; docked controls are Float node panel, Pin node panel, and Collapse node panel; left Versions row remains at y=90..139 and right panel tabs at y=90..139.",
+    "sha256": "2f235f1fbbfe037f47deee0c13f7118b888de0afbaabdbff4e9f85ca5e7d392f",
+    "observed_at": "2026-08-04T13:10:38.000Z"
+  },
+  "impact": "The user's active tab was temporarily visually obstructed by test state. The state was reset before handoff; the feature still supports intentional Float, Pin, and Collapse interactions.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Browser acceptance must restore the user's active tab to its pre-test layout before reporting completion, especially when window state is persisted per project.",
+  "incident_id": "1d6f9c5e-23ec-4c1a-9c6d-2b8a8d5e3f10",
+  "lesson_key": "restore-persisted-panel-state-after-browser-acceptance",
+  "links": [
+    "frontend/src/workbench/WorkbenchRouteContainer.tsx",
+    "frontend/src/workbench/panelHost.css",
+    "frontend/src/workbench/PanelWindowControls.tsx"
+  ]
+}

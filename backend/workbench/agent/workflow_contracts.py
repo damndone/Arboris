@@ -291,12 +291,18 @@ class ModelFamilyContract:
     allows_polynomial_terms: bool = True
     requires_nonempty_predictors: bool = True
     allows_covariance: bool = True
+    allows_weights: tuple[str, ...] = ()
+    supported_split_kinds: tuple[str, ...] = ()
     requires_branch_figures: bool = False
     context_spec_fields: tuple[str, ...] = ()
     column_spec_fields: tuple[str, ...] = ()
     builds_native_params: bool = False
     validate_spec: ModelFamilySpecValidator | None = None
     validate_branch_frame: ModelFamilyDataValidator | None = None
+    model_options_fields: tuple[str, ...] = ()
+    model_options_required_fields: tuple[str, ...] = ()
+    model_options_column_fields: tuple[str, ...] = ()
+    validate_model_options: ModelFamilySpecValidator | None = None
 
     def __post_init__(self) -> None:
         if self.required_spec_field_mode not in {"all", "any"}:
@@ -311,6 +317,26 @@ class ModelFamilyContract:
             raise ValueError("ModelFamilyContract requires family and expected artifacts")
         if not set(self.column_spec_fields) <= set(self.context_spec_fields):
             raise ValueError("ModelFamilyContract column fields must be context fields")
+        allowed_weight_kinds = {"sampling", "analysis", "frequency"}
+        if any(weight not in allowed_weight_kinds for weight in self.allows_weights):
+            raise ValueError("ModelFamilyContract allows_weights contains an unknown weight kind")
+        if len(set(self.allows_weights)) != len(self.allows_weights):
+            raise ValueError("ModelFamilyContract allows_weights must not contain duplicates")
+        allowed_split_kinds = {"iid", "grouped", "temporal", "panel"}
+        if any(split not in allowed_split_kinds for split in self.supported_split_kinds):
+            raise ValueError("ModelFamilyContract supported_split_kinds contains an unknown split kind")
+        if len(set(self.supported_split_kinds)) != len(self.supported_split_kinds):
+            raise ValueError("ModelFamilyContract supported_split_kinds must not contain duplicates")
+        if len(set(self.model_options_fields)) != len(self.model_options_fields):
+            raise ValueError("ModelFamilyContract model_options_fields must not contain duplicates")
+        if not set(self.model_options_required_fields) <= set(self.model_options_fields):
+            raise ValueError(
+                "ModelFamilyContract model_options_required_fields must be declared"
+            )
+        if not set(self.model_options_column_fields) <= set(self.model_options_fields):
+            raise ValueError(
+                "ModelFamilyContract model_options_column_fields must be declared"
+            )
 
 
 def _build_ols_model_params(
@@ -352,6 +378,175 @@ def _build_generalized_model_params(
         }
 
     return _build
+
+
+def _build_model_params_with_options(
+    model_type: str,
+) -> ModelParameterBuilder:
+    def _build(
+        spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+    ) -> dict[str, Any]:
+        return {
+            "model_type": model_type,
+            "y": branch["outcome"],
+            "x": list(predictors),
+            "model_options": dict(spec.get("model_options") or {}),
+        }
+
+    return _build
+
+
+def _validate_family_options(
+    spec: Mapping[str, Any], contract: ModelFamilyContract
+) -> None:
+    raw_options = spec.get("model_options")
+    options = {} if raw_options is None else raw_options
+    if not isinstance(options, Mapping):
+        raise OperationValidationError(
+            f"model.genesis {contract.family} model_options must be an object"
+        )
+    unknown = sorted(set(options) - set(contract.model_options_fields))
+    if unknown:
+        raise OperationValidationError(
+            f"model.genesis {contract.family} model_options does not accept field(s): "
+            + ", ".join(unknown)
+        )
+    missing = sorted(
+        field_name
+        for field_name in contract.model_options_required_fields
+        if field_name not in options or options[field_name] in (None, "")
+    )
+    if missing:
+        raise OperationValidationError(
+            f"model.genesis {contract.family} model_options requires: "
+            + ", ".join(missing)
+        )
+    if contract.validate_model_options is not None:
+        contract.validate_model_options(options)
+
+
+def _validate_ordinal_model_options(options: Mapping[str, Any]) -> None:
+    if "optimizer" in options and options["optimizer"] not in {"bfgs", "lbfgs"}:
+        raise OperationValidationError(
+            "model.genesis ordinal_logit model_options.optimizer must be bfgs or lbfgs"
+        )
+    if "link" in options and options["link"] not in {"logit", "probit"}:
+        raise OperationValidationError(
+            "model.genesis ordinal_logit model_options.link must be logit or probit"
+        )
+    outcome_order = options.get("outcome_order")
+    if outcome_order is not None and (
+        not isinstance(outcome_order, list)
+        or len(outcome_order) < 3
+        or any(not isinstance(level, str) or not level for level in outcome_order)
+        or len(set(outcome_order)) != len(outcome_order)
+    ):
+        raise OperationValidationError(
+            "model.genesis ordinal_logit model_options.outcome_order must be a list of at least three unique non-empty labels"
+        )
+    maxiter = options.get("maxiter")
+    if maxiter is not None and (
+        not isinstance(maxiter, int) or isinstance(maxiter, bool) or not 50 <= maxiter <= 5000
+    ):
+        raise OperationValidationError(
+            "model.genesis ordinal_logit model_options.maxiter must be an integer between 50 and 5000"
+        )
+
+
+def _validate_multinomial_model_options(options: Mapping[str, Any]) -> None:
+    if "base_category" in options and (
+        not isinstance(options["base_category"], str) or not options["base_category"]
+    ):
+        raise OperationValidationError(
+            "model.genesis multinomial_logit model_options.base_category must be a non-empty string"
+        )
+    maxiter = options.get("maxiter")
+    if maxiter is not None and (
+        not isinstance(maxiter, int) or isinstance(maxiter, bool) or not 50 <= maxiter <= 5000
+    ):
+        raise OperationValidationError(
+            "model.genesis multinomial_logit model_options.maxiter must be an integer between 50 and 5000"
+        )
+
+
+def _validate_survival_model_options(options: Mapping[str, Any]) -> None:
+    for field_name in ("event_column", "group_column", "entry_column"):
+        if field_name in options and (
+            not isinstance(options[field_name], str) or not options[field_name]
+        ):
+            raise OperationValidationError(
+                f"model.genesis survival_cox model_options.{field_name} must be a non-empty string"
+            )
+    if options.get("ties", "breslow") not in {"breslow", "efron"}:
+        raise OperationValidationError(
+            "model.genesis survival_cox model_options.ties must be breslow or efron"
+        )
+
+
+def _validate_quantile_model_options(options: Mapping[str, Any]) -> None:
+    quantiles = options.get("quantiles", [0.25, 0.5, 0.75])
+    if (
+        not isinstance(quantiles, list)
+        or not quantiles
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not np.isfinite(float(value))
+            or not 0 < float(value) < 1
+            for value in quantiles
+        )
+        or len(set(float(value) for value in quantiles)) != len(quantiles)
+        or len(quantiles) > 7
+    ):
+        raise OperationValidationError(
+            "model.genesis quantile_regression model_options.quantiles must be a unique list of at most seven values strictly between 0 and 1"
+        )
+    bootstrap_reps = options.get("bootstrap_reps", 0)
+    if (
+        not isinstance(bootstrap_reps, int)
+        or isinstance(bootstrap_reps, bool)
+        or not 0 <= bootstrap_reps <= 1000
+    ):
+        raise OperationValidationError(
+            "model.genesis quantile_regression model_options.bootstrap_reps must be an integer between 0 and 1000"
+        )
+    random_state = options.get("random_state")
+    if random_state is not None and (
+        not isinstance(random_state, int)
+        or isinstance(random_state, bool)
+        or random_state < 0
+    ):
+        raise OperationValidationError(
+            "model.genesis quantile_regression model_options.random_state must be a non-negative integer"
+        )
+
+
+def _validate_ordinal_outcome(frame: pd.DataFrame, branch: Mapping[str, Any]) -> None:
+    outcome = branch.get("outcome")
+    if not isinstance(outcome, str) or outcome not in frame.columns:
+        raise OperationValidationError(
+            "model.genesis ordinal_logit requires an available outcome before execution"
+        )
+    if frame[outcome].dropna().nunique() < 3:
+        raise OperationValidationError(
+            "model.genesis ordinal_logit requires at least three ordered outcome levels"
+        )
+
+
+def _validate_multinomial_outcome(frame: pd.DataFrame, branch: Mapping[str, Any]) -> None:
+    outcome = branch.get("outcome")
+    if not isinstance(outcome, str) or outcome not in frame.columns:
+        raise OperationValidationError(
+            "model.genesis multinomial_logit requires an available outcome before execution"
+        )
+    if frame[outcome].dropna().nunique() < 3:
+        raise OperationValidationError(
+            "model.genesis multinomial_logit requires at least three outcome levels"
+        )
+
+
+def _validate_continuous_outcome(frame: pd.DataFrame, branch: Mapping[str, Any]) -> None:
+    _require_outcome_values(frame, branch, "quantile_regression")
 
 
 def _require_outcome_values(
@@ -535,6 +730,8 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         expected_artifacts=("ols_1", "diagnostic_summary"),
         result_shape="coefficient_intervals",
         forbidden_spec_fields_message="model.genesis ols does not accept panel entity_col or time_col",
+        allows_weights=("frequency", "analysis"),
+        supported_split_kinds=("iid", "grouped"),
         requires_branch_figures=True,
     ),
     "logit": ModelFamilyContract(
@@ -761,6 +958,83 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         column_spec_fields=("entity_col", "time_col", "treatment_path_col"),
         builds_native_params=True,
     ),
+    "ordinal_logit": ModelFamilyContract(
+        family="ordinal_logit",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_model_params_with_options("ordinal_logit"),
+        expected_artifacts=("ordinal_logit_1", "diagnostics_ordinal_logit_1"),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message=(
+            "model.genesis ordinal_logit does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        model_options_fields=("optimizer", "maxiter", "link", "outcome_order"),
+        validate_model_options=_validate_ordinal_model_options,
+        validate_branch_frame=_validate_ordinal_outcome,
+        supported_split_kinds=("iid", "grouped"),
+    ),
+    "multinomial_logit": ModelFamilyContract(
+        family="multinomial_logit",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_model_params_with_options("multinomial_logit"),
+        expected_artifacts=("multinomial_logit_1", "diagnostics_multinomial_logit_1"),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message=(
+            "model.genesis multinomial_logit does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        model_options_fields=("maxiter", "base_category"),
+        validate_model_options=_validate_multinomial_model_options,
+        validate_branch_frame=_validate_multinomial_outcome,
+        supported_split_kinds=("iid", "grouped"),
+    ),
+    "survival_cox": ModelFamilyContract(
+        family="survival_cox",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_model_params_with_options("survival_cox"),
+        expected_artifacts=("survival_cox_1", "survival_evidence"),
+        result_shape="effect_estimate_bundle",
+        forbidden_spec_fields_message=(
+            "model.genesis survival_cox does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        model_options_fields=("event_column", "group_column", "entry_column", "ties"),
+        model_options_required_fields=("event_column",),
+        model_options_column_fields=("event_column", "group_column", "entry_column"),
+        validate_model_options=_validate_survival_model_options,
+        supported_split_kinds=("iid", "grouped"),
+    ),
+    "quantile_regression": ModelFamilyContract(
+        family="quantile_regression",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_model_params_with_options("quantile_regression"),
+        expected_artifacts=("quantile_regression_1",),
+        result_shape="coefficient_intervals",
+        forbidden_spec_fields_message=(
+            "model.genesis quantile_regression does not accept panel entity_col or time_col"
+        ),
+        allows_covariance=False,
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        model_options_fields=("quantiles", "bootstrap_reps", "random_state"),
+        validate_model_options=_validate_quantile_model_options,
+        validate_branch_frame=_validate_continuous_outcome,
+        supported_split_kinds=("iid", "grouped"),
+    ),
 }
 
 MODEL_FAMILY_SPEC_FIELDS = frozenset(
@@ -815,6 +1089,21 @@ def family_context_columns(
         raise OperationValidationError(
             f"model.genesis {contract.family} {field_name} must declare source column names"
         )
+    options = spec.get("model_options")
+    if options is not None:
+        if not isinstance(options, Mapping):
+            raise OperationValidationError(
+                f"model.genesis {contract.family} model_options must be an object"
+            )
+        for field_name in contract.model_options_column_fields:
+            value = options.get(field_name)
+            if value is None:
+                continue
+            if not isinstance(value, str) or not value:
+                raise OperationValidationError(
+                    f"model.genesis {contract.family} model_options.{field_name} must declare a source column"
+                )
+            values.append(value)
     return tuple(dict.fromkeys(values))
 
 
@@ -825,6 +1114,27 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     from ..model_terms import ModelTermError, validate_branch_terms
 
     contract = model_family_contract(spec.get("model_family"))
+    _validate_family_options(spec, contract)
+    weight_kind = spec.get("weight_kind")
+    if weight_kind is not None:
+        if weight_kind not in {"sampling", "analysis", "frequency"}:
+            raise OperationValidationError(
+                "model.genesis weight_kind must be sampling, analysis, or frequency"
+            )
+        if weight_kind not in contract.allows_weights:
+            raise OperationValidationError(
+                f"model.genesis {contract.family} does not accept weight_kind {weight_kind}"
+            )
+    split_kind = spec.get("split_kind")
+    if split_kind is not None:
+        if split_kind not in {"iid", "grouped", "temporal", "panel"}:
+            raise OperationValidationError(
+                "model.genesis split_kind must be iid, grouped, temporal, or panel"
+            )
+        if split_kind not in contract.supported_split_kinds:
+            raise OperationValidationError(
+                f"model.genesis {contract.family} does not accept split_kind {split_kind}"
+            )
     declared_family_fields = {
         field_name
         for field_name in MODEL_FAMILY_SPEC_FIELDS
@@ -1050,10 +1360,15 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             "model_family": (
                 "Registered workflow-executable model family: ols, logit, probit, poisson, "
                 "negative_binomial, glm:binomial, glm:poisson, glm:negative_binomial, "
-                "panel_ols, iv_2sls, did, cs_did, sa_did, or dcdh. "
+                "panel_ols, iv_2sls, did, cs_did, sa_did, dcdh, ordinal_logit, "
+                "multinomial_logit, survival_cox, or quantile_regression. "
                 "Every branch in one step uses this same family."
             ),
             "covariance": "Default covariance for every branch.",
+            "model_options": (
+                "Family-owned JSON options. Only the selected model family's declared "
+                "option fields are accepted; do not copy options from another family."
+            ),
             "entity_col": (
                 "Panel entity column. panel_ols requires entity_col or time_col; "
                 "clustered panel covariance requires entity_col."
@@ -1098,6 +1413,7 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         field_types={
             "model_family": "string",
             "covariance": "string",
+            "model_options": "object",
             "entity_col": "string",
             "time_col": "string",
             "cohort_col": "string",

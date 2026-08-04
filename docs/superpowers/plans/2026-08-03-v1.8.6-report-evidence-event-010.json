@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "event_id": "35784c76-53b4-47bd-943b-a92fd7efd009",
+  "timestamp": "2026-08-04T01:08:47.000Z",
+  "type": "GATE",
+  "subtype": "full_backend_regression",
+  "stage": "gate",
+  "cause_status": "external",
+  "cause": "The full backend suite completed with 35 failures outside the report scope: sandbox-exec cannot apply the host sandbox policy in this environment, and inherited model golden snapshots differ from the current dirty v1.8.6 model/lineage outputs.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python -m pytest -q --tb=short --disable-warnings",
+    "sha256": "f050ffe4db58e5ea7e9bfc26ba517e09783ff2f6deca9b77a75cd947475d5a74",
+    "observed_at": "2026-08-04T01:08:47.000Z"
+  },
+  "impact": "The full repository gate is not green, but the failures do not involve the v1.8.6 report, evidence, revision, or explicit-export paths. The report-focused and frontend-focused gates remain independently verifiable.",
+  "preventability": "not_preventable",
+  "resolution": "accepted",
+  "lesson": "Keep environment-capability failures and inherited golden drift separate from feature regressions; do not alter protected sandbox or unrelated model code to force a report-line gate green.",
+  "incident_id": "0b46457b-1643-4680-8269-0f17c8cdac2f",
+  "lesson_key": "full-gate-external-and-inherited-failures",
+  "links": [
+    "tests/test_code_execute_routes.py",
+    "tests/test_code_execution.py",
+    "tests/test_engine_golden.py",
+    "tests/test_sandbox.py"
+  ]
+}

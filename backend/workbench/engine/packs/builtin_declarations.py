@@ -18,4 +18,20 @@ BUILTIN_PACK_DECLARATIONS: tuple[PackDeclaration, ...] = (
         module="workbench.engine.packs.ets.declaration",
         model_type="time_series.ets",
     ),
+    PackDeclaration(
+        module="workbench.engine.packs.v186_model_families.ordinal_logit",
+        model_type="ordinal_logit",
+    ),
+    PackDeclaration(
+        module="workbench.engine.packs.v186_model_families.multinomial_logit",
+        model_type="multinomial_logit",
+    ),
+    PackDeclaration(
+        module="workbench.engine.packs.v186_model_families.survival_cox",
+        model_type="survival_cox",
+    ),
+    PackDeclaration(
+        module="workbench.engine.packs.v186_model_families.quantile_regression",
+        model_type="quantile_regression",
+    ),
 )

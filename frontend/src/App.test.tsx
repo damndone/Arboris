@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, test, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -24,7 +24,6 @@ vi.mock("./capabilities/useCapabilities", () => ({
 
 import App from "./App";
 import type { RunSummary } from "./api";
-import * as XLSX from "xlsx";
 
 type FetchInit = { status?: number; ok?: boolean };
 
@@ -71,9 +70,7 @@ beforeEach(() => {
     // ignore
   }
   try {
-    // V1.5.0.1 HF4: lastRun is persisted in sessionStorage; clear
-    // it between tests so a previous test's run cannot leak into the
-    // next test's SubmitRoute mount.
+    // Keep browser-like session state isolated between tests.
     sessionStorage.clear();
   } catch {
     // ignore
@@ -88,128 +85,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function fillProject(parent = "/tmp"): Promise<void> {
-  fireEvent.change(screen.getByLabelText("parent folder"), {
-    target: { value: parent }
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
-  await waitFor(() => {
-    expect(screen.getByText(`${parent}/demo`)).toBeInTheDocument();
-  });
-}
-
-function fillRunForm(): void {
-  fireEvent.change(screen.getByLabelText("dependent variable"), {
-    target: { value: "y" }
-  });
-  fireEvent.change(screen.getByLabelText("independent variables"), {
-    target: { value: "x1, x2" }
-  });
-  const file = new File(["a,b\n1,2\n"], "data.csv", { type: "text/csv" });
-  fireEvent.change(screen.getByLabelText("data file"), {
-    target: { files: [file] }
-  });
-}
-
-function makeXlsxFile(): File {
-  const sheet = XLSX.utils.json_to_sheet([
-    { target: 10, x1: 1, x2: 100, user_id: "u1" },
-    { target: 12, x1: 2, x2: 120, user_id: "u2" },
-    { target: 14, x1: 3, x2: 140, user_id: "u3" },
-  ]);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, "Data");
-  const data = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-  return new File([data], "data.xlsx", {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-}
-
-test("renders workbench navigation and disables run when invalid", () => {
-  renderAt("/submit");
-
-  expect(screen.getByRole("tab", { name: "Home" })).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Workbench" })).toBeInTheDocument();
-  expect(document.querySelector(".activity")).not.toBeInTheDocument();
-  expect(screen.getByLabelText("parent folder")).toBeInTheDocument();
-  expect(screen.getByLabelText("project name")).toBeInTheDocument();
-  expect(screen.getByLabelText("run mode")).toBeInTheDocument();
-  expect(screen.getByLabelText("dependent variable")).toBeInTheDocument();
-  expect(screen.getByLabelText("independent variables")).toBeInTheDocument();
-  expect(screen.getByLabelText("data file")).toBeInTheDocument();
-
-  expect(screen.getByRole("button", { name: "Create project" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Run workflow" })).toBeDisabled();
-
-  expect(screen.getByRole("heading", { name: /last run/i })).toBeInTheDocument();
-  expect(screen.getByText(/no run yet/i)).toBeInTheDocument();
-});
-
-test("selecting an XLSX file previews rows and applies suggested variables", async () => {
-  renderAt("/submit");
-
-  fireEvent.change(screen.getByLabelText("data file"), {
-    target: { files: [makeXlsxFile()] },
-  });
-
-  await waitFor(() => {
-    expect(screen.getByRole("heading", { name: /data preview/i })).toBeInTheDocument();
-  });
-
-  expect(document.body).toHaveTextContent("data.xlsx");
-  expect(document.body).toHaveTextContent("3 rows");
-  expect(document.body).toHaveTextContent("4 columns");
-  expect(screen.getAllByText("target").length).toBeGreaterThan(0);
-  expect(screen.getByLabelText("dependent variable")).toHaveValue("target");
-  expect(screen.getByLabelText("independent variables")).toHaveValue("x1, x2");
-});
-
-test("createProject success populates project_root", async () => {
-  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-    jsonResponse({ project_root: "/tmp/demo" })
-  );
-
-  renderAt("/submit");
-  await fillProject();
-
-  expect(screen.getByText("/tmp/demo")).toBeInTheDocument();
-});
-
-// V1.5.0.1 HF1: after a successful run, the Submit page stays on /
-// and renders the V1.4 result summary inline. The "Open Lineage →"
-// button on the Last run heading is the explicit user gesture that
-// navigates to the dark lineage view. The V1.5.0 P0 forced auto-nav
-// was removed because users lost sight of the result they just ran
-// and were jarred by the light → dark flip.
-function minimalGraphResponse(runId: string) {
-  return {
-    schema_version: 3,
-    run_id: runId,
-    legacy: false,
-    stats: { node_count: 0, edge_count: 0, leaf_count: 0, has_dp_count: 0 },
-    nodes: {},
-    edges: {},
-    branches: {},
-  };
-}
-
-// Route mocked fetches by URL so the polling-aware flow (POST → poll
-// runDetail → GET graph) doesn't have to be encoded as a fragile
-// sequential chain.
-type RouteFn = (url: string, init?: RequestInit) => Response | Promise<Response>;
-function installFetchRouter(fetchMock: ReturnType<typeof vi.fn>, route: RouteFn) {
-  fetchMock.mockImplementation((url, init) => {
-    const u = typeof url === "string" ? url : String(url);
-    return Promise.resolve(route(u, init));
-  });
-}
-
-// RunResultView reads several optional fields (errors.issues,
-// artifact_counts, lineage, model_results). When the Submit route is
-// rendered mid-poll the inline RunResultView crashes if these are
-// missing, even though the test only cares about the navigation
-// contract. Build a fully-populated minimal RunDetail so the inline
-// render doesn't blow up while we wait for polling to complete.
+// Build a fully-populated minimal RunDetail for run-detail route tests.
 function fullRunDetail(
   runId: string,
   status: string,
@@ -223,260 +99,10 @@ function fullRunDetail(
     x: ["x1", "x2"],
     lineage: [],
     artifact_counts: {},
-    errors: { issues: [] },
-    model_results: [],
+  errors: { issues: [] },
+  model_results: [],
   };
 }
-
-test("runWorkflow polls until terminal then stays on Submit with Open Lineage button [HF1]", async () => {
-  // V1.5.0.1 HF1: do NOT auto-navigate after a run completes. The
-  // run-detail polling still gates against the orchestrator's
-  // background race, but the user stays on Submit and sees the
-  // V1.4 result summary inline. An "Open Lineage →" button on the
-  // Last run heading is the explicit gesture for entering lineage.
-  // Use POST /runs that returns "completed" directly (no polling)
-  // to keep the test deterministic; the polling gate is exercised
-  // by api.test.ts waitForRunTerminal suite. This test focuses on
-  // the post-run UI contract.
-  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  installFetchRouter(fetchMock, (url) => {
-    if (url.includes("/projects"))
-      return jsonResponse({ project_root: "/tmp/demo" });
-    if (/\/runs\/abc-123\/artifacts(\?|$)/.test(url)) {
-      return jsonResponse({ groups: [] });
-    }
-    if (/\/runs\/abc-123(\?|$)/.test(url)) {
-      return jsonResponse(fullRunDetail("abc-123", "completed"));
-    }
-    if (/\/runs(\?|$)/.test(url)) {
-      return jsonResponse({ run_id: "abc-123", status: "completed" });
-    }
-    return jsonResponse({});
-  });
-
-  renderAt("/submit");
-  await fillProject();
-  fillRunForm();
-  fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
-
-  // After the run terminates, the Submit tab stays selected and the
-  // Open Lineage button appears on the Last run heading.
-  await waitFor(() => {
-    expect(
-      screen.getByRole("button", { name: /Open Lineage/ }),
-    ).toBeInTheDocument();
-  });
-  // v1.6.8: the form lives at /submit (off-nav); neither shell tab is
-  // selected there — assert we did NOT navigate away from the form.
-  expect(screen.getByLabelText("parent folder")).toBeInTheDocument();
-});
-
-test("Open Lineage button navigates to /runs/:id?tab=lineage [HF1]", async () => {
-  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  installFetchRouter(fetchMock, (url) => {
-    if (url.includes("/projects")) {
-      return jsonResponse({ project_root: "/tmp/demo" });
-    }
-    if (/\/runs\/blk-1\/graph(\?|$)/.test(url)) {
-      return jsonResponse(minimalGraphResponse("blk-1"));
-    }
-    if (/\/runs\/blk-1\/artifacts(\?|$)/.test(url)) {
-      return jsonResponse({ groups: [] });
-    }
-    if (/\/runs\/blk-1(\?|$)/.test(url)) {
-      return jsonResponse(fullRunDetail("blk-1", "blocked"));
-    }
-    if (/\/runs(\?|$)/.test(url)) {
-      // A run that lands as blocked from the POST itself has finished
-      // — no polling needed. The button still appears and lets the
-      // user enter the lineage view if they want to inspect.
-      return jsonResponse({ run_id: "blk-1", status: "blocked" });
-    }
-    return jsonResponse({});
-  });
-
-  renderAt("/submit");
-  await fillProject();
-  fillRunForm();
-  fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
-
-  // Wait for the Open Lineage button to appear (run terminated).
-  const openBtn = await waitFor(
-    () => screen.getByRole("button", { name: /Open Lineage/ }),
-    { timeout: 4000 },
-  );
-  fireEvent.click(openBtn);
-
-  // v1.6.8 route inversion: Open Lineage lands on /runs/:id?tab=lineage,
-  // which now redirects into the project graph home (/p/:slug/graph?focus=).
-  await waitFor(() => {
-    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
-  });
-});
-
-test("V1.5.1 T1.3 — Submit shows live step progress from SSE step_start", async () => {
-  // SSE happy path: POST /runs returns running so waitForRunTerminal
-  // takes the SSE subscribe path. A stubbed EventSource lets us fire
-  // a step_start event mid-run; the Submit page should render the
-  // step text in the └─ progress chip.
-  class MockEventSource {
-    static instances: MockEventSource[] = [];
-    url: string;
-    listeners = new Map<string, ((e: MessageEvent) => void)[]>();
-    onerror: ((e: Event) => void) | null = null;
-    close = vi.fn();
-    constructor(url: string) {
-      this.url = url;
-      MockEventSource.instances.push(this);
-    }
-    addEventListener(type: string, fn: (e: MessageEvent) => void) {
-      const list = this.listeners.get(type) ?? [];
-      list.push(fn);
-      this.listeners.set(type, list);
-    }
-    fire(type: string, data: unknown) {
-      for (const fn of this.listeners.get(type) ?? []) {
-        fn({ data: JSON.stringify(data) } as MessageEvent);
-      }
-    }
-  }
-  MockEventSource.instances = [];
-  vi.stubGlobal("EventSource", MockEventSource);
-
-  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  installFetchRouter(fetchMock, (url) => {
-    if (url.includes("/projects"))
-      return jsonResponse({ project_root: "/tmp/demo" });
-    if (/\/runs\/run-sse\/artifacts(\?|$)/.test(url)) {
-      return jsonResponse({ groups: [] });
-    }
-    if (/\/runs\/run-sse(\?|$)/.test(url)) {
-      return jsonResponse(fullRunDetail("run-sse", "completed"));
-    }
-    if (/\/runs(\?|$)/.test(url)) {
-      return jsonResponse({ run_id: "run-sse", status: "running" });
-    }
-    return jsonResponse({});
-  });
-
-  renderAt("/submit");
-  await fillProject();
-  fillRunForm();
-  fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
-
-  // EventSource is opened inside the SSE subscribe path; wait for it
-  // before firing simulated server events.
-  await waitFor(() => {
-    expect(MockEventSource.instances.length).toBeGreaterThan(0);
-  });
-  const source = MockEventSource.instances[MockEventSource.instances.length - 1]!;
-  act(() => {
-    source.fire("step_start", {
-      event: "step_start",
-      run_id: "run-sse",
-      sequence: 1,
-      timestamp: "2026-05-01T00:00:01+00:00",
-      step: "regress",
-      message: "Running OLS",
-      status: null,
-    });
-  });
-
-  await waitFor(() => {
-    expect(screen.getByTestId("run-progress-line")).toHaveTextContent(
-      /regress: Running OLS/,
-    );
-  });
-
-  // Fire terminal so waitForRunTerminal resolves and the test doesn't
-  // dangle on a pending promise.
-  act(() => {
-    source.fire("workflow_completed", {
-      event: "workflow_completed",
-      run_id: "run-sse",
-      sequence: 2,
-      timestamp: "2026-05-01T00:00:05+00:00",
-      step: null,
-      message: "Done",
-      status: "completed",
-    });
-  });
-  await waitFor(() => {
-    expect(
-      screen.getByRole("button", { name: /Open Lineage/ }),
-    ).toBeInTheDocument();
-  });
-  // Progress chip clears once the run terminates.
-  expect(screen.queryByTestId("run-progress-line")).not.toBeInTheDocument();
-});
-
-test("HTTP 413 surfaces FastAPI string detail in error panel", async () => {
-  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse(
-      { detail: "Uploaded file exceeds project size limit." },
-      { status: 413 }
-    )
-  );
-
-  renderAt("/submit");
-  await fillProject();
-  fillRunForm();
-  fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
-
-  await waitFor(() => {
-    expect(screen.getByRole("alert")).toBeInTheDocument();
-  });
-
-  const alert = screen.getByRole("alert");
-  expect(alert).toHaveTextContent("HTTP 413");
-  expect(alert).toHaveTextContent("Uploaded file exceeds project size limit.");
-});
-
-test("HTTP 422 with validation array detail joins location + msg", async () => {
-  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse(
-      {
-        detail: [
-          { loc: ["body", "parent"], msg: "field required", type: "value_error" }
-        ]
-      },
-      { status: 422 }
-    )
-  );
-
-  renderAt("/submit");
-  fireEvent.change(screen.getByLabelText("parent folder"), {
-    target: { value: "/tmp" }
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
-
-  await waitFor(() => {
-    expect(screen.getByRole("alert")).toBeInTheDocument();
-  });
-
-  const alert = screen.getByRole("alert");
-  expect(alert).toHaveTextContent("HTTP 422");
-  expect(alert).toHaveTextContent("parent: field required");
-});
-
-test("Workbench tab navigates into the project graph home", async () => {
-  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValue(jsonResponse({ runs: [] }));
-
-  renderAt("/submit");
-  await fillProject();
-
-  fireEvent.click(screen.getByRole("tab", { name: "Workbench" }));
-
-  await waitFor(() => {
-    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
-  });
-});
-
 test("clicking a history row loads run detail with errors", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(
@@ -943,38 +569,6 @@ test("running run progress includes statistical tests step", async () => {
   expect(screen.getByText("Statistical tests")).toBeInTheDocument();
 });
 
-// --- V1.2.5 model type selector tests ---
-
-test("model type selector renders options from capabilities", () => {
-  renderAt("/submit");
-
-  const selector = screen.getByLabelText("model type");
-  expect(selector).toBeInTheDocument();
-
-  const options = within(selector).getAllByRole("option");
-  const optionValues = options.map((opt) => (opt as HTMLOptionElement).value);
-  expect(optionValues).toEqual([
-    "auto",
-    "ols",
-    "logit",
-    "poisson",
-    "negative_binomial",
-  ]);
-  expect(
-    within(selector).getByRole("option", { name: "OLS (linear)" }),
-  ).toHaveValue("ols");
-});
-
-test("model type defaults to Auto and can be changed to logit", async () => {
-  renderAt("/submit");
-
-  const selector = screen.getByLabelText("model type") as HTMLSelectElement;
-  expect(selector.value).toBe("auto");
-
-  fireEvent.change(selector, { target: { value: "logit" } });
-  expect(selector.value).toBe("logit");
-});
-
 // --- V1.3.1 Trust Preview regression tests ---
 
 test("report is disabled when artifact manifest is missing in preview", async () => {
@@ -1178,40 +772,6 @@ test("HF2: /runs/:id?tab=overview does NOT apply lineage dark shell", () => {
   expect(shell?.classList.contains("workbench-shell--lineage")).toBe(false);
 });
 
-// V1.5.0.1 HF4: lastRun survives SubmitRoute remount via sessionStorage.
-// Before this fix it was plain useState and was discarded on navigation.
-test("HF4: lastRun persisted in sessionStorage survives SubmitRoute remount", async () => {
-  // Seed sessionStorage as if a previous session had completed run-prev.
-  sessionStorage.setItem(
-    "workbench:lastRun",
-    JSON.stringify({ run_id: "run-prev", status: "completed" }),
-  );
-
-  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockImplementation((url: string) => {
-    if (url.includes("/projects")) {
-      return Promise.resolve(jsonResponse({ project_root: "/tmp/demo" }));
-    }
-    if (/\/runs\/run-prev\/artifacts/.test(url)) {
-      return Promise.resolve(jsonResponse({ groups: [] }));
-    }
-    if (/\/runs\/run-prev(\?|$)/.test(url)) {
-      return Promise.resolve(jsonResponse(fullRunDetail("run-prev", "completed")));
-    }
-    return Promise.resolve(jsonResponse({}));
-  });
-
-  renderAt("/submit");
-
-  // Without HF4, lastRun starts as null and Open Lineage doesn't render.
-  // With HF4, the seeded value is restored and the button appears.
-  await waitFor(() => {
-    expect(
-      screen.getByRole("button", { name: /Open Lineage/ }),
-    ).toBeInTheDocument();
-  });
-});
-
 test("HF2: /runs/:id?tab=lineage DOES apply lineage dark shell", () => {
   stubRunDetailAndArtifacts("run-hf2");
   renderAt("/runs/run-hf2?project_root=/tmp/demo&tab=lineage");
@@ -1229,10 +789,17 @@ test("/ renders the launcher, not the submit form", async () => {
   expect(screen.queryByLabelText("parent folder")).not.toBeInTheDocument();
 });
 
-test("/submit still mounts the legacy form (hidden route, F7)", () => {
-  renderAt("/submit");
+test("/submit redirects into the project graph instead of mounting the abandoned form", async () => {
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+    jsonResponse({ runs: [] }),
+  );
 
-  expect(screen.getByLabelText("parent folder")).toBeInTheDocument();
+  renderAt("/submit?project_root=/tmp/demo");
+
+  await waitFor(() => {
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
+  });
+  expect(screen.queryByLabelText("data file")).not.toBeInTheDocument();
 });
 
 test("/runs/:id redirects into the graph home and forwards focus", async () => {

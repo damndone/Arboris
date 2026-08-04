@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "event_id": "e4a0f3d2-5b3c-4e73-9a15-0d6d9a4a2c10",
+  "timestamp": "2026-08-04T11:57:45.000Z",
+  "type": "REVIEW",
+  "subtype": "report_review_control_semantics",
+  "stage": "review",
+  "cause_status": "known",
+  "cause": "Float and Pin previously shared floating behavior without a meaningful interaction distinction, and Open Report only changed the view without requesting focus on the top composer.",
+  "evidence": {
+    "kind": "code_review",
+    "ref": "The report review drag handle now disables pointer and keyboard movement while pinned; Open Report increments a focus request consumed by the top Report composer; control glyphs use explicit float, pin, dock, and directional collapse icons.",
+    "sha256": "7beca31aaeb8cdc1aa2cffe771e98040d1083868afe15a770b60167c11653034",
+    "observed_at": "2026-08-04T11:57:45.000Z"
+  },
+  "impact": "Users can distinguish movable floating review from position-locked pinned review, and can return from an empty review state directly to the writing input.",
+  "preventability": "partially_preventable",
+  "resolution": "accepted",
+  "lesson": "Window controls need distinct state semantics, not only distinct labels; navigation actions that return to an existing view must also provide a visible focus target.",
+  "incident_id": "e4a0f3d2-5b3c-4e73-9a15-0d6d9a4a2c10",
+  "lesson_key": "report-review-control-semantics",
+  "links": [
+    "frontend/src/report/ReportReviewPanel.tsx",
+    "frontend/src/report/ReportComposer.tsx",
+    "frontend/src/workbench/WorkbenchRouteContainer.tsx",
+    "frontend/src/workbench/PanelHost.tsx"
+  ]
+}

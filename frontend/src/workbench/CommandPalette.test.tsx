@@ -188,13 +188,15 @@ describe("CommandPalette (F7)", () => {
     ).toBeNull();
   });
 
-  it("quick-run legacy command navigates to /submit with project_root", () => {
+  it("data upload command navigates to the Graph Genesis flow", () => {
     mount(null, "/tmp/demo project");
     act(() => cmdShiftP());
-    const quickRun = screen.getByTestId("command-palette-item-quick-run-legacy");
-    expect(quickRun).toHaveTextContent("快速 run(旧表单)");
-    fireEvent.click(quickRun);
-    expect(lastLocation).toBe("/submit?project_root=%2Ftmp%2Fdemo+project");
+    const openGenesis = screen.getByTestId("command-palette-item-open-genesis");
+    expect(openGenesis).toHaveTextContent("打开数据上传");
+    fireEvent.click(openGenesis);
+    expect(lastLocation).toBe(
+      "/p/L3RtcC9kZW1vIHByb2plY3Q/graph?open_genesis=1",
+    );
   });
 
   it("ArrowDown moves the cursor", () => {

@@ -38,6 +38,13 @@ import {
   createDefaultArmaGarchValue,
   type ArmaGarchControlValue,
 } from "../../runForm/ArmaGarchControls";
+import {
+  V186ModelControls,
+  defaultV186ModelOptions,
+  isV186ModelType,
+  normalizeV186ModelOptions,
+  type V186ModelOptionsByType,
+} from "../../runForm/V186ModelControls";
 
 type BusyState =
   | "resume"
@@ -138,6 +145,8 @@ export function GenesisWizard({
   const [armaGarchValue, setArmaGarchValue] = useState<ArmaGarchControlValue>(
     createDefaultArmaGarchValue,
   );
+  const [v186ModelOptionsByType, setV186ModelOptionsByType] =
+    useState<V186ModelOptionsByType>({});
   const [armaGarchPreflight, setArmaGarchPreflight] =
     useState<ArmaGarchTransformPreflight | null>(null);
   const [armaGarchPreflightError, setArmaGarchPreflightError] =
@@ -173,6 +182,20 @@ export function GenesisWizard({
   const [predictionModelType, setPredictionModelType] = useState("");
   const [predictionCvFolds, setPredictionCvFolds] = useState(5);
   const [predictionSampling, setPredictionSampling] = useState("");
+  const [predictionDataStructure, setPredictionDataStructure] = useState("unknown");
+  const [predictionEntityColumn, setPredictionEntityColumn] = useState("");
+  const [predictionGroupColumn, setPredictionGroupColumn] = useState("");
+  const [predictionTimeColumn, setPredictionTimeColumn] = useState("");
+  const [predictionFinalHoldoutFraction, setPredictionFinalHoldoutFraction] = useState(0.2);
+  const [predictionShuffle, setPredictionShuffle] = useState(true);
+  const [frequencyWeight, setFrequencyWeight] = useState("");
+  const [analysisWeight, setAnalysisWeight] = useState("");
+  const [samplingWeight, setSamplingWeight] = useState("");
+  const [weightParamsPresent, setWeightParamsPresent] = useState({
+    frequency: false,
+    analysis: false,
+    sampling: false,
+  });
   const [y, setY] = useState("");
   const [x, setX] = useState("");
   const [focal, setFocal] = useState<string[]>([]);
@@ -278,6 +301,12 @@ export function GenesisWizard({
         );
       }
     }
+    if (isV186ModelType(savedType)) {
+      setV186ModelOptionsByType((current) => ({
+        ...current,
+        [savedType]: normalizeV186ModelOptions(savedType, modelParams.model_options),
+      }));
+    }
     const savedImputation = firstString(modelParams.imputation);
     if (savedImputation) {
       try {
@@ -358,7 +387,28 @@ export function GenesisWizard({
       if (savedFolds !== null) setPredictionCvFolds(savedFolds);
       const savedSampling = firstString(modelParams.prediction_sampling_method);
       if (savedSampling) setPredictionSampling(savedSampling);
+      const savedStructure = firstString(modelParams.prediction_data_structure);
+      if (savedStructure) setPredictionDataStructure(savedStructure);
+      const savedGroup = firstString(modelParams.prediction_group_column);
+      if (savedGroup) setPredictionGroupColumn(savedGroup);
+      const savedEntity = firstString(modelParams.prediction_entity_column);
+      if (savedEntity) setPredictionEntityColumn(savedEntity);
+      const savedTime = firstString(modelParams.prediction_time_column);
+      if (savedTime) setPredictionTimeColumn(savedTime);
+      const savedHoldout = firstNumber(modelParams.prediction_final_holdout_fraction);
+      if (savedHoldout !== null) setPredictionFinalHoldoutFraction(savedHoldout);
+      if (typeof modelParams.prediction_shuffle === "boolean") {
+        setPredictionShuffle(modelParams.prediction_shuffle);
+      }
     }
+    setFrequencyWeight(firstString(modelParams.frequency_weight));
+    setAnalysisWeight(firstString(modelParams.analysis_weight));
+    setSamplingWeight(firstString(modelParams.sampling_weight));
+    setWeightParamsPresent({
+      frequency: Object.prototype.hasOwnProperty.call(modelParams, "frequency_weight"),
+      analysis: Object.prototype.hasOwnProperty.call(modelParams, "analysis_weight"),
+      sampling: Object.prototype.hasOwnProperty.call(modelParams, "sampling_weight"),
+    });
     if (notify) onDraftUpdated?.(response);
   }
 
@@ -371,6 +421,7 @@ export function GenesisWizard({
     setModelConfigured(false);
     setValidation(null);
     setError(null);
+    setWeightParamsPresent({ frequency: false, analysis: false, sampling: false });
     if (!nextFile) return;
     setBusy("file");
     try {
@@ -557,6 +608,10 @@ export function GenesisWizard({
         `upload:${sourceFilename}`,
       );
     }
+    if (isV186ModelType(modelType)) {
+      params.model_options =
+        v186ModelOptionsByType[modelType] ?? defaultV186ModelOptions(modelType);
+    }
     if (isIV) {
       if (ivRole.endog.length > 0) params.iv_endog = ivRole.endog;
       if (ivRole.instruments.length > 0) params.iv_instruments = ivRole.instruments;
@@ -588,6 +643,21 @@ export function GenesisWizard({
       if (predictionModelType) params.prediction_model_type = predictionModelType;
       params.prediction_cv_folds = predictionCvFolds;
       if (predictionSampling) params.prediction_sampling_method = predictionSampling;
+      params.prediction_data_structure = predictionDataStructure;
+      if (predictionEntityColumn) params.prediction_entity_column = predictionEntityColumn;
+      if (predictionGroupColumn) params.prediction_group_column = predictionGroupColumn;
+      if (predictionTimeColumn) params.prediction_time_column = predictionTimeColumn;
+      params.prediction_final_holdout_fraction = predictionFinalHoldoutFraction;
+      params.prediction_shuffle = predictionShuffle;
+    }
+    if (frequencyWeight || weightParamsPresent.frequency) {
+      params.frequency_weight = frequencyWeight;
+    }
+    if (analysisWeight || weightParamsPresent.analysis) {
+      params.analysis_weight = analysisWeight;
+    }
+    if (samplingWeight || weightParamsPresent.sampling) {
+      params.sampling_weight = samplingWeight;
     }
     if (!isIV && !usesDidRoles && !isDcdh && focal.length > 0) {
       params.focal_x = focal.filter((col) => exogColumns.includes(col));
@@ -628,12 +698,48 @@ export function GenesisWizard({
       setError("LMM 需要指定受试者、时间和组别列。");
       return;
     }
+    if (
+      modelType === "survival_cox" &&
+      (!v186ModelOptionsByType.survival_cox?.event_column ||
+        typeof v186ModelOptionsByType.survival_cox.event_column !== "string")
+    ) {
+      setError("Survival / Cox 需要指定 event 列。");
+      return;
+    }
     if (modelType === "panel_ols" && entityCol && timeCol && entityCol === timeCol) {
       setError("个体列与时间列不能是同一列 (entity == time)。");
       return;
     }
     if (predictionEnabled && !predictionModelType) {
       setError("已开启预测，请选择算法 (algorithm)。");
+      return;
+    }
+    if (predictionEnabled && predictionDataStructure === "unknown") {
+      setError("预测必须声明数据结构 (IID、分组、时间或面板)。");
+      return;
+    }
+    if (
+      predictionEnabled &&
+      predictionDataStructure === "grouped" &&
+      !predictionGroupColumn
+    ) {
+      setError("分组预测必须指定分组列。");
+      return;
+    }
+    if (
+      predictionEnabled &&
+      predictionDataStructure === "panel" &&
+      !predictionEntityColumn
+    ) {
+      setError("面板预测必须指定个体列。");
+      return;
+    }
+    if (
+      predictionEnabled &&
+      (predictionDataStructure === "temporal" || predictionDataStructure === "panel") &&
+      !predictionTimeColumn
+    ) {
+      setError("时间或面板预测必须指定时间列。");
       return;
     }
     setBusy("model");
@@ -700,6 +806,9 @@ export function GenesisWizard({
           (modelType === "linear_mixed_effects" ? lmmRolesConfigured : xColumns.length > 0)),
   );
   const canRun = Boolean(draftId && modelConfigured);
+  const activeV186ModelOptions = isV186ModelType(modelType)
+    ? v186ModelOptionsByType[modelType] ?? defaultV186ModelOptions(modelType)
+    : null;
 
   return (
     <div data-testid="genesis-wizard" style={{ display: "grid", gap: 18 }}>
@@ -840,6 +949,19 @@ export function GenesisWizard({
               onChange={setArmaGarchValue}
             />
           )}
+          {isV186ModelType(modelType) && activeV186ModelOptions && (
+            <V186ModelControls
+              modelType={modelType}
+              columns={columnNames}
+              options={activeV186ModelOptions}
+              onChange={(options) => {
+                setV186ModelOptionsByType((current) => ({
+                  ...current,
+                  [modelType]: options,
+                }));
+              }}
+            />
+          )}
           {modelType === "iv_2sls" && (
             <div className="ios-group">
               <p className="ios-hint">
@@ -880,16 +1002,67 @@ export function GenesisWizard({
               onChange={setDcdhValue}
             />
           )}
+          <div className="ios-group" aria-label="Weight settings">
+            <p className="ios-hint">
+              权重会写入本次 Run 的证据。frequency / analysis 可用于 OLS；sampling 目前会明确拒绝，请通过现有 entity_col + covariance=clustered 通道声明 strata/PSU。
+            </p>
+            <label className="ios-field">
+              <span>频数权重 frequency weight（可选）</span>
+              <select aria-label="frequency weight" value={frequencyWeight}
+                onChange={(e) => {
+                  setFrequencyWeight(e.target.value);
+                  setWeightParamsPresent((current) => ({ ...current, frequency: true }));
+                }}>
+                <option value="">(不使用)</option>
+                {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
+              </select>
+            </label>
+            <label className="ios-field">
+              <span>分析权重 analysis weight（可选）</span>
+              <select aria-label="analysis weight" value={analysisWeight}
+                onChange={(e) => {
+                  setAnalysisWeight(e.target.value);
+                  setWeightParamsPresent((current) => ({ ...current, analysis: true }));
+                }}>
+                <option value="">(不使用)</option>
+                {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
+              </select>
+            </label>
+            <label className="ios-field">
+              <span>抽样权重 sampling weight（当前会拒绝）</span>
+              <select aria-label="sampling weight" value={samplingWeight}
+                onChange={(e) => {
+                  setSamplingWeight(e.target.value);
+                  setWeightParamsPresent((current) => ({ ...current, sampling: true }));
+                }}>
+                <option value="">(不使用)</option>
+                {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
+              </select>
+            </label>
+          </div>
           {modelType !== "time_series.arma_garch" && <PredictionControls
             capabilities={capabilities}
             enabled={predictionEnabled}
             modelType={predictionModelType}
             cvFolds={predictionCvFolds}
             sampling={predictionSampling}
+            columns={columnNames}
+            dataStructure={predictionDataStructure}
+            entityColumn={predictionEntityColumn}
+            groupColumn={predictionGroupColumn}
+            timeColumn={predictionTimeColumn}
+            finalHoldoutFraction={predictionFinalHoldoutFraction}
+            shuffle={predictionShuffle}
             onEnabled={setPredictionEnabled}
             onModelType={setPredictionModelType}
             onCvFolds={setPredictionCvFolds}
             onSampling={setPredictionSampling}
+            onDataStructure={setPredictionDataStructure}
+            onEntityColumn={setPredictionEntityColumn}
+            onGroupColumn={setPredictionGroupColumn}
+            onTimeColumn={setPredictionTimeColumn}
+            onFinalHoldoutFraction={setPredictionFinalHoldoutFraction}
+            onShuffle={setPredictionShuffle}
           />}
           {modelType !== "time_series.arma_garch" &&
             modelType !== "panel_ols" &&

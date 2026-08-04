@@ -245,6 +245,10 @@ def _model_label(primary_type: str) -> str:
         "ols": "OLS",
         "ols_robust": "OLS with robust standard errors",
         "logit": "Logistic regression",
+        "ordinal_logit": "Ordinal logistic regression",
+        "multinomial_logit": "Multinomial logistic regression",
+        "survival_cox": "Cox proportional hazards model",
+        "quantile_regression": "Quantile regression",
         "poisson": "Poisson regression",
         "poisson_rate": "Poisson rate model",
     }

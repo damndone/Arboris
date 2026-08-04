@@ -122,7 +122,7 @@ describe("ProjectSwitcher (T11)", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent(
-        `/p/${rootToSlug("/tmp/fresh")}/graph?genesis=1`,
+        `/p/${rootToSlug("/tmp/fresh")}/graph?open_genesis=1`,
       ),
     );
     expect(listRecents()[0].root).toBe("/tmp/fresh");

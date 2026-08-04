@@ -87,6 +87,31 @@ const PRESENTATION_PACKET = {
   },
 };
 
+const PREDICTION_TYPED_PACKET = {
+  ...PAYLOAD,
+  packet: {
+    schema_id: "workbench.prediction.compare.v1",
+    compare_status: "complete",
+    comparability: "typed_same_split_plan",
+    split_plan_hash: "sha256:split",
+    metric_diff: { r2: { left: 0.4, right: 0.5, difference: 0.1 } },
+    left: { model_id: "prediction_ridge_1" },
+    right: { model_id: "prediction_lasso_1" },
+  },
+};
+
+const PREDICTION_LEGACY_PACKET = {
+  ...PAYLOAD,
+  packet: {
+    schema_id: "workbench.prediction.compare.v1",
+    compare_status: "legacy_only",
+    comparability: "legacy_only",
+    message: "Legacy evaluation — split protocol was not persisted. The result remains readable but is not comparable with v1.8.6 predictive-research results.",
+    left: { status: "legacy", model_id: "prediction_ridge_1" },
+    right: { status: "legacy", model_id: "prediction_ridge_1" },
+  },
+};
+
 const refetch = vi.fn();
 
 function renderSection(compare: unknown) {
@@ -111,6 +136,22 @@ beforeEach(() => {
 });
 
 describe("CompareNodeSection", () => {
+  it("renders typed predictive-research comparability from the durable packet", () => {
+    renderSection(PREDICTION_TYPED_PACKET);
+
+    expect(screen.getByTestId("prediction-compare-evidence")).toHaveTextContent("Prediction research comparison");
+    expect(screen.getByTestId("prediction-compare-evidence")).toHaveTextContent("typed_same_split_plan");
+    expect(screen.getByTestId("prediction-compare-evidence")).toHaveTextContent("sha256:split");
+    expect(screen.getByTestId("prediction-compare-evidence")).toHaveTextContent("0.1");
+  });
+
+  it("renders legacy predictive-research comparison as readable but non-comparable", () => {
+    renderSection(PREDICTION_LEGACY_PACKET);
+
+    expect(screen.getByTestId("prediction-compare-evidence")).toHaveTextContent("legacy_only");
+    expect(screen.getByTestId("prediction-compare-evidence")).toHaveTextContent(/Legacy evaluation — split protocol was not persisted/);
+  });
+
   it("names both runs so the comparison can be checked", () => {
     renderSection(PAYLOAD);
 

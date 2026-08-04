@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "event_id": "7b2d1c84-3f67-4af8-a8e6-2be4b5fdd8c1",
+  "timestamp": "2026-08-04T13:46:59.000Z",
+  "type": "REVIEW",
+  "subtype": "node_panel_detached_tab_alignment",
+  "stage": "review",
+  "cause_status": "known",
+  "cause": "The floating node panel reused the complete right-side DetailDrawer tab strip, including the docked panel's negative top margin, so the detached window showed duplicated or clipped tabs and the detached node remained selected in the docked host. The first focused regression run reproduced the pre-fix failure; the implementation then separated the detached tab from the docked tab collection and gave the floating window its own tab geometry.",
+  "evidence": {
+    "kind": "browser_test_command",
+    "ref": "Focused Vitest: 2 files, 65 tests passed. Full Vitest: 188 files, 1630 tests passed. Typecheck and git diff --check passed. Browser acceptance verified Float leaves Report review in the right host and moves only Derived interaction into the floating window without clipping; Dock returned the node tab to the right host and made it active. The browser was restored to the corrected floating state.",
+    "sha256": "fa2e7337b0fbc9849cea933b1c43b2706713d5023107cb9e2ce58577414d26ca",
+    "observed_at": "2026-08-04T13:46:59.000Z"
+  },
+  "impact": "Floating node tabs now follow browser-style detached-tab ownership: the right panel remains available for docked tabs, the floating window contains only the detached node tab, and docking restores that tab to the right-side strip.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Model floating panels as tab detachment rather than as a second copy of the host tab strip. Test tab ownership, active-tab fallback, clipping, and the complete Float-Dock round trip in both the host and floating portals.",
+  "incident_id": "7b2d1c84-3f67-4af8-a8e6-2be4b5fdd8c1",
+  "lesson_key": "node-panel-floating-tab-detachment",
+  "links": [
+    "frontend/src/workbench/WorkbenchRouteContainer.tsx",
+    "frontend/src/workbench/WorkbenchRouteContainer.test.tsx",
+    "frontend/src/workbench/panelHost.css"
+  ]
+}

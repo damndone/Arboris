@@ -24,6 +24,7 @@ from ..analysis_loop.time_series_compare import read_time_series_artifacts as _r
 from ..analysis_loop.plan import PlanDiff
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
+from ..predictive_research.consumer_projection import read_prediction_evidence_from_run_root
 from .context_compiler import resolve_registered_artifact
 from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .recipes.registry import build_option_vocabulary, validate_model_options_patch
@@ -174,6 +175,13 @@ class InspectProjectNotebookWorkflowResultsRequest:
     run_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class InspectProjectStatisticalEvidenceRequest:
+    """Read the persisted statistics evidence packet for visible project runs."""
+
+    run_ids: tuple[str, ...]
+
+
 class OperationContractUnavailableError(ValueError):
     """The selected node has no resolvable contract for the requested operation."""
 
@@ -289,6 +297,25 @@ class NodeOperationContextProvider:
             return self.inspect_diagnostics(
                 InspectDiagnosticsRequest(
                     request_id=str(arguments.get("request_id") or "inspect-diagnostics"),
+                    owner_run_id=str(arguments["owner_run_id"]),
+                    op_node_id=str(arguments["op_node_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
+                )
+            )
+
+        def inspect_statistical_evidence(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_statistical_evidence(
+                InspectResultSummaryRequest(
+                    request_id=str(
+                        arguments.get("request_id") or "inspect-statistical-evidence"
+                    ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
                     active_head_run_id=self._tool_active_head(
@@ -726,6 +753,37 @@ class NodeOperationContextProvider:
                 handler=inspect_diagnostics,
             ),
             ToolDefinition(
+                tool_id="inspect_statistical_evidence",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "owner_run_id",
+                        "op_node_id",
+                        "active_head_run_id",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string"},
+                        "owner_run_id": {"type": "string"},
+                        "op_node_id": {"type": "string"},
+                        "active_head_run_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_statistical_evidence,
+                description=(
+                    "Read the run's statistical evidence packet: ANOVA post-hoc "
+                    "comparisons with their correction method (Tukey, Bonferroni), "
+                    "Cohen's d, eta squared, omega squared, and the Levene, Bartlett "
+                    "and Shapiro-Wilk assumption checks. Call this for any question "
+                    "about statistical tests, effect sizes, post-hoc multiple "
+                    "comparisons or assumption checks on a completed run."
+                ),
+            ),
+            ToolDefinition(
                 tool_id="inspect_result_summary",
                 version="v1",
                 input_schema={
@@ -747,6 +805,15 @@ class NodeOperationContextProvider:
                 scope_requirements=("project", "chain"),
                 max_output_budget=8192,
                 handler=inspect_result_summary,
+                description=(
+                    "Read the persisted result summary for one model node: model "
+                    "identity, fit metrics, coefficient rows, the regression table, "
+                    "model-family evidence, and the run's statistical evidence packet "
+                    "(ANOVA post-hoc comparisons and their correction method, Cohen's d, "
+                    "eta squared, omega squared, Levene, Bartlett and Shapiro-Wilk). "
+                    "Use this whenever the question is about statistical tests, effect "
+                    "sizes, post-hoc comparisons or assumption checks for a completed run."
+                ),
             ),
             ToolDefinition(
                 tool_id="inspect_project_model_coefficients",
@@ -949,6 +1016,18 @@ class NodeOperationContextProvider:
                         }
                         for item in arguments["transforms"]
                     )
+                )
+            )
+
+        def inspect_project_statistical_evidence(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered project scope")
+            return self.inspect_project_statistical_evidence(
+                InspectProjectStatisticalEvidenceRequest(
+                    run_ids=tuple(str(run_id) for run_id in arguments["run_ids"])
                 )
             )
 
@@ -1156,6 +1235,37 @@ class NodeOperationContextProvider:
                 scope_requirements=("project",),
                 max_output_budget=8192,
                 handler=inspect_project_notebook_workflow_results,
+            ),
+            ToolDefinition(
+                tool_id="inspect_project_statistical_evidence",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_ids"],
+                    "properties": {
+                        "run_ids": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 16,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project",),
+                max_output_budget=8192,
+                handler=inspect_project_statistical_evidence,
+                description=(
+                    "Read the persisted statistical evidence packet for the named runs: "
+                    "ANOVA post-hoc multiple comparisons with their correction method "
+                    "(Tukey, Bonferroni), Cohen's d, eta squared, omega squared, and the "
+                    "Levene, Bartlett and Shapiro-Wilk assumption checks. Call this for "
+                    "any question about statistical tests, effect sizes, post-hoc "
+                    "comparisons or assumption checks — these are produced by every "
+                    "ordinary run and do not require a Notebook workflow receipt."
+                ),
             ),
         ]
 
@@ -1365,6 +1475,31 @@ class NodeOperationContextProvider:
             "omitted_sections": omitted_sections,
         }
 
+    def inspect_statistical_evidence(
+        self,
+        request: InspectResultSummaryRequest,
+    ) -> dict[str, Any]:
+        """Return only the run's statistical evidence packet.
+
+        The same facts are reachable through inspect_result_summary, but tool
+        choice is name-driven in practice: a question about post-hoc tests or
+        effect sizes has to meet a tool whose name says so, or the model
+        concludes the tests were never run.
+        """
+
+        canonical, node, _manifest = self._read_node_snapshot(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            active_head_run_id=request.active_head_run_id,
+        )
+        run_root = self.project_root / "runs" / request.owner_run_id
+        return {
+            **canonical,
+            "node": _bounded_node(node),
+            "statistical_evidence": _bounded_statistics_evidence(run_root),
+        }
+
     def inspect_result_summary(
         self,
         request: InspectResultSummaryRequest,
@@ -1386,6 +1521,7 @@ class NodeOperationContextProvider:
             summary_status=summary_status,
             preview=preview,
             model_results=model_results,
+            run_root=run_root,
         )
         omitted_sections = ["raw_model_results"]
         if result_summary["coefficient_rows_omitted"]:
@@ -1797,6 +1933,24 @@ class NodeOperationContextProvider:
         return {
             "transforms": values,
             "omitted_sections": ["raw_model_results", "raw_rows"],
+        }
+
+    def inspect_project_statistical_evidence(
+        self,
+        request: InspectProjectStatisticalEvidenceRequest,
+    ) -> dict[str, Any]:
+        """Read the statistics evidence packet for named, visible project runs."""
+
+        runs: list[dict[str, Any]] = []
+        for run_id in sorted(set(request.run_ids)):
+            run_root = self._project_run_root(run_id)
+            evidence = _bounded_statistics_evidence(run_root)
+            if evidence is None:
+                continue
+            runs.append({"run_id": run_id, "statistical_evidence": evidence})
+        return {
+            "runs": runs,
+            "omitted_sections": ["raw_artifact_payloads", "raw_rows"],
         }
 
     def inspect_project_notebook_workflow_results(
@@ -2738,12 +2892,224 @@ def _read_diagnostic_summary(run_root: Path) -> tuple[dict[str, Any] | None, str
     return value, "complete"
 
 
+def _bounded_statistics_evidence(
+    run_root: Path,
+    *,
+    limit: int = 8,
+) -> dict[str, Any] | None:
+    """Expose the typed normal-Run statistics packet to Agent consumers.
+
+    The packet is already schema-owned at write time. This read projection
+    keeps the exact numeric fields while applying the same bounded public
+    result budget used for other Agent evidence.
+    """
+
+    packet_path = run_root / "statistical_tests" / "evidence.json"
+    try:
+        packet = read_json(packet_path)
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    if not isinstance(packet, dict):
+        return None
+    if packet.get("payload_schema") != "workbench.statistics.evidence-packet":
+        return None
+    raw_results = packet.get("results")
+    if not isinstance(raw_results, list):
+        return None
+    priority_types = {
+        "anova_posthoc",
+        "posthoc_anova",
+        "cohens_d",
+        "eta_squared",
+        "omega_squared",
+        "levene",
+        "bartlett",
+        "shapiro_wilk",
+    }
+    # Pairwise Cohen's d outnumbers every other family by an order of
+    # magnitude, so a first-N budget would spend the whole allowance on it and
+    # the Agent would conclude that post-hoc, effect-size and assumption tests
+    # were never run.  Round-robin across families so each one is represented,
+    # priority families first, order inside a family preserved.
+    families: dict[str, list[dict[str, Any]]] = {}
+    for row in raw_results:
+        if not isinstance(row, dict):
+            continue
+        families.setdefault(str(row.get("test_type") or ""), []).append(row)
+    ordered_families = sorted(
+        families, key=lambda name: (name not in priority_types, name)
+    )
+    selected_results: list[dict[str, Any]] = []
+    depth = 0
+    while len(selected_results) < max(0, limit):
+        progressed = False
+        for name in ordered_families:
+            rows = families[name]
+            if depth >= len(rows):
+                continue
+            progressed = True
+            selected_results.append(rows[depth])
+            if len(selected_results) >= max(0, limit):
+                break
+        if not progressed:
+            break
+        depth += 1
+    budget = _PublicResultBudget()
+    bounded_results: list[dict[str, Any]] = []
+    for row in selected_results:
+        if not isinstance(row, dict):
+            continue
+        bounded: dict[str, Any] = {}
+        for key in (
+            "test_id",
+            "test_version",
+            "test_type",
+            "nobs",
+            "statistic",
+            "p_value",
+            "p_value_corrected",
+            "effect_size",
+            "assumptions",
+            "warnings",
+            "correction",
+            "family",
+        ):
+            if key not in row:
+                continue
+            if key in {"test_id", "test_version", "test_type", "family", "correction"}:
+                # The correction method is what makes a post-hoc p-value
+                # interpretable, so it is a short label, not budgeted detail.
+                label = _bounded_label(row[key])
+                if label is not None:
+                    bounded[key] = label
+            elif key in {"nobs", "statistic", "p_value", "p_value_corrected", "effect_size"}:
+                number = _public_stat_number(row[key])
+                if number is not None:
+                    bounded[key] = number
+            else:
+                bounded[key] = _bounded_public_result_value(row[key], budget=budget)
+        comparisons = row.get("comparisons")
+        if isinstance(comparisons, list):
+            bounded["comparisons"] = [
+                _bounded_public_result_value(
+                    {
+                        key: comparison[key]
+                        for key in ("group1", "group2", "mean_difference", "ci_low", "ci_high", "p_value", "correction")
+                        if key in comparison
+                    },
+                    budget=budget,
+                )
+                for comparison in comparisons[:8]
+                if isinstance(comparison, dict)
+            ]
+        bounded_results.append(bounded)
+    return {
+        "payload_schema": packet.get("payload_schema"),
+        "schema_version": packet.get("schema_version"),
+        "dataset_ref": packet.get("dataset_ref"),
+        "lineage_parent": packet.get("lineage_parent"),
+        "correction_scope": packet.get("correction_scope"),
+        "results": bounded_results,
+        "result_count": len(raw_results),
+        "results_omitted": max(len(raw_results) - len(bounded_results), 0),
+    }
+
+
+def _bounded_regression_table(
+    model_results: list[dict[str, Any]],
+    *,
+    model_limit: int = 4,
+    term_limit: int = 32,
+) -> dict[str, Any]:
+    """Project the persisted coefficient packets into the report-table schema.
+
+    Agent consumers need the same side-by-side evidence as Report/Table, but
+    must not receive an unbounded raw model payload.  Keep the table schema,
+    exact scalar estimates and source ids, and bound both model and term
+    counts.  Significance markers are derived from the fixed report defaults;
+    they are display metadata, never a replacement for the persisted p-value.
+    """
+
+    cutoffs = (("***", 0.01), ("**", 0.05), ("*", 0.1))
+    models: list[dict[str, Any]] = []
+    rows_by_term: dict[str, dict[str, Any]] = {}
+    budget = _PublicResultBudget()
+
+    for result in model_results[: max(0, model_limit)]:
+        model_id = result.get("model_id")
+        if not isinstance(model_id, str) or not model_id:
+            continue
+        models.append({
+            "id": model_id,
+            "label": result.get("model_label") or result.get("model_type") or model_id,
+            "model_type": result.get("model_type"),
+            "nobs": result.get("nobs"),
+        })
+        coefficients = result.get("coefficients")
+        if not isinstance(coefficients, dict):
+            continue
+        for term, raw_cell in list(coefficients.items())[: max(0, term_limit)]:
+            if not isinstance(raw_cell, dict):
+                continue
+            term_key = str(term)
+            row = rows_by_term.setdefault(
+                term_key,
+                {"term": term_key, "label": term_key, "models": {}},
+            )
+            cell = {
+                key: _bounded_public_result_value(raw_cell[key], budget=budget)
+                for key in (
+                    "estimate",
+                    "std_error",
+                    "ci_lower",
+                    "ci_upper",
+                    "p_value",
+                    "source_id",
+                )
+                if key in raw_cell
+            }
+            p_value = raw_cell.get("p_value")
+            try:
+                parsed_p = float(p_value)
+            except (TypeError, ValueError):
+                parsed_p = math.nan
+            cell["significance"] = next(
+                (marker for marker, cutoff in cutoffs if math.isfinite(parsed_p) and parsed_p < cutoff),
+                "",
+            )
+            row["models"][model_id] = cell
+
+    model_ids = [model["id"] for model in models]
+    rows = [
+        {
+            **row,
+            "models": {
+                model_id: row["models"].get(model_id)
+                for model_id in model_ids
+            },
+        }
+        for row in rows_by_term.values()
+    ]
+    return {
+        "payload_schema": "workbench.regression-table",
+        "schema_version": 1,
+        "models": models,
+        "rows": rows,
+        "significance": {
+            "cutoffs": {marker: cutoff for marker, cutoff in cutoffs},
+            "legend": "*** p < 0.01; ** p < 0.05; * p < 0.1",
+        },
+        "models_omitted": max(len(model_results) - len(models), 0),
+    }
+
+
 def _bounded_result_summary(
     summary: dict[str, Any] | None,
     *,
     summary_status: str,
     preview: dict[str, Any],
     model_results: list[dict[str, Any]],
+    run_root: Path,
 ) -> dict[str, Any]:
     identity = summary.get("model_identity") if isinstance(summary, dict) else None
     identity = identity if isinstance(identity, dict) else {}
@@ -2797,6 +3163,9 @@ def _bounded_result_summary(
     coefficient_rows_omitted = max(len(coefficient_rows) - 8, 0)
 
     run_status = preview.get("run_status")
+    statistical_evidence = _bounded_statistics_evidence(run_root)
+    model_family_evidence = _bounded_model_family_evidence(run_root, model_results)
+    regression_table = _bounded_regression_table(model_results)
     return {
         "available": summary_status == "complete" and preview.get("available") is True,
         "summary_status": summary_status,
@@ -2820,7 +3189,349 @@ def _bounded_result_summary(
         ),
         "run_status": run_status if isinstance(run_status, dict) else None,
         "persisted_models": _bounded_persisted_model_facts(model_results),
+        "statistical_evidence": statistical_evidence,
+        "regression_table": regression_table,
+        "model_family_evidence": model_family_evidence,
     }
+
+
+def _bounded_model_family_evidence(
+    run_root: Path,
+    model_results: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Project exact, bounded evidence for v1.8.6 non-linear model families.
+
+    The raw model result remains outside the Agent boundary. This projection
+    keeps the packet's numeric authority while exposing only family-owned
+    fields, with fixed list/depth budgets so probabilities and survival rows
+    cannot become an unbounded data-export channel.
+    """
+
+    primary = next((item for item in model_results if isinstance(item, dict)), None)
+    if not isinstance(primary, dict):
+        return None
+    model_type = primary.get("model_type")
+    if model_type == "ordinal_logit":
+        diagnostic_path = run_root / "model_results" / "diagnostics_ordinal_logit_1.json"
+        diagnostic = read_json(diagnostic_path) if diagnostic_path.is_file() else {}
+        parallel = diagnostic.get("parallel_lines") if isinstance(diagnostic, dict) else {}
+        parallel = parallel if isinstance(parallel, dict) else {}
+        return {
+            "contract": "workbench.ordinal_logit.result.v1",
+            "model_type": model_type,
+            "outcome_levels": _bounded_labels(primary.get("outcome_levels")),
+            "odds_ratios": _bounded_numeric_map(
+                primary.get("odds_ratios"),
+                fields=("odds_ratio", "ci_lower", "ci_upper"),
+            ),
+            "marginal_effects": _bounded_ordinal_marginal_effects(primary.get("marginal_effects")),
+            "predicted_probabilities": _bounded_ordinal_probabilities(primary.get("predicted_probabilities")),
+            "parallel_lines": _bounded_parallel_lines(parallel),
+        }
+    if model_type == "multinomial_logit":
+        diagnostic_path = run_root / "model_results" / "diagnostics_multinomial_logit_1.json"
+        diagnostic = read_json(diagnostic_path) if diagnostic_path.is_file() else {}
+        return {
+            "contract": "workbench.multinomial_logit.result.v1",
+            "model_type": model_type,
+            "outcome_levels": _bounded_labels(primary.get("outcome_levels")),
+            "base_category": _bounded_label(primary.get("base_category")),
+            "relative_risk_ratios": _bounded_numeric_map(
+                primary.get("relative_risk_ratios"),
+                fields=("relative_risk_ratio", "ci_lower", "ci_upper"),
+            ),
+            "marginal_effects": _bounded_multinomial_marginal_effects(primary.get("marginal_effects")),
+            "predicted_probabilities": _bounded_probability_map(primary.get("predicted_probabilities")),
+            "diagnostic": _bounded_family_diagnostic(diagnostic),
+        }
+    if model_type == "survival_cox":
+        packet_path = run_root / "survival" / "evidence.json"
+        packet = read_json(packet_path) if packet_path.is_file() else None
+        if not isinstance(packet, dict):
+            return None
+        return {
+            "contract": packet.get("contract"),
+            "model_type": model_type,
+            "duration_column": _bounded_label(packet.get("duration_column")),
+            "event_column": _bounded_label(packet.get("event_column")),
+            "nobs": _public_positive_int(packet.get("nobs")),
+            "censoring": _bounded_numeric_fields(packet.get("censoring"), fields=("events", "censored")),
+            "kaplan_meier": _bounded_survival_rows(packet.get("kaplan_meier"), limit=16),
+            "log_rank": _bounded_numeric_fields(
+                packet.get("log_rank"),
+                fields=("statistic", "p_value"),
+                string_fields=("status",),
+                list_fields=("groups",),
+            ),
+            "risk_set": _bounded_survival_rows(packet.get("risk_set"), limit=16),
+            "schoenfeld": _bounded_schoenfeld(packet.get("schoenfeld")),
+        }
+    if model_type == "quantile_regression":
+        return {
+            "contract": "workbench.quantile_regression.result.v1",
+            "model_type": model_type,
+            "quantiles": _bounded_numeric_list(primary.get("quantiles"), limit=7),
+            "fits": _bounded_quantile_fits(primary.get("fits")),
+            "confidence_intervals": _bounded_quantile_intervals(primary.get("confidence_intervals")),
+            "bootstrap": _bounded_bootstrap(primary.get("bootstrap")),
+            "cross_quantile_comparisons": _bounded_cross_quantile_comparisons(primary.get("cross_quantile_comparisons")),
+        }
+    return None
+
+
+def _bounded_label(value: Any) -> str | None:
+    return value[:128] if isinstance(value, str) else None
+
+
+def _bounded_labels(value: Any, *, limit: int = 16) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item[:128] for item in value[:limit] if isinstance(item, str)]
+
+
+def _bounded_numeric_list(value: Any, *, limit: int) -> list[int | float]:
+    if not isinstance(value, list):
+        return []
+    return [number for item in value[:limit] if (number := _public_stat_number(item)) is not None]
+
+
+def _bounded_numeric_fields(
+    value: Any,
+    *,
+    fields: tuple[str, ...],
+    string_fields: tuple[str, ...] = (),
+    list_fields: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, Any] = {}
+    for field in fields:
+        number = _public_stat_number(value.get(field))
+        if number is not None:
+            result[field] = number
+    for field in string_fields:
+        label = _bounded_label(value.get(field))
+        if label is not None:
+            result[field] = label
+    for field in list_fields:
+        result[field] = _bounded_labels(value.get(field))
+    return result
+
+
+def _bounded_numeric_map(value: Any, *, fields: tuple[str, ...]) -> dict[str, dict[str, int | float]]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, dict[str, int | float]] = {}
+    for key, cell in list(value.items())[:64]:
+        if not isinstance(key, str) or not isinstance(cell, dict):
+            continue
+        bounded = _bounded_numeric_fields(cell, fields=fields)
+        if bounded:
+            result[key[:128]] = bounded
+    return result
+
+
+def _bounded_ordinal_marginal_effects(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for row in value[:16]:
+        if not isinstance(row, dict):
+            continue
+        effects = row.get("average_effect_by_category")
+        result.append({
+            "variable": _bounded_label(row.get("variable")),
+            "average_effect_by_category": {},
+        })
+        if isinstance(effects, dict):
+            result[-1]["average_effect_by_category"] = {
+                str(key)[:128]: number
+                for key, item in list(effects.items())[:16]
+                if (number := _public_stat_number(item)) is not None
+            }
+    return result
+
+
+def _bounded_ordinal_probabilities(value: Any, *, limit: int = 8) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for row in value[:limit]:
+        if not isinstance(row, dict):
+            continue
+        probabilities = row.get("probabilities")
+        result.append({
+            "row": _public_positive_int(row.get("row")),
+            "probabilities": {
+                str(key)[:128]: number
+                for key, item in list(probabilities.items())[:16]
+                if isinstance(key, str) and (number := _public_stat_number(item)) is not None
+            } if isinstance(probabilities, dict) else {},
+        })
+    return result
+
+
+def _bounded_parallel_lines(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    result = _bounded_numeric_fields(value, fields=(), string_fields=("status", "method"))
+    result["slope_ranges"] = {}
+    if isinstance(value.get("slope_ranges"), dict):
+        result["slope_ranges"] = {
+            str(key)[:128]: number
+            for key, item in list(value["slope_ranges"].items())[:16]
+            if (number := _public_stat_number(item)) is not None
+        }
+    comparisons: list[dict[str, Any]] = []
+    for row in (value.get("comparisons") if isinstance(value.get("comparisons"), list) else [])[:8]:
+        if not isinstance(row, dict):
+            continue
+        coefficients = row.get("coefficients")
+        comparisons.append({
+            "threshold": _public_positive_int(row.get("threshold")),
+            "coefficients": {
+                str(key)[:128]: number
+                for key, item in list(coefficients.items())[:16]
+                if isinstance(key, str) and (number := _public_stat_number(item)) is not None
+            } if isinstance(coefficients, dict) else {},
+        })
+    result["comparisons"] = comparisons
+    return result
+
+
+def _bounded_multinomial_marginal_effects(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    numeric_fields = ("dy/dx", "Std. Err.", "z", "Pr(>|z|)", "Conf. Int. Low", "Cont. Int. Hi.")
+    result: list[dict[str, Any]] = []
+    for row in value[:16]:
+        if not isinstance(row, dict):
+            continue
+        bounded = _bounded_numeric_fields(row, fields=numeric_fields, string_fields=("endog", "exog"))
+        result.append(bounded)
+    return result
+
+
+def _bounded_probability_map(value: Any, *, limit: int = 8) -> dict[str, list[int | float]]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key[:128]: _bounded_numeric_list(item, limit=limit)
+        for key, item in list(value.items())[:16]
+        if isinstance(key, str) and isinstance(item, list)
+    }
+
+
+def _bounded_family_diagnostic(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        "contract": _bounded_label(value.get("contract")),
+        "model_type": _bounded_label(value.get("model_type")),
+        "nobs": _public_positive_int(value.get("nobs")),
+        "outcome_levels": _bounded_labels(value.get("outcome_levels")),
+        "base_category": _bounded_label(value.get("base_category")),
+        "validation": {
+            key[:64]: label[:128]
+            for key, label in (value.get("validation") or {}).items()
+            if isinstance(key, str) and isinstance(label, str)
+        } if isinstance(value.get("validation"), dict) else {},
+    }
+
+
+def _bounded_survival_rows(value: Any, *, limit: int) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for row in value[:limit]:
+        if not isinstance(row, dict):
+            continue
+        bounded = _bounded_numeric_fields(
+            row,
+            fields=("time", "survival", "n_at_risk", "at_risk", "events", "censored"),
+            string_fields=("group",),
+        )
+        result.append(bounded)
+    return result
+
+
+def _bounded_schoenfeld(value: Any, *, limit: int = 8) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for row in value[:limit]:
+        if not isinstance(row, dict):
+            continue
+        result.append(_bounded_numeric_fields(
+            row,
+            fields=("time_correlation",),
+            string_fields=("variable", "status"),
+        ))
+    return result
+
+
+def _bounded_quantile_fits(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, Any] = {}
+    numeric_fields = ("estimate", "std_error", "p_value", "ci_lower", "ci_upper")
+    for quantile, fit in list(value.items())[:7]:
+        if not isinstance(quantile, str) or not isinstance(fit, dict):
+            continue
+        coefficients = fit.get("coefficients")
+        result[quantile[:32]] = {
+            "quantile": _public_stat_number(fit.get("quantile")),
+            "coefficients": {
+                str(term)[:128]: _bounded_numeric_fields(cell, fields=numeric_fields)
+                for term, cell in list(coefficients.items())[:32]
+                if isinstance(term, str) and isinstance(cell, dict)
+            } if isinstance(coefficients, dict) else {},
+        }
+    return result
+
+
+def _bounded_quantile_intervals(value: Any) -> dict[str, dict[str, list[int | float]]]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, dict[str, list[int | float]]] = {}
+    for quantile, terms in list(value.items())[:7]:
+        if not isinstance(quantile, str) or not isinstance(terms, dict):
+            continue
+        result[quantile[:32]] = {}
+        for term, interval in list(terms.items())[:32]:
+            if not isinstance(term, str) or not isinstance(interval, list) or len(interval) != 2:
+                continue
+            numbers = [_public_stat_number(item) for item in interval]
+            if all(item is not None for item in numbers):
+                result[quantile[:32]][term[:128]] = [numbers[0], numbers[1]]  # type: ignore[list-item]
+    return result
+
+
+def _bounded_bootstrap(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    result = _bounded_numeric_fields(value, fields=("repetitions", "random_state"))
+    successful = value.get("successful_repetitions")
+    if isinstance(successful, dict):
+        result["successful_repetitions"] = {
+            str(key)[:32]: number
+            for key, item in list(successful.items())[:7]
+            if (number := _public_positive_int(item)) is not None
+        }
+    result["intervals"] = _bounded_quantile_intervals(value.get("intervals"))
+    return result
+
+
+def _bounded_cross_quantile_comparisons(value: Any, *, limit: int = 32) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    numeric_fields = ("lower_quantile", "upper_quantile", "difference", "std_error", "p_value")
+    result: list[dict[str, Any]] = []
+    for row in value[:limit]:
+        if not isinstance(row, dict):
+            continue
+        result.append(_bounded_numeric_fields(row, fields=numeric_fields, string_fields=("term",)))
+    return result
 
 
 def _bounded_persisted_model_facts(
@@ -3717,3 +4428,13 @@ def inspect_analysis_loop_context(
             "packet": payload,
         })
     return result
+
+
+def read_prediction_research_evidence(
+    run_root: Path,
+    *,
+    consumer: str = "agent",
+) -> dict[str, Any]:
+    """Read v1.8.6 prediction evidence through the shared projection."""
+
+    return read_prediction_evidence_from_run_root(run_root, consumer=consumer)

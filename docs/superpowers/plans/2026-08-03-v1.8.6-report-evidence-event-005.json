@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "2a24d0f9-6700-4c36-841b-5ea2c2a6e3b0",
+  "timestamp": "2026-08-04T00:18:00.000Z",
+  "type": "GAP",
+  "subtype": "revision_schema_boundary",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The report save route accepted arbitrary unknown keys inside the nested revision source because the Pydantic field was a generic dictionary and storage validation checked only protected result-like keys.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python -m pytest tests/test_ai_report_store.py::test_ai_report_route_rejects_unknown_revision_fields -q",
+    "sha256": "5a15c2a5fe9d69c30dbfb8b358e345d7e2ee254ae673d104c10ae8d3f276c8ff",
+    "observed_at": "2026-08-04T00:17:40.000Z"
+  },
+  "impact": "A report revision could carry unrecognized audit fields into durable storage even though it could not overwrite Run result fields.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Versioned nested report payloads need explicit allowed-key validation in the server store, not only protected-key rejection.",
+  "incident_id": "2a24d0f9-6700-4c36-841b-5ea2c2a6e3b0",
+  "lesson_key": "strict-report-revision-schema",
+  "links": [
+    "backend/workbench/report_store.py",
+    "tests/test_ai_report_store.py"
+  ]
+}

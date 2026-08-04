@@ -482,10 +482,15 @@ def _validate_rescope_allowed_paths(root: Path, allowed_paths: tuple[str, ...] |
         raise ContextPackError("rescope requires at least one allow_path when --allow-path is supplied")
     for value in allowed_paths:
         parts = Path(value).parts
+        concrete_top_level_backend_file = (
+            len(parts) == 3
+            and parts[:2] == ("backend", "workbench")
+            and parts[-1].endswith((".py", ".pyi"))
+        )
         if (
             not parts
             or parts in {("backend",), ("backend", "workbench"), ("tests",), ("frontend",), ("scripts",), (".agent",)}
-            or (parts[0] == "backend" and len(parts) < 4)
+            or (parts[0] == "backend" and len(parts) < 4 and not concrete_top_level_backend_file)
         ):
             raise ContextPackError("allowed_paths contains a too broad boundary path")
     _reject_symlinked_relative_paths(root, allowed_paths, "allowed_paths")

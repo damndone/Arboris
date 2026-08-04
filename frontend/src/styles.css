@@ -473,7 +473,7 @@ label {
   gap: 4px;
 }
 
-input,
+input:not([type="checkbox"]):not([type="radio"]),
 select {
   background: var(--field-bg);
   border: 1px solid var(--border-strong);
@@ -482,6 +482,19 @@ select {
   min-height: 36px;
   padding: 6px 9px;
   width: 100%;
+}
+
+/* Choice controls are not text fields. Keep the native affordance compact;
+ * component-specific switches and inline choices can still override these
+ * low-specificity defaults below. */
+:where(input[type="checkbox"], input[type="radio"]) {
+  accent-color: var(--tint);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  min-height: 14px;
+  padding: 0;
+  width: 14px;
 }
 
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"])[aria-invalid="true"],
@@ -834,6 +847,7 @@ dd {
 .workbench-shell--lineage .workbench-outlet > * {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
 }
 
 .runs-table {

@@ -52,6 +52,10 @@ def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -
         "cs_did",
         "sa_did",
         "dcdh",
+        "ordinal_logit",
+        "multinomial_logit",
+        "survival_cox",
+        "quantile_regression",
     }
 
     ols = MODEL_FAMILY_CONTRACTS["ols"]

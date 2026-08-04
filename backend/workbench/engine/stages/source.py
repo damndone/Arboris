@@ -40,6 +40,16 @@ class SourceStage:
             "schema", "complete", f"Inferred schema with {len(schema.columns)} columns"
         )
         frame = next(iter(frames.values()))
+        labels = ctx.artifacts.get("_labels", {})
+        if isinstance(labels, dict):
+            variable_labels = labels.get("variable_labels", {})
+            value_labels = labels.get("value_labels", {})
+            for source_frame in frames.values():
+                source_frame.attrs["variable_labels"] = dict(variable_labels)
+                source_frame.attrs["value_labels"] = {
+                    str(column): dict(mapping)
+                    for column, mapping in value_labels.items()
+                }
         raw_row_count = len(frame)
         raw_col_count = len(frame.columns)
         env.recorder.record_stage(

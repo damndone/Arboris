@@ -27,12 +27,14 @@ def test_prediction_via_request_writes_artifact(tmp_path):
     run_root, result = _run(
         tmp_path, mode="auto", y="y", x=["x"], model_type="auto",
         prediction_model_type="prediction_ridge", prediction_cv_folds=3,
+        prediction_data_structure="iid",
     )
     assert result["status"] == "completed"
     pred = read_json(run_root / "prediction_results" / "prediction_ridge_1.json")
     assert pred["model_type"] == "prediction_ridge"
-    assert pred["cv_folds"] == 3
-    assert "metrics" in pred
+    evaluation = read_json(run_root / "evaluation_results" / "prediction_ridge_1.json")
+    assert len(evaluation["cv"]) == 3
+    assert "oos" in evaluation
 
 
 def test_no_prediction_request_writes_nothing(tmp_path):

@@ -45,4 +45,24 @@ describe("PredictionControls", () => {
       onEnabled={vi.fn()} onModelType={vi.fn()} onCvFolds={vi.fn()} onSampling={vi.fn()} />);
     expect(container.firstChild).toBeNull();
   });
+
+  it("requires an explicit data structure and exposes the grouped key", () => {
+    const onStructure = vi.fn();
+    const onGroup = vi.fn();
+    render(<PredictionControls capabilities={caps} enabled={true}
+      modelType="prediction_ridge" cvFolds={5} sampling=""
+      columns={["y", "x", "firm", "year"]}
+      dataStructure="grouped" groupColumn="firm" timeColumn=""
+      onEnabled={vi.fn()} onModelType={vi.fn()} onCvFolds={vi.fn()} onSampling={vi.fn()}
+      onDataStructure={onStructure} onGroupColumn={onGroup} onTimeColumn={vi.fn()} />);
+    expect(screen.getByLabelText(/data structure|数据结构/i)).toHaveValue("grouped");
+    fireEvent.change(screen.getByLabelText(/data structure|数据结构/i), {
+      target: { value: "iid" },
+    });
+    expect(onStructure).toHaveBeenCalledWith("iid");
+    fireEvent.change(screen.getByLabelText(/group column|分组列/i), {
+      target: { value: "year" },
+    });
+    expect(onGroup).toHaveBeenCalledWith("year");
+  });
 });

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "b7f169a5-1d4a-4b98-9cf4-9b1f70b18a42",
+  "timestamp": "2026-08-04T11:05:00.000Z",
+  "type": "ERROR",
+  "subtype": "persisted_report_export_identity_mismatch",
+  "stage": "gate",
+  "cause_status": "known",
+  "cause": "The live browser export request was correctly rejected while the running backend still held the pre-fix persisted-figure comparison logic; the focused regression test reproduced the mismatch before the server reload.",
+  "evidence": {
+    "kind": "browser_pytest",
+    "ref": "Browser export returned AI_REPORT_SOURCE_MISMATCH before backend reload; tests/test_report_export.py::test_persisted_report_export_is_bound_to_the_stored_revision passed after normalizing stable figure identity.",
+    "sha256": "753898ab9020add89b2504b9a2947ba5de92327c626209b18d3e736898a9e10f",
+    "observed_at": "2026-08-04T11:05:00.000Z"
+  },
+  "impact": "Export was unavailable in the already-running browser service until the exact v1.8.6 backend process was restarted; no report content was fabricated.",
+  "preventability": "partially_preventable",
+  "resolution": "resolved",
+  "lesson": "A code-level export fix needs a live-service reload and one real browser request before the UI can be called accepted.",
+  "incident_id": "b7f169a5-1d4a-4b98-9cf4-9b1f70b18a42",
+  "lesson_key": "report-export-live-service-reload",
+  "links": [
+    "backend/workbench/http/runs_routes.py",
+    "tests/test_report_export.py"
+  ]
+}

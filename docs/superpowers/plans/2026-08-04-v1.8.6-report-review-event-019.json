@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "event_id": "d2b28a89-17f9-4c2d-b0d9-cff53034ba5e",
+  "timestamp": "2026-08-04T11:30:00.000Z",
+  "type": "GATE",
+  "subtype": "report_review_correction_acceptance",
+  "stage": "gate",
+  "cause_status": "not_applicable",
+  "cause": "The Report review correction passed focused and full automated verification plus live in-app browser acceptance after the backend service reload.",
+  "evidence": {
+    "kind": "browser_test_command",
+    "ref": "Frontend full: 187 files / 1619 tests passed; backend report suite: 72 passed; frontend typecheck passed; git diff --check passed; live browser verified report export, result-table export, outside-click menus, context bounds, collapse, float, and Graph cross-view persistence.",
+    "sha256": "e115bca619a5a6b6b87cc5c5fb91b28e93d433fa60fedd846b8b26dd2b475812",
+    "observed_at": "2026-08-04T11:30:00.000Z"
+  },
+  "impact": "The requested Report page and Report review workspace corrections are verified for this scope; no commit, push, or release action was taken.",
+  "preventability": "not_preventable",
+  "resolution": "accepted",
+  "lesson": "Keep the top composer as the single revision entry point, make exports explicit, and verify the persistent right panel through real view switching.",
+  "incident_id": "d2b28a89-17f9-4c2d-b0d9-cff53034ba5e",
+  "lesson_key": "report-review-export-and-layout-acceptance",
+  "links": [
+    "frontend/src/report/ReportView.tsx",
+    "frontend/src/report/ReportReviewPanel.tsx",
+    "frontend/src/report/ReportComposer.tsx",
+    "frontend/src/workbench/PanelHost.tsx",
+    "frontend/src/lineage/tokens/lineage.css",
+    "backend/workbench/http/runs_routes.py"
+  ]
+}

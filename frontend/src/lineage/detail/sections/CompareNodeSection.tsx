@@ -81,6 +81,30 @@ function ComparePresentation({ presentation }: { presentation: unknown }) {
   );
 }
 
+function PredictionCompareEvidence({ packet }: { packet: Record<string, unknown> }) {
+  if (packet.schema_id !== "workbench.prediction.compare.v1") return null;
+  const metricDiff = object(packet.metric_diff);
+  const status = typeof packet.comparability === "string" ? packet.comparability : "—";
+  return (
+    <div data-testid="prediction-compare-evidence" style={{ marginTop: 10, fontSize: 12 }}>
+      <div className="ln-section-label">Prediction research comparison</div>
+      <p>Comparability: <strong>{status}</strong></p>
+      {typeof packet.split_plan_hash === "string" && (
+        <p>Shared SplitPlan: <code>{packet.split_plan_hash}</code></p>
+      )}
+      {typeof packet.message === "string" && <p className="ios-warning">{packet.message}</p>}
+      {Object.entries(metricDiff).map(([metric, raw]) => {
+        const values = object(raw);
+        return (
+          <p key={metric}>
+            {metric}: {String(values.left ?? "—")} → {String(values.right ?? "—")} (Δ {String(values.difference ?? "—")})
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 export function CompareNodeSection({ node }: { node: GraphViewNode }) {
   const projectRoot = useProjectRootOptional();
   const forest = useForest();
@@ -152,6 +176,8 @@ export function CompareNodeSection({ node }: { node: GraphViewNode }) {
           {safeMessage ? ` — ${safeMessage}` : null}
         </p>
       )}
+
+      <PredictionCompareEvidence packet={packet} />
 
       {conclusion.classification != null ? (
         <p style={{ fontSize: 12, marginTop: 8 }}>

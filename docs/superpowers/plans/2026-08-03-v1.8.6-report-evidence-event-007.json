@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "6b4d9c9e-7492-4d23-88a4-6a3baf5e32a2",
+  "timestamp": "2026-08-04T00:24:22.000Z",
+  "type": "FAILURE",
+  "subtype": "revision_parent_binding",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The first server-side revision validation rejected a new report record because its immutable source snapshot correctly pointed to the original parent report rather than the child record ID.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python -m pytest tests/test_ai_report_store.py::test_ai_report_route_allows_new_revision_bound_to_parent_snapshot -q",
+    "sha256": "33e52552afcacdc80402ea638a82a80ebd4374ad491dcf613ad0e5689d2a4a4c",
+    "observed_at": "2026-08-04T00:24:22.000Z"
+  },
+  "impact": "Real Report-page prose edits would have failed at the save API even though the frontend allowed only narrative editing.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Revision IDs and immutable source IDs are distinct; bind a child revision to an existing parent snapshot instead of requiring identifier equality.",
+  "incident_id": "6b4d9c9e-7492-4d23-88a4-6a3baf5e32a2",
+  "lesson_key": "parent-bound-report-revisions",
+  "links": [
+    "backend/workbench/report_store.py",
+    "tests/test_ai_report_store.py"
+  ]
+}

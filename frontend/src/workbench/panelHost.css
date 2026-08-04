@@ -1,0 +1,192 @@
+.node-panel-floating {
+  position: fixed;
+  left: var(--node-panel-left, 36px);
+  top: var(--node-panel-top, 116px);
+  z-index: 900;
+  width: min(680px, calc(100vw - 32px));
+  height: min(720px, calc(100vh - 148px));
+  min-width: 360px;
+  min-height: 280px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 56px);
+  resize: none;
+  overflow: hidden;
+}
+
+.node-panel-floating__surface {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--separator) 86%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--bg-card-2) 96%, transparent);
+  color: var(--label);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.node-panel-floating__tabs {
+  flex: 0 0 auto;
+  border-bottom: 1px solid color-mix(in oklch, var(--separator) 76%, transparent);
+}
+
+/* DetailDrawer normally sits inside 22px of panel padding and uses a
+ * compensating negative top margin for its docked tab strip. A floating
+ * window has its own chrome, so keep the detached tab fully inside it. */
+.node-panel-floating__tabs .detail-tabs {
+  margin: 0;
+}
+
+.node-panel-floating__tabs .detail-tabs__strip--compact {
+  padding-inline: 8px;
+}
+
+.node-panel-floating__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.node-panel-floating .detail-drawer {
+  box-sizing: border-box;
+  width: 100% !important;
+  height: 100% !important;
+  border-left: 0 !important;
+  padding-top: 12px !important;
+  overflow-y: auto !important;
+}
+
+/* Report review starts its header controls at the panel's 12px top inset.
+ * The embedded DetailDrawer normally centers its toolbar inside a 36px row;
+ * floating node chrome uses the same top baseline as Report review instead. */
+.node-panel-floating .detail-header-toolbar {
+  align-items: flex-start !important;
+}
+
+/* Node Actions and the drag affordance share the same 27px square baseline
+ * as Float/Dock, Pin, and Collapse. Actions keeps its menu semantics but uses
+ * the compact ellipsis glyph so the toolbar does not grow wider than its
+ * window controls. */
+.node-panel-floating .node-action-menu__trigger,
+.node-panel-floating .panel-window-drag-handle {
+  display: inline-grid;
+  place-items: center;
+  width: 27px;
+  min-width: 27px;
+  height: 27px;
+  min-height: 27px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--label-secondary);
+  line-height: 1;
+}
+
+.node-panel-floating .node-action-menu__trigger {
+  font-size: 19px;
+  font-weight: 500;
+}
+
+.node-panel-floating .panel-window-drag-handle {
+  cursor: grab;
+  font-size: 16px;
+  letter-spacing: -3px;
+}
+
+.node-panel-floating .panel-window-drag-handle:active {
+  cursor: grabbing;
+}
+
+.node-panel-floating .node-action-menu__trigger:hover,
+.node-panel-floating .node-action-menu__trigger:focus-visible,
+.node-panel-floating .panel-window-drag-handle:hover,
+.node-panel-floating .panel-window-drag-handle:focus-visible {
+  background: color-mix(in oklch, var(--tint) 10%, transparent);
+  color: var(--label);
+  outline: none;
+}
+
+/* CSS resize only exposes the bottom-right corner. These four transparent
+ * buttons make each corner an explicit, keyboard-discoverable pointer target;
+ * WorkbenchRouteContainer owns the size/position math. */
+.node-panel-floating__resize-handle {
+  position: absolute;
+  z-index: 4;
+  width: 16px;
+  min-width: 0;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+}
+
+.node-panel-floating__resize-handle--top-left {
+  top: -1px;
+  left: -1px;
+  cursor: nwse-resize;
+}
+
+.node-panel-floating__resize-handle--top-right {
+  top: -1px;
+  right: -1px;
+  cursor: nesw-resize;
+}
+
+.node-panel-floating__resize-handle--bottom-left {
+  bottom: -1px;
+  left: -1px;
+  cursor: nesw-resize;
+}
+
+.node-panel-floating__resize-handle--bottom-right {
+  right: -1px;
+  bottom: -1px;
+  cursor: nwse-resize;
+}
+
+.node-panel-floating__resize-handle:focus-visible {
+  outline: 2px solid var(--tint);
+  outline-offset: -2px;
+}
+
+.node-panel-floating--pinned .node-panel-floating__surface {
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.28), 0 0 0 1px color-mix(in oklch, var(--tint) 24%, transparent);
+}
+
+.node-panel-floating--dragging,
+.node-panel-floating--dragging * {
+  user-select: none;
+}
+
+.node-panel-floating--collapsed {
+  width: min(520px, calc(100vw - 32px));
+  height: auto;
+  min-width: 280px;
+  min-height: 0;
+  resize: none;
+  overflow: visible;
+}
+
+.node-panel-floating--collapsed .node-panel-floating__surface,
+.node-panel-floating--collapsed .node-panel-floating__body,
+.node-panel-floating--collapsed .detail-drawer {
+  height: auto !important;
+  min-height: 0;
+  overflow: visible !important;
+}
+
+@media (max-width: 720px) {
+  .node-panel-floating {
+    left: 8px;
+    width: calc(100vw - 16px);
+    min-width: 0;
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LineageContext } from "../../lineage/LineageContext";
 import type { LineageContextValue } from "../../lineage/LineageContext";
@@ -137,12 +137,184 @@ describe("TableView", () => {
     expect(screen.getByText("education")).toBeTruthy();
     expect(screen.getByText("age")).toBeTruthy();
     expect(screen.getByText("0.08")).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "95% CI" })).toBeTruthy();
-    expect(screen.getByText("[0.0604, 0.0996]")).toBeTruthy();
+    const coefficientDetails = within(screen.getByTestId("table-view-coefficients"));
+    expect(coefficientDetails.getByRole("columnheader", { name: "95% CI" })).toBeTruthy();
+    expect(coefficientDetails.getByText("[0.0604, 0.0996]")).toBeTruthy();
     expect(screen.getByTestId("table-view-coefficient-scroll")).toHaveAttribute("tabindex", "0");
     // Stata `reg` prints Adj R-squared; a reader must not have to compute it.
     expect(screen.getByText(/adj\. R²=0\.41/)).toBeTruthy();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("renders multiple model_results side-by-side with configurable stars, labels, CI, and source ids", async () => {
+    mockDetail.current = {
+      model_results: [
+        {
+          model_id: "ols_1",
+          model_type: "Baseline",
+          nobs: 100,
+          coefficients: {
+            education: {
+              estimate: 1.25,
+              std_error: 0.2,
+              p_value: 0.15,
+              ci_lower: 0.8,
+              ci_upper: 1.7,
+              source_id: "model_results.ols_1.coefficients.education",
+            },
+          },
+        },
+        {
+          model_id: "ols_2",
+          model_type: "With control",
+          nobs: 95,
+          coefficients: {
+            education: {
+              estimate: 1.1,
+              std_error: 0.18,
+              p_value: 0.04,
+              ci_lower: 0.75,
+              ci_upper: 1.45,
+              source_id: "model_results.ols_2.coefficients.education",
+            },
+          },
+        },
+      ],
+      // This is the optional run-level presentation configuration consumed by
+      // the Table view; it must not silently fall back to a different legend.
+      significance_levels: { "*": 0.2, "**": 0.05, "***": 0.01 },
+      variable_labels: { education: "Education years" },
+      artifact_counts: {},
+    } as unknown as RunDetail;
+
+    renderTable();
+
+    const table = await screen.findByTestId("table-view-regression-table");
+    expect(table).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /Baseline \(ols_1\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /With control \(ols_2\)/ })).toBeInTheDocument();
+    const regressionTable = within(table);
+    expect(regressionTable.getByText("Education years (education)")).toBeInTheDocument();
+    expect(regressionTable.getByText("1.25 *")).toBeInTheDocument();
+    expect(regressionTable.getByText("1.1 **")).toBeInTheDocument();
+    expect(regressionTable.getByText("[0.8, 1.7]")).toBeInTheDocument();
+    expect(regressionTable.getByText("[0.75, 1.45]")).toBeInTheDocument();
+    expect(regressionTable.getByText("source: model_results.ols_1.coefficients.education")).toBeInTheDocument();
+    expect(regressionTable.getByText("source: model_results.ols_2.coefficients.education")).toBeInTheDocument();
+    expect(regressionTable.getByText("Significance: *** p < 0.01; ** p < 0.05; * p < 0.2")).toBeInTheDocument();
+
+    const oneStarCutoff = screen.getByRole("spinbutton", { name: "One-star cutoff" });
+    expect(oneStarCutoff).toHaveValue(0.2);
+    fireEvent.change(oneStarCutoff, { target: { value: "0.1" } });
+    await waitFor(() => {
+      expect(regressionTable.getByText("Significance: *** p < 0.01; ** p < 0.05; * p < 0.1")).toBeInTheDocument();
+    });
+  });
+
+  it("consumes typed model-family evidence in the Table view", async () => {
+    mockDetail.current = {
+      model_results: [
+        {
+          model_id: "ordinal_1",
+          model_type: "ordinal_logit",
+          outcome_levels: ["low", "medium", "high"],
+          odds_ratios: {
+            education: { odds_ratio: 1.4, ci_lower: 1.1, ci_upper: 1.8 },
+          },
+          marginal_effects: [
+            { variable: "education", average_effect_by_category: { low: -0.1, high: 0.1 } },
+          ],
+          predicted_probabilities: [
+            { row: 0, probabilities: { low: 0.2, medium: 0.5, high: 0.3 } },
+          ],
+        },
+      ],
+      artifact_counts: {},
+    } as unknown as RunDetail;
+
+    renderTable();
+
+    const evidence = await screen.findByTestId("model-family-evidence");
+    expect(evidence).toHaveTextContent("Ordered logit");
+    expect(evidence).toHaveTextContent("Odds ratios");
+    expect(evidence).toHaveTextContent("1.4");
+    expect(evidence).toHaveTextContent("Predicted probabilities");
+  });
+
+  it("states when Table 1, statistical evidence, and labels are not provided by RunDetail", async () => {
+    mockDetail.current = {
+      model_results: [
+        {
+          model_id: "ols_1",
+          coefficients: { education: { estimate: 1.25, p_value: 0.15 } },
+        },
+      ],
+      artifact_counts: {},
+    } as unknown as RunDetail;
+
+    renderTable();
+
+    const status = await screen.findByTestId("table-view-evidence-status");
+    expect(status).toHaveTextContent("Table 1: not provided by RunDetail");
+    expect(status).toHaveTextContent("Statistical evidence: not provided by RunDetail");
+    expect(status).toHaveTextContent("Variable labels: not provided; using variable names");
+  });
+
+  it("consumes the persisted statistical evidence packet when the artifact is present", async () => {
+    mockDetail.current = {
+      model_results: [
+        {
+          model_id: "ols_1",
+          coefficients: { education: { estimate: 1.25, p_value: 0.04 } },
+        },
+      ],
+      artifact_counts: {},
+    } as unknown as RunDetail;
+    mockArtifacts.current = {
+      groups: [
+        {
+          artifact_type: "statistical_test",
+          items: [
+            {
+              artifact_id: "statistical_tests_evidence",
+              path: "statistical_tests/evidence.json",
+              artifact_type: "statistical_test",
+              step: "statistical_tests",
+              sha256: "evidence-sha",
+            },
+          ],
+        },
+      ],
+    } as unknown as ArtifactsResponse;
+    artifactJsonMock.mockResolvedValue({
+      payload_schema: "workbench.statistics.evidence-packet",
+      schema_version: 1,
+      results: [
+        {
+          test_id: "cohens_d:y:group:a:b",
+          test_type: "cohens_d",
+          nobs: 20,
+          statistic: 2.3,
+          p_value: 0.01,
+          effect_size: { effect_size_name: "cohens_d", value: 1.2 },
+          assumptions: ["independent observations"],
+          warnings: [],
+          source_id: "statistical_tests.evidence.cohens_d.y.group",
+        },
+      ],
+    });
+
+    renderTable();
+
+    const evidence = await screen.findByTestId("table-view-statistical-evidence");
+    expect(evidence).toHaveTextContent("Cohen's d");
+    expect(evidence).toHaveTextContent("1.2");
+    expect(evidence).toHaveTextContent("statistical_tests.evidence.cohens_d.y.group");
+    expect(artifactJsonMock).toHaveBeenCalledWith(
+      "/tmp/demo",
+      "run-1",
+      "statistical_tests_evidence",
+    );
   });
 
   it("renders declared post-estimation results so the answer is on screen", async () => {

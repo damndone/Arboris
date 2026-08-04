@@ -180,12 +180,19 @@ def run_workflow(
     x: list[str],
     model_type: str = "auto",
     imputation: dict | None = None,
+    statistical_tests: dict | None = None,
     entity_col: str = "",
     time_col: str = "",
     covariance: str = "",
     prediction_model_type: str = "",
     prediction_cv_folds: int = 0,
     prediction_sampling_method: str = "",
+    prediction_data_structure: str | None = None,
+    prediction_entity_column: str = "",
+    prediction_group_column: str = "",
+    prediction_time_column: str = "",
+    prediction_final_holdout_fraction: float | None = None,
+    prediction_shuffle: bool | None = None,
     iv_endog: list[str] | None = None,
     iv_instruments: list[str] | None = None,
     did_mode: str = "",
@@ -201,12 +208,17 @@ def run_workflow(
     cs_cluster_var: str = "",
     honest_did: bool = False,
     model_options: dict[str, object] | None = None,
+    frequency_weight: str = "",
+    analysis_weight: str = "",
+    sampling_weight: str = "",
+    labels: dict[str, object] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
     from ..lineage.hashing import dag_hash
     from ..lineage.run_inputs import write_run_inputs
     from ..lineage.upload_store import store_upload_bytes
     from ..model_options import ModelOptionsError, bind_new_model_options
+    from ..services.run_service import _normalize_labels
 
     project_root = Path(project_root)
     if model_type == "linear_mixed_effects":
@@ -227,6 +239,7 @@ def run_workflow(
         model_type, {} if model_options is None else model_options
     )
     normalized_model_options = bound_model_options.payload
+    normalized_labels = _normalize_labels(labels)
     effective_covariance = covariance
     if model_type in {"ols", "panel_ols"} and normalized_model_options:
         from ..contracts.model.ols import effective_ols_covariance
@@ -263,6 +276,15 @@ def run_workflow(
         "prediction_model_type": prediction_model_type,
         "prediction_cv_folds": str(prediction_cv_folds),
         "prediction_sampling_method": prediction_sampling_method,
+        "prediction_data_structure": prediction_data_structure,
+        "prediction_entity_column": prediction_entity_column,
+        "prediction_group_column": prediction_group_column,
+        "prediction_time_column": prediction_time_column,
+        "prediction_final_holdout_fraction": prediction_final_holdout_fraction,
+        "prediction_shuffle": prediction_shuffle,
+        "frequency_weight": frequency_weight,
+        "analysis_weight": analysis_weight,
+        "sampling_weight": sampling_weight,
         "did_mode": did_mode,
         "did_cohort_col": did_cohort_col,
         "did_treat_col": did_treat_col,
@@ -279,6 +301,8 @@ def run_workflow(
     }
     if model_options_binding is not None:
         direct_form["model_options_binding"] = model_options_binding
+    if normalized_labels:
+        direct_form["labels"] = normalized_labels
     upload_path = input_files[0] if input_files else None
     upload_bytes = upload_path.read_bytes() if upload_path is not None else b""
     upload_filename = upload_path.name if upload_path is not None else None
@@ -302,6 +326,8 @@ def run_workflow(
     }
     if model_options_binding is not None:
         executable_payload["model_options_binding"] = model_options_binding
+    if normalized_labels:
+        executable_payload["labels"] = normalized_labels
     write_run_inputs(
         run.root,
         form=direct_form,
@@ -349,12 +375,19 @@ def run_workflow(
             started_at,
             model_type=model_type,
             imputation=imputation,
+            statistical_tests=statistical_tests,
             entity_col=entity_col,
             time_col=time_col,
             covariance=covariance,
             prediction_model_type=prediction_model_type,
             prediction_cv_folds=prediction_cv_folds,
             prediction_sampling_method=prediction_sampling_method,
+            prediction_data_structure=prediction_data_structure,
+            prediction_entity_column=prediction_entity_column,
+            prediction_group_column=prediction_group_column,
+            prediction_time_column=prediction_time_column,
+            prediction_final_holdout_fraction=prediction_final_holdout_fraction,
+            prediction_shuffle=prediction_shuffle,
             iv_endog=iv_endog,
             iv_instruments=iv_instruments,
             did_mode=did_mode,
@@ -371,6 +404,10 @@ def run_workflow(
             honest_did=honest_did,
             model_options=normalized_model_options,
             model_options_binding=model_options_binding,
+            frequency_weight=frequency_weight,
+            analysis_weight=analysis_weight,
+            sampling_weight=sampling_weight,
+            labels=normalized_labels,
             stop_reason=stop_reason,
         )
     except OptionalDependencyNotInstalled as exc:
@@ -511,12 +548,19 @@ def _run_workflow(
     sheet_name: str | None = None,
     transpose: bool = False,
     imputation: dict | None = None,
+    statistical_tests: dict | None = None,
     entity_col: str = "",
     time_col: str = "",
     covariance: str = "",
     prediction_model_type: str = "",
     prediction_cv_folds: int = 0,
     prediction_sampling_method: str = "",
+    prediction_data_structure: str | None = None,
+    prediction_entity_column: str = "",
+    prediction_group_column: str = "",
+    prediction_time_column: str = "",
+    prediction_final_holdout_fraction: float | None = None,
+    prediction_shuffle: bool | None = None,
     iv_endog: list[str] | None = None,
     iv_instruments: list[str] | None = None,
     did_mode: str = "",
@@ -533,6 +577,10 @@ def _run_workflow(
     honest_did: bool = False,
     model_options: dict[str, object] | None = None,
     model_options_binding: dict[str, str] | None = None,
+    frequency_weight: str = "",
+    analysis_weight: str = "",
+    sampling_weight: str = "",
+    labels: dict[str, object] | None = None,
     lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
@@ -543,10 +591,12 @@ def _run_workflow(
     """
     from ..engine.stages import PIPELINE
     from ..model_options import canonicalize_model_options
+    from ..services.run_service import _normalize_labels
 
     normalized_model_options = canonicalize_model_options(
         {} if model_options is None else model_options
     )
+    normalized_labels = _normalize_labels(labels)
     effective_covariance = covariance
     if model_type in {"ols", "panel_ols"} and normalized_model_options:
         from ..contracts.model.ols import effective_ols_covariance
@@ -586,12 +636,23 @@ def _run_workflow(
     ctx.artifacts["_model_type"] = model_type
     ctx.artifacts["_started_at"] = started_at
     ctx.artifacts["_imputation_request"] = imputation
+    ctx.artifacts["_statistical_tests_request"] = statistical_tests
     ctx.artifacts["_entity_col"] = entity_col
     ctx.artifacts["_time_col"] = time_col
     ctx.artifacts["_covariance"] = effective_covariance
     ctx.artifacts["_prediction_model_type"] = prediction_model_type
     ctx.artifacts["_prediction_cv_folds"] = prediction_cv_folds
     ctx.artifacts["_prediction_sampling_method"] = prediction_sampling_method
+    ctx.artifacts["_prediction_data_structure"] = prediction_data_structure
+    ctx.artifacts["_prediction_entity_column"] = prediction_entity_column
+    ctx.artifacts["_prediction_group_column"] = prediction_group_column
+    ctx.artifacts["_prediction_time_column"] = prediction_time_column
+    ctx.artifacts["_prediction_final_holdout_fraction"] = prediction_final_holdout_fraction
+    ctx.artifacts["_prediction_shuffle"] = prediction_shuffle
+    ctx.artifacts["_frequency_weight"] = frequency_weight
+    ctx.artifacts["_analysis_weight"] = analysis_weight
+    ctx.artifacts["_sampling_weight"] = sampling_weight
+    ctx.artifacts["_labels"] = normalized_labels
     ctx.artifacts["_iv_endog"] = [normalize_column_name(c) for c in (iv_endog or [])]
     ctx.artifacts["_iv_instruments"] = [normalize_column_name(c) for c in (iv_instruments or [])]
     ctx.artifacts["_did_mode"] = did_mode
@@ -632,8 +693,19 @@ def _run_workflow(
         "prediction_model_type": prediction_model_type,
         "prediction_cv_folds": prediction_cv_folds,
         "prediction_sampling_method": prediction_sampling_method,
+        "prediction_data_structure": prediction_data_structure,
+        "prediction_entity_column": prediction_entity_column,
+        "prediction_group_column": prediction_group_column,
+        "prediction_time_column": prediction_time_column,
+        "prediction_final_holdout_fraction": prediction_final_holdout_fraction,
+        "prediction_shuffle": prediction_shuffle,
+        "frequency_weight": frequency_weight,
+        "analysis_weight": analysis_weight,
+        "sampling_weight": sampling_weight,
         "model_options": normalized_model_options,
     }
+    if normalized_labels:
+        form["labels"] = normalized_labels
     if model_options_binding is not None:
         form["model_options_binding"] = model_options_binding
     cfg = {

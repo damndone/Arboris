@@ -31,9 +31,21 @@ from ..lineage.family import scan_family
 from ..lineage.headset import forest_node_key
 from ..lineage.node_index import NODE_INDEX_FILENAME
 from ..lineage.run_inputs import read_run_inputs
+from ..predictive_research.consumer_projection import (
+    read_prediction_evidence_from_run_root,
+)
+from ..predictive_research.schema import PayloadContractError
 
 
 ARMA_GARCH_PACK_ID = "time_series.arma_garch"
+_PREDICTION_ARTIFACT_TYPES = {
+    "prediction_sample_spec",
+    "prediction_split_plan",
+    "prediction_packet",
+    "evaluation_packet",
+    "negative_control_packet",
+    "prediction_result",
+}
 
 
 def _resolve_endpoint(runs_dir: Path, run_id: str, node_id: str) -> CompareEndpoint:
@@ -101,6 +113,92 @@ def _source_run_id(runs_dir: Path, run_id: str) -> str | None:
         return None
 
 
+def _prediction_projection_for_compare(
+    runs_dir: Path,
+    run_id: str,
+) -> dict[str, Any] | None:
+    run_root = runs_dir / run_id
+    try:
+        index = read_json(run_root / "artifacts_index.json")
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    records = index.get("artifacts") if isinstance(index, dict) else None
+    if not isinstance(records, list) or not any(
+        isinstance(record, dict) and record.get("artifact_type") in _PREDICTION_ARTIFACT_TYPES
+        for record in records
+    ):
+        return None
+    try:
+        return read_prediction_evidence_from_run_root(run_root, consumer="compare")
+    except (PayloadContractError, OSError, ValueError) as error:
+        raise CompareNodeError(
+            "PREDICTION_EVIDENCE_INVALID",
+            "predictive evidence could not be validated for comparison",
+            evidence={"run_id": run_id, "reason": str(error)},
+        ) from error
+
+
+def _build_prediction_compare_packet(
+    left: dict[str, Any],
+    right: dict[str, Any],
+) -> dict[str, Any]:
+    if left.get("status") == "legacy" or right.get("status") == "legacy":
+        if left.get("status") != "legacy" or right.get("status") != "legacy":
+            raise CompareNodeError(
+                "PREDICTION_LEGACY_RESULT_INCOMPARABLE",
+                "legacy prediction results cannot be numerically compared with v1.8.6 evidence",
+                evidence={"left_status": left.get("status"), "right_status": right.get("status")},
+            )
+        return {
+            "schema_id": "workbench.prediction.compare.v1",
+            "compare_status": "legacy_only",
+            "comparability": "legacy_only",
+            "message": left.get("message"),
+            "left": left,
+            "right": right,
+        }
+    if left.get("sample_spec_hash") != right.get("sample_spec_hash"):
+        raise CompareNodeError(
+            "PREDICTION_SAMPLE_INCOMPATIBLE",
+            "prediction results use different sample specifications",
+            evidence={
+                "left_sample_spec_hash": left.get("sample_spec_hash"),
+                "right_sample_spec_hash": right.get("sample_spec_hash"),
+            },
+        )
+    if left.get("split_plan_hash") != right.get("split_plan_hash"):
+        raise CompareNodeError(
+            "PREDICTION_SPLIT_INCOMPATIBLE",
+            "prediction results must use the same persisted SplitPlan",
+            evidence={
+                "left_split_plan_hash": left.get("split_plan_hash"),
+                "right_split_plan_hash": right.get("split_plan_hash"),
+            },
+        )
+    left_metrics = left.get("oos", {}).get("metrics", {})
+    right_metrics = right.get("oos", {}).get("metrics", {})
+    metric_diff = {
+        metric: {
+            "left": left_metrics.get(metric),
+            "right": right_metrics.get(metric),
+            "difference": right_metrics.get(metric) - left_metrics.get(metric),
+        }
+        for metric in sorted(set(left_metrics) & set(right_metrics))
+        if isinstance(left_metrics.get(metric), (int, float))
+        and isinstance(right_metrics.get(metric), (int, float))
+    }
+    return {
+        "schema_id": "workbench.prediction.compare.v1",
+        "compare_status": "complete",
+        "comparability": "typed_same_split_plan",
+        "split_plan_hash": left.get("split_plan_hash"),
+        "sample_spec_hash": left.get("sample_spec_hash"),
+        "metric_diff": metric_diff,
+        "left": left,
+        "right": right,
+    }
+
+
 def _build_packet(
     runs_dir: Path,
     left: CompareEndpoint,
@@ -108,6 +206,16 @@ def _build_packet(
     *,
     relation: str,
 ) -> dict[str, Any]:
+    left_prediction = _prediction_projection_for_compare(runs_dir, left.run_id)
+    right_prediction = _prediction_projection_for_compare(runs_dir, right.run_id)
+    if left_prediction is not None or right_prediction is not None:
+        if left_prediction is None or right_prediction is None:
+            raise CompareNodeError(
+                "PREDICTION_EVIDENCE_REQUIRED",
+                "predictive-research comparison requires predictive evidence on both endpoints",
+                evidence={"left_run_id": left.run_id, "right_run_id": right.run_id},
+            )
+        return _build_prediction_compare_packet(left_prediction, right_prediction)
     if _pack_id(runs_dir, left.run_id) != ARMA_GARCH_PACK_ID or _pack_id(
         runs_dir, right.run_id
     ) != ARMA_GARCH_PACK_ID:

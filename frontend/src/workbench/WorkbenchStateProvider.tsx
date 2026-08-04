@@ -20,8 +20,9 @@
 //   Tier 3 (memory):
 //     hoverKey, searchCursor, contextMenu
 //
-// `selectedKey` is *derived* from `activeTabId` — never stored as its
-// own URL field. Plan §18.
+// `selectedKey` is derived from the active node tab, or the remembered last
+// node tab while the Report review system tab is active. It is never stored
+// as its own URL field. Plan §18.
 
 import {
   createContext,
@@ -36,8 +37,11 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   emptyTabsSlice,
+  ensureReportReviewTab,
+  isNodeTab,
   maxOpenedAt,
   parseTabsParams,
+  REPORT_REVIEW_TAB_ID,
   reduceCloseTab,
   reduceOpenTab,
   reduceSetActive,
@@ -51,7 +55,7 @@ import {
   type ViewMode,
   type WorkbenchUrlSlice,
 } from "./state/urlSchema";
-import type { TabState } from "./state/tabsSchema";
+import type { NodeTabState, TabState } from "./state/tabsSchema";
 import type { BottomPanelId } from "./registry/bottomPanelRegistry";
 
 // ─── public types ───────────────────────────────────────────────────
@@ -68,8 +72,10 @@ export interface WorkbenchState {
   view: ViewMode;
   tabs: TabState[];
   activeTabId: string | null;
-  /** Derived: same as the active tab's nodeKey. Read-only convenience. */
+  /** Active node selection; report review never becomes a node selection. */
   selectedKey: string | null;
+  /** Last node tab used while the report review system tab was active. */
+  lastNodeTabId: string | null;
   focusKey: string | null;
   pinned: boolean;
   searchQuery: string;
@@ -163,6 +169,20 @@ function persistHiddenGraphNodeIds(runId: string, nodeIds: ReadonlySet<string>):
   }
 }
 
+function findNodeTab(tabs: TabState[], id: string | null): NodeTabState | null {
+  if (id === null) return null;
+  const tab = tabs.find((candidate) => candidate.id === id) ?? null;
+  return tab !== null && isNodeTab(tab) ? tab : null;
+}
+
+function newestNodeTab(tabs: TabState[]): NodeTabState | null {
+  return (
+    [...tabs]
+      .filter(isNodeTab)
+      .sort((a, b) => b.openedAt - a.openedAt)[0] ?? null
+  );
+}
+
 /** Throws if used outside the provider — V1.5.1's LineageContext
  *  follows the same fail-loud convention. */
 export function useWorkbench(): WorkbenchContextValue {
@@ -235,6 +255,7 @@ export function WorkbenchStateProvider({
   urlRef.current = urlSlice;
   const paramsRef = useRef(params);
   paramsRef.current = params;
+  const lastNodeTabIdRef = useRef<string | null>(null);
 
   // Last evicted tab id (transient — cleared by the next non-overflow
   // openTab. Plan §11 wiring uses this for "Closed oldest tab to make
@@ -288,12 +309,22 @@ export function WorkbenchStateProvider({
   // Derived
   const activeTab =
     tabsSlice.tabs.find((t) => t.id === tabsSlice.activeTabId) ?? null;
-  const selectedKey = activeTab?.nodeKey ?? null;
+  if (activeTab !== null && isNodeTab(activeTab)) {
+    lastNodeTabIdRef.current = activeTab.id;
+  } else if (findNodeTab(tabsSlice.tabs, lastNodeTabIdRef.current) === null) {
+    lastNodeTabIdRef.current = newestNodeTab(tabsSlice.tabs)?.id ?? null;
+  }
+  const selectedNodeTab =
+    (activeTab !== null && isNodeTab(activeTab) ? activeTab : null) ??
+    findNodeTab(tabsSlice.tabs, lastNodeTabIdRef.current);
+  const selectedKey = selectedNodeTab?.nodeKey ?? null;
+  const lastNodeTabId = lastNodeTabIdRef.current;
 
   // ── §7 transition implementations ────────────────────────────
 
   const selectByCanvasClick = useCallback(
     (nodeKey: string) => {
+      if (!nodeKey || nodeKey === REPORT_REVIEW_TAB_ID) return;
       const { next, evicted, nextClock } = reduceOpenTab(
         tabsRef.current,
         clockRef.current,
@@ -313,10 +344,20 @@ export function WorkbenchStateProvider({
       const next = reduceSetActive(tabsRef.current, tabId);
       if (next === tabsRef.current) return; // no-op
       const tab = next.tabs.find((t) => t.id === tabId);
-      const slice =
-        urlRef.current.pinned || !tab
-          ? urlRef.current
-          : { ...urlRef.current, focusKey: tab.nodeKey };
+      if (!tab) return;
+      let slice = urlRef.current;
+      if (isNodeTab(tab)) {
+        lastNodeTabIdRef.current = tab.id;
+        if (!urlRef.current.pinned) {
+          slice = { ...urlRef.current, focusKey: tab.nodeKey };
+        }
+      } else {
+        const activeNode = findNodeTab(
+          tabsRef.current.tabs,
+          tabsRef.current.activeTabId,
+        );
+        if (activeNode !== null) lastNodeTabIdRef.current = activeNode.id;
+      }
       commit({ tabs: next, slice });
     },
     [commit],
@@ -324,6 +365,7 @@ export function WorkbenchStateProvider({
 
   const selectBySearchCommit = useCallback(
     (nodeKey: string, query: string) => {
+      if (!nodeKey || nodeKey === REPORT_REVIEW_TAB_ID) return;
       const { next, evicted, nextClock } = reduceOpenTab(
         tabsRef.current,
         clockRef.current,
@@ -343,6 +385,7 @@ export function WorkbenchStateProvider({
 
   const pinFocus = useCallback(
     (nodeKey: string) => {
+      if (!nodeKey || nodeKey === REPORT_REVIEW_TAB_ID) return;
       const slice: WorkbenchUrlSlice = {
         ...urlRef.current,
         focusKey: nodeKey,
@@ -355,6 +398,7 @@ export function WorkbenchStateProvider({
 
   const setFocusOnly = useCallback(
     (nodeKey: string) => {
+      if (!nodeKey || nodeKey === REPORT_REVIEW_TAB_ID) return;
       // Only focus + pinned change. tabs / active / selected are left
       // exactly as they were — this is the whole point versus
       // selectByCanvasClick.
@@ -369,9 +413,9 @@ export function WorkbenchStateProvider({
   );
 
   const unpinFocus = useCallback(() => {
-    const activeId = tabsRef.current.activeTabId;
     const fallback =
-      tabsRef.current.tabs.find((t) => t.id === activeId)?.nodeKey ?? null;
+      findNodeTab(tabsRef.current.tabs, lastNodeTabIdRef.current)?.nodeKey ??
+      null;
     const slice: WorkbenchUrlSlice = {
       ...urlRef.current,
       focusKey: fallback,
@@ -386,6 +430,12 @@ export function WorkbenchStateProvider({
       const next = reduceCloseTab(prevTabs, tabId);
       if (next === prevTabs) return; // unknown id, no-op
 
+      if (lastNodeTabIdRef.current === tabId) {
+        const nextNode =
+          findNodeTab(next.tabs, next.activeTabId) ?? newestNodeTab(next.tabs);
+        lastNodeTabIdRef.current = nextNode?.id ?? null;
+      }
+
       // Per §7: closing the focus tab — focus survives (pinned or not,
       // the anchor is the URL focus key, which we don't touch here).
       // Closing the selected tab promotes a new active; if !pinned,
@@ -394,7 +444,9 @@ export function WorkbenchStateProvider({
       let slice = urlRef.current;
       const wasActive = prevTabs.activeTabId === tabId;
       if (wasActive && !slice.pinned) {
-        const newActive = next.tabs.find((t) => t.id === next.activeTabId);
+        const newActive =
+          findNodeTab(next.tabs, next.activeTabId) ??
+          findNodeTab(next.tabs, lastNodeTabIdRef.current);
         slice = { ...slice, focusKey: newActive?.nodeKey ?? null };
       }
       commit({ tabs: next, slice });
@@ -404,7 +456,29 @@ export function WorkbenchStateProvider({
 
   const setView = useCallback(
     (view: ViewMode) => {
-      commit({ slice: { ...urlRef.current, view } });
+      let tabs = tabsRef.current;
+      let slice: WorkbenchUrlSlice = { ...urlRef.current, view };
+      if (view === "report") {
+        const activeNode = findNodeTab(tabs.tabs, tabs.activeTabId);
+        if (activeNode !== null) lastNodeTabIdRef.current = activeNode.id;
+        if (!tabs.tabs.some((tab) => tab.id === REPORT_REVIEW_TAB_ID)) {
+          clockRef.current += 1;
+          tabs = ensureReportReviewTab(tabs, clockRef.current);
+        }
+        tabs = reduceSetActive(tabs, REPORT_REVIEW_TAB_ID);
+      } else if (urlRef.current.view === "report") {
+        const restore =
+          findNodeTab(tabs.tabs, lastNodeTabIdRef.current) ??
+          newestNodeTab(tabs.tabs);
+        if (restore !== null) {
+          lastNodeTabIdRef.current = restore.id;
+          tabs = reduceSetActive(tabs, restore.id);
+          if (!urlRef.current.pinned) {
+            slice = { ...slice, focusKey: restore.nodeKey };
+          }
+        }
+      }
+      commit({ tabs, slice });
     },
     [commit],
   );
@@ -435,6 +509,7 @@ export function WorkbenchStateProvider({
   }, []);
 
   const openContextMenu = useCallback((menu: ContextMenuState) => {
+    if (menu.nodeKey === REPORT_REVIEW_TAB_ID) return;
     setContextMenu(menu);
   }, []);
 
@@ -451,6 +526,7 @@ export function WorkbenchStateProvider({
         tabs: tabsSlice.tabs,
         activeTabId: tabsSlice.activeTabId,
         selectedKey,
+        lastNodeTabId,
         focusKey: urlSlice.focusKey,
         pinned: urlSlice.pinned,
         searchQuery: urlSlice.searchQuery,
@@ -485,6 +561,7 @@ export function WorkbenchStateProvider({
       urlSlice,
       tabsSlice,
       selectedKey,
+      lastNodeTabId,
       lastEvictedTabId,
       hoverKey,
       searchCursor,

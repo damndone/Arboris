@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "8bdfc3df-e04c-4a18-9321-d45f97c2bd0c",
+  "timestamp": "2026-08-04T00:19:00.000Z",
+  "type": "GAP",
+  "subtype": "journal_length_quality",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The first journal quality implementation enforced a length floor but accepted an identical long sentence repeated enough times to satisfy that floor.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python -m pytest tests/test_report_quality.py::test_journal_full_rejects_repeated_boilerplate -q",
+    "sha256": "6323fa78af61dab62dcdcd8ca1feb63a34e8e35230481e56502633d5da9bdfe0",
+    "observed_at": "2026-08-04T00:18:30.000Z"
+  },
+  "impact": "A report could look long while remaining substantively thin, contrary to the user's request for a journal-style report standard.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Treat length as a floor only and add a conservative exact-repetition guard; do not attempt subjective semantic scoring in the deterministic validator.",
+  "incident_id": "8bdfc3df-e04c-4a18-9321-d45f97c2bd0c",
+  "lesson_key": "journal-repetition-floor",
+  "links": [
+    "backend/workbench/report_quality.py",
+    "tests/test_report_quality.py"
+  ]
+}

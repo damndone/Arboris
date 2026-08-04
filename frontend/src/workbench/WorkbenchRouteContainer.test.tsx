@@ -10,7 +10,7 @@
 //   - selecting `table` / `pipeline` swaps WorkbenchMain content
 
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchHome, WorkbenchRouteContainer } from "./WorkbenchRouteContainer";
@@ -329,6 +329,165 @@ function confirmOperationRerun() {
 }
 
 describe("WorkbenchRouteContainer", () => {
+  it("activates a persistent Report review panel without removing node tabs", async () => {
+    mountForestAt("/?view=graph&tabs=hash_model&active=hash_model");
+    await screen.findByTestId("detail-drawer");
+
+    fireEvent.click(screen.getByTestId("view-tab-report"));
+
+    expect(await screen.findByTestId("report-review-panel")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Report review" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Original OLS" })).toBeInTheDocument();
+    expect(screen.getByTestId("bottom-panel")).toBeInTheDocument();
+  });
+
+  it("makes Open Report focus the top report composer even when already on Report", async () => {
+    vi.spyOn(api, "fetchRunArtifacts").mockResolvedValue({ groups: [] });
+    mountForestAt("/?view=report&tabs=report:review&active=report:review");
+    await screen.findByTestId("report-review-empty");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Report" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Report instruction" })).toHaveFocus(),
+    );
+  });
+
+  it("keeps floating Report review above the Workbench when the view changes", async () => {
+    mountForestAt("/?view=graph&tabs=hash_model&active=hash_model");
+    await screen.findByTestId("detail-drawer");
+    fireEvent.click(screen.getByTestId("view-tab-report"));
+    await screen.findByTestId("report-review-panel");
+
+    fireEvent.click(screen.getByRole("button", { name: "Float report review" }));
+    expect(screen.getByTestId("report-review-floating")).toHaveAttribute("data-pinned", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Pin report review" }));
+    expect(screen.getByTestId("report-review-floating")).toHaveAttribute("data-pinned", "true");
+    expect(screen.getByRole("button", { name: "Drag report review" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Collapse report review" }));
+    expect(screen.getByTestId("report-review-panel")).toHaveAttribute("data-collapsed", "true");
+    expect(screen.getByTestId("report-review-floating")).toHaveClass("report-review-floating--collapsed");
+    expect(screen.getByRole("button", { name: "Expand report review" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand report review" }));
+    fireEvent.click(screen.getByTestId("view-tab-table"));
+
+    expect(screen.getByTestId("report-review-floating")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("report-review-empty")
+      || screen.queryByTestId("report-review-load-error"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dock report review" }));
+    expect(screen.queryByTestId("report-review-floating")).not.toBeInTheDocument();
+  });
+
+  it("gives node panels the same float, pin, and collapse controls as Report review", async () => {
+    sessionStorage.removeItem("workbench:node-panel:/proj");
+    mountForestAt("/?view=table&tabs=hash_model&active=hash_model");
+    await screen.findByTestId("detail-drawer");
+
+    expect(screen.getByRole("button", { name: "Float node panel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pin node panel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse node panel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /node actions/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Close Original OLS tab" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Float node panel" }));
+    expect(screen.getByTestId("node-panel-floating")).toHaveAttribute("data-pinned", "false");
+    expect(screen.getByRole("button", { name: "Pin node panel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /node actions/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Close Original OLS tab" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin node panel" }));
+    expect(screen.getByTestId("node-panel-floating")).toHaveAttribute("data-pinned", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Collapse node panel" }));
+    expect(screen.getByTestId("node-panel-floating")).toHaveAttribute("data-collapsed", "true");
+    expect(screen.queryByTestId("basic-info-section")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand node panel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /node actions/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand node panel" }));
+    fireEvent.click(screen.getByTestId("view-tab-graph"));
+    expect(screen.getByTestId("node-panel-floating")).toBeInTheDocument();
+    expect(screen.getByTestId("basic-info-section")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dock node panel" }));
+    expect(screen.queryByTestId("node-panel-floating")).not.toBeInTheDocument();
+    sessionStorage.removeItem("workbench:node-panel:/proj");
+  });
+
+  it("provides four corner resize handles for a floating node panel", async () => {
+    sessionStorage.removeItem("workbench:node-panel:/proj");
+    mountForestAt("/?view=table&tabs=hash_model&active=hash_model");
+    await screen.findByTestId("detail-drawer");
+
+    fireEvent.click(screen.getByRole("button", { name: "Float node panel" }));
+    const floating = await screen.findByTestId("node-panel-floating");
+    expect(screen.getByRole("button", { name: "Node actions" })).toHaveClass(
+      "node-action-menu__trigger",
+    );
+    expect(screen.getByRole("button", { name: "Drag node panel" })).toHaveClass(
+      "panel-window-drag-handle",
+    );
+
+    const corners = ["top-left", "top-right", "bottom-left", "bottom-right"];
+    for (const corner of corners) {
+      expect(
+        within(floating).getByRole("button", {
+          name: `Resize node panel from ${corner}`,
+        }),
+      ).toBeInTheDocument();
+    }
+
+    const topLeft = within(floating).getByRole("button", {
+      name: "Resize node panel from top-left",
+    });
+    fireEvent.pointerDown(topLeft, { clientX: 100, clientY: 100, pointerId: 1 });
+    expect(floating).toHaveAttribute("data-resizing", "true");
+    fireEvent.pointerUp(topLeft, { clientX: 100, clientY: 100, pointerId: 1 });
+    expect(floating).toHaveAttribute("data-resizing", "false");
+    sessionStorage.removeItem("workbench:node-panel:/proj");
+  });
+
+  it("detaches a floating node tab while keeping other docked tabs visible", async () => {
+    sessionStorage.removeItem("workbench:node-panel:/proj");
+    mountForestAt("/?view=table&tabs=hash_model,report:review&active=hash_model");
+    await screen.findByTestId("detail-drawer");
+
+    const dockedTabs = screen.getByTestId("panel-host-tabs");
+    expect(within(dockedTabs).getByRole("tab", { name: "Original OLS" })).toBeInTheDocument();
+    expect(within(dockedTabs).getByRole("tab", { name: "Report review" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Float node panel" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("node-panel-floating")).toBeInTheDocument();
+      expect(screen.getByTestId("panel-host")).toHaveAttribute("data-active-kind", "report-review");
+    });
+    expect(within(screen.getByTestId("panel-host-tabs")).queryByRole("tab", { name: "Original OLS" })).toBeNull();
+    expect(within(screen.getByTestId("panel-host-tabs")).getByRole("tab", { name: "Report review" })).toBeInTheDocument();
+    expect(within(screen.getByTestId("node-panel-floating")).getByRole("tab", { name: "Original OLS" })).toBeInTheDocument();
+    expect(within(screen.getByTestId("node-panel-floating")).queryByRole("tab", { name: "Report review" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dock node panel" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("node-panel-floating")).not.toBeInTheDocument();
+      expect(screen.getByTestId("panel-host")).toHaveAttribute("data-active-kind", "node");
+    });
+    expect(within(screen.getByTestId("panel-host-tabs")).getByRole("tab", { name: "Original OLS" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(within(screen.getByTestId("panel-host-tabs")).getByRole("tab", { name: "Report review" })).toBeInTheDocument();
+    sessionStorage.removeItem("workbench:node-panel:/proj");
+  });
+
   it("keeps project settings out of the inner workbench action bar", async () => {
     mountAt("/?tab=lineage");
     await screen.findByTestId("graph-workbench");
@@ -423,7 +582,7 @@ describe("WorkbenchRouteContainer", () => {
 
       const drawer = await screen.findByTestId("detail-drawer");
       expect(drawer).toBeInTheDocument();
-      expect(drawer).toHaveStyle({ flex: "0 0 460px" });
+      expect(screen.getByTestId("panel-host")).toHaveStyle({ flex: "0 0 460px" });
     });
 
     it("S1: Escape with modal open closes only the modal, NOT the selection", async () => {
@@ -494,6 +653,13 @@ describe("WorkbenchRouteContainer", () => {
       expect(centerColumn).toContainElement(screen.getByTestId("bottom-panel"));
       expect(centerColumn).not.toContainElement(screen.getByTestId("run-rail"));
       expect(centerColumn).not.toContainElement(screen.getByTestId("detail-drawer"));
+    });
+
+    it("keeps the main view row shrinkable when a view has wide content", async () => {
+      mountAt("/?tab=lineage");
+      await screen.findByTestId("graph-workbench");
+
+      expect(screen.getByTestId("workbench-main-row").style.minWidth).toBe("0");
     });
 
     it("ignores legacy panelOpen and keeps the BottomPanel expanded", async () => {
@@ -597,15 +763,16 @@ describe("WorkbenchRouteContainer", () => {
     it("resizes the right detail drawer with a horizontal splitter", async () => {
       sessionStorage.removeItem("workbench:detailDrawerWidth:/proj");
       mountAt("/?tab=lineage&tabs=n1&active=n1");
-      const drawer = await screen.findByTestId("detail-drawer");
-      const splitter = screen.getByTestId("detail-drawer-resizer");
-      expect(drawer).toHaveStyle({ width: "460px" });
+      await screen.findByTestId("detail-drawer");
+      const splitter = screen.getByTestId("panel-host-resizer");
+      const panelHost = screen.getByTestId("panel-host");
+      expect(panelHost).toHaveStyle({ width: "460px" });
 
       dispatchHorizontalPointerDrag(splitter, "pointerdown", 1000);
       dispatchHorizontalPointerDrag(splitter, "pointermove", 900);
       dispatchHorizontalPointerDrag(splitter, "pointerup", 900);
 
-      expect(drawer).toHaveStyle({ width: "560px" });
+      expect(panelHost).toHaveStyle({ width: "560px" });
       expect(sessionStorage.getItem("workbench:detailDrawerWidth:/proj")).toBe("560");
     });
 
@@ -1039,7 +1206,16 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.getByTestId("genesis-wizard")).toBeInTheDocument();
     });
 
-    it("consumes ?genesis=1 after opening so a closed wizard does not reopen", async () => {
+    it("opens the genesis wizard from the handoff URL when the project already has runs", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(forestResponse());
+      vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+      mountHome(undefined, "/p/slug/graph?genesis=1");
+
+      expect(await screen.findByTestId("genesis-wizard-drawer")).toBeInTheDocument();
+      expect(screen.getByTestId("genesis-wizard")).toBeInTheDocument();
+    });
+
+    it("consumes ?genesis=1 when the wizard closes so it does not reopen", async () => {
       vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
       vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
       let currentSearch: string | null = null;
@@ -1064,15 +1240,15 @@ describe("WorkbenchRouteContainer", () => {
       );
 
       expect(await screen.findByTestId("genesis-wizard-drawer")).toBeInTheDocument();
-      // The handoff param is one-shot: it must leave the URL once consumed, so
-      // reload-style remounts and unrelated query updates cannot reopen a
-      // wizard the user closed.
-      await waitFor(() => expect(currentSearch).not.toContain("genesis"));
+      // Keep the handoff param while the drawer is open so route-state writes
+      // cannot race the open transition. Closing the drawer consumes it.
+      expect(currentSearch).toContain("genesis");
 
       fireEvent.click(screen.getByRole("button", { name: "Close" }));
       await waitFor(() =>
         expect(screen.queryByTestId("genesis-wizard-drawer")).toBeNull(),
       );
+      await waitFor(() => expect(currentSearch).not.toContain("genesis"));
     });
 
     it("legacy deep links fall back to the legacy per-run workbench when the project forest omits the run", async () => {

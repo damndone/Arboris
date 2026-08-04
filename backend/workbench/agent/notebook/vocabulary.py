@@ -93,6 +93,19 @@ _CAPABILITY_PRIMARY_ARTIFACTS = {
     "glm:binomial": {"glm_1": "model_result"},
     "glm:poisson": {"glm_1": "model_result"},
     "glm:negative_binomial": {"glm_1": "model_result"},
+    "ordinal_logit": {
+        "ordinal_logit_1": "model_result",
+        "diagnostics_ordinal_logit_1": "diagnostic_result",
+    },
+    "multinomial_logit": {
+        "multinomial_logit_1": "model_result",
+        "diagnostics_multinomial_logit_1": "diagnostic_result",
+    },
+    "survival_cox": {
+        "survival_cox_1": "model_result",
+        "survival_evidence": "survival_evidence",
+    },
+    "quantile_regression": {"quantile_regression_1": "model_result"},
     "linear_mixed_effects": {
         "linear_mixed_effects_1.result": "model_result_packet"
     },

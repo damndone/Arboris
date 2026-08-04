@@ -1253,6 +1253,7 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
         "inspect_project_linear_interaction_effects",
         "inspect_project_notebook_workflow_results",
         "inspect_project_numeric_summary",
+        "inspect_project_statistical_evidence",
     }
     descriptor = next(
         tool

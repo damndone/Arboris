@@ -15,6 +15,7 @@ from typing import Any
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _CITE_MARKER = re.compile(r"\[\[c:([^\]]+)\]\]")
 _FIGURE_MARKER = re.compile(r"\[\[fig:([A-Za-z0-9._-]+)\]\]")
+JOURNAL_FULL_REPORT_STANDARD = "journal_full_v1"
 
 
 class ReportContractError(ValueError):
@@ -29,6 +30,10 @@ class ReportContractError(ValueError):
 class ReportPacketContract:
     fact_ids: frozenset[str]
     figure_ids: frozenset[str]
+    report_standard: str | None = None
+    required_capabilities: tuple[str, ...] = ()
+    excluded_fact_ids: frozenset[str] = frozenset()
+    capability_manifest: tuple[dict[str, Any], ...] = ()
 
 
 def validate_report_packet(packet: dict[str, Any]) -> ReportPacketContract:
@@ -65,9 +70,33 @@ def validate_report_packet(packet: dict[str, Any]) -> ReportPacketContract:
     if len(figure_ids) != len(set(figure_ids)):
         raise ReportContractError("duplicate figure artifact_id")
 
+    report_standard = packet.get("report_standard")
+    if report_standard is not None and report_standard != JOURNAL_FULL_REPORT_STANDARD:
+        raise ReportContractError(
+            f"unsupported report_standard {report_standard!r}; "
+            f"expected {JOURNAL_FULL_REPORT_STANDARD!r}"
+        )
+
+    required_capabilities = _validate_id_list(
+        packet.get("required_capabilities", []),
+        field_name="required capability",
+    )
+    excluded_fact_ids = _validate_id_list(
+        packet.get("excluded_fact_ids", []),
+        field_name="excluded fact id",
+    )
+    capability_manifest = _validate_capability_manifest(
+        packet.get("capability_manifest", []),
+        required_capabilities,
+    )
+
     return ReportPacketContract(
         fact_ids=frozenset(fact_ids),
         figure_ids=frozenset(figure_ids),
+        report_standard=report_standard,
+        required_capabilities=required_capabilities,
+        excluded_fact_ids=frozenset(excluded_fact_ids),
+        capability_manifest=capability_manifest,
     )
 
 
@@ -87,7 +116,13 @@ def validate_report_response(
 
     normalized = _normalize_numeric_citations(text, contract.fact_ids)
     violations: list[str] = []
-    violations.extend(_citation_violations(normalized, contract.fact_ids))
+    violations.extend(
+        _citation_violations(
+            normalized,
+            contract.fact_ids,
+            contract.excluded_fact_ids,
+        )
+    )
     violations.extend(_figure_violations(normalized, contract.figure_ids))
     if violations:
         raise ReportContractError("; ".join(violations), violations=violations)
@@ -104,11 +139,98 @@ def _normalize_numeric_citations(text: str, fact_ids: frozenset[str]) -> str:
     return _CITE_MARKER.sub(replace, text)
 
 
-def _citation_violations(text: str, fact_ids: frozenset[str]) -> list[str]:
+def _validate_id_list(value: Any, *, field_name: str) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ReportContractError(f"{field_name}s must be a list")
+    values: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not _SAFE_ID.fullmatch(item):
+            raise ReportContractError(f"{field_name} must be a safe non-empty id")
+        values.append(item)
+    if len(values) != len(set(values)):
+        raise ReportContractError(f"duplicate {field_name}")
+    return tuple(values)
+
+
+def _validate_capability_manifest(
+    value: Any,
+    required_capabilities: tuple[str, ...],
+) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, list):
+        raise ReportContractError("capability_manifest must be a list")
+    entries: list[dict[str, Any]] = []
+    capability_ids: list[str] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ReportContractError("each capability manifest entry must be an object")
+        unknown = set(entry) - {
+            "capability_id",
+            "provider_id",
+            "availability",
+            "validation_level",
+            "report_modules",
+            "limitations",
+        }
+        if unknown:
+            raise ReportContractError(
+                "unknown capability manifest fields: " + ", ".join(sorted(unknown))
+            )
+        capability_id = entry.get("capability_id")
+        provider_id = entry.get("provider_id")
+        if not isinstance(capability_id, str) or not _SAFE_ID.fullmatch(capability_id):
+            raise ReportContractError("capability manifest capability_id must be a safe id")
+        if not isinstance(provider_id, str) or not _SAFE_ID.fullmatch(provider_id):
+            raise ReportContractError("capability manifest provider_id must be a safe id")
+        availability = entry.get("availability", "available")
+        if availability not in {"available", "unavailable", "not_applicable"}:
+            raise ReportContractError("capability manifest availability is invalid")
+        validation_level = entry.get("validation_level", "internal_only")
+        if validation_level not in {"external_oracle", "internal_only", "unverified"}:
+            raise ReportContractError("capability manifest validation_level is invalid")
+        report_modules = entry.get("report_modules", [])
+        if not isinstance(report_modules, list) or not all(
+            isinstance(module, str) and _SAFE_ID.fullmatch(module)
+            for module in report_modules
+        ):
+            raise ReportContractError("capability manifest report_modules must be safe ids")
+        limitations = entry.get("limitations", [])
+        if not isinstance(limitations, list) or not all(
+            isinstance(limitation, str) and limitation.strip()
+            for limitation in limitations
+        ):
+            raise ReportContractError("capability manifest limitations must be non-empty strings")
+        if capability_id in capability_ids:
+            raise ReportContractError("duplicate capability manifest capability_id")
+        capability_ids.append(capability_id)
+        entries.append(
+            {
+                "capability_id": capability_id,
+                "provider_id": provider_id,
+                "availability": availability,
+                "validation_level": validation_level,
+                "report_modules": list(report_modules),
+                "limitations": list(limitations),
+            }
+        )
+    missing = sorted(set(required_capabilities) - set(capability_ids))
+    if value and missing:
+        raise ReportContractError(
+            "capability manifest is missing required capabilities: " + ", ".join(missing)
+        )
+    return tuple(entries)
+
+
+def _citation_violations(
+    text: str,
+    fact_ids: frozenset[str],
+    excluded_fact_ids: frozenset[str] = frozenset(),
+) -> list[str]:
     violations: list[str] = []
     cited_ids = [match.group(1) for match in _CITE_MARKER.finditer(text)]
     for fact_id in cited_ids:
-        if fact_id not in fact_ids:
+        if fact_id in excluded_fact_ids:
+            violations.append(f"excluded fact {fact_id}")
+        elif fact_id not in fact_ids:
             violations.append(f"unknown citation {fact_id}")
     if "[[c:" in text:
         covered = {match.span() for match in _CITE_MARKER.finditer(text)}
@@ -130,7 +252,7 @@ def _figure_violations(text: str, figure_ids: frozenset[str]) -> list[str]:
     for artifact_id in marker_ids:
         if artifact_id not in figure_ids:
             violations.append(f"unknown figure marker {artifact_id}")
-    for artifact_id in figure_ids:
+    for artifact_id in sorted(figure_ids):
         count = marker_ids.count(artifact_id)
         if count == 0:
             violations.append(f"missing figure marker {artifact_id}")
@@ -155,6 +277,7 @@ def _unique(values: list[str]) -> list[str]:
 
 
 __all__ = [
+    "JOURNAL_FULL_REPORT_STANDARD",
     "ReportContractError",
     "ReportPacketContract",
     "validate_report_packet",

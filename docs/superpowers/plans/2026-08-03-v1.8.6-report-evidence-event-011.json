@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "531ed81a-3c93-4b6f-af2b-6d25a5631ed3",
+  "timestamp": "2026-08-04T01:12:06.000Z",
+  "type": "GAP",
+  "subtype": "new_report_curation_reset",
+  "stage": "review",
+  "cause_status": "known",
+  "cause": "ReportView restored saved exclusions when opening a history record but left the prior curation state in place when the user started a new report.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "npm test -- --run src/report/ReportView.test.tsx -t starts a new report with all facts included",
+    "sha256": "740c0293a5b92d1a999d097f975b7b3f60ed36a82ec384182d8e6f2880735516",
+    "observed_at": "2026-08-04T01:12:06.000Z"
+  },
+  "impact": "A fresh report could silently omit facts excluded from the previous report, although the source Run remained unchanged.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Report curation state must distinguish a selected immutable revision from a new draft; reset omission state when starting a new report and restore it only when reopening history.",
+  "incident_id": "8d25e355-ac63-46a8-8895-934740d7ca1e",
+  "lesson_key": "report-new-draft-resets-curation",
+  "links": [
+    "frontend/src/report/ReportView.tsx",
+    "frontend/src/report/ReportView.test.tsx"
+  ]
+}

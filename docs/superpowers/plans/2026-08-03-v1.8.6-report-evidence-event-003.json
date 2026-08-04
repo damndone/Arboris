@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "7d6d1918-0b9a-4d04-a8c2-4b7e5c4a2b65",
+  "timestamp": "2026-08-04T00:17:12.000Z",
+  "type": "GAP",
+  "subtype": "report_heading_parser",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The journal quality parser treated every level-one Markdown heading as Title, so conventional top-level headings such as # Abstract or # Methods were falsely reported as missing sections.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python -m pytest tests/test_report_quality.py::test_journal_full_accepts_named_top_level_sections -q",
+    "sha256": "bf8391915f1e627701b560eb28e5ecf7d69e3de02eec8087947f551d33310f8e",
+    "observed_at": "2026-08-04T00:15:00.000Z"
+  },
+  "impact": "Users or future report writers using one top-level Markdown heading per section could not produce an exportable journal report despite supplying all required sections.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Recognize explicit section names before applying the free-form-title fallback, and keep a regression test for top-level section headings.",
+  "incident_id": "7d6d1918-0b9a-4d04-a8c2-4b7e5c4a2b65",
+  "lesson_key": "named-top-level-report-sections",
+  "links": [
+    "backend/workbench/report_quality.py",
+    "tests/test_report_quality.py"
+  ]
+}

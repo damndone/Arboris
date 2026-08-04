@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import pandas as pd
@@ -79,14 +80,28 @@ def test_workflow_writes_prediction_artifact_only_when_configured(tmp_path: Path
         }
     ).to_csv(source, index=False)
 
-    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x1", "x2"])
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x1", "x2"],
+        prediction_data_structure="iid",
+    )
 
     run_root = project.root / "runs" / result["run_id"]
     prediction = read_json(
         run_root / "prediction_results" / "prediction_random_forest_1.json"
     )
     assert prediction["model_type"] == "prediction_random_forest"
-    assert prediction["cv_folds"] <= 5
+    evaluation = read_json(
+        run_root / "evaluation_results" / "prediction_random_forest_1.json"
+    )
+    split_plan = read_json(
+        run_root / "prediction_splits" / "prediction_random_forest_1.json"
+    )
+    assert len(evaluation["cv"]) == 20
+    assert split_plan["effective_parameters"]["cv_folds"] == 20
     assert (run_root / "model_results" / "ols_1.json").is_file()
     report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
     assert "prediction_random_forest" not in report_html
@@ -111,6 +126,7 @@ def test_workflow_accepts_explicit_prediction_model_type(tmp_path: Path):
         y="y",
         x=["x1", "x2"],
         model_type="prediction_lasso",
+        prediction_data_structure="iid",
     )
 
     run_root = project.root / "runs" / result["run_id"]
@@ -334,3 +350,9 @@ def test_prediction_sampling_rejects_continuous_target(tmp_path: Path):
         assert "requires a discrete target" in str(exc)
     else:
         raise AssertionError("Expected sampling target validation error")
+
+
+def test_legacy_prediction_helper_is_explicitly_historical_and_declares_shuffle():
+    signature = inspect.signature(run_prediction_model)
+    assert "shuffle" in signature.parameters
+    assert "historical" in (run_prediction_model.__doc__ or "").lower()

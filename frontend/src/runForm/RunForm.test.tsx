@@ -15,6 +15,10 @@ vi.mock("../capabilities/useCapabilities", () => ({
         { key: "cs_did", label: "Callaway-Sant'Anna", group: "Causal" },
         { key: "sa_did", label: "Sun-Abraham", group: "Causal" },
         { key: "time_series.arma_garch", label: "ARMA-GARCH", group: "Time Series" },
+        { key: "ordinal_logit", label: "Ordinal logit", group: "Ordinal" },
+        { key: "multinomial_logit", label: "Multinomial logit", group: "Nominal" },
+        { key: "survival_cox", label: "Survival / Cox", group: "Survival" },
+        { key: "quantile_regression", label: "Quantile regression", group: "Quantile" },
       ],
       imputation_methods: [],
       covariance_options: [
@@ -145,6 +149,26 @@ describe("RunForm IV wiring", () => {
     expect(extra?.ivEndog).toBeUndefined();
     expect(extra?.ivInstruments).toBeUndefined();
   });
+
+  it("renders v1.8.6 model controls and posts model options from the ordinary Run form", async () => {
+    const spy = vi.spyOn(api, "runWorkflow").mockResolvedValue(RUN_RESPONSE);
+    renderForm();
+    fillForm();
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "ordinal_logit" },
+    });
+    expect(screen.getByLabelText("ordinal model options")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("ordinal model options"), {
+      target: { value: '{"optimizer":"lbfgs","maxiter":800}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /run workflow/i }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(spy.mock.calls[0]?.[9]?.modelOptions).toEqual({
+      optimizer: "lbfgs",
+      maxiter: 800,
+    });
+  });
 });
 
 const PREVIEW: api.FilePreview = {
@@ -165,6 +189,43 @@ const PREVIEW: api.FilePreview = {
   suggestedX: ["x1"],
   excludedColumns: [],
 };
+
+describe("RunForm weights wiring", () => {
+  it("posts frequency, analysis, and sampling weight columns through the real run API payload", async () => {
+    const spy = vi.spyOn(api, "runWorkflow").mockResolvedValue(RUN_RESPONSE);
+    vi.spyOn(api, "previewFile").mockResolvedValue(PREVIEW);
+    renderForm();
+    const file = new File(["y,x1,id,year,cohort\n1,2,1,2020,1\n"], "data.csv", {
+      type: "text/csv",
+    });
+    fireEvent.change(screen.getByLabelText("data file"), {
+      target: { files: [file] },
+    });
+    await screen.findByLabelText("column selector");
+    fireEvent.change(screen.getByLabelText("dependent variable"), {
+      target: { value: "y" },
+    });
+    fireEvent.change(screen.getByLabelText("independent variables"), {
+      target: { value: "x1" },
+    });
+    fireEvent.change(screen.getByLabelText("frequency weight"), {
+      target: { value: "id" },
+    });
+    fireEvent.change(screen.getByLabelText("analysis weight"), {
+      target: { value: "x1" },
+    });
+    fireEvent.change(screen.getByLabelText("sampling weight"), {
+      target: { value: "cohort" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /run workflow/i }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const extra = spy.mock.calls[0][9];
+    expect(extra?.frequencyWeight).toBe("id");
+    expect(extra?.analysisWeight).toBe("x1");
+    expect(extra?.samplingWeight).toBe("cohort");
+  });
+});
 
 describe("RunForm DID wiring", () => {
   async function setupDID() {

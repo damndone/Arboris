@@ -1,6 +1,7 @@
 // frontend/src/lineage/header/DetailHeader.test.tsx
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ForestContext } from "../../workbench/ForestContext";
@@ -46,12 +47,18 @@ function renderHeader(
   onClose: () => void = vi.fn(),
   model: GraphViewModel = makeModel(),
   onShowJson?: () => void,
+  windowControls?: ReactNode,
 ) {
   const ctx: LineageContextValue = { model, selectedKey: node.id, select: vi.fn() };
   return render(
     <MemoryRouter>
       <LineageContext.Provider value={ctx}>
-        <DetailHeader node={node} onClose={onClose} onShowJson={onShowJson} />
+        <DetailHeader
+          node={node}
+          onClose={onClose}
+          onShowJson={onShowJson}
+          windowControls={windowControls}
+        />
       </LineageContext.Provider>
     </MemoryRouter>,
   );
@@ -86,12 +93,11 @@ describe("DetailHeader", () => {
     expect(container.querySelector(".dp-sub")).toBeNull();
   });
 
-  it('close button has aria-label="Close" and fires onClose', () => {
+  it("does not render a separate close button in the node header", () => {
     const onClose = vi.fn();
     renderHeader(makeNode(), onClose);
-    const btn = screen.getByRole("button", { name: "Close" });
-    fireEvent.click(btn);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("does NOT mount NodeActionMenu when onShowJson is omitted", () => {
@@ -104,6 +110,22 @@ describe("DetailHeader", () => {
     expect(
       screen.getByRole("button", { name: /node actions/i }),
     ).toBeInTheDocument();
+  });
+
+  it("places Actions before the shared window controls", () => {
+    const { container } = renderHeader(
+      makeNode(),
+      vi.fn(),
+      makeModel(),
+      vi.fn(),
+      <span data-testid="node-window-controls">window controls</span>,
+    );
+    const actions = screen.getByRole("button", { name: /node actions/i });
+    const controls = screen.getByTestId("node-window-controls");
+    expect(
+      actions.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(container.querySelector('[aria-label="Close"]')).toBeNull();
   });
 
   it("NodeActionMenu's View Raw JSON forwards to the onShowJson prop", () => {
@@ -233,10 +255,31 @@ describe("DetailHeader", () => {
   it("keeps the action toolbar on its own row so a long id can't push it off (v1.6.7)", () => {
     renderHeader(makeNode({ nodeKey: "n".repeat(120), kind: "model" }), vi.fn(), makeModel(), vi.fn());
     const toolbar = screen.getByTestId("detail-header-toolbar");
-    expect(within(toolbar).getByRole("button", { name: "Close" })).toBeInTheDocument();
+    expect(within(toolbar).queryByRole("button", { name: "Close" })).toBeNull();
     expect(within(toolbar).getByRole("button", { name: /node actions/i })).toBeInTheDocument();
     const meta = screen.getByTestId("detail-header-meta");
     expect(meta).toHaveStyle({ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+  });
+
+  it("keeps node window controls beside Actions without a second close affordance", () => {
+    const { container } = renderHeader(
+      makeNode(),
+      vi.fn(),
+      makeModel(),
+      vi.fn(),
+      <span data-testid="node-window-controls">window controls</span>,
+    );
+
+    const toolbar = screen.getByTestId("detail-header-toolbar");
+    expect(within(toolbar).getByTestId("node-window-controls")).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: /node actions/i })).toBeInTheDocument();
+    expect(within(toolbar).queryByRole("button", { name: "Close" })).toBeNull();
+    const actions = within(toolbar).getByRole("button", { name: /node actions/i });
+    const controls = within(toolbar).getByTestId("node-window-controls");
+    expect(
+      actions.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(container.querySelector('[aria-label="Close"]')).toBeNull();
   });
 
   it("shows a lifecycle state chip for a draft node (v1.6.7)", () => {

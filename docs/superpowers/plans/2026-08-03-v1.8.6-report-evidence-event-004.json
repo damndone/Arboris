@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "event_id": "30e72cc4-0b12-4f06-97e6-c2ed4ce5db0b",
+  "timestamp": "2026-08-04T00:16:00.000Z",
+  "type": "FAILURE",
+  "subtype": "test_fixture_isolation",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The new history-state regression test ran in isolation without initializing the fetchRunDetail mock, exposing an existing describe-order dependency in the frontend test fixture.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "npm test -- --run src/report/ReportView.test.tsx -t \"generated reports persist to history\"",
+    "sha256": "47ad0d9d1114af0917eaf2cdb737bf8ec7f3120aedff1f2c1d3b8945e307fde2",
+    "observed_at": "2026-08-04T00:15:50.000Z"
+  },
+  "impact": "The isolated test failed before exercising the product behavior with TypeError: Cannot read properties of undefined (reading 'then'); no application source state was changed by the failure.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Initialize every async mock in the describe-local beforeEach so focused tests do not depend on execution order.",
+  "incident_id": "30e72cc4-0b12-4f06-97e6-c2ed4ce5db0b",
+  "lesson_key": "report-view-focused-fixtures",
+  "links": [
+    "frontend/src/report/ReportView.test.tsx"
+  ]
+}

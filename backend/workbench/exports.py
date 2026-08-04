@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import json
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,14 @@ def export_pdf(
 
         y = _draw_section(pdf, "Facts", report.get("facts", []), y)
         y = _draw_section(pdf, "Descriptive statistics", report.get("descriptive_stats", []), y)
+        regression_table = report.get("regression_table")
+        if isinstance(regression_table, Mapping):
+            y = _draw_section(
+                pdf,
+                "Regression table",
+                _regression_pdf_items(regression_table),
+                y,
+            )
         y = _draw_section(pdf, "Interpretation", report.get("claims", []), y)
         st = report.get("statistical_tests")
         if isinstance(st, Mapping):
@@ -79,7 +88,7 @@ def export_xlsx(
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill("solid", fgColor="1F4E78")
         for row in normalized_rows:
-            worksheet.append([row.get(header, "") for header in headers])
+            worksheet.append([_excel_value(row.get(header, "")) for header in headers])
         worksheet.auto_filter.ref = worksheet.dimensions
         for index, header in enumerate(headers, start=1):
             values = [str(header)] + [str(row.get(header, "")) for row in normalized_rows[:200]]
@@ -178,19 +187,27 @@ def _report_item_text(item: Any) -> str:
     if not isinstance(item, Mapping):
         return str(item)
     if "column" in item and "dtype" in item:
+        raw_column = str(item.get("column", ""))
+        display_column = str(item.get("label") or raw_column)
+        column_text = (
+            display_column
+            if display_column == raw_column
+            else f"{display_column} ({raw_column})"
+        )
+        value_labels = _value_labels_text(item.get("value_labels"))
         dtype = item.get("dtype", "")
         missing = item.get("missing", 0)
         unique = item.get("unique_count", 0)
         if item.get("mean") is not None:
             return (
-                f"{item['column']} ({dtype}): "
+                f"{column_text} ({dtype}): "
                 f"mean={item['mean']:.4f} std={item['std']:.4f} "
                 f"min={item['min']:.4f} max={item['max']:.4f} "
-                f"missing={missing} unique={unique}"
+                f"missing={missing} unique={unique}{value_labels}"
             )
         return (
-            f"{item['column']} ({dtype}): "
-            f"missing={missing} unique={unique}"
+            f"{column_text} ({dtype}): "
+            f"missing={missing} unique={unique}{value_labels}"
         )
     if item.get("label") and item.get("interpretation"):
         text = f"{item['label']}: {item['interpretation']}"
@@ -203,6 +220,49 @@ def _report_item_text(item: Any) -> str:
     if confidence is not None:
         text = f"{text} [confidence: {confidence}]"
     return text
+
+
+def _value_labels_text(value_labels: object) -> str:
+    if not isinstance(value_labels, Mapping) or not value_labels:
+        return ""
+    rendered = ", ".join(
+        f"{value}={label}" for value, label in value_labels.items()
+    )
+    return f" values: {rendered}"
+
+
+def _excel_value(value: Any) -> Any:
+    """Convert structured metadata into a lossless, Excel-safe scalar."""
+    if isinstance(value, (Mapping, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return value
+
+
+def _regression_pdf_items(table: Mapping[str, Any]) -> list[str]:
+    models = [model for model in table.get("models", []) if isinstance(model, Mapping)]
+    items: list[str] = []
+    for row in table.get("rows", []):
+        if not isinstance(row, Mapping):
+            continue
+        parts = [f"{row.get('label', row.get('term', ''))} ({row.get('term', '')})"]
+        cells = row.get("models", {})
+        for model in models:
+            model_id = str(model.get("id", ""))
+            cell = cells.get(model_id) if isinstance(cells, Mapping) else None
+            if not isinstance(cell, Mapping):
+                parts.append(f"{model.get('label', model_id)}: unavailable")
+                continue
+            value = (
+                f"{model.get('label', model_id)}: estimate={cell.get('estimate', '—')}"
+                f" se={cell.get('std_error', '—')} p={cell.get('p_value', '—')}"
+                f" {cell.get('significance', '')}".rstrip()
+            )
+            source_id = cell.get("source_id")
+            if source_id:
+                value += f" [source: {source_id}]"
+            parts.append(value)
+        items.append(" | ".join(parts))
+    return items
 
 
 def _headers(rows: Sequence[Mapping[str, Any]]) -> list[str]:

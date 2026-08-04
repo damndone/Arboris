@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "ba76f953-871d-4cbd-8594-fe65fb3864cc",
+  "timestamp": "2026-08-04T12:44:35.000Z",
+  "type": "GATE",
+  "subtype": "right_panel_only_separator_alignment",
+  "stage": "gate",
+  "cause_status": "known",
+  "cause": "The prior correction changed the left run-version picker to force a fixed single row. That violated the requested scope. The correct baseline is the untouched left picker: 6px top and bottom padding, 36px control, and 1px bottom border; only the right compact strip needed to match its 48px content-box row.",
+  "evidence": {
+    "kind": "browser_test_command",
+    "ref": "After removing all scoped wb-run-version-picker rules and changing only the PanelHost strip, the user-visible tab measured the untouched left picker at y=90..139 and the right strip at y=90..139; separator delta=0. Both selected controls measured y=96..132. Frontend typecheck passed; frontend full: 187 files / 1623 tests passed; git diff --check passed.",
+    "sha256": "7dd1cf209b2a6a37649258bd61da97f4773a61b063197ffb5103659df3d9a7f3",
+    "observed_at": "2026-08-04T12:44:35.000Z"
+  },
+  "impact": "Only the right PanelHost compact tab strip changes; the left Versions CSS remains the existing global rule and its wrapping/padding behavior is covered by a regression assertion.",
+  "preventability": "partially_preventable",
+  "resolution": "accepted",
+  "lesson": "Honor the requested ownership boundary in UI fixes: adapt the target panel to the existing neighboring layout instead of normalizing both sides.",
+  "incident_id": "ba76f953-871d-4cbd-8594-fe65fb3864cc",
+  "lesson_key": "right-panel-only-separator-alignment",
+  "links": [
+    "frontend/src/lineage/tokens/lineage.css",
+    "frontend/src/styles.test.ts"
+  ]
+}

@@ -1,8 +1,8 @@
 // v1.6.8 T10 — create-project modal.
 //
 // Exported separately so Task 11's topbar project switcher can reuse it.
-// The parent/name validation rules are moved from the legacy SubmitRoute
-// (App.tsx) — parent required; name required + no path separators. Browser
+// Shared parent/name validation — parent required; name required + no path
+// separators. Browser
 // folder pickers cannot expose a trustworthy absolute server path, so project
 // creation uses an explicit parent path field. Errors render inline in the
 // modal (not the global banner). Dialog pattern mirrors lineage/modals/RawJsonModal.tsx:
@@ -63,7 +63,7 @@ export function CreateProjectModal({
 
   if (!open) return null;
 
-  // Validation rules — verbatim from SubmitRoute.
+  // Shared project-creation validation rules.
   const projectErrors: Record<string, string> = {};
   if (parent.trim() === "") projectErrors.parent = "Required";
   if (name.trim() === "") projectErrors.name = "Required";
@@ -119,7 +119,7 @@ export function CreateProjectModal({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 100,
+        zIndex: 1300,
       }}
     >
       <section

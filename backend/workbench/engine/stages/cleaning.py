@@ -22,6 +22,13 @@ class CleaningStage:
 
         env.step("cleaning", "start", "Cleaning data...")
         cleaned, actions = clean_frame(frame, list(schema.time_candidates))
+        labels = ctx.artifacts.get("_labels", {})
+        if isinstance(labels, dict):
+            cleaned.attrs["variable_labels"] = dict(labels.get("variable_labels", {}))
+            cleaned.attrs["value_labels"] = {
+                str(column): dict(mapping)
+                for column, mapping in labels.get("value_labels", {}).items()
+            }
         env.step("cleaning", "complete", f"Applied {len(actions)} cleaning actions")
         raw_inputs = [f"raw_{path.name}" for path in input_files]
         cleaning_path = run_root / "processed" / "cleaning_actions.json"

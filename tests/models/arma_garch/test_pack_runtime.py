@@ -301,10 +301,9 @@ def test_public_workflow_completes_with_pack_graph_and_raw_lineage(
     assert 'id="time-series-overview"' in report_html
     assert "ARMA(1,0)" in report_html
     assert "RMSE" in report_html
-    from openpyxl import load_workbook
-    workbook = load_workbook(run_root / "exports" / "tables.xlsx", read_only=True, data_only=True)
-    assert {"Overview", "Parameters", "Acceptance", "Next forecast"}.issubset(workbook.sheetnames)
-    assert workbook["Parameters"].max_row > 1
+    # Presentation exports are explicit Report-page actions in v1.8.6; a
+    # normal Run retains the HTML/evidence artifacts without creating XLSX.
+    assert not (run_root / "exports" / "tables.xlsx").exists()
     index = json.loads((run_root / "artifacts_index.json").read_text())
     model_record = next(
         item for item in index["artifacts"] if item["artifact_id"] == "arma_garch_1"

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "event_id": "4e6f1c38-8b5d-4a14-9ef2-4bd48b7b7f2c",
+  "timestamp": "2026-08-04T13:29:08.000Z",
+  "type": "REVIEW",
+  "subtype": "node_panel_close_affordance_alignment",
+  "stage": "review",
+  "cause_status": "known",
+  "cause": "The node panel header still rendered a standalone Close button beside Actions even though the workspace tab strip already owned node-tab closing. The first focused test run also exposed one stale fixture assertion using the wrong node tab label; both the UI and assertion were corrected before final verification.",
+  "evidence": {
+    "kind": "browser_test_command",
+    "ref": "Focused Vitest: 4 files, 90 tests passed. Full Vitest: 188 files, 1629 tests passed. Typecheck and git diff --check passed. Browser acceptance verified docked and floating node panels: Actions precedes the shared Float/Pin/Collapse controls, no standalone Close exists, the tab strip retains Close Derived interaction tab, and the panel was restored to docked state.",
+    "sha256": "afe1205bcade66e2d40e1a18477d1d6dc8544cd8a3517c35d1deef16e167c811",
+    "observed_at": "2026-08-04T13:29:08.000Z"
+  },
+  "impact": "The initial focused test run failed on stale test expectations only; no runtime failure remained. The final UI has one clear node-tab close entry and consistent panel-window controls.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "When moving a close affordance from panel chrome to a tab strip, test both the exact tab label and the absence of an exact standalone Close button; verify docked and floating portals separately.",
+  "incident_id": "4e6f1c38-8b5d-4a14-9ef2-4bd48b7b7f2c",
+  "lesson_key": "node-panel-close-owned-by-tabs",
+  "links": [
+    "frontend/src/lineage/header/DetailHeader.tsx",
+    "frontend/src/lineage/detail/DetailDrawerTabs.tsx",
+    "frontend/src/workbench/PanelWindowControls.tsx"
+  ]
+}

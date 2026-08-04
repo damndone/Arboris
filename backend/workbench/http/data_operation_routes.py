@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter
+import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
+
+from ..artifacts import read_json
 
 from ..agent.chains import ChainHeadConflict, ensure_chain_root
 from ..agent.events import AgentEventStream
@@ -32,9 +37,17 @@ from ..data_operations import (
     DataColumnCastSpecV1,
     DataColumnCastValidationError,
     DataColumnsCastSpecV1,
+    FeatureRecipeOperationSpecV1,
+    DataTransformSpecV1,
+    apply_data_transform,
+    apply_feature_recipe_operation,
     preview_data_column_cast,
     preview_data_columns_cast,
+    preview_feature_recipe,
+    preview_data_transform,
     resolve_data_column_cast_context,
+    _read_frame,
+    _resolve_source,
 )
 from ..code_execution import (
     MAX_CODE_CHARS,
@@ -88,6 +101,58 @@ class DataColumnsCastRequest(BaseModel):
 class DataColumnsCastConfirmRequest(DataColumnsCastRequest):
     preview_fingerprint: str = Field(min_length=1, max_length=200)
     session_id: str = Field(default="agent_data_ui", min_length=1, max_length=200)
+
+
+class FeatureRecipeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_run_id: str = Field(min_length=1, max_length=200)
+    source_node_id: str = Field(min_length=1, max_length=300)
+    source_artifact_id: str = Field(min_length=1, max_length=200)
+    recipe_id: str = Field(min_length=1, max_length=200)
+    operation_id: Literal["derived_variable", "recode", "interaction", "log", "ratio"]
+    inputs: list[str] = Field(min_length=1, max_length=2)
+    output: str = Field(min_length=1, max_length=200)
+    output_type: str = Field(default="numeric", min_length=1, max_length=40)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    fit_scope: Literal["stateless", "date_local", "period_fitted"] = "stateless"
+    missing_policy: str = Field(default="fail_closed", min_length=1, max_length=40)
+    outlier_policy: str = Field(default="preserve", min_length=1, max_length=40)
+
+
+class FeatureRecipeConfirmRequest(FeatureRecipeRequest):
+    preview_fingerprint: str = Field(min_length=1, max_length=200)
+
+
+class DataTransformRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_run_id: str = Field(min_length=1, max_length=200)
+    source_node_id: str = Field(min_length=1, max_length=300)
+    source_artifact_id: str = Field(min_length=1, max_length=200)
+    operation: Literal["merge", "append", "reshape", "subset"]
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    secondary_run_id: str | None = Field(default=None, max_length=200)
+    secondary_node_id: str | None = Field(default=None, max_length=300)
+    secondary_artifact_id: str | None = Field(default=None, max_length=200)
+
+
+class DataTransformConfirmRequest(DataTransformRequest):
+    preview_fingerprint: str = Field(min_length=1, max_length=200)
+
+
+class DataModelRunRequest(BaseModel):
+    """Start the existing OLS lifecycle from a materialized data-operation node."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_run_id: str = Field(min_length=1, max_length=200)
+    source_node_id: str = Field(min_length=1, max_length=300)
+    source_artifact_id: str = Field(min_length=1, max_length=200)
+    model_type: Literal["ols"] = "ols"
+    y: str = Field(min_length=1, max_length=200)
+    x: list[str] = Field(min_length=1, max_length=200)
+    covariance: Literal["", "unadjusted", "robust", "clustered"] = "robust"
 
 
 class CodeExecuteRequest(BaseModel):
@@ -186,6 +251,158 @@ def _batch_preview_or_error(root, spec: DataColumnsCastSpecV1, *, confirm: bool)
             ),
             details={"operation_id": "data.columns.cast", "reason": str(exc)},
         ) from exc
+
+
+def _feature_recipe_spec(body: FeatureRecipeRequest) -> FeatureRecipeOperationSpecV1:
+    from ..predictive_research.contracts import FeatureRecipeV1
+
+    try:
+        recipe = FeatureRecipeV1(
+            recipe_id=body.recipe_id,
+            operation_id=body.operation_id,
+            operation_version=1,
+            inputs=tuple(body.inputs),
+            outputs=(body.output,),
+            output_types=(body.output_type,),
+            parameters=body.parameters,
+            fit_scope=body.fit_scope,
+            source_artifact=body.source_artifact_id,
+            lineage_parent=body.source_node_id,
+            missing_policy=body.missing_policy,
+            outlier_policy=body.outlier_policy,
+        )
+        return FeatureRecipeOperationSpecV1(
+            source_run_id=body.source_run_id,
+            source_node_id=body.source_node_id,
+            source_artifact_id=body.source_artifact_id,
+            recipe=recipe,
+        )
+    except (TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_INVALID",
+            message="The typed FeatureRecipe specification is invalid.",
+            details={"operation_id": "data.feature_recipe", "reason": str(exc)},
+        ) from exc
+
+
+def _feature_recipe_preview_or_error(root, spec: FeatureRecipeOperationSpecV1, *, confirm: bool):
+    try:
+        return preview_feature_recipe(root, spec)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409 if confirm else 422,
+            code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            message=(
+                "The FeatureRecipe source changed before confirmation."
+                if confirm
+                else "The typed FeatureRecipe cannot be previewed."
+            ),
+            details={"operation_id": "data.feature_recipe", "reason": str(exc)},
+        ) from exc
+
+
+def _data_transform_spec(body: DataTransformRequest) -> DataTransformSpecV1:
+    try:
+        return DataTransformSpecV1(
+            source_run_id=body.source_run_id,
+            source_node_id=body.source_node_id,
+            source_artifact_id=body.source_artifact_id,
+            operation=body.operation,
+            parameters=body.parameters,
+            secondary_run_id=body.secondary_run_id,
+            secondary_node_id=body.secondary_node_id,
+            secondary_artifact_id=body.secondary_artifact_id,
+        )
+    except (TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_INVALID",
+            message="The typed data transform specification is invalid.",
+            details={"operation_id": f"data.{body.operation}", "reason": str(exc)},
+        ) from exc
+
+
+def _data_transform_preview_or_error(root, spec: DataTransformSpecV1, *, confirm: bool):
+    try:
+        return preview_data_transform(root, spec)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409 if confirm else 422,
+            code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            message=(
+                "The data transform source changed before confirmation."
+                if confirm
+                else "The typed data transform cannot be previewed."
+            ),
+            details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
+        ) from exc
+
+
+def _model_source_or_error(root, body: DataModelRunRequest) -> tuple[Path, dict[str, Any], str | None]:
+    """Resolve and fingerprint a materialized data node before dispatch."""
+
+    if len(set(body.x)) != len(body.x):
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_INVALID",
+            message="The model predictors must be unique.",
+            details={"source_node_id": body.source_node_id},
+        )
+    if body.y in body.x:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_INVALID",
+            message="The outcome cannot also be a predictor.",
+            details={"outcome": body.y},
+        )
+    probe = DataColumnCastSpecV1(
+        source_run_id=body.source_run_id,
+        source_node_id=body.source_node_id,
+        source_artifact_id=body.source_artifact_id,
+        column="__model_source__",
+        target_dtype="string",
+    )
+    try:
+        run_root, _graph, node, artifact, source_path = _resolve_source(root, probe)
+        frame = _read_frame(source_path)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_INVALID",
+            message="The selected graph node is not a usable materialized dataset.",
+            details={"source_node_id": body.source_node_id, "reason": str(exc)},
+        ) from exc
+    missing = [column for column in [body.y, *body.x] if column not in frame.columns]
+    if missing:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_INVALID",
+            message="The model columns are not present in the selected data node.",
+            details={"missing_columns": missing},
+        )
+    non_numeric = [
+        column
+        for column in [body.y, *body.x]
+        if not pd.api.types.is_numeric_dtype(frame[column])
+    ]
+    if non_numeric:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_INVALID",
+            message="The v1.8.6 data-node model entry currently requires numeric OLS columns.",
+            details={"non_numeric_columns": non_numeric},
+        )
+    node_hash: str | None = getattr(node, "node_hash", None)
+    index_path = run_root / "node_index.json"
+    if index_path.is_file():
+        try:
+            indexed = read_json(index_path).get(body.source_node_id) or {}
+            if indexed.get("node_hash"):
+                node_hash = str(indexed["node_hash"])
+        except (OSError, ValueError, AttributeError):
+            pass
+    return source_path, {"artifact": artifact, "node_hash": node_hash}, body.source_node_id
 
 
 def _code_spec(body: CodeExecuteRequest) -> CodeExecuteSpecV1:
@@ -696,6 +913,156 @@ async def confirm_columns_cast(
         "proposal": proposal_store.latest_revision(proposal_id).to_dict(),
         "operation": record.to_dict(),
         "status": record.status,
+    }
+
+
+@router.post("/data-operations/feature-recipe/preview")
+def preview_feature_recipe_route(project_root: str, body: FeatureRecipeRequest) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _feature_recipe_spec(body)
+    preview = _feature_recipe_preview_or_error(root, spec, confirm=False)
+    return {"spec": spec.to_dict(), "preview": preview.to_dict()}
+
+
+@router.post("/data-operations/feature-recipe/confirm")
+def confirm_feature_recipe_route(
+    project_root: str,
+    body: FeatureRecipeConfirmRequest,
+) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _feature_recipe_spec(body)
+    preview = _feature_recipe_preview_or_error(root, spec, confirm=True)
+    if preview.fingerprint != body.preview_fingerprint:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The FeatureRecipe preview fingerprint no longer matches the source data.",
+            details={"expected": preview.fingerprint, "received": body.preview_fingerprint},
+        )
+    if preview.status != "ready":
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_BLOCKED",
+            message="The FeatureRecipe preview has blocking validation failures.",
+            details={"reason": preview.reason, "next_step": preview.next_step},
+        )
+    try:
+        effect = apply_feature_recipe_operation(root, spec, preview)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The FeatureRecipe could not be applied because its source changed.",
+            details={"operation_id": "data.feature_recipe", "reason": str(exc)},
+        ) from exc
+    return {"status": "completed", "effect": effect.to_dict(), "preview": preview.to_dict()}
+
+
+@router.post("/data-operations/transform/preview")
+def preview_data_transform_route(project_root: str, body: DataTransformRequest) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _data_transform_spec(body)
+    preview = _data_transform_preview_or_error(root, spec, confirm=False)
+    return {"spec": spec.to_dict(), "preview": preview.to_dict()}
+
+
+@router.post("/data-operations/transform/confirm")
+def confirm_data_transform_route(
+    project_root: str,
+    body: DataTransformConfirmRequest,
+) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _data_transform_spec(body)
+    preview = _data_transform_preview_or_error(root, spec, confirm=True)
+    if preview.fingerprint != body.preview_fingerprint:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The data transform preview fingerprint no longer matches the source data.",
+            details={"expected": preview.fingerprint, "received": body.preview_fingerprint},
+        )
+    try:
+        effect = apply_data_transform(root, spec, preview)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The data transform could not be applied because its source changed.",
+            details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
+        ) from exc
+    return {"status": "completed", "effect": effect.to_dict(), "preview": preview.to_dict()}
+
+
+@router.post("/data-operations/model-run")
+def start_model_from_data_node_route(
+    project_root: str,
+    body: DataModelRunRequest,
+) -> dict[str, Any]:
+    """Dispatch a real OLS run from a confirmed, materialized data-operation node.
+
+    This is intentionally a narrow bridge: it reuses the existing run lifecycle,
+    keeps the source node in ``run_inputs`` lineage, and does not invent a second
+    estimator path for data operations.
+    """
+
+    root = _root(project_root)
+    source_path, source, source_node_id = _model_source_or_error(root, body)
+    from ..events import get_event_manager
+    from ..services.run_service import _submit_run
+
+    events = get_event_manager()
+    if not events.try_acquire_slot():
+        raise WorkbenchAPIError(
+            status_code=429,
+            code="RUN_SLOT_BUSY",
+            message="A run is already in progress.",
+            details={"source_node_id": source_node_id},
+        )
+    try:
+        started_at = datetime.now(timezone.utc).isoformat()
+        result = _submit_run(
+            root,
+            form={
+                "mode": "auto",
+                "model_type": body.model_type,
+                "covariance": body.covariance or "robust",
+                "y": body.y,
+                "x": ",".join(body.x),
+            },
+            upload_bytes=source_path.read_bytes(),
+            upload_filename=Path(source["artifact"].get("path") or "data.csv").name,
+            started_at=started_at,
+            rerun_of=body.source_run_id,
+            from_node=source_node_id,
+            rerun_reason="data_operation_model",
+            rerun_from={
+                "source_run_id": body.source_run_id,
+                "op_node_id": source_node_id,
+                "source_artifact_id": body.source_artifact_id,
+                "source_node_hash": source.get("node_hash"),
+            },
+        )
+    except WorkbenchAPIError:
+        events.release_slot(None)
+        raise
+    except Exception as exc:
+        events.release_slot(None)
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_DISPATCH_FAILED",
+            message="The data node could not be submitted to the existing model lifecycle.",
+            details={"reason": str(exc), "source_node_id": source_node_id},
+        ) from exc
+    return {
+        "status": result["status"],
+        "run_id": result["run_id"],
+        "model_type": body.model_type,
+        "source_lineage": {
+            "source_run_id": body.source_run_id,
+            "source_node_id": source_node_id,
+            "source_artifact_id": body.source_artifact_id,
+            "source_node_hash": source.get("node_hash"),
+        },
     }
 
 

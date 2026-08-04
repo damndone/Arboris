@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "fae1b7b7-3f9b-4b5e-bfc4-9a7e6f25d1f4",
+  "timestamp": "2026-08-04T00:24:55.000Z",
+  "type": "FAILURE",
+  "subtype": "revision_parent_optional_fields",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The first parent-snapshot comparison treated omitted legacy optional fields as None on the child source while the persisted parent normalized them to empty lists.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python -m pytest tests/test_ai_report_store.py::test_ai_report_route_allows_new_revision_bound_to_parent_snapshot -q",
+    "sha256": "33e52552afcacdc80402ea638a82a80ebd4374ad491dcf613ad0e5689d2a4a4c",
+    "observed_at": "2026-08-04T00:24:55.000Z"
+  },
+  "impact": "A revision from a legacy report without the newly introduced context/capability arrays would have been rejected despite an unchanged evidence snapshot.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Normalize optional snapshot metadata to the same empty-list defaults on both legacy parents and new revisions before comparing content.",
+  "incident_id": "fae1b7b7-3f9b-4b5e-bfc4-9a7e6f25d1f4",
+  "lesson_key": "legacy-report-revision-defaults",
+  "links": [
+    "backend/workbench/report_store.py",
+    "tests/test_ai_report_store.py"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "18e4a1a0-12d9-4b53-9b39-a6df9ae12f1e",
+  "timestamp": "2026-08-04T00:25:40.000Z",
+  "type": "FAILURE",
+  "subtype": "quality_fixture_update",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The new exact-repetition quality guard correctly rejected an existing LLM integration fixture whose long filler was one sentence repeated thirty-six times.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python -m pytest tests/test_llm_chat.py::TestReportMode::test_journal_profile_is_enforced_and_returns_quality_status -q",
+    "sha256": "4c8400fc81cc805bd3b76724d1ea41904c96e4d4177cfd7739bd3e5d98698637",
+    "observed_at": "2026-08-04T00:25:00.000Z"
+  },
+  "impact": "The integration test no longer represented a substantively acceptable journal report after the validator was strengthened; production behavior remained fail-closed as intended.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Test fixtures must satisfy the same anti-boilerplate standard as generated reports; use varied evidence-specific prose rather than repeated filler.",
+  "incident_id": "18e4a1a0-12d9-4b53-9b39-a6df9ae12f1e",
+  "lesson_key": "quality-fixtures-no-filler",
+  "links": [
+    "backend/workbench/report_quality.py",
+    "tests/test_llm_chat.py"
+  ]
+}

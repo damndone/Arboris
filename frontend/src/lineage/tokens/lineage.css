@@ -24,6 +24,8 @@
   --bg-elev:          oklch(0.28  0.006 70);
   --separator:        rgba(255, 250, 240, 0.08);
   --separator-faint:  rgba(255, 250, 240, 0.045);
+  --scrollbar-thumb:  rgba(196, 200, 206, 0.72);
+  --scrollbar-track:  transparent;
 
   /* Typography — warm cream */
   --label:            oklch(0.94 0.008 75);
@@ -569,6 +571,47 @@
   width: 4px;
   flex: none;
 }
+
+/* Keep every Workbench reading surface and floating window on the same
+ * restrained light-gray scrollbar. The compact tab strip below deliberately
+ * hides its scrollbar and overrides this base treatment. */
+.workbench-route,
+.workbench-route *,
+.node-panel-floating,
+.node-panel-floating *,
+.report-review-floating,
+.report-review-floating * {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
+}
+.workbench-route::-webkit-scrollbar,
+.workbench-route *::-webkit-scrollbar,
+.node-panel-floating::-webkit-scrollbar,
+.node-panel-floating *::-webkit-scrollbar,
+.report-review-floating::-webkit-scrollbar,
+.report-review-floating *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.workbench-route::-webkit-scrollbar-track,
+.workbench-route *::-webkit-scrollbar-track,
+.node-panel-floating::-webkit-scrollbar-track,
+.node-panel-floating *::-webkit-scrollbar-track,
+.report-review-floating::-webkit-scrollbar-track,
+.report-review-floating *::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+.workbench-route::-webkit-scrollbar-thumb,
+.workbench-route *::-webkit-scrollbar-thumb,
+.node-panel-floating::-webkit-scrollbar-thumb,
+.node-panel-floating *::-webkit-scrollbar-thumb,
+.report-review-floating::-webkit-scrollbar-thumb,
+.report-review-floating *::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
 .run-rail__header {
   display: flex;
   align-items: baseline;
@@ -1013,6 +1056,26 @@
   color: var(--label-tertiary);
   font-size: 11px;
   font-family: var(--font-mono);
+}
+
+/* The shell-owned PanelHost has no DetailDrawer padding. Keep its tab strip
+ * inside the column instead of inheriting the drawer's negative offset. */
+.panel-host-tabs .detail-tabs {
+  margin: 0;
+}
+.panel-host-tabs .detail-tabs__strip--compact {
+  align-items: center;
+  block-size: 48px;
+  box-sizing: content-box;
+  min-block-size: 48px;
+  max-block-size: 48px;
+  padding: 0 6px;
+}
+.panel-host-tabs .detail-tabs__item {
+  max-width: none;
+}
+.panel-host-tabs .detail-tabs__tab {
+  max-width: none;
 }
 
 /* v1.6.5 — expanded variable-cluster container (behind the variables) */

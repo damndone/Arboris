@@ -26,6 +26,8 @@
 // rail + panel + search palette work identically across them.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
   useLocation,
   useNavigate,
@@ -37,6 +39,7 @@ import { useLineage } from "../lineage/LineageContext";
 import { ErrorBanner, Loading } from "../lineage/statusViews";
 import { useGraphKeyboard } from "../lineage/hooks/useGraphKeyboard";
 import { DetailDrawer } from "../lineage/detail/DetailDrawer";
+import { DetailDrawerTabs } from "../lineage/detail/DetailDrawerTabs";
 import { RawJsonModal } from "../lineage/modals/RawJsonModal";
 import {
   RunHistoryRail,
@@ -45,7 +48,7 @@ import {
 } from "../lineage/runRail/RunHistoryRail";
 import "../lineage/tokens/lineage.css";
 import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
-import { useWorkbench } from "./WorkbenchStateProvider";
+import { useWorkbench, type WorkbenchState } from "./WorkbenchStateProvider";
 import { rootToSlug } from "./projectSlug";
 import { CompareProvider } from "../lineage/compare/CompareContext";
 import { LineageBridge } from "./LineageBridge";
@@ -82,6 +85,14 @@ import { completeNotebookOptionExecution } from "../notebook/notebookApi";
 import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
 import { usePendingRun, type PendingRun } from "./usePendingRun";
 import { AgentSurfaceProvider } from "./agent/AgentSurfaceContext";
+import { PanelHost } from "./PanelHost";
+import "./panelHost.css";
+import { PanelWindowControls, PanelWindowDragHandle } from "./PanelWindowControls";
+import { REPORT_REVIEW_TAB_ID } from "./state/tabsSchema";
+import {
+  ReportReviewPanel,
+} from "../report/ReportReviewPanel";
+import { ReportWorkspaceProvider } from "../report/ReportWorkspaceContext";
 import {
   AgentNavigationContext,
   applyAgentNavigationRef,
@@ -109,6 +120,137 @@ type LegacyFocusProbe = {
 const PENDING_FOCUS_RETRY_LIMIT = 20;
 const PENDING_FOCUS_RETRY_DELAY_MS = 200;
 
+type PanelLayout = "docked" | "floating";
+
+type PanelPosition = {
+  x: number;
+  y: number;
+};
+
+type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+type NodePanelResizeState = {
+  corner: ResizeCorner;
+  startX: number;
+  startY: number;
+  startWidth: number;
+  startHeight: number;
+  startLeft: number;
+  startTop: number;
+  pointerId: number;
+};
+
+type PanelUiState = {
+  layout: PanelLayout;
+  pinned: boolean;
+  collapsed: boolean;
+  position: PanelPosition;
+  /** The tab detached into the floating node window, when applicable. */
+  floatingTabId: string | null;
+};
+
+type ReportReviewUiState = PanelUiState;
+type NodePanelUiState = PanelUiState;
+
+const REPORT_REVIEW_FLOATING_WIDTH = 680;
+const NODE_PANEL_FLOATING_WIDTH = 680;
+const REPORT_REVIEW_STORAGE_PREFIX = "workbench:report-review:";
+const NODE_PANEL_STORAGE_PREFIX = "workbench:node-panel:";
+const DEFAULT_REPORT_REVIEW_UI_STATE: ReportReviewUiState = {
+  layout: "docked",
+  pinned: false,
+  collapsed: false,
+  position: { x: 36, y: 116 },
+  floatingTabId: null,
+};
+const DEFAULT_NODE_PANEL_UI_STATE: NodePanelUiState = {
+  layout: "docked",
+  pinned: false,
+  collapsed: false,
+  position: { x: 36, y: 116 },
+  floatingTabId: null,
+};
+
+function reportReviewStorageKey(projectRoot: string): string {
+  return `${REPORT_REVIEW_STORAGE_PREFIX}${projectRoot}`;
+}
+
+function nodePanelStorageKey(projectRoot: string): string {
+  return `${NODE_PANEL_STORAGE_PREFIX}${projectRoot}`;
+}
+
+function readPanelUiState(storageKey: string, fallback: PanelUiState): PanelUiState {
+  if (typeof sessionStorage === "undefined") return fallback;
+  try {
+    const raw = sessionStorage.getItem(storageKey);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<PanelUiState>;
+    const position = parsed.position;
+    return {
+      layout: parsed.layout === "floating" ? "floating" : "docked",
+      pinned: parsed.pinned === true,
+      collapsed: parsed.collapsed === true,
+      floatingTabId: typeof parsed.floatingTabId === "string" ? parsed.floatingTabId : fallback.floatingTabId,
+      position: {
+        x: typeof position?.x === "number" && Number.isFinite(position.x)
+          ? Math.max(8, position.x)
+          : fallback.position.x,
+        y: typeof position?.y === "number" && Number.isFinite(position.y)
+          ? Math.max(56, position.y)
+          : fallback.position.y,
+      },
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function findDockedFallbackTabId(
+  tabs: WorkbenchState["tabs"],
+  activeTabId: string | null,
+  floatingTabId: string | null,
+): string | null {
+  const dockedTabs = tabs.filter((tab) => tab.id !== floatingTabId);
+  if (dockedTabs.length === 0) return null;
+  if (activeTabId !== floatingTabId && dockedTabs.some((tab) => tab.id === activeTabId)) {
+    return activeTabId;
+  }
+
+  const activeIndex = tabs.findIndex((tab) => tab.id === activeTabId);
+  if (activeIndex >= 0) {
+    const next = tabs.slice(activeIndex + 1).find((tab) => tab.id !== floatingTabId);
+    if (next) return next.id;
+    const previous = tabs.slice(0, activeIndex).reverse().find((tab) => tab.id !== floatingTabId);
+    if (previous) return previous.id;
+  }
+  return dockedTabs[0].id;
+}
+
+function readReportReviewUiState(projectRoot: string): ReportReviewUiState {
+  return readPanelUiState(reportReviewStorageKey(projectRoot), DEFAULT_REPORT_REVIEW_UI_STATE);
+}
+
+function readNodePanelUiState(projectRoot: string): NodePanelUiState {
+  return readPanelUiState(nodePanelStorageKey(projectRoot), DEFAULT_NODE_PANEL_UI_STATE);
+}
+
+function persistPanelUiState(storageKey: string, state: PanelUiState): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(storageKey, JSON.stringify(state));
+  } catch {
+    // A private browsing context can reject sessionStorage; the UI remains usable.
+  }
+}
+
+function persistReportReviewUiState(projectRoot: string, state: ReportReviewUiState): void {
+  persistPanelUiState(reportReviewStorageKey(projectRoot), state);
+}
+
+function persistNodePanelUiState(projectRoot: string, state: NodePanelUiState): void {
+  persistPanelUiState(nodePanelStorageKey(projectRoot), state);
+}
+
 // A draft-execute focus that never recorded a produced op node id degrades to
 // "no target": the pending-focus effect then simply finds nothing and gives up
 // after its budget instead of crashing — the run still activated + indexed.
@@ -123,6 +265,8 @@ interface WorkbenchHomeProps {
   /** Optional run deep link (?run=). Absent → newest head is the active run;
    *  a zero-run project renders the empty canvas + genesis CTA instead. */
   focusRunId?: string;
+  /** One-shot upload handoff from launcher and compatibility routes. */
+  openGenesis?: boolean;
   /** Monotonic request from the outer project navigation. */
   settingsRequestVersion?: number;
 }
@@ -136,6 +280,7 @@ type AppShellStatusContext = {
 export function WorkbenchHome({
   projectRoot,
   focusRunId,
+  openGenesis = false,
   settingsRequestVersion = 0,
 }: WorkbenchHomeProps) {
   // This is the live project-home mount path. The bootstrap itself is
@@ -152,6 +297,7 @@ export function WorkbenchHome({
     <ForestWorkbench
       projectRoot={projectRoot}
       focusRunId={focusRunId}
+      openGenesis={openGenesis}
       settingsRequestVersion={settingsRequestVersion}
     />
   );
@@ -174,6 +320,7 @@ export function WorkbenchRouteContainer({
 function ForestWorkbench({
   projectRoot,
   focusRunId,
+  openGenesis = false,
   settingsRequestVersion = 0,
 }: WorkbenchHomeProps) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -186,7 +333,8 @@ function ForestWorkbench({
   const [legacyFocusProbe, setLegacyFocusProbe] =
     useState<LegacyFocusProbe | null>(null);
   const [focusIndexPollAttempts, setFocusIndexPollAttempts] = useState(0);
-  const [genesisWizardOpen, setGenesisWizardOpen] = useState(false);
+  const [genesisWizardOpen, setGenesisWizardOpen] = useState(openGenesis);
+  const genesisHandoffConsumed = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const previousSettingsRequest = useRef(settingsRequestVersion);
   const [pendingGenesisRun, setPendingGenesisRun] =
@@ -278,10 +426,23 @@ function ForestWorkbench({
   // state: open the wizard, then strip the param so reloads and unrelated
   // query updates don't reopen a wizard the user already closed.
   useEffect(() => {
-    if (searchParams.get("genesis") !== "1") return;
+    const queryGenesis =
+      searchParams.get("genesis") === "1" ||
+      searchParams.get("open_genesis") === "1";
+    if ((!openGenesis && !queryGenesis) || genesisHandoffConsumed.current) return;
+    genesisHandoffConsumed.current = true;
     setGenesisWizardOpen(true);
+  }, [genesisHandoffConsumed, openGenesis, searchParams]);
+
+  const closeGenesisWizard = useCallback(() => {
+    setGenesisWizardOpen(false);
+    if (
+      searchParams.get("genesis") !== "1" &&
+      searchParams.get("open_genesis") !== "1"
+    ) return;
     const next = new URLSearchParams(searchParams);
     next.delete("genesis");
+    next.delete("open_genesis");
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 
@@ -667,7 +828,7 @@ function ForestWorkbench({
     >
       <GenesisWizard
         projectRoot={projectRoot}
-        onClose={() => setGenesisWizardOpen(false)}
+        onClose={closeGenesisWizard}
         onDraftUpdated={draftHandlers.onGenesisDraftUpdated}
         onDraftValidated={draftHandlers.onGenesisDraftValidated}
         onDraftExecuting={draftHandlers.onGenesisDraftExecuting}
@@ -738,24 +899,28 @@ function ForestWorkbench({
           >
             <LineageBridge model={model}>
               <CompareProvider>
-              <WorkbenchShell
-                runId={shellRunId}
-                projectRoot={projectRoot}
-                onResumeGenesisDraft={
-                  draftOnlyRunId ? () => setGenesisWizardOpen(true) : undefined
-                }
-                pendingFocusTarget={pendingFocusTarget}
-                onPendingFocusConsumed={() => setPendingFocusTarget(null)}
-                onPendingFocusRetry={() => {
-                  setPendingFocusTarget((current) =>
-                    current === null
-                      ? null
-                      : { ...current, attempts: current.attempts + 1 },
-                  );
-                  void refetch();
-                }}
-                onOpenSettings={() => setSettingsOpen(true)}
-              />
+                <AgentSurfaceProvider projectRoot={projectRoot} runId={shellRunId}>
+                  <ReportWorkspaceProvider projectRoot={projectRoot}>
+                    <WorkbenchShell
+                      runId={shellRunId}
+                      projectRoot={projectRoot}
+                      onResumeGenesisDraft={
+                        draftOnlyRunId ? () => setGenesisWizardOpen(true) : undefined
+                      }
+                      pendingFocusTarget={pendingFocusTarget}
+                      onPendingFocusConsumed={() => setPendingFocusTarget(null)}
+                      onPendingFocusRetry={() => {
+                        setPendingFocusTarget((current) =>
+                          current === null
+                            ? null
+                            : { ...current, attempts: current.attempts + 1 },
+                        );
+                        void refetch();
+                      }}
+                      onOpenSettings={() => setSettingsOpen(true)}
+                    />
+                  </ReportWorkspaceProvider>
+                </AgentSurfaceProvider>
               </CompareProvider>
             </LineageBridge>
           </DraftActionsProvider>
@@ -1097,11 +1262,15 @@ function LegacyGraphWorkbench({
   return (
     <WorkbenchStateProvider runId={runId} validNodeKeys={validNodeKeys}>
       <LineageBridge model={model}>
-        <WorkbenchShell
-          runId={runId}
-          projectRoot={projectRoot}
-          onOpenSettings={onOpenSettings}
-        />
+        <AgentSurfaceProvider projectRoot={projectRoot} runId={runId}>
+          <ReportWorkspaceProvider projectRoot={projectRoot}>
+            <WorkbenchShell
+              runId={runId}
+              projectRoot={projectRoot}
+              onOpenSettings={onOpenSettings}
+            />
+          </ReportWorkspaceProvider>
+        </AgentSurfaceProvider>
       </LineageBridge>
     </WorkbenchStateProvider>
   );
@@ -1156,20 +1325,361 @@ function WorkbenchShell({
   onOpenSettings: () => void;
 }) {
   const { model, selectedKey, select } = useLineage();
-  const { state } = useWorkbench();
+  const { state, dispatch } = useWorkbench();
   const navigate = useNavigate();
   const [navigationParams, setNavigationParams] = useSearchParams();
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
   const [runHistoryOpen, setRunHistoryOpen] = useState(() => readRunHistoryOpen(projectRoot));
+  const [reportReviewUi, setReportReviewUi] = useState<ReportReviewUiState>(() => readReportReviewUiState(projectRoot));
+  const [nodePanelUi, setNodePanelUi] = useState<NodePanelUiState>(() => readNodePanelUiState(projectRoot));
+  const [reportReviewDragging, setReportReviewDragging] = useState(false);
+  const [nodePanelDragging, setNodePanelDragging] = useState(false);
+  const [nodePanelResizing, setNodePanelResizing] = useState(false);
+  const [nodePanelSize, setNodePanelSize] = useState<{ width: number; height: number } | null>(null);
+  const [reportFocusRequest, setReportFocusRequest] = useState(0);
+  const reportReviewFloatingRef = useRef<HTMLDivElement | null>(null);
+  const nodePanelFloatingRef = useRef<HTMLDivElement | null>(null);
+  const reportReviewHydratedRootRef = useRef(projectRoot);
+  const nodePanelHydratedRootRef = useRef(projectRoot);
+  const reportReviewDragRef = useRef<{
+    offsetX: number;
+    offsetY: number;
+    pointerId: number;
+  } | null>(null);
+  const nodePanelDragRef = useRef<{
+    offsetX: number;
+    offsetY: number;
+    pointerId: number;
+  } | null>(null);
+  const nodePanelResizeRef = useRef<NodePanelResizeState | null>(null);
 
   useEffect(() => {
     setRunHistoryOpen(readRunHistoryOpen(projectRoot));
   }, [projectRoot]);
 
+  useEffect(() => {
+    reportReviewHydratedRootRef.current = projectRoot;
+    setReportReviewUi(readReportReviewUiState(projectRoot));
+  }, [projectRoot]);
+
+  useEffect(() => {
+    nodePanelHydratedRootRef.current = projectRoot;
+    setNodePanelUi(readNodePanelUiState(projectRoot));
+    setNodePanelSize(null);
+  }, [projectRoot]);
+
+  useEffect(() => {
+    if (reportReviewHydratedRootRef.current !== projectRoot) return;
+    persistReportReviewUiState(projectRoot, reportReviewUi);
+  }, [projectRoot, reportReviewUi]);
+
+  useEffect(() => {
+    if (nodePanelHydratedRootRef.current !== projectRoot) return;
+    persistNodePanelUiState(projectRoot, nodePanelUi);
+  }, [nodePanelUi, projectRoot]);
+
+  const reportReviewLayout = reportReviewUi.layout;
+  const reportReviewPinned = reportReviewUi.pinned;
+  const reportReviewCollapsed = reportReviewUi.collapsed;
+  const reportReviewPosition = reportReviewUi.position;
+  const nodePanelLayout = nodePanelUi.layout;
+  const nodePanelPinned = nodePanelUi.pinned;
+  const nodePanelCollapsed = nodePanelUi.collapsed;
+  const nodePanelPosition = nodePanelUi.position;
+
   const onRunHistoryOpenChange = useCallback((open: boolean) => {
     persistRunHistoryOpen(projectRoot, open);
     setRunHistoryOpen(open);
   }, [projectRoot]);
+
+  const floatReportReview = useCallback(() => {
+    setReportReviewUi((state) => ({ ...state, layout: "floating", collapsed: false }));
+  }, []);
+
+  const dockReportReview = useCallback(() => {
+    setReportReviewUi((state) => ({ ...state, layout: "docked", pinned: false, collapsed: false }));
+  }, []);
+
+  const pinReportReview = useCallback(() => {
+    const width = Math.min(REPORT_REVIEW_FLOATING_WIDTH, Math.max(360, window.innerWidth - 32));
+    setReportReviewUi((state) => ({
+      ...state,
+      layout: "floating",
+      pinned: true,
+      collapsed: false,
+      position: state.layout === "floating"
+        ? state.position
+        : { x: Math.max(8, window.innerWidth - width - 16), y: 64 },
+    }));
+  }, []);
+
+  const unpinReportReview = useCallback(() => {
+    setReportReviewUi((state) => ({ ...state, pinned: false }));
+  }, []);
+
+  const beginReportReviewDrag = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (reportReviewLayout !== "floating" || reportReviewPinned) return;
+    const panel = reportReviewFloatingRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    event.preventDefault();
+    reportReviewDragRef.current = {
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      pointerId: event.pointerId,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setReportReviewDragging(true);
+  }, [reportReviewLayout, reportReviewPinned]);
+
+  const moveReportReviewWithKeyboard = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (reportReviewLayout !== "floating" || reportReviewPinned) return;
+    const step = event.shiftKey ? 64 : 16;
+    const deltas: Record<string, PanelPosition> = {
+      ArrowLeft: { x: -step, y: 0 },
+      ArrowRight: { x: step, y: 0 },
+      ArrowUp: { x: 0, y: -step },
+      ArrowDown: { x: 0, y: step },
+    };
+    const delta = deltas[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    setReportReviewUi((state) => ({
+      ...state,
+      position: {
+        x: Math.max(8, state.position.x + delta.x),
+        y: Math.max(56, state.position.y + delta.y),
+      },
+    }));
+  }, [reportReviewLayout, reportReviewPinned]);
+
+  const moveReportReview = useCallback((event: globalThis.PointerEvent) => {
+    const drag = reportReviewDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setReportReviewUi((state) => ({
+      ...state,
+      position: {
+        x: Math.max(8, event.clientX - drag.offsetX),
+        y: Math.max(56, event.clientY - drag.offsetY),
+      },
+    }));
+  }, []);
+
+  const stopReportReviewDrag = useCallback((event?: globalThis.PointerEvent) => {
+    const drag = reportReviewDragRef.current;
+    if (!drag || (event && drag.pointerId !== event.pointerId)) return;
+    reportReviewDragRef.current = null;
+    setReportReviewDragging(false);
+  }, []);
+
+  useEffect(() => {
+    if (!reportReviewDragging) return undefined;
+    window.addEventListener("pointermove", moveReportReview);
+    window.addEventListener("pointerup", stopReportReviewDrag);
+    window.addEventListener("pointercancel", stopReportReviewDrag);
+    return () => {
+      window.removeEventListener("pointermove", moveReportReview);
+      window.removeEventListener("pointerup", stopReportReviewDrag);
+      window.removeEventListener("pointercancel", stopReportReviewDrag);
+    };
+  }, [moveReportReview, reportReviewDragging, stopReportReviewDrag]);
+
+  const floatNodePanel = useCallback(() => {
+    const floatingTabId = state.selectedKey;
+    if (!floatingTabId) return;
+    const dockedFallbackTabId = findDockedFallbackTabId(
+      state.tabs,
+      state.activeTabId,
+      floatingTabId,
+    );
+    setNodePanelUi((current) => ({
+      ...current,
+      layout: "floating",
+      floatingTabId,
+      collapsed: false,
+    }));
+    if (dockedFallbackTabId !== null) {
+      dispatch.selectByTabSwitch(dockedFallbackTabId);
+    }
+  }, [dispatch, state.activeTabId, state.selectedKey, state.tabs]);
+
+  const dockNodePanel = useCallback(() => {
+    const detachedTabId = nodePanelUi.floatingTabId ?? state.selectedKey;
+    setNodePanelUi((current) => ({
+      ...current,
+      layout: "docked",
+      pinned: false,
+      collapsed: false,
+      floatingTabId: null,
+    }));
+    if (nodePanelLayout === "floating" && detachedTabId !== null && state.tabs.some((tab) => tab.id === detachedTabId)) {
+      dispatch.selectByTabSwitch(detachedTabId);
+    }
+  }, [dispatch, nodePanelLayout, nodePanelUi.floatingTabId, state.selectedKey, state.tabs]);
+
+  const pinNodePanel = useCallback(() => {
+    const floatingTabId = nodePanelUi.floatingTabId ?? state.selectedKey;
+    if (!floatingTabId) return;
+    const width = Math.min(NODE_PANEL_FLOATING_WIDTH, Math.max(360, window.innerWidth - 32));
+    const dockedFallbackTabId = findDockedFallbackTabId(
+      state.tabs,
+      state.activeTabId,
+      floatingTabId,
+    );
+    setNodePanelUi((state) => ({
+      ...state,
+      layout: "floating",
+      floatingTabId,
+      pinned: true,
+      collapsed: false,
+      position: state.layout === "floating"
+        ? state.position
+        : { x: Math.max(8, window.innerWidth - width - 16), y: 64 },
+    }));
+    if (dockedFallbackTabId !== null) {
+      dispatch.selectByTabSwitch(dockedFallbackTabId);
+    }
+  }, [dispatch, nodePanelUi.floatingTabId, state.activeTabId, state.selectedKey, state.tabs]);
+
+  const unpinNodePanel = useCallback(() => {
+    setNodePanelUi((state) => ({ ...state, pinned: false }));
+  }, []);
+
+  const beginNodePanelDrag = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (nodePanelLayout !== "floating" || nodePanelPinned) return;
+    const panel = nodePanelFloatingRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    event.preventDefault();
+    nodePanelDragRef.current = {
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      pointerId: event.pointerId,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setNodePanelDragging(true);
+  }, [nodePanelLayout, nodePanelPinned]);
+
+  const moveNodePanelWithKeyboard = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (nodePanelLayout !== "floating" || nodePanelPinned) return;
+    const step = event.shiftKey ? 64 : 16;
+    const deltas: Record<string, PanelPosition> = {
+      ArrowLeft: { x: -step, y: 0 },
+      ArrowRight: { x: step, y: 0 },
+      ArrowUp: { x: 0, y: -step },
+      ArrowDown: { x: 0, y: step },
+    };
+    const delta = deltas[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    setNodePanelUi((state) => ({
+      ...state,
+      position: {
+        x: Math.max(8, state.position.x + delta.x),
+        y: Math.max(56, state.position.y + delta.y),
+      },
+    }));
+  }, [nodePanelLayout, nodePanelPinned]);
+
+  const moveNodePanel = useCallback((event: globalThis.PointerEvent) => {
+    const drag = nodePanelDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setNodePanelUi((state) => ({
+      ...state,
+      position: {
+        x: Math.max(8, event.clientX - drag.offsetX),
+        y: Math.max(56, event.clientY - drag.offsetY),
+      },
+    }));
+  }, []);
+
+  const stopNodePanelDrag = useCallback((event?: globalThis.PointerEvent) => {
+    const drag = nodePanelDragRef.current;
+    if (!drag || (event && drag.pointerId !== event.pointerId)) return;
+    nodePanelDragRef.current = null;
+    setNodePanelDragging(false);
+  }, []);
+
+  const beginNodePanelResize = useCallback((corner: ResizeCorner, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (nodePanelLayout !== "floating" || nodePanelCollapsed) return;
+    const panel = nodePanelFloatingRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    event.preventDefault();
+    event.stopPropagation();
+    nodePanelResizeRef.current = {
+      corner,
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: rect.width,
+      startHeight: rect.height,
+      startLeft: rect.left,
+      startTop: rect.top,
+      pointerId: event.pointerId,
+    };
+    setNodePanelSize({ width: rect.width, height: rect.height });
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setNodePanelResizing(true);
+  }, [nodePanelCollapsed, nodePanelLayout]);
+
+  const moveNodePanelResize = useCallback((event: globalThis.PointerEvent) => {
+    const resize = nodePanelResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - resize.startX;
+    const deltaY = event.clientY - resize.startY;
+    const growsLeft = resize.corner.includes("left");
+    const growsTop = resize.corner.includes("top");
+    const width = Math.min(
+      Math.max(360, window.innerWidth - 16),
+      Math.max(360, resize.startWidth + (growsLeft ? -deltaX : deltaX)),
+    );
+    const height = Math.min(
+      Math.max(280, window.innerHeight - 56),
+      Math.max(280, resize.startHeight + (growsTop ? -deltaY : deltaY)),
+    );
+    const left = growsLeft
+      ? Math.max(8, resize.startLeft + resize.startWidth - width)
+      : resize.startLeft;
+    const top = growsTop
+      ? Math.max(56, resize.startTop + resize.startHeight - height)
+      : resize.startTop;
+    setNodePanelSize({ width, height });
+    setNodePanelUi((state) => ({
+      ...state,
+      position: { x: left, y: top },
+    }));
+  }, []);
+
+  const stopNodePanelResize = useCallback((event?: globalThis.PointerEvent) => {
+    const resize = nodePanelResizeRef.current;
+    if (!resize || (event && resize.pointerId !== event.pointerId)) return;
+    nodePanelResizeRef.current = null;
+    setNodePanelResizing(false);
+  }, []);
+
+  useEffect(() => {
+    if (!nodePanelDragging) return undefined;
+    window.addEventListener("pointermove", moveNodePanel);
+    window.addEventListener("pointerup", stopNodePanelDrag);
+    window.addEventListener("pointercancel", stopNodePanelDrag);
+    return () => {
+      window.removeEventListener("pointermove", moveNodePanel);
+      window.removeEventListener("pointerup", stopNodePanelDrag);
+      window.removeEventListener("pointercancel", stopNodePanelDrag);
+    };
+  }, [moveNodePanel, nodePanelDragging, stopNodePanelDrag]);
+
+  useEffect(() => {
+    if (!nodePanelResizing) return undefined;
+    window.addEventListener("pointermove", moveNodePanelResize);
+    window.addEventListener("pointerup", stopNodePanelResize);
+    window.addEventListener("pointercancel", stopNodePanelResize);
+    return () => {
+      window.removeEventListener("pointermove", moveNodePanelResize);
+      window.removeEventListener("pointerup", stopNodePanelResize);
+      window.removeEventListener("pointercancel", stopNodePanelResize);
+    };
+  }, [moveNodePanelResize, nodePanelResizing, stopNodePanelResize]);
 
   const openAgentNavigation = useMemo(
     () => (ref: Parameters<typeof applyAgentNavigationRef>[1]) => {
@@ -1194,6 +1704,37 @@ function WorkbenchShell({
     effectiveSelectedKey !== null
       ? (nodeIndex.get(effectiveSelectedKey) ?? null)
       : null;
+  const floatingNodeTabId = nodePanelLayout === "floating"
+    ? nodePanelUi.floatingTabId ?? selectedNode?.id ?? null
+    : null;
+  const floatingNode = floatingNodeTabId !== null
+    ? (nodeIndex.get(floatingNodeTabId) ?? null)
+    : null;
+
+  // Older session entries predate the detached-tab id. Recover that id from
+  // the remembered selected node once the forest has loaded, without changing
+  // the user's visible node selection.
+  useEffect(() => {
+    if (nodePanelLayout !== "floating" || nodePanelUi.floatingTabId !== null || selectedNode === null) return;
+    setNodePanelUi((current) => (
+      current.layout === "floating" && current.floatingTabId === null
+        ? { ...current, floatingTabId: selectedNode.id }
+        : current
+    ));
+  }, [nodePanelLayout, nodePanelUi.floatingTabId, selectedNode]);
+
+  // If the detached tab is closed from its own floating tab strip, remove the
+  // floating shell as well instead of silently replacing it with another node.
+  useEffect(() => {
+    if (floatingNodeTabId === null || state.tabs.some((tab) => tab.id === floatingNodeTabId)) return;
+    setNodePanelUi((current) => ({
+      ...current,
+      layout: "docked",
+      pinned: false,
+      collapsed: false,
+      floatingTabId: null,
+    }));
+  }, [floatingNodeTabId, state.tabs]);
 
   useEffect(() => {
     if (!pendingFocusTarget) return;
@@ -1243,9 +1784,160 @@ function WorkbenchShell({
   // Reuses F4's editable-target guard; acts on the selected node.
   useGlobalShortcuts({ enabled: state.view !== "home" });
 
+  const reportReviewPanel = (
+    <ReportReviewPanel
+      floating={reportReviewLayout === "floating"}
+      pinned={reportReviewPinned}
+      collapsed={reportReviewLayout === "floating" && reportReviewCollapsed}
+      dragging={reportReviewDragging}
+      onFloat={floatReportReview}
+      onDock={dockReportReview}
+      onPin={pinReportReview}
+      onUnpin={unpinReportReview}
+      onCollapse={() => setReportReviewUi((state) => ({ ...state, collapsed: true }))}
+      onExpand={() => setReportReviewUi((state) => ({ ...state, collapsed: false }))}
+      onOpenReport={() => {
+        dispatch.setView("report");
+        setReportFocusRequest((request) => request + 1);
+      }}
+      onDragPointerDown={beginReportReviewDrag}
+      onDragKeyDown={moveReportReviewWithKeyboard}
+    />
+  );
+  const reportReviewFloating = reportReviewLayout === "floating" && typeof document !== "undefined"
+    ? createPortal(
+        <div
+          ref={reportReviewFloatingRef}
+          data-testid="report-review-floating"
+          data-pinned={reportReviewPinned ? "true" : "false"}
+          className={`report-review-floating${reportReviewPinned ? " report-review-floating--pinned" : ""}${reportReviewDragging ? " report-review-floating--dragging" : ""}${reportReviewCollapsed ? " report-review-floating--collapsed" : ""}`}
+          style={{
+            "--report-review-left": `${reportReviewPosition.x}px`,
+            "--report-review-top": `${reportReviewPosition.y}px`,
+          } as CSSProperties}
+        >
+          {reportReviewPanel}
+        </div>,
+        document.body,
+      )
+    : null;
+
+  const dockedTabs = state.tabs.filter((tab) => tab.id !== floatingNodeTabId);
+  const dockedActiveTabId = findDockedFallbackTabId(
+    state.tabs,
+    state.activeTabId,
+    floatingNodeTabId,
+  );
+  const dockedActiveTab = dockedTabs.find((tab) => tab.id === dockedActiveTabId) ?? null;
+  const reportReviewTabActive = dockedActiveTab?.id === REPORT_REVIEW_TAB_ID;
+  const dockedSelectedNode = dockedActiveTab?.kind === "node"
+    ? (nodeIndex.get(dockedActiveTab.id) ?? null)
+    : null;
+  const nodePanelTabActive = dockedSelectedNode !== null;
+  const nodePanelWindowControls = (
+    <PanelWindowControls
+      surface="node panel"
+      floating={nodePanelLayout === "floating"}
+      pinned={nodePanelPinned}
+      collapsed={nodePanelLayout === "floating" && nodePanelCollapsed}
+      onFloat={floatNodePanel}
+      onDock={dockNodePanel}
+      onPin={pinNodePanel}
+      onUnpin={unpinNodePanel}
+      onCollapse={() => setNodePanelUi((current) => ({ ...current, collapsed: true }))}
+      onExpand={() => setNodePanelUi((current) => ({ ...current, collapsed: false }))}
+    />
+  );
+  const nodePanelWindowDragHandle = (
+    <PanelWindowDragHandle
+      surface="node panel"
+      floating={nodePanelLayout === "floating"}
+      pinned={nodePanelPinned}
+      dragging={nodePanelDragging}
+      onPointerDown={beginNodePanelDrag}
+      onKeyDown={moveNodePanelWithKeyboard}
+    />
+  );
+  const renderNodePanel = (node: GraphViewNode | null) => node !== null ? (
+    <DetailDrawer
+      node={node}
+      projectRoot={projectRoot}
+      onClose={() => select(null)}
+      onShowJson={() => setRawJsonOpen(true)}
+      windowControls={nodePanelWindowControls}
+      windowDragHandle={nodePanelWindowDragHandle}
+      collapsed={nodePanelLayout === "floating" && nodePanelCollapsed}
+      showTabs={false}
+      embedded
+    />
+  ) : null;
+  const nodePanelContent = nodePanelLayout === "docked" ? renderNodePanel(dockedSelectedNode) : null;
+  const floatingNodeTab = floatingNodeTabId !== null
+    ? (state.tabs.find((tab) => tab.id === floatingNodeTabId) ?? null)
+    : null;
+  const closeFloatingNodeTab = (tabId: string) => {
+    dispatch.closeTab(tabId);
+    if (tabId !== floatingNodeTabId) return;
+    setNodePanelUi((current) => ({
+      ...current,
+      layout: "docked",
+      pinned: false,
+      collapsed: false,
+      floatingTabId: null,
+    }));
+  };
+  const nodePanelFloating = nodePanelLayout === "floating"
+    && floatingNode !== null
+    && floatingNodeTab !== null
+    && typeof document !== "undefined"
+    ? createPortal(
+        <div
+          ref={nodePanelFloatingRef}
+          data-testid="node-panel-floating"
+          data-floating="true"
+          data-pinned={nodePanelPinned ? "true" : "false"}
+          data-collapsed={nodePanelCollapsed ? "true" : "false"}
+          data-resizing={nodePanelResizing ? "true" : "false"}
+          className={`node-panel-floating${nodePanelPinned ? " node-panel-floating--pinned" : ""}${nodePanelDragging || nodePanelResizing ? " node-panel-floating--dragging" : ""}${nodePanelCollapsed ? " node-panel-floating--collapsed" : ""}`}
+          style={{
+            "--node-panel-left": `${nodePanelPosition.x}px`,
+            "--node-panel-top": `${nodePanelPosition.y}px`,
+            ...(nodePanelSize !== null && !nodePanelCollapsed
+              ? { width: `${nodePanelSize.width}px`, height: `${nodePanelSize.height}px` }
+              : {}),
+          } as CSSProperties}
+        >
+          <div className="node-panel-floating__surface">
+            <div className="node-panel-floating__tabs">
+              <DetailDrawerTabs
+                tabs={[floatingNodeTab]}
+                nodes={model.nodes}
+                activeTabId={floatingNodeTabId}
+                onActive={() => undefined}
+                onClose={closeFloatingNodeTab}
+              />
+            </div>
+            <div className="node-panel-floating__body">{renderNodePanel(floatingNode)}</div>
+          </div>
+          {!nodePanelCollapsed && (['top-left', 'top-right', 'bottom-left', 'bottom-right'] as ResizeCorner[]).map((corner) => (
+            <button
+              key={corner}
+              type="button"
+              className={`node-panel-floating__resize-handle node-panel-floating__resize-handle--${corner}`}
+              aria-label={`Resize node panel from ${corner}`}
+              data-resize-corner={corner}
+              onPointerDown={(event) => beginNodePanelResize(corner, event)}
+            />
+          ))}
+        </div>,
+        document.body,
+      )
+    : null;
+
   return (
     <div
       data-testid="workbench-route"
+      className="workbench-route"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -1315,6 +2007,7 @@ function WorkbenchShell({
             flexDirection: "row",
             flex: 1,
             minHeight: 0,
+            minWidth: 0,
             overflow: "hidden",
           }}
         >
@@ -1326,37 +2019,63 @@ function WorkbenchShell({
             />
           )}
           <div
-            data-testid="workbench-center-column"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              flex: 1,
-              minHeight: 0,
-              minWidth: 0,
-              overflow: "hidden",
-            }}
-          >
-            <AgentSurfaceProvider projectRoot={projectRoot} runId={runId}>
-              <WorkbenchMain
-                projectRoot={projectRoot}
-                onOpenSettings={onOpenSettings}
-                onOpenProject={(root) => {
-                  navigate(`/p/${rootToSlug(root)}/graph`);
+                data-testid="workbench-center-column"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  flex: 1,
+                  minHeight: 0,
+                  minWidth: 0,
+                  overflow: "hidden",
                 }}
-              />
+              >
+                <WorkbenchMain
+                  projectRoot={projectRoot}
+                  reportFocusRequest={reportFocusRequest}
+                  onOpenSettings={onOpenSettings}
+                  onOpenProject={(root) => {
+                    navigate(`/p/${rootToSlug(root)}/graph`);
+                  }}
+                />
+                {state.view !== "home" && (
+                  <BottomPanel runId={runId} projectRoot={projectRoot} />
+                )}
+              </div>
               {state.view !== "home" && (
-                <BottomPanel runId={runId} projectRoot={projectRoot} />
+                <PanelHost
+                  projectRoot={projectRoot}
+                  collapseLabel={reportReviewTabActive ? "report review" : "node panel"}
+                  activeKind={
+                    reportReviewLayout === "docked" && reportReviewTabActive
+                      ? "report-review"
+                      : nodePanelTabActive && nodePanelLayout === "docked"
+                        ? "node"
+                        : null
+                  }
+                  collapsed={reportReviewTabActive && reportReviewLayout === "docked"
+                    ? reportReviewCollapsed
+                    : nodePanelTabActive && nodePanelLayout === "docked"
+                      ? nodePanelCollapsed
+                      : undefined}
+                  onCollapsedChange={reportReviewTabActive && reportReviewLayout === "docked"
+                    ? (collapsed) => setReportReviewUi((current) => ({ ...current, collapsed }))
+                    : nodePanelTabActive && nodePanelLayout === "docked"
+                      ? (collapsed) => setNodePanelUi((current) => ({ ...current, collapsed }))
+                      : undefined}
+                  tabs={
+                    <DetailDrawerTabs
+                      tabs={dockedTabs}
+                      nodes={model.nodes}
+                      activeTabId={dockedActiveTabId}
+                      onActive={dispatch.selectByTabSwitch}
+                      onClose={dispatch.closeTab}
+                      lastEvictedTabId={state.lastEvictedTabId}
+                    />
+                  }
+                  nodePanel={nodePanelLayout === "docked" ? nodePanelContent : null}
+                  reportPanel={reportReviewLayout === "docked" ? reportReviewPanel : null}
+                />
               )}
-            </AgentSurfaceProvider>
-          </div>
-          {state.view !== "home" && selectedNode !== null && (
-            <DetailDrawer
-              node={selectedNode}
-              projectRoot={projectRoot}
-              onClose={() => select(null)}
-              onShowJson={() => setRawJsonOpen(true)}
-            />
-          )}
         </div>
       </AgentNavigationContext.Provider>
       {state.view !== "home" && <ContextMenu />}
@@ -1369,6 +2088,8 @@ function WorkbenchShell({
           node={selectedNode}
         />
       )}
+      {reportReviewFloating}
+      {nodePanelFloating}
     </div>
   );
 }

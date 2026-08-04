@@ -10,6 +10,26 @@ from ..context import ModelingContext, RunEnv
 from ...domain import GuardrailIssue, Severity
 
 
+_V186_FAMILY_TYPES = frozenset(
+    {"ordinal_logit", "multinomial_logit", "survival_cox", "quantile_regression"}
+)
+
+
+def _family_owned_diagnostic(model_type: str, model_id: str) -> dict[str, Any]:
+    """Return a typed pointer for families whose diagnostics are not OLS-shaped."""
+
+    return {
+        "contract": f"workbench.{model_type}.diagnostics.v1",
+        "model_type": model_type,
+        "status": "family_owned",
+        "source_model_id": model_id,
+        "validation": {
+            "level": "internal_consistency_only",
+            "external_oracle": "not_verified",
+        },
+    }
+
+
 def _promote_did_warnings(
     result: dict[str, Any],
     *,
@@ -117,10 +137,11 @@ class DiagnosticsStage:
         from ...artifacts import register_artifact, write_json
         from ...domain import GuardrailIssue, Severity
         from ...econometrics.optional_deps import OptionalDependencyNotInstalled
+        from ...predictive_research.contracts import ContractError, SamplingSpecV1
+        from ...prediction import run_prediction_model_v186
 
         compute_diagnostics = _orch.compute_diagnostics
         run_time_series_diagnostics = _orch.run_time_series_diagnostics
-        run_prediction_model = _orch.run_prediction_model
         create_figures = _orch.create_figures
 
         run_root = env.run_root
@@ -139,6 +160,15 @@ class DiagnosticsStage:
         req_pred_type = ctx.artifacts.get("_prediction_model_type") or ""
         req_pred_folds = ctx.artifacts.get("_prediction_cv_folds") or 0
         req_pred_sampling = ctx.artifacts.get("_prediction_sampling_method") or ""
+        req_pred_structure = ctx.artifacts.get("_prediction_data_structure")
+        req_pred_entity = ctx.artifacts.get("_prediction_entity_column") or ""
+        req_pred_group = ctx.artifacts.get("_prediction_group_column") or ""
+        req_pred_time = ctx.artifacts.get("_prediction_time_column") or ""
+        req_pred_holdout = ctx.artifacts.get("_prediction_final_holdout_fraction")
+        req_pred_shuffle = ctx.artifacts.get("_prediction_shuffle")
+        req_frequency_weight = str(ctx.artifacts.get("_frequency_weight") or "").strip()
+        req_analysis_weight = str(ctx.artifacts.get("_analysis_weight") or "").strip()
+        req_sampling_weight = str(ctx.artifacts.get("_sampling_weight") or "").strip()
         routing = ctx.artifacts["_routing"]
         time_candidates = ctx.artifacts["_time_candidates"]
 
@@ -152,7 +182,12 @@ class DiagnosticsStage:
             result = result_dict.get(model_id, {})
             fitted_model_type = result.get("model_type", "ols")
             family = _diagnostic_family(result)
-            diag = compute_diagnostics(fitted, exog, model_id, model_family=family)
+            family_owned = fitted_model_type in _V186_FAMILY_TYPES
+            diag = (
+                _family_owned_diagnostic(fitted_model_type, model_id)
+                if family_owned
+                else compute_diagnostics(fitted, exog, model_id, model_family=family)
+            )
             diag["model_type"] = fitted_model_type
             diag_path = run_root / "model_results" / f"diagnostics_{model_id}.json"
             write_json(diag_path, diag)
@@ -165,10 +200,11 @@ class DiagnosticsStage:
                 model_input_ids,
             )
             diagnostic_artifacts[model_id] = diag
-            _check_model_validity(diag, model_id, issue_dicts, run_root)
-            if family == "poisson":
+            if not family_owned:
+                _check_model_validity(diag, model_id, issue_dicts, run_root)
+            if not family_owned and family == "poisson":
                 _check_overdispersion_issue(diag, model_id, issue_dicts, run_root)
-            sep = diag.get("separation", {})
+            sep = diag.get("separation", {}) if not family_owned else {}
             if isinstance(sep, dict) and sep.get("warning"):
                 issue_dicts.append(GuardrailIssue(
                     Severity.WARNING,
@@ -326,17 +362,52 @@ class DiagnosticsStage:
             cv_folds = req_pred_folds or config.prediction_cv_folds
             sampling_method = req_pred_sampling or config.prediction_sampling_method
             try:
-                run_prediction_model(
-                    modeling_frame,
+                imputation_request = ctx.artifacts.get("_imputation_request")
+                imputation_method = (
+                    imputation_request.get("method")
+                    if isinstance(imputation_request, dict)
+                    else getattr(config, "imputation_method", "")
+                )
+                if not req_pred_structure:
+                    raise ContractError(
+                        "PREDICTION_DATA_STRUCTURE_UNKNOWN",
+                        "new prediction runs require an explicit data structure declaration",
+                    )
+                if sampling_method:
+                    raise ContractError(
+                        "PREDICTION_SAMPLING_UNSUPPORTED",
+                        "legacy sampling methods are not accepted by the v1.8.6 typed prediction protocol",
+                    )
+                prediction_inputs = (
+                    ["cleaned_dataset"]
+                    if imputation_method == "mice"
+                    else model_input_ids
+                )
+                run_prediction_model_v186(
+                    cleaned if imputation_method == "mice" else modeling_frame,
                     run_root,
                     y=normalized_y,
                     x=normalized_x,
                     model_type=prediction_model_type,
                     model_id=prediction_model_id,
+                    final_holdout_fraction=req_pred_holdout if req_pred_holdout is not None else 0.2,
                     cv_folds=cv_folds,
+                    shuffle=req_pred_shuffle if req_pred_shuffle is not None else True,
                     random_seed=config.random_seed,
-                    inputs=model_input_ids,
-                    sampling_method=sampling_method,
+                    data_structure=str(req_pred_structure),
+                    entity_column=req_pred_entity or None,
+                    group_column=req_pred_group or None,
+                    time_column=req_pred_time or None,
+                    sampling=SamplingSpecV1(
+                        frequency_weight=req_frequency_weight or None,
+                        analysis_weight=req_analysis_weight or None,
+                        sampling_weight=req_sampling_weight or None,
+                    ),
+                    inputs=prediction_inputs,
+                    graph_recorder=env.recorder,
+                    imputation_method=imputation_method or None,
+                    imputation_max_iter=getattr(config, "imputation_max_iter", 10),
+                    imputation_max_missing_rate=getattr(config, "max_missing_rate", 0.4),
                 )
             except OptionalDependencyNotInstalled as dep_exc:
                 # Prediction is supplementary; missing optional deps should
@@ -356,6 +427,20 @@ class DiagnosticsStage:
                     "OPTIONAL_DEPENDENCY_MISSING",
                     str(dep_exc),
                     evidence,
+                ).to_dict())
+                write_json(run_root / "errors.json", {"issues": issue_dicts})
+            except ContractError as exc:
+                issue_dicts.append(GuardrailIssue(
+                    Severity.WARNING,
+                    exc.code,
+                    str(exc),
+                    _model_failure_details(
+                        model_type=prediction_model_type,
+                        y=normalized_y,
+                        x=normalized_x,
+                        root_cause=str(exc),
+                        step="prediction",
+                    ),
                 ).to_dict())
                 write_json(run_root / "errors.json", {"issues": issue_dicts})
             except ValueError as exc:

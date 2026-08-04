@@ -16,6 +16,14 @@ export interface CitableFact {
   field: string;
   label: string;
   value: unknown;
+  /** Optional provider metadata; old facts remain valid without it. */
+  provider_id?: string;
+  kind?: "estimate" | "diagnostic" | "sample" | "decision" | "metadata" | string;
+  unit?: string | null;
+  artifact_ids?: string[];
+  claim_types?: string[];
+  validation_level?: "external_oracle" | "internal_only" | "unverified" | string;
+  qualifiers?: Record<string, unknown>;
 }
 
 export interface ReportScope {

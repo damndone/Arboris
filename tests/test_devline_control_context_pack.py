@@ -355,6 +355,29 @@ def test_rescope_rejects_non_relative_or_symlinked_paths_before_any_event_or_pac
     assert len(events) == 1
 
 
+def test_rescope_allows_a_concrete_top_level_backend_workbench_file(tmp_path: Path) -> None:
+    """Concrete files are safe allowlist entries even at backend/workbench depth."""
+
+    create_context_pack(tmp_path, "integration-v173", _request())
+
+    required = record_context_rescope_required(
+        tmp_path,
+        "integration-v173",
+        affected_paths=("backend/workbench/prediction.py",),
+        allowed_paths=("backend/workbench/prediction.py",),
+    )
+    rescoped = rescope_context_pack(
+        tmp_path,
+        "integration-v173",
+        affected_paths=("backend/workbench/prediction.py",),
+        allowed_paths=("backend/workbench/prediction.py",),
+    )
+
+    assert rescoped.manifest_sha256 == required.new_manifest_sha256
+    manifest = json.loads(rescoped.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["request"]["allowed_paths"] == ["backend/workbench/prediction.py"]
+
+
 def test_rescope_recovers_only_the_already_audited_generation_after_interrupted_publish(tmp_path: Path) -> None:
     created = create_context_pack(tmp_path, "integration-v173", _request())
     required = record_context_rescope_required(

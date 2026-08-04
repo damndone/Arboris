@@ -62,6 +62,7 @@ class GraphRecorder:
         decision_points: tuple[DecisionPoint, ...] = (),
         summary: str | None = None,
         stage: Stage | None = None,
+        node_hash: str | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -74,6 +75,7 @@ class GraphRecorder:
             decision_points=decision_points,
             summary=summary,
             stage=stage,
+            node_hash=node_hash,
             created_at=_now_iso(),
         )
 
@@ -89,6 +91,7 @@ class GraphRecorder:
         decision_points: tuple[DecisionPoint, ...] = (),
         summary: str | None = None,
         stage: Stage | None = None,
+        node_hash: str | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -101,6 +104,7 @@ class GraphRecorder:
             decision_points=decision_points,
             summary=summary,
             stage=stage,
+            node_hash=node_hash,
             created_at=_now_iso(),
         )
 
@@ -115,6 +119,7 @@ class GraphRecorder:
         decision_points: tuple[DecisionPoint, ...] = (),
         summary: str | None = None,
         stage: Stage | None = None,
+        node_hash: str | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -127,6 +132,7 @@ class GraphRecorder:
             decision_points=decision_points,
             summary=summary,
             stage=stage,
+            node_hash=node_hash,
             created_at=_now_iso(),
         )
 
@@ -140,6 +146,7 @@ class GraphRecorder:
         trust_reason: str | None = None,
         summary: str | None = None,
         stage: Stage | None = None,
+        node_hash: str | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -152,6 +159,7 @@ class GraphRecorder:
             decision_points=(),
             summary=summary,
             stage=stage,
+            node_hash=node_hash,
             created_at=_now_iso(),
         )
 
@@ -227,6 +235,7 @@ class GraphRecorder:
         decision_points: tuple[DecisionPoint, ...],
         summary: str | None,
         stage: Stage | None,
+        node_hash: str | None,
         created_at: str,
     ) -> None:
         if id in self._nodes:
@@ -245,4 +254,5 @@ class GraphRecorder:
             decision_points=decision_points,
             summary=summary,
             stage=stage,
+            node_hash=node_hash,
         )

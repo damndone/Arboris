@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from workbench.artifacts import read_json
+from workbench.agent.context_tools import _bounded_result_summary, _bounded_statistics_evidence
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
 
@@ -24,8 +25,8 @@ def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
     run_root = project.root / "runs" / result["run_id"]
     assert (run_root / "run_manifest.json").exists()
     assert (run_root / "reports" / "report.html").exists()
-    assert (run_root / "reports" / "report.pdf").exists()
-    assert (run_root / "exports" / "tables.xlsx").exists()
+    assert not (run_root / "reports" / "report.pdf").exists()
+    assert not (run_root / "exports" / "tables.xlsx").exists()
     assert (run_root / "artifacts_index.json").exists()
     manifest = read_json(run_root / "run_manifest.json")
     assert manifest["status"] == "completed"
@@ -40,9 +41,9 @@ def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
         "analysis_router",
         "ols_1",
         "report_html",
-        "report_pdf",
-        "tables_xlsx",
     }.issubset(artifact_ids)
+    assert "report_pdf" not in artifact_ids
+    assert "tables_xlsx" not in artifact_ids
     assert all(
         not artifact["path"].startswith("/")
         for artifact in artifact_index["artifacts"]
@@ -50,6 +51,102 @@ def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
     model_result = read_json(run_root / "model_results" / "ols_1.json")
     assert model_result["model_id"] == "ols_1"
     assert "x" in model_result["coefficients"]
+
+
+def test_normal_run_persists_typed_advanced_statistics_evidence(tmp_path: Path):
+    source = tmp_path / "grouped.csv"
+    pd.DataFrame(
+        {
+            "y": [1.0, 1.2, 0.9, 2.0, 2.2, 1.8, 3.0, 3.1, 2.9] * 4,
+            "x": list(range(36)),
+            "region": ["north"] * 12 + ["south"] * 12 + ["west"] * 12,
+        }
+    ).to_csv(source, index=False)
+    project = create_project(tmp_path, "advanced-statistics")
+
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x", "region"],
+        model_type="ols",
+    )
+
+    assert result["status"] == "completed"
+    run_root = project.root / "runs" / result["run_id"]
+    packet = read_json(run_root / "statistical_tests" / "evidence.json")
+    assert packet["payload_schema"] == "workbench.statistics.evidence-packet"
+    test_types = {row["test_type"] for row in packet["results"]}
+    assert {"anova_posthoc", "cohens_d", "levene", "bartlett", "shapiro_wilk"} <= test_types
+    agent_evidence = _bounded_statistics_evidence(run_root)
+    assert agent_evidence["payload_schema"] == "workbench.statistics.evidence-packet"
+    assert agent_evidence["results"][0]["test_type"] in test_types
+    first_packet_result = packet["results"][0]
+    first_agent_result = next(
+        row for row in agent_evidence["results"]
+        if row.get("test_id") == first_packet_result.get("test_id")
+    )
+    assert first_agent_result.get("statistic") == first_packet_result.get("statistic")
+    assert first_agent_result.get("p_value") == first_packet_result.get("p_value")
+    report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
+    assert "Statistical Evidence" in report_html
+    assert "Table 1" in report_html
+    assert "Regression Table" in report_html
+    assert "model_results.ols_1.coefficients.x" in report_html
+    assert not (run_root / "reports" / "report.pdf").exists()
+    assert not (run_root / "exports" / "tables.xlsx").exists()
+
+
+def test_agent_result_summary_consumes_bounded_regression_table(tmp_path: Path):
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    model_results = [
+        {
+            "model_id": "ols_1",
+            "model_type": "ols",
+            "nobs": 24,
+            "coefficients": {
+                "x": {
+                    "estimate": 1.25,
+                    "std_error": 0.2,
+                    "ci_lower": 0.86,
+                    "ci_upper": 1.64,
+                    "p_value": 0.009,
+                    "source_id": "model_results.ols_1.coefficients.x",
+                }
+            },
+        },
+        {
+            "model_id": "ols_2",
+            "model_type": "ols_robust",
+            "nobs": 24,
+            "coefficients": {
+                "x": {
+                    "estimate": 1.1,
+                    "std_error": 0.25,
+                    "ci_lower": 0.61,
+                    "ci_upper": 1.59,
+                    "p_value": 0.08,
+                    "source_id": "model_results.ols_2.coefficients.x",
+                }
+            },
+        },
+    ]
+
+    result = _bounded_result_summary(
+        {},
+        summary_status="complete",
+        preview={"available": True},
+        model_results=model_results,
+        run_root=run_root,
+    )
+
+    table = result["regression_table"]
+    assert table["payload_schema"] == "workbench.regression-table"
+    assert [model["id"] for model in table["models"]] == ["ols_1", "ols_2"]
+    assert table["rows"][0]["models"]["ols_1"]["source_id"] == "model_results.ols_1.coefficients.x"
+    assert table["rows"][0]["models"]["ols_1"]["significance"] == "***"
 
 
 def test_run_workflow_blocks_missing_model_columns(tmp_path: Path):

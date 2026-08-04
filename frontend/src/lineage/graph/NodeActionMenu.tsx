@@ -375,7 +375,7 @@ export function NodeActionMenu({
       <button
         ref={triggerRef}
         type="button"
-        className="ln-btn-secondary"
+        className="ln-btn-secondary node-action-menu__trigger"
         onClick={() => {
           setForkError(null);
           setAgentForkError(null);
@@ -384,8 +384,9 @@ export function NodeActionMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Node actions"
+        title="Actions"
       >
-        Actions ⌄
+        <span aria-hidden="true">⋯</span>
       </button>
       {forkError !== null && (
         <div

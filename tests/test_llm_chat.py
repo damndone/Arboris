@@ -426,6 +426,9 @@ class TestReportMode:
         assert len(seen) == 2
         retry_messages = json.loads(seen[1].content)["messages"]
         assert "contract" in retry_messages[-1]["content"].lower()
+        assert "do not repeat any figure marker" in retry_messages[-1]["content"].lower()
+        assert "delete the entire sentence" in retry_messages[-1]["content"].lower()
+        assert "evidence boundary" in retry_messages[-1]["content"].lower()
 
     def test_invalid_report_after_retry_fails_closed(
         self, api: TestClient, configured_env, monkeypatch
@@ -440,6 +443,38 @@ class TestReportMode:
         assert response.status_code == 502
         assert response.json()["error"]["code"] == "LLM_RESPONSE_CONTRACT_INVALID"
         assert len(seen) == 2
+
+    def test_invalid_journal_report_after_retry_exposes_quality_details(
+        self, api: TestClient, configured_env, monkeypatch
+    ):
+        body = self._report_body()
+        body["packet"].update(
+            {
+                "report_standard": "journal_full_v1",
+                "required_capabilities": ["model.estimation", "diagnostics.robustness"],
+                "capability_manifest": [],
+            }
+        )
+        seen = _install_upstream(
+            monkeypatch,
+            lambda request: _ok_upstream("# Title\nIncomplete 0.86 [[c:c1]]; 240 observations"),
+        )
+
+        response = api.post("/llm/chat", json=body)
+
+        assert response.status_code == 502
+        details = response.json()["error"]["details"]
+        assert details["retry_attempted"] is True
+        assert details["retry_count"] == 2
+        assert details["report_quality"]["status"] == "needs_revision"
+        assert details["report_quality"]["violations"]
+        retry_prompt = json.loads(seen[1].content)["messages"][-1]["content"].lower()
+        assert "forbidden numeric tokens" in retry_prompt
+        assert "240" in retry_prompt
+        assert len(seen) == 3
+        final_prompt = json.loads(seen[2].content)["messages"][-1]["content"].lower()
+        assert "no numeric tokens" in final_prompt
+        assert "delete every unsupported numeric statement" in final_prompt
 
     def test_report_prompt_carries_cite_rule_and_fact_table(
         self, api: TestClient, configured_env, monkeypatch
@@ -460,6 +495,85 @@ class TestReportMode:
         assert "numeric source summary" in system_prompt
         # the node-context header must NOT leak into report mode
         assert "node assistant" not in system_prompt
+
+    def test_journal_profile_is_enforced_and_returns_quality_status(
+        self, api: TestClient, configured_env, monkeypatch
+    ):
+        body = self._report_body()
+        body["packet"].update(
+            {
+                "report_standard": "journal_full_v1",
+                "required_capabilities": ["regression", "diagnostics.robustness"],
+                "excluded_fact_ids": [],
+            }
+        )
+        journal_filler = " ".join(
+            f"The interpretation remains conditional because the supplied {topic} and {qualifier} limit what this run can establish."
+            for topic in [
+                "sample definition", "measurement choices", "variable coding", "missingness review",
+                "model specification", "uncertainty reporting", "diagnostic scope", "lineage context",
+                "comparison baseline", "outcome definition", "predictor interpretation", "data coverage",
+                "reference category", "estimation assumptions", "robustness checks", "artifact provenance",
+                "research question", "practical interpretation",
+            ]
+            for qualifier in ("measurement choices", "evidence boundary")
+        )
+        complete = """# Title
+
+## Abstract
+The research question, data, method, principal result 0.86 [[c:c1]], and limitation are stated in this evidence-bound abstract.
+
+## Research question and scope
+This section states the research question and scope.
+
+## Data
+The data are described from the supplied evidence.
+
+## Variables and transformations
+Variables and transformations are described.
+
+## Methods
+The regression method is described.
+
+## Results
+### Main estimate
+Regression estimate 0.86 [[c:c1]] and covariance HC1 [[c:c2]]. The positive association is conditional on the supplied model.
+
+### Interpretation and implications
+The findings indicate an empirical association, not a causal effect, and the implication is limited to the supplied evidence.
+[[fig:coef_plot]]
+
+## Diagnostics and robustness
+Diagnostics and robustness are discussed.
+
+## Limitations
+Evidence and scope limitations are stated.
+
+## Conclusion
+The conclusion remains conditional on the supplied evidence.
+    """ + journal_filler
+        responses = iter([
+            _ok_upstream("# Title\n\n## Results\nIncomplete 0.86 [[c:c1]]"),
+            _ok_upstream(complete),
+        ])
+        seen = _install_upstream(monkeypatch, lambda request: next(responses))
+
+        response = api.post("/llm/chat", json=body)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["report_quality"]["status"] == "exportable"
+        assert len(seen) == 2
+        prompt = json.loads(seen[0].content)["messages"][0]["content"]
+        assert "journal_full_v1" in prompt
+        assert "Abstract" in prompt
+        assert "required capabilities" in prompt.lower()
+        assert "exactly these markdown headings" in prompt.lower()
+        assert "before returning, verify" in prompt.lower()
+        assert "model.estimation" in prompt
+        assert "diagnostics.robustness" in prompt
+        assert "literal phrases" in prompt.lower()
+        assert "never round" in prompt.lower()
+        assert "evidence boundary" in prompt.lower()
 
     def test_invalid_report_packet_is_rejected_before_provider_call(
         self, api: TestClient, configured_env, monkeypatch

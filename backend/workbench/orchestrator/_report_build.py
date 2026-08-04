@@ -94,6 +94,7 @@ def _coefficient_rows(model_result: dict[str, Any]) -> list[dict[str, Any]]:
     for term, values in coefficients.items():
         if isinstance(values, dict):
             row: dict[str, Any] = {"term": term, **values}
+            row["significance"] = _significance_marker(values.get("p_value"))
             if isinstance(irr_dict, dict) and term in irr_dict:
                 term_irr = irr_dict[term]
                 if isinstance(term_irr, dict):
@@ -102,6 +103,20 @@ def _coefficient_rows(model_result: dict[str, Any]) -> list[dict[str, Any]]:
                     row.setdefault("irr_ci_upper", term_irr.get("irr_ci_upper"))
             rows.append(row)
     return rows
+
+
+def _significance_marker(p_value: Any) -> str:
+    try:
+        parsed = float(p_value)
+    except (TypeError, ValueError):
+        return ""
+    if parsed < 0.01:
+        return "***"
+    if parsed < 0.05:
+        return "**"
+    if parsed < 0.1:
+        return "*"
+    return ""
 
 
 def _coefficient_rows_for_models(
@@ -209,6 +224,12 @@ def _importance_sort_key(item: dict[str, Any]) -> float:
 
 def _build_descriptive_stats(frame: pd.DataFrame, *, categorical_vars: set[str] | None = None) -> list[dict[str, Any]]:
     cat_set = categorical_vars or set()
+    variable_labels = frame.attrs.get("variable_labels", {})
+    if not isinstance(variable_labels, dict):
+        variable_labels = {}
+    value_labels = frame.attrs.get("value_labels", {})
+    if not isinstance(value_labels, dict):
+        value_labels = {}
     stats: list[dict[str, Any]] = []
     for column in frame.columns:
         col_str = str(column)
@@ -217,6 +238,9 @@ def _build_descriptive_stats(frame: pd.DataFrame, *, categorical_vars: set[str] 
         total = len(series)
         row: dict[str, Any] = {
             "column": col_str,
+            "label": variable_labels.get(col_str, col_str),
+            "label_source": "declared" if col_str in variable_labels else "column_name_fallback",
+            "value_labels": value_labels.get(col_str, {}),
             "dtype": str(series.dtype),
             "count": present,
             "missing": total - present,
