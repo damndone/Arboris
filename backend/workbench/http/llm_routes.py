@@ -51,11 +51,13 @@ from ..llm.provider_store import (
     ProviderStoreUnavailableError,
 )
 from ..report_contract import (
+    JOURNAL_FULL_REPORT_STANDARD,
     ReportContractError,
     ReportPacketContract,
     validate_report_packet,
     validate_report_response,
 )
+from ..report_quality import ReportQualityResult, validate_report_response_quality
 
 
 
@@ -182,8 +184,62 @@ _REPORT_CORRECTION_PROMPT = (
     "Your previous report response violated the Workbench report contract. "
     "Rewrite the complete report in Markdown. Fix every listed violation, "
     "preserve the supplied evidence boundary, and include each supplied figure "
-    "marker exactly once. Do not explain the correction; return only the report. "
+    "marker exactly once. Do not repeat any figure marker. For journal_full_v1, "
+    "keep every required heading, state the research question and limitation "
+    "explicitly in the Abstract, and state the evidence or interpretation boundary "
+    "explicitly in Limitations. Every numeric token must either be removed or be "
+    "copied exactly from a supplied fact and immediately followed by [[c:ID]]; "
+    "never round a supplied value. If you cannot locate the exact fact, delete the "
+    "entire sentence rather than keeping an unsupported number. Do not explain the "
+    "correction; return only the report. "
     "Violations: "
+)
+
+_REPORT_NUMERIC_FREE_CORRECTION_PROMPT = (
+    "This is the final conservative correction for a journal_full_v1 report. "
+    "Return the complete report, not an explanation of the correction. Keep all "
+    "required headings, substantive qualitative interpretation, exact supplied "
+    "fact citations, and each supplied figure marker exactly once. The response "
+    "must contain no numeric tokens anywhere in prose: no digits, decimals, "
+    "percentages, sample counts, p-values, confidence levels, or rounded estimates. "
+    "Delete every unsupported numeric statement rather than paraphrasing or "
+    "rounding it. Do not put numbers in headings. This preserves the evidence "
+    "boundary when the model cannot reproduce an exact supplied value. "
+    "In Limitations, state the evidence boundary and that the report does not "
+    "establish causal effects unless the packet explicitly provides a causal design. "
+    "Do not explain the correction; return only the report. Violations: "
+)
+
+_REPORT_JOURNAL_PROMPT_ADDENDUM = (
+    "This packet opts into the journal_full_v1 quality profile. In addition to "
+    "the evidence rules above, use exactly these Markdown headings in this order "
+    "(copy the heading text verbatim): # Title; ## Abstract; ## Research question "
+    "and scope; ## Data; ## Variables and transformations; ## Methods; ## Results; "
+    "## Diagnostics and robustness; ## Limitations; ## Conclusion. Do not return "
+    "a shortened outline, a list of missing sections, or only a title. Abstract "
+    "must state the research question, data/sample, "
+    "method, principal result, and limitation. Use the literal phrases "
+    "'research question' and 'limitation' in the Abstract. Keep every section substantive; "
+    "the body floor is approximately 1,200 non-whitespace Chinese characters or "
+    "700 English words. When Results cites multiple findings, split it into at "
+    "least two titled subsections. Each principal finding must include a claim, "
+    "evidence citation, conditional interpretation, and a limitation or "
+    "implication. Diagnostics must say what was performed, not performed, or "
+    "unavailable. Use conditional association language unless a causal design "
+    "is explicitly present in the packet. Explain missing evidence in "
+    "Limitations; do not invent a number or repeat empty prose to make a section "
+    "look complete. For model.estimation, explicitly discuss the model "
+    "specification and coefficient/estimate interpretation in Methods or Results. "
+    "For diagnostics.robustness, explicitly discuss diagnostics, residuals, "
+    "robust or standard errors, p-values, confidence intervals, or checks that "
+    "were performed or unavailable in Diagnostics and robustness. Every required "
+    "capability named in the packet must be discussed in its corresponding "
+    "section. Never round a supplied value. Before returning, verify that every "
+    "required heading is present, every numeric token is immediately followed by "
+    "[[c:ID]], and every supplied figure marker appears exactly once. In "
+    "Limitations, use the literal phrase 'evidence boundary' and state that the "
+    "report does not establish causal effects unless the packet explicitly provides "
+    "a causal design."
 )
 
 _SYSTEM_PROMPT_HEADER = (
@@ -820,46 +876,110 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
     ]
     result = _chat_or_api_error(messages, config)
     text = result["text"]
+    report_quality: ReportQualityResult | None = None
     if report_contract is not None:
         try:
-            text = validate_report_response(text, report_contract)
+            text, report_quality = _validate_report_text(text, report_contract)
         except ReportContractError as first_error:
+            report_quality = getattr(first_error, "quality", None)
+            correction_prompt = _REPORT_CORRECTION_PROMPT
+            forbidden_numeric_tokens = _forbidden_numeric_tokens(
+                first_error.violations
+            )
+            if forbidden_numeric_tokens:
+                correction_prompt += (
+                    "Forbidden numeric tokens in the corrected response: "
+                    + ", ".join(forbidden_numeric_tokens)
+                    + ". Delete every occurrence unless it is copied exactly "
+                    "from a fact and immediately cited. "
+                )
             retry_messages = [
                 *messages,
                 {
                     "role": "user",
-                    "content": _REPORT_CORRECTION_PROMPT
+                    "content": correction_prompt
                     + "; ".join(first_error.violations)[:1_000],
                 },
             ]
             retry_result = _chat_or_api_error(retry_messages, config)
+            final_retry_succeeded = False
             try:
-                text = validate_report_response(retry_result["text"], report_contract)
+                text, report_quality = _validate_report_text(
+                    retry_result["text"], report_contract
+                )
             except ReportContractError as second_error:
-                raise WorkbenchAPIError(
-                    status_code=502,
-                    code="LLM_RESPONSE_CONTRACT_INVALID",
-                    message=(
-                        "The LLM returned a report that did not satisfy the "
-                        "Workbench evidence and figure contract after one retry."
-                    ),
-                    details={
-                        "retry_attempted": True,
-                        "violations": list(second_error.violations),
-                    },
-                ) from second_error
-            result = retry_result
+                final_error = second_error
+                failed_quality = getattr(second_error, "quality", None) or report_quality
+                second_forbidden_numeric_tokens = _forbidden_numeric_tokens(
+                    second_error.violations
+                )
+                retry_count = 1
+                if (
+                    report_contract.report_standard == JOURNAL_FULL_REPORT_STANDARD
+                    and second_forbidden_numeric_tokens
+                ):
+                    retry_count = 2
+                    final_retry_messages = [
+                        *messages,
+                        {
+                            "role": "user",
+                            "content": (
+                                _REPORT_NUMERIC_FREE_CORRECTION_PROMPT
+                                + "; ".join(second_error.violations)[:1_000]
+                            ),
+                        },
+                    ]
+                    final_retry_result = _chat_or_api_error(
+                        final_retry_messages, config
+                    )
+                    try:
+                        text, report_quality = _validate_report_text(
+                            final_retry_result["text"], report_contract
+                        )
+                    except ReportContractError as final_contract_error:
+                        final_error = final_contract_error
+                        failed_quality = (
+                            getattr(final_contract_error, "quality", None)
+                            or failed_quality
+                        )
+                    else:
+                        result = final_retry_result
+                        final_retry_succeeded = True
+                if not final_retry_succeeded:
+                    raise WorkbenchAPIError(
+                        status_code=502,
+                        code="LLM_RESPONSE_CONTRACT_INVALID",
+                        message=(
+                            "The LLM returned a report that did not satisfy the "
+                            "Workbench evidence and figure contract after retries."
+                        ),
+                        details={
+                            "retry_attempted": True,
+                            "retry_count": retry_count,
+                            "violations": list(final_error.violations),
+                            "report_quality": (
+                                _quality_response_payload(failed_quality)
+                                if failed_quality is not None
+                                else None
+                            ),
+                        },
+                    ) from final_error
+            if not final_retry_succeeded:
+                result = retry_result
 
-    return {
+    response = {
         "text": text,
         "model": result["model"],
         "context_fingerprint": request.packet.get("context_fingerprint"),
     }
+    if report_quality is not None:
+        response["report_quality"] = _quality_response_payload(report_quality)
+    return response
 
 
 # A whole-report request is structurally the largest call this endpoint makes:
 # hundreds of facts and every figure in one prompt, and on a contract violation
-# it runs a second corrective round trip. A 214-fact report came in at ~55s and
+# it runs corrective round trips. A 214-fact report came in at ~55s and
 # the previous attempt returned 502 at the 60s provider default -- the model was
 # working, the clock simply ran out. Report mode gets its own ceiling instead of
 # raising the default, which would make every small Ask AI call hang far longer
@@ -933,6 +1053,15 @@ def _build_user_content(request: AskAIChatRequest) -> Any:
 def _build_system_prompt(request: AskAIChatRequest) -> str:
     if request.mode == REPORT_MODE:
         header = _REPORT_PROMPT_HEADER
+        if request.packet.get("report_standard") == "journal_full_v1":
+            header = f"{header}\n{_REPORT_JOURNAL_PROMPT_ADDENDUM}"
+            capabilities = request.packet.get("required_capabilities", [])
+            if isinstance(capabilities, list) and capabilities:
+                header = (
+                    f"{header}\nRequired capabilities for this packet: "
+                    + ", ".join(str(item) for item in capabilities)
+                    + "."
+                )
     elif request.mode == FIGURE_MODE:
         header = (
             _FIGURE_VISION_PROMPT_HEADER
@@ -952,3 +1081,41 @@ def _build_system_prompt(request: AskAIChatRequest) -> str:
         "Context packet:\n" + json.dumps(request.packet, ensure_ascii=False)
     )
     return "\n\n".join(sections)
+
+
+def _validate_report_text(
+    text: str,
+    contract: ReportPacketContract,
+) -> tuple[str, ReportQualityResult | None]:
+    if contract.report_standard is None:
+        return validate_report_response(text, contract), None
+    quality = validate_report_response_quality(text, contract)
+    if not quality.is_exportable:
+        messages = [violation.message for violation in quality.violations]
+        error = ReportContractError(
+            "report quality contract failed: " + "; ".join(messages)[:2_000],
+            violations=messages or [f"report quality status: {quality.status}"],
+        )
+        # Keep the structured result attached to the retry error so a failed
+        # second attempt can tell the user which sections/evidence are missing.
+        setattr(error, "quality", quality)
+        raise error
+    return quality.normalized_text, quality
+
+
+def _quality_response_payload(result: ReportQualityResult) -> dict[str, Any]:
+    payload = result.to_dict()
+    payload.pop("normalized_text", None)
+    return payload
+
+
+def _forbidden_numeric_tokens(violations: tuple[str, ...]) -> tuple[str, ...]:
+    prefix = "numeric citation missing for "
+    return tuple(
+        dict.fromkeys(
+            violation.removeprefix(prefix).strip()
+            for violation in violations
+            if violation.startswith(prefix)
+            and violation.removeprefix(prefix).strip()
+        )
+    )

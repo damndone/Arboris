@@ -26,6 +26,10 @@ TEST_FAMILIES = {
 }
 
 
+class StatisticalTestContractError(ValueError):
+    """A requested statistical comparison lacks explicit semantic columns."""
+
+
 def run_statistical_tests(
     frame: pd.DataFrame,
     *,
@@ -172,6 +176,23 @@ def _build_advanced_evidence_results(
     paired_columns: Sequence[tuple[str, str]] | None,
 ) -> list[dict[str, Any]]:
     evidence: list[dict[str, Any]] = []
+    if paired_columns is not None:
+        for pair in paired_columns:
+            if (
+                not isinstance(pair, (tuple, list))
+                or len(pair) != 2
+                or not all(isinstance(column, str) and column for column in pair)
+            ):
+                raise StatisticalTestContractError(
+                    "paired columns must be declared as two column names; "
+                    "provide an explicit before/after pair"
+                )
+            left, right = pair
+            if left == right or left not in numeric or right not in numeric:
+                raise StatisticalTestContractError(
+                    f"paired column pair ({left!r}, {right!r}) must name two "
+                    "distinct numeric analysis columns; provide the pair explicitly"
+                )
     for outcome in numeric:
         for group in categorical:
             if group == outcome:

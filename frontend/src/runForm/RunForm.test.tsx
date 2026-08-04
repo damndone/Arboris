@@ -190,6 +190,43 @@ const PREVIEW: api.FilePreview = {
   excludedColumns: [],
 };
 
+describe("RunForm weights wiring", () => {
+  it("posts frequency, analysis, and sampling weight columns through the real run API payload", async () => {
+    const spy = vi.spyOn(api, "runWorkflow").mockResolvedValue(RUN_RESPONSE);
+    vi.spyOn(api, "previewFile").mockResolvedValue(PREVIEW);
+    renderForm();
+    const file = new File(["y,x1,id,year,cohort\n1,2,1,2020,1\n"], "data.csv", {
+      type: "text/csv",
+    });
+    fireEvent.change(screen.getByLabelText("data file"), {
+      target: { files: [file] },
+    });
+    await screen.findByLabelText("column selector");
+    fireEvent.change(screen.getByLabelText("dependent variable"), {
+      target: { value: "y" },
+    });
+    fireEvent.change(screen.getByLabelText("independent variables"), {
+      target: { value: "x1" },
+    });
+    fireEvent.change(screen.getByLabelText("frequency weight"), {
+      target: { value: "id" },
+    });
+    fireEvent.change(screen.getByLabelText("analysis weight"), {
+      target: { value: "x1" },
+    });
+    fireEvent.change(screen.getByLabelText("sampling weight"), {
+      target: { value: "cohort" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /run workflow/i }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const extra = spy.mock.calls[0][9];
+    expect(extra?.frequencyWeight).toBe("id");
+    expect(extra?.analysisWeight).toBe("x1");
+    expect(extra?.samplingWeight).toBe("cohort");
+  });
+});
+
 describe("RunForm DID wiring", () => {
   async function setupDID() {
     vi.spyOn(api, "previewFile").mockResolvedValue(PREVIEW);

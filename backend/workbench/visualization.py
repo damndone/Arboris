@@ -276,7 +276,7 @@ def _plot_histograms(frame, columns, figures_dir, run_root, figures) -> None:
             bins = min(30, max(5, int(len(data) ** 0.5)))
             ax.hist(data, bins=bins, color="#4c78a8")
             drew = True
-        ax.set_title(column, fontsize=9)
+        ax.set_title(_label_for(frame, column), fontsize=9)
     _hide_unused(axes, len(columns), rows, cols)
     if drew:
         _save(fig, figures_dir / "histograms.png", run_root, "histograms", figures)
@@ -291,7 +291,7 @@ def _plot_kde(frame, columns, figures_dir, run_root, figures) -> None:
     plotted = 0
     for i, column in enumerate(columns):
         ax = axes[i // cols][i % cols]
-        ax.set_title(column, fontsize=9)
+        ax.set_title(_label_for(frame, column), fontsize=9)
         data = _numeric_series(frame, column)
         try:
             if len(data) >= 2 and float(data.std()) > 0:
@@ -317,7 +317,12 @@ def _plot_boxplots(frame, columns, figures_dir, run_root, figures) -> None:
         return
     fig, ax = plt.subplots(figsize=(max(6.0, len(pairs) * 0.9), 4.0))
     ax.boxplot([s.to_numpy() for _, s in pairs])
-    ax.set_xticklabels([c for c, _ in pairs], rotation=45, ha="right")
+    ax.set_xticks(
+        range(1, len(pairs) + 1),
+        [_label_for(frame, c) for c, _ in pairs],
+        rotation=45,
+        ha="right",
+    )
     _save(fig, figures_dir / "boxplots.png", run_root, "boxplots", figures)
 
 
@@ -327,8 +332,10 @@ def _plot_correlation_heatmap(frame, columns, figures_dir, run_root, figures) ->
     correlation = frame[columns].corr(numeric_only=True)
     fig, ax = plt.subplots()
     image = ax.imshow(correlation, cmap="coolwarm", vmin=-1, vmax=1)
-    ax.set_xticks(range(len(correlation.columns)), correlation.columns, rotation=45, ha="right")
-    ax.set_yticks(range(len(correlation.index)), correlation.index)
+    column_labels = [_label_for(frame, column) for column in correlation.columns]
+    row_labels = [_label_for(frame, column) for column in correlation.index]
+    ax.set_xticks(range(len(correlation.columns)), column_labels, rotation=45, ha="right")
+    ax.set_yticks(range(len(correlation.index)), row_labels)
     fig.colorbar(image, ax=ax)
     _save(fig, figures_dir / "correlation_heatmap.png", run_root, "correlation_heatmap", figures)
 
@@ -417,8 +424,8 @@ def _plot_time_trend(frame, continuous, time_column, figures_dir, run_root, figu
     plot_frame = frame.sort_values(time_column)
     fig, ax = plt.subplots()
     for column in continuous:
-        ax.plot(plot_frame[time_column], plot_frame[column], label=column)
-    ax.set_xlabel(time_column)
+        ax.plot(plot_frame[time_column], plot_frame[column], label=_label_for(frame, column))
+    ax.set_xlabel(_label_for(frame, time_column))
     ax.legend()
     fig.autofmt_xdate()
     _save(fig, figures_dir / "time_trend.png", run_root, "time_trend", figures)

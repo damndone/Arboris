@@ -10,20 +10,21 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 1/28 (3.6%; 3.6 per 100 events)
-- Repeat rate: 0/1 (0.0%)
-- Recurrence rate: 0/1 (0.0%)
-- MTTR: median=0 ms (sample=1; unresolved=0)
+- Failure frequency: 4/40 (10.0%; 10.0 per 100 events)
+- Repeat rate: 0/4 (0.0%)
+- Recurrence rate: 0/4 (0.0%)
+- MTTR: median=0 ms (sample=3; unresolved=1)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/2 (0.0%)
+- Gate waste rate: 0/3 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
 ## All failures
 
 - #6 2026-08-03T11:37:48.000Z `consumer_entry_contract_red`; cause_status: `known`; cause: The new labels acceptance tests correctly failed because run_workflow had no labels transport, reports did not expose label source/value mappings, and figure axes did not yet use declared labels.; resolution: `resolved`; lesson: For labels, test the same declaration through transport, report/table export, and visualization metadata before claiming user reachability.
+- #40 2026-08-03T18:59:01.000Z `agent_evidence_projection_budget`; cause_status: `known`; cause: The generic bounded Agent result projection spent its nesting and string budget before exposing the newly added model-family and statistics evidence fields.; resolution: `resolved`; lesson: Agent evidence boundaries need explicit family-owned numeric projections and stable priority selection; generic truncation is not evidence delivery.
 
 ## All errors
 
@@ -31,7 +32,8 @@ CONTEXT_RESCOPED
 
 ## All gaps
 
-- None recorded.
+- #29 2026-08-03T12:45:20.000Z `agent_regression_table_consumer_missing`; cause_status: `known`; cause: Report and frontend Table consumed the v1.8.6 regression-table packet, but inspect_result_summary did not yet expose a bounded Agent projection.; resolution: `resolved`; lesson: A report packet is not user-complete until Table, Report, and Agent projections are each asserted against the same schema and source ids.
+- #32 2026-08-03T15:00:01.000Z `unowned_v186_consumer_paths`; cause_status: `known`; cause: The typed model-family evidence consumer and its Table integration test were added after the consumer Context Pack was frozen.; resolution: `open`; lesson: Every new evidence consumer and its acceptance test must be frozen in one formal consumer scope before the release gate.
 
 ## All waste
 
@@ -39,7 +41,10 @@ CONTEXT_RESCOPED
 
 ## Root causes and solutions
 
+- `agent-evidence-exact-projection`: occurrences=1; cause_status: `known`; root cause: The generic bounded Agent result projection spent its nesting and string budget before exposing the newly added model-family and statistics evidence fields.; solution: `resolved`
+- `consumer-evidence-needs-formal-owner`: occurrences=1; cause_status: `known`; root cause: The typed model-family evidence consumer and its Table integration test were added after the consumer Context Pack was frozen.; solution: `open`
 - `labels-consumer-boundary-before-claim`: occurrences=1; cause_status: `known`; root cause: The new labels acceptance tests correctly failed because run_workflow had no labels transport, reports did not expose label source/value mappings, and figure axes did not yet use declared labels.; solution: `resolved`
+- `regression-table-needs-three-consumers`: occurrences=1; cause_status: `known`; root cause: Report and frontend Table consumed the v1.8.6 regression-table packet, but inspect_result_summary did not yet expose a bounded Agent projection.; solution: `resolved`
 
 ## Added tests
 
@@ -47,10 +52,16 @@ CONTEXT_RESCOPED
 
 ## New rules
 
+- `agent-evidence-exact-projection`: line experience occurrence(s)=1
+- `consumer-evidence-needs-formal-owner`: line experience occurrence(s)=1
 - `labels-consumer-boundary-before-claim`: line experience occurrence(s)=1
+- `regression-table-needs-three-consumers`: line experience occurrence(s)=1
 
 ## Future guidance
 
+- A report packet is not user-complete until Table, Report, and Agent projections are each asserted against the same schema and source ids.
+- Agent evidence boundaries need explicit family-owned numeric projections and stable priority selection; generic truncation is not evidence delivery.
+- Every new evidence consumer and its acceptance test must be frozen in one formal consumer scope before the release gate.
 - For labels, test the same declaration through transport, report/table export, and visualization metadata before claiming user reachability.
 
 ## Event index
@@ -83,3 +94,15 @@ CONTEXT_RESCOPED
 - #26: `6345333e-a4f6-4786-b506-6115d5fab8df` | 2026-08-03T12:02:51.957Z | STATE_CHANGE/context_rescoped | incident=`c3141b20-5e25-4bbb-983b-8fb29645ccf5` | lesson_key=`context-pack-rescope` | event_sha256=`a6415b4b1429702eaeadeb18e584f7a15ddf00517d2b804a4717d54c3e5bdab6`
 - #27: `c3d4c1f1-3dd5-4ced-b9a6-1bcbd1cb5f4c` | 2026-08-03T12:03:23.000Z | GATE/full_backend_gate_host_sandbox | incident=`f7a6242a-aac8-4fd8-a73e-97a0ec0301d0` | lesson_key=`host-sandbox-gate-separation` | event_sha256=`c68b84590bb95820cbe4f68253d2a7606627976f453a17cac22fc98ac0020fa3`
 - #28: `5a0e101a-8b2c-4d75-9855-653247c5f6c4` | 2026-08-03T12:05:12.000Z | GATE/focused_consumer_gate_passed | incident=`d75647a7-3700-4429-b773-58aa94a9df3b` | lesson_key=`consumer-vocabulary-completeness` | event_sha256=`95daf61fc4e6c3bff3b42dbef05d8d14fe7f7997d5dc5cf423a2ea475293a2e4`
+- #29: `e5f6a7b8-c9d0-41e2-3f4a-5b6c7d8e9f0a` | 2026-08-03T12:45:20.000Z | GAP/agent_regression_table_consumer_missing | incident=`f6a7b8c9-d0e1-42f3-4a5b-6c7d8e9f0a1b` | lesson_key=`regression-table-needs-three-consumers` | event_sha256=`4999a9a78c7c42fe28e91b7c45a3ee30acbc91f1c95e418795efe3edfca23067`
+- #30: `cf0c05c8-0289-43d7-967c-005e0eb7deb2` | 2026-08-03T13:18:30.426Z | STATE_CHANGE/context_rescope_required | incident=`4ee4d352-9575-44dc-a02e-f53bb906f048` | lesson_key=`context-pack-rescope` | event_sha256=`1d8f2572830f7b2c92b4b39bebbd4fa7e6769e43b4b0e59dea1ed458a7fa60dc`
+- #31: `5f79dd05-76d1-46a1-83cf-78df4e435ed5` | 2026-08-03T13:18:30.441Z | STATE_CHANGE/context_rescoped | incident=`abb58516-a5f3-43eb-a82a-3f8555339bea` | lesson_key=`context-pack-rescope` | event_sha256=`ff2816d00cfd55c75fda7a5a4dd2a6d8874ac31e135b3ab1aec948d0b2cf8748`
+- #32: `d3e4f5a6-b7c8-4901-2345-6789abcdef01` | 2026-08-03T15:00:01.000Z | GAP/unowned_v186_consumer_paths | incident=`e4f5a6b7-c8d9-4012-3456-789abcdef012` | lesson_key=`consumer-evidence-needs-formal-owner` | event_sha256=`9547164d794489e5c924071a1b663778649f404e0760db1aae5d361a1c932df6`
+- #33: `8e3fd10b-9663-4242-99ee-32b329daa219` | 2026-08-03T15:04:26.163Z | STATE_CHANGE/context_rescope_required | incident=`c336d813-f5c9-4d04-a109-32571dcf2927` | lesson_key=`context-pack-rescope` | event_sha256=`1cee7b1585a2ce60a13ccce959163c237c9b89431196a96610c3ac03fee1f3ba`
+- #34: `4fdbee20-3419-4074-8d17-73a53ee70773` | 2026-08-03T15:04:26.178Z | STATE_CHANGE/context_rescoped | incident=`fa9f2340-2b7d-4fca-a2cc-39f0867c3a6b` | lesson_key=`context-pack-rescope` | event_sha256=`8a67b18e073fb7505b0c9b9c4ba8100817cbeef0a7db48d0c4d62abe933a39be`
+- #35: `8481a39b-7da3-490e-a472-58ed83db8f49` | 2026-08-03T15:05:55.429Z | STATE_CHANGE/context_rescope_required | incident=`f1bf4350-e12e-4d25-9eb3-acc62ea3fbf5` | lesson_key=`context-pack-rescope` | event_sha256=`dfac44c4f4331454c3700d7b944e7c973e1440d8b237dd9a5c48d3ed68f74b0d`
+- #36: `c0051e7f-c710-4cc5-aa4c-105165cdc5d3` | 2026-08-03T15:05:55.448Z | STATE_CHANGE/context_rescoped | incident=`9cfa1394-24be-4b74-8d72-d61bc0c2edc7` | lesson_key=`context-pack-rescope` | event_sha256=`64f3d5c9164499b72d06ff1e08dc7b96cf4aeedeba164ca1526eaa1d0528ab75`
+- #37: `d9e0f1a2-b3c4-4567-8901-abcdef012347` | 2026-08-03T15:21:01.000Z | GATE/consumer_gate_passed | incident=`e0f1a2b3-c4d5-4678-9012-abcdef012348` | lesson_key=`consumer-suite-gate-evidence` | event_sha256=`b2616b9ddc7143dc0d16b5db8d5437d0109593d5c9326120e3542bd245c4e58f`
+- #38: `3e02d068-ab94-4688-8a01-1939a37a01a9` | 2026-08-03T15:49:30.033Z | STATE_CHANGE/context_rescope_required | incident=`b677e35d-1f0b-4d9e-b258-fe99464cd874` | lesson_key=`context-pack-rescope` | event_sha256=`6a3014d2cf5708fbbb9901e3bedf14a5e59110ba85a2684b3f67f2526bf75cdb`
+- #39: `4830c355-21d8-43e8-9137-a0aa5036159e` | 2026-08-03T15:49:30.052Z | STATE_CHANGE/context_rescoped | incident=`b1afcbb0-1b25-469a-92c9-67c813e1dda2` | lesson_key=`context-pack-rescope` | event_sha256=`a5ddfd880e87f3bdf0a4573accc89e1241526116e36e0f57fee4e15fe59b02e1`
+- #40: `8e9f0123-4567-4456-a7b8-e9f012345678` | 2026-08-03T18:59:01.000Z | FAILURE/agent_evidence_projection_budget | incident=`9f012345-6789-4567-b8c9-f01234567890` | lesson_key=`agent-evidence-exact-projection` | event_sha256=`792a6fd09460bfe17b9942e70ea586a205627a29e77c76dee7f892c19278665e`

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "e9d1b09a-2b70-4ed0-b88a-0d980d6ee660",
+  "timestamp": "2026-08-04T14:00:30.000Z",
+  "type": "REVIEW",
+  "subtype": "panel_scrollbar_and_header_baseline_alignment",
+  "stage": "review",
+  "cause_status": "known",
+  "cause": "The node floating drawer retained the embedded DetailDrawer's 22px top padding and centered its 36px header toolbar, while Report review used a 12px header inset with top-aligned controls. Scroll surfaces also mixed native/default styling with the DetailDrawer's label-tertiary scrollbar treatment. A first-run style contract test reproduced both missing contracts before the implementation was changed.",
+  "evidence": {
+    "kind": "browser_test_command",
+    "ref": "Focused Vitest: 3 files, 69 tests passed. Full Vitest: 188 files, 1632 tests passed. Typecheck and git diff --check passed. Browser acceptance measured the node floating toolbar and controls at y=151.703125 and Report review controls at y=152 (0.3px difference); both right-side scroll surfaces computed scrollbar-color rgba(196, 200, 206, 0.72) with thin width. The browser screenshot showed the node Actions and window controls on the Report review baseline. Left Versions styling was unchanged.",
+    "sha256": "86e6b1e60120425115cd05cac7eba7fb97c2334d3b5f82d6efcaa2566001efbb",
+    "observed_at": "2026-08-04T14:00:30.000Z"
+  },
+  "impact": "Workbench primary reading surfaces and both floating panel families now use a consistent light-gray scrollbar. Floating node Actions, Float/Dock, Pin, and Collapse controls share the Report review top baseline without changing Float/Dock behavior or the left Versions presentation.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "For cross-panel visual alignment, compare measured browser rectangles against the reference component and lock the intended CSS contract before tuning offsets. Keep scrollbar styling at the shared Workbench surface boundary so docked and portaled panels cannot drift apart.",
+  "incident_id": "e9d1b09a-2b70-4ed0-b88a-0d980d6ee660",
+  "lesson_key": "panel-scrollbar-and-header-baseline",
+  "links": [
+    "frontend/src/lineage/tokens/lineage.css",
+    "frontend/src/workbench/panelHost.css",
+    "frontend/src/lineage/header/DetailHeader.tsx",
+    "frontend/src/workbench/WorkbenchRouteContainer.tsx",
+    "frontend/src/styles.test.ts"
+  ]
+}

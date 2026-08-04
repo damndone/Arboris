@@ -24,7 +24,7 @@ def test_agent_reads_only_hash_and_schema_verified_prediction_evidence(tmp_path:
     run_root = tmp_path / "run"
     run_root.mkdir()
     write_json(run_root / "artifacts_index.json", {"schema_version": 1, "artifacts": []})
-    run_prediction_model_v186(
+    result = run_prediction_model_v186(
         pd.DataFrame({"y": [float(i + 1) for i in range(10)], "x": [float(i) for i in range(10)]}),
         run_root,
         y="y",
@@ -43,6 +43,23 @@ def test_agent_reads_only_hash_and_schema_verified_prediction_evidence(tmp_path:
 
     assert projection["status"] == "validated"
     assert projection["model_id"] == "prediction_test_mean_1"
+    assert projection["sample_spec_hash"] == result["sample_spec"]["sample_spec_hash"]
+    assert projection["dataset_sha256"] == result["sample_spec"]["dataset_ref"]["dataset_sha256"]
+    assert projection["structure"] == result["sample_spec"]["structure"]
+    assert projection["split_plan_hash"] == result["split_plan"]["content_hash"]
+    assert projection["split_parameters"] == result["split_plan"]["effective_parameters"]
+    assert projection["oos"] == result["evaluation_packet"]["oos"]
+    assert projection["development"]["cv"] == result["evaluation_packet"]["cv"]
+    assert projection["baseline"] == result["evaluation_packet"]["baseline"]
+    assert projection["controls"] == result["control_packet"]["controls"]
+    assert projection["limits"] == result["evaluation_packet"]["limits"]
+    assert projection["payload_versions"] == {
+        "workbench.prediction.sample-spec": 1,
+        "workbench.prediction.split-plan": 1,
+        "workbench.prediction.prediction-packet": 1,
+        "workbench.prediction.evaluation-packet": 1,
+        "workbench.prediction.negative-control-packet": 1,
+    }
 
 
 def test_agent_statistics_evidence_covers_every_test_family_not_just_the_largest(tmp_path) -> None:
@@ -78,6 +95,52 @@ def test_agent_statistics_evidence_covers_every_test_family_not_just_the_largest
     observed = {row["test_type"] for row in projected["results"]}
     # A first-N budget yields only cohens_d; these three prove the round-robin.
     assert {"anova_posthoc", "eta_squared", "cohens_d"} <= observed, observed
+
+
+def test_result_summary_tool_advertises_the_statistics_evidence_it_carries(tmp_path) -> None:
+    """The Agent picks tools from their descriptors alone.
+
+    inspect_result_summary is the only place post-hoc, effect-size and
+    assumption tests are reachable, so a descriptor that does not say so makes
+    the Agent report that those tests were never run.
+    """
+    from workbench.agent.context_tools import NodeOperationContextProvider
+
+    provider = NodeOperationContextProvider(tmp_path)
+    definition = next(
+        item
+        for item in provider.tool_definitions(chain_id="c", session_id="s")
+        if item.tool_id == "inspect_result_summary"
+    )
+
+    descriptor = definition.descriptor()
+    description = str(descriptor.get("description") or "")
+    assert description, "inspect_result_summary exposes no description to the model"
+    lowered = description.lower()
+    assert "statistic" in lowered
+    assert "post-hoc" in lowered or "posthoc" in lowered
+
+
+def test_a_dedicated_statistical_evidence_tool_is_offered_to_the_agent(tmp_path) -> None:
+    """Tool choice is name-driven in practice.
+
+    A statistics question has to meet a tool whose name says "statistical
+    evidence"; burying the packet inside a result-summary tool leaves the model
+    answering "those tests were never run".
+    """
+    from workbench.agent.context_tools import NodeOperationContextProvider
+
+    provider = NodeOperationContextProvider(tmp_path)
+    definitions = {
+        item.tool_id: item
+        for item in provider.tool_definitions(chain_id="c", session_id="s")
+    }
+
+    assert "inspect_statistical_evidence" in definitions
+    definition = definitions["inspect_statistical_evidence"]
+    assert definition.side_effect == "none"
+    assert "owner_run_id" in definition.input_schema["required"]
+    assert "post-hoc" in str(definition.descriptor().get("description") or "").lower()
 
 
 def test_global_agent_can_reach_statistical_evidence(tmp_path) -> None:

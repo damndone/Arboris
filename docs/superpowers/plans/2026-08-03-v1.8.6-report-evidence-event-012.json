@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "021963c1-d3e8-474b-9338-dd555b350aa1",
+  "timestamp": "2026-08-04T01:13:01.000Z",
+  "type": "FAILURE",
+  "subtype": "curation_reset_effect_race",
+  "stage": "review",
+  "cause_status": "known",
+  "cause": "The first implementation of new-draft reset performed the exclusion-state clear in a useEffect, which raced with the existing history test's immediate curation interaction.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "npm test -- --run src/report/reportEvidence.test.ts src/report/reportDocument.test.ts src/report/ReportView.test.tsx",
+    "sha256": "4cb58edbba4cf77471d0010547b88f56ad431faaa33e31f98876f2e4102570a3",
+    "observed_at": "2026-08-04T01:13:01.000Z"
+  },
+  "impact": "The curation reset fix temporarily caused one existing history test to fail; no Run or report artifact was mutated.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "State resets that are user actions should happen in the action handler; effects should only hydrate selected persisted revisions.",
+  "incident_id": "bd61ca95-d25c-45bc-957e-2d3aac98bfba",
+  "lesson_key": "report-curation-reset-handler-boundary",
+  "links": [
+    "frontend/src/report/ReportView.tsx",
+    "frontend/src/report/ReportView.test.tsx"
+  ]
+}

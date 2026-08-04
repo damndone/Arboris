@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "event_id": "d4d4dd8e-82bc-49a1-a171-8cf9824f2a15",
+  "timestamp": "2026-08-03T23:53:03.000Z",
+  "type": "FAILURE",
+  "subtype": "formal_command_setup",
+  "stage": "gate",
+  "cause_status": "known",
+  "cause": "The first formal verifier invocation omitted the repository-required PYTHONPATH=backend environment prefix.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "python3 scripts/devline_control.py verify --line v1-8-6-report-evidence",
+    "sha256": "b5a8d438fac2c92b0b8012e38182588cf3fd253077bc8f2a36b4962728775122",
+    "observed_at": "2026-08-03T23:53:03.000Z"
+  },
+  "impact": "The verifier exited before reading the formal line because the workbench package was not importable; no source or formal state was changed.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Run every formal development-line command with PYTHONPATH=backend and the bundled Python interpreter.",
+  "incident_id": "d4d4dd8e-82bc-49a1-a171-8cf9824f2a15",
+  "lesson_key": "formal-cli-pythonpath",
+  "links": [
+    "docs/superpowers/plans/2026-08-03-v1.8.6-report-evidence-editing-plan.md"
+  ]
+}

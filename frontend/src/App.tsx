@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Navigate,
   Outlet,
@@ -10,11 +10,6 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import {
-  ApiError,
-  createProject,
-} from "./api";
-import { RunForm } from "./runForm/RunForm";
 import { RunDetailRoute } from "./runDetail";
 import { ThemeProvider, ThemeToggle } from "./theme";
 import { DraftGraphRoute } from "./pipelineDrafts/DraftGraphRoute";
@@ -22,8 +17,6 @@ import { LauncherRoute } from "./launcher/LauncherRoute";
 import { WorkbenchHome } from "./workbench/WorkbenchRouteContainer";
 import { rootToSlug, slugToRoot } from "./workbench/projectSlug";
 import "./styles.css";
-
-type RequestState = "idle" | "working";
 
 export function validatePanelPrediction(s: {
   modelType: string;
@@ -63,147 +56,6 @@ function useAppContext(): AppContextValue {
   return useOutletContext<AppContextValue>();
 }
 
-// --- SubmitRoute ---
-
-function SubmitRoute() {
-  const { projectRoot, setProjectRoot, setError, setActivity, activity } =
-    useAppContext();
-
-  const [parent, setParent] = useState("");
-  const [name, setName] = useState("demo");
-  // V1.5.4.3: `requestState` stays lifted here because it is shared chrome
-  // between the Project panel (onCreateProject) and the RunForm (onRun) —
-  // each disables the other's submit button while either request is in
-  // flight. Passed into RunForm to preserve that cross-disabling behavior.
-  const [requestState, setRequestState] = useState<RequestState>("idle");
-  const folderInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setError(null);
-  }, [setError]);
-
-  const projectErrors: Record<string, string> = {};
-  if (parent.trim() === "") projectErrors.parent = "Required";
-  if (name.trim() === "") projectErrors.name = "Required";
-  else if (name.includes("/") || name.includes("\\"))
-    projectErrors.name = "No path separators";
-
-  const canCreate =
-    Object.keys(projectErrors).length === 0 && requestState === "idle";
-
-  async function onCreateProject() {
-    setRequestState("working");
-    setError(null);
-    setActivity("Creating project");
-    try {
-      const result = await createProject(parent.trim(), name.trim());
-      setProjectRoot(result.project_root);
-      setActivity("Project ready");
-    } catch (error) {
-      const message =
-        error instanceof ApiError
-          ? `[HTTP ${error.status}] ${error.message}`
-          : error instanceof Error
-            ? error.message
-            : "Project creation failed";
-      setError(message);
-      setActivity("Project creation failed");
-    } finally {
-      setRequestState("idle");
-    }
-  }
-
-  function onFolderFiles(files: FileList | null) {
-    const first = files?.[0] as (File & { webkitRelativePath?: string }) | undefined;
-    const relativePath = first?.webkitRelativePath;
-    if (!relativePath) return;
-    const rootName = relativePath.split("/")[0];
-    if (rootName) setParent(parent ? parent : `/${rootName}`);
-  }
-
-  return (
-    <>
-      <section className="panel" aria-labelledby="project-heading">
-        <div className="panel-heading">
-          <h2 id="project-heading">Project</h2>
-          <span>Parent folder + name → backend creates project_root.</span>
-        </div>
-        <div className="control-grid">
-          <label>
-            Parent folder
-            <input
-              aria-label="parent folder"
-              aria-invalid={Boolean(projectErrors.parent)}
-              placeholder="/path/to/workspace"
-              value={parent}
-              onChange={(event) => setParent(event.target.value)}
-            />
-            {projectErrors.parent && (
-              <span className="field-error">{projectErrors.parent}</span>
-            )}
-          </label>
-          <div className="folder-picker">
-            <button
-              type="button"
-              onClick={() => folderInputRef.current?.click()}
-            >
-              Browse
-            </button>
-            <input
-              ref={folderInputRef}
-              aria-label="folder picker"
-              className="visually-hidden"
-              type="file"
-              multiple
-              {...({ webkitdirectory: "true", directory: "true" } as Record<
-                string,
-                string
-              >)}
-              onChange={(event) => onFolderFiles(event.target.files)}
-            />
-          </div>
-          <label>
-            Project name
-            <input
-              aria-label="project name"
-              aria-invalid={Boolean(projectErrors.name)}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-            {projectErrors.name && (
-              <span className="field-error">{projectErrors.name}</span>
-            )}
-          </label>
-          <button
-            type="button"
-            disabled={!canCreate}
-            onClick={onCreateProject}
-          >
-            {requestState === "working" && activity === "Creating project"
-              ? "Creating…"
-              : "Create project"}
-          </button>
-        </div>
-        <dl className="summary-list">
-          <div>
-            <dt>Project root</dt>
-            <dd className="mono">{projectRoot || "Not created"}</dd>
-          </div>
-        </dl>
-      </section>
-
-      <RunForm
-        projectRoot={projectRoot}
-        setError={setError}
-        setActivity={setActivity}
-        activity={activity}
-        requestState={requestState}
-        setRequestState={setRequestState}
-      />
-    </>
-  );
-}
-
 // --- v1.6.8 route inversion: legacy redirects + project graph home ---
 // The graph is the home; /runs* deep links keep working via redirects
 // (spec F8), and the workbench mounts at /p/:slug/graph where slug is a
@@ -237,6 +89,18 @@ function LegacyRunsListRedirect() {
   return <Navigate replace to={root ? `/p/${rootToSlug(root)}/graph` : "/"} />;
 }
 
+function SubmitRedirect() {
+  const [searchParams] = useSearchParams();
+  const root = searchParams.get("project_root");
+  return (
+    <Navigate
+      replace
+      to={root ? `/p/${rootToSlug(root)}/graph?open_genesis=1` : "/"}
+      state={root ? { openGenesis: true } : undefined}
+    />
+  );
+}
+
 function ProjectGraphRoute() {
   const { slug } = useParams();
 
@@ -254,7 +118,16 @@ function ProjectGraphRoute() {
 
 function ProjectGraphBridge({ projectRoot }: { projectRoot: string }) {
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const { settingsRequestVersion } = useAppContext();
+  const routeState =
+    location.state && typeof location.state === "object"
+      ? (location.state as { openGenesis?: unknown })
+      : null;
+  const openGenesis =
+    searchParams.get("genesis") === "1" ||
+    searchParams.get("open_genesis") === "1" ||
+    routeState?.openGenesis === true;
   // ?run= is the run deep-link param. ?focus= belongs to the workbench URL
   // schema (NODE focus key, rewritten on every canvas interaction) — never
   // read it here.
@@ -269,6 +142,7 @@ function ProjectGraphBridge({ projectRoot }: { projectRoot: string }) {
       <WorkbenchHome
         projectRoot={projectRoot}
         focusRunId={runParam || undefined}
+        openGenesis={openGenesis}
         settingsRequestVersion={settingsRequestVersion}
       />
     </div>
@@ -451,7 +325,7 @@ export default function App() {
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<LauncherRoute />} />
-          <Route path="submit" element={<SubmitRoute />} />
+          <Route path="submit" element={<SubmitRedirect />} />
           <Route path="p/:slug/graph" element={<ProjectGraphRoute />} />
           <Route path="runs" element={<LegacyRunsListRedirect />} />
           <Route path="runs/:runId" element={<LegacyRunRoute />} />

@@ -39,6 +39,7 @@ def _normalize_to_view_model(data: dict[str, Any]) -> dict[str, Any]:
         "exploration": data.get("exploration"),
         "statistical_tests": data.get("statistical_tests"),
         "statistical_evidence": data.get("statistical_evidence"),
+        "regression_table": data.get("regression_table"),
         "model_family_evidence": data.get("model_family_evidence"),
         "model_diagnostics": data.get("diagnostics", {}),
         "model_quality": None,

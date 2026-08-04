@@ -78,6 +78,9 @@ export function RunForm(props: RunFormProps) {
   const [entityCol, setEntityCol] = useState("");
   const [timeCol, setTimeCol] = useState("");
   const [covariance, setCovariance] = useState("");
+  const [frequencyWeight, setFrequencyWeight] = useState("");
+  const [analysisWeight, setAnalysisWeight] = useState("");
+  const [samplingWeight, setSamplingWeight] = useState("");
   const [lmmValue, setLmmValue] = useState<LmmControlValue>({
     subject_id: "",
     time: "",
@@ -156,11 +159,8 @@ export function RunForm(props: RunFormProps) {
   // from SSE step events (or a 3 s "connecting…" placeholder if no
   // event arrives — usually means we fell back to polling).
   const [progressLine, setProgressLine] = useState<string | null>(null);
-  // V1.5.0.1 HF4: persist lastRun in sessionStorage so the "Open
-  // Lineage" affordance and inline RunResultView survive when the
-  // user navigates away (e.g. to History or to /runs/:id and back)
-  // and the SubmitRoute component re-mounts. Before this, lastRun
-  // lived in plain useState and was discarded on every unmount.
+  // Persist lastRun in sessionStorage so the "Open Lineage" affordance
+  // survives when this standalone run-form host is remounted.
   const [lastRun, setLastRunState] = useState<RunResponse | null>(() => {
     try {
       const raw = sessionStorage.getItem("workbench:lastRun");
@@ -295,6 +295,9 @@ export function RunForm(props: RunFormProps) {
     setTranspose(false);
     setXManuallySet(false);
     setArmaGarchValue(createDefaultArmaGarchValue());
+    setFrequencyWeight("");
+    setAnalysisWeight("");
+    setSamplingWeight("");
     if (!nextFile) {
       setPreviewState("idle");
       return;
@@ -468,6 +471,9 @@ export function RunForm(props: RunFormProps) {
             isIV || usesDidRoles || isDcdh
               ? undefined
               : focal.filter((c) => exogColumns.includes(c)),
+          frequencyWeight,
+          analysisWeight,
+          samplingWeight,
         },
       );
       setLastRun(result);
@@ -673,6 +679,53 @@ export function RunForm(props: RunFormProps) {
               onChange={setDcdhValue}
             />
           )}
+          <div className="ios-group" aria-label="Weight settings">
+            <p className="ios-hint">
+              frequency / analysis weights are executed by OLS; prediction keeps
+              frequency weights as sample weights. sampling weights remain
+              fail-closed until a declared strata/PSU design uses the existing
+              entity/cluster channel.
+            </p>
+            <label className="ios-field">
+              <span>Frequency weight (optional)</span>
+              <select
+                aria-label="frequency weight"
+                value={frequencyWeight}
+                onChange={(event) => setFrequencyWeight(event.target.value)}
+              >
+                <option value="">(none)</option>
+                {columnNames.map((column) => (
+                  <option key={column} value={column}>{column}</option>
+                ))}
+              </select>
+            </label>
+            <label className="ios-field">
+              <span>Analysis weight (optional)</span>
+              <select
+                aria-label="analysis weight"
+                value={analysisWeight}
+                onChange={(event) => setAnalysisWeight(event.target.value)}
+              >
+                <option value="">(none)</option>
+                {columnNames.map((column) => (
+                  <option key={column} value={column}>{column}</option>
+                ))}
+              </select>
+            </label>
+            <label className="ios-field">
+              <span>Sampling weight (currently rejected)</span>
+              <select
+                aria-label="sampling weight"
+                value={samplingWeight}
+                onChange={(event) => setSamplingWeight(event.target.value)}
+              >
+                <option value="">(none)</option>
+                {columnNames.map((column) => (
+                  <option key={column} value={column}>{column}</option>
+                ))}
+              </select>
+            </label>
+          </div>
           {!isArmaGarch && (
             <PredictionControls
               capabilities={capabilities}

@@ -23,6 +23,7 @@ import {
   useWorkbench,
   type WorkbenchContextValue,
 } from "./WorkbenchStateProvider";
+import { REPORT_REVIEW_TAB_ID } from "./state/tabsSchema";
 
 interface ProbeRef extends WorkbenchContextValue {
   search: string;
@@ -258,6 +259,56 @@ describe("§7 row: Search hover (not committed)", () => {
 });
 
 describe("View / panel / search dispatch", () => {
+  it("enters Report by activating the system tab without changing node selection", () => {
+    renderAt("/?tabs=n1,n2&active=n2&focus=n2");
+
+    act(() => dispatch().setView("report"));
+
+    expect(state().view).toBe("report");
+    expect(state().activeTabId).toBe(REPORT_REVIEW_TAB_ID);
+    expect(state().tabs.map((tab) => tab.id)).toEqual([
+      "n1",
+      "n2",
+      REPORT_REVIEW_TAB_ID,
+    ]);
+    expect(state().selectedKey).toBe("n2");
+    expect(state().focusKey).toBe("n2");
+    expect(new URLSearchParams(ref.current!.search).get("active")).toBe(
+      REPORT_REVIEW_TAB_ID,
+    );
+  });
+
+  it("leaving Report restores the last node tab while retaining Report review", () => {
+    renderAt("/?tabs=n1,n2&active=n2");
+
+    act(() => dispatch().setView("report"));
+    act(() => dispatch().setView("table"));
+
+    expect(state().view).toBe("table");
+    expect(state().activeTabId).toBe("n2");
+    expect(state().lastNodeTabId).toBe("n2");
+    expect(state().selectedKey).toBe("n2");
+    expect(state().focusKey).toBe("n2");
+    expect(state().tabs.map((tab) => tab.id)).toEqual([
+      "n1",
+      "n2",
+      REPORT_REVIEW_TAB_ID,
+    ]);
+  });
+
+  it("activating Report review directly does not pass it into node focus", () => {
+    renderAt("/?tabs=n1,n2&active=n2&focus=n2");
+
+    act(() => dispatch().setView("report"));
+    act(() => dispatch().setView("table"));
+    act(() => dispatch().selectByTabSwitch(REPORT_REVIEW_TAB_ID));
+
+    expect(state().activeTabId).toBe(REPORT_REVIEW_TAB_ID);
+    expect(state().lastNodeTabId).toBe("n2");
+    expect(state().selectedKey).toBe("n2");
+    expect(state().focusKey).toBe("n2");
+  });
+
   it("setView updates URL view param", () => {
     renderAt("/");
     act(() => dispatch().setView("table"));
@@ -310,7 +361,9 @@ describe("selectedKey single-source invariant (F3 lock-in)", () => {
     renderAt("/?tabs=n1,n2&active=n2");
     expect(state().selectedKey).toBe("n2");
     const active = state().tabs.find((t) => t.id === state().activeTabId);
-    expect(active?.nodeKey).toBe(state().selectedKey);
+    expect(active?.kind === "node" ? active.nodeKey : undefined).toBe(
+      state().selectedKey,
+    );
   });
 
   it("selectedKey is null when no active tab", () => {
@@ -325,7 +378,9 @@ describe("selectedKey single-source invariant (F3 lock-in)", () => {
     expect(state().activeTabId).toBe("n2");
     expect(state().selectedKey).toBe("n2");
     const active = state().tabs.find((t) => t.id === "n2");
-    expect(active?.nodeKey).toBe(state().selectedKey);
+    expect(active?.kind === "node" ? active.nodeKey : undefined).toBe(
+      state().selectedKey,
+    );
   });
 
   it("selectedKey stays in sync after closeTab promotes new active", () => {
@@ -378,6 +433,20 @@ describe("selectedKey single-source invariant (F3 lock-in)", () => {
 });
 
 describe("contextMenu (Tier 3)", () => {
+  it("does not expose Report review as a node context target", () => {
+    renderAt("/");
+
+    act(() =>
+      dispatch().openContextMenu({
+        nodeKey: REPORT_REVIEW_TAB_ID,
+        x: 10,
+        y: 20,
+      }),
+    );
+
+    expect(state().contextMenu).toBeNull();
+  });
+
   it("open + close are memory-only", () => {
     renderAt("/");
     const before = ref.current!.search;

@@ -1,10 +1,154 @@
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from .artifacts import read_json
 from .narrative.render import render_template
+
+
+_DEFAULT_SIGNIFICANCE_LEVELS: dict[str, float] = {
+    "***": 0.01,
+    "**": 0.05,
+    "*": 0.1,
+}
+
+
+def build_regression_table(
+    model_results: Sequence[tuple[str, Mapping[str, Any]]],
+    *,
+    variable_labels: Mapping[str, Any] | None = None,
+    significance_levels: Mapping[str, float] | None = None,
+) -> dict[str, Any]:
+    """Project multiple model packets into a side-by-side report table.
+
+    This is a report projection only: coefficient values and provenance fields
+    are copied as-is, while the significance marker is derived from the packet's
+    p-value using the explicitly supplied (or default) cutoffs.
+    """
+
+    labels = variable_labels or {}
+    cutoffs = dict(significance_levels or _DEFAULT_SIGNIFICANCE_LEVELS)
+    ordered_cutoffs = sorted(
+        ((str(marker), float(cutoff)) for marker, cutoff in cutoffs.items()),
+        key=lambda item: item[1],
+    )
+
+    model_views: list[dict[str, Any]] = []
+    rows_by_term: dict[str, dict[str, Any]] = {}
+    for model_id, model_result in model_results:
+        model_key = str(model_id)
+        model_views.append(
+            {
+                "id": model_key,
+                "label": (
+                    model_result.get("model_label")
+                    or model_result.get("model_type")
+                    or model_key
+                ),
+                "model_type": model_result.get("model_type"),
+                "nobs": model_result.get("nobs"),
+                "r_squared": model_result.get("r_squared"),
+                "adjusted_r_squared": model_result.get("adjusted_r_squared"),
+            }
+        )
+        coefficients = model_result.get("coefficients", {})
+        if not isinstance(coefficients, Mapping):
+            continue
+        for term, values in coefficients.items():
+            if not isinstance(values, Mapping):
+                continue
+            term_key = str(term)
+            row = rows_by_term.setdefault(
+                term_key,
+                {
+                    "term": term_key,
+                    "label": labels.get(term_key, term_key),
+                    "models": {},
+                },
+            )
+            cell = dict(values)
+            cell["significance"] = _regression_significance_marker(
+                values.get("p_value"), ordered_cutoffs
+            )
+            row["models"][model_key] = cell
+
+    return {
+        "payload_schema": "workbench.regression-table",
+        "schema_version": 1,
+        "models": model_views,
+        "rows": [
+            {
+                **row,
+                "models": {
+                    model["id"]: row["models"].get(model["id"])
+                    for model in model_views
+                },
+            }
+            for row in rows_by_term.values()
+        ],
+        "significance": {
+            "cutoffs": {marker: cutoff for marker, cutoff in ordered_cutoffs},
+            "legend": "; ".join(
+                f"{marker} p < {cutoff:g}" for marker, cutoff in ordered_cutoffs
+            ),
+        },
+    }
+
+
+def _regression_significance_marker(
+    p_value: Any,
+    ordered_cutoffs: Sequence[tuple[str, float]],
+) -> str:
+    try:
+        parsed = float(p_value)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(parsed):
+        return ""
+    for marker, cutoff in ordered_cutoffs:
+        if parsed < cutoff:
+            return marker
+    return ""
+
+
+def regression_table_export_rows(
+    regression_table: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Flatten the side-by-side packet into scalar-friendly XLSX rows."""
+
+    if not isinstance(regression_table, Mapping):
+        return []
+    raw_models = regression_table.get("models", [])
+    models = [model for model in raw_models if isinstance(model, Mapping)]
+    raw_rows = regression_table.get("rows", [])
+    export_rows: list[dict[str, Any]] = []
+    for row in raw_rows:
+        if not isinstance(row, Mapping):
+            continue
+        export_row: dict[str, Any] = {
+            "term": row.get("term", ""),
+            "label": row.get("label", row.get("term", "")),
+        }
+        cells = row.get("models", {})
+        for model in models:
+            model_id = str(model.get("id", ""))
+            cell = cells.get(model_id) if isinstance(cells, Mapping) else None
+            for field in (
+                "estimate",
+                "std_error",
+                "confidence_interval",
+                "p_value",
+                "significance",
+                "source_id",
+            ):
+                export_row[f"{model_id} {field}"] = (
+                    cell.get(field) if isinstance(cell, Mapping) else None
+                )
+        export_rows.append(export_row)
+    return export_rows
 
 
 def build_report_view_model(
@@ -14,6 +158,7 @@ def build_report_view_model(
     descriptive_stats: list[dict[str, Any]] | None = None,
     statistical_tests: dict[str, Any] | None = None,
     statistical_evidence: dict[str, Any] | None = None,
+    regression_table: dict[str, Any] | None = None,
     exploration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     diagnostics = summary.get("diagnostics", {})
@@ -128,6 +273,7 @@ def build_report_view_model(
             if statistical_evidence is not None
             else _load_if_exists(run_root / "statistical_tests" / "evidence.json")
         ),
+        "regression_table": regression_table,
         "model_family_evidence": summary.get("model_family_evidence"),
         "exploration": exploration,
         "model_diagnostics": model_diag,

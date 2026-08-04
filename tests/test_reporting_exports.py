@@ -5,6 +5,10 @@ from workbench.exports import export_pdf, export_xlsx
 from workbench.narrative import build_claims
 from workbench.projects import create_project, create_run
 from workbench.reporting import render_html_report
+from workbench.report_view_model import (
+    build_regression_table,
+    regression_table_export_rows,
+)
 
 
 def test_claims_have_source_ids():
@@ -81,6 +85,180 @@ def test_claims_skip_unavailable_estimates():
     }
 
     assert build_claims([model_result], warnings=[]) == []
+
+
+def test_regression_table_projects_multiple_models_side_by_side_with_configurable_stars():
+    table = build_regression_table(
+        [
+            (
+                "ols_1",
+                {
+                    "model_id": "ols_1",
+                    "model_label": "Baseline",
+                    "nobs": 100,
+                    "r_squared": 0.81,
+                    "coefficients": {
+                        "x": {
+                            "estimate": 1.25,
+                            "std_error": 0.2,
+                            "confidence_interval": [0.8, 1.7],
+                            "p_value": 0.15,
+                            "source_id": "model_results.ols_1.coefficients.x",
+                        },
+                        "z": {
+                            "estimate": -0.4,
+                            "std_error": 0.1,
+                            "p_value": 0.009,
+                            "source_id": "model_results.ols_1.coefficients.z",
+                        },
+                    },
+                },
+            ),
+            (
+                "ols_2",
+                {
+                    "model_id": "ols_2",
+                    "model_label": "With control",
+                    "nobs": 95,
+                    "r_squared": 0.84,
+                    "coefficients": {
+                        "x": {
+                            "estimate": 1.1,
+                            "std_error": 0.18,
+                            "p_value": 0.04,
+                            "source_id": "model_results.ols_2.coefficients.x",
+                        },
+                        "control": {
+                            "estimate": 0.7,
+                            "std_error": 0.3,
+                            "p_value": 0.25,
+                            "source_id": "model_results.ols_2.coefficients.control",
+                        },
+                    },
+                },
+            ),
+        ],
+        variable_labels={"x": "Treatment label", "z": "Baseline control"},
+        significance_levels={"***": 0.01, "**": 0.05, "*": 0.20},
+    )
+
+    assert table["payload_schema"] == "workbench.regression-table"
+    assert [(model["id"], model["label"]) for model in table["models"]] == [
+        ("ols_1", "Baseline"),
+        ("ols_2", "With control"),
+    ]
+    rows = {row["term"]: row for row in table["rows"]}
+    assert set(rows) == {"x", "z", "control"}
+    assert rows["x"]["label"] == "Treatment label"
+    assert rows["x"]["models"]["ols_1"] == {
+        "estimate": 1.25,
+        "std_error": 0.2,
+        "confidence_interval": [0.8, 1.7],
+        "p_value": 0.15,
+        "significance": "*",
+        "source_id": "model_results.ols_1.coefficients.x",
+    }
+    assert rows["x"]["models"]["ols_2"]["significance"] == "**"
+    assert rows["z"]["models"]["ols_1"]["significance"] == "***"
+    assert rows["z"]["models"]["ols_2"] is None
+    assert rows["control"]["models"]["ols_1"] is None
+    assert rows["control"]["models"]["ols_2"]["source_id"] == (
+        "model_results.ols_2.coefficients.control"
+    )
+
+
+def test_regression_table_packet_reaches_html_pdf_and_xlsx_exports(tmp_path: Path):
+    project = create_project(tmp_path, "regression-table")
+    run = create_run(project.root, mode="auto")
+    packet = build_regression_table(
+        [
+            (
+                "ols_1",
+                {
+                    "model_label": "Baseline",
+                    "coefficients": {
+                        "x": {
+                            "estimate": 1.25,
+                            "std_error": 0.2,
+                            "confidence_interval": [0.8, 1.7],
+                            "p_value": 0.04,
+                            "source_id": "model_results.ols_1.coefficients.x",
+                        }
+                    },
+                },
+            )
+        ],
+        variable_labels={"x": "Treatment label"},
+    )
+    report = {
+        "title": "Regression table report",
+        "facts": [],
+        "claims": [],
+        "warnings": [],
+        "regression_table": packet,
+    }
+
+    html_path = render_html_report(report, run.root)
+    pdf_path = export_pdf(report, run.root)
+    from workbench.engine.stages.report import _xlsx_export_rows
+
+    xlsx_path = export_xlsx(
+        {"regression_table": _xlsx_export_rows(regression_table_export_rows(packet))},
+        run.root,
+    )
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "Treatment label" in html
+    assert "model_results.ols_1.coefficients.x" in html
+    assert b"Regression table" in pdf_path.read_bytes()
+    assert b"model_results.ols_1.coefficients.x" in pdf_path.read_bytes()
+    workbook = __import__("openpyxl").load_workbook(xlsx_path, read_only=True)
+    rows = list(workbook["regression_table"].iter_rows(values_only=True))
+    assert "ols_1 significance" in rows[0]
+    assert "model_results.ols_1.coefficients.x" in rows[1]
+    assert "[0.8,1.7]" in rows[1]
+
+
+def test_pdf_and_xlsx_keep_variable_and_value_labels(tmp_path: Path):
+    project = create_project(tmp_path, "labelled-exports")
+    run = create_run(project.root, mode="auto")
+    table_1 = [
+        {
+            "column": "group",
+            "label": "Treatment group",
+            "label_source": "declared",
+            "value_labels": {"0": "Control", "1": "Treated"},
+            "dtype": "int64",
+            "count": 4,
+            "missing": 0,
+            "unique_count": 2,
+            "mean": None,
+            "std": None,
+            "min": None,
+            "max": None,
+        }
+    ]
+    report = {
+        "title": "Labelled export report",
+        "facts": [],
+        "claims": [],
+        "descriptive_stats": table_1,
+        "warnings": [],
+    }
+
+    pdf_path = export_pdf(report, run.root)
+    xlsx_path = export_xlsx({"table_1": table_1}, run.root)
+
+    pdf_bytes = pdf_path.read_bytes()
+    assert b"Treatment group" in pdf_bytes
+    assert b"Control" in pdf_bytes
+    assert b"Treated" in pdf_bytes
+    workbook = __import__("openpyxl").load_workbook(xlsx_path, read_only=True)
+    rows = list(workbook["table_1"].iter_rows(values_only=True))
+    flattened = " ".join(str(value) for row in rows for value in row)
+    assert "Treatment group" in flattened
+    assert "Control" in flattened
+    assert "Treated" in flattened
 
 
 def test_render_and_export_reports(tmp_path: Path):

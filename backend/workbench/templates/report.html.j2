@@ -119,6 +119,47 @@
     </section>
     {% endif %}
 
+    {% if view_model.regression_table and view_model.regression_table.rows %}
+    <section id="regression-table" aria-label="Regression Table">
+      <h2>Regression Table</h2>
+      <p>Significance: {{ view_model.regression_table.significance.legend }}</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Term</th>
+            {% for model in view_model.regression_table.models %}
+            <th>{{ model.label }} ({{ model.id }})<br>Estimate</th>
+            <th>{{ model.label }} ({{ model.id }})<br>Std. error</th>
+            <th>{{ model.label }} ({{ model.id }})<br>p-value</th>
+            <th>{{ model.label }} ({{ model.id }})<br>95% CI</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in view_model.regression_table.rows %}
+          <tr>
+            <td>{{ row.label }} ({{ row.term }})</td>
+            {% for model in view_model.regression_table.models %}
+            {% set cell = row.models.get(model.id) %}
+            {% if cell %}
+            <td>
+              {{ cell.estimate if cell.estimate is defined else "—" }}{% if cell.significance %} {{ cell.significance }}{% endif %}
+              {% if cell.source_id is defined %}<br><small>source: {{ cell.source_id }}</small>{% endif %}
+            </td>
+            <td>{{ cell.std_error if cell.std_error is defined else "—" }}</td>
+            <td>{{ cell.p_value if cell.p_value is defined else "—" }}</td>
+            <td>{{ cell.confidence_interval if cell.confidence_interval is defined else "—" }}</td>
+            {% else %}
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+            {% endif %}
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+
     <section id="causal-caution">
       <h2>Causal Caution</h2>
       <p>{{ view_model.causal_caution }}</p>

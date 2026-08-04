@@ -16,10 +16,31 @@
 // now lives here as the single source of truth. All tabs/active writes
 // flow through WorkbenchStateProvider.commit().
 
-export interface TabState {
+export const REPORT_REVIEW_TAB_ID = "report:review" as const;
+
+export interface NodeTabState {
+  kind: "node";
   id: string;
   nodeKey: string;
   openedAt: number;
+}
+
+export interface ReportReviewTabState {
+  kind: "report-review";
+  id: typeof REPORT_REVIEW_TAB_ID;
+  openedAt: number;
+}
+
+export type TabState = NodeTabState | ReportReviewTabState;
+
+export function isNodeTab(tab: TabState): tab is NodeTabState {
+  return tab.kind === "node";
+}
+
+export function isReportReviewTab(
+  tab: TabState,
+): tab is ReportReviewTabState {
+  return tab.kind === "report-review";
 }
 
 export const MAX_TABS = 8;
@@ -31,8 +52,12 @@ export interface TabsSlice {
 
 export const emptyTabsSlice: TabsSlice = { tabs: [], activeTabId: null };
 
-function tabOf(id: string, openedAt: number): TabState {
-  return { id, nodeKey: id, openedAt };
+export function nodeTabOf(id: string, openedAt: number): NodeTabState {
+  return { kind: "node", id, nodeKey: id, openedAt };
+}
+
+function reportReviewTabOf(openedAt: number): ReportReviewTabState {
+  return { kind: "report-review", id: REPORT_REVIEW_TAB_ID, openedAt };
 }
 
 /**
@@ -48,10 +73,20 @@ export function parseTabsParams(params: URLSearchParams): TabsSlice {
       .filter(Boolean) ?? [];
 
   if (ids.length > 0) {
-    const unique = Array.from(new Set(ids)).slice(0, MAX_TABS);
+    let nodeCount = 0;
+    const unique = Array.from(new Set(ids)).filter((id) => {
+      if (id === REPORT_REVIEW_TAB_ID) return true;
+      if (nodeCount >= MAX_TABS) return false;
+      nodeCount += 1;
+      return true;
+    });
     const active = params.get("active");
     return {
-      tabs: unique.map((id, index) => tabOf(id, index + 1)),
+      tabs: unique.map((id, index) =>
+        id === REPORT_REVIEW_TAB_ID
+          ? reportReviewTabOf(index + 1)
+          : nodeTabOf(id, index + 1),
+      ),
       activeTabId:
         active && unique.includes(active)
           ? active
@@ -61,7 +96,11 @@ export function parseTabsParams(params: URLSearchParams): TabsSlice {
 
   const legacyNode = params.get("node");
   if (legacyNode) {
-    return { tabs: [tabOf(legacyNode, 1)], activeTabId: legacyNode };
+    const tab =
+      legacyNode === REPORT_REVIEW_TAB_ID
+        ? reportReviewTabOf(1)
+        : nodeTabOf(legacyNode, 1);
+    return { tabs: [tab], activeTabId: legacyNode };
   }
 
   return emptyTabsSlice;
@@ -96,6 +135,18 @@ export interface ReduceResult {
   nextClock: number;
 }
 
+/** Add the permanent Report review tab without changing the active tab. */
+export function ensureReportReviewTab(
+  prev: TabsSlice,
+  openedAt = maxOpenedAt(prev.tabs) + 1,
+): TabsSlice {
+  if (prev.tabs.some((tab) => tab.id === REPORT_REVIEW_TAB_ID)) return prev;
+  return {
+    ...prev,
+    tabs: [...prev.tabs, reportReviewTabOf(openedAt)],
+  };
+}
+
 /** Open or focus a tab. LRU evicts oldest when MAX_TABS exceeded.
  *  Returns the next slice without writing URL. */
 export function reduceOpenTab(
@@ -103,15 +154,20 @@ export function reduceOpenTab(
   clock: number,
   nodeKey: string,
 ): ReduceResult {
-  if (!nodeKey) return { next: prev, evicted: null, nextClock: clock };
+  if (!nodeKey || nodeKey === REPORT_REVIEW_TAB_ID) {
+    return { next: prev, evicted: null, nextClock: clock };
+  }
 
-  const existing = prev.tabs.find((t) => t.id === nodeKey);
+  const existing = prev.tabs.find(
+    (tab) =>
+      isNodeTab(tab) && (tab.nodeKey === nodeKey || tab.id === nodeKey),
+  );
   if (existing) {
-    if (prev.activeTabId === nodeKey) {
+    if (prev.activeTabId === existing.id) {
       return { next: prev, evicted: null, nextClock: clock };
     }
     return {
-      next: { ...prev, activeTabId: nodeKey },
+      next: { ...prev, activeTabId: existing.id },
       evicted: null,
       nextClock: clock,
     };
@@ -119,16 +175,17 @@ export function reduceOpenTab(
 
   let tabs = prev.tabs;
   let evicted: string | null = null;
-  if (tabs.length >= MAX_TABS) {
-    const oldest = [...tabs].sort((a, b) => a.openedAt - b.openedAt)[0];
+  const nodeTabs = tabs.filter(isNodeTab);
+  if (nodeTabs.length >= MAX_TABS) {
+    const oldest = [...nodeTabs].sort((a, b) => a.openedAt - b.openedAt)[0];
     evicted = oldest.id;
-    tabs = tabs.filter((t) => t.id !== oldest.id);
+    tabs = tabs.filter((tab) => tab.id !== oldest.id);
   }
 
   const nextClock = clock + 1;
   return {
     next: {
-      tabs: [...tabs, tabOf(nodeKey, nextClock)],
+      tabs: [...tabs, nodeTabOf(nodeKey, nextClock)],
       activeTabId: nodeKey,
     },
     evicted,
@@ -140,7 +197,7 @@ export function reduceOpenTab(
  *  one that took its slot, else its left neighbour, else first). */
 export function reduceCloseTab(prev: TabsSlice, id: string): TabsSlice {
   const index = prev.tabs.findIndex((t) => t.id === id);
-  if (index === -1) return prev;
+  if (index === -1 || !isNodeTab(prev.tabs[index])) return prev;
   const tabs = prev.tabs.filter((t) => t.id !== id);
   let activeTabId = prev.activeTabId;
   if (prev.activeTabId === id) {

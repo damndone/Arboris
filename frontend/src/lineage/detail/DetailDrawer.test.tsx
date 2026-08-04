@@ -48,6 +48,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { DetailDrawer } from "./DetailDrawer";
 import { LineageContext, type LineageContextValue } from "../LineageContext";
@@ -122,6 +123,7 @@ function makeTabbedCtx(
     },
   };
   const tabs: TabState[] = nodes.map((n, index) => ({
+    kind: "node",
     id: n.id,
     nodeKey: n.nodeKey,
     openedAt: index + 1,
@@ -141,11 +143,21 @@ function makeTabbedCtx(
 
 function renderDrawer(
   ctx: LineageContextValue,
-  props: { node?: GraphViewNode; onClose?: () => void } = {},
+  props: {
+    node?: GraphViewNode;
+    onClose?: () => void;
+    windowControls?: ReactNode;
+    collapsed?: boolean;
+  } = {},
 ) {
   return render(
     <LineageContext.Provider value={ctx}>
-      <DetailDrawer node={props.node} onClose={props.onClose ?? vi.fn()} />
+      <DetailDrawer
+        node={props.node}
+        onClose={props.onClose ?? vi.fn()}
+        windowControls={props.windowControls}
+        collapsed={props.collapsed}
+      />
     </LineageContext.Provider>,
   );
 }
@@ -158,6 +170,18 @@ describe("DetailDrawer", () => {
     expect(dialog).toHaveClass("detail-drawer");
     expect(dialog.getAttribute("aria-labelledby")).toBe("detail-drawer-title");
     expect(document.getElementById("detail-drawer-title")).not.toBeNull();
+  });
+
+  it("forwards node window controls and keeps the header while collapsed", () => {
+    renderDrawer(makeCtx(makeNode()), {
+      windowControls: <span data-testid="node-window-controls">window controls</span>,
+      collapsed: true,
+    });
+
+    expect(screen.getByTestId("node-window-controls")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    expect(screen.queryByTestId("basic-info-section")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("lineage-chain-section")).not.toBeInTheDocument();
   });
 
   it("ok-trust node with no DPs → only basic + lineage sections (no trust, no decision)", () => {
@@ -258,7 +282,7 @@ describe("DetailDrawer", () => {
     expect(document.getElementById("detail-drawer-title")).not.toBeNull();
     expect(screen.getByText("Primary OLS")).toBeInTheDocument();
     expect(screen.getByText(/OLS · HC1 · n=10/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
     // Trust banner — review-required wins over trust=review (TrustBanner contract)
     expect(
       screen.getByTestId("trust-banner-review-required"),

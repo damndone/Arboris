@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "event_id": "c5f1b7dd-3be6-4bb6-9d0f-0f035f1d5f5d",
+  "timestamp": "2026-08-04T02:06:00.000Z",
+  "type": "GATE",
+  "subtype": "full_gate_external_and_inherited_failures",
+  "stage": "gate",
+  "cause_status": "external",
+  "cause": "The repository quick gate's backend fallback still reports host sandbox-exec capability failures in unrelated code-execution tests and inherited golden drift in existing model outputs; no report-review test failed.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "bash scripts/gate.sh --quick",
+    "sha256": "347b922a8b51f06aa19edb981e70dedbab4248172f9efbeb7a896ec4634811cd",
+    "observed_at": "2026-08-04T01:40:00.000Z"
+  },
+  "impact": "The full repository gate remains not green and must be disclosed as a known external/inherited limitation; it is not evidence that the Report review workspace is accepted or rejected.",
+  "preventability": "not_preventable",
+  "resolution": "accepted",
+  "lesson": "Do not force unrelated sandbox or golden-output changes to close a scoped report UI task; report the repository-wide gate boundary explicitly.",
+  "incident_id": "c5f1b7dd-3be6-4bb6-9d0f-0f035f1d5f5d",
+  "lesson_key": "scoped-report-gate-boundary",
+  "links": [
+    "scripts/gate.sh",
+    "tests/test_code_execute_routes.py",
+    "tests/test_engine_golden.py"
+  ]
+}

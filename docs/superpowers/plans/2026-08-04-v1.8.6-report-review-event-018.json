@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "event_id": "56f8ef68-bc8a-4b33-97b1-76d8a15eac59",
+  "timestamp": "2026-08-04T11:12:00.000Z",
+  "type": "WASTE",
+  "subtype": "nonexistent_report_test_path",
+  "stage": "gate",
+  "cause_status": "known",
+  "cause": "The first broad report test command included tests/test_report_provenance.py, which is not present in this checkout.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "pytest reported file or directory not found; the command was corrected using the repository's actual report test inventory.",
+    "sha256": "49ca89f35e0025692d72816049fd68116ef045eaa35cb0b0840f7214aadebbac",
+    "observed_at": "2026-08-04T11:12:00.000Z"
+  },
+  "impact": "No test ran in that single invocation; the corrected report suite then passed 72 tests.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Resolve the repository test inventory before composing a multi-file gate command.",
+  "incident_id": "56f8ef68-bc8a-4b33-97b1-76d8a15eac59",
+  "lesson_key": "report-test-inventory-before-gate",
+  "links": [
+    "tests/test_ai_report_store.py",
+    "tests/test_llm_routes.py",
+    "tests/test_report_export.py"
+  ]
+}

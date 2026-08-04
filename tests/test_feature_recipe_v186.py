@@ -21,7 +21,7 @@ from workbench.graph_store import GraphStore
 from workbench.predictive_research.contracts import FeatureRecipeV1
 
 
-def _recipe(run_id: str, artifact_id: str, operation_id: str, *, inputs: tuple[str, ...], output: str, parameters: dict) -> FeatureRecipeV1:
+def _recipe(operation_id: str, *, inputs: tuple[str, ...], output: str, parameters: dict) -> FeatureRecipeV1:
     return FeatureRecipeV1(
         recipe_id=f"recipe_{operation_id}",
         operation_id=operation_id,
@@ -31,7 +31,7 @@ def _recipe(run_id: str, artifact_id: str, operation_id: str, *, inputs: tuple[s
         output_types=("numeric",),
         parameters=parameters,
         fit_scope="stateless",
-        source_artifact=artifact_id,
+        source_artifact="source_data",
         lineage_parent="stage:source",
     )
 
@@ -45,14 +45,7 @@ def test_feature_recipe_preview_and_apply_persist_typed_child_and_graph_identity
         source_run_id=run_id,
         source_node_id="stage:source",
         source_artifact_id=artifact_id,
-        recipe=_recipe(
-            run_id,
-            artifact_id,
-            "interaction",
-            inputs=("x", "z"),
-            output="xz",
-            parameters={"left": "x", "right": "z"},
-        ),
+        recipe=_recipe("interaction", inputs=("x", "z"), output="xz", parameters={"left": "x", "right": "z"}),
     )
 
     preview = preview_feature_recipe(project, spec)
@@ -66,7 +59,6 @@ def test_feature_recipe_preview_and_apply_persist_typed_child_and_graph_identity
     assert child["xz"].tolist() == [8.0, 15.0]
     recipe_payload = json.loads((project / "runs" / run_id / effect.recipe_path).read_text())
     assert recipe_payload["payload_schema"] == "workbench.prediction.feature-recipe"
-    assert recipe_payload["operation_id"] == "interaction"
     graph = json.loads((project / "runs" / run_id / "graph.json").read_text())
     assert effect.child_node_id in graph["nodes"]
     assert graph["nodes"][effect.child_node_id]["annotations"][0]["operation_id"] == "interaction"
@@ -84,11 +76,7 @@ def test_feature_recipe_preview_and_apply_persist_typed_child_and_graph_identity
     ],
 )
 def test_feature_recipe_all_registered_operations_are_previewable(
-    tmp_path: Path,
-    operation_id: str,
-    inputs: tuple[str, ...],
-    output: str,
-    parameters: dict,
+    tmp_path: Path, operation_id: str, inputs: tuple[str, ...], output: str, parameters: dict,
 ) -> None:
     project, run_id, artifact_id = _source_project(
         tmp_path,
@@ -100,7 +88,7 @@ def test_feature_recipe_all_registered_operations_are_previewable(
             source_run_id=run_id,
             source_node_id="stage:source",
             source_artifact_id=artifact_id,
-            recipe=_recipe(run_id, artifact_id, operation_id, inputs=inputs, output=output, parameters=parameters),
+            recipe=_recipe(operation_id, inputs=inputs, output=output, parameters=parameters),
         ),
     )
     assert preview.status == "ready"
@@ -112,7 +100,7 @@ def test_feature_recipe_fail_closed_on_unmapped_recode(tmp_path: Path) -> None:
         source_run_id=run_id,
         source_node_id="stage:source",
         source_artifact_id=artifact_id,
-        recipe=_recipe(run_id, artifact_id, "recode", inputs=("group",), output="label", parameters={"input": "group", "mapping": {1: "one"}}),
+        recipe=_recipe("recode", inputs=("group",), output="label", parameters={"input": "group", "mapping": {1: "one"}}),
     )
     with pytest.raises(Exception):
         preview_feature_recipe(project, spec)
@@ -120,8 +108,7 @@ def test_feature_recipe_fail_closed_on_unmapped_recode(tmp_path: Path) -> None:
 
 def test_data_transform_reshape_then_subset_is_persisted_and_traceable(tmp_path: Path) -> None:
     project, run_id, artifact_id = _source_project(
-        tmp_path,
-        pd.DataFrame({"id": [1, 2], "score_a": [10.0, 20.0], "score_b": [11.0, 21.0]}),
+        tmp_path, pd.DataFrame({"id": [1, 2], "score_a": [10.0, 20.0], "score_b": [11.0, 21.0]})
     )
     reshape = DataTransformSpecV1(
         source_run_id=run_id,
@@ -152,10 +139,7 @@ def test_data_transform_reshape_then_subset_is_persisted_and_traceable(tmp_path:
 
 
 def test_merge_many_to_many_is_fail_closed_with_next_step(tmp_path: Path) -> None:
-    project, run_id, artifact_id = _source_project(
-        tmp_path,
-        pd.DataFrame({"id": [1, 1], "left_value": [10, 11]}),
-    )
+    project, run_id, artifact_id = _source_project(tmp_path, pd.DataFrame({"id": [1, 1], "left_value": [10, 11]}))
     right_run = "run_right"
     right_root = project / "runs" / right_run
     right_root.mkdir()

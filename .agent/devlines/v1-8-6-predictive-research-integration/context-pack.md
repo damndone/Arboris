@@ -34,8 +34,8 @@ manifest 或历史事件。
 temporal/panel prediction execution、OLS/Panel/econometric weights。
 
 ## Boundary
-- Affected paths: `backend/workbench/http/runs_routes.py`, `backend/workbench/services/run_service.py`, `frontend/src/api.ts`, `frontend/src/api.test.ts`, `frontend/src/lineage/drafts/GenesisWizard.tsx`, `frontend/src/lineage/drafts/GenesisWizard.test.tsx`, `frontend/src/workbench/views/TableView.tsx`, `tests/test_api_run_params.py`
-- Allowed paths: `backend/workbench/http/runs_routes.py`, `backend/workbench/services/run_service.py`, `frontend/src/api.ts`, `frontend/src/api.test.ts`, `frontend/src/lineage/drafts/GenesisWizard.tsx`, `frontend/src/lineage/drafts/GenesisWizard.test.tsx`, `frontend/src/workbench/views/TableView.tsx`, `tests/test_api_run_params.py`
+- Affected paths: `backend/workbench/http/runs_routes.py`, `backend/workbench/services/run_service.py`, `frontend/src/api.ts`, `frontend/src/api.test.ts`, `frontend/src/lineage/drafts/GenesisWizard.tsx`, `frontend/src/lineage/drafts/GenesisWizard.test.tsx`, `tests/test_api_run_params.py`
+- Allowed paths: `backend/workbench/http/runs_routes.py`, `backend/workbench/services/run_service.py`, `frontend/src/api.ts`, `frontend/src/api.test.ts`, `frontend/src/lineage/drafts/GenesisWizard.tsx`, `frontend/src/lineage/drafts/GenesisWizard.test.tsx`, `tests/test_api_run_params.py`
 - Protected paths: none
 - Dependencies: none
 - Tests: `PYTHONPATH=backend .venv/bin/python -m pytest tests/predictive_research`, `PYTHONPATH=backend .venv/bin/python -m pytest tests/test_prediction_models.py tests/test_prediction_request.py`, `PYTHONPATH=backend .venv/bin/python -m pytest tests/test_statistical_tests_v186.py`, `PYTHONPATH=backend .venv/bin/python -m pytest tests/test_imputation_fold_local.py`, `PYTHONPATH=backend .venv/bin/python -m pytest tests/test_compare_node_api.py tests/test_report_contract.py tests/test_report_view_model.py`, `npm test -- --run`, `npm run typecheck`, `bash scripts/gate.sh --quick`, `bash scripts/gate.sh`

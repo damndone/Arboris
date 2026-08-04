@@ -180,6 +180,50 @@ def test_oos_prediction_rejects_sampling_and_analysis_weights_before_fit() -> No
         assert getattr(error.value, "code", None) == "PREDICTION_WEIGHT_UNSUPPORTED"
 
 
+def test_oos_prediction_sampling_weight_explains_fail_closed_cluster_next_step() -> None:
+    frame = pd.DataFrame(
+        {"x": [float(index) for index in range(12)], "y": [float(index) for index in range(12)]},
+        index=[f"row-{index}" for index in range(12)],
+    )
+    split = build_split_plan(
+        row_refs=tuple(frame.index),
+        strategy="iid",
+        final_holdout_fraction=0.25,
+        cv_folds=3,
+        shuffle=True,
+        random_seed=17,
+    )
+    sample_spec = SampleSpecV1(
+        dataset_sha256="f" * 64,
+        sampling=SamplingSpecV1(sampling_weight="sampling"),
+        split_plan=SplitPlanV1(
+            strategy="iid",
+            profile_id="iid_holdout_kfold",
+            profile_version=1,
+            effective_parameters=split.effective_parameters,
+        ),
+        structure=StructureSpecV1(kind="iid", provenance="user_confirmed"),
+        availability=AvailabilitySpecV1(kind="declared", reservation_policy="fail_closed"),
+    )
+
+    with pytest.raises(ContractError) as error:
+        run_oos_prediction(
+            frame=frame,
+            target="y",
+            features=("x",),
+            sample_spec=sample_spec,
+            split_receipt=split,
+            estimator_factory=RecordingMeanEstimator,
+            model_id="unweighted_mean",
+        )
+
+    assert error.value.code == "PREDICTION_WEIGHT_UNSUPPORTED"
+    assert str(error.value) == (
+        "sampling_weight is fail-closed until a declared strata/PSU design is "
+        "supported; declare strata/PSU through the existing entity/cluster channel"
+    )
+
+
 def test_weight_semantics_cannot_be_merged_into_one_column() -> None:
     with pytest.raises(ContractError) as error:
         SamplingSpecV1(

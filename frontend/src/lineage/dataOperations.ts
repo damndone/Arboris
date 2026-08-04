@@ -162,12 +162,47 @@ export interface FeatureRecipeConfirmResponse {
 
 export type DataTransformOperation = "merge" | "append" | "reshape" | "subset";
 
+export type DataTransformHow = "left" | "right" | "inner" | "outer";
+export type DataTransformSchemaPolicy = "exact" | "union";
+export type DataTransformDirection = "wide_to_long" | "long_to_wide";
+
+export interface DataTransformGrowthPolicy {
+  max_rows?: number;
+  max_growth_factor?: number;
+}
+
+export interface DataTransformRowIndexRange {
+  start: number;
+  stop: number;
+}
+
+/** Canonical parameters sent to the fail-closed data-operation route. */
+export interface DataTransformParameters {
+  keys?: string[];
+  how?: DataTransformHow;
+  growth_policy?: DataTransformGrowthPolicy;
+  schema_policy?: DataTransformSchemaPolicy;
+  row_growth_policy?: DataTransformGrowthPolicy;
+  direction?: DataTransformDirection;
+  id_columns?: string[];
+  value_columns?: string[];
+  var_name?: string;
+  value_name?: string;
+  index?: string[];
+  columns?: string | string[];
+  values?: string;
+  equals?: Record<string, unknown>;
+  row_indices?: number[];
+  row_index_range?: DataTransformRowIndexRange;
+  [key: string]: unknown;
+}
+
 export interface DataTransformRequest {
   source_run_id: string;
   source_node_id: string;
   source_artifact_id: string;
   operation: DataTransformOperation;
-  parameters: Record<string, unknown>;
+  parameters: DataTransformParameters;
   secondary_run_id?: string;
   secondary_node_id?: string;
   secondary_artifact_id?: string;
@@ -182,7 +217,7 @@ export interface DataTransformPreview {
   secondary_run_id: string | null;
   secondary_node_id: string | null;
   secondary_artifact_id: string | null;
-  parameters: Record<string, unknown>;
+  parameters: DataTransformParameters;
   source_sha256: string;
   secondary_source_sha256: string | null;
   row_count_before: number;
@@ -207,6 +242,28 @@ export interface DataTransformConfirmResponse {
   status: "completed";
   effect: Record<string, unknown>;
   preview: DataTransformPreview;
+}
+
+export interface DataModelRunRequest {
+  source_run_id: string;
+  source_node_id: string;
+  source_artifact_id: string;
+  model_type: "ols";
+  y: string;
+  x: string[];
+  covariance: "" | "unadjusted" | "robust" | "clustered";
+}
+
+export interface DataModelRunResponse {
+  status: string;
+  run_id: string;
+  model_type: "ols";
+  source_lineage: {
+    source_run_id: string;
+    source_node_id: string;
+    source_artifact_id: string;
+    source_node_hash: string | null;
+  };
 }
 
 /** Typed projection of the durable operation record bound to a cast child node. */
@@ -524,4 +581,19 @@ export async function confirmDataTransform(
     },
   );
   return readResponse<DataTransformConfirmResponse>(response);
+}
+
+export async function startModelFromDataNode(
+  projectRoot: string,
+  request: DataModelRunRequest,
+): Promise<DataModelRunResponse> {
+  const response = await fetch(
+    apiUrl(`/data-operations/model-run${projectQuery(projectRoot)}`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    },
+  );
+  return readResponse<DataModelRunResponse>(response);
 }

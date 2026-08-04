@@ -16,6 +16,44 @@ from ...contracts.model.ols import (
 )
 
 
+def _validate_model_family_weights(
+    model_type: str,
+    *,
+    frequency_weight: str,
+    analysis_weight: str,
+    sampling_weight: str,
+) -> None:
+    """Admit weights from the declared ModelFamilyContract only.
+
+    The ordinary Run path used to special-case ``ols``.  That was safe for
+    today's registry but made the contract fields descriptive rather than
+    authoritative.  Keeping this lookup at the fit boundary makes every
+    future family fail closed unless it explicitly declares the weight kind.
+    """
+
+    from ...agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+
+    contract = MODEL_FAMILY_CONTRACTS.get(model_type)
+    allowed = frozenset(contract.allows_weights) if contract is not None else frozenset()
+    provided = {
+        kind: column
+        for kind, column in (
+            ("frequency", frequency_weight),
+            ("analysis", analysis_weight),
+            ("sampling", sampling_weight),
+        )
+        if column
+    }
+    unsupported = sorted(set(provided) - allowed)
+    if unsupported:
+        allowed_text = ", ".join(sorted(allowed)) or "none"
+        raise ValueError(
+            "MODEL_WEIGHT_UNSUPPORTED: "
+            f"model family {model_type} does not declare support for "
+            f"{', '.join(unsupported)} weight(s); allowed: {allowed_text}"
+        )
+
+
 def _result_for_downstream(model_type: str, result: dict[str, Any]) -> dict[str, Any]:
     """Return the result shape consumed by the pre-packet engine stages.
 
@@ -323,7 +361,9 @@ def _ols_weight_spec(ctx):
     sampling_weight = str(ctx.artifacts.get("_sampling_weight") or "").strip()
     if sampling_weight:
         raise ValueError(
-            "OLS_SAMPLING_WEIGHT_UNSUPPORTED: sampling_weight requires a declared strata/PSU design"
+            "OLS_SAMPLING_WEIGHT_UNSUPPORTED: sampling_weight requires a declared "
+            "strata/PSU design; declare strata/PSU through the existing "
+            "entity_col + covariance=clustered channel"
         )
     if frequency_weight and analysis_weight:
         raise ValueError(
@@ -709,16 +749,25 @@ class EstimationStage:
                         "analysis_weight": analysis_weight,
                     },
                 )
-            if sampling_weight and handler.model_type == "ols":
-                raise WorkflowValidationError(
-                    "OLS_SAMPLING_WEIGHT_UNSUPPORTED",
-                    "sampling_weight requires a declared strata/PSU design",
-                    {"model_type": handler.model_type, "sampling_weight": sampling_weight},
+            try:
+                _validate_model_family_weights(
+                    handler.model_type,
+                    frequency_weight=frequency_weight,
+                    analysis_weight=analysis_weight,
+                    sampling_weight=sampling_weight,
                 )
-            if (frequency_weight or analysis_weight or sampling_weight) and handler.model_type != "ols":
+            except ValueError as exc:
+                if sampling_weight and handler.model_type == "ols":
+                    raise WorkflowValidationError(
+                        "OLS_SAMPLING_WEIGHT_UNSUPPORTED",
+                        "sampling_weight requires a declared strata/PSU design; "
+                        "declare strata/PSU through the existing entity_col + "
+                        "covariance=clustered channel",
+                        {"model_type": handler.model_type, "sampling_weight": sampling_weight},
+                    ) from exc
                 raise WorkflowValidationError(
                     "MODEL_WEIGHT_UNSUPPORTED",
-                    f"model family {handler.model_type} has not declared weight support",
+                    str(exc),
                     {
                         "model_type": handler.model_type,
                         "weight_kinds": [
@@ -731,7 +780,7 @@ class EstimationStage:
                             if value
                         ],
                     },
-                )
+                ) from exc
             if model_options:
                 if handler.validate_model_options is None:
                     raise ModelOptionsValidationError(

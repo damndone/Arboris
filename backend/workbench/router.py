@@ -71,6 +71,8 @@ class YKind(str, Enum):
     BINARY = "binary"
     COUNT = "count"
     CONTINUOUS = "continuous"
+    ORDINAL = "ordinal"
+    NOMINAL = "nominal"
 
 
 _POISSON_MAX_UNIQUE = 20
@@ -90,6 +92,18 @@ def detect_y_kind(frame: pd.DataFrame, y: str) -> YKind:
         if unique_vals <= {0, 1} or unique_vals <= {True, False}:
             return YKind.BINARY
         return YKind.CONTINUOUS
+    # Preserve the historical numeric routing above while making categorical
+    # outcome semantics explicit.  Ordered pandas categoricals are the only
+    # automatic source of ordinal semantics; unordered/string outcomes are
+    # nominal.  A two-level categorical outcome remains on the legacy binary
+    # boundary so existing default routing does not drift.
+    if nunique > 2 and isinstance(series.dtype, pd.CategoricalDtype):
+        return YKind.ORDINAL if series.dtype.ordered else YKind.NOMINAL
+    if nunique > 2 and (
+        pd.api.types.is_object_dtype(series.dtype)
+        or pd.api.types.is_string_dtype(series.dtype)
+    ):
+        return YKind.NOMINAL
     if nunique >= 3 and pd.api.types.is_numeric_dtype(series):
         is_nonnegative_integer = (
             (series >= 0).all()

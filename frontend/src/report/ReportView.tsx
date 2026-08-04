@@ -1,268 +1,53 @@
-// v1.6.11 slice C (+C-3) — the Report view (Graph | Table | Report).
-//
-// Deterministic part first: the fact table (scope = every node on the active
-// head's path) renders before any AI call, so the user sees — and can curate —
-// exactly what the model may cite. Curation is OMIT-ONLY (no value editing
-// exists anywhere) and every exclusion is disclosed in the provenance line and
-// stored in the history record, so leaving out inconvenient facts is always
-// visible, never silent. Generated reports persist to a per-project history.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForest } from "../workbench/ForestContext";
 import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
 import {
-  buildFactTable,
-  buildFigureFacts,
-  buildPostEstimationFacts,
-  buildTimeSeriesFacts,
-  type CitableFact,
-} from "./factTable";
+  displayEvidenceLabel,
+  groupFactIds,
+  groupFacts,
+} from "./reportEvidence";
 import {
-  DEFAULT_REPORT_INSTRUCTION,
-  exportReport,
-  fetchAiReports,
-  generateReport,
-  saveAiReport,
-  type ReportFigure,
+  REPORT_PROMPT_PLACEHOLDER,
 } from "./reportClient";
-import { CiteChip, parseCiteSegments } from "./citeMarkup";
-import { renderMarkdown } from "./markdown";
-import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
-import {
-  deleteReportRecord,
-  loadReportHistory,
-  makeRecordId,
-  saveReportRecord,
-  type ReportRecord,
-} from "./reportHistory";
-import {
-  artifactDownloadUrl,
-  fetchArtifactJson,
-  fetchRunArtifacts,
-  fetchRunDetail,
-} from "../api";
-import type { PostEstimationResult, PredictionResearchEvidence } from "../api";
-import { fetchFigureAiContext } from "../workbench/views/figureAi";
+import { ReportFigureSelection } from "./ReportFigureSelection";
+import { ReportComposer } from "./ReportComposer";
 import { PredictionResearchReportSections } from "./PredictionResearchReportSections";
+import {
+  buildRegressionTablePacket,
+  RegressionTable,
+} from "./RegressionTable";
+import {
+  FamilyEvidence,
+  type FamilyModelResult,
+} from "./FamilyEvidence";
+import {
+  ReportWorkspaceProvider,
+  useReportWorkspaceOptional,
+  useReportWorkspace,
+} from "./ReportWorkspaceContext";
+import type { CitableFact } from "./factTable";
+import type { ReportRecord } from "./reportHistory";
+import "./report.css";
 
-const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
-  "ts.analysis_contract",
-  "ts.data_audit",
-  "ts.arma_selection",
-  "ts.volatility_selection",
-  "ts.final_model",
-  "ts.parameters",
-  "ts.final_diagnostics",
-  "ts.forecast_metrics",
-  "ts.next_forecast",
-]);
-
-function reportsForRun(records: ReportRecord[], runId: string | null): ReportRecord[] {
-  if (!runId) return [];
-  return records.filter((record) => record.scope.run_id === runId);
+export function ReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: string; focusRequest?: number }) {
+  const workspace = useReportWorkspaceOptional();
+  if (workspace) return <ReportViewContent focusRequest={focusRequest} />;
+  return (
+    <ReportWorkspaceProvider projectRoot={projectRoot}>
+      <ReportViewContent focusRequest={focusRequest} />
+    </ReportWorkspaceProvider>
+  );
 }
 
-export function ReportView({ projectRoot }: { projectRoot?: string }) {
+/** Center-column report writing surface. Review prose is rendered by ReportReviewPanel. */
+export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number } = {}) {
   const forest = useForest();
   const wb = useWorkbenchOptional();
-  const activeRunId = forest?.activeRunId ?? null;
-  // Async generation belongs to the Run whose fact snapshot was submitted.
-  // Keep the latest visible Run outside a request closure so a completed Run A
-  // cannot replace the report currently being viewed for Run B.
-  const activeRunIdRef = useRef(activeRunId);
-  activeRunIdRef.current = activeRunId;
-  const historyRoot = projectRoot ?? "unknown-project";
-  const [instruction, setInstruction] = useState(DEFAULT_REPORT_INSTRUCTION);
-  const [current, setCurrent] = useState<ReportRecord | null>(null);
-  const [history, setHistory] = useState<ReportRecord[]>([]);
-  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
-  const [generatingRunId, setGeneratingRunId] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const [reportFigures, setReportFigures] = useState<ReportFigure[]>([]);
-  const [timeSeriesArtifacts, setTimeSeriesArtifacts] = useState<Record<string, unknown>>({});
-  const [figureContextLoading, setFigureContextLoading] = useState(false);
-  const [figureInventoryError, setFigureInventoryError] = useState<string | null>(null);
-  const [postEstimation, setPostEstimation] = useState<PostEstimationResult[]>([]);
-  const [predictionEvidence, setPredictionEvidence] = useState<PredictionResearchEvidence | null>(null);
-
-  // Declared post-estimation results are server-computed scalars with artifact
-  // provenance, so they belong in the deterministic fact table. A failure here
-  // is not surfaced: the report is still truthful without these facts, and the
-  // figure inventory owns the visible error channel.
-  useEffect(() => {
-    const runId = activeRunId;
-    if (!runId || !projectRoot) {
-      setPostEstimation([]);
-      setPredictionEvidence(null);
-      return;
-    }
-    let cancelled = false;
-    void fetchRunDetail(projectRoot, runId)
-      .then((detail) => {
-        if (!cancelled) {
-          setPostEstimation(detail.post_estimation_results ?? []);
-          setPredictionEvidence(detail.prediction_evidence ?? null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPostEstimation([]);
-          setPredictionEvidence(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeRunId, projectRoot]);
-
-  useEffect(() => {
-    const stored = loadReportHistory(historyRoot);
-    const scoped = reportsForRun(stored, activeRunId);
-    setHistory(scoped);
-    // The report itself was never lost -- history is persisted -- but the
-    // preview lived in local state, so switching tabs blanked the screen and
-    // the user had to go dig it out of "Report history" to see it again.
-    // Restoring the newest record makes coming back to this view show what
-    // was last generated, which is what leaving it showed.
-    setCurrent(scoped[0] ?? null);
-  }, [activeRunId, historyRoot]);
-
-  useEffect(() => {
-    const runId = activeRunId;
-    if (!projectRoot || !runId) return;
-    let cancelled = false;
-    void fetchAiReports({ projectRoot, runId })
-      .then((records) => {
-        if (cancelled || records.length === 0) return;
-        const durable = reportsForRun(records as unknown as ReportRecord[], runId);
-        setHistory(durable);
-        setCurrent(durable[0] ?? null);
-      })
-      .catch(() => {
-        // Local history is a cache and a sensible offline fallback. The user is
-        // told about a new persistence failure at generation time instead.
-      });
-    return () => { cancelled = true; };
-  }, [activeRunId, projectRoot]);
-
-  useEffect(() => {
-    const runId = activeRunId;
-    if (!runId || !projectRoot) {
-      setReportFigures([]);
-      setTimeSeriesArtifacts({});
-      setFigureContextLoading(false);
-      setFigureInventoryError(null);
-      return;
-    }
-    let cancelled = false;
-    setFigureContextLoading(true);
-    setFigureInventoryError(null);
-    void fetchRunArtifacts(projectRoot, runId)
-      .then(async (response) => {
-        const allItems = response.groups.flatMap((group) => group.items);
-        const items = allItems
-          .filter((item) => item.artifact_type === "figure");
-        const timeSeriesItems = allItems.filter((item) =>
-          REPORT_TIME_SERIES_ARTIFACT_IDS.has(item.artifact_id),
-        );
-        const [resolved, resolvedTimeSeries] = await Promise.all([
-          Promise.all(
-            items.map(async (item) => {
-              try {
-                const context = await fetchFigureAiContext(projectRoot, runId, item.artifact_id);
-                return {
-                  artifact_id: item.artifact_id,
-                  chart_type: context.figure.chart_type,
-                  path: context.figure.path,
-                  source: context.source,
-                } satisfies ReportFigure;
-              } catch {
-                // The figure remains visible/exportable even when its numeric
-                // source is unavailable; the report packet records that gap.
-                return {
-                  artifact_id: item.artifact_id,
-                  chart_type: item.artifact_id,
-                  source: null,
-                } satisfies ReportFigure;
-              }
-            }),
-          ),
-          Promise.all(
-            timeSeriesItems.map(async (item) => {
-              try {
-                const value = await fetchArtifactJson(projectRoot, runId, item.artifact_id);
-                return [item.artifact_id, value] as const;
-              } catch {
-                return null;
-              }
-            }),
-          ),
-        ]);
-        if (!cancelled) {
-          setReportFigures(resolved);
-          setTimeSeriesArtifacts(
-            Object.fromEntries(resolvedTimeSeries.filter((item) => item !== null)),
-          );
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setReportFigures([]);
-          setTimeSeriesArtifacts({});
-          setFigureInventoryError(
-            "Unable to load the run figure inventory; report generation is disabled.",
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setFigureContextLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeRunId, projectRoot]);
-
-  const table = useMemo(() => {
-    if (!forest || !forest.activeRunId) return null;
-    return buildFactTable(forest.forest, forest.activeRunId);
-  }, [forest]);
-
-  const figureFacts = useMemo(
-    () => buildFigureFacts(reportFigures, table?.facts.length ?? 0),
-    [reportFigures, table?.facts.length],
-  );
-  const timeSeriesProvenance = useMemo(() => {
-    const modelNode = forest?.forest.nodes.find(
-      (node) =>
-        (node.runs ?? []).includes(forest.activeRunId ?? "")
-        && node.opType === "time_series.arma_garch"
-        && node.kind === "model",
-    );
-    return modelNode
-      ? { nodeKey: modelNode.nodeKey, nodeLabel: modelNode.title }
-      : { nodeKey: "model:arma_garch_1", nodeLabel: "ARMA-GARCH" };
-  }, [forest]);
-  const timeSeriesFacts = useMemo(
-    () => buildTimeSeriesFacts(
-      timeSeriesArtifacts,
-      (table?.facts.length ?? 0) + figureFacts.length,
-      timeSeriesProvenance,
-    ),
-    [figureFacts.length, table?.facts.length, timeSeriesArtifacts, timeSeriesProvenance],
-  );
-  const postEstimationFacts = useMemo(
-    () => buildPostEstimationFacts(
-      postEstimation,
-      (table?.facts.length ?? 0) + figureFacts.length + timeSeriesFacts.length,
-    ),
-    [figureFacts.length, postEstimation, table?.facts.length, timeSeriesFacts.length],
-  );
-  const allFacts = useMemo(
-    () => (table
-      ? [...table.facts, ...figureFacts, ...timeSeriesFacts, ...postEstimationFacts]
-      : []),
-    [figureFacts, postEstimationFacts, table, timeSeriesFacts],
-  );
+  const workspace = useReportWorkspace();
+  const table = workspace.table;
+  const activeRunId = workspace.activeRunId;
+  const excludedIds = new Set(workspace.excludedFactIds);
+  const excludedFigureIds = new Set(workspace.excludedFigureIds);
 
   if (!forest || !forest.activeRunId || !table) {
     return (
@@ -272,132 +57,43 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
     );
   }
 
-  const includedFacts = allFacts.filter((fact) => !excludedIds.has(fact.id));
   const jumpToNode = (nodeKey: string) => {
     if (!wb) return;
     wb.dispatch.setView("graph");
     wb.dispatch.selectByCanvasClick(nodeKey);
   };
-  const toggleFact = (factId: string) => {
-    setExcludedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(factId)) next.delete(factId);
-      else next.add(factId);
-      return next;
-    });
-  };
-
-  async function handleGenerate() {
-    if (!table) return;
-    const runId = table.scope.run_id;
-    setGeneratingRunId(runId);
-    setError(null);
-    try {
-      const response = await generateReport({
-        facts: includedFacts,
-        scope: table.scope,
-        fingerprints: table.fingerprints,
-        figures: reportFigures,
-        instruction,
-      });
-      const record: ReportRecord = {
-        id: makeRecordId(),
-        generatedAt: new Date().toISOString(),
-        model: response.model,
-        instruction,
-        text: response.text,
-        scope: table.scope,
-        facts: allFacts, // FULL snapshot, exclusions included — audit trail
-        excluded_fact_ids: [...excludedIds],
-        figures: reportFigures,
-      };
-      if (projectRoot) {
-        await saveAiReport({ projectRoot, runId: table.scope.run_id, record });
-      }
-      if (activeRunIdRef.current === runId) {
-        setCurrent(record);
-        setHistory(reportsForRun(saveReportRecord(historyRoot, record), runId));
-      } else {
-        // Still preserve the user-requested Run A report; only defer its view
-        // update until the user explicitly returns to Run A.
-        saveReportRecord(historyRoot, record);
-      }
-      appendAiActivity(historyRoot, {
-        kind: "report_generate",
-        id: makeActivityId(),
-        at: record.generatedAt,
-        run_id: table.scope.run_id,
-        instruction,
-        model: response.model,
-        fact_count: includedFacts.length,
-        excluded_count: excludedIds.size,
-        report_record_id: record.id,
-        status: "completed",
-      });
-    } catch (err) {
-      // Leaving the previously restored report on screen next to a failure
-      // invites reading it as this attempt's output. It is not lost -- it is
-      // still in Report history -- but it must not stand in for a result that
-      // was never produced.
-      const failure = err instanceof Error ? err.message : "Report generation failed";
-      appendAiActivity(historyRoot, {
-        kind: "report_generate",
-        id: makeActivityId(),
-        at: new Date().toISOString(),
-        run_id: table.scope.run_id,
-        instruction,
-        fact_count: includedFacts.length,
-        excluded_count: excludedIds.size,
-        status: "error",
-        error: failure.length <= 500 ? failure : `${failure.slice(0, 499)}…`,
-      });
-      if (activeRunIdRef.current === runId) {
-        setCurrent(null);
-        setError(failure);
-      }
-    } finally {
-      setGeneratingRunId((currentRunId) => currentRunId === runId ? null : currentRunId);
-    }
-  }
-
-  async function handleExport(format: "html" | "docx" | "tex" | "pdf-print") {
-    if (!current || !projectRoot) return;
-    if (format === "pdf-print") {
-      window.print();
-      return;
-    }
-    setExporting(true);
-    setError(null);
-    try {
-      const blob = await exportReport({
-        projectRoot,
-        runId: current.scope.run_id,
-        format,
-        markdown: current.text,
-        figures: current.figures ?? reportFigures,
-      });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `workbench-report-${current.scope.run_id}.${format === "tex" ? "zip" : format}`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Report export failed");
-    } finally {
-      setExporting(false);
-    }
-  }
-
-  const viewingFactsById = new Map(
-    (current?.facts ?? allFacts).map((fact) => [fact.id, fact]),
-  );
+  const regressionTable = buildRegressionTablePacket(workspace.modelResults);
+  const resultFamilies = [...new Set(
+    workspace.modelResults.map((result) => result.model_type?.trim() || "unknown model"),
+  )];
+  const hasCurrentReport = workspace.current !== null;
+  const promptValue = hasCurrentReport ? workspace.revisionInstruction : workspace.instruction;
+  const promptChange = hasCurrentReport
+    ? workspace.onRevisionInstructionChange
+    : workspace.onInstructionChange;
+  const promptSubmit = hasCurrentReport
+    ? () => void workspace.reviseReport()
+    : () => void workspace.generateReport();
 
   return (
     <div
       data-testid="report-view"
-      style={{ padding: "12px 20px 20px", overflowY: "auto", flex: 1, minHeight: 0 }}
+      className="report-page"
+      style={{
+        boxSizing: "border-box",
+        width: "100%",
+        minWidth: 0,
+        padding: "12px 20px 20px",
+        overflowY: "auto",
+        flex: 1,
+        minHeight: 0,
+      }}
     >
+      <style>{`@media print {
+        body * { visibility: hidden !important; }
+        [data-testid="report-body"], [data-testid="report-body"] * { visibility: visible !important; }
+        [data-testid="report-body"] { position: absolute !important; left: 0 !important; top: 0 !important; max-width: none !important; width: 100% !important; }
+      }`}</style>
       {forest.forest.heads.length > 0 && (
         <nav
           data-testid="report-view-run-picker"
@@ -421,196 +117,242 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
           ))}
         </nav>
       )}
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 12 }}>
-        <textarea
-          aria-label="Report instruction"
-          value={instruction}
-          onChange={(event) => setInstruction(event.target.value)}
-          rows={2}
-          style={{ flex: 1, fontSize: 13, padding: 8 }}
-        />
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={
-            generatingRunId === activeRunId ||
-            figureContextLoading ||
-            figureInventoryError !== null ||
-            includedFacts.length === 0
-          }
-        >
-          {generatingRunId === activeRunId
-            ? "Generating…"
-            : figureContextLoading
-              ? "Loading figures…"
-              : "Generate report"}
-        </button>
-        {current && (
-          <>
-            <button type="button" onClick={() => setCurrent(null)}>
-              New report
-            </button>
-            <label style={{ fontSize: 12 }}>
-              <span className="sr-only">Download report</span>
-              <select
-                aria-label="Download report"
-                disabled={exporting || !projectRoot}
-                defaultValue=""
-                onChange={(event) => {
-                  const value = event.target.value as "html" | "docx" | "tex" | "pdf-print" | "";
-                  if (value) void handleExport(value);
-                  event.target.value = "";
-                }}
-              >
-                <option value="">Download…</option>
-                <option value="html">HTML</option>
-                <option value="docx">Word</option>
-                <option value="tex">LaTeX (.zip)</option>
-                <option value="pdf-print">Print / PDF</option>
-              </select>
-            </label>
-          </>
-        )}
-      </div>
 
-      <div
-        data-testid="report-provenance"
-        style={{ fontSize: 12, color: "var(--label-tertiary)", marginBottom: 12 }}
-      >
-        Scope: run <code>{table.scope.run_id}</code> · {table.scope.node_count} nodes ·{" "}
-        {includedFacts.length} of {allFacts.length} facts included
-        {excludedIds.size > 0 && (
-          <strong style={{ color: "var(--diff-removed, #b35900)" }}>
-            {" "}
-            ({excludedIds.size} excluded by user — disclosed &amp; recorded)
-          </strong>
-        )}
-        {current?.model && (
-          <>
-            {" · "}model <code>{current.model}</code> · generated {current.generatedAt}
-            {current.excluded_fact_ids.length > 0 && (
-              <strong style={{ color: "var(--diff-removed, #b35900)" }}>
-                {" "}
-                · {current.excluded_fact_ids.length} facts were excluded when this
-                report was generated
+      <ReportComposer
+        value={promptValue}
+        onChange={promptChange}
+        onSubmit={promptSubmit}
+        submitLabel={hasCurrentReport ? "Revise draft" : "Generate report"}
+        placeholder={REPORT_PROMPT_PLACEHOLDER}
+        ariaLabel={hasCurrentReport ? "Report revision instruction" : "Report instruction"}
+        contextLines={workspace.reportContextLines}
+        contextDetails={workspace.reportContextDetails}
+        contextUsedTokens={workspace.reportContextUsedTokens}
+        focusRequest={focusRequest}
+        allowEmptySubmit={!hasCurrentReport}
+        busy={workspace.generating}
+        disabled={
+          workspace.figureContextLoading
+          || workspace.figureInventoryError !== null
+          || workspace.includedFacts.length === 0
+        }
+      />
+
+      <ReportActionBar />
+
+      <section data-testid="report-scope-summary" className="report-scope-summary">
+        <div className="report-scope-summary__heading">
+          <div>
+            <strong>Scope</strong>
+            <span>What this report covers</span>
+          </div>
+          <span className="report-scope-summary__hint">
+            Defines the run and lineage boundary; it does not change Workbench data.
+          </span>
+        </div>
+        <div
+          data-testid="report-provenance"
+          className="report-scope-summary__facts"
+        >
+          <div>
+            Run <code>{table.scope.run_id}</code> · {table.scope.node_count} lineage nodes
+          </div>
+          <div>
+            Evidence inventory: {workspace.allFacts.length} facts in provenance · next writer packet: {workspace.includedFacts.length} of {workspace.allFacts.length} selected
+            {excludedIds.size > 0 && (
+              <strong className="report-scope-summary__warning">
+                {" "}({excludedIds.size} excluded by user — disclosed &amp; recorded)
               </strong>
             )}
-          </>
-        )}
+          </div>
+          <div>
+            Figure inventory: {workspace.reportFigures.length} figures in provenance · next writer packet: {workspace.includedFigures.length} of {workspace.reportFigures.length} selected
+            {excludedFigureIds.size > 0 && (
+              <strong className="report-scope-summary__warning">
+                {" "}({excludedFigureIds.size} figure{excludedFigureIds.size === 1 ? "" : "s"} omitted from the writer packet)
+              </strong>
+            )}
+          </div>
+          {workspace.current?.model && (
+            <div>
+              Model <code>{workspace.current.model}</code> · generated {workspace.current.generatedAt}
+              {workspace.current.excluded_fact_ids.length > 0 && (
+                <strong className="report-scope-summary__warning">
+                  {" "}· {workspace.current.excluded_fact_ids.length} facts were excluded when this report was generated
+                </strong>
+              )}
+            </div>
+          )}
+          {workspace.current && (workspace.current.report_standard || workspace.currentQualityStatus) && (
+            <div data-testid="report-quality-status">
+              Standard <code>{workspace.current.report_standard ?? "legacy"}</code> · quality{" "}
+              <code>{workspace.currentQualityStatus ?? "unknown"}</code>
+            </div>
+          )}
+          {workspace.currentIsStale && (
+            <strong data-testid="report-stale" className="report-scope-summary__warning">
+              Source evidence changed; this revision is stale.
+            </strong>
+          )}
+        </div>
+      </section>
+
+      <div data-testid="report-scope-divider" className="report-scope-divider">
+        <span className="report-scope-divider__title">Regression evidence</span>
+        <span>Source output from this run; it remains in provenance and is not automatically sent to the writer.</span>
       </div>
 
-      {error && (
+      {workspace.current && workspace.currentQualityStatus && workspace.currentQualityStatus !== "exportable" && (
         <div
-          role="alert"
-          style={{ fontSize: 13, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}
+          data-testid="report-quality-issues"
+          style={{ fontSize: 12, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}
         >
-          {error}
+          This revision needs attention before formal export: {workspace.current.report_quality?.violations?.map((item) => typeof item === "string" ? item : item.message).join("; ") || workspace.currentQualityStatus}.
         </div>
       )}
 
-      {figureInventoryError && (
-        <div
-          role="alert"
-          style={{ fontSize: 13, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}
-        >
-          {figureInventoryError}
+      {workspace.error && (
+        <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}>
+          {workspace.error}
         </div>
       )}
 
-      <PredictionResearchReportSections evidence={predictionEvidence} />
-
-      {current ? (
-        <ReportBody
-          text={current.text}
-          factsById={viewingFactsById}
-          figures={current.figures ?? reportFigures}
-          projectRoot={projectRoot ?? ""}
-          runId={current.scope.run_id}
-          onJump={jumpToNode}
-        />
-      ) : (
-        <FactTablePreview
-          facts={allFacts}
-          excludedIds={excludedIds}
-          onToggle={toggleFact}
-          onJump={jumpToNode}
-        />
+      {workspace.figureInventoryError && (
+        <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}>
+          {workspace.figureInventoryError}
+        </div>
       )}
+
+      <PredictionResearchReportSections evidence={workspace.predictionEvidence} />
+      <RegressionTable packet={regressionTable} />
+      <FamilyEvidence
+        modelResults={workspace.modelResults as unknown as FamilyModelResult[]}
+        artifacts={workspace.familyEvidenceArtifacts}
+      />
+
+      <div data-testid="report-evidence-divider" className="report-evidence-divider">
+        <span className="report-evidence-divider__title">
+          Report evidence (what the AI may reference)
+        </span>
+        <span className="report-evidence-divider__note">
+          Regression evidence above is source output; this section is the citable report context.
+        </span>
+      </div>
+      <FactTablePreview
+        facts={workspace.allFacts}
+        excludedIds={excludedIds}
+        onToggle={workspace.toggleFact}
+        onJump={jumpToNode}
+        showHeading={false}
+      />
+      <ReportFigureSelection
+        figures={workspace.reportFigures}
+        excludedFigureIds={excludedFigureIds}
+        onToggle={workspace.toggleFigure}
+        onUseRecommended={workspace.useRecommendedFigures}
+        onIncludeAll={workspace.includeAllFigures}
+      />
 
       <HistoryList
-        history={history}
-        currentId={current?.id ?? null}
-        onOpen={(record) => setCurrent(record)}
-        onDelete={(record) => {
-          setHistory(reportsForRun(deleteReportRecord(historyRoot, record.id), activeRunId));
-          if (current?.id === record.id) setCurrent(null);
-        }}
+        history={workspace.history}
+        currentId={workspace.current?.id ?? null}
+        onOpen={workspace.openReport}
+        onDelete={workspace.deleteReport}
       />
-      {figureContextLoading && !current && (
+      {workspace.figureContextLoading && !workspace.current && (
         <div style={{ fontSize: 11, color: "var(--label-tertiary)" }}>
           Loading numeric sources for report figures…
         </div>
       )}
+
+      <span aria-hidden="true" data-report-result-families={resultFamilies.join(",")} hidden />
     </div>
   );
 }
 
-function ReportBody({
-  text,
-  factsById,
-  figures,
-  projectRoot,
-  runId,
-  onJump,
-}: {
-  text: string;
-  factsById: Map<string, CitableFact>;
-  figures: ReportFigure[];
-  projectRoot: string;
-  runId: string;
-  onJump: (nodeKey: string) => void;
-}) {
-  // v1.6.12 (V5): markdown blocks; [[c:ID]] markers become chips inside every
-  // plain-text leaf via the renderTextSpan seam (bold/list content included).
-  const figureById = new Map(figures.map((figure) => [figure.artifact_id, figure]));
-  const renderCiteSpan = (span: string, key: string) => {
-    const parts = span.split(/(\[\[fig:[A-Za-z0-9._-]+\]\])/g);
-    return (
-      <span key={key}>
-        {parts.map((part, index) => {
-          const figureMatch = /^\[\[fig:([A-Za-z0-9._-]+)\]\]$/.exec(part);
-          if (figureMatch) {
-            const figure = figureById.get(figureMatch[1]);
-            return figure ? (
-              <img
-                key={index}
-                src={artifactDownloadUrl(projectRoot, runId, figure.artifact_id)}
-                alt={`${figure.chart_type} figure`}
-                data-testid={`report-figure-${figure.artifact_id}`}
-                style={{ display: "block", width: "100%", margin: "10px 0" }}
-              />
-            ) : (
-              <span key={index}>[Figure unavailable: {figureMatch[1]}]</span>
-            );
-          }
-          return (
-            <span key={index}>
-              {parseCiteSegments(part).map((segment, segmentIndex) =>
-                segment.type === "text" ? (
-                  <span key={segmentIndex}>{segment.text}</span>
-                ) : (
-                  <CiteChip key={segmentIndex} id={segment.id} fact={factsById.get(segment.id)} onJump={onJump} />
-                ),
-              )}
-            </span>
-          );
-        })}
-      </span>
-    );
+function ReportActionBar() {
+  const workspace = useReportWorkspace();
+  const [moreFormatsOpen, setMoreFormatsOpen] = useState(false);
+  const moreFormatsRef = useRef<HTMLDivElement>(null);
+  const hasReport = workspace.current !== null;
+
+  useEffect(() => {
+    if (!moreFormatsOpen) return undefined;
+    const closeOnOutsidePress = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Node && moreFormatsRef.current?.contains(target)) return;
+      setMoreFormatsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreFormatsOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsidePress);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsidePress);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [moreFormatsOpen]);
+
+  const exportFormat = (format: "html" | "docx" | "tex") => {
+    setMoreFormatsOpen(false);
+    void workspace.exportReport(format);
   };
+
   return (
-    <div data-testid="report-body" style={{ fontSize: 13, maxWidth: 860 }}>
-      {renderMarkdown(text, renderCiteSpan)}
+    <div className="report-action-bar" data-testid="report-action-bar">
+      <button type="button" aria-label="New report" onClick={workspace.startNewReport}>
+        New
+      </button>
+      <button
+        type="button"
+        aria-label="Edit report"
+        onClick={workspace.beginEditing}
+        disabled={!hasReport || workspace.editing}
+      >
+        Edit
+      </button>
+      <button
+        type="button"
+        aria-label="Export report"
+        title="Download the current report"
+        onClick={() => void workspace.exportReport("pdf-print")}
+        disabled={workspace.exporting || !workspace.projectRoot || !workspace.reportExportAllowed || !hasReport}
+      >
+        Export
+      </button>
+      <button
+        type="button"
+        aria-label="Export result table"
+        title="Download the authoritative result table as XLSX"
+        onClick={() => void workspace.exportResultTable()}
+        disabled={workspace.resultTableExporting || !workspace.projectRoot || !hasReport}
+      >
+        Result table
+      </button>
+      <div className="report-action-bar__more" ref={moreFormatsRef}>
+        <button
+          type="button"
+          aria-label="More formats"
+          aria-expanded={moreFormatsOpen}
+          onClick={() => setMoreFormatsOpen((open) => !open)}
+        >
+          More formats <span aria-hidden="true">▾</span>
+        </button>
+        {moreFormatsOpen && (
+          <div className="report-action-bar__menu" role="menu" aria-label="More report formats">
+            <button type="button" role="menuitem" onClick={() => exportFormat("html")} disabled={!hasReport || !workspace.reportExportAllowed}>
+              HTML
+            </button>
+            <button type="button" role="menuitem" onClick={() => exportFormat("docx")} disabled={!hasReport || !workspace.reportExportAllowed}>
+              Word
+            </button>
+            <button type="button" role="menuitem" onClick={() => exportFormat("tex")} disabled={!hasReport || !workspace.reportExportAllowed}>
+              LaTeX (.zip)
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -620,11 +362,13 @@ function FactTablePreview({
   excludedIds,
   onToggle,
   onJump,
+  showHeading = true,
 }: {
   facts: CitableFact[];
-  excludedIds: Set<string>;
+  excludedIds: ReadonlySet<string>;
   onToggle: (factId: string) => void;
   onJump: (nodeKey: string) => void;
+  showHeading?: boolean;
 }) {
   if (facts.length === 0) {
     return (
@@ -634,71 +378,103 @@ function FactTablePreview({
     );
   }
   return (
-    <div data-testid="report-fact-preview">
-      <div className="ln-section-label" style={{ marginBottom: 2 }}>
-        Citable facts (what the AI may reference)
+    <div data-testid="report-fact-preview" className="report-fact-preview">
+      {showHeading && (
+        <div className="ln-section-label" style={{ marginBottom: 2 }}>
+          Report evidence (what the AI may reference)
+        </div>
+      )}
+      <div className="report-fact-preview__description" style={{ fontSize: 11, color: "var(--label-tertiary)" }}>
+        Inventory is the full provenance snapshot. Only rows in the next writer packet
+        are sent on the next generation; Workbench values are read-only and exclusions
+        are disclosed in report provenance and history.
       </div>
-      <div style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
-        Untick a fact to leave it out of the report. Values cannot be edited;
-        every exclusion is disclosed in the report's provenance and kept in its
-        history record.
+      <div style={{ display: "grid", gap: 6 }}>
+        {groupFacts(facts).map((group) => {
+          const ids = groupFactIds(group);
+          const includedCount = ids.filter((id) => !excludedIds.has(id)).length;
+          const setGroupIncluded = (included: boolean) => {
+            ids.forEach((id) => {
+              const currentlyIncluded = !excludedIds.has(id);
+              if (currentlyIncluded !== included) onToggle(id);
+            });
+          };
+          return (
+            <details key={group.id}>
+              <summary
+                style={{
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: "5px 0",
+                  listStylePosition: "outside",
+                }}
+              >
+                {group.label} <span style={{ color: "var(--label-tertiary)", fontWeight: 400 }}>
+                  Next writer packet: {includedCount}/{group.facts.length} selected
+                </span>
+              </summary>
+              <div style={{ display: "flex", gap: 6, margin: "0 0 4px 14px" }}>
+                <button type="button" onClick={() => setGroupIncluded(true)} style={{ fontSize: 11, minHeight: 0, padding: "2px 6px" }}>
+                  Include all
+                </button>
+                <button type="button" onClick={() => setGroupIncluded(false)} style={{ fontSize: 11, minHeight: 0, padding: "2px 6px" }}>
+                  Exclude all
+                </button>
+              </div>
+              <table style={{ fontSize: 12, borderCollapse: "collapse", marginLeft: 14 }}>
+                <thead>
+                  <tr>
+                    {["use", "evidence", "source", "value", "details"].map((header) => (
+                      <th key={header} style={{ textAlign: "left", padding: "2px 10px 2px 0" }}>{header}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.facts.map((fact) => {
+                    const excluded = excludedIds.has(fact.id);
+                    return (
+                      <tr key={fact.id} style={{ opacity: excluded ? 0.45 : 1 }}>
+                        <td style={{ padding: "2px 10px 2px 0" }}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Include fact ${fact.id}`}
+                            checked={!excluded}
+                            onChange={() => onToggle(fact.id)}
+                          />
+                        </td>
+                        <td style={{ padding: "2px 10px 2px 0" }}>{displayEvidenceLabel(fact)}</td>
+                        <td style={{ padding: "2px 10px 2px 0" }}>
+                          <button
+                            type="button"
+                            onClick={() => onJump(fact.node_key)}
+                            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline", fontSize: 12, color: "var(--tint)", minHeight: 0, fontWeight: 400 }}
+                          >
+                            {fact.node_label}
+                          </button>
+                        </td>
+                        <td style={{ padding: "2px 10px 2px 0", fontFamily: "ui-monospace, monospace" }}>{String(fact.value)}</td>
+                        <td style={{ padding: "2px 10px 2px 0" }}>
+                          <details>
+                            <summary style={{ cursor: "pointer", color: "var(--tint)", fontSize: 11 }}>
+                              Evidence details for fact {fact.id}
+                            </summary>
+                            <div style={{ fontSize: 11, color: "var(--label-tertiary)", paddingTop: 3 }}>
+                              <div>id: {fact.id}</div>
+                              <div>field: {fact.field}</div>
+                              <div>node: {fact.node_key}</div>
+                            </div>
+                          </details>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </details>
+          );
+        })}
       </div>
-      <table style={{ fontSize: 12, borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            {["use", "id", "node", "field", "value"].map((header) => (
-              <th key={header} style={{ textAlign: "left", padding: "2px 10px 2px 0" }}>
-                {header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {facts.map((fact) => {
-            const excluded = excludedIds.has(fact.id);
-            return (
-              <tr key={fact.id} style={{ opacity: excluded ? 0.45 : 1 }}>
-                <td style={{ padding: "2px 10px 2px 0" }}>
-                  <input
-                    type="checkbox"
-                    aria-label={`Include fact ${fact.id}`}
-                    checked={!excluded}
-                    onChange={() => onToggle(fact.id)}
-                  />
-                </td>
-                <td style={{ padding: "2px 10px 2px 0", color: "var(--label-tertiary)" }}>
-                  {fact.id}
-                </td>
-                <td style={{ padding: "2px 10px 2px 0" }}>
-                  <button
-                    type="button"
-                    onClick={() => onJump(fact.node_key)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      padding: 0,
-                      cursor: "pointer",
-                      textDecoration: "underline",
-                      fontSize: 12,
-                      // global `button` is tint-bg + WHITE text; a link-style
-                      // button must restore a readable label color.
-                      color: "var(--tint)",
-                      minHeight: 0,
-                      fontWeight: 400,
-                    }}
-                  >
-                    {fact.node_label}
-                  </button>
-                </td>
-                <td style={{ padding: "2px 10px 2px 0" }}>{fact.field}</td>
-                <td style={{ padding: "2px 10px 2px 0", fontFamily: "ui-monospace, monospace" }}>
-                  {String(fact.value)}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -714,14 +490,10 @@ function HistoryList({
   onOpen: (record: ReportRecord) => void;
   onDelete: (record: ReportRecord) => void;
 }) {
-  // Always render the section (empty state included) — an invisible feature
-  // is an undiscoverable feature (user report 2026-07-12).
   if (history.length === 0) {
     return (
       <div data-testid="report-history-empty" style={{ marginTop: 24 }}>
-        <div className="ln-section-label" style={{ marginBottom: 6 }}>
-          Report history
-        </div>
+        <div className="ln-section-label" style={{ marginBottom: 6 }}>Report history</div>
         <div style={{ fontSize: 12, color: "var(--label-tertiary)" }}>
           No reports yet — every generated report is saved here (survives reload).
         </div>
@@ -730,44 +502,26 @@ function HistoryList({
   }
   return (
     <div data-testid="report-history" style={{ marginTop: 24 }}>
-      <div className="ln-section-label" style={{ marginBottom: 6 }}>
-        Report history ({history.length})
-      </div>
+      <div className="ln-section-label" style={{ marginBottom: 6 }}>Report history ({history.length})</div>
       <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {history.map((record) => (
-          <li
-            key={record.id}
-            style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "3px 0", fontSize: 12 }}
-          >
+          <li key={record.id} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "3px 0", fontSize: 12 }}>
             <button
               type="button"
               onClick={() => onOpen(record)}
-              style={{
-                background: "none",
-                border: "none",
-                padding: 0,
-                cursor: "pointer",
-                textDecoration: "underline",
-                fontSize: 12,
-                fontWeight: record.id === currentId ? 600 : 400,
-                // global `button` paints WHITE text — restore a readable color.
-                color: "var(--tint)",
-                minHeight: 0,
-              }}
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline", fontSize: 12, fontWeight: record.id === currentId ? 600 : 400, color: "var(--tint)", minHeight: 0 }}
             >
               {record.generatedAt}
             </button>
             <span style={{ color: "var(--label-tertiary)" }}>
-              {record.model ?? "?"} · {record.facts.length - record.excluded_fact_ids.length}/
-              {record.facts.length} facts
-              {record.excluded_fact_ids.length > 0 && " (curated)"}
+              {record.model ?? "?"} · {record.facts.length - record.excluded_fact_ids.length}/{record.facts.length} facts
+              {record.figures && <> · {record.figures.length - (record.excluded_figure_ids?.length ?? 0)}/{record.figures.length} figures</>}
+              {(record.excluded_fact_ids.length > 0 || (record.excluded_figure_ids?.length ?? 0) > 0) && " (curated)"}
             </span>
             <span style={{ color: "var(--label-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320 }}>
               {record.instruction}
             </span>
-            <button type="button" onClick={() => onDelete(record)} aria-label={`Delete report ${record.id}`}>
-              ✕
-            </button>
+            <button type="button" onClick={() => onDelete(record)} aria-label={`Delete report ${record.id}`}>✕</button>
           </li>
         ))}
       </ul>

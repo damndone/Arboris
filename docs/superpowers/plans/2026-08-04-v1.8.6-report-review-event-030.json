@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "event_id": "8c3e1b74-6a5c-4c0a-bf0c-1e0df3b3fca0",
+  "timestamp": "2026-08-04T14:31:22.000Z",
+  "type": "REVIEW",
+  "subtype": "node_panel_compact_controls_and_four_corner_resize",
+  "stage": "review",
+  "cause_status": "known",
+  "cause": "The floating node panel still used a wide text Actions button, the drag-node affordance was stretched by the shared button minimum height, and native CSS resize exposed only a bottom-right handle. A focused RED test reproduced the missing compact-control and four-corner contracts before implementation.",
+  "evidence": {
+    "kind": "browser_test_command",
+    "ref": "Focused regression and full frontend Vitest passed: 188 files and 1634 tests. Typecheck and git diff --check passed. Browser acceptance measured 27x27px Node actions and Drag node panel controls, 16x16px hitboxes for top-left/top-right/bottom-left/bottom-right, and used real pointer drags on all four corners. Each corner changed width and height; top corners moved the top edge and left corners moved the left edge. The floating panel was restored to x=36, y=116, width=680, height=572. The integrated quick gate's backend stage reported 4584 passed, 35 failed, 5 skipped, and 1 xfailed; failures were sandbox-exec permission failures and existing golden snapshot drift, unrelated to these frontend paths.",
+    "sha256": "de359d2ca83d4ab702a19b818f77de2e74d59e392a174229b90fc564187cdc65",
+    "observed_at": "2026-08-04T14:31:22.000Z"
+  },
+  "impact": "Floating node chrome now uses the same compact square control footprint as the shared window controls, with a visible compact Actions glyph and stronger drag-handle dots. Users can resize the floating node panel from any corner while preserving minimum dimensions and corner-specific anchoring. The repository-wide quick gate remains red only for pre-existing macOS sandbox-exec and golden-snapshot failures outside this UI change.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "When replacing browser-native resize with controlled corner handles, test both hitbox presence and directional geometry with real pointer drags, then restore the persisted panel position and size before handoff. Keep repository-wide environment failures separate from feature-specific acceptance evidence.",
+  "lesson_key": "node-panel-four-corner-resize",
+  "links": [
+    "frontend/src/lineage/graph/NodeActionMenu.tsx",
+    "frontend/src/workbench/panelHost.css",
+    "frontend/src/workbench/WorkbenchRouteContainer.tsx",
+    "frontend/src/styles.test.ts",
+    "frontend/src/workbench/WorkbenchRouteContainer.test.tsx"
+  ],
+  "prev_event_sha256": "c0a4d8f54a4820c0be567a7e6211364ec8b9f98bbd1b56207c798f12bbf63bb2",
+  "incident_id": "8c3e1b74-6a5c-4c0a-bf0c-1e0df3b3fca0"
+}

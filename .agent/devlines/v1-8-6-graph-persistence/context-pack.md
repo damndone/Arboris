@@ -19,8 +19,8 @@ GraphStore 读回后仍保留 `node_hash`。旧 graph.json 没有该字段时必
 - 相关回归测试与既有 GraphStore/GraphRecorder 测试通过。
 
 ## Boundary
-- Affected paths: `docs/superpowers/plans/2026-08-03-v1.8.6-graph-persistence-objective.md`, `backend/workbench/graph_store.py`, `backend/workbench/graph_model.py`, `backend/workbench/graph_recorder.py`, `backend/workbench/prediction.py`, `tests/test_node_hash.py`, `tests/predictive_research/test_sample_identity_v186.py`
-- Allowed paths: `docs/superpowers/plans/2026-08-03-v1.8.6-graph-persistence-objective.md`, `backend/workbench/graph_store.py`, `backend/workbench/graph_model.py`, `backend/workbench/graph_recorder.py`, `backend/workbench/prediction.py`, `tests/test_node_hash.py`, `tests/predictive_research/test_sample_identity_v186.py`
+- Affected paths: `docs/superpowers/plans/2026-08-03-v1.8.6-graph-persistence-objective.md`, `backend/workbench/graph_store.py`, `backend/workbench/graph_model.py`, `backend/workbench/graph_recorder.py`, `backend/workbench/predictive_research/graph_persistence.py`, `tests/test_node_hash.py`
+- Allowed paths: `docs/superpowers/plans/2026-08-03-v1.8.6-graph-persistence-objective.md`, `backend/workbench/graph_store.py`, `backend/workbench/graph_model.py`, `backend/workbench/graph_recorder.py`, `backend/workbench/predictive_research/graph_persistence.py`, `tests/test_node_hash.py`
 - Protected paths: none
 - Dependencies: `baseline-cb08e6f`, `S0-identity-projection-present-GraphStore-readback-pending`
 - Tests: `PYTHONPATH=backend .venv/bin/python -m pytest tests/test_node_hash.py tests/predictive_research/test_sample_identity_v186.py -q`, `PYTHONPATH=backend .venv/bin/python -m pytest tests/test_graph_store.py tests/test_graph_recorder.py -q`

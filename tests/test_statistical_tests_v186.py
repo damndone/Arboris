@@ -5,6 +5,7 @@ import pandas as pd
 import workbench.statistical_tests as statistical_tests
 
 from workbench.statistical_tests import (
+    StatisticalTestContractError,
     cohens_d,
     eta_squared,
     one_sample_t_test,
@@ -165,3 +166,14 @@ def test_reference_and_pairing_semantics_are_required_for_special_tests() -> Non
     )
     with_types = {row["test_type"] for row in with_semantics["evidence"]["results"]}
     assert {"one_sample_t_test", "paired_t_test", "wilcoxon_signed_rank"} <= with_types
+
+
+def test_paired_test_request_fails_closed_when_pair_columns_are_not_declared() -> None:
+    frame = pd.DataFrame({"before": [1.0, 1.2, 0.9], "after": [1.2, 1.3, 1.1]})
+
+    with pytest.raises(StatisticalTestContractError, match="paired column"):
+        run_statistical_tests(
+            frame,
+            analysis_columns=["before", "after"],
+            paired_columns=[("before", "missing_id")],
+        )

@@ -10,6 +10,26 @@ from ..context import ModelingContext, RunEnv
 from ...domain import GuardrailIssue, Severity
 
 
+_V186_FAMILY_TYPES = frozenset(
+    {"ordinal_logit", "multinomial_logit", "survival_cox", "quantile_regression"}
+)
+
+
+def _family_owned_diagnostic(model_type: str, model_id: str) -> dict[str, Any]:
+    """Return a typed pointer for families whose diagnostics are not OLS-shaped."""
+
+    return {
+        "contract": f"workbench.{model_type}.diagnostics.v1",
+        "model_type": model_type,
+        "status": "family_owned",
+        "source_model_id": model_id,
+        "validation": {
+            "level": "internal_consistency_only",
+            "external_oracle": "not_verified",
+        },
+    }
+
+
 def _promote_did_warnings(
     result: dict[str, Any],
     *,
@@ -162,7 +182,12 @@ class DiagnosticsStage:
             result = result_dict.get(model_id, {})
             fitted_model_type = result.get("model_type", "ols")
             family = _diagnostic_family(result)
-            diag = compute_diagnostics(fitted, exog, model_id, model_family=family)
+            family_owned = fitted_model_type in _V186_FAMILY_TYPES
+            diag = (
+                _family_owned_diagnostic(fitted_model_type, model_id)
+                if family_owned
+                else compute_diagnostics(fitted, exog, model_id, model_family=family)
+            )
             diag["model_type"] = fitted_model_type
             diag_path = run_root / "model_results" / f"diagnostics_{model_id}.json"
             write_json(diag_path, diag)
@@ -175,10 +200,11 @@ class DiagnosticsStage:
                 model_input_ids,
             )
             diagnostic_artifacts[model_id] = diag
-            _check_model_validity(diag, model_id, issue_dicts, run_root)
-            if family == "poisson":
+            if not family_owned:
+                _check_model_validity(diag, model_id, issue_dicts, run_root)
+            if not family_owned and family == "poisson":
                 _check_overdispersion_issue(diag, model_id, issue_dicts, run_root)
-            sep = diag.get("separation", {})
+            sep = diag.get("separation", {}) if not family_owned else {}
             if isinstance(sep, dict) and sep.get("warning"):
                 issue_dicts.append(GuardrailIssue(
                     Severity.WARNING,

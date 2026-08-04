@@ -34,6 +34,10 @@ class ModelOptionsValidationError(ValueError):
         self.evidence = dict(evidence or {})
 
 
+class ModelRegistryError(ValueError):
+    """Raised when a model handler would overwrite an existing registry key."""
+
+
 @dataclass
 class ModelHandler:
     model_type: str            # registry key
@@ -49,6 +53,12 @@ DEFAULT_BY_Y_TYPE: dict[str, str] = {}
 
 
 def register_model(handler: ModelHandler) -> None:
+    existing = MODEL_REGISTRY.get(handler.model_type)
+    if existing is not None:
+        raise ModelRegistryError(
+            f"model handler {handler.model_type!r} is already registered by "
+            f"model_id {existing.model_id!r}; additive packs must use a new key"
+        )
     MODEL_REGISTRY[handler.model_type] = handler
 
 

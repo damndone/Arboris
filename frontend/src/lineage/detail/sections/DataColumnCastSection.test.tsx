@@ -13,6 +13,7 @@ const {
   featureConfirmMock,
   transformPreviewMock,
   transformConfirmMock,
+  modelStartMock,
 } = vi.hoisted(() => ({
   resolvedMock: { current: null as unknown },
   contextMock: { current: null as unknown },
@@ -23,6 +24,7 @@ const {
   featureConfirmMock: vi.fn(),
   transformPreviewMock: vi.fn(),
   transformConfirmMock: vi.fn(),
+  modelStartMock: vi.fn(),
 }));
 
 vi.mock("../NodeOperationContextProvider", () => ({
@@ -40,6 +42,7 @@ vi.mock("../../dataOperations", () => ({
   confirmFeatureRecipe: (...args: unknown[]) => featureConfirmMock(...args),
   previewDataTransform: (...args: unknown[]) => transformPreviewMock(...args),
   confirmDataTransform: (...args: unknown[]) => transformConfirmMock(...args),
+  startModelFromDataNode: (...args: unknown[]) => modelStartMock(...args),
 }));
 
 function node(): GraphViewNode {
@@ -72,6 +75,7 @@ describe("DataColumnCastSection", () => {
     featureConfirmMock.mockReset();
     transformPreviewMock.mockReset();
     transformConfirmMock.mockReset();
+    modelStartMock.mockReset();
     previewMock.mockImplementation((...args: unknown[]) => {
       if (args[0] === "preview") {
         const request = args[2] as { casts: Array<{ column: string; target_dtype: string }> };
@@ -130,6 +134,17 @@ describe("DataColumnCastSection", () => {
     });
     featureConfirmMock.mockResolvedValue({ status: "completed" });
     transformConfirmMock.mockResolvedValue({ status: "completed" });
+    modelStartMock.mockResolvedValue({
+      status: "running",
+      run_id: "run-model-child",
+      model_type: "ols",
+      source_lineage: {
+        source_run_id: "run-1",
+        source_node_id: "stage:cleaned",
+        source_artifact_id: "cleaned_dataset",
+        source_node_hash: "node-hash-1",
+      },
+    });
   });
 
   it("renders the schema diff of a code.execute child, not just who made it", async () => {
@@ -350,5 +365,132 @@ describe("DataColumnCastSection", () => {
       operation: "subset",
       source_node_id: "stage:cleaned",
     }));
+  });
+
+  it("exposes a real OLS run action from a numeric data node", async () => {
+    previewMock.mockImplementation((...args: unknown[]) => {
+      if (args[0] === "preview") return Promise.resolve({ preview: { status: "ready", fingerprint: "fp-1", row_count: 2, items: [], downstream_invalidation: [] } });
+      return Promise.resolve({
+        source_run_id: "run-1",
+        source_node_id: "stage:cleaned",
+        source_artifact_id: "cleaned_dataset",
+        row_count: 48,
+        columns: [
+          { name: "score", dtype: "float64" },
+          { name: "age", dtype: "int64" },
+          { name: "weighted_score", dtype: "float64" },
+        ],
+      });
+    });
+
+    render(<DataColumnCastSection node={node()} />);
+
+    await waitFor(() => expect(screen.getByTestId("data-node-model-run")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("data-node-model-run"));
+
+    await waitFor(() => expect(screen.getByTestId("data-node-model-run-result")).toHaveTextContent("run-model-child"));
+    expect(modelStartMock).toHaveBeenCalledWith("/tmp/project", {
+      source_run_id: "run-1",
+      source_node_id: "stage:cleaned",
+      source_artifact_id: "cleaned_dataset",
+      model_type: "ols",
+      y: "score",
+      x: ["age", "weighted_score"],
+      covariance: "robust",
+    });
+  });
+
+  it("exposes and transfers merge how plus an explicit growth policy", async () => {
+    render(<DataColumnCastSection node={node()} />);
+
+    await waitFor(() => expect(screen.getByTestId("data-transform-builder")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Data transform operation"), { target: { value: "merge" } });
+    fireEvent.change(screen.getByLabelText("Merge keys"), { target: { value: "id" } });
+    fireEvent.change(screen.getByLabelText("Merge how"), { target: { value: "inner" } });
+    fireEvent.change(screen.getByLabelText("Merge max rows"), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText("Merge max growth factor"), { target: { value: "1.5" } });
+    fireEvent.change(screen.getByLabelText("Secondary run"), { target: { value: "run-right" } });
+    fireEvent.change(screen.getByLabelText("Secondary artifact"), { target: { value: "right-data" } });
+
+    fireEvent.click(screen.getByTestId("data-transform-preview"));
+    await waitFor(() => expect(transformPreviewMock).toHaveBeenCalled());
+    expect(transformPreviewMock).toHaveBeenCalledWith("/tmp/project", expect.objectContaining({
+      operation: "merge",
+      parameters: {
+        keys: ["id"],
+        how: "inner",
+        growth_policy: { max_rows: 12, max_growth_factor: 1.5 },
+      },
+      secondary_run_id: "run-right",
+      secondary_artifact_id: "right-data",
+    }));
+  });
+
+  it("exposes and transfers append schema compatibility plus row-growth policy", async () => {
+    render(<DataColumnCastSection node={node()} />);
+
+    await waitFor(() => expect(screen.getByTestId("data-transform-builder")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Data transform operation"), { target: { value: "append" } });
+    fireEvent.change(screen.getByLabelText("Append schema policy"), { target: { value: "union" } });
+    fireEvent.change(screen.getByLabelText("Append max rows"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("Append max growth factor"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Secondary run"), { target: { value: "run-right" } });
+    fireEvent.change(screen.getByLabelText("Secondary artifact"), { target: { value: "right-data" } });
+
+    fireEvent.click(screen.getByTestId("data-transform-preview"));
+    await waitFor(() => expect(transformPreviewMock).toHaveBeenCalled());
+    expect(transformPreviewMock).toHaveBeenCalledWith("/tmp/project", expect.objectContaining({
+      operation: "append",
+      parameters: {
+        schema_policy: "union",
+        row_growth_policy: { max_rows: 100, max_growth_factor: 2 },
+      },
+    }));
+  });
+
+  it("exposes complete parameters for both reshape directions", async () => {
+    render(<DataColumnCastSection node={node()} />);
+
+    await waitFor(() => expect(screen.getByTestId("data-transform-builder")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Data transform operation"), { target: { value: "reshape" } });
+    fireEvent.change(screen.getByLabelText("Reshape direction"), { target: { value: "long_to_wide" } });
+    fireEvent.change(screen.getByLabelText("Long index columns"), { target: { value: "id,group" } });
+    fireEvent.change(screen.getByLabelText("Long columns column"), { target: { value: "metric" } });
+    fireEvent.change(screen.getByLabelText("Long values column"), { target: { value: "value" } });
+
+    fireEvent.click(screen.getByTestId("data-transform-preview"));
+    await waitFor(() => expect(transformPreviewMock).toHaveBeenCalled());
+    expect(transformPreviewMock).toHaveBeenCalledWith("/tmp/project", expect.objectContaining({
+      operation: "reshape",
+      parameters: {
+        direction: "long_to_wide",
+        index: ["id", "group"],
+        columns: "metric",
+        values: "value",
+      },
+    }));
+  });
+
+  it("transfers a user-visible subset row range", async () => {
+    render(<DataColumnCastSection node={node()} />);
+
+    await waitFor(() => expect(screen.getByTestId("data-transform-builder")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Subset row range"), { target: { value: "2:8" } });
+    fireEvent.click(screen.getByTestId("data-transform-preview"));
+    await waitFor(() => expect(transformPreviewMock).toHaveBeenCalled());
+    expect(transformPreviewMock).toHaveBeenCalledWith("/tmp/project", expect.objectContaining({
+      operation: "subset",
+      parameters: expect.objectContaining({ row_index_range: { start: 2, stop: 8 } }),
+    }));
+  });
+
+  it("shows the typed FeatureRecipe payload after preview", async () => {
+    render(<DataColumnCastSection node={node()} />);
+
+    await waitFor(() => expect(screen.getByTestId("feature-recipe-builder")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("feature-recipe-preview"));
+    await waitFor(() => expect(screen.getByTestId("feature-recipe-payload")).toBeInTheDocument());
+    expect(screen.getByTestId("feature-recipe-payload")).toHaveTextContent("interaction");
+    expect(screen.getByTestId("feature-recipe-payload")).toHaveTextContent("cleaned_dataset");
   });
 });

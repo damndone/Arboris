@@ -1,0 +1,77 @@
+.panel-window-controls {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.panel-window-drag-handle {
+  flex: 0 0 25px;
+  width: 25px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--label-tertiary);
+  cursor: grab;
+  font-size: 14px;
+  letter-spacing: -3px;
+}
+
+.panel-window-drag-handle:active {
+  cursor: grabbing;
+}
+
+.panel-window-drag-handle[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.panel-window-drag-handle:hover,
+.panel-window-drag-handle:focus-visible {
+  background: color-mix(in oklch, var(--label) 8%, transparent);
+  color: var(--label);
+  outline: none;
+}
+
+.panel-window-controls__icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 27px;
+  min-width: 27px;
+  height: 27px;
+  min-height: 27px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.panel-window-controls__icon-button svg {
+  display: block;
+}
+
+.panel-window-controls__icon-button--active {
+  background: color-mix(in oklch, var(--tint) 16%, transparent);
+  color: var(--tint);
+}
+
+.panel-window-controls__icon-button:hover,
+.panel-window-controls__icon-button:focus-visible {
+  background: color-mix(in oklch, var(--tint) 10%, transparent);
+  color: var(--label);
+  outline: none;
+}
+
+@media (max-width: 720px) {
+  .panel-window-controls {
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+}

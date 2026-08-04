@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "event_id": "9e33c3bf-7d6a-49a1-9ec2-93c088f6af26",
+  "timestamp": "2026-08-04T01:28:35.000Z",
+  "type": "FAILURE",
+  "subtype": "frontend_command_wrong_directory",
+  "stage": "gate",
+  "cause_status": "known",
+  "cause": "The focused frontend test command was first run from the worktree root, but the npm package is rooted at frontend/.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "npm test -- --run frontend/src/report/ReportComposer.test.tsx frontend/src/report/ReportPreviewPanel.test.tsx frontend/src/report/ReportView.test.tsx (worktree root)",
+    "sha256": "92e3c8944f50af3051adf1a24c76c478d92eaf6ba5061bb2d8744880153b047e",
+    "observed_at": "2026-08-04T01:28:35.000Z"
+  },
+  "impact": "No product code was executed and no Run or report artifact was changed; the focused test must be rerun from frontend/.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Run npm gates from the frontend package directory in this repository.",
+  "incident_id": "0fd1d9cc-8b24-4fd6-8db4-6d678cbafacb",
+  "lesson_key": "frontend-npm-directory",
+  "links": [
+    "frontend/package.json",
+    "frontend/src/report/ReportComposer.test.tsx",
+    "frontend/src/report/ReportPreviewPanel.test.tsx",
+    "frontend/src/report/ReportView.test.tsx"
+  ]
+}

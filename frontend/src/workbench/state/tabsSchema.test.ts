@@ -7,7 +7,9 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_TABS,
+  nodeTabOf,
   parseTabsParams,
+  REPORT_REVIEW_TAB_ID,
   reduceCloseTab,
   reduceOpenTab,
   reduceSetActive,
@@ -28,6 +30,17 @@ describe("parseTabsParams", () => {
     const s = parseTabsParams(p("tabs=a,b,c&active=b"));
     expect(s.tabs.map((t) => t.id)).toEqual(["a", "b", "c"]);
     expect(s.activeTabId).toBe("b");
+  });
+
+  it("parses report:review as a non-node workspace tab", () => {
+    const s = parseTabsParams(
+      p("tabs=node:a,report:review&active=report:review"),
+    );
+    const reportTab = s.tabs.find((tab) => tab.id === "report:review");
+
+    expect(reportTab?.kind).toBe("report-review");
+    expect(reportTab).not.toHaveProperty("nodeKey");
+    expect(s.activeTabId).toBe("report:review");
   });
 
   it("defaults active to last tab when active param is missing/invalid", () => {
@@ -63,7 +76,7 @@ describe("parseTabsParams", () => {
 describe("writeTabsParams", () => {
   it("preserves unrelated params and deletes legacy node", () => {
     const out = writeTabsParams(p("project_root=/x&node=old&view=table"), {
-      tabs: [{ id: "a", nodeKey: "a", openedAt: 1 }],
+      tabs: [nodeTabOf("a", 1)],
       activeTabId: "a",
     });
     expect(out.get("project_root")).toBe("/x");
@@ -97,8 +110,8 @@ describe("reduceOpenTab", () => {
   it("focuses an existing tab without re-adding", () => {
     const prev: TabsSlice = {
       tabs: [
-        { id: "a", nodeKey: "a", openedAt: 1 },
-        { id: "b", nodeKey: "b", openedAt: 2 },
+        nodeTabOf("a", 1),
+        nodeTabOf("b", 2),
       ],
       activeTabId: "a",
     };
@@ -111,7 +124,7 @@ describe("reduceOpenTab", () => {
 
   it("returns prev unchanged when re-opening the already-active tab", () => {
     const prev: TabsSlice = {
-      tabs: [{ id: "a", nodeKey: "a", openedAt: 1 }],
+      tabs: [nodeTabOf("a", 1)],
       activeTabId: "a",
     };
     const { next } = reduceOpenTab(prev, 5, "a");
@@ -120,9 +133,7 @@ describe("reduceOpenTab", () => {
 
   it("evicts the LRU tab when at MAX_TABS", () => {
     const tabs = Array.from({ length: MAX_TABS }, (_, i) => ({
-      id: `n${i}`,
-      nodeKey: `n${i}`,
-      openedAt: i + 1,
+      ...nodeTabOf(`n${i}`, i + 1),
     }));
     const prev: TabsSlice = { tabs, activeTabId: "n7" };
     const { next, evicted } = reduceOpenTab(prev, MAX_TABS, "newkid");
@@ -131,23 +142,55 @@ describe("reduceOpenTab", () => {
     expect(next.tabs.map((t) => t.id)).not.toContain("n0");
     expect(next.activeTabId).toBe("newkid");
   });
+
+  it("keeps Report review outside the node LRU capacity", () => {
+    const prev: TabsSlice = {
+      tabs: [
+        { kind: "report-review", id: REPORT_REVIEW_TAB_ID, openedAt: 1 },
+        ...Array.from({ length: MAX_TABS }, (_, i) =>
+          nodeTabOf(`n${i}`, i + 2),
+        ),
+      ],
+      activeTabId: "n7",
+    };
+
+    const { next, evicted } = reduceOpenTab(prev, MAX_TABS + 1, "newkid");
+
+    expect(evicted).toBe("n0");
+    expect(next.tabs.some((tab) => tab.id === REPORT_REVIEW_TAB_ID)).toBe(true);
+    expect(next.tabs.filter((tab) => tab.kind === "node")).toHaveLength(
+      MAX_TABS,
+    );
+  });
 });
 
 describe("reduceCloseTab", () => {
   it("returns prev when tab id is unknown", () => {
     const prev: TabsSlice = {
-      tabs: [{ id: "a", nodeKey: "a", openedAt: 1 }],
+      tabs: [nodeTabOf("a", 1)],
       activeTabId: "a",
     };
     expect(reduceCloseTab(prev, "ghost")).toBe(prev);
   });
 
+  it("does not close the permanent Report review tab", () => {
+    const prev: TabsSlice = {
+      tabs: [
+        nodeTabOf("a", 1),
+        { kind: "report-review", id: REPORT_REVIEW_TAB_ID, openedAt: 2 },
+      ],
+      activeTabId: REPORT_REVIEW_TAB_ID,
+    };
+
+    expect(reduceCloseTab(prev, REPORT_REVIEW_TAB_ID)).toBe(prev);
+  });
+
   it("promotes the right-neighbour when closing the active tab", () => {
     const prev: TabsSlice = {
       tabs: [
-        { id: "a", nodeKey: "a", openedAt: 1 },
-        { id: "b", nodeKey: "b", openedAt: 2 },
-        { id: "c", nodeKey: "c", openedAt: 3 },
+        nodeTabOf("a", 1),
+        nodeTabOf("b", 2),
+        nodeTabOf("c", 3),
       ],
       activeTabId: "b",
     };
@@ -159,8 +202,8 @@ describe("reduceCloseTab", () => {
   it("falls back to the left-neighbour when active was last tab", () => {
     const prev: TabsSlice = {
       tabs: [
-        { id: "a", nodeKey: "a", openedAt: 1 },
-        { id: "b", nodeKey: "b", openedAt: 2 },
+        nodeTabOf("a", 1),
+        nodeTabOf("b", 2),
       ],
       activeTabId: "b",
     };
@@ -169,7 +212,7 @@ describe("reduceCloseTab", () => {
 
   it("nulls active when closing the last tab", () => {
     const prev: TabsSlice = {
-      tabs: [{ id: "a", nodeKey: "a", openedAt: 1 }],
+      tabs: [nodeTabOf("a", 1)],
       activeTabId: "a",
     };
     expect(reduceCloseTab(prev, "a").activeTabId).toBeNull();
@@ -178,8 +221,8 @@ describe("reduceCloseTab", () => {
   it("does not touch active when closing a non-active tab", () => {
     const prev: TabsSlice = {
       tabs: [
-        { id: "a", nodeKey: "a", openedAt: 1 },
-        { id: "b", nodeKey: "b", openedAt: 2 },
+        nodeTabOf("a", 1),
+        nodeTabOf("b", 2),
       ],
       activeTabId: "b",
     };
@@ -190,8 +233,8 @@ describe("reduceCloseTab", () => {
 describe("reduceSetActive", () => {
   const prev: TabsSlice = {
     tabs: [
-      { id: "a", nodeKey: "a", openedAt: 1 },
-      { id: "b", nodeKey: "b", openedAt: 2 },
+      nodeTabOf("a", 1),
+      nodeTabOf("b", 2),
     ],
     activeTabId: "a",
   };

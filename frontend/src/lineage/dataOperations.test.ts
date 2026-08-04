@@ -5,9 +5,56 @@ import {
   confirmCodeExecute,
   fetchDataColumnCastContext,
   previewDataColumnCast,
+  startModelFromDataNode,
 } from "./dataOperations";
 
 describe("data column cast API", () => {
+  it("starts the existing model lifecycle from a materialized data node", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "running",
+          run_id: "run-model-child",
+          model_type: "ols",
+          source_lineage: {
+            source_run_id: "run-1",
+            source_node_id: "data-feature:abc",
+            source_artifact_id: "feature_recipe_abc",
+            source_node_hash: "node-hash-1",
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startModelFromDataNode("/tmp/project", {
+      source_run_id: "run-1",
+      source_node_id: "data-feature:abc",
+      source_artifact_id: "feature_recipe_abc",
+      model_type: "ols",
+      y: "score",
+      x: ["age", "weighted_score"],
+      covariance: "robust",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/data-operations/model-run?project_root=%2Ftmp%2Fproject",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          source_run_id: "run-1",
+          source_node_id: "data-feature:abc",
+          source_artifact_id: "feature_recipe_abc",
+          model_type: "ols",
+          y: "score",
+          x: ["age", "weighted_score"],
+          covariance: "robust",
+        }),
+      }),
+    );
+  });
+
   it("resolves a typed source context without guessing an artifact id", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

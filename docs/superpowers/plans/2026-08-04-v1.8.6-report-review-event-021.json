@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "8d1e7c6a-9f34-4a2d-b5c8-1e0f7a6b3d92",
+  "timestamp": "2026-08-04T11:57:50.000Z",
+  "type": "GATE",
+  "subtype": "report_review_controls_acceptance",
+  "stage": "gate",
+  "cause_status": "not_applicable",
+  "cause": "The corrected Report review controls passed focused tests, full frontend regression, typecheck, diff validation, and live in-app browser interaction checks.",
+  "evidence": {
+    "kind": "browser_test_command",
+    "ref": "Focused ReportReviewPanel, ReportComposer, WorkbenchRouteContainer, and PanelHost tests: 70 passed; frontend typecheck passed; frontend full: 187 files / 1622 tests passed; git diff --check passed; browser verified Float, Pin lock, Unpin, Collapse/Expand direction, New empty state, Open Report focus, and full workspace tab labels.",
+    "sha256": "7beca31aaeb8cdc1aa2cffe771e98040d1083868afe15a770b60167c11653034",
+    "observed_at": "2026-08-04T11:57:50.000Z"
+  },
+  "impact": "The requested Report review interaction corrections are accepted for this scope; existing dirty work remains uncommitted and no release action was taken.",
+  "preventability": "not_preventable",
+  "resolution": "accepted",
+  "lesson": "Pair semantic UI state changes with focused regression tests and at least one real browser acceptance pass before handoff.",
+  "incident_id": "8d1e7c6a-9f34-4a2d-b5c8-1e0f7a6b3d92",
+  "lesson_key": "report-review-controls-acceptance",
+  "links": [
+    "frontend/src/report/ReportReviewPanel.test.tsx",
+    "frontend/src/report/ReportComposer.test.tsx",
+    "frontend/src/workbench/WorkbenchRouteContainer.test.tsx",
+    "frontend/src/workbench/PanelHost.test.tsx",
+    "frontend/src/lineage/tokens/lineage.css"
+  ]
+}

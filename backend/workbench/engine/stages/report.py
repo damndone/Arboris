@@ -55,14 +55,15 @@ def _refresh_artifact_checksum(run_root, artifact_id: str, path) -> None:
 
 class ReportStage:
     """Assemble the report facts/descriptive-stats/variable-importance, build
-    the diagnostic summary, render the HTML report, export PDF/XLSX, flush the
+    the diagnostic summary, render the retained HTML report, flush the
     lineage recorder, and write the final ``completed`` manifest.
 
-    Extracted verbatim from the tail of orchestrator._run_workflow (from the
+    Extracted from the tail of orchestrator._run_workflow (from the
     ``descriptive_stats`` build through ``build_report_view_model`` rendering,
-    the file exports, ``_safe_flush_recorder(..., context="success")`` and the
-    closing ``completed`` manifest write/return) as part of the V1.5.4 engine
-    decomposition. Behavior stays byte-identical.
+    ``_safe_flush_recorder(..., context="success")`` and the closing
+    ``completed`` manifest write/return) as part of the V1.5.4 engine
+    decomposition. Presentation exports are deliberately on-demand at the
+    Report page; a normal Run retains HTML and evidence artifacts only.
 
     Report lineage / diagnostic-summary inputs read the working modeling
     handle id via the already-bridged ``model_results``/``coercion_actions``
@@ -77,7 +78,6 @@ class ReportStage:
             _build_descriptive_stats,
             _build_model_routing_summary,
             _build_variable_importance,
-            _coefficient_rows_for_models,
             _lineage,
             _mice_imputation_fact,
             _safe_flush_recorder,
@@ -88,9 +88,10 @@ class ReportStage:
 
         build_diagnostic_summary = _orch.build_diagnostic_summary
         from ...diagnostic_summary import finalize_diagnostic_summary
+        from ...report_view_model import (
+            build_regression_table,
+        )
         render_html_report = _orch.render_html_report
-        export_pdf = _orch.export_pdf
-        export_xlsx = _orch.export_xlsx
 
         run_root = env.run_root
         run_id = env.run_id
@@ -126,6 +127,15 @@ class ReportStage:
         started_at = ctx.artifacts["_started_at"]
 
         descriptive_stats = _build_descriptive_stats(cleaned, categorical_vars=categorical_vars)
+        variable_labels = {
+            str(row["column"]): row.get("label", row["column"])
+            for row in descriptive_stats
+            if isinstance(row, dict) and row.get("column") is not None
+        }
+        regression_table = build_regression_table(
+            model_results,
+            variable_labels=variable_labels,
+        )
         model_family_display = {
             "ols": "OLS",
             "ols_robust": "OLS (robust SE)",
@@ -223,6 +233,7 @@ class ReportStage:
             "descriptive_stats": descriptive_stats,
             "statistical_tests": statistical_test_summaries,
             "statistical_evidence": statistical_tests.get("evidence"),
+            "regression_table": regression_table,
             "variable_importance": variable_importance,
             "diagnostics": diagnostic_artifacts,
             "model_family_evidence": family_evidence,
@@ -259,6 +270,37 @@ class ReportStage:
         )
         if family_evidence is not None:
             diagnostic_summary["model_family_evidence"] = family_evidence
+        # Keep the deterministic report-side packets on the durable diagnostic
+        # summary as well as in the retained HTML view.  The RunDetail endpoint can then
+        # expose the exact same Table 1, labels, statistical evidence, and
+        # family packet to Table/Report/Agent consumers without adding a second
+        # source of truth or changing the legacy artifact set.
+        declared_variable_labels = {
+            str(row["column"]): row["label"]
+            for row in descriptive_stats
+            if isinstance(row, dict)
+            and row.get("label_source") == "declared"
+            and row.get("column") is not None
+            and isinstance(row.get("label"), str)
+        }
+        declared_value_labels = {
+            str(row["column"]): row["value_labels"]
+            for row in descriptive_stats
+            if isinstance(row, dict)
+            and row.get("column") is not None
+            and isinstance(row.get("value_labels"), dict)
+            and row.get("value_labels")
+        }
+        diagnostic_summary.update(
+            {
+                "table_1": descriptive_stats,
+                "statistical_evidence": statistical_tests.get("evidence"),
+                "labels": {
+                    "variable_labels": declared_variable_labels,
+                    "value_labels": declared_value_labels,
+                },
+            }
+        )
         write_json(run_root / "diagnostic_summary.json", diagnostic_summary)
         register_artifact(run_root, "diagnostic_summary", run_root / "diagnostic_summary.json", "metadata", "diagnostics", [])
 
@@ -289,6 +331,7 @@ class ReportStage:
                     descriptive_stats=descriptive_stats,
                     statistical_tests=statistical_test_summaries,
                     statistical_evidence=statistical_tests.get("evidence"),
+                    regression_table=regression_table,
                 )
             render_html_report(view_model, run_root)
             report_render_status = "complete"
@@ -306,40 +349,15 @@ class ReportStage:
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("reporting", "complete", "Report render failed — model results available")
 
-        env.step("export", "start", "Exporting files...")
-        try:
-            if primary_type == "time_series.arma_garch":
-                if time_series_deliverables is None:
-                    from ..packs.arma_garch.deliverables import build_arma_garch_deliverables
-
-                    time_series_deliverables = build_arma_garch_deliverables(run_root)
-                export_pdf(time_series_deliverables["report"], run_root)
-                export_xlsx(time_series_deliverables["tables"], run_root)
-            else:
-                export_pdf(report, run_root)
-                export_xlsx(
-                    {
-                        "coefficients": _xlsx_export_rows(_coefficient_rows_for_models(model_results)),
-                        "table_1": _xlsx_export_rows(descriptive_stats),
-                        "statistical_evidence": _xlsx_export_rows(
-                            (statistical_tests.get("evidence") or {}).get("results", [])
-                        ),
-                        "model_family_evidence": _xlsx_export_rows(
-                            [{"evidence": family_evidence}] if family_evidence is not None else []
-                        ),
-                    },
-                    run_root,
-                )
-            env.step("export", "complete", "Exported PDF and XLSX")
-        except Exception as exc:
-            issue_dicts.append(GuardrailIssue(
-                Severity.WARNING,
-                "EXPORT_FAILED",
-                f"File export failed: {exc}. Model results are still available.",
-                {"error": str(exc)},
-            ).to_dict())
-            write_json(run_root / "errors.json", {"issues": issue_dicts})
-            env.step("export", "complete", "Export failed — model results available")
+        # Run completion keeps the durable HTML/JSON/evidence artifacts only.
+        # PDF and result-table XLSX are presentation views and are created by
+        # explicit Report-page actions, so a normal run never spends time or
+        # storage producing files the user did not request.
+        env.step(
+            "export",
+            "complete",
+            "HTML retained; PDF and result-table XLSX available on demand",
+        )
 
         # Late issues (render/export) and the actual report file must be
         # reflected in the same summary consumed by diagnostic preview and the

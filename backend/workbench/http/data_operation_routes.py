@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter
+import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
+
+from ..artifacts import read_json
 
 from ..agent.chains import ChainHeadConflict, ensure_chain_root
 from ..agent.events import AgentEventStream
@@ -41,6 +46,8 @@ from ..data_operations import (
     preview_feature_recipe,
     preview_data_transform,
     resolve_data_column_cast_context,
+    _read_frame,
+    _resolve_source,
 )
 from ..code_execution import (
     MAX_CODE_CHARS,
@@ -132,6 +139,20 @@ class DataTransformRequest(BaseModel):
 
 class DataTransformConfirmRequest(DataTransformRequest):
     preview_fingerprint: str = Field(min_length=1, max_length=200)
+
+
+class DataModelRunRequest(BaseModel):
+    """Start the existing OLS lifecycle from a materialized data-operation node."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_run_id: str = Field(min_length=1, max_length=200)
+    source_node_id: str = Field(min_length=1, max_length=300)
+    source_artifact_id: str = Field(min_length=1, max_length=200)
+    model_type: Literal["ols"] = "ols"
+    y: str = Field(min_length=1, max_length=200)
+    x: list[str] = Field(min_length=1, max_length=200)
+    covariance: Literal["", "unadjusted", "robust", "clustered"] = "robust"
 
 
 class CodeExecuteRequest(BaseModel):
@@ -316,6 +337,72 @@ def _data_transform_preview_or_error(root, spec: DataTransformSpecV1, *, confirm
             ),
             details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
         ) from exc
+
+
+def _model_source_or_error(root, body: DataModelRunRequest) -> tuple[Path, dict[str, Any], str | None]:
+    """Resolve and fingerprint a materialized data node before dispatch."""
+
+    if len(set(body.x)) != len(body.x):
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_INVALID",
+            message="The model predictors must be unique.",
+            details={"source_node_id": body.source_node_id},
+        )
+    if body.y in body.x:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_INVALID",
+            message="The outcome cannot also be a predictor.",
+            details={"outcome": body.y},
+        )
+    probe = DataColumnCastSpecV1(
+        source_run_id=body.source_run_id,
+        source_node_id=body.source_node_id,
+        source_artifact_id=body.source_artifact_id,
+        column="__model_source__",
+        target_dtype="string",
+    )
+    try:
+        run_root, _graph, node, artifact, source_path = _resolve_source(root, probe)
+        frame = _read_frame(source_path)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_INVALID",
+            message="The selected graph node is not a usable materialized dataset.",
+            details={"source_node_id": body.source_node_id, "reason": str(exc)},
+        ) from exc
+    missing = [column for column in [body.y, *body.x] if column not in frame.columns]
+    if missing:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_INVALID",
+            message="The model columns are not present in the selected data node.",
+            details={"missing_columns": missing},
+        )
+    non_numeric = [
+        column
+        for column in [body.y, *body.x]
+        if not pd.api.types.is_numeric_dtype(frame[column])
+    ]
+    if non_numeric:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_INVALID",
+            message="The v1.8.6 data-node model entry currently requires numeric OLS columns.",
+            details={"non_numeric_columns": non_numeric},
+        )
+    node_hash: str | None = getattr(node, "node_hash", None)
+    index_path = run_root / "node_index.json"
+    if index_path.is_file():
+        try:
+            indexed = read_json(index_path).get(body.source_node_id) or {}
+            if indexed.get("node_hash"):
+                node_hash = str(indexed["node_hash"])
+        except (OSError, ValueError, AttributeError):
+            pass
+    return source_path, {"artifact": artifact, "node_hash": node_hash}, body.source_node_id
 
 
 def _code_spec(body: CodeExecuteRequest) -> CodeExecuteSpecV1:
@@ -904,6 +991,79 @@ def confirm_data_transform_route(
             details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
         ) from exc
     return {"status": "completed", "effect": effect.to_dict(), "preview": preview.to_dict()}
+
+
+@router.post("/data-operations/model-run")
+def start_model_from_data_node_route(
+    project_root: str,
+    body: DataModelRunRequest,
+) -> dict[str, Any]:
+    """Dispatch a real OLS run from a confirmed, materialized data-operation node.
+
+    This is intentionally a narrow bridge: it reuses the existing run lifecycle,
+    keeps the source node in ``run_inputs`` lineage, and does not invent a second
+    estimator path for data operations.
+    """
+
+    root = _root(project_root)
+    source_path, source, source_node_id = _model_source_or_error(root, body)
+    from ..events import get_event_manager
+    from ..services.run_service import _submit_run
+
+    events = get_event_manager()
+    if not events.try_acquire_slot():
+        raise WorkbenchAPIError(
+            status_code=429,
+            code="RUN_SLOT_BUSY",
+            message="A run is already in progress.",
+            details={"source_node_id": source_node_id},
+        )
+    try:
+        started_at = datetime.now(timezone.utc).isoformat()
+        result = _submit_run(
+            root,
+            form={
+                "mode": "auto",
+                "model_type": body.model_type,
+                "covariance": body.covariance or "robust",
+                "y": body.y,
+                "x": ",".join(body.x),
+            },
+            upload_bytes=source_path.read_bytes(),
+            upload_filename=Path(source["artifact"].get("path") or "data.csv").name,
+            started_at=started_at,
+            rerun_of=body.source_run_id,
+            from_node=source_node_id,
+            rerun_reason="data_operation_model",
+            rerun_from={
+                "source_run_id": body.source_run_id,
+                "op_node_id": source_node_id,
+                "source_artifact_id": body.source_artifact_id,
+                "source_node_hash": source.get("node_hash"),
+            },
+        )
+    except WorkbenchAPIError:
+        events.release_slot(None)
+        raise
+    except Exception as exc:
+        events.release_slot(None)
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_MODEL_DISPATCH_FAILED",
+            message="The data node could not be submitted to the existing model lifecycle.",
+            details={"reason": str(exc), "source_node_id": source_node_id},
+        ) from exc
+    return {
+        "status": result["status"],
+        "run_id": result["run_id"],
+        "model_type": body.model_type,
+        "source_lineage": {
+            "source_run_id": body.source_run_id,
+            "source_node_id": source_node_id,
+            "source_artifact_id": body.source_artifact_id,
+            "source_node_hash": source.get("node_hash"),
+        },
+    }
 
 
 @router.post("/data-operations/code-execute/preview")

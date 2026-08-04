@@ -191,6 +191,11 @@ export function GenesisWizard({
   const [frequencyWeight, setFrequencyWeight] = useState("");
   const [analysisWeight, setAnalysisWeight] = useState("");
   const [samplingWeight, setSamplingWeight] = useState("");
+  const [weightParamsPresent, setWeightParamsPresent] = useState({
+    frequency: false,
+    analysis: false,
+    sampling: false,
+  });
   const [y, setY] = useState("");
   const [x, setX] = useState("");
   const [focal, setFocal] = useState<string[]>([]);
@@ -399,6 +404,11 @@ export function GenesisWizard({
     setFrequencyWeight(firstString(modelParams.frequency_weight));
     setAnalysisWeight(firstString(modelParams.analysis_weight));
     setSamplingWeight(firstString(modelParams.sampling_weight));
+    setWeightParamsPresent({
+      frequency: Object.prototype.hasOwnProperty.call(modelParams, "frequency_weight"),
+      analysis: Object.prototype.hasOwnProperty.call(modelParams, "analysis_weight"),
+      sampling: Object.prototype.hasOwnProperty.call(modelParams, "sampling_weight"),
+    });
     if (notify) onDraftUpdated?.(response);
   }
 
@@ -411,6 +421,7 @@ export function GenesisWizard({
     setModelConfigured(false);
     setValidation(null);
     setError(null);
+    setWeightParamsPresent({ frequency: false, analysis: false, sampling: false });
     if (!nextFile) return;
     setBusy("file");
     try {
@@ -639,9 +650,15 @@ export function GenesisWizard({
       params.prediction_final_holdout_fraction = predictionFinalHoldoutFraction;
       params.prediction_shuffle = predictionShuffle;
     }
-    if (frequencyWeight) params.frequency_weight = frequencyWeight;
-    if (analysisWeight) params.analysis_weight = analysisWeight;
-    if (samplingWeight) params.sampling_weight = samplingWeight;
+    if (frequencyWeight || weightParamsPresent.frequency) {
+      params.frequency_weight = frequencyWeight;
+    }
+    if (analysisWeight || weightParamsPresent.analysis) {
+      params.analysis_weight = analysisWeight;
+    }
+    if (samplingWeight || weightParamsPresent.sampling) {
+      params.sampling_weight = samplingWeight;
+    }
     if (!isIV && !usesDidRoles && !isDcdh && focal.length > 0) {
       params.focal_x = focal.filter((col) => exogColumns.includes(col));
     }
@@ -987,12 +1004,15 @@ export function GenesisWizard({
           )}
           <div className="ios-group" aria-label="Weight settings">
             <p className="ios-hint">
-              权重会写入本次 Run 的证据。frequency / analysis 可用于 OLS；sampling 目前会明确拒绝，直到 strata/PSU 设计完成。
+              权重会写入本次 Run 的证据。frequency / analysis 可用于 OLS；sampling 目前会明确拒绝，请通过现有 entity_col + covariance=clustered 通道声明 strata/PSU。
             </p>
             <label className="ios-field">
               <span>频数权重 frequency weight（可选）</span>
               <select aria-label="frequency weight" value={frequencyWeight}
-                onChange={(e) => setFrequencyWeight(e.target.value)}>
+                onChange={(e) => {
+                  setFrequencyWeight(e.target.value);
+                  setWeightParamsPresent((current) => ({ ...current, frequency: true }));
+                }}>
                 <option value="">(不使用)</option>
                 {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
               </select>
@@ -1000,7 +1020,10 @@ export function GenesisWizard({
             <label className="ios-field">
               <span>分析权重 analysis weight（可选）</span>
               <select aria-label="analysis weight" value={analysisWeight}
-                onChange={(e) => setAnalysisWeight(e.target.value)}>
+                onChange={(e) => {
+                  setAnalysisWeight(e.target.value);
+                  setWeightParamsPresent((current) => ({ ...current, analysis: true }));
+                }}>
                 <option value="">(不使用)</option>
                 {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
               </select>
@@ -1008,7 +1031,10 @@ export function GenesisWizard({
             <label className="ios-field">
               <span>抽样权重 sampling weight（当前会拒绝）</span>
               <select aria-label="sampling weight" value={samplingWeight}
-                onChange={(e) => setSamplingWeight(e.target.value)}>
+                onChange={(e) => {
+                  setSamplingWeight(e.target.value);
+                  setWeightParamsPresent((current) => ({ ...current, sampling: true }));
+                }}>
                 <option value="">(不使用)</option>
                 {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
               </select>

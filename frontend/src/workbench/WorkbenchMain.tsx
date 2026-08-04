@@ -20,10 +20,12 @@ export function WorkbenchMain({
   projectRoot,
   onOpenSettings,
   onOpenProject,
+  reportFocusRequest = 0,
 }: {
   projectRoot: string;
   onOpenSettings?: () => void;
   onOpenProject?: (root: string) => void;
+  reportFocusRequest?: number;
 }) {
   const { state } = useWorkbench();
   const forest = useForest();
@@ -55,7 +57,7 @@ export function WorkbenchMain({
       {state.view === "graph" && <GraphView />}
       {state.view === "table" && <TableView projectRoot={projectRoot} />}
       {state.view === "pipeline" && <PipelineView />}
-      {state.view === "report" && <ReportView projectRoot={projectRoot} />}
+      {state.view === "report" && <ReportView projectRoot={projectRoot} focusRequest={reportFocusRequest} />}
       {state.view === "notebook" && (
         <NotebookRouteView
           projectRoot={projectRoot}

@@ -29,6 +29,7 @@ import {
 } from "./registry/actionRegistry";
 import { isEditableTarget } from "./keyboard";
 import { useProjectRootOptional } from "./ProjectRootContext";
+import { rootToSlug } from "./projectSlug";
 
 export interface CommandPaletteProps {
   projectRoot?: string | null;
@@ -82,15 +83,16 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
     () => (ctx === null ? [] : actionsForSurface("command-palette", ctx)),
     [ctx],
   );
-  const quickRunAction = useMemo<PaletteItem>(
+  const openGenesisAction = useMemo<PaletteItem>(
     () => ({
-      id: "quick-run-legacy",
-      label: "快速 run(旧表单)",
+      id: "open-genesis",
+      label: "打开数据上传",
       disabled: effectiveProjectRoot ? false : { reason: "Project root required" },
       invoke: () => {
         if (!effectiveProjectRoot) return;
-        const params = new URLSearchParams({ project_root: effectiveProjectRoot });
-        navigate(`/submit?${params.toString()}`);
+        navigate(`/p/${rootToSlug(effectiveProjectRoot)}/graph?open_genesis=1`, {
+          state: { openGenesis: true },
+        });
       },
     }),
     [navigate, effectiveProjectRoot],
@@ -106,9 +108,9 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
           if (ctx) action.invoke(ctx);
         },
       })),
-      quickRunAction,
+      openGenesisAction,
     ],
-    [ctx, nodeActions, quickRunAction],
+    [ctx, nodeActions, openGenesisAction],
   );
 
   // Keep cursor in range as the list changes.

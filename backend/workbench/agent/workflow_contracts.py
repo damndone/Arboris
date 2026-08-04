@@ -430,6 +430,20 @@ def _validate_ordinal_model_options(options: Mapping[str, Any]) -> None:
         raise OperationValidationError(
             "model.genesis ordinal_logit model_options.optimizer must be bfgs or lbfgs"
         )
+    if "link" in options and options["link"] not in {"logit", "probit"}:
+        raise OperationValidationError(
+            "model.genesis ordinal_logit model_options.link must be logit or probit"
+        )
+    outcome_order = options.get("outcome_order")
+    if outcome_order is not None and (
+        not isinstance(outcome_order, list)
+        or len(outcome_order) < 3
+        or any(not isinstance(level, str) or not level for level in outcome_order)
+        or len(set(outcome_order)) != len(outcome_order)
+    ):
+        raise OperationValidationError(
+            "model.genesis ordinal_logit model_options.outcome_order must be a list of at least three unique non-empty labels"
+        )
     maxiter = options.get("maxiter")
     if maxiter is not None and (
         not isinstance(maxiter, int) or isinstance(maxiter, bool) or not 50 <= maxiter <= 5000
@@ -958,7 +972,7 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         allows_covariance=False,
         allows_categorical_terms=False,
         allows_polynomial_terms=False,
-        model_options_fields=("optimizer", "maxiter"),
+        model_options_fields=("optimizer", "maxiter", "link", "outcome_order"),
         validate_model_options=_validate_ordinal_model_options,
         validate_branch_frame=_validate_ordinal_outcome,
         supported_split_kinds=("iid", "grouped"),
@@ -969,7 +983,7 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
         build_model_params=_build_model_params_with_options("multinomial_logit"),
-        expected_artifacts=("multinomial_logit_1",),
+        expected_artifacts=("multinomial_logit_1", "diagnostics_multinomial_logit_1"),
         result_shape="coefficient_intervals",
         forbidden_spec_fields_message=(
             "model.genesis multinomial_logit does not accept panel entity_col or time_col"

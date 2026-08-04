@@ -292,6 +292,65 @@ describe("GenesisWizard", () => {
     expect(onDraftExecuted).toHaveBeenCalledWith(executeResult, "draft_g1");
   });
 
+  it("explicitly clears a previously saved analysis weight when the UI selects none", async () => {
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+    vi.spyOn(api, "previewFile").mockResolvedValue(preview());
+    vi.spyOn(api, "uploadDataset").mockResolvedValue({
+      sha256: sha,
+      filename: "data.csv",
+    });
+    vi.spyOn(api, "createGenesisDraft").mockResolvedValue(draftResponse("h1"));
+    const savedWithWeight = draftResponse("h3", "configured", "configured");
+    const modelNode = savedWithWeight.draft.graph.nodes.find(
+      (node) => node.node_id === "model_1" && node.node_type === "model",
+    );
+    if (!modelNode || modelNode.node_type !== "model") {
+      throw new Error("model_1 fixture node is missing");
+    }
+    modelNode.params = {
+      model_type: "ols",
+      y: "y",
+      x: ["x"],
+      covariance: "robust",
+      analysis_weight: "x",
+    };
+    vi.spyOn(api, "patchDraftNode")
+      .mockResolvedValueOnce(draftResponse("h2", "configured", "pending"))
+      .mockResolvedValueOnce(savedWithWeight)
+      .mockResolvedValueOnce(savedWithWeight);
+
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Dataset file"), {
+      target: { files: [new File(["y,x\n1,2"], "data.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(await screen.findByTestId("genesis-save-table"));
+    await waitFor(() => expect(api.patchDraftNode).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "ols" },
+    });
+    fireEvent.change(screen.getByLabelText("analysis weight"), {
+      target: { value: "x" },
+    });
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+    await waitFor(() => expect(api.patchDraftNode).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText("analysis weight"), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+
+    await waitFor(() =>
+      expect(api.patchDraftNode).toHaveBeenNthCalledWith(
+        3,
+        "/proj",
+        "draft_g1",
+        "model_1",
+        expect.objectContaining({
+          params: expect.objectContaining({ analysis_weight: "" }),
+        }),
+      ),
+    );
+  });
+
   it("renders the preview column role picker so x/y can be selected without comma typing", async () => {
     vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
     vi.spyOn(api, "previewFile").mockResolvedValue({
@@ -844,6 +903,15 @@ describe("GenesisWizard", () => {
     fireEvent.change(screen.getByLabelText("dcdh-cluster-var"), {
       target: { value: "market" },
     });
+    fireEvent.change(screen.getByLabelText("frequency weight"), {
+      target: { value: "price" },
+    });
+    fireEvent.change(screen.getByLabelText("analysis weight"), {
+      target: { value: "treated" },
+    });
+    fireEvent.change(screen.getByLabelText("sampling weight"), {
+      target: { value: "market" },
+    });
     fireEvent.click(screen.getByLabelText("prediction"));
     fireEvent.change(screen.getByLabelText("algorithm"), {
       target: { value: "prediction_ridge" },
@@ -869,6 +937,9 @@ describe("GenesisWizard", () => {
           time_col: "year",
           did_treatment_path: "treated",
           cs_cluster_var: "market",
+          frequency_weight: "price",
+          analysis_weight: "treated",
+          sampling_weight: "market",
           prediction_model_type: "prediction_ridge",
           prediction_cv_folds: 7,
           prediction_sampling_method: "smote",

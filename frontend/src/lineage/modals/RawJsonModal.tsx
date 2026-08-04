@@ -87,7 +87,7 @@ export function RawJsonModal({ open, onClose, node }: RawJsonModalProps) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 100,
+        zIndex: 1300,
       }}
     >
       <div

@@ -300,7 +300,6 @@ class SampleSpecV1:
             "schema_version": 1,
             "transformation_hash": self.transformation_hash,
             "split_plan": self.split_plan.to_dict(),
-            "split_plan_ref": self.split_plan_ref,
         }
         encoded = json.dumps(_canonical(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
         return "sha256:" + hashlib.sha256(encoded).hexdigest()

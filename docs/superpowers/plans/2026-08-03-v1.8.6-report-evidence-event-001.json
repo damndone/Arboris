@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "event_id": "940b1f56-565b-40b2-9934-336b194265af",
+  "timestamp": "2026-08-03T23:32:03.000Z",
+  "type": "FAILURE",
+  "subtype": "test_setup",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The first focused frontend test was invoked from the repository root, where the package manifest is not present.",
+  "evidence": {
+    "kind": "test_command",
+    "ref": "frontend package-local vitest invocation",
+    "sha256": "5a7945d9ace735c1effef5cadea17320a5c755b0469f96ca8dd0faad810e5ebb",
+    "observed_at": "2026-08-03T23:32:03.000Z"
+  },
+  "impact": "The first test command exited before Vitest collected tests; the same focused test was rerun from the frontend package and proceeded to the intended red/green cycle.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Run frontend package tests from the package root and use package-relative test paths.",
+  "incident_id": "940b1f56-565b-40b2-9934-336b194265af",
+  "lesson_key": "frontend-package-root",
+  "links": [
+    "docs/superpowers/plans/2026-08-03-v1.8.6-report-evidence-editing-plan.md"
+  ]
+}

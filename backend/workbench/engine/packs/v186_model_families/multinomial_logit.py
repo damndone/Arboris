@@ -19,4 +19,10 @@ def declare_pack() -> None:
             {"key": "model_options", "kind": "json", "label": "Multinomial options", "value": {}},
         ],
     ))
-    register_pack(AnalysisPack(pack_id="v186-multinomial-logit", model_handlers=[handler]))
+    register_pack(
+        AnalysisPack(
+            pack_id="v186-multinomial-logit",
+            model_handlers=[handler],
+            defaults_by_y_type={"nominal": "multinomial_logit"},
+        )
+    )

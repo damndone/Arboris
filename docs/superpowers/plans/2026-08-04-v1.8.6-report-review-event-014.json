@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "event_id": "c1f7d1d4-4aa1-4f15-96e7-9bdf37ecb5c1",
+  "timestamp": "2026-08-04T02:04:00.000Z",
+  "type": "REVIEW",
+  "subtype": "report_review_p1_resolution",
+  "stage": "review",
+  "cause_status": "known",
+  "cause": "Architecture review identified cross-view loading, floating-layout, collapse, persistence, error-state, and server-save response gaps in the Report review workspace.",
+  "evidence": {
+    "kind": "browser_acceptance",
+    "ref": "Graph to Report, Float to Table, collapse, reload persistence",
+    "sha256": "50548d60faf3f2a746f472497dfe918a82fef8951582e96faa48bc140eaa72ab",
+    "observed_at": "2026-08-04T02:02:00.000Z"
+  },
+  "impact": "A floating Report review could lose its in-flight report, leave a blank right column, remain oversized after collapse, outrank modal surfaces, lose layout state on reload, or mislabel load failures as an empty report.",
+  "preventability": "partially_preventable",
+  "resolution": "resolved",
+  "lesson": "Cross-view workspace panels need explicit async lifetime, zero-width dock behavior, persisted UI state, modal-aware stacking, and distinct load-error states before browser acceptance.",
+  "incident_id": "c1f7d1d4-4aa1-4f15-96e7-9bdf37ecb5c1",
+  "lesson_key": "report-review-cross-view-hardening",
+  "review_round": 1,
+  "links": [
+    "frontend/src/report/ReportWorkspaceContext.tsx",
+    "frontend/src/report/ReportReviewPanel.tsx",
+    "frontend/src/workbench/PanelHost.tsx",
+    "frontend/src/workbench/WorkbenchRouteContainer.tsx",
+    "frontend/src/report/report.css"
+  ]
+}

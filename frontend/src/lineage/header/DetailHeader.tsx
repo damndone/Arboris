@@ -2,15 +2,16 @@
 //
 // DetailDrawer chrome (Step 6, T6.3). Lives OUTSIDE the section registry
 // per spec §8.2 — it hosts the dialog's aria-labelledby target and the
-// close button, both of which are invariant across node kinds. Section
-// changes must not be able to remove it.
+// persistent header toolbar. Workspace tabs own node closing, so the header
+// does not add a second close affordance beside Actions.
 //
 // When `onShowJson` is provided the header also mounts NodeActionMenu
-// next to the close button — this is the V1.5.0 Step-6 reachability
+// next to the shared window controls — this is the V1.5.0 Step-6 reachability
 // path for the 4 actionable items (Step 8 will additionally mount the
 // menu on RF node ⋯ affordances). REV-3 F2.
 
 import { useLineage } from "../LineageContext";
+import type { ReactNode } from "react";
 import type { GraphViewNode, HeadSetNode } from "../api/graphViewTypes";
 import { resolveOwnerRun } from "../api/graphViewTypes";
 import { ResolverFailureState } from "../detail/ResolverFailureState";
@@ -20,11 +21,16 @@ import { NodeActionMenu } from "../graph/NodeActionMenu";
 
 interface DetailHeaderProps {
   node: GraphViewNode;
+  /** Legacy callback retained for drawer callers; the tab strip owns closing. */
   onClose: () => void;
   /** When set, the header renders NodeActionMenu and forwards "View Raw JSON". */
   onShowJson?: () => void;
   /** Explicit project root for slug routes that no longer carry ?project_root=. */
   projectRoot?: string;
+  /** Shared window controls supplied by the Workbench shell for node panels. */
+  windowControls?: ReactNode;
+  /** Optional drag handle supplied by a floating panel shell. */
+  windowDragHandle?: ReactNode;
 }
 
 /** Element id consumed by `<aside aria-labelledby=...>` in DetailDrawer. */
@@ -32,9 +38,11 @@ export const DETAIL_HEADER_TITLE_ID = "detail-drawer-title";
 
 export function DetailHeader({
   node,
-  onClose,
+  onClose: _onClose,
   onShowJson,
   projectRoot,
+  windowControls,
+  windowDragHandle,
 }: DetailHeaderProps) {
   const { model } = useLineage();
   // In the forest, `model.runId` is the URL run, not the run that owns the selected
@@ -52,11 +60,13 @@ export function DetailHeader({
   return (
     <div className="dp-head">
       {/* v1.6.7 — persistent action toolbar row: never shares a row with the
-          long id, so Actions + Close are always reachable. */}
+          long id, so Actions + window controls are always reachable. */}
       <div
         data-testid="detail-header-toolbar"
+        className="detail-header-toolbar"
         style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}
       >
+        {windowDragHandle}
         {node.isDraft && node.lifecycleState && (
           <span
             data-testid="detail-header-state-chip"
@@ -84,25 +94,7 @@ export function DetailHeader({
             projectRoot={projectRoot}
           />
         )}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          style={{
-            border: "none",
-            background: "var(--bg-elev)",
-            color: "var(--label-secondary)",
-            width: 24,
-            height: 24,
-            borderRadius: 6,
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          ×
-        </button>
+        {windowControls}
       </div>
 
       {/* meta row: kind + id/resolver + owner + warnings, truncates instead of

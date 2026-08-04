@@ -3,10 +3,13 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DetailDrawerTabs } from "./DetailDrawerTabs";
 import type { GraphViewNode } from "../api/graphViewTypes";
-import type { TabState } from "../../workbench/state/tabsSchema";
+import {
+  REPORT_REVIEW_TAB_ID,
+  type TabState,
+} from "../../workbench/state/tabsSchema";
 
 function tab(id: string, openedAt = 1, nodeKey = id): TabState {
-  return { id, nodeKey, openedAt };
+  return { kind: "node", id, nodeKey, openedAt };
 }
 
 function node(id: string, title: string, nodeKey = id): GraphViewNode {
@@ -97,6 +100,31 @@ describe("DetailDrawerTabs", () => {
 
     expect(onClose).toHaveBeenCalledWith("b");
     expect(onActive).not.toHaveBeenCalled();
+  });
+
+  it("renders Report review beside nodes without a close button", () => {
+    const { onActive, onClose } = renderTabs({
+      tabs: [
+        tab("a"),
+        { kind: "report-review", id: REPORT_REVIEW_TAB_ID, openedAt: 2 },
+        tab("b", 3),
+      ],
+      activeTabId: REPORT_REVIEW_TAB_ID,
+    });
+
+    expect(
+      screen.getByRole("tab", { name: "Report review" }),
+    ).toHaveAttribute("aria-current", "true");
+    expect(
+      screen.queryByRole("button", { name: "Close Report review tab" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Report review" }));
+    expect(onActive).toHaveBeenCalledWith(REPORT_REVIEW_TAB_ID);
+    expect(onClose).not.toHaveBeenCalledWith(REPORT_REVIEW_TAB_ID);
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
+    expect(onActive).toHaveBeenCalledWith("b");
   });
 
   it("Left and Right arrows cycle active tabs when the strip has focus", () => {

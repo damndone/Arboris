@@ -15,7 +15,7 @@
 //
 // Spec §8.2.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { DetailHeader, DETAIL_HEADER_TITLE_ID } from "../header/DetailHeader";
 import { useLineage } from "../LineageContext";
 import type { GraphViewNode } from "../api/graphViewTypes";
@@ -35,6 +35,16 @@ interface DetailDrawerProps {
    * GraphWorkbench to open RawJsonModal.
    */
   onShowJson?: () => void;
+  /** The shell can render the shared workspace tab strip above this panel. */
+  showTabs?: boolean;
+  /** Use the shell-owned PanelHost width/resizer instead of drawer chrome. */
+  embedded?: boolean;
+  /** Shared Workbench window controls rendered in the node header toolbar. */
+  windowControls?: ReactNode;
+  /** Optional drag handle rendered when the node drawer is floating. */
+  windowDragHandle?: ReactNode;
+  /** Keep the node header visible while hiding the detail body in a floating panel. */
+  collapsed?: boolean;
 }
 
 const MIN_DRAWER_WIDTH = 320;
@@ -56,6 +66,11 @@ export function DetailDrawer({
   onClose,
   projectRoot,
   onShowJson,
+  showTabs = true,
+  embedded = false,
+  windowControls,
+  windowDragHandle,
+  collapsed = false,
 }: DetailDrawerProps) {
   const {
     model,
@@ -127,17 +142,19 @@ export function DetailDrawer({
       data-testid="detail-drawer"
       className="detail-drawer"
       style={{
-        width: drawerWidth,
-        flex: `0 0 ${drawerWidth}px`,
+        width: embedded ? "100%" : drawerWidth,
+        flex: embedded ? "1 1 auto" : `0 0 ${drawerWidth}px`,
         minWidth: 0,
+        minHeight: 0,
+        height: embedded ? "100%" : undefined,
         position: "relative",
-        borderLeft: "1px solid var(--separator)",
+        borderLeft: embedded ? 0 : "1px solid var(--separator)",
         padding: 22,
         overflowY: "auto",
         background: "var(--bg-canvas)",
       }}
     >
-      <div
+      {!embedded && <div
         role="separator"
         aria-label="Resize detail drawer"
         aria-orientation="vertical"
@@ -161,8 +178,8 @@ export function DetailDrawer({
           }
         }}
         className="detail-drawer__resizer"
-      />
-      {tabs.length > 0 && setActiveTab && closeTab && (
+      />}
+      {showTabs && tabs.length > 0 && setActiveTab && closeTab && (
         <DetailDrawerTabs
           tabs={tabs}
           nodes={model.nodes}
@@ -178,8 +195,10 @@ export function DetailDrawer({
           onClose={onClose}
           onShowJson={onShowJson}
           projectRoot={projectRoot}
+          windowControls={windowControls}
+          windowDragHandle={windowDragHandle}
         />
-        {visibleSections.map((s) => (
+        {!collapsed && visibleSections.map((s) => (
           <s.Component key={s.id} node={resolved} />
         ))}
       </NodeOperationContextProvider>

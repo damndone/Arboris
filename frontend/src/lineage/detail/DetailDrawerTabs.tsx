@@ -12,6 +12,7 @@ export interface DetailDrawerTabsProps {
 }
 
 function labelFor(tab: TabState, nodes: GraphViewNode[]): string {
+  if (tab.kind === "report-review") return "Report review";
   return (
     nodes.find((node) => node.id === tab.id || node.nodeKey === tab.nodeKey)
       ?.title ?? tab.nodeKey
@@ -47,7 +48,7 @@ export function DetailDrawerTabs({
       <div
         className="detail-tabs__strip detail-tabs__strip--compact"
         role="tablist"
-        aria-label="Open node details"
+        aria-label="Open workspace panels"
         tabIndex={0}
         onKeyDown={onKeyDown}
       >
@@ -65,18 +66,21 @@ export function DetailDrawerTabs({
                 className="detail-tabs__tab"
                 role="tab"
                 aria-current={isActive ? "true" : undefined}
+                title={label}
                 onClick={() => onActive(tab.id)}
               >
                 {label}
               </button>
-              <button
-                type="button"
-                className="detail-tabs__close"
-                aria-label={`Close ${label} tab`}
-                onClick={() => onClose(tab.id)}
-              >
-                x
-              </button>
+              {tab.kind === "node" && (
+                <button
+                  type="button"
+                  className="detail-tabs__close"
+                  aria-label={`Close ${label} tab`}
+                  onClick={() => onClose(tab.id)}
+                >
+                  x
+                </button>
+              )}
             </span>
           );
         })}

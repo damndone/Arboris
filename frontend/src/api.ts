@@ -231,6 +231,14 @@ export type RunDetail = RunSummary & {
   diagnostic_summary_preview?: DiagnosticSummaryPreview;
   post_estimation_results?: PostEstimationResult[];
   prediction_evidence?: PredictionResearchEvidence | null;
+  /** Durable deterministic report packets projected from diagnostic_summary. */
+  table_1?: Array<Record<string, unknown>>;
+  statistical_evidence?: Record<string, unknown> | null;
+  labels?: {
+    variable_labels?: Record<string, string>;
+    value_labels?: Record<string, Record<string, string>>;
+  };
+  model_family_evidence?: Record<string, unknown> | null;
 };
 
 export type CoefficientRecord = {

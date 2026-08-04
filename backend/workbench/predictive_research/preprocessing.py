@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
@@ -23,10 +23,24 @@ class FittedPreprocessorV1:
     steps: tuple[PreprocessingStepV1, ...]
     fit_scope: str
     state: dict[str, dict[str, float]]
+    transformers: dict[str, Any] = field(default_factory=dict)
 
     def apply(self, frame: pd.DataFrame) -> pd.DataFrame:
         result = frame.copy()
         for step in self.steps:
+            if step.transform_id == "mice":
+                transformer_key = f"mice:{','.join(step.columns)}"
+                transformer = self.transformers.get(transformer_key)
+                if transformer is None:
+                    raise ContractError(
+                        "PREDICTION_PREPROCESSING_STATE_MISSING",
+                        f"missing fit state for {transformer_key}",
+                    )
+                values = transformer.transform(
+                    result.loc[:, list(step.columns)].to_numpy(dtype=float, copy=True)
+                )
+                result.loc[:, list(step.columns)] = values
+                continue
             for column in step.columns:
                 key = f"{step.transform_id}:{column}"
                 if key not in self.state:
@@ -52,11 +66,39 @@ class FoldPreprocessingKernel:
                 "fit-state may only be learned from a development training fold",
             )
         state: dict[str, dict[str, float]] = {}
+        transformers: dict[str, Any] = {}
         for step in self.steps:
             if step.fit_semantics not in {"stateless", "date_local", "period_fitted"}:
                 raise ContractError("PREDICTION_PREPROCESSING_SEMANTICS_INVALID", "unknown fit semantics")
-            if step.fit_semantics == "period_fitted" and step.transform_id not in {"mean_impute", "standard_scale"}:
+            if step.fit_semantics == "period_fitted" and step.transform_id not in {"mean_impute", "standard_scale", "mice"}:
                 raise ContractError("PREDICTION_PREPROCESSING_UNKNOWN_TRANSFORM", step.transform_id)
+            if step.transform_id == "mice":
+                if any(not pd.api.types.is_numeric_dtype(frame[column]) for column in step.columns if column in frame.columns):
+                    raise ContractError(
+                        "PREDICTION_MICE_NON_NUMERIC_MISSING",
+                        "fold-local MICE only supports numeric preprocessing columns",
+                    )
+                missing_columns = [
+                    column for column in step.columns
+                    if column not in frame.columns or frame[column].isna().any()
+                ]
+                if any(column not in frame.columns for column in missing_columns):
+                    raise ContractError(
+                        "PREDICTION_PREPROCESSING_COLUMN_MISSING",
+                        ", ".join(column for column in missing_columns if column not in frame.columns),
+                    )
+                from sklearn.experimental import enable_iterative_imputer  # noqa: F401
+                from sklearn.impute import IterativeImputer
+
+                transformer = IterativeImputer(
+                    max_iter=10,
+                    random_state=0,
+                    sample_posterior=False,
+                    keep_empty_features=True,
+                )
+                transformer.fit(frame.loc[:, list(step.columns)].to_numpy(dtype=float, copy=True))
+                transformers[f"mice:{','.join(step.columns)}"] = transformer
+                continue
             for column in step.columns:
                 if column not in frame.columns:
                     raise ContractError("PREDICTION_PREPROCESSING_COLUMN_MISSING", column)
@@ -67,4 +109,9 @@ class FoldPreprocessingKernel:
                         raise ContractError("PREDICTION_PREPROCESSING_NO_FIT_DATA", column)
                     scale = float(values.std(ddof=0)) if step.transform_id == "standard_scale" else 0.0
                     state[f"{step.transform_id}:{column}"] = {"mean": mean, "scale": scale}
-        return FittedPreprocessorV1(steps=self.steps, fit_scope=fit_scope, state=state)
+        return FittedPreprocessorV1(
+            steps=self.steps,
+            fit_scope=fit_scope,
+            state=state,
+            transformers=transformers,
+        )

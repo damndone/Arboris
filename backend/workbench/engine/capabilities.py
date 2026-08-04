@@ -52,13 +52,13 @@ V186_MODEL_CAPABILITY_METADATA: dict[str, dict[str, object]] = {
         "label": "Ordinal logit",
         "group": "Ordinal",
         "description": (
-            "Ordered categorical outcome with probabilities, odds ratios, "
-            "marginal effects, and a parallel-lines diagnostic."
+            "Ordered categorical outcome with logit or probit link, probabilities, "
+            "odds ratios where applicable, marginal effects, and a parallel-lines diagnostic."
         ),
         "requires": ["ordered_outcome"],
-        "model_options_fields": ["optimizer", "maxiter"],
+        "model_options_fields": ["optimizer", "maxiter", "link", "outcome_order"],
         "model_options_required": [],
-        "params": _v186_model_params(["optimizer", "maxiter"]),
+        "params": _v186_model_params(["optimizer", "maxiter", "link", "outcome_order"]),
     },
     "multinomial_logit": {
         "label": "Multinomial logit",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -211,6 +212,84 @@ def _transform_source_spec(run_id: str, node_id: str, artifact_id: str) -> DataC
     )
 
 
+def _growth_policy(
+    parameters: Mapping[str, Any],
+    *,
+    parameter_name: str,
+    legacy_factor_name: str | None = None,
+    default_factor: float = 3.0,
+) -> tuple[int | None, float | None]:
+    """Resolve an explicit row-growth policy without silently widening limits."""
+
+    raw_policy = parameters.get(parameter_name)
+    if raw_policy is None:
+        if legacy_factor_name and legacy_factor_name in parameters:
+            raw_policy = {"max_growth_factor": parameters[legacy_factor_name]}
+        else:
+            raw_policy = {"max_growth_factor": default_factor}
+    if not isinstance(raw_policy, Mapping):
+        raise DataColumnCastValidationError(f"{parameter_name} must be an object")
+    unknown = set(raw_policy) - {"max_rows", "max_growth_factor"}
+    if unknown:
+        raise DataColumnCastValidationError(
+            f"{parameter_name} contains unsupported fields: {sorted(unknown)}"
+        )
+    if not raw_policy:
+        raise DataColumnCastValidationError(
+            f"{parameter_name} must declare max_rows or max_growth_factor"
+        )
+
+    max_rows: int | None = None
+    if "max_rows" in raw_policy:
+        candidate = raw_policy["max_rows"]
+        if isinstance(candidate, bool) or not isinstance(candidate, int) or candidate < 0:
+            raise DataColumnCastValidationError(
+                f"{parameter_name}.max_rows must be a non-negative integer"
+            )
+        max_rows = candidate
+
+    max_growth_factor: float | None = None
+    if "max_growth_factor" in raw_policy:
+        try:
+            candidate = float(raw_policy["max_growth_factor"])
+        except (TypeError, ValueError) as exc:
+            raise DataColumnCastValidationError(
+                f"{parameter_name}.max_growth_factor must be finite and positive"
+            ) from exc
+        if not math.isfinite(candidate) or candidate <= 0:
+            raise DataColumnCastValidationError(
+                f"{parameter_name}.max_growth_factor must be finite and positive"
+            )
+        max_growth_factor = candidate
+    return max_rows, max_growth_factor
+
+
+def _enforce_growth_policy(
+    row_count: int,
+    source_row_count: int,
+    *,
+    operation_code: str,
+    growth_error_code: str | None = None,
+    policy: tuple[int | None, float | None],
+) -> None:
+    max_rows, max_growth_factor = policy
+    error_code = growth_error_code or f"{operation_code}_ROW_EXPANSION_BLOCKED"
+    if max_rows is not None and row_count > max_rows:
+        raise DataColumnCastValidationError(
+            f"{error_code}; "
+            f"next_step=lower the input rows or raise the explicit max_rows limit"
+        )
+    if max_growth_factor is not None and row_count > max(1, source_row_count) * max_growth_factor:
+        raise DataColumnCastValidationError(
+            f"{error_code}; "
+            f"next_step=inspect key uniqueness or raise the explicit growth limit"
+        )
+
+
+def _schema_signature(frame: pd.DataFrame) -> tuple[tuple[str, str], ...]:
+    return tuple((str(column), str(frame[column].dtype)) for column in frame.columns)
+
+
 def _execute_data_transform(
     left: pd.DataFrame,
     spec: DataTransformSpecV1,
@@ -220,7 +299,29 @@ def _execute_data_transform(
     if spec.operation == "append":
         if right is None:
             raise DataColumnCastValidationError("append requires a secondary frame")
-        return pd.concat([left, right], ignore_index=True, sort=False)
+        schema_policy = parameters.get("schema_policy", "exact")
+        if not isinstance(schema_policy, str) or schema_policy not in {"exact", "union"}:
+            raise DataColumnCastValidationError(
+                "append schema_policy must be exact or union"
+            )
+        if schema_policy == "exact" and _schema_signature(left) != _schema_signature(right):
+            raise DataColumnCastValidationError(
+                "DATA_APPEND_SCHEMA_INCOMPATIBLE; "
+                "next_step=choose schema_policy=union or align columns and dtypes"
+            )
+        output = pd.concat([left, right], ignore_index=True, sort=False)
+        _enforce_growth_policy(
+            len(output),
+            len(left),
+            operation_code="DATA_APPEND",
+            growth_error_code="DATA_APPEND_ROW_GROWTH_BLOCKED",
+            policy=_growth_policy(
+                parameters,
+                parameter_name="row_growth_policy",
+                legacy_factor_name="max_growth_factor",
+            ),
+        )
+        return output
     if spec.operation == "merge":
         if right is None:
             raise DataColumnCastValidationError("merge requires a secondary frame")
@@ -238,19 +339,22 @@ def _execute_data_transform(
                 "DATA_MERGE_MANY_TO_MANY_BLOCKED; next_step=declare a one-to-one or one-to-many key contract"
             )
         how = parameters.get("how", "left")
-        if how not in {"left", "right", "inner", "outer"}:
+        if not isinstance(how, str) or how not in {"left", "right", "inner", "outer"}:
             raise DataColumnCastValidationError("merge how must be left, right, inner, or outer")
         try:
             merged = left.merge(right, on=keys, how=how, suffixes=("_left", "_right"), validate="many_to_one")
         except (pd.errors.MergeError, ValueError) as exc:
             raise DataColumnCastValidationError(f"merge key contract rejected: {exc}") from exc
-        max_growth = float(parameters.get("max_growth_factor", 3.0))
-        if not math.isfinite(max_growth) or max_growth <= 0:
-            raise DataColumnCastValidationError("max_growth_factor must be finite and positive")
-        if len(merged) > max(1, len(left)) * max_growth:
-            raise DataColumnCastValidationError(
-                "DATA_MERGE_ROW_EXPANSION_BLOCKED; next_step=inspect key uniqueness or raise the explicit growth limit"
-            )
+        _enforce_growth_policy(
+            len(merged),
+            len(left),
+            operation_code="DATA_MERGE",
+            policy=_growth_policy(
+                parameters,
+                parameter_name="growth_policy",
+                legacy_factor_name="max_growth_factor",
+            ),
+        )
         return merged
     if spec.operation == "reshape":
         direction = parameters.get("direction")
@@ -259,6 +363,15 @@ def _execute_data_transform(
             value_columns = parameters.get("value_columns")
             if not isinstance(id_columns, list) or not isinstance(value_columns, list) or not id_columns or not value_columns:
                 raise DataColumnCastValidationError("wide_to_long requires id_columns and value_columns")
+            missing = [
+                column
+                for column in [*id_columns, *value_columns]
+                if not isinstance(column, str) or column not in left.columns
+            ]
+            if missing:
+                raise DataColumnCastValidationError(
+                    f"DATA_RESHAPE_COLUMNS_MISSING: {missing}"
+                )
             return left.melt(
                 id_vars=id_columns,
                 value_vars=value_columns,
@@ -271,6 +384,16 @@ def _execute_data_transform(
             values = parameters.get("values")
             if not isinstance(index, list) or not isinstance(columns, str) or not isinstance(values, str):
                 raise DataColumnCastValidationError("long_to_wide requires index, columns, and values")
+            required = [*index, columns, values]
+            missing = [
+                column
+                for column in required
+                if not isinstance(column, str) or column not in left.columns
+            ]
+            if not index or missing:
+                raise DataColumnCastValidationError(
+                    f"DATA_RESHAPE_COLUMNS_MISSING: {missing or ['index']}"
+                )
             try:
                 return left.pivot(index=index, columns=columns, values=values).reset_index()
             except (ValueError, KeyError) as exc:
@@ -294,10 +417,42 @@ def _execute_data_transform(
                 raise DataColumnCastValidationError(f"subset filter column missing: {column}")
             result = result[result[column] == value]
         row_indices = parameters.get("row_indices")
+        row_index_range = parameters.get("row_index_range", parameters.get("row_range"))
+        if row_indices is not None and row_index_range is not None:
+            raise DataColumnCastValidationError(
+                "DATA_SUBSET_ROW_INDEX_INVALID: row_indices and row_index_range are mutually exclusive"
+            )
         if row_indices is not None:
-            if not isinstance(row_indices, list) or any(not isinstance(index, int) for index in row_indices):
-                raise DataColumnCastValidationError("subset row_indices must be a list of integers")
+            if (
+                not isinstance(row_indices, list)
+                or not row_indices
+                or any(type(index) is not int for index in row_indices)
+                or len(set(row_indices)) != len(row_indices)
+                or any(index < 0 or index >= len(result) for index in row_indices)
+            ):
+                raise DataColumnCastValidationError(
+                    "DATA_SUBSET_ROW_INDEX_INVALID: row_indices must be unique, non-negative, and in range"
+                )
             result = result.iloc[row_indices]
+        elif row_index_range is not None:
+            if isinstance(row_index_range, Mapping):
+                start = row_index_range.get("start")
+                stop = row_index_range.get("stop")
+            elif isinstance(row_index_range, (list, tuple)) and len(row_index_range) == 2:
+                start, stop = row_index_range
+            else:
+                start = stop = None
+            if (
+                type(start) is not int
+                or type(stop) is not int
+                or start < 0
+                or stop < start
+                or stop > len(result)
+            ):
+                raise DataColumnCastValidationError(
+                    "DATA_SUBSET_ROW_INDEX_INVALID: row_index_range must be a bounded [start, stop) range"
+                )
+            result = result.iloc[start:stop]
         return result.reset_index(drop=True)
     raise DataColumnCastValidationError(f"unsupported data operation: {spec.operation}")
 
@@ -366,8 +521,10 @@ def apply_data_transform(
         project_root, _transform_source_spec(spec.source_run_id, spec.source_node_id, spec.source_artifact_id)
     )
     right = None
+    secondary_graph = None
+    secondary_node = None
     if spec.secondary_run_id and spec.secondary_node_id and spec.secondary_artifact_id:
-        _right_root, _right_graph, _right_node, _right_artifact, right_path = _resolve_source(
+        _right_root, secondary_graph, secondary_node, _right_artifact, right_path = _resolve_source(
             project_root,
             _transform_source_spec(spec.secondary_run_id, spec.secondary_node_id, spec.secondary_artifact_id),
         )
@@ -404,8 +561,16 @@ def apply_data_transform(
     _graph_store_for(left_root).mutate(
         spec.source_run_id,
         lambda current: current if child_node_id in current.nodes else _commit_data_transform_graph_child(
-            current, spec=spec, preview=fresh, artifact_rel=artifact_rel, recipe_rel=recipe_rel,
-            child_node_id=child_node_id, execution_key=execution,
+            current,
+            spec=spec,
+            preview=fresh,
+            artifact_rel=artifact_rel,
+            recipe_rel=recipe_rel,
+            child_node_id=child_node_id,
+            execution_key=execution,
+            node_hash=sha256_file(artifact_path),
+            secondary_graph=secondary_graph,
+            secondary_node=secondary_node,
         ),
     )
     _ensure_node_index_entry(
@@ -655,6 +820,7 @@ def apply_feature_recipe_operation(
             recipe_rel=recipe_rel,
             child_node_id=child_node_id,
             execution_key=execution,
+            node_hash=sha256_file(artifact_path),
         ),
     )
     _ensure_node_index_entry(
@@ -934,6 +1100,7 @@ def apply_data_column_cast(
                 recipe_rel=recipe_rel,
                 child_node_id=child_node_id,
                 execution_key=execution,
+                node_hash=sha256_file(artifact_path),
             )
         ),
     )
@@ -1293,6 +1460,7 @@ def apply_data_columns_cast(
                 recipe_rel=recipe_rel,
                 child_node_id=child_node_id,
                 execution_key=execution,
+                node_hash=sha256_file(artifact_path),
             )
         ),
     )
@@ -1330,6 +1498,7 @@ def _commit_batch_graph_child(
     recipe_rel: str,
     child_node_id: str,
     execution_key: str,
+    node_hash: str,
 ) -> Graph:
     branch_id = f"data-casts:{execution_key.removeprefix('exec_')[:20]}"
     columns_summary = ", ".join(f"{i.column}→{i.target_dtype}" for i in preview.items)
@@ -1357,6 +1526,7 @@ def _commit_batch_graph_child(
             },
         ),
         stage=Stage.TRANSFORM,
+        node_hash=node_hash,
     )
     nodes = dict(graph.nodes)
     nodes[child_node_id] = child
@@ -1566,6 +1736,7 @@ def _commit_graph_child(
     recipe_rel: str,
     child_node_id: str,
     execution_key: str,
+    node_hash: str,
 ) -> Graph:
     branch_id = f"data-cast:{execution_key.removeprefix('exec_')[:20]}"
     child = Node(
@@ -1591,6 +1762,7 @@ def _commit_graph_child(
             },
         ),
         stage=Stage.TRANSFORM,
+        node_hash=node_hash,
     )
     nodes = dict(graph.nodes)
     nodes[child_node_id] = child
@@ -1640,6 +1812,7 @@ def _commit_feature_recipe_graph_child(
     recipe_rel: str,
     child_node_id: str,
     execution_key: str,
+    node_hash: str,
 ) -> Graph:
     branch_id = f"feature-recipe:{execution_key.removeprefix('exec_')[:20]}"
     child = Node(
@@ -1666,6 +1839,7 @@ def _commit_feature_recipe_graph_child(
             },
         ),
         stage=Stage.TRANSFORM,
+        node_hash=node_hash,
     )
     nodes = _mark_downstream_invalidation(
         {**graph.nodes, child_node_id: child},
@@ -1713,6 +1887,9 @@ def _commit_data_transform_graph_child(
     recipe_rel: str,
     child_node_id: str,
     execution_key: str,
+    node_hash: str,
+    secondary_graph: Graph | None = None,
+    secondary_node: Node | None = None,
 ) -> Graph:
     branch_id = f"data-{spec.operation}:{execution_key.removeprefix('exec_')[:20]}"
     child = Node(
@@ -1739,9 +1916,51 @@ def _commit_data_transform_graph_child(
             },
         ),
         stage=Stage.TRANSFORM,
+        node_hash=node_hash,
     )
+    nodes = {**graph.nodes, child_node_id: child}
+    secondary_id: str | None = None
+    if spec.secondary_node_id and spec.secondary_run_id:
+        if spec.secondary_run_id == graph.run_id and spec.secondary_node_id in nodes:
+            secondary_id = spec.secondary_node_id
+        else:
+            if secondary_graph is None or secondary_node is None:
+                raise DataColumnCastValidationError(
+                    "merge/append secondary graph projection is unavailable"
+                )
+            secondary_id = f"{spec.secondary_run_id}:{spec.secondary_node_id}"
+            nodes.setdefault(
+                secondary_id,
+                Node(
+                    id=secondary_id,
+                    kind=secondary_node.kind,
+                    display_label=secondary_node.display_label,
+                    created_at=secondary_node.created_at,
+                    parent_stage_id=None,
+                    branch_id=f"external:{spec.secondary_run_id}",
+                    trust=secondary_node.trust,
+                    trust_reason=secondary_node.trust_reason,
+                    archived=secondary_node.archived,
+                    payload_ref=None,
+                    summary=(
+                        f"External input from run {spec.secondary_run_id}; "
+                        f"artifact {spec.secondary_artifact_id}"
+                    ),
+                    annotations=(
+                        {
+                            "type": "external_input",
+                            "external_run_id": spec.secondary_run_id,
+                            "external_node_id": spec.secondary_node_id,
+                            "external_artifact_id": spec.secondary_artifact_id,
+                            "external_payload_ref": secondary_node.payload_ref,
+                        },
+                    ),
+                    stage=secondary_node.stage,
+                    node_hash=secondary_node.node_hash,
+                ),
+            )
     nodes = _mark_downstream_invalidation(
-        {**graph.nodes, child_node_id: child},
+        nodes,
         reason=f"data_{spec.operation}",
         source_node_id=spec.source_node_id,
         child_node_id=child_node_id,
@@ -1755,14 +1974,19 @@ def _commit_data_transform_graph_child(
         op=f"data.{spec.operation}",
         params={"execution_key": execution_key, "parameters": dict(spec.parameters)},
     )
-    if spec.secondary_node_id and spec.secondary_run_id:
-        secondary_id = f"{spec.secondary_run_id}:{spec.secondary_node_id}"
+    if secondary_id is not None:
         edges[f"edge:{child_node_id}:secondary"] = Edge(
             id=f"edge:{child_node_id}:secondary",
             source_id=secondary_id,
             target_id=child_node_id,
             op=f"data.{spec.operation}",
-            params={"role": "secondary_input", "execution_key": execution_key},
+            params={
+                "role": "secondary_input",
+                "execution_key": execution_key,
+                "run_id": spec.secondary_run_id,
+                "node_id": spec.secondary_node_id,
+                "artifact_id": spec.secondary_artifact_id,
+            },
         )
     branches = dict(graph.branches)
     branches[branch_id] = BranchRef(branch_id, spec.source_node_id, (child_node_id,))

@@ -145,10 +145,17 @@ def _frequency_weights(
     sample_spec: SampleSpecV1,
 ) -> tuple[str | None, pd.Series | None]:
     sampling = sample_spec.sampling
-    if sampling.sampling_weight is not None or sampling.analysis_weight is not None:
+    if sampling.sampling_weight is not None:
         raise ContractError(
             "PREDICTION_WEIGHT_UNSUPPORTED",
-            "sampling_weight and analysis_weight are not supported by the v1.8.6 generic estimator adapter",
+            "sampling_weight is fail-closed until a declared strata/PSU design is "
+            "supported; declare strata/PSU through the existing entity/cluster channel",
+        )
+    if sampling.analysis_weight is not None:
+        raise ContractError(
+            "PREDICTION_WEIGHT_UNSUPPORTED",
+            "analysis_weight is not supported by the v1.8.6 generic estimator adapter; "
+            "use an OLS run for analysis-weight execution",
         )
     column = sampling.frequency_weight
     if column is None:

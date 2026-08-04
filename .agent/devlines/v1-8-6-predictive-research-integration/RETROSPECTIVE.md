@@ -10,14 +10,14 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 18/26 (69.2%; 69.2 per 100 events)
-- Repeat rate: 0/18 (0.0%)
-- Recurrence rate: 0/18 (0.0%)
-- MTTR: median=0 ms (sample=6; unresolved=12)
+- Failure frequency: 19/33 (57.6%; 57.6 per 100 events)
+- Repeat rate: 0/19 (0.0%)
+- Recurrence rate: 0/19 (0.0%)
+- MTTR: median=0 ms (sample=6; unresolved=13)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/3 (0.0%)
+- Gate waste rate: 0/5 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -48,6 +48,7 @@ CONTEXT_RESCOPED
 
 - #13 2026-08-02T18:08:38.000Z `allowlist_gap_found`; cause_status: `known`; cause: The frozen Context Pack already includes the continuation file's listed HTTP, frontend API, draft, table, and API-test paths, but the current predictive compare implementation also modifies frontend/src/lineage/detail/sections files that are outside the frozen allowlist.; resolution: `open`; lesson: Audit the frozen allowlist against every changed consumer path before continuing integration work.
 - #20 2026-08-02T18:26:44.000Z `sandbox_containment_gate_failure`; cause_status: `known`; cause: The agent-seatbelt full fallback reported sandbox-exec: sandbox_apply: Operation not permitted in code-execution tests; baseline attribution must still be performed on a supported host before this is classified as inherited.; resolution: `open`; lesson: Separate product regression evidence from host containment capability and compare the same gate on a supported host and exact baseline.
+- #27 2026-08-03T09:32:27.000Z `existing_line_scope_drift_audit`; cause_status: `known`; cause: The completed v1.8.6 integration changes include eight paths that are not present in the currently frozen Context Pack allowlist, so the formal line scope does not faithfully describe the already committed work.; resolution: `open`; lesson: A completed commit does not prove formal scope correctness; audit the frozen allowlist against the complete diff before starting an expansion.
 
 ## All waste
 
@@ -56,6 +57,7 @@ CONTEXT_RESCOPED
 ## Root causes and solutions
 
 - `allowlist-audit-before-integration`: occurrences=1; cause_status: `known`; root cause: The frozen Context Pack already includes the continuation file's listed HTTP, frontend API, draft, table, and API-test paths, but the current predictive compare implementation also modifies frontend/src/lineage/detail/sections files that are outside the frozen allowlist.; solution: `open`
+- `audit-formal-scope-before-expansion`: occurrences=1; cause_status: `known`; root cause: The completed v1.8.6 integration changes include eight paths that are not present in the currently frozen Context Pack allowlist, so the formal line scope does not faithfully describe the already committed work.; solution: `open`
 - `frequency-weight-positive-path-and-unsupported-rejections`: occurrences=1; cause_status: `known`; root cause: The OOS protocol ignored declared frequency_weight and did not reject unsupported sampling_weight or analysis_weight semantics before fitting.; solution: `open`
 - `host-containment-gate-must-be-supported-host-verified`: occurrences=1; cause_status: `known`; root cause: The agent-seatbelt full fallback reported sandbox-exec: sandbox_apply: Operation not permitted in code-execution tests; baseline attribution must still be performed on a supported host before this is classified as inherited.; solution: `open`
 - `independent-statistics-need-versioned-packet`: occurrences=1; cause_status: `known`; root cause: The independent v1.8.6 statistical operators produced typed individual results, but no versioned workbench.statistics.evidence-packet producer existed.; solution: `resolved`
@@ -81,6 +83,7 @@ CONTEXT_RESCOPED
 ## New rules
 
 - `allowlist-audit-before-integration`: line experience occurrence(s)=1
+- `audit-formal-scope-before-expansion`: line experience occurrence(s)=1
 - `frequency-weight-positive-path-and-unsupported-rejections`: line experience occurrence(s)=1
 - `host-containment-gate-must-be-supported-host-verified`: line experience occurrence(s)=1
 - `independent-statistics-need-versioned-packet`: line experience occurrence(s)=1
@@ -101,6 +104,7 @@ CONTEXT_RESCOPED
 
 ## Future guidance
 
+- A completed commit does not prove formal scope correctness; audit the frozen allowlist against the complete diff before starting an expansion.
 - A consumer projection must carry every bounded report section required by the contract; consumers must not parse packets independently.
 - A contract test must exercise the real new-run dispatch seam, not only the typed entrypoint, because an unchanged legacy fallback can bypass the contract entirely.
 - A durable backend packet is not a user-visible capability until its dedicated consumer renders the packet contract.
@@ -148,3 +152,10 @@ CONTEXT_RESCOPED
 - #24: `456789ab-cdef-4012-3456-789abcdef012` | 2026-08-02T19:42:57.300Z | GATE/gate_new_run_fixture_migrated | incident=`3456789a-bcde-4f01-9234-56789abcdef0` | lesson_key=`new-run-prediction-tests-must-declare-structure` | event_sha256=`3e74d20a783b8bd1a4cce7f9ae795a5f110b8d772d5d470a0cfbb1c5a79a6046`
 - #25: `56789abc-def0-4123-4567-89abcdef0123` | 2026-08-02T19:42:57.300Z | GATE/baseline_and_current_full_gate_passed | incident=`6789abcd-ef01-4234-5678-9abcdef01234` | lesson_key=`baseline-gate-needs-matching-dependency-preflight` | event_sha256=`4a998b7800412305ad00f580c038004d8a6e8e39bc6b8c79ee66161a2e80e021`
 - #26: `6789abcd-ef01-4234-5678-9abcdef01234` | 2026-08-02T19:42:57.300Z | GATE/sandbox_containment_supported_host_reverified | incident=`01234567-89ab-4cde-f012-3456789abcde` | lesson_key=`host-containment-gate-must-be-supported-host-verified` | event_sha256=`db46e73196e54cf01d7c7ca3b6ad79b31d75ab2cfa9494c9a6beee9115f65b2a`
+- #27: `789abcde-f012-4345-6789-abcdef012345` | 2026-08-03T09:32:27.000Z | GAP/existing_line_scope_drift_audit | incident=`89abcdef-0123-4456-789a-bcdef0123456` | lesson_key=`audit-formal-scope-before-expansion` | event_sha256=`d49f3d60726a735ffc920af7ffbbeb57a974a66c47f9c6e45edf7f7c5f8c7604`
+- #28: `65e32663-5c93-461b-961b-61d0cf78e01d` | 2026-08-03T09:34:15.582Z | STATE_CHANGE/context_rescope_required | incident=`dd68a654-c512-4c50-8e55-742c82b16d38` | lesson_key=`context-pack-rescope` | event_sha256=`4f0110bb4a9642cb496768e4ec84c828573655d7cf959c603554dbdb8acf3164`
+- #29: `2dee7b8b-b8ff-4ab6-858a-a5ac63fa28a3` | 2026-08-03T09:34:15.597Z | STATE_CHANGE/context_rescoped | incident=`177eb231-1f50-4f24-8292-ce6a55789bab` | lesson_key=`context-pack-rescope` | event_sha256=`37b9618edff85fa96550d07195843109e35978d1d770f88973fead6e2a4e455a`
+- #30: `c1d2e3f4-a5b6-4789-0123-abcdef012359` | 2026-08-03T15:21:07.000Z | GATE/prediction_api_gate_passed | incident=`d2e3f4a5-b6c7-4890-1234-abcdef012360` | lesson_key=`prediction-protocol-scope` | event_sha256=`0ce9ebc00878fe2a72cd3befe412485ecb379a02d63ddb4b073263a73a225d6c`
+- #31: `edb94885-672a-49e7-85f7-ee6ba1c1fe94` | 2026-08-03T15:49:29.142Z | STATE_CHANGE/context_rescope_required | incident=`89736fe8-26f3-46f0-9fd0-c0119b195750` | lesson_key=`context-pack-rescope` | event_sha256=`1af9fd774435f868f7c8622baeaf5c84d49f493e316b5397459fd91fc876ff35`
+- #32: `76390678-ddf0-405b-a007-a41d34dcbec1` | 2026-08-03T15:49:29.157Z | STATE_CHANGE/context_rescoped | incident=`2d5d33da-f71d-4edc-b922-668aaa370725` | lesson_key=`context-pack-rescope` | event_sha256=`651834f7919f424bc523e60bb598030de3d708ffad93ddc5325f56242dea3e14`
+- #33: `e456789a-bcde-4f01-9234-56789abcdef0` | 2026-08-03T19:27:46.000Z | GATE/baseline_current_full_gate_attribution | incident=`f56789ab-cdef-4012-3456-789abcdef012` | lesson_key=`baseline-current-gate-attribution` | event_sha256=`51a44edde53187202aeb8ba932ab6d667da11ccae7b72e17cc1ee2d431284ff5`

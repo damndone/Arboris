@@ -31,8 +31,10 @@ export function LauncherRoute() {
 
   function goToProject(root: string, opts: { openGenesis?: boolean } = {}) {
     touchRecent(root);
-    const suffix = opts.openGenesis ? "?genesis=1" : "";
-    navigate(`/p/${rootToSlug(root)}/graph${suffix}`);
+    const suffix = opts.openGenesis ? "?open_genesis=1" : "";
+    navigate(`/p/${rootToSlug(root)}/graph${suffix}`, {
+      state: opts.openGenesis ? { openGenesis: true } : undefined,
+    });
   }
 
   return (

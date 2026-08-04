@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from workbench.engine.pack import AnalysisPack
-from workbench.engine.registry import ModelHandler
+from workbench.engine.registry import ModelHandler, ModelRegistryError
+import workbench.engine.registry as registry
 from workbench.engine.stages.estimation import CORE_PACK
 
 
@@ -24,3 +25,22 @@ def test_new_family_contract_can_be_declared_as_one_additive_handler() -> None:
 
     assert [item.model_type for item in pack.model_handlers] == ["v186_test_family"]
     assert not pack.defaults_by_y_type
+
+
+def test_registry_rejects_duplicate_model_handler_keys_instead_of_overwriting(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "MODEL_REGISTRY", {})
+    handler = ModelHandler(
+        model_type="v186_duplicate_guard",
+        model_id="v186_duplicate_guard_1",
+        serves_y_types=("continuous",),
+        fit=lambda context, env: ("v186_duplicate_guard_1", {}, None),
+    )
+
+    registry.register_model(handler)
+
+    try:
+        registry.register_model(handler)
+    except ModelRegistryError as error:
+        assert "v186_duplicate_guard" in str(error)
+    else:
+        raise AssertionError("duplicate model handler registration must fail closed")
