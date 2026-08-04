@@ -28,7 +28,6 @@
     "qq_residuals": [],
     "raw_data.csv": [],
     "report_html": [],
-    "report_pdf": [],
     "residuals_fitted": [],
     "residuals_vs_x": [],
     "scatter_plots": [],
@@ -52,8 +51,7 @@
     ],
     "statistical_tests_t_tests": [
       "cleaned_dataset"
-    ],
-    "tables_xlsx": []
+    ]
   },
   "error_codes": [],
   "models": {

@@ -30,7 +30,6 @@
     "kde_plots": [],
     "raw_data.csv": [],
     "report_html": [],
-    "report_pdf": [],
     "scatter_plots": [],
     "statistical_tests_anova": [
       "cleaned_dataset"
@@ -52,8 +51,7 @@
     ],
     "statistical_tests_t_tests": [
       "cleaned_dataset"
-    ],
-    "tables_xlsx": []
+    ]
   },
   "error_codes": [],
   "models": {
