@@ -222,6 +222,37 @@ def dataset_snapshot_hash(frame: pd.DataFrame) -> str:
     return hashlib.sha256(metadata + values).hexdigest()
 
 
+_CONTROL_POLICY_VERSION = 1
+_MAX_PERMUTATIONS = 1
+_MAX_NOISE_FEATURES = 1
+
+
+def _control_budget_record(
+    *,
+    requested: tuple[str, ...],
+    executed: tuple[str, ...],
+) -> dict[str, Any]:
+    """Describe the bounded control budget this run actually consumed.
+
+    A packet that does not say how much of its budget it spent cannot be told
+    apart from one that stopped early, which would make "the controls passed"
+    unverifiable.
+    """
+
+    fully_executed = set(executed) == set(requested)
+    return {
+        "policy_version": _CONTROL_POLICY_VERSION,
+        "max_permutations": _MAX_PERMUTATIONS,
+        "max_noise_features": _MAX_NOISE_FEATURES,
+        "requested_controls": len(requested),
+        "executed_controls": len(executed),
+        "fully_executed": fully_executed,
+        "stop_reason": (
+            "BUDGET_NOT_EXHAUSTED" if fully_executed else "CONTROL_NOT_EXECUTED"
+        ),
+    }
+
+
 def _metric_weights(actual: pd.Series, sample_weight: pd.Series | None) -> list[float]:
     if sample_weight is None:
         return [1.0] * len(actual)
@@ -654,6 +685,14 @@ def run_oos_prediction(
         "seed": control_seed,
         "controls": controls,
         "status": "prepared" if controls else "not_requested",
+        "budget": _control_budget_record(
+            requested=("permuted_target", "seeded_noise_features") if control_seed is not None else (),
+            executed=tuple(
+                str(entry.get("control"))
+                for entry in controls
+                if isinstance(entry, dict) and entry.get("control")
+            ),
+        ),
         "limits": ["control metrics require the same bounded model budget"] if controls else [],
     }
     evaluation = {
