@@ -459,6 +459,7 @@ def _submit_run(
         else None
     )
     labels = _normalize_labels(form.get("labels", {}))
+    statistical_tests_request = form.get("statistical_tests") or None
     if form.get("model_type", "auto") == "ols" and model_options:
         from ..contracts.model.ols import effective_ols_covariance
 
@@ -627,6 +628,7 @@ def _submit_run(
         form.get("analysis_weight", ""),
         form.get("sampling_weight", ""),
         labels,
+        statistical_tests_request,
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -675,6 +677,7 @@ def _bg_run(
     analysis_weight: str = "",
     sampling_weight: str = "",
     labels: dict[str, object] | None = None,
+    statistical_tests_request: dict | None = None,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -747,6 +750,7 @@ def _bg_run(
             analysis_weight=analysis_weight,
             sampling_weight=sampling_weight,
             labels=labels,
+            statistical_tests=statistical_tests_request,
             lmm_execution_admission=lmm_execution_admission,
             stop_reason=_stop_reason,
         )

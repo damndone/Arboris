@@ -268,6 +268,7 @@ async def run_endpoint(
     focal_x: str = Form(""),  # v1.6.5 role layer: comma-joined focal columns
     model_options: str = Form("{}"),
     labels: str = Form("{}"),
+    statistical_tests: str = Form("{}"),
 ) -> dict[str, str]:
     _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     root = Path(project_root)
@@ -281,6 +282,12 @@ async def run_endpoint(
         parsed_labels = _normalize_labels(parse_model_options(labels))
     except (ModelOptionsError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=f"INVALID_LABELS: {exc}") from exc
+    try:
+        parsed_statistical_tests = parse_model_options(statistical_tests)
+    except ModelOptionsError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"INVALID_STATISTICAL_TESTS: {exc.code}"
+        ) from exc
 
     events = get_event_manager()
     if not events.try_acquire_slot():
@@ -320,6 +327,8 @@ async def run_endpoint(
         }
         if parsed_labels:
             form["labels"] = parsed_labels
+        if parsed_statistical_tests:
+            form["statistical_tests"] = parsed_statistical_tests
         started_at = datetime.now(timezone.utc).isoformat()
         try:
             result = _submit_run(

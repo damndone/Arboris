@@ -180,6 +180,7 @@ def run_workflow(
     x: list[str],
     model_type: str = "auto",
     imputation: dict | None = None,
+    statistical_tests: dict | None = None,
     entity_col: str = "",
     time_col: str = "",
     covariance: str = "",
@@ -374,6 +375,7 @@ def run_workflow(
             started_at,
             model_type=model_type,
             imputation=imputation,
+            statistical_tests=statistical_tests,
             entity_col=entity_col,
             time_col=time_col,
             covariance=covariance,
@@ -546,6 +548,7 @@ def _run_workflow(
     sheet_name: str | None = None,
     transpose: bool = False,
     imputation: dict | None = None,
+    statistical_tests: dict | None = None,
     entity_col: str = "",
     time_col: str = "",
     covariance: str = "",
@@ -633,6 +636,7 @@ def _run_workflow(
     ctx.artifacts["_model_type"] = model_type
     ctx.artifacts["_started_at"] = started_at
     ctx.artifacts["_imputation_request"] = imputation
+    ctx.artifacts["_statistical_tests_request"] = statistical_tests
     ctx.artifacts["_entity_col"] = entity_col
     ctx.artifacts["_time_col"] = time_col
     ctx.artifacts["_covariance"] = effective_covariance
