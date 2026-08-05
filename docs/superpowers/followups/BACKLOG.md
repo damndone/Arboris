@@ -17,14 +17,21 @@
 
 ## 0. 一句话结论
 
-**v1.8.0 已 SHIPPED**（2026-07-22，tag `v1.8.0`，`origin/main`=`63f2fa1`；仓库已更名 Arboris）。
-本版是 ARMA–GARCH 时间序列波动率工作台；发布说明见 `docs/releases/v1.8-release-notes.md`，
-逐条 gate 证据见 `release-trains/v1.8/release-ledger.json`。
+**v1.8.6 已 SHIPPED**（2026-08-04，tag `v1.8.6`，`origin/main`=`9d5e947`）。
+本版是 Predictive Research 正确性基础 + 四个新模型族 + 统计检验补完 + 报告审阅工作区；
+发布说明见 `docs/releases/v1.8.6-release-notes.md`。
 
-**下一版 v1.8.1 = Agent Notebook + 选中文本交互**，路线经 2026-07-22 两轮对齐后拍板，
-见 `roadmap/2026-07-22-agent-analysis-system-roadmap.md`。北极星不是"更自主的 Agent"，
-而是**认知自主性高、操作自主性分级**：理解/检查/设计/生成备选可以高度自主；
-改图、装依赖、跑新算法、产出正式数值必须走 typed → validate → confirm → execute → verify → commit。
+**下一版 v1.8.7 = 复杂抽样设计（引擎优先）+ 测量级别声明**，2026-08-04 拍板，
+设计见 `specs/2026-08-04-v1.8.7-survey-design-and-measurement-level-design.md`。
+单轴：对标 SPSS/Stata。核心是**引擎优先、族是声明**——设计方差引擎做一次，
+模型族通过 `ModelFamilyContract` 一条声明接入，并拆掉两张枚举天花板
+（「族 × 设计」支持表、`result_shape` 封闭枚举）。
+产品定位（四层、提问/回答不对称、永久红线）见
+`roadmap/2026-08-04-ai-native-vs-spss-stata-positioning.md`。
+
+北极星不是"更自主的 Agent"，而是**认知自主性高、操作自主性分级**：
+理解/检查/设计/生成备选可以高度自主；改图、装依赖、跑新算法、产出正式数值
+必须走 typed → validate → confirm → execute → verify → commit。
 
 > 三条系统不变量（roadmap §1，任何版本不得违反）：
 > 没有类型的内容可以解释、不能执行；没有验证的实现可以实验、不能产出正式数字；
@@ -36,7 +43,7 @@
 > NL proposal 当前只开放 `data.columns.cast`；单列 `data.column.cast` 与 `code.execute` 保持 NL 关闭。
 > P-SBX2、P-CE1 和 honest-DiD 性能优化仍是独立后续债，不自动并入 v1.7.3。
 
-## 0.1 当前版本状态（2026-07-21）
+## 0.1 当前版本状态（2026-08-04）
 
 - v1.7.1：已发布。
 - v1.7.2：已发布，PR #24 已合并，tag 与 `origin/main` 指向 `4b2e6c1`。
@@ -46,8 +53,19 @@
   时间序列工作台。交付层阻塞（原 `V1.8-DELIVERY-TRUTH`）已在发版前修复并独立验收，详见 §3。
   联合含 MA 的 ARCH/GARCH MLE 仍不属于本版，按 `V1.8-JOINT-ARMA-GARCH-MLE` 单独立项；
   当前一律 `REFERENCE_SEMANTICS = "directional_or_workflow_regression"`，不得称为 Stata 数值复现。
-- v1.8.1：**进行中**。Agent Notebook + 选中文本交互。路线与三条系统不变量见
-  `roadmap/2026-07-22-agent-analysis-system-roadmap.md`（2026-07-22 两轮对齐后拍板）。
+- v1.8.1：**已发布**（tag `v1.8.1`）。Agent Notebook + 选中文本交互。
+- v1.8.2：**已发布**（2026-07-25，PR #29，`origin/main`=`ef38ece`，tag `v1.8.2`）。
+  Raw 节点统计探索 + Agent 自主编排多步工作流；删除 class3 preset 并加防复发闸门。
+- v1.8.3 / v1.8.4 / v1.8.5：**已发布**（tag 同名）。v1.8.4 = Agent Model Composition；
+  v1.8.5 = 分级 typed memory + `ModelFamilyContract`。v1.8.4 遗留见 §1 表
+  `V1.8.4-OPEN` / `V1.8.4-TIMER-EVIDENCE`。
+- v1.8.6：**已发布**（2026-08-04，`origin/main`=`9d5e947`，tag `v1.8.6`）。
+  Predictive Research 正确性基础（SplitPlan / holdout 隔离 / 负对照 / 泄漏诱饵）、
+  四个新模型族（ordinal / multinomial / survival_cox / quantile）、统计检验补完、
+  三种权重语义显式化、FeatureRecipe 与数据操作、变量与值标签、报告审阅工作区。
+  本版开放欠账见 §1 表 `V1.8.6-*` 五条。
+- v1.8.7：**进行中**。复杂抽样设计（引擎优先）+ 测量级别声明。见 §0 与
+  `specs/2026-08-04-v1.8.7-survey-design-and-measurement-level-design.md`。
 
 ---
 
@@ -72,6 +90,11 @@
 | ✅ 已完成 | V1.8.5-TYPED-MEMORY | 分级 typed memory（`project_domain_fact`、`apply_mode`、`vocabulary_version`、`verifier`、`last_validated_at`）+ 模型族契约（`ModelFamilyContract`，workflow-executable 扩到 cs_did/sa_did/dcdh）。**原标 v1.8.4，2026-07-31 改标**——实际 v1.8.4 是 Agent Model Composition，版本号被复用 | Agent 记忆 / 工作流 | 本机实现、Settings 管理、Notebook registry/admission、独立 GLM/IV/2SLS/TWFE DID 与 memory default 浏览器证据、4398/8/1 full-suite 证据已完成；外部部署 signer/scanner、ML/量化和六层检索链不在本版 | 否 | `specs/2026-07-31-v1.8.5-typed-memory-and-model-family-design.md` |
 | 🟠 本版遗留 | V1.8.4-OPEN | v1.8.4 仅剩 **2 条** open：`notebook_load_not_found`（legacy fixture 走加载/编译路径未复现原故障）、`chain_agent_proposal_upstream_error`（provider 上游故障未取得可归因复现）。2026-07-31 重开的 6 条已完成第二轮核验：5 条核实为 baseline `6607c2d` 已满足（带 commit:file:line 引用），`proposal_ready_budget_terminal_error` 原诊断不复现，记 not_applicable；**均不计为 v1.8.4 交付**。 | Agent/Notebook | 两条都不猜根因：legacy 需可确定性复现的 fixture，provider 需可观测的复现窗口 | 否 | `.agent/devlines/v1-8-4-reopened-incident-truth/events.jsonl` |
 | 🟠 本版遗留 | V1.8.4-TIMER-EVIDENCE | 规划计时器跨组件重挂的修复仍只有确定性测试证据，无真机复现（需在真实规划调用进行中触发重挂） | 验收证据 | 下次真机 Notebook 验收时顺手构造一次重挂；不要补写为已验收 | 否 | `docs/superpowers/archive/handoff/2026-07-30-v1.8.4-remediation-handoff.md` §未完成 |
+| 🟢 v1.8.7 在做 | V1.8.6-SVY-DESIGN | `sampling_weight` fail-closed，`strata`/`PSU` 只存在于错误信息里。复杂抽样调查数据（CGSS/CFPS/CHARLS/NHANES）得不到正确方差估计。**且现有错误信息建议用 `entity_col + covariance=clustered` 代替，这个建议本身是错的**（聚类稳健 SE 忽略分层带来的方差缩减、无设计自由度） | 统计正确性 | v1.8.7 A1：设计方差引擎（Taylor + 重复权重）+ 族按声明接入 | 是（对该类数据） | `specs/2026-08-04-v1.8.7-survey-design-and-measurement-level-design.md` |
+| 🟢 v1.8.7 在做 | V1.8.6-ORDINAL-ROUTING | 整数编码量表（李克特 1–4）被判为计数型静默路由到 Poisson；`YKind.ORDINAL` 仅由 ordered Categorical 产生。用户看不出来 | 路由/元数据 | v1.8.7 A2：测量级别声明 + 未声明时显式 advisory + Agent 批量提议。**不改自动路由**（区别在测量方式不在数值，自动跳只会换一批受害者） | 否 | 同上 |
+| 🟢 v1.8.7 在做 | V1.8.6-FAMILY-ORACLE | `ordinal_logit` / `multinomial_logit` / `quantile_regression` 仅内部一致性——复核用的 statsmodels 正是执行引擎，等于自己批自己的卷子。`survival_cox` 已对 R 验证但 R 数值硬编码在测试里，无可重跑生成脚本 | 验证等级 | v1.8.7 A3：五个 `.R` 生成脚本 + fixture + 逐位对照，照 `tests/fixtures/{cs_did,dcdh,sa_did,honest_did}/generate_oracle.R` 范式 | 否 | 同上 |
+| 🟠 v1.8.8 | V1.8.6-COLUMN-LOOKAHEAD | **列级前视无法检测**。无 availability/provenance 声明时系统判断不了某列是否偷看未来；时序标成 IID 时一个显式未来位移特征可跑出 r²>0.9 而不被拦。`AvailabilitySpecV1` 字段已在，但唯一构造点 `prediction.py:147` 把 `kind`/`validation_status` 硬编码为 `declared`，无列级信息、无校验 | 静默正确性 | 填空不是重建：补生产者与校验；`test_future_shift_leakage_decoy_v186.py` 现钉为已知行为，落地后应收紧为拒绝 | 否 | v1.8.7 设计 §5 明确顺延 |
+| 🟡 长期 | V1.8.6-SCOPE-LIMITS | 三条本版未交付项：外部格式（`.dta`/`.sav`）标签自动保留不宣称；数据节点模型桥接只启动数值 OLS；temporal/panel prediction 实际执行未做 | 范围 | 各自按需求单独立项，不打包 | 否 | `docs/releases/v1.8.6-release-notes.md` 已知限制 |
 | 🟡 测试 | N2 | 预存 slot-leak race:`test_run_inputs_persisted` 发 run 不等完成 → EventManager 单例 slot 泄漏，反字母序运行会 429 污染后续 run 测试 | 测试卫生（预存，v1.6.10 发现） | 测试收尾 join/await run 或按测试隔离 slot（字母序下不触发，故 gate 一直绿；非回归） | 否 | §2-N2 |
 | 🟡 工程 | W1 | draft-execute dedupe 响应 `produced_lineage` 与 fresh execute 不同形 | 后端协议 | 统一响应形状 | 否 | §2-W1 |
 | 🟡 工程 | W2 | 全量孤儿 upload/draft GC（项目级后台回收未做） | 后端 | 单独设计 GC；本版只回收 discard 创世链的无引用 upload | 否 | §2-W2 |
