@@ -1,0 +1,36 @@
+# R packages required by the committed oracle generators.
+#
+# R packages are NOT per-worktree.  They install into the machine-level library
+# (`/opt/homebrew/lib/R/<ver>/site-library` here), so every worktree and every
+# session already shares one copy -- unlike `.venv` and `frontend/node_modules`,
+# which default to one copy per checkout and therefore need
+# `scripts/link-shared-deps.sh`.  Nothing here needs re-downloading per worktree.
+#
+# What was missing is a *declaration*.  Each generator used to name its
+# dependencies only in a comment, so a fresh machine discovered them by failing
+# somewhere inside an oracle run, and a package installed by hand left no record
+# of why it was needed.
+#
+# Install everything listed here with:
+#   Rscript tests/fixtures/install-r-oracle-requirements.R
+#
+# A missing package must make the oracle FAIL LOUDLY, never silently skip:
+# a skipped oracle is indistinguishable from a passing one in the summary, and
+# this release exists to remove exactly that class of invisible outcome.
+
+# --- survey design (v1.8.7) ---
+survey          # Lumley; svydesign/svyglm/svyolr/svycoxph, replicate weights, withReplicates
+MASS            # polr — ordinal logit oracle
+nnet            # multinom — multinomial logit oracle
+quantreg        # rq — quantile regression oracle
+survival        # coxph — Cox oracle
+
+# --- DID families (pre-existing generators) ---
+did             # tests/fixtures/cs_did/generate_fixtures.R
+DRDID           # tests/fixtures/cs_did/generate_fixtures.R
+fixest          # tests/fixtures/sa_did/generate_oracle.R
+HonestDiD       # tests/fixtures/honest_did/generate_oracle.R
+DIDmultiplegtDYN # tests/fixtures/dcdh/generate_oracle.R
+
+# --- shared ---
+jsonlite        # every generator writes JSON fixtures
