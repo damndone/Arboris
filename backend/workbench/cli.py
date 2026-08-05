@@ -205,6 +205,37 @@ def run(
         "", "--prediction-sampling-method",
         help="Class-imbalance resampling: smote | oversample | undersample.",
     ),
+    # v1.8.7 block 1.  Added alongside the HTTP surface so the CLI does not
+    # repeat the D3 debt of silently lacking parameters the API accepts.
+    survey_strata_col: str = typer.Option(
+        "", "--survey-strata-col", help="Complex survey design: stratum column.",
+    ),
+    survey_psu_col: str = typer.Option(
+        "", "--survey-psu-col", help="Complex survey design: primary sampling unit column.",
+    ),
+    survey_fpc_col: str = typer.Option(
+        "", "--survey-fpc-col", help="Complex survey design: finite population correction column.",
+    ),
+    survey_replicate_weights: list[str] = typer.Option(
+        [], "--survey-replicate-weight",
+        help="Replicate weight column. Repeat for multiple columns.",
+    ),
+    survey_replicate_type: str = typer.Option(
+        "", "--survey-replicate-type",
+        help="Replicate variance method: brr | jackknife | bootstrap | provided.",
+    ),
+    survey_lonely_psu: str = typer.Option(
+        "", "--survey-lonely-psu",
+        help="Single-PSU stratum policy: fail | remove | adjust | average | certainty.",
+    ),
+    survey_weight_frame: str = typer.Option(
+        "", "--survey-weight-frame",
+        help="Panel weight semantics: cross_sectional | longitudinal.",
+    ),
+    survey_subpop: str = typer.Option(
+        "", "--survey-subpop",
+        help="Subpopulation expression evaluated on the full design.",
+    ),
 ) -> None:
     from .orchestrator import parse_imputation_request, run_workflow
 
@@ -240,6 +271,14 @@ def run(
         prediction_model_type=prediction_model_type,
         prediction_cv_folds=prediction_cv_folds,
         prediction_sampling_method=prediction_sampling_method,
+        survey_strata_col=survey_strata_col,
+        survey_psu_col=survey_psu_col,
+        survey_fpc_col=survey_fpc_col,
+        survey_replicate_weights=list(survey_replicate_weights),
+        survey_replicate_type=survey_replicate_type,
+        survey_lonely_psu=survey_lonely_psu,
+        survey_weight_frame=survey_weight_frame,
+        survey_subpop=survey_subpop,
     )
     run_id = result["run_id"]
     # stdout: machine-readable run_id only — preserves the long-standing
