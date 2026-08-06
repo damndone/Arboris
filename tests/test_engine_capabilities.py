@@ -64,5 +64,6 @@ def test_groups_match_known_vocabulary():
         {
             "auto", "Linear", "Binary", "Count", "Panel", "GLM", "IV", "DID",
             "Time Series", "Ordinal", "Nominal", "Survival", "Quantile",
+            "ANOVA",
         }
     )

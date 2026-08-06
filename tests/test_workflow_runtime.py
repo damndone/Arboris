@@ -38,6 +38,7 @@ def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -
     from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
 
     assert set(MODEL_FAMILY_CONTRACTS) == {
+        "anova",
         "ols",
         "logit",
         "probit",

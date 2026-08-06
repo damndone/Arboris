@@ -105,6 +105,7 @@ _CAPABILITY_PRIMARY_ARTIFACTS = {
         "survival_cox_1": "model_result",
         "survival_evidence": "survival_evidence",
     },
+    "anova": {"anova_1": "model_result"},
     "quantile_regression": {"quantile_regression_1": "model_result"},
     "linear_mixed_effects": {
         "linear_mixed_effects_1.result": "model_result_packet"

@@ -738,6 +738,18 @@ def _build_dcdh_model_params(
 
 
 MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
+    "anova": ModelFamilyContract(
+        family="anova",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=lambda spec: {},
+        expected_artifacts=("anova_1",),
+        result_shape="anova_table",
+        allows_covariance=False,
+        model_options_fields=("sums_of_squares", "categorical", "interactions", "posthoc"),
+        model_options_required_fields=("sums_of_squares",),
+    ),
     "ols": ModelFamilyContract(
         family="ols",
         survey_glm_family="gaussian",

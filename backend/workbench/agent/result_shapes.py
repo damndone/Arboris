@@ -125,3 +125,22 @@ register_result_shape(
     payload_version="1.0",
     description="Event-time effect paths with pre-trend evidence.",
 )
+
+register_result_shape(
+    "anova_table",
+    payload_schema={
+        "type": "object",
+        "required": ["anova_table", "sums_of_squares_type"],
+        "properties": {
+            "anova_table": {"type": "array"},
+            "sums_of_squares_type": {"type": "integer"},
+            "effect_sizes": {"type": "object"},
+            "posthoc": {"type": "object"},
+        },
+    },
+    payload_version="1.0",
+    description=(
+        "Variance decomposition with its declared sums-of-squares type, effect "
+        "sizes and optional post-hoc comparisons."
+    ),
+)

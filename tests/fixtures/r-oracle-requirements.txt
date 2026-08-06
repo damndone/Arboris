@@ -25,6 +25,9 @@ nnet            # multinom — multinomial logit oracle
 quantreg        # rq — quantile regression oracle
 survival        # coxph — Cox oracle
 
+# --- factorial ANOVA / ANCOVA (v1.8.7 P1) ---
+car             # Anova() -- Type II and Type III sums of squares
+
 # --- DID families (pre-existing generators) ---
 did             # tests/fixtures/cs_did/generate_fixtures.R
 DRDID           # tests/fixtures/cs_did/generate_fixtures.R
