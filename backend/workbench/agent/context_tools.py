@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 from pathlib import Path
 import re
+from collections.abc import Callable
 from typing import Any, Iterable, Protocol
 
 from ..artifacts import read_json, sha256_file
@@ -2046,24 +2047,25 @@ class NodeOperationContextProvider:
         }:
             effective_model_type = input_model_types[0]
 
-        if effective_model_type == "time_series.ets":
+        recipe_projection = RECIPE_RESULT_PROJECTIONS.get(effective_model_type)
+        if recipe_projection is not None:
             from .recipe_contracts import recipe_contract
 
             registered = _resolve_verified_registered_artifact(
                 run_root,
-                artifact_id="ets_1",
+                artifact_id=recipe_projection.artifact_id,
                 expected_type="model_result",
             )
             summary = (
                 recipe_contract(effective_model_type).public_result_projection().build(
                     registered[0],
-                    artifact_id="ets_1",
+                    artifact_id=recipe_projection.artifact_id,
                     artifact_sha256=registered[1],
                 )
                 if registered is not None
                 else {
                     "available": False,
-                    "reason_code": "ETS_PUBLIC_RESULT_UNAVAILABLE",
+                    "reason_code": recipe_projection.unavailable_reason_code,
                 }
             )
             return {
@@ -3210,73 +3212,47 @@ def _bounded_model_family_evidence(
     primary = next((item for item in model_results if isinstance(item, dict)), None)
     if not isinstance(primary, dict):
         return None
-    model_type = primary.get("model_type")
-    if model_type == "ordinal_logit":
-        diagnostic_path = run_root / "model_results" / "diagnostics_ordinal_logit_1.json"
-        diagnostic = read_json(diagnostic_path) if diagnostic_path.is_file() else {}
-        parallel = diagnostic.get("parallel_lines") if isinstance(diagnostic, dict) else {}
-        parallel = parallel if isinstance(parallel, dict) else {}
-        return {
-            "contract": "workbench.ordinal_logit.result.v1",
-            "model_type": model_type,
-            "outcome_levels": _bounded_labels(primary.get("outcome_levels")),
-            "odds_ratios": _bounded_numeric_map(
-                primary.get("odds_ratios"),
-                fields=("odds_ratio", "ci_lower", "ci_upper"),
-            ),
-            "marginal_effects": _bounded_ordinal_marginal_effects(primary.get("marginal_effects")),
-            "predicted_probabilities": _bounded_ordinal_probabilities(primary.get("predicted_probabilities")),
-            "parallel_lines": _bounded_parallel_lines(parallel),
-        }
-    if model_type == "multinomial_logit":
-        diagnostic_path = run_root / "model_results" / "diagnostics_multinomial_logit_1.json"
-        diagnostic = read_json(diagnostic_path) if diagnostic_path.is_file() else {}
-        return {
-            "contract": "workbench.multinomial_logit.result.v1",
-            "model_type": model_type,
-            "outcome_levels": _bounded_labels(primary.get("outcome_levels")),
-            "base_category": _bounded_label(primary.get("base_category")),
-            "relative_risk_ratios": _bounded_numeric_map(
-                primary.get("relative_risk_ratios"),
-                fields=("relative_risk_ratio", "ci_lower", "ci_upper"),
-            ),
-            "marginal_effects": _bounded_multinomial_marginal_effects(primary.get("marginal_effects")),
-            "predicted_probabilities": _bounded_probability_map(primary.get("predicted_probabilities")),
-            "diagnostic": _bounded_family_diagnostic(diagnostic),
-        }
-    if model_type == "survival_cox":
-        packet_path = run_root / "survival" / "evidence.json"
+    spec = FAMILY_EVIDENCE_PROJECTIONS.get(primary.get("model_type"))
+    if spec is None:
+        return None
+    return _project_family_evidence(primary, spec, run_root)
+
+
+def _project_family_evidence(
+    primary: dict[str, Any], spec: "FamilyEvidenceSpec", run_root: Path
+) -> dict[str, Any] | None:
+    """Apply a family's declared projection.
+
+    Nothing here knows any family name.  Each family states which fields it
+    exposes and how each is bounded, so adding one is a table entry rather than
+    another branch -- the same move blocks 2 and 3 made in the design layer and
+    in `result_shape`. Leaving the branches here would just relocate the cost.
+    """
+    source: dict[str, Any] = primary
+    if spec.packet_path is not None:
+        packet_path = run_root / spec.packet_path
         packet = read_json(packet_path) if packet_path.is_file() else None
         if not isinstance(packet, dict):
             return None
-        return {
-            "contract": packet.get("contract"),
-            "model_type": model_type,
-            "duration_column": _bounded_label(packet.get("duration_column")),
-            "event_column": _bounded_label(packet.get("event_column")),
-            "nobs": _public_positive_int(packet.get("nobs")),
-            "censoring": _bounded_numeric_fields(packet.get("censoring"), fields=("events", "censored")),
-            "kaplan_meier": _bounded_survival_rows(packet.get("kaplan_meier"), limit=16),
-            "log_rank": _bounded_numeric_fields(
-                packet.get("log_rank"),
-                fields=("statistic", "p_value"),
-                string_fields=("status",),
-                list_fields=("groups",),
-            ),
-            "risk_set": _bounded_survival_rows(packet.get("risk_set"), limit=16),
-            "schoenfeld": _bounded_schoenfeld(packet.get("schoenfeld")),
-        }
-    if model_type == "quantile_regression":
-        return {
-            "contract": "workbench.quantile_regression.result.v1",
-            "model_type": model_type,
-            "quantiles": _bounded_numeric_list(primary.get("quantiles"), limit=7),
-            "fits": _bounded_quantile_fits(primary.get("fits")),
-            "confidence_intervals": _bounded_quantile_intervals(primary.get("confidence_intervals")),
-            "bootstrap": _bounded_bootstrap(primary.get("bootstrap")),
-            "cross_quantile_comparisons": _bounded_cross_quantile_comparisons(primary.get("cross_quantile_comparisons")),
-        }
-    return None
+        source = packet
+
+    sidecars: dict[str, dict[str, Any]] = {}
+    for name, relative in spec.sidecars.items():
+        sidecar_path = run_root / relative
+        loaded = read_json(sidecar_path) if sidecar_path.is_file() else {}
+        sidecars[name] = loaded if isinstance(loaded, dict) else {}
+
+    projected: dict[str, Any] = {
+        "contract": spec.contract if spec.contract is not None else source.get("contract"),
+        "model_type": primary.get("model_type"),
+    }
+    for field in spec.fields:
+        origin = sidecars[field.sidecar] if field.sidecar else source
+        value = origin.get(field.source_key)
+        if field.nested_key is not None:
+            value = value.get(field.nested_key) if isinstance(value, dict) else {}
+        projected[field.key] = field.bound(value)
+    return projected
 
 
 def _bounded_label(value: Any) -> str | None:
@@ -4438,3 +4414,123 @@ def read_prediction_research_evidence(
     """Read v1.8.6 prediction evidence through the shared projection."""
 
     return read_prediction_evidence_from_run_root(run_root, consumer=consumer)
+
+
+@dataclass(frozen=True)
+class FamilyEvidenceField:
+    """One projected field: where it comes from and how it is bounded."""
+
+    key: str
+    source_key: str
+    bound: Callable[[Any], Any]
+    sidecar: str | None = None
+    nested_key: str | None = None
+
+
+@dataclass(frozen=True)
+class FamilyEvidenceSpec:
+    """A family's declaration of what its evidence exposes.
+
+    The bounds are part of the declaration, not an afterthought: this projection
+    is what an agent sees, and an unbounded probability or survival table would
+    turn it into a data-export channel.
+    """
+
+    contract: str | None
+    fields: tuple[FamilyEvidenceField, ...]
+    packet_path: str | None = None
+    sidecars: dict[str, str] = field(default_factory=dict)
+
+
+FAMILY_EVIDENCE_PROJECTIONS: dict[str, FamilyEvidenceSpec] = {
+    "ordinal_logit": FamilyEvidenceSpec(
+        contract="workbench.ordinal_logit.result.v1",
+        sidecars={"diagnostic": "model_results/diagnostics_ordinal_logit_1.json"},
+        fields=(
+            FamilyEvidenceField("outcome_levels", "outcome_levels", _bounded_labels),
+            FamilyEvidenceField(
+                "odds_ratios", "odds_ratios",
+                lambda v: _bounded_numeric_map(v, fields=("odds_ratio", "ci_lower", "ci_upper")),
+            ),
+            FamilyEvidenceField("marginal_effects", "marginal_effects", _bounded_ordinal_marginal_effects),
+            FamilyEvidenceField("predicted_probabilities", "predicted_probabilities", _bounded_ordinal_probabilities),
+            FamilyEvidenceField(
+                "parallel_lines", "parallel_lines", _bounded_parallel_lines, sidecar="diagnostic"
+            ),
+        ),
+    ),
+    "multinomial_logit": FamilyEvidenceSpec(
+        contract="workbench.multinomial_logit.result.v1",
+        sidecars={"diagnostic": "model_results/diagnostics_multinomial_logit_1.json"},
+        fields=(
+            FamilyEvidenceField("outcome_levels", "outcome_levels", _bounded_labels),
+            FamilyEvidenceField("base_category", "base_category", _bounded_label),
+            FamilyEvidenceField(
+                "relative_risk_ratios", "relative_risk_ratios",
+                lambda v: _bounded_numeric_map(
+                    v, fields=("relative_risk_ratio", "ci_lower", "ci_upper")
+                ),
+            ),
+            FamilyEvidenceField("marginal_effects", "marginal_effects", _bounded_multinomial_marginal_effects),
+            FamilyEvidenceField("predicted_probabilities", "predicted_probabilities", _bounded_probability_map),
+        ),
+    ),
+    "survival_cox": FamilyEvidenceSpec(
+        contract=None,  # the packet carries its own
+        packet_path="survival/evidence.json",
+        fields=(
+            FamilyEvidenceField("duration_column", "duration_column", _bounded_label),
+            FamilyEvidenceField("event_column", "event_column", _bounded_label),
+            FamilyEvidenceField("nobs", "nobs", _public_positive_int),
+            FamilyEvidenceField(
+                "censoring", "censoring",
+                lambda v: _bounded_numeric_fields(v, fields=("events", "censored")),
+            ),
+            FamilyEvidenceField("kaplan_meier", "kaplan_meier", lambda v: _bounded_survival_rows(v, limit=16)),
+            FamilyEvidenceField(
+                "log_rank", "log_rank",
+                lambda v: _bounded_numeric_fields(
+                    v, fields=("statistic", "p_value"),
+                    string_fields=("status",), list_fields=("groups",),
+                ),
+            ),
+            FamilyEvidenceField("risk_set", "risk_set", lambda v: _bounded_survival_rows(v, limit=16)),
+            FamilyEvidenceField("schoenfeld", "schoenfeld", _bounded_schoenfeld),
+        ),
+    ),
+    "quantile_regression": FamilyEvidenceSpec(
+        contract="workbench.quantile_regression.result.v1",
+        fields=(
+            FamilyEvidenceField("quantiles", "quantiles", lambda v: _bounded_numeric_list(v, limit=7)),
+            FamilyEvidenceField("fits", "fits", _bounded_quantile_fits),
+            FamilyEvidenceField("confidence_intervals", "confidence_intervals", _bounded_quantile_intervals),
+            FamilyEvidenceField("bootstrap", "bootstrap", _bounded_bootstrap),
+            FamilyEvidenceField(
+                "cross_quantile_comparisons", "cross_quantile_comparisons",
+                _bounded_cross_quantile_comparisons,
+            ),
+        ),
+    ),
+}
+
+
+@dataclass(frozen=True)
+class RecipeResultProjection:
+    """A family whose public result comes from its recipe contract.
+
+    Structurally different from `FamilyEvidenceSpec`: this path builds the
+    projection from a registered artifact via the family's recipe contract, so
+    only the artifact id and the unavailable reason vary. Declaring those two
+    keeps the entry condition a lookup rather than a family name in an `if`.
+    """
+
+    artifact_id: str
+    unavailable_reason_code: str
+
+
+RECIPE_RESULT_PROJECTIONS: dict[str, RecipeResultProjection] = {
+    "time_series.ets": RecipeResultProjection(
+        artifact_id="ets_1",
+        unavailable_reason_code="ETS_PUBLIC_RESULT_UNAVAILABLE",
+    ),
+}

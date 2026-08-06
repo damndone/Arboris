@@ -885,6 +885,42 @@ def run_ols(
     return _add_engine(result), original
 
 
+
+def _attach_average_marginal_effects(result: dict[str, Any], fitted: Any) -> dict[str, Any]:
+    """Add average marginal effects to a GLM-family result.
+
+    logit, probit and poisson report coefficients on the log-odds or log-rate
+    scale, which nobody interprets directly -- so without this the last step of
+    the analysis was left for the user to do by hand, while ordinal and
+    multinomial runs already carried it.
+
+    The record shape is deliberately identical to the one those two families
+    emit, so a consumer reads marginal effects the same way everywhere rather
+    than learning a second layout.  Failure is non-fatal: a model that cannot
+    produce them still returns its estimates, with the reason recorded.
+    """
+    from .normalize import _public_term
+
+    try:
+        frame = fitted.get_margeff(at="overall").summary_frame()
+        records = frame.reset_index().to_dict(orient="records")
+        for record in records:
+            # statsmodels labels rows with the formula term, `Q('x1')`, while
+            # coefficients are keyed by the plain column. Leaving both shapes in
+            # one payload would make marginal effects impossible to line up with
+            # the estimates they belong to.
+            raw = record.pop("index", None)
+            term = _public_term(raw) if raw is not None else None
+            record["term"] = term
+            record["index"] = term
+        result["marginal_effects"] = records
+        result["marginal_effects_basis"] = "average_marginal_effect"
+    except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+        result["marginal_effects"] = []
+        result["marginal_effects_unavailable_reason"] = type(exc).__name__
+    return result
+
+
 def run_logit(
     frame: pd.DataFrame, y: str, x: list[str], model_id: str,
     categorical_x: set[str] | None = None,
@@ -907,6 +943,7 @@ def run_logit(
         )
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "logit"
+    _attach_average_marginal_effects(result, fitted)
     return _add_engine(result), fitted
 
 
@@ -932,6 +969,7 @@ def run_probit(
         raise ValueError(f"Probit model {model_id} did not converge.")
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "probit"
+    _attach_average_marginal_effects(result, fitted)
     return _add_engine(result), fitted
 
 
@@ -993,6 +1031,7 @@ def run_poisson(
         result["exposure_col"] = exposure_col
     else:
         result["model_type"] = "poisson"
+    _attach_average_marginal_effects(result, fitted)
     return _add_engine(result), fitted
 
 

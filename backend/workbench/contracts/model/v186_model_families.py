@@ -62,6 +62,33 @@ def _require_validation(value: Any) -> Mapping[str, str]:
     return validation  # type: ignore[return-value]
 
 
+def _require_identity(
+    value: Mapping[str, Any],
+    *,
+    packet_name: str,
+    expected_contract: str,
+    expected_model_type: str,
+) -> None:
+    """For packets that share identity but not the result envelope.
+
+    The ordinal diagnostics packet carries contract, model_type, parallel_lines,
+    nobs and validation -- no coefficients, no model_id, no engine. Pushing it
+    through the result envelope would be forcing a fit, the same mistake in the
+    opposite direction from letting each family restate the core.
+    """
+    from .result_envelope import ResultEnvelopeError, validate_result_identity
+
+    try:
+        validate_result_identity(
+            value,
+            packet_name=packet_name,
+            expected_contract=expected_contract,
+            expected_model_type=expected_model_type,
+        )
+    except ResultEnvelopeError as exc:
+        raise ContractError(str(exc)) from exc
+
+
 def _require_common(
     value: Mapping[str, Any],
     *,
@@ -69,12 +96,22 @@ def _require_common(
     expected_contract: str,
     expected_model_type: str,
 ) -> None:
-    _require_string(value.get("contract"), f"{packet_name}.contract")
-    if value["contract"] != expected_contract:
-        raise ContractError(f"{packet_name}.contract must be {expected_contract}")
-    _require_string(value.get("model_type"), f"{packet_name}.model_type")
-    if value["model_type"] != expected_model_type:
-        raise ContractError(f"{packet_name}.model_type must be {expected_model_type}")
+    """Delegate the shared core to its single definition.
+
+    This used to check two of the eight shared fields itself, leaving the other
+    six restated per family with nothing keeping them in step.
+    """
+    from .result_envelope import ResultEnvelopeError, validate_result_envelope
+
+    try:
+        validate_result_envelope(
+            value,
+            packet_name=packet_name,
+            expected_contract=expected_contract,
+            expected_model_type=expected_model_type,
+        )
+    except ResultEnvelopeError as exc:
+        raise ContractError(str(exc)) from exc
 
 
 @dataclass(frozen=True)
@@ -162,7 +199,7 @@ class OrdinalDiagnosticsContract:
     validation: Mapping[str, str]
 
     def __post_init__(self) -> None:
-        _require_common(
+        _require_identity(
             self.to_dict(),
             packet_name="ordinal_diagnostics",
             expected_contract="workbench.ordinal_logit.diagnostics.v1",
