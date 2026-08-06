@@ -1168,4 +1168,47 @@ class EstimationStage:
         ctx.artifacts["_model_results"] = model_results
         ctx.artifacts["_fitted_models"] = fitted_models
         ctx.artifacts["_robust_se_dp"] = _robust_se_dp
+        _write_design_precheck(ctx, env, model_results)
         return ctx
+
+
+def _write_design_precheck(ctx, env, model_results) -> None:
+    """Raise sampling-design questions the run itself can answer (v1.8.7 A2b).
+
+    Written after estimation because the design effect only exists once a design
+    has been fitted. Emitted only when there is something to ask about: a note on
+    every run is one users learn to close unread.
+    """
+    from ...artifacts import register_artifact, write_json
+    from ...design_precheck import build_precheck, collect_design_findings
+
+    survey_design = None
+    for _model_id, payload in model_results:
+        if isinstance(payload, dict) and payload.get("survey_design"):
+            survey_design = payload["survey_design"]
+            break
+
+    declared = {
+        key: ctx.artifacts.get(f"_{key}")
+        for key in ("survey_strata_col", "survey_psu_col")
+    }
+    findings = collect_design_findings(
+        ctx.data.frame,
+        declared=declared,
+        survey_design=survey_design,
+        weight_column=(ctx.artifacts.get("_sampling_weight") or None),
+        modelled_columns=[
+            ctx.artifacts.get("_normalized_y") or "",
+            *(ctx.artifacts.get("_normalized_x") or []),
+        ],
+    )
+    if not findings:
+        return
+
+    path = env.run_root / "measurement" / "design_precheck.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, build_precheck(findings))
+    register_artifact(
+        env.run_root, "design_precheck", path, "design_precheck", "estimation",
+        ["cleaned_dataset"],
+    )

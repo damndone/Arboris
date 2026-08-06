@@ -258,7 +258,19 @@ def test_survey_design_params_do_not_change_any_result(tmp_path):
     declared_arts = sorted(
         p.name for p in (svy_project.root / "runs" / declared["run_id"]).rglob("*") if p.is_file()
     )
-    assert bare_arts == declared_arts, "declaring survey design changed the artifact set"
+    # The A2b design pre-check (v1.8.7) writes `design_precheck.json` when a
+    # design was *not* declared -- that is the whole point of it, so the two
+    # artifact sets are expected to differ by exactly that file. Spec §6.5
+    # declares this exception in advance: A2-7 constrains routing and statistical
+    # results, not the artifact set. Everything else must still match, so the
+    # comparison is narrowed rather than dropped.
+    expected_extra = {"design_precheck.json"}
+    assert set(bare_arts) - set(declared_arts) <= expected_extra, (
+        "declaring survey design changed the artifact set beyond the declared exception"
+    )
+    assert not set(declared_arts) - set(bare_arts), (
+        "declaring survey design produced artifacts the bare run did not"
+    )
 
 
 def test_sampling_weight_fails_closed_without_a_declared_design(tmp_path):

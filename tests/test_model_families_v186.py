@@ -75,7 +75,11 @@ def test_ordinal_logit_run_persists_probabilities_effects_and_parallel_lines(tmp
     assert result["marginal_effects"]
     diagnostics = read_json(run_root / "model_results" / "diagnostics_ordinal_logit_1.json")
     assert diagnostics["parallel_lines"]["status"] in {"computed", "insufficient_support"}
-    assert diagnostics["validation"]["external_oracle"] == "not_verified"
+    # v1.8.7 A3 replaced the flat "not_verified" with the reference this family
+    # is now checked against. What the assertion guards is unchanged: the packet
+    # must state its evidence rather than assert correctness bare.
+    assert diagnostics["validation"]["level"] == "external_oracle_within_tolerance"
+    assert "polr" in diagnostics["validation"]["external_oracle"]
     OrdinalResultContract.from_dict(result)
     OrdinalDiagnosticsContract.from_dict(diagnostics)
     projected = _bounded_model_family_evidence(run_root, read_model_results(run_root))

@@ -281,7 +281,12 @@ async def _write_upload(file: UploadFile, target: Path, max_bytes: int) -> None:
             handle.write(chunk)
 
 
-def encode_form_override(key: str, value: object) -> str:
+#: Form fields persisted as objects rather than as JSON text. `model_options`
+#: is handled separately by the merge itself; these are the rest.
+_STRUCTURED_FORM_OVERRIDES = frozenset({"labels"})
+
+
+def encode_form_override(key: str, value: object) -> object:
     """Encode an operation override using the run form's wire format.
 
     Column selectors are submitted as comma-separated form fields, while other
@@ -289,6 +294,12 @@ def encode_form_override(key: str, value: object) -> str:
     """
     if key in {"x", "focal_x"} and isinstance(value, list):
         return ",".join(str(item) for item in value)
+    # `labels` is persisted in the form as an object, not as JSON text -- see
+    # `_submit_run`, which stores the normalized mapping. Encoding an override
+    # to a string here would hand `_normalize_labels` a str and fail with
+    # MODEL_OPTIONS_NOT_OBJECT, which names the wrong field entirely.
+    if key in _STRUCTURED_FORM_OVERRIDES and isinstance(value, dict):
+        return value
     return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
 
 

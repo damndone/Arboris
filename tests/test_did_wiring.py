@@ -38,7 +38,14 @@ def test_did_capabilities_declare_native_timing_fields_and_optional_covariates()
     assert set(capabilities) == {"cs_did", "sa_did", "dcdh"}
     for model_type in ("cs_did", "sa_did"):
         params = {item["key"]: item for item in capabilities[model_type]["params"]}
-        assert set(params) == {"model_type", "x", "entity_col", "time_col", "cohort_col"}
+        # `labels` (v1.8.7 A2) carries column metadata -- measurement levels and
+        # variable/value labels -- and is published for every family because it
+        # describes the data, not the model. Kept in the exact set rather than
+        # loosening this to a subset check: the point of the assertion is that
+        # no OLS-shaped field creeps in, and a subset check would not catch that.
+        assert set(params) == {
+            "model_type", "x", "entity_col", "time_col", "cohort_col", "labels",
+        }
         assert params["x"]["required"] is False
         assert params["entity_col"]["required"] is True
         assert params["time_col"]["required"] is True
@@ -50,6 +57,7 @@ def test_did_capabilities_declare_native_timing_fields_and_optional_covariates()
         "entity_col",
         "time_col",
         "treatment_path_col",
+        "labels",  # column metadata, published for every family -- see above
     }
     assert dcdh_params["x"]["required"] is False
     assert "covariance" not in dcdh_params

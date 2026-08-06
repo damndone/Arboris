@@ -13,6 +13,13 @@ from typing import Any, Literal
 
 from ..common.envelope import ContractError, require_exact_keys
 from .survival import SurvivalEvidenceContract
+from .validation_levels import (
+    INTERNAL_ONLY,
+    NOT_VERIFIED,
+    VALIDATION_LEVELS,
+    ExternalOracle,
+    check_validation,
+)
 
 
 V186_MODEL_FAMILY_CONTRACT_VERSION = "1"
@@ -20,6 +27,56 @@ V186_VALIDATION_LEVEL = "internal_consistency_only"
 V186_EXTERNAL_ORACLE_STATUS = "not_verified"
 
 _VALIDATION_FIELDS = {"level", "external_oracle"}
+
+#: One entry per family. Adding a family without one leaves it at
+#: `internal_consistency_only`, which is the truthful default for something
+#: nothing has checked from the outside.
+EXTERNAL_ORACLES: dict[str, ExternalOracle] = {
+    "survival_cox": ExternalOracle(
+        level="external_oracle_exact",
+        reference="R survival::coxph (Efron ties)",
+        tolerance="1e-10 relative",
+        note="Coefficients, standard errors and hazard ratios agree to machine precision.",
+    ),
+    "quantile_regression": ExternalOracle(
+        level="external_oracle_within_tolerance",
+        reference="R quantreg::rq (Barrodale-Roberts simplex)",
+        tolerance="1e-5 absolute",
+        note=(
+            "quantreg solves the linear program exactly; statsmodels fits iteratively, "
+            "so the two differ in the sixth decimal."
+        ),
+    ),
+    "ordinal_logit": ExternalOracle(
+        level="external_oracle_within_tolerance",
+        reference="R MASS::polr (proportional odds)",
+        tolerance="1e-4 absolute",
+        note=(
+            "The same likelihood optimised by different solvers. Cutpoints are "
+            "comparable only after undoing statsmodels' log-increment parameterisation."
+        ),
+    ),
+    "multinomial_logit": ExternalOracle(
+        level="external_oracle_within_tolerance",
+        reference="R nnet::multinom",
+        tolerance="1e-4 absolute",
+        note=(
+            "nnet optimises a neural-net objective by BFGS against statsmodels' Newton "
+            "method. Comparable only once the baseline category is pinned on both sides."
+        ),
+    ),
+}
+
+
+def validation_payload(model_type: str) -> dict[str, str]:
+    """The validation block a result of this family should carry."""
+    oracle = EXTERNAL_ORACLES.get(model_type)
+    if oracle is None:
+        return {
+            "level": V186_VALIDATION_LEVEL,
+            "external_oracle": V186_EXTERNAL_ORACLE_STATUS,
+        }
+    return {"level": oracle.level, "external_oracle": oracle.statement}
 
 
 def _require_string(value: Any, field_name: str) -> str:
@@ -51,14 +108,7 @@ def _require_list(value: Any, field_name: str) -> list[Any]:
 def _require_validation(value: Any) -> Mapping[str, str]:
     validation = _require_mapping(value, "validation")
     require_exact_keys(validation, _VALIDATION_FIELDS, "validation")
-    if validation["level"] != V186_VALIDATION_LEVEL:
-        raise ContractError(
-            "validation.level must be internal_consistency_only until an external oracle is run"
-        )
-    if validation["external_oracle"] != V186_EXTERNAL_ORACLE_STATUS:
-        raise ContractError(
-            "validation.external_oracle must be not_verified without Stata/R evidence"
-        )
+    check_validation(dict(validation), "validation")
     return validation  # type: ignore[return-value]
 
 

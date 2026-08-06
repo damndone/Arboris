@@ -748,6 +748,24 @@ def _model_rerun_change_branch() -> dict[str, Any]:
 
     properties: dict[str, Any] = {
         "model_options": {"type": "object"},
+        "labels": {
+            "type": "object",
+            "description": (
+                "Column metadata. `measurement_level` maps column names to one of "
+                "nominal / ordinal / scale / count and decides how each is modelled; "
+                "declare every column in one proposal rather than one at a time. "
+                "Only columns present in the data may be named."
+            ),
+            "properties": {
+                "measurement_level": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "enum": ["nominal", "ordinal", "scale", "count", "unspecified"],
+                    },
+                },
+            },
+        },
         # No enum here on purpose: the legal families are a runtime registry, and
         # a list frozen into this schema would drift the moment a pack is added.
         # `inspect_operation_contract` returns the live set together with the
@@ -1043,7 +1061,13 @@ def model_rerun_change_fields() -> tuple[str, ...]:
     # and validates the rest of the patch against *that* family's params, so an
     # under-specified switch is refused there rather than silently running a
     # model configured by omission. Only the Agent whitelist stood in the way.
-    return ("model_type", "model_options", *sorted(weights), *DESIGN_FIELDS)
+    # `labels` carries the measurement-level declarations (v1.8.7 A2). A
+    # questionnaire has fifty columns; declared one at a time nobody declares
+    # any, so the batch has to be one proposal. It rides a rerun rather than a
+    # bespoke data operation because a measurement level is run metadata, not a
+    # transformation, and a rerun already gives the child node, the lineage and
+    # the confirmation gate.
+    return ("model_type", "model_options", "labels", *sorted(weights), *DESIGN_FIELDS)
 
 
 def _model_rerun_editable_schema() -> dict[str, Any]:

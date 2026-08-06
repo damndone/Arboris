@@ -306,6 +306,25 @@ class NodeOperationContextProvider:
                 )
             )
 
+        def inspect_design_advisories(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_design_advisories(
+                InspectResultSummaryRequest(
+                    request_id=str(
+                        arguments.get("request_id") or "inspect-design-advisories"
+                    ),
+                    owner_run_id=str(arguments["owner_run_id"]),
+                    op_node_id=str(arguments["op_node_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        arguments.get("active_head_run_id")
+                    ),
+                )
+            )
+
         def inspect_statistical_evidence(
             arguments: dict[str, Any],
             context: ToolContext,
@@ -752,6 +771,39 @@ class NodeOperationContextProvider:
                 scope_requirements=("project", "chain"),
                 max_output_budget=8192,
                 handler=inspect_diagnostics,
+            ),
+            ToolDefinition(
+                tool_id="inspect_design_advisories",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "owner_run_id",
+                        "op_node_id",
+                        "active_head_run_id",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string"},
+                        "owner_run_id": {"type": "string"},
+                        "op_node_id": {"type": "string"},
+                        "active_head_run_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_design_advisories,
+                description=(
+                    "Read what this run assumed and could not verify: measurement "
+                    "levels that were never declared (an integer rating analysed as "
+                    "a count), columns that look like an undeclared sampling design, "
+                    "the design effect and effective sample size, and extreme "
+                    "sampling weights. Every figure here was computed by the engine "
+                    "-- quote these values rather than deriving your own, and present "
+                    "them as observations and questions, never as a verdict on the "
+                    "user's conclusions."
+                ),
             ),
             ToolDefinition(
                 tool_id="inspect_statistical_evidence",
@@ -1474,6 +1526,50 @@ class NodeOperationContextProvider:
             "node": _bounded_node(node),
             "diagnostics": diagnostics,
             "omitted_sections": omitted_sections,
+        }
+
+    def inspect_design_advisories(
+        self,
+        request: InspectResultSummaryRequest,
+    ) -> dict[str, Any]:
+        """Return what the run assumed but could not verify (v1.8.7 A2/A2b).
+
+        Both artifacts are produced deterministically by the engine and are
+        returned verbatim rather than summarised: an Agent re-deriving an
+        effective sample size from a rounded design effect would produce a figure
+        that reads as authoritative and disagrees with the result panel.
+        """
+        canonical, node, _manifest = self._read_node_snapshot(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            active_head_run_id=request.active_head_run_id,
+        )
+        run_root = self.project_root / "runs" / request.owner_run_id
+
+        def _read(relative: str, key: str) -> list[dict[str, Any]]:
+            path = run_root / relative
+            if not path.exists():
+                return []
+            try:
+                payload = read_json(path)
+            except (OSError, ValueError):
+                return []
+            entries = payload.get(key) or []
+            # Bounded like every other agent-facing projection: a questionnaire
+            # can raise a finding per column, and the whole list would crowd out
+            # the rest of the context.
+            return [dict(entry) for entry in entries[:12]]
+
+        return {
+            **canonical,
+            "node": _bounded_node(node),
+            "measurement_advisories": _read("measurement/advisory.json", "entries"),
+            "design_findings": _read("measurement/design_precheck.json", "findings"),
+            "note": (
+                "Computed by the engine. Quote these figures rather than deriving "
+                "your own, and raise them as questions, not conclusions."
+            ),
         }
 
     def inspect_statistical_evidence(

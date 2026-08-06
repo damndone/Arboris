@@ -430,6 +430,7 @@ def build_capabilities() -> dict:
         model_types.append(entry)
 
     survey = _survey_design_capability()
+    _attach_labels_param(model_types)
     _attach_weight_params(model_types)
     _attach_survey_design_params(model_types, survey["sampling_weight_families"])
 
@@ -452,6 +453,34 @@ def build_capabilities() -> dict:
         "covariance_options": list(COVARIANCE_UI),
         "survey_design": survey,
     }
+
+
+def _attach_labels_param(model_types: list[dict]) -> None:
+    """Every family can carry column metadata, so every family publishes it.
+
+    Not gated per family: a measurement-level declaration says what a column
+    *is*, which is true of the data regardless of which model reads it. Without
+    this the rerun contract rejects `labels` as an unknown field and the A2
+    batch declaration has nowhere to land.
+    """
+    for entry in model_types:
+        # `auto` publishes no params: it is a routing instruction, and a rerun
+        # always resolves it to a concrete family before validating overrides.
+        if "params" not in entry:
+            continue
+        if any(param["key"] == "labels" for param in entry["params"]):
+            continue
+        entry["params"] = [
+            *entry["params"],
+            {
+                "key": "labels",
+                "kind": "object",
+                "label": "Column metadata (variable / value labels, measurement level)",
+                "required": False,
+                "role": "labels",
+                "value": {},
+            },
+        ]
 
 
 def _attach_weight_params(model_types: list[dict]) -> None:
