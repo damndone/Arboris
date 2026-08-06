@@ -429,6 +429,10 @@ def build_capabilities() -> dict:
             entry["requires"] = list(declaration.requires)
         model_types.append(entry)
 
+    survey = _survey_design_capability()
+    _attach_weight_params(model_types)
+    _attach_survey_design_params(model_types, survey["sampling_weight_families"])
+
     imputation_methods = [
         {
             "key": method.key,
@@ -446,8 +450,62 @@ def build_capabilities() -> dict:
         "prediction_models": list(PREDICTION_UI),
         "sampling_methods": list(SAMPLING_UI),
         "covariance_options": list(COVARIANCE_UI),
-        "survey_design": _survey_design_capability(),
+        "survey_design": survey,
     }
+
+
+def _attach_weight_params(model_types: list[dict]) -> None:
+    """Publish each family's weight columns, read off its own contract.
+
+    v1.8.6 taught the engine to accept weights but never published them here, so
+    `sampling_weight` was rejected as an unknown field on a rerun -- the weight
+    could be set when a run was first created and never changed afterwards, and
+    no Agent could set one at all. The family contract already declares which
+    kinds it takes; this makes that declaration visible instead of restating it.
+    """
+    from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+
+    for entry in model_types:
+        contract = MODEL_FAMILY_CONTRACTS.get(entry["key"])
+        if contract is None or not contract.allows_weights:
+            continue
+        published = {param["key"] for param in entry["params"]}
+        entry["params"] = [
+            *entry["params"],
+            *(
+                {
+                    "key": f"{kind}_weight",
+                    "kind": "text",
+                    "label": f"{kind.capitalize()} weight column",
+                    "required": False,
+                    "role": f"{kind}_weight",
+                }
+                for kind in contract.allows_weights
+                if f"{kind}_weight" not in published
+            ),
+        ]
+
+
+def _attach_survey_design_params(model_types: list[dict], families: list[str]) -> None:
+    """Publish the design fields as params on the families that accept them.
+
+    The rerun operation contract derives its legal overrides from a family's
+    published params, so a design that is not published here cannot be changed
+    by a rerun -- and therefore cannot be reached by an Agent, whose typed
+    proposal travels that same path. Appending it once, driven by the same
+    family list the form reads, keeps the three surfaces from disagreeing.
+    """
+    from ..survey.fields import design_params
+
+    allowed = set(families)
+    for entry in model_types:
+        if entry["key"] not in allowed:
+            continue
+        published = {param["key"] for param in entry["params"]}
+        entry["params"] = [
+            *entry["params"],
+            *(param for param in design_params() if param["key"] not in published),
+        ]
 
 
 def _survey_design_capability() -> dict:
@@ -460,6 +518,7 @@ def _survey_design_capability() -> dict:
     from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
     from ..survey.design import LONELY_PSU_POLICIES, REPLICATE_TYPES
     from ..survey.estimator import VARIANCE_METHOD_REQUIREMENTS
+    from ..survey.fields import DESIGN_FIELDS
 
     return {
         # Read off the family contracts, not listed by hand: a family that gains
@@ -476,9 +535,5 @@ def _survey_design_capability() -> dict:
         },
         "replicate_types": list(REPLICATE_TYPES),
         "lonely_psu_policies": list(LONELY_PSU_POLICIES),
-        "design_fields": [
-            "survey_strata_col", "survey_psu_col", "survey_fpc_col",
-            "survey_replicate_weights", "survey_replicate_type",
-            "survey_lonely_psu", "survey_weight_frame", "survey_subpop",
-        ],
+        "design_fields": list(DESIGN_FIELDS),
     }

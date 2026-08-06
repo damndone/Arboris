@@ -1237,6 +1237,34 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .ios-row-pair .ios-field { flex: 1; border-bottom: none; }
 .ios-hint { font-size: 12px; color: var(--ios-secondary); margin-top: 6px; }
 .ios-switch { width: 44px; height: 26px; accent-color: var(--ios-green); }
+
+/* A checkbox sitting on the same line as its label.
+   Introduced with the v1.8.7 ANOVA factor list, which used this class before it
+   existed: with no rule the label stayed a plain inline box inside a column
+   flex container, so the box and its text stacked onto separate lines and every
+   factor took two rows. */
+.ios-check {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 0; font-size: 13px; cursor: pointer;
+}
+/* `width: auto` is load-bearing: the enclosing fieldset carries `.ios-field`,
+   whose `.ios-field input { width: 100% }` stretches a checkbox to the full row
+   (344px measured) and pushes its label clean out of the panel. */
+.ios-check input[type="checkbox"] { flex: none; width: auto; margin: 0; }
+
+/* The genesis wizard is the right-hand panel, and its spacing came from two
+   sources at once: `gap` on the grid plus `margin` on every `.ios-group`, which
+   stacked to 42px between consecutive sections. The gap owns it here; the
+   groups contribute none. Scoped rather than global so the standalone RunForm,
+   which has no grid gap to fall back on, keeps its own spacing. */
+.genesis-wizard { display: grid; gap: 10px; }
+.genesis-wizard .ios-group { margin: 0; padding: 10px 12px; }
+.genesis-wizard .ios-group-label { margin-bottom: 5px; }
+.genesis-wizard .ios-row, .genesis-wizard .ios-field { padding: 5px 0; }
+.genesis-wizard .ios-field > span { margin-bottom: 3px; }
+.genesis-wizard .ios-hint { margin-top: 4px; }
+.genesis-wizard fieldset.ios-field { padding: 6px 0 4px; }
+.genesis-wizard fieldset.ios-field > legend { font-size: 13px; color: var(--ios-secondary); }
 .ios-card {
   background: var(--ios-card); border-radius: var(--ios-radius);
   padding: 14px; margin: 12px 0; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);

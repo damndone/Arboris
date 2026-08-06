@@ -846,7 +846,7 @@ export function GenesisWizard({
     : null;
 
   return (
-    <div data-testid="genesis-wizard" style={{ display: "grid", gap: 18 }}>
+    <div data-testid="genesis-wizard" className="genesis-wizard">
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 16 }}>New pipeline</h2>

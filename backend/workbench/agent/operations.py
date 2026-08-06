@@ -111,19 +111,7 @@ class OperationRegistry:
                 risk_level="mutating",
                 confirmation_policy="required",
                 proposal_schema=_model_rerun_proposal_schema(),
-                editable_schema={
-                    "type": "object",
-                    "description": "Field-level model rerun changes.",
-                    "properties": {
-                        "model_options": {
-                            "type": "object",
-                            "description": (
-                                "A one-level model-options patch, not an old/new field-diff wrapper."
-                            ),
-                        },
-                    },
-                    "additionalProperties": True,
-                },
+                editable_schema=_model_rerun_editable_schema(),
                 executor_key="model.rerun",
                 reconciler_key="model.rerun",
                 diff_builder_key="rerun.diff.v1",
@@ -747,22 +735,53 @@ def _proposal_schema(
     }
 
 
+def _model_rerun_change_branch() -> dict[str, Any]:
+    """The normal rerun patch, as the *model* is shown it.
+
+    Built from the same declaration as the validator. These are two different
+    schemas -- `editable_schema` describes the operation, `proposal_schema` is
+    what reaches the language model -- and aligning only one of them yields a
+    tool contract that forbids a field the validator would have accepted, so the
+    model cannot emit it at all.
+    """
+    from ..survey.fields import DESIGN_FIELD_SPECS
+
+    properties: dict[str, Any] = {"model_options": {"type": "object"}}
+    for field_name in model_rerun_change_fields():
+        if field_name.endswith("_weight"):
+            properties[field_name] = {
+                "type": "string",
+                "description": f"Column holding the {field_name.removesuffix('_weight')} weight.",
+            }
+    for spec in DESIGN_FIELD_SPECS:
+        entry: dict[str, Any] = {
+            "type": "array" if spec["kind"] == "columns" else "string",
+            "description": spec["label"],
+        }
+        if spec["kind"] == "columns":
+            entry["items"] = {"type": "string"}
+        if spec.get("options"):
+            entry["enum"] = list(spec["options"])
+        properties[spec["key"]] = entry
+    return {
+        "type": "object",
+        "description": (
+            "The normal v1 rerun patch. Use one-level model_options only; do not "
+            "use an old/new field-diff wrapper. The survey_* fields declare a "
+            "complex sampling design: setting them re-runs the model with "
+            "design-based standard errors, and they require a sampling weight."
+        ),
+        "properties": properties,
+        "additionalProperties": False,
+    }
+
+
 def _model_rerun_proposal_schema() -> dict[str, Any]:
     return _proposal_schema(
         target_required=["run_id", "node_ref", "node_hash", "forest_node_key"],
         changes={
             "oneOf": [
-                {
-                    "type": "object",
-                    "description": (
-                        "The normal v1 rerun patch. Use one-level model_options only; "
-                        "do not use an old/new field-diff wrapper."
-                    ),
-                    "properties": {
-                        "model_options": {"type": "object"},
-                    },
-                    "additionalProperties": False,
-                },
+                _model_rerun_change_branch(),
                 {
                     "type": "object",
                     "description": (
@@ -978,6 +997,62 @@ def _validate_data_columns_cast(
         raise OperationValidationError("data.columns.cast changes output_format must match target")
 
 
+def model_rerun_change_fields() -> tuple[str, ...]:
+    """Top-level fields a `model.rerun` proposal may carry.
+
+    Declared in one place because the operation's `editable_schema` and its
+    validator both consume it: a schema that advertises a field the validator
+    rejects teaches an Agent to emit proposals that always fail, and reads as
+    authoritative while doing so.
+
+    The survey design fields are flat rather than nested under one object
+    because `op_overrides` merges straight into the run form, where they are
+    flat -- a nested shape would need a translation step whose only job would be
+    to undo the nesting.
+    """
+    from ..survey.fields import DESIGN_FIELDS
+    from .workflow_contracts import MODEL_FAMILY_CONTRACTS
+
+    # The weight columns travel with the design, not separately: a design
+    # without a sampling weight is refused by the engine, so an Agent able to
+    # propose one but not the other could only ever produce a rejected run.
+    # Which weights a given family accepts is still enforced downstream against
+    # that family's published params -- this is the union of what may be asked.
+    weights = {
+        f"{kind}_weight"
+        for contract in MODEL_FAMILY_CONTRACTS.values()
+        for kind in contract.allows_weights
+    }
+    return ("model_options", *sorted(weights), *DESIGN_FIELDS)
+
+
+def _model_rerun_editable_schema() -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "model_options": {
+            "type": "object",
+            "description": (
+                "A one-level model-options patch, not an old/new field-diff wrapper."
+            ),
+        },
+    }
+    for field_name in model_rerun_change_fields():
+        properties.setdefault(
+            field_name,
+            {
+                "description": (
+                    "Complex survey design declaration; changing it re-runs the model "
+                    "with design-based variance."
+                ),
+            },
+        )
+    return {
+        "type": "object",
+        "description": "Field-level model rerun changes.",
+        "properties": properties,
+        "additionalProperties": True,
+    }
+
+
 def _validate_model_rerun(
     target: dict[str, Any],
     preconditions: dict[str, Any],
@@ -1009,7 +1084,7 @@ def _validate_model_rerun(
         )
     if not changes:
         raise OperationValidationError("model.rerun changes must not be empty")
-    unknown = set(changes) - {"model_options"}
+    unknown = set(changes) - set(model_rerun_change_fields())
     # The pre-existing Analysis Loop has its own canonical PlanDiff binding and
     # stores a legacy wire patch (covariance/entity_col) alongside the binding.
     # Keep that adapter interoperable while making every ordinary Notebook or
