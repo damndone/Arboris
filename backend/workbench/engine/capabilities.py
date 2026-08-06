@@ -446,4 +446,30 @@ def build_capabilities() -> dict:
         "prediction_models": list(PREDICTION_UI),
         "sampling_methods": list(SAMPLING_UI),
         "covariance_options": list(COVARIANCE_UI),
+        "survey_design": _survey_design_capability(),
+    }
+
+
+def _survey_design_capability() -> dict:
+    """What composes with what, stated so a caller can derive it.
+
+    Published as capabilities rather than left implicit so an agent can work out
+    which variance channel a given estimator can use instead of carrying a
+    hard-coded list that silently rots as families are added.
+    """
+    from ..survey.design import LONELY_PSU_POLICIES, REPLICATE_TYPES
+    from ..survey.estimator import VARIANCE_METHOD_REQUIREMENTS
+
+    return {
+        "variance_methods": sorted(VARIANCE_METHOD_REQUIREMENTS),
+        "variance_method_requirements": {
+            method: sorted(caps) for method, caps in VARIANCE_METHOD_REQUIREMENTS.items()
+        },
+        "replicate_types": list(REPLICATE_TYPES),
+        "lonely_psu_policies": list(LONELY_PSU_POLICIES),
+        "design_fields": [
+            "survey_strata_col", "survey_psu_col", "survey_fpc_col",
+            "survey_replicate_weights", "survey_replicate_type",
+            "survey_lonely_psu", "survey_weight_frame", "survey_subpop",
+        ],
     }

@@ -355,16 +355,54 @@ def _ols_covariance_plan(ctx) -> tuple[bool, str | None]:
     return covariance != "unadjusted", None
 
 
+
+def _survey_design_declared(ctx) -> bool:
+    """Whether the run carries a complex sampling design.
+
+    Deliberately a presence check over the declarations block 1 wired through --
+    no family appears here, and none may.  Which families can *use* the design is
+    derived from what each declares, in `_survey_estimator_for`.
+    """
+    return bool(
+        str(ctx.artifacts.get("_survey_strata_col") or "").strip()
+        or str(ctx.artifacts.get("_survey_psu_col") or "").strip()
+    )
+
+
+def _survey_estimator_for(model_type: str, y: str, x: list[str]):
+    """Build the engine-side estimator from what the family declared.
+
+    Returns None when the family declared no link, which is a refusal to guess:
+    a family that has not said how it fits under arbitrary weights does not get a
+    design-based variance invented on its behalf.
+    """
+    from ...agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ...survey.adapters import glm_estimator_spec
+
+    contract = MODEL_FAMILY_CONTRACTS.get(model_type)
+    glm_family = getattr(contract, "survey_glm_family", None) if contract else None
+    if not glm_family:
+        return None
+    return glm_estimator_spec(family=model_type, glm_family=glm_family, y=y, x=list(x))
+
+
 def _ols_weight_spec(ctx):
     frequency_weight = str(ctx.artifacts.get("_frequency_weight") or "").strip()
     analysis_weight = str(ctx.artifacts.get("_analysis_weight") or "").strip()
     sampling_weight = str(ctx.artifacts.get("_sampling_weight") or "").strip()
     if sampling_weight:
-        raise ValueError(
-            "OLS_SAMPLING_WEIGHT_UNSUPPORTED: sampling_weight requires a declared "
-            "strata/PSU design; declare strata/PSU through the existing "
-            "entity_col + covariance=clustered channel"
-        )
+        # A declared design is now executed by the survey engine, so the only
+        # remaining refusal is an undeclared one.  The former message told the
+        # user to reach for `entity_col + covariance=clustered` instead, which is
+        # a category error: a clustered covariance ignores the variance reduction
+        # stratification buys and produces no design degrees of freedom.
+        if not _survey_design_declared(ctx):
+            raise ValueError(
+                "OLS_SAMPLING_WEIGHT_UNSUPPORTED: sampling_weight requires a declared "
+                "complex sampling design; supply survey_strata_col and/or "
+                "survey_psu_col. A clustered covariance is not a substitute."
+            )
+        return {"kind": "sampling", "column": sampling_weight}
     if frequency_weight and analysis_weight:
         raise ValueError(
             "OLS_WEIGHT_SEMANTICS_CONFLICT: choose one of frequency_weight or analysis_weight"
@@ -404,7 +442,80 @@ def _fit_ols(ctx, env):
         primary_estimand=persisted_form.get("primary_estimand"),
         weights=_ols_weight_spec(ctx),
     )
+    _apply_survey_design_variance(ctx, "ols", primary)
     return "ols_1", primary, fitted
+
+
+
+def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
+    """Replace the naive variance with the design-based one, in place.
+
+    The point estimate is already right -- weighted least squares gives the same
+    coefficients either way -- so nothing about an un-corrected result looks
+    wrong.  Only the uncertainty is off, and on the committed fixture it is off
+    by more than half: 0.0850 where the design gives 0.1773. A user reading the
+    first number believes the estimate is twice as sharp as it is.
+    """
+    from scipy import stats
+
+    from ...survey.adapters import build_design_from_artifacts
+    from ...survey.engine import estimate_with_design
+
+    design = build_design_from_artifacts(ctx.data.frame, ctx.artifacts)
+    if design is None:
+        return
+    estimator = _survey_estimator_for(
+        model_type, ctx.artifacts["_normalized_y"], ctx.artifacts["_normalized_x"]
+    )
+    if estimator is None:
+        return
+
+    declared_replicate = str(ctx.artifacts.get("_survey_replicate_type") or "").strip()
+    method = "replicate" if declared_replicate else "linearization"
+    result = estimate_with_design(
+        design, estimator, method=method,
+        replicate_type=declared_replicate or None,
+    )
+
+    critical = float(stats.t.ppf(0.975, result.residual_degf))
+    coefficients = primary.get("coefficients") or {}
+    for term, entry in coefficients.items():
+        if term not in result.standard_errors:
+            continue
+        se = result.standard_errors[term]
+        estimate = float(entry.get("estimate", result.estimates[term]))
+        entry["std_error"] = se
+        entry["ci_lower"] = estimate - critical * se
+        entry["ci_upper"] = estimate + critical * se
+        entry["p_value"] = float(
+            2 * stats.t.sf(abs(estimate / se), result.residual_degf)
+        ) if se > 0 else float("nan")
+        entry["variance_source"] = "survey_design"
+
+    effects = design.design_effects(ctx.artifacts["_normalized_y"])
+    summary = result.replicate_summary
+    primary["survey_design"] = {
+        "strata_column": design.strata,
+        "psu_column": design.psu,
+        "weight_column": design.weight,
+        "subpopulation": design.subpop,
+        "n_obs": design.n_obs,
+        "n_strata": design.n_strata,
+        "n_psu": design.n_psu,
+        "degf": result.degf,
+        "residual_degf": result.residual_degf,
+        "variance_method": result.method,
+        "replicate_type": declared_replicate or None,
+        "lonely_psu_policy": design.lonely_psu,
+        "design_effect": effects.deff,
+        "effective_sample_size": effects.kish_n_eff,
+        # Reported rather than silently absorbed: replicates that could not be
+        # fitted shrink the variance, and nothing on screen would say so.
+        "replicates_attempted": summary.attempted if summary else None,
+        "replicates_succeeded": summary.succeeded if summary else None,
+        "replicates_failed": summary.failed if summary else None,
+        "replicate_failure_reasons": summary.failure_reasons if summary else None,
+    }
 
 
 def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:

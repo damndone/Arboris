@@ -641,15 +641,10 @@ def _normalize_ols_weight_spec(
         raise ValueError("OLS_WEIGHT_INVALID: weights must be an object with kind and column")
     kind = str(weights.get("kind") or "").strip().lower()
     column = str(weights.get("column") or "").strip()
-    if kind == "sampling":
+    if kind not in {"frequency", "analysis", "sampling"}:
         raise ValueError(
-            "OLS_SAMPLING_WEIGHT_UNSUPPORTED: sampling_weight requires a declared "
-            "strata/PSU design; declare strata/PSU through the existing "
-            "entity_col + covariance=clustered channel"
-        )
-    if kind not in {"frequency", "analysis"}:
-        raise ValueError(
-            "OLS_WEIGHT_KIND_UNSUPPORTED: OLS supports frequency or analysis weights"
+            "OLS_WEIGHT_KIND_UNSUPPORTED: OLS supports frequency, analysis or "
+            "sampling weights"
         )
     if not column:
         raise ValueError("OLS_WEIGHT_COLUMN_MISSING: weight column must be declared")
@@ -804,7 +799,18 @@ def run_ols(
     normalized_weights: dict[str, Any] | None = None
     if weight_kind is not None:
         normalized_weights = {"kind": weight_kind, "column": weight_column, "executed": True}
-    if weight_kind == "analysis":
+    if weight_kind == "sampling":
+        # A sampling weight means "this row represents w population units", so
+        # the point estimate is weighted least squares -- the same arithmetic an
+        # analysis weight produces.  What differs is the variance, and that is
+        # not computed here: the design-variance engine owns it, because getting
+        # it right needs the strata and PSU structure this function never sees.
+        sampling_weights = pd.to_numeric(model_frame[weight_column], errors="coerce")
+        original = smf.wls(
+            formula=formula, data=model_frame, weights=sampling_weights
+        ).fit()
+        normalized_weights["variance_owner"] = "survey_design_engine"
+    elif weight_kind == "analysis":
         # An analysis weight stays weighted least squares: it rescales each
         # row's contribution without claiming the row was observed more than
         # once, so nobs remains the row count.

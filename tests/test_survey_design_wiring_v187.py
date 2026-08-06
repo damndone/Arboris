@@ -261,17 +261,18 @@ def test_survey_design_params_do_not_change_any_result(tmp_path):
     assert bare_arts == declared_arts, "declaring survey design changed the artifact set"
 
 
-def test_sampling_weight_still_fails_closed_in_block1(tmp_path):
-    """Block 1 wires the design fields but does NOT unlock sampling_weight.
+def test_sampling_weight_fails_closed_without_a_declared_design(tmp_path):
+    """The refusal that survives block 3.
 
-    Unlocking is block 2, and only once the variance engine actually exists.
+    Block 1 refused every sampling weight because no engine existed yet. Block 3
+    unlocks the declared case, so what remains here is the undeclared one -- a
+    weight with no strata and no PSU still cannot yield a design variance, and
+    guessing one would be worse than refusing.
     """
     project, source = _project(tmp_path, "stillclosed")
     outcome = run_workflow(
         project.root, [source], mode="auto", model_type="ols", y="y", x=["x"],
         sampling_weight="rw1",
-        survey_strata_col="region",
-        survey_psu_col="cluster",
     )
 
     assert outcome["status"] == "failed"

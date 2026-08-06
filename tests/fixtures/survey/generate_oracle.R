@@ -63,6 +63,18 @@ rep_se <- function(type, ...) {
   list(estimate = as.list(s[, 1]), se = as.list(s[, 2]))
 }
 set.seed(101); brr  <- rep_se("BRR")
+
+# BRR is not uniquely defined: the estimate depends on which balanced set of
+# half-samples is used.  Measured on this fixture, R returns 1.62518598 with its
+# 12-replicate matrix and 1.70845732 with a 20-replicate one -- both valid.  So
+# the oracle has to pin the matrix, otherwise "matches R" is not a statement
+# about correctness at all.
+brr_hadamard <- as.svrepdesign(des, type = "BRR")$mse  # touch the design first
+hadamard_matrix <- survey:::hadamard(n_strata)
+brr$hadamard <- list(
+  order = nrow(hadamard_matrix),
+  matrix = lapply(seq_len(nrow(hadamard_matrix)), function(i) as.integer(hadamard_matrix[i, ]))
+)
 set.seed(102); jkn  <- rep_se("JKn")
 set.seed(103); boot <- rep_se("bootstrap", replicates = 500)
 

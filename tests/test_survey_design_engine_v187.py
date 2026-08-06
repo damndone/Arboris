@@ -59,11 +59,40 @@ def design():
     )
 
 
+def weighted_ols_influence(frame: pd.DataFrame, weights: np.ndarray) -> dict[str, np.ndarray]:
+    """Per-observation influence contributions for the WLS fit above.
+
+    infl_j = (X'WX)^-1 x_j w_j e_j -- the bread times each observation's score.
+    Supplying this is what unlocks the linearization channel; an estimator that
+    cannot produce it is still perfectly usable through replicate weights.
+    """
+    x = np.column_stack([np.ones(len(frame)), frame["x1"].to_numpy(), frame["x2"].to_numpy()])
+    y = frame["y"].to_numpy()
+    w = np.asarray(weights, dtype=float)
+    bread = np.linalg.inv((x.T * w) @ x)
+    resid = y - x @ (bread @ ((x.T * w) @ y))
+    contrib = (x * (w * resid)[:, None]) @ bread.T
+    return {"(Intercept)": contrib[:, 0], "x1": contrib[:, 1], "x2": contrib[:, 2]}
+
+
 @pytest.fixture()
 def estimator():
+    """Refit only: the minimum contract, so only the replicate channel is open."""
     from workbench.survey import EstimatorSpec
 
     return EstimatorSpec(name="synthetic_wls", refit=weighted_ols)
+
+
+@pytest.fixture()
+def linearizable_estimator():
+    """Refit plus influence: additionally unlocks Taylor linearization."""
+    from workbench.survey import EstimatorSpec
+
+    return EstimatorSpec(
+        name="synthetic_wls_linearizable",
+        refit=weighted_ols,
+        influence=weighted_ols_influence,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -78,28 +107,36 @@ def test_design_reports_structure_and_degrees_of_freedom(design):
     assert design.degf == oracle["degf"] == design.n_psu - design.n_strata
 
 
-def test_confidence_intervals_use_the_design_t_not_the_normal(design, estimator):
-    """degf=8 makes t (2.306) and the normal (1.96) impossible to confuse."""
+def test_confidence_intervals_use_the_design_t_not_the_normal(design, linearizable_estimator):
+    """The multiplier must come from the design, not from the normal.
+
+    An earlier version of this test asserted qt(.975, degf) = 2.306. That was
+    wrong: intervals use the *residual* design df, `degf - p + 1` = 6, giving
+    2.447 -- which is what R reports as `df.residual` for svyglm. Both are far
+    from 1.96, so the test still catches a normal approximation, but asserting
+    the wrong one of the two would have hard-coded a real error.
+    """
     from workbench.survey import estimate_with_design
 
-    result = estimate_with_design(design, estimator, method="linearization")
+    result = estimate_with_design(design, linearizable_estimator, method="linearization")
     oracle = _oracle()["linearization"]
     for term in ("(Intercept)", "x1", "x2"):
         assert result.ci_lower[term] == pytest.approx(oracle["ci_lower"][term], rel=1e-8)
         assert result.ci_upper[term] == pytest.approx(oracle["ci_upper"][term], rel=1e-8)
 
     half_width = result.ci_upper["x1"] - result.estimates["x1"]
-    assert half_width / result.standard_errors["x1"] == pytest.approx(2.306, abs=0.01)
+    assert result.residual_degf == 6
+    assert half_width / result.standard_errors["x1"] == pytest.approx(2.447, abs=0.01)
 
 
 # --------------------------------------------------------------------------
 # linearization
 # --------------------------------------------------------------------------
 
-def test_linearization_matches_r_svyglm(design, estimator):
+def test_linearization_matches_r_svyglm(design, linearizable_estimator):
     from workbench.survey import estimate_with_design
 
-    result = estimate_with_design(design, estimator, method="linearization")
+    result = estimate_with_design(design, linearizable_estimator, method="linearization")
     oracle = _oracle()["linearization"]
     for term in ("(Intercept)", "x1", "x2"):
         assert result.estimates[term] == pytest.approx(oracle["estimate"][term], rel=1e-10)
@@ -112,9 +149,16 @@ def test_linearization_matches_r_svyglm(design, estimator):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("replicate_type", ["brr", "jackknife"])
-def test_replicate_weights_match_r_withreplicates(design, estimator, replicate_type):
-    from workbench.survey import estimate_with_design
+def test_replicate_weights_match_r_withreplicates(estimator, replicate_type):
+    """BRR additionally requires fixing the balanced set -- see the note below."""
+    from workbench.survey import SurveyDesign, estimate_with_design
 
+    kwargs = {}
+    if replicate_type == "brr":
+        kwargs["hadamard_matrix"] = _oracle()["replicate"]["brr"]["hadamard"]["matrix"]
+    design = SurveyDesign(
+        frame=_design_frame(), strata="stratum", psu="psu", weight="weight", **kwargs
+    )
     result = estimate_with_design(
         design, estimator, method="replicate", replicate_type=replicate_type
     )
@@ -122,6 +166,32 @@ def test_replicate_weights_match_r_withreplicates(design, estimator, replicate_t
     oracle = _oracle()["replicate"][key]
     for term in ("(Intercept)", "x1", "x2"):
         assert result.standard_errors[term] == pytest.approx(oracle["se"][term], rel=1e-8)
+
+
+def test_brr_depends_on_the_balanced_set(estimator):
+    """Not a defect -- a property, and one a reported SE must not hide.
+
+    The same data and the same design give different BRR standard errors under
+    different balanced sets: R returns 1.62518598 from its 12-replicate matrix
+    and 1.70845732 from a 20-replicate one. A BRR standard error quoted without
+    naming its set is therefore under-specified, which is why the oracle pins
+    the matrix rather than asserting a bare number.
+    """
+    from workbench.survey import SurveyDesign, estimate_with_design
+
+    r_matrix = _oracle()["replicate"]["brr"]["hadamard"]["matrix"]
+    with_r_set = estimate_with_design(
+        SurveyDesign(frame=_design_frame(), strata="stratum", psu="psu", weight="weight",
+                     hadamard_matrix=r_matrix),
+        estimator, method="replicate", replicate_type="brr",
+    ).standard_errors["(Intercept)"]
+    with_default_set = estimate_with_design(
+        SurveyDesign(frame=_design_frame(), strata="stratum", psu="psu", weight="weight"),
+        estimator, method="replicate", replicate_type="brr",
+    ).standard_errors["(Intercept)"]
+
+    assert with_r_set != pytest.approx(with_default_set, rel=1e-6)
+    assert 0.5 < with_default_set / with_r_set < 2.0, "both sets must stay plausible"
 
 
 def test_provided_replicate_weights_reproduce_the_brr_design(estimator):
@@ -172,7 +242,14 @@ def test_replicate_failures_are_reported_not_silently_dropped(design, estimator)
 def test_too_many_failed_replicates_refuses_to_produce_a_result(design):
     from workbench.survey import EstimatorSpec, SurveyEngineError, estimate_with_design
 
+    # Must succeed on the full sample and fail only on replicates: an estimator
+    # that cannot fit the data at all is a different failure, and conflating the
+    # two would let this test pass without the replicate guard existing.
+    full_sample_weights = _design_frame()["weight"].to_numpy()
+
     def always_fails(frame, weights):
+        if np.allclose(np.asarray(weights), full_sample_weights):
+            return weighted_ols(frame, weights)
         raise np.linalg.LinAlgError("singular replicate")
 
     with pytest.raises(SurveyEngineError) as excinfo:
@@ -189,26 +266,26 @@ def test_too_many_failed_replicates_refuses_to_produce_a_result(design):
 # lonely PSU
 # --------------------------------------------------------------------------
 
-def test_lonely_psu_fails_closed_by_default(estimator):
+def test_lonely_psu_fails_closed_by_default(linearizable_estimator):
     from workbench.survey import SurveyDesign, SurveyEngineError, estimate_with_design
 
     frame = pd.read_csv(FIXTURES / "lonely.csv")
     design = SurveyDesign(frame=frame, strata="stratum", psu="psu", weight="weight")
     with pytest.raises(SurveyEngineError) as excinfo:
-        estimate_with_design(design, estimator, method="linearization")
+        estimate_with_design(design, linearizable_estimator, method="linearization")
     assert excinfo.value.code == "SURVEY_LONELY_PSU"
     assert "h01" in str(excinfo.value.detail), "the offending stratum must be named"
 
 
 @pytest.mark.parametrize("policy", ["remove", "adjust", "average", "certainty"])
-def test_lonely_psu_strategies_match_r(estimator, policy):
+def test_lonely_psu_strategies_match_r(linearizable_estimator, policy):
     from workbench.survey import SurveyDesign, estimate_with_design
 
     frame = pd.read_csv(FIXTURES / "lonely.csv")
     design = SurveyDesign(
         frame=frame, strata="stratum", psu="psu", weight="weight", lonely_psu=policy
     )
-    result = estimate_with_design(design, estimator, method="linearization")
+    result = estimate_with_design(design, linearizable_estimator, method="linearization")
     oracle = _oracle()["lonely_psu"][policy]
     assert oracle["status"] == "ok"
     for term in ("(Intercept)", "x1", "x2"):
@@ -219,7 +296,7 @@ def test_lonely_psu_strategies_match_r(estimator, policy):
 # subpopulation
 # --------------------------------------------------------------------------
 
-def test_subpopulation_subsets_the_design_not_the_data(estimator):
+def test_subpopulation_subsets_the_design_not_the_data(linearizable_estimator):
     """Filtering the rows first understates the standard error.
 
     The fixture empties whole PSUs precisely so the two approaches disagree; an
@@ -232,7 +309,7 @@ def test_subpopulation_subsets_the_design_not_the_data(estimator):
     design = SurveyDesign(
         frame=frame, strata="stratum", psu="psu", weight="weight", subpop="subpop == 1"
     )
-    result = estimate_with_design(design, estimator, method="linearization")
+    result = estimate_with_design(design, linearizable_estimator, method="linearization")
 
     oracle = _oracle()["subpopulation"]
     for term in ("(Intercept)", "x1", "x2"):
@@ -256,10 +333,10 @@ def test_design_effect_and_effective_sample_size_match_r(design):
     assert effects.n_obs == oracle["n_obs"]
 
 
-def test_adjusted_wald_uses_design_degrees_of_freedom(design, estimator):
+def test_adjusted_wald_uses_design_degrees_of_freedom(design, linearizable_estimator):
     from workbench.survey import estimate_with_design
 
-    result = estimate_with_design(design, estimator, method="linearization")
+    result = estimate_with_design(design, linearizable_estimator, method="linearization")
     wald = result.joint_test(["x1", "x2"])
     oracle = _oracle()["adjusted_wald"]
     assert wald.statistic == pytest.approx(oracle["statistic"], rel=1e-8)

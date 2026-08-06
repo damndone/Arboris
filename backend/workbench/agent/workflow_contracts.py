@@ -266,6 +266,15 @@ ModelFamilySpecValidator = Callable[[Mapping[str, Any]], None]
 ModelFamilyDataValidator = Callable[[pd.DataFrame, Mapping[str, Any]], None]
 
 
+from .result_shapes import (  # noqa: E402  -- keeps the contract next to its registry
+    ResultShapeError,
+    get_result_shape,
+    is_registered,
+    register_result_shape,
+    registered_result_shapes,
+)
+
+
 @dataclass(frozen=True)
 class ModelFamilyContract:
     """The complete workflow admission contract for one model family.
@@ -292,6 +301,11 @@ class ModelFamilyContract:
     requires_nonempty_predictors: bool = True
     allows_covariance: bool = True
     allows_weights: tuple[str, ...] = ()
+    #: v1.8.7. Which statsmodels GLM link this family's fit corresponds to, if
+    #: any. Declaring it is the whole cost of joining the design-variance engine
+    #: -- the shared adapter does the rest, and neither the engine nor the
+    #: adapter ever asks which family it is holding.
+    survey_glm_family: str | None = None
     supported_split_kinds: tuple[str, ...] = ()
     requires_branch_figures: bool = False
     context_spec_fields: tuple[str, ...] = ()
@@ -307,12 +321,15 @@ class ModelFamilyContract:
     def __post_init__(self) -> None:
         if self.required_spec_field_mode not in {"all", "any"}:
             raise ValueError("ModelFamilyContract required_spec_field_mode is invalid")
-        if self.result_shape not in {
-            "coefficient_intervals",
-            "effect_estimate_bundle",
-            "event_study_bundle",
-        }:
-            raise ValueError("ModelFamilyContract result_shape is invalid")
+        # The shape must be declared, not drawn from a fixed list.  A closed
+        # enum here is what kept factor loadings, reliability coefficients and
+        # cluster assignments from being registrable at all -- their results are
+        # none of the three kinds a regression produces.
+        if not is_registered(self.result_shape):
+            raise ResultShapeError(
+                f"ModelFamilyContract result_shape {self.result_shape!r} is not declared; "
+                "call register_result_shape() with its minimal payload schema first"
+            )
         if not self.family or not self.expected_artifacts:
             raise ValueError("ModelFamilyContract requires family and expected artifacts")
         if not set(self.column_spec_fields) <= set(self.context_spec_fields):
@@ -723,6 +740,7 @@ def _build_dcdh_model_params(
 MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     "ols": ModelFamilyContract(
         family="ols",
+        survey_glm_family="gaussian",
         required_spec_fields=(),
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
@@ -730,12 +748,14 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         expected_artifacts=("ols_1", "diagnostic_summary"),
         result_shape="coefficient_intervals",
         forbidden_spec_fields_message="model.genesis ols does not accept panel entity_col or time_col",
-        allows_weights=("frequency", "analysis"),
+        allows_weights=("frequency", "analysis", "sampling"),
         supported_split_kinds=("iid", "grouped"),
         requires_branch_figures=True,
     ),
     "logit": ModelFamilyContract(
         family="logit",
+        survey_glm_family="binomial",
+        allows_weights=("sampling",),
         required_spec_fields=(),
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
@@ -748,6 +768,8 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     ),
     "probit": ModelFamilyContract(
         family="probit",
+        survey_glm_family="binomial",
+        allows_weights=("sampling",),
         required_spec_fields=(),
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
@@ -760,6 +782,8 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     ),
     "poisson": ModelFamilyContract(
         family="poisson",
+        survey_glm_family="poisson",
+        allows_weights=("sampling",),
         required_spec_fields=(),
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
