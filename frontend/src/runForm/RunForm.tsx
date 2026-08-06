@@ -31,6 +31,18 @@ import {
   type ArmaGarchControlValue,
 } from "./ArmaGarchControls";
 import {
+  SurveyDesignControls,
+  emptySurveyDesign,
+  hasSurveyDesign,
+  type SurveyDesignValue,
+} from "./SurveyDesignControls";
+import {
+  AnovaControls,
+  emptyAnovaOptions,
+  toAnovaModelOptions,
+  type AnovaOptionsValue,
+} from "./AnovaControls";
+import {
   V186ModelControls,
   isV186ModelType,
   normalizeV186ModelOptions,
@@ -55,6 +67,19 @@ export type RunFormProps = {
   setRequestState: (state: RequestState) => void;
   onRan?: (r: RunResponse) => void;
 };
+
+function surveyDesign2Extra(value: SurveyDesignValue) {
+  return {
+    surveyStrataCol: value.survey_strata_col,
+    surveyPsuCol: value.survey_psu_col,
+    surveyFpcCol: value.survey_fpc_col,
+    surveyReplicateWeights: value.survey_replicate_weights,
+    surveyReplicateType: value.survey_replicate_type,
+    surveyLonelyPsu: value.survey_lonely_psu,
+    surveyWeightFrame: value.survey_weight_frame,
+    surveySubpop: value.survey_subpop,
+  };
+}
 
 export function RunForm(props: RunFormProps) {
   const {
@@ -81,6 +106,8 @@ export function RunForm(props: RunFormProps) {
   const [frequencyWeight, setFrequencyWeight] = useState("");
   const [analysisWeight, setAnalysisWeight] = useState("");
   const [samplingWeight, setSamplingWeight] = useState("");
+  const [surveyDesign, setSurveyDesign] = useState<SurveyDesignValue>(emptySurveyDesign);
+  const [anovaOptions, setAnovaOptions] = useState<AnovaOptionsValue>(emptyAnovaOptions);
   const [lmmValue, setLmmValue] = useState<LmmControlValue>({
     subject_id: "",
     time: "",
@@ -298,6 +325,8 @@ export function RunForm(props: RunFormProps) {
     setFrequencyWeight("");
     setAnalysisWeight("");
     setSamplingWeight("");
+    setSurveyDesign(emptySurveyDesign());
+    setAnovaOptions(emptyAnovaOptions());
     if (!nextFile) {
       setPreviewState("idle");
       return;
@@ -463,7 +492,9 @@ export function RunForm(props: RunFormProps) {
                   )
                 : isV186ModelType(modelType)
                   ? normalizeV186ModelOptions(modelType, v186ModelOptionsByType[modelType])
-                  : undefined,
+                  : modelType === "anova"
+                    ? toAnovaModelOptions(anovaOptions)
+                    : undefined,
           // v1.6.5 role layer: declare focal only for user-focal families and
           // only over the columns actually posted as x. Structural families
           // (IV/DID/CS/SA/dCDH) get nothing — focal/treatment is structural.
@@ -474,6 +505,10 @@ export function RunForm(props: RunFormProps) {
           frequencyWeight,
           analysisWeight,
           samplingWeight,
+          // Sent only when a design was actually declared: an empty field must
+          // not read as a declaration, since the backend keys its refusal on
+          // whether one is present.
+          ...(hasSurveyDesign(surveyDesign) ? surveyDesign2Extra(surveyDesign) : {}),
         },
       );
       setLastRun(result);
@@ -592,6 +627,21 @@ export function RunForm(props: RunFormProps) {
                 <span className="field-error">{runErrors.survivalEvent}</span>
               )}
             </>
+          )}
+          {modelType === "anova" && (
+            <AnovaControls
+              columns={columnNames}
+              value={anovaOptions}
+              onChange={setAnovaOptions}
+            />
+          )}
+          {capabilities?.survey_design && (
+            <SurveyDesignControls
+              columns={columnNames}
+              capability={capabilities.survey_design}
+              value={surveyDesign}
+              onChange={setSurveyDesign}
+            />
           )}
           <ImputationControls
             capabilities={capabilities}

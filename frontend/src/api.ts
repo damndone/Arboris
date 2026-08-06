@@ -450,6 +450,17 @@ export interface RunExtraParams {
   frequencyWeight?: string;
   analysisWeight?: string;
   samplingWeight?: string;
+  /** Complex survey design declarations (v1.8.7). Sent only when declared:
+   *  the backend refuses a sampling weight without a design, and an empty
+   *  field must not be mistaken for a declaration. */
+  surveyStrataCol?: string;
+  surveyPsuCol?: string;
+  surveyFpcCol?: string;
+  surveyReplicateWeights?: string[];
+  surveyReplicateType?: string;
+  surveyLonelyPsu?: string;
+  surveyWeightFrame?: string;
+  surveySubpop?: string;
   ivEndog?: string[];
   ivInstruments?: string[];
   didMode?: string;
@@ -580,6 +591,16 @@ export async function runWorkflow(
   if (extra?.frequencyWeight) form.append("frequency_weight", extra.frequencyWeight);
   if (extra?.analysisWeight) form.append("analysis_weight", extra.analysisWeight);
   if (extra?.samplingWeight) form.append("sampling_weight", extra.samplingWeight);
+  if (extra?.surveyStrataCol) form.append("survey_strata_col", extra.surveyStrataCol);
+  if (extra?.surveyPsuCol) form.append("survey_psu_col", extra.surveyPsuCol);
+  if (extra?.surveyFpcCol) form.append("survey_fpc_col", extra.surveyFpcCol);
+  if (extra?.surveyReplicateWeights?.length) {
+    form.append("survey_replicate_weights", JSON.stringify(extra.surveyReplicateWeights));
+  }
+  if (extra?.surveyReplicateType) form.append("survey_replicate_type", extra.surveyReplicateType);
+  if (extra?.surveyLonelyPsu) form.append("survey_lonely_psu", extra.surveyLonelyPsu);
+  if (extra?.surveyWeightFrame) form.append("survey_weight_frame", extra.surveyWeightFrame);
+  if (extra?.surveySubpop) form.append("survey_subpop", extra.surveySubpop);
   if (extra?.modelOptions !== undefined) {
     form.append("model_options", serializeModelOptions(extra.modelOptions));
   }
