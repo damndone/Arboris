@@ -225,7 +225,7 @@ export function ReportPreviewPanel({
               onChange={onChange}
               onSubmit={onRevise}
               submitLabel="Revise draft"
-              placeholder="告诉 Agent 如何修改这份报告…"
+              placeholder="Tell the agent how to change this report…"
               ariaLabel="Report revision instruction"
               contextLines={contextLines}
               contextDetails={contextDetails}

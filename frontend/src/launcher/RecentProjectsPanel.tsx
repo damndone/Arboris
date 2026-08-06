@@ -29,7 +29,7 @@ export function RecentProjectsPanel({ onOpenProject }: RecentProjectsPanelProps)
       if (error instanceof ApiError && error.code === "PROJECT_NOT_FOUND") {
         setStaleRoots((current) => ({ ...current, [root]: true }));
       } else {
-        setProbeError(error instanceof Error ? error.message : "无法打开项目，请稍后再试。");
+        setProbeError(error instanceof Error ? error.message : "Could not open the project. Try again.");
       }
     } finally {
       setProbingRoot(null);
@@ -54,7 +54,7 @@ export function RecentProjectsPanel({ onOpenProject }: RecentProjectsPanelProps)
     <>
       {probeError && <p className="field-error" role="alert">{probeError}</p>}
       {recents.length === 0 ? (
-        <p className="muted">最近项目将显示在这里。</p>
+        <p className="muted">Recent projects appear here.</p>
       ) : (
         <ul
           aria-label="recent projects"
@@ -81,12 +81,12 @@ export function RecentProjectsPanel({ onOpenProject }: RecentProjectsPanelProps)
                   <strong>{projectName(recent.root)}</strong>
                   <span className="mono" style={{ display: "block" }}>{recent.root}</span>
                   <span className="muted" style={{ display: "block" }}>
-                    {probingRoot === recent.root ? "打开中…" : `上次打开 ${recent.lastOpened}`}
+                    {probingRoot === recent.root ? "Opening…" : `Last opened ${recent.lastOpened}`}
                   </span>
                 </button>
                 {/* Removal used to appear only once a project had gone stale,
                     so a healthy project could never be taken off the list.
-                    The wording stays "移除" rather than "删除" on purpose: this
+                    The wording stays "Remove" rather than "Delete" on purpose: this
                     clears the entry, it does not touch the files on disk. */}
                 <div
                   style={{
@@ -96,14 +96,14 @@ export function RecentProjectsPanel({ onOpenProject }: RecentProjectsPanelProps)
                     gap: 8,
                   }}
                 >
-                  {stale && <span className="field-error">失效</span>}
+                  {stale && <span className="field-error">stale</span>}
                   <button
                     type="button"
                     data-testid={`recent-remove-${recent.root}`}
                     onClick={() => remove(recent.root)}
-                    title="从最近列表中移除（不会删除磁盘上的项目文件）"
+                    title="Remove from the recent list (the project files on disk are left alone)"
                   >
-                    移除
+                    Remove
                   </button>
                 </div>
               </li>

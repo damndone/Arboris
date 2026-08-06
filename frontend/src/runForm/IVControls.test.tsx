@@ -24,11 +24,11 @@ describe("IVControls", () => {
 
   it("shows identification status", () => {
     const { rerender } = render(<IVControls columns={cols} value={{ endog: ["educ"], instruments: ["dist"] }} onChange={() => {}} />);
-    expect(screen.getByText(/just-identified|恰好识别/i)).toBeInTheDocument();
+    expect(screen.getByText(/just-identified/i)).toBeInTheDocument();
     rerender(<IVControls columns={cols} value={{ endog: ["educ", "age"], instruments: ["dist"] }} onChange={() => {}} />);
-    expect(screen.getByText(/under-identified|欠识别/i)).toBeInTheDocument();
+    expect(screen.getByText(/Under-identified/i)).toBeInTheDocument();
     rerender(<IVControls columns={cols} value={{ endog: ["educ"], instruments: ["dist", "momeduc"] }} onChange={() => {}} />);
-    expect(screen.getByText(/over-identified|过度识别/i)).toBeInTheDocument();
+    expect(screen.getByText(/Over-identified/i)).toBeInTheDocument();
   });
 
   it("reassigning a column back to exog removes it from both buckets", () => {
@@ -40,6 +40,6 @@ describe("IVControls", () => {
 
   it("shows the neutral hint when no endogenous variable is assigned", () => {
     render(<IVControls columns={cols} value={{ endog: [], instruments: [] }} onChange={() => {}} />);
-    expect(screen.getByText(/请指派至少一个内生变量/)).toBeInTheDocument();
+    expect(screen.getByText(/Assign at least one endogenous variable/i)).toBeInTheDocument();
   });
 });

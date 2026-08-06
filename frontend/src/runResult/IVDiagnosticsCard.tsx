@@ -30,9 +30,9 @@ function fmt(v: number, digits = 2): string {
 }
 
 function identificationLabel(id: IVDiagnostics["identification"]): string {
-  if (id === "under") return "under-identified · 欠识别";
-  if (id === "just") return "just-identified · 恰好识别";
-  return "over-identified · 过度识别";
+  if (id === "under") return "under-identified";
+  if (id === "just") return "just-identified";
+  return "over-identified";
 }
 
 export function IVDiagnosticsCard(props: {
@@ -44,15 +44,18 @@ export function IVDiagnosticsCard(props: {
   return (
     <section className="ios-card iv-diagnostics" aria-label="IV diagnostics">
       <div className="ios-card-title">
-        🎯 IV 诊断
-        <span className={`iv-badge iv-id-${d.identification}`}>
+        🎯 IV diagnostics
+        <span
+          className={`iv-badge iv-id-${d.identification}`}
+          aria-label="IV identification"
+        >
           {identificationLabel(d.identification)}
         </span>
       </div>
       <ul className="ios-metric-list">
         <li className="iv-row">
           <span>
-            第一阶段 F (first-stage F) = {fmt(d.weak_instruments.first_stage_f)}{" "}
+            First-stage F = {fmt(d.weak_instruments.first_stage_f)}{" "}
             (threshold {fmt(d.weak_instruments.threshold)})
           </span>
           <strong className={`iv-badge iv-wi-${d.weak_instruments.verdict}`}>

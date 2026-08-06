@@ -38,15 +38,15 @@ export const GRAPH_MIN_ZOOM = 0.1;
 // 8 V1.5.0 stages have an entry. Synthetic "unknown" doesn't appear in
 // the legend by design.
 const STAGE_LABEL: Record<Exclude<Stage, "unknown">, string> = {
-  source: "原始",
-  eda: "探索",
-  clean: "清洗",
-  transform: "变换",
-  model: "模型",
-  diag: "诊断",
-  viz: "可视化",
-  report: "报告",
-  compare: "对比",
+  source: "Source",
+  eda: "Explore",
+  clean: "Clean",
+  transform: "Transform",
+  model: "Model",
+  diag: "Diagnostics",
+  viz: "Visualise",
+  report: "Report",
+  compare: "Compare",
 };
 const LEGEND_STAGES: Array<Exclude<Stage, "unknown">> = [
   "source",
@@ -834,7 +834,7 @@ export function GraphCanvas({
         nodeTypes={nodeTypes}
         // V1.5.0.1 HF5: free node drag matches the prototype's contract
         // (uiux/app.jsx TWEAK_DEFAULTS layout=free; uiux/panels.jsx empty
-        // drawer hint "拖拽 = 重排"). Positions are owned by RF state
+        // drawer hint "drag = rearrange"). Positions are owned by RF state
         // via useNodesState above; dagre is the initial seed only.
         nodesDraggable={layout === "free"}
         // V1.5.0.1 HF5: pin edge type to RF's bezier default so a future

@@ -1,6 +1,6 @@
 // v1.6.11 slice B-2 — presentational renderer for a NodeComparisonResult.
 //
-// Readability rules (user 拍板 2026-07-11): sections self-adapt — unchanged
+// Readability rules (user decision, 2026-07-11): sections self-adapt — unchanged
 // sections collapse to nothing, so the eye lands only on real differences.
 // Values are GitHub-diff colored: removed red with −, added green with +,
 // changed renders old → new with a numeric delta badge when meaningful.

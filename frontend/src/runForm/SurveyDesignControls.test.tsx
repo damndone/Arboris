@@ -19,6 +19,7 @@ const capability: SurveyDesignCapability = {
   replicate_types: ["brr", "jackknife", "bootstrap", "provided"],
   lonely_psu_policies: ["fail", "remove", "adjust", "average", "certainty"],
   design_fields: [],
+  sampling_weight_families: ["ols", "logit", "probit", "poisson"],
 };
 
 const columns = ["stratum", "psu", "fpc", "weight", "region"];
@@ -82,6 +83,24 @@ describe("SurveyDesignControls", () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ survey_strata_col: "stratum" }),
     );
+  });
+
+  it("belongs only to families the server says take a sampling weight", async () => {
+    /**
+     * A family whose engine refuses a sampling weight must not be offered a
+     * design: the run would come back rejected for a reason the user cannot see
+     * from the form.  The answer is the server's, not a copy kept here -- a
+     * local list is the enumeration matrix this version removed from the backend.
+     */
+    const { surveyDesignApplies } = await import("./SurveyDesignControls");
+    expect(surveyDesignApplies(capability, "ols")).toBe(true);
+    expect(surveyDesignApplies(capability, "cs_did")).toBe(false);
+    expect(surveyDesignApplies(undefined, "ols")).toBe(false);
+
+    // Follows the server rather than a constant: withdraw ols and it goes away.
+    expect(
+      surveyDesignApplies({ ...capability, sampling_weight_families: ["logit"] }, "ols"),
+    ).toBe(false);
   });
 
   it("starts with no design declared", () => {

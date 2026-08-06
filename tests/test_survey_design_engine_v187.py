@@ -343,3 +343,61 @@ def test_adjusted_wald_uses_design_degrees_of_freedom(design, linearizable_estim
     assert wald.df == oracle["df"]
     assert wald.ddf == oracle["ddf"]
     assert wald.p_value == pytest.approx(oracle["p_value"], rel=1e-6)
+
+
+# --------------------------------------------------------------------------
+# end to end: what a real run actually writes
+# --------------------------------------------------------------------------
+
+def test_every_coefficient_in_a_real_run_carries_the_design_standard_error(tmp_path):
+    """A full workflow, checked term by term against R -- intercept included.
+
+    The engine tests above drive `estimate_with_design` directly and pass while
+    the wiring layer delivers the design SE to only *some* coefficients.  That is
+    not hypothetical: the payload names the intercept `Intercept` and the engine
+    names it `(Intercept)`, and the merge skipped what it could not match, so a
+    browser run showed x1/x2 matching R to twelve decimals and the intercept
+    still carrying its naive 0.7804 against R's 1.5955 -- half the true width,
+    with nothing in the result marking it as different from its neighbours.
+
+    Asserting on the slopes alone is what let that through.  This walks the whole
+    coefficient table.
+    """
+    from workbench.orchestrator import run_workflow
+    from workbench.artifacts import read_json
+    from workbench.projects import create_project
+
+    project = create_project(tmp_path, "svy_e2e")
+    source = project.root / "design.csv"
+    source.write_text((FIXTURES / "design.csv").read_text())
+
+    outcome = run_workflow(
+        project.root, [source], mode="auto", model_type="ols",
+        y="y", x=["x1", "x2"],
+        sampling_weight="weight",
+        survey_strata_col="stratum",
+        survey_psu_col="psu",
+        survey_fpc_col="fpc",
+    )
+    assert outcome["status"] == "completed"
+
+    result = read_json(
+        project.root / "runs" / outcome["run_id"] / "model_results" / "ols_1.json"
+    )
+    oracle = _oracle()["linearization"]
+    coefficients = result["coefficients"]
+
+    # Every term R reports must be present and carry R's standard error. Naming
+    # is the failure mode, so the mapping is asserted rather than assumed.
+    assert set(coefficients) == {"Intercept", "x1", "x2"}
+    for payload_term, oracle_term in [
+        ("Intercept", "(Intercept)"), ("x1", "x1"), ("x2", "x2"),
+    ]:
+        entry = coefficients[payload_term]
+        assert entry["estimate"] == pytest.approx(oracle["estimate"][oracle_term], rel=1e-10)
+        assert entry["std_error"] == pytest.approx(oracle["se"][oracle_term], rel=1e-8), (
+            f"{payload_term} kept a standard error the design engine did not produce"
+        )
+        assert entry["ci_lower"] == pytest.approx(oracle["ci_lower"][oracle_term], rel=1e-8)
+        assert entry["ci_upper"] == pytest.approx(oracle["ci_upper"][oracle_term], rel=1e-8)
+        assert entry["variance_source"] == "survey_design"

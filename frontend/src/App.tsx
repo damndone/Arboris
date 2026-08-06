@@ -28,14 +28,14 @@ export function validatePanelPrediction(s: {
 }): string | null {
   if (s.modelType === "panel_ols") {
     if (s.entity && s.time && s.entity === s.time) {
-      return "个体列与时间列不能是同一列 (entity == time)。";
+      return "The entity and time columns cannot be the same column (entity == time).";
     }
     if (!s.entity && !s.time && !s.isPanelData) {
-      return "选择 Panel OLS 时请指定个体或时间列；该数据未被识别为面板数据。";
+      return "Panel OLS needs an entity or time column; this dataset was not recognised as panel data.";
     }
   }
   if (s.predictionEnabled && !s.predictionModelType) {
-    return "已开启预测，请选择算法 (algorithm)。";
+    return "Prediction is enabled — choose an algorithm.";
   }
   return null;
 }

@@ -44,7 +44,7 @@ describe("ReportReviewPanel", () => {
     render(<ReportReviewPanel />);
 
     expect(screen.getByTestId("report-review-panel")).toBeInTheDocument();
-    expect(screen.getByText("暂时没有报告")).toBeInTheDocument();
+    expect(screen.getByText("No report yet")).toBeInTheDocument();
     expect(screen.queryByTestId("report-body")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Report revision instruction" })).not.toBeInTheDocument();
   });
@@ -133,9 +133,9 @@ describe("ReportReviewPanel", () => {
 
     render(<ReportReviewPanel />);
 
-    expect(screen.getByTestId("report-review-load-error")).toHaveTextContent("报告加载失败");
+    expect(screen.getByTestId("report-review-load-error")).toHaveTextContent("Report failed to load");
     expect(screen.getByTestId("report-review-load-error")).toHaveTextContent("network unavailable");
-    expect(screen.queryByText("暂时没有报告")).not.toBeInTheDocument();
+    expect(screen.queryByText("No report yet")).not.toBeInTheDocument();
   });
 
   it("uses a pin glyph for the locked floating state and disables dragging", () => {

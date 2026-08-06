@@ -419,8 +419,8 @@ export function ReportWorkspaceProvider({
       })
       .catch((err) => {
         if (cancelled || activeRunIdRef.current !== runId || projectRootRef.current !== projectRoot) return;
-        const message = err instanceof Error ? err.message : "报告暂时无法加载";
-        setReportLoadError(`报告加载失败：${message}`);
+        const message = err instanceof Error ? err.message : "The report could not be loaded";
+        setReportLoadError(`Report failed to load: ${message}`);
       });
     return () => {
       // A floating review remains mounted after the user leaves Report. Let a

@@ -20,7 +20,7 @@ export function CovarianceSelect({
   if (options.length === 0) return null;
   return (
     <label className="ios-field">
-      <span>标准误 covariance</span>
+      <span>Covariance</span>
       <select
         aria-label="covariance"
         value={value || covarianceDefault(capabilities)}

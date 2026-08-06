@@ -213,9 +213,9 @@ function LabelTable({
       <thead>
         <tr>
           <th>{labelHeader}</th>
-          <th>估计</th>
+          <th>Estimate</th>
           <th>SE</th>
-          <th>一致带</th>
+          <th>Uniform band</th>
         </tr>
       </thead>
       <tbody>
@@ -256,8 +256,8 @@ function HonestDidSensitivityTable({
         <thead>
           <tr>
             <th>{paramLabel}</th>
-            <th>下界</th>
-            <th>上界</th>
+            <th>Lower</th>
+            <th>Upper</th>
           </tr>
         </thead>
         <tbody>
@@ -271,8 +271,8 @@ function HonestDidSensitivityTable({
         </tbody>
       </table>
       <div>
-        突破 {paramLabel}:{" "}
-        {breakdown == null ? "无突破 (始终含 0)" : f(breakdown, 2)}
+        Breakdown {paramLabel}:{" "}
+        {breakdown == null ? "No breakdown (always contains 0)" : f(breakdown, 2)}
       </div>
     </div>
   );
@@ -303,19 +303,19 @@ function HonestTrackPanel({
   const paramLabel = kind === "rm" ? "M̄" : "M";
   const heading =
     kind === "rm"
-      ? "相对幅度限制 (ΔRM, Rambachan-Roth)"
-      : "平滑性限制 (ΔSD) · FLCI 固定长度 CI";
+      ? "Relative magnitude restriction (ΔRM, Rambachan-Roth)"
+      : "Smoothness restriction (ΔSD) — FLCI fixed-length CI";
   const microcopy =
     kind === "rm"
-      ? "点估计不变；M̄ 越大表示平行趋势假设越弱。突破 M̄ = 效应仍显著（CI 不含 0）的最大相对幅度界。"
-      : "对二阶差分施加平滑性约束 (ΔSD)，以 FLCI（固定长度置信区间）报告。M 越大约束越松。";
+      ? "The point estimate does not move; a larger M̄ means a weaker parallel-trends assumption. The breakdown M̄ is the largest relative magnitude at which the effect is still significant (CI excludes 0)."
+      : "A smoothness restriction (ΔSD) on second differences, reported as an FLCI (fixed-length confidence interval). A larger M is a looser restriction.";
   return (
     <section aria-label={`cs-honest-did-${kind}-panel`}>
       <div className="ios-card-title">{heading}</div>
       <div>{microcopy}</div>
       {track.post_average && (
         <HonestDidSensitivityTable
-          caption="后处理期平均 (post-average)"
+          caption="Post-treatment average"
           ariaLabel={`cs-honest-did-${kind}-post-average`}
           results={track.post_average.results}
           breakdown={track.post_average.breakdown}
@@ -326,7 +326,7 @@ function HonestTrackPanel({
       {(track.per_event_time ?? []).map((pet) => (
         <HonestDidSensitivityTable
           key={pet.event_time}
-          caption={`事件期 ${pet.event_time}`}
+          caption={`Event time ${pet.event_time}`}
           ariaLabel={`cs-honest-did-${kind}-event-${pet.event_time}`}
           results={pet.results}
           breakdown={pet.breakdown}
@@ -341,7 +341,7 @@ function HonestTrackPanel({
 function HonestDidPanel({ honest }: { honest: HonestDidBlock }) {
   return (
     <section aria-label="cs-honest-did-panel">
-      <div className="ios-card-title">honest-DID 敏感性 (Rambachan-Roth)</div>
+      <div className="ios-card-title">honest-DID sensitivity (Rambachan-Roth)</div>
       <HonestTrackPanel track={honest.rm} kind="rm" />
       <HonestTrackPanel track={honest.sd} kind="sd" />
     </section>
@@ -359,7 +359,7 @@ export function CSDiagnosticsCard({
   if ("available" in diagnostics && diagnostics.available === false) {
     return (
       <section className="ios-card cs-diagnostics" aria-label="cs-diagnostics">
-        <div className="ios-card-title">Callaway-Sant'Anna 诊断不可用</div>
+        <div className="ios-card-title">Callaway-Sant'Anna diagnostics unavailable</div>
         <div className="ios-warning">{diagnostics.error}</div>
       </section>
     );
@@ -374,7 +374,7 @@ export function CSDiagnosticsCard({
     return (
       <section className="ios-card cs-diagnostics" aria-label="cs-diagnostics">
         <div className="ios-card-title">{cardTitle(d.metadata?.estimator)}</div>
-        <div className="ios-warning">结果不完整</div>
+        <div className="ios-warning">Incomplete result</div>
       </section>
     );
   }
@@ -389,23 +389,23 @@ export function CSDiagnosticsCard({
       <div className="ios-card-title">{cardTitle(m.estimator)}</div>
 
       <div>
-        <span>总体 ATT</span>{" "}
+        <span>Overall ATT</span>{" "}
         <strong style={{ fontSize: 20 }}>{f(agg.simple.overall, 2)}</strong>{" "}
         <span>SE {f(agg.simple.overall_se, 2)}</span>
         {band && band.length === 2 && (
           <span>
             {" "}
-            · 一致带 [{f(band[0], 2)}, {f(band[1], 2)}]
+            · uniform band [{f(band[0], 2)}, {f(band[1], 2)}]
           </span>
         )}
       </div>
 
       <div>
-        <span>事件研究 (动态)</span>{" "}
+        <span>Event study (dynamic)</span>{" "}
         {esOk ? (
           <CSEventStudyChart dyn={dyn} />
         ) : (
-          <span aria-label="cs-event-study-skipped">事件研究不可用</span>
+          <span aria-label="cs-event-study-skipped">Event study unavailable</span>
         )}
       </div>
 
@@ -420,41 +420,41 @@ export function CSDiagnosticsCard({
       )}
 
       <button onClick={() => setOpen((v) => !v)}>
-        {open ? "▾ 收起" : "▸ 展开完整数据"}
+        {open ? "▾ Collapse" : "▸ Expand full data"}
       </button>
 
       {open && (
         <div>
           <LabelTable
-            caption="按队列 (group)"
+            caption="By cohort (group)"
             ariaLabel="cs-group-table"
-            labelHeader="队列"
+            labelHeader="Cohort"
             labels={agg.group.label}
             estimate={agg.group.estimate}
             se={agg.group.se}
             band={agg.group.uniform_band}
           />
           <LabelTable
-            caption="按日历期 (calendar)"
+            caption="By calendar period"
             ariaLabel="cs-calendar-table"
-            labelHeader="期"
+            labelHeader="Period"
             labels={agg.calendar.label}
             estimate={agg.calendar.estimate}
             se={agg.calendar.se}
             band={agg.calendar.uniform_band}
           />
           <div>
-            规格: 估计法={m.est_method} · 对照组={m.control_group} · 基期=
-            {m.base_period} · 单位数 {m.n_units} · 队列数 {m.n_cohorts} · 有效格
-            {m.n_valid_cells}/{m.n_cells} · 省略格 {omittedCount} · 置信度
-            {(m.confidence_level * 100).toFixed(0)}% · 带类型 {m.band_type}
+            Spec: method={m.est_method} · control group={m.control_group} · base period=
+            {m.base_period} · units {m.n_units} · cohorts {m.n_cohorts} · valid cells
+            {m.n_valid_cells}/{m.n_cells} · omitted cells {omittedCount} · confidence 
+            {(m.confidence_level * 100).toFixed(0)}% · band type {m.band_type}
           </div>
           {m.cluster_level && (
             <div aria-label="cs-cluster-level">
-              聚类层级:{" "}
+              Cluster level:{" "}
               {m.cluster_level === "entity"
-                ? "实体 (entity)"
-                : `${m.cluster_level} · ${m.n_clusters ?? "?"} 簇`}
+                ? "Entity"
+                : `${m.cluster_level} · ${m.n_clusters ?? "?"} clusters`}
               （cluster-robust SE）
             </div>
           )}

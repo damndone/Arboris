@@ -54,6 +54,9 @@ export interface SurveyDesignCapability {
   replicate_types: string[];
   lonely_psu_policies: string[];
   design_fields: string[];
+  /** Families whose engine accepts a sampling weight; the design controls
+   *  belong to those and nowhere else. Server-derived, never restated here. */
+  sampling_weight_families: string[];
 }
 
 export interface Capabilities {

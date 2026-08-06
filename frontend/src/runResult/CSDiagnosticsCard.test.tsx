@@ -68,7 +68,7 @@ describe("CSDiagnosticsCard", () => {
         diagnostics={{ available: false, error: "cs_did failed: boom" }}
       />,
     );
-    expect(screen.getByText(/不可用/)).toBeInTheDocument();
+    expect(screen.getByText(/unavailable/)).toBeInTheDocument();
     expect(screen.getByText(/boom/)).toBeInTheDocument();
   });
 
@@ -84,7 +84,7 @@ describe("CSDiagnosticsCard", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders a 结果不完整 fallback for a truthy-but-incomplete artifact", () => {
+  it("renders an incomplete-result fallback for a truthy-but-incomplete artifact", () => {
     // available is not false (so it passes the degraded check) but a required
     // aggregation key is missing — must NOT throw on d.aggregations.dynamic.*.
     const partial = {
@@ -95,7 +95,7 @@ describe("CSDiagnosticsCard", () => {
     expect(() =>
       render(<CSDiagnosticsCard diagnostics={partial} />),
     ).not.toThrow();
-    expect(screen.getByText(/结果不完整/)).toBeInTheDocument();
+    expect(screen.getByText(/Incomplete result/)).toBeInTheDocument();
   });
 
   it("renders both rm and sd panels when both tracks are ok", () => {
@@ -179,10 +179,10 @@ describe("CSDiagnosticsCard", () => {
     const postBreakdown = screen
       .getByLabelText("cs-honest-did-rm-post-average")
       .parentElement!.querySelector("div");
-    expect(postBreakdown?.textContent).toContain("突破");
+    expect(postBreakdown?.textContent).toContain("Breakdown");
     expect(postBreakdown?.textContent).toContain("1.00");
     // null breakdown microcopy for the per-event-time rows
-    expect(screen.getAllByText(/无突破/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/No breakdown/).length).toBeGreaterThan(0);
   });
 
   it("renders a null (nan-sanitized) honest-DID CI row as — without crashing", () => {
@@ -369,6 +369,6 @@ describe("CSDiagnosticsCard", () => {
           estimate: [], se: [], pointwise_ci: [], uniform_band: [] } } };
     render(<CSDiagnosticsCard diagnostics={noEs} />);
     expect(screen.queryByLabelText("cs-event-study-chart")).toBeNull();
-    expect(screen.getByText(/事件研究不可用/)).toBeInTheDocument();
+    expect(screen.getByText(/Event study unavailable/)).toBeInTheDocument();
   });
 });

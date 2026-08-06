@@ -38,7 +38,7 @@ export function PredictionControls(props: {
   return (
     <div className="ios-group" aria-label="Forecast settings">
       <label className="ios-row">
-        <span>同时跑预测模型</span>
+        <span>Also run a prediction model</span>
         <input type="checkbox" aria-label="prediction" className="ios-switch"
           checked={props.enabled}
           onChange={(e) => props.onEnabled(e.target.checked)} />
@@ -46,20 +46,20 @@ export function PredictionControls(props: {
       {props.enabled && (
         <>
           <label className="ios-field">
-            <span>算法 algorithm</span>
+            <span>Algorithm</span>
             <select aria-label="algorithm" value={props.modelType}
               onChange={(e) => props.onModelType(e.target.value)}>
-              <option value="">(选择)</option>
+              <option value="">(select)</option>
               {models.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
           </label>
           <label className="ios-field">
-            <span>交叉验证折数 cv_folds</span>
+            <span>Cross-validation folds</span>
             <input type="number" aria-label="cv_folds" min={2} max={20} value={props.cvFolds}
               onChange={(e) => props.onCvFolds(Number(e.target.value) || 5)} />
           </label>
           <label className="ios-field">
-            <span>最终留出比例 final holdout</span>
+            <span>Final holdout fraction</span>
             <input type="number" aria-label="final holdout fraction" min={0.1} max={0.5} step={0.05}
               value={props.finalHoldoutFraction ?? 0.2}
               onChange={(e) => setFinalHoldoutFraction(Number(e.target.value) || 0.2)} />
@@ -71,49 +71,49 @@ export function PredictionControls(props: {
               onChange={(e) => setShuffle(e.target.checked)} />
           </label>
           <label className="ios-field">
-            <span>数据结构 data structure</span>
+            <span>Data structure</span>
             <select aria-label="data structure" value={dataStructure}
               onChange={(e) => setDataStructure(e.target.value)}>
-              <option value="unknown">(必须声明)</option>
-              <option value="iid">IID / 独立同分布</option>
-              <option value="grouped">Grouped / 分组</option>
-              <option value="temporal">Temporal / 时间序列</option>
-              <option value="panel">Panel / 面板</option>
+              <option value="unknown">(must be declared)</option>
+              <option value="iid">IID / independent and identically distributed</option>
+              <option value="grouped">Grouped</option>
+              <option value="temporal">Temporal / time series</option>
+              <option value="panel">Panel</option>
             </select>
           </label>
           {dataStructure === "grouped" && (
             <label className="ios-field">
-              <span>分组列 group column</span>
+              <span>Group column</span>
               <select aria-label="group column" value={props.groupColumn ?? ""}
                 onChange={(e) => setGroupColumn(e.target.value)}>
-                <option value="">(选择)</option>
+                <option value="">(select)</option>
                 {columns.map((column) => <option key={column} value={column}>{column}</option>)}
               </select>
             </label>
           )}
           {dataStructure === "panel" && (
             <label className="ios-field">
-              <span>个体列 entity column</span>
+              <span>Entity column</span>
               <select aria-label="entity column" value={props.entityColumn ?? ""}
                 onChange={(e) => setEntityColumn(e.target.value)}>
-                <option value="">(选择)</option>
+                <option value="">(select)</option>
                 {columns.map((column) => <option key={column} value={column}>{column}</option>)}
               </select>
             </label>
           )}
           {(dataStructure === "temporal" || dataStructure === "panel") && (
             <label className="ios-field">
-              <span>时间列 time column</span>
+              <span>Time column</span>
               <select aria-label="time column" value={props.timeColumn ?? ""}
                 onChange={(e) => setTimeColumn(e.target.value)}>
-                <option value="">(选择)</option>
+                <option value="">(select)</option>
                 {columns.map((column) => <option key={column} value={column}>{column}</option>)}
               </select>
             </label>
           )}
           {sampling.length > 0 && (
             <label className="ios-field">
-              <span>不平衡采样 sampling</span>
+              <span>Imbalance sampling</span>
               <select aria-label="sampling" value={props.sampling}
                 onChange={(e) => props.onSampling(e.target.value)}>
                 <option value="">(none)</option>

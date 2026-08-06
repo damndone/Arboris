@@ -34,6 +34,7 @@ import {
   SurveyDesignControls,
   emptySurveyDesign,
   hasSurveyDesign,
+  surveyDesignApplies,
   type SurveyDesignValue,
 } from "./SurveyDesignControls";
 import {
@@ -635,7 +636,7 @@ export function RunForm(props: RunFormProps) {
               onChange={setAnovaOptions}
             />
           )}
-          {capabilities?.survey_design && (
+          {capabilities?.survey_design && surveyDesignApplies(capabilities.survey_design, modelType) && (
             <SurveyDesignControls
               columns={columnNames}
               capability={capabilities.survey_design}
@@ -680,7 +681,7 @@ export function RunForm(props: RunFormProps) {
           {modelType === "iv_2sls" && (
             <div className="ios-group" aria-label="IV controls">
               <p className="ios-hint">
-                把控制变量、内生变量、工具变量都加入 X，再在下方为每个变量指派角色
+                Add controls, endogenous variables and instruments all to X, then assign each one a role below
               </p>
               <IVControls
                 columns={xColumns}
@@ -689,7 +690,7 @@ export function RunForm(props: RunFormProps) {
               />
               {(capabilities?.covariance_options ?? []).length > 0 && (
                 <label className="ios-field">
-                  <span>标准误 covariance</span>
+                  <span>Covariance</span>
                   <select
                     aria-label="covariance"
                     value={covariance}

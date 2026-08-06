@@ -30,7 +30,7 @@ describe("RecentProjectsPanel removal", () => {
 
     expect(screen.getByTestId("recent-remove-/p/alpha")).toHaveAttribute(
       "title",
-      expect.stringContaining("不会删除") as unknown as string,
+      expect.stringContaining("left alone") as unknown as string,
     );
   });
 

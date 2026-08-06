@@ -207,3 +207,27 @@ def test_capability_projection_exposes_the_design_variance_matrix():
     assert set(survey["lonely_psu_policies"]) == {
         "fail", "remove", "adjust", "average", "certainty"
     }
+
+
+def test_capability_projection_names_the_families_that_take_a_sampling_weight():
+    """The form has to know where the design controls belong.
+
+    Without this the frontend either shows the design fields for every family --
+    including the ones whose engine refuses a sampling weight -- or carries its
+    own copy of the list, which is the enumeration matrix this version spent
+    three blocks removing from the backend.  Derived from the family contracts so
+    a family that gains or loses `sampling` moves the form with it.
+    """
+    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.engine.capabilities import build_capabilities
+
+    published = set(build_capabilities()["survey_design"]["sampling_weight_families"])
+    declared = {
+        key
+        for key, contract in MODEL_FAMILY_CONTRACTS.items()
+        if "sampling" in contract.allows_weights
+    }
+    assert published == declared
+    # Guard against the degenerate ways of passing: an empty set, or everything.
+    assert "ols" in published
+    assert published != set(MODEL_FAMILY_CONTRACTS)

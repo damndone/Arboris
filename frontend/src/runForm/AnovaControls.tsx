@@ -17,9 +17,9 @@ export type AnovaOptionsValue = {
 };
 
 const SS_TYPES = [
-  { value: "1", label: "Type I（序贯，R aov 的默认）" },
-  { value: "2", label: "Type II（无交互作用时的主效应）" },
-  { value: "3", label: "Type III（SPSS GLM 的默认）" },
+  { value: "1", label: "Type I (sequential — the default in R's aov)" },
+  { value: "2", label: "Type II (main effects, no interaction assumed)" },
+  { value: "3", label: "Type III (the default in SPSS GLM)" },
 ];
 
 const POSTHOC = [
@@ -56,28 +56,29 @@ export function AnovaControls(props: {
 
   return (
     <div className="ios-group" aria-label="ANOVA settings">
-      <div className="ios-group-label">ANOVA / ANCOVA 设置</div>
+      <div className="ios-group-label">ANOVA / ANCOVA settings</div>
 
       <label className="ios-field">
-        <span>平方和类型</span>
+        <span>Sums of squares</span>
         <select
           aria-label="ANOVA sums of squares"
           value={props.value.sums_of_squares}
           onChange={(event) => set({ sums_of_squares: event.target.value })}
         >
-          <option value="">请选择</option>
+          <option value="">Choose one</option>
           {SS_TYPES.map((entry) => (
             <option key={entry.value} value={entry.value}>{entry.label}</option>
           ))}
         </select>
       </label>
       <p className="ios-hint" data-testid="anova-ss-help">
-        没有默认值，必须自己选。SPSS 的 GLM 默认 Type III，R 的 aov 默认 Type I；
-        在非平衡设计下两者给出不同的 F 与 p，替你选一个会让这个差异不可见。
+        No default — you have to choose. SPSS GLM reports Type III and R's aov reports
+        Type I; on an unbalanced design the two give different F and p, and picking one
+        for you would hide that difference.
       </p>
 
       <fieldset className="ios-field">
-        <legend>因子（其余列作为协变量）</legend>
+        <legend>Factors (remaining columns enter as covariates)</legend>
         {props.columns.map((column) => (
           <label key={column} className="ios-check">
             <input
@@ -105,24 +106,25 @@ export function AnovaControls(props: {
             })
           }
         />
-        <span>纳入前两个因子的交互作用</span>
+        <span>Include the interaction between the first two factors</span>
       </label>
 
       <label className="ios-field">
-        <span>事后比较</span>
+        <span>Post-hoc comparisons</span>
         <select
           aria-label="ANOVA post-hoc"
           value={props.value.posthoc}
           onChange={(event) => set({ posthoc: event.target.value })}
         >
-          <option value="">不做</option>
+          <option value="">None</option>
           {POSTHOC.map((entry) => (
             <option key={entry.value} value={entry.value}>{entry.label}</option>
           ))}
         </select>
       </label>
       <p className="ios-hint">
-        总体 F 只说明存在差异，不说明是哪一对；事后比较回答后一个问题。
+        The overall F says a difference exists, not which pair differs; a post-hoc test
+        answers the second question.
       </p>
     </div>
   );

@@ -192,7 +192,7 @@ describe("CommandPalette (F7)", () => {
     mount(null, "/tmp/demo project");
     act(() => cmdShiftP());
     const openGenesis = screen.getByTestId("command-palette-item-open-genesis");
-    expect(openGenesis).toHaveTextContent("打开数据上传");
+    expect(openGenesis).toHaveTextContent("Open data upload");
     fireEvent.click(openGenesis);
     expect(lastLocation).toBe(
       "/p/L3RtcC9kZW1vIHByb2plY3Q/graph?open_genesis=1",

@@ -18,7 +18,7 @@ describe("PredictionControls", () => {
     render(<PredictionControls capabilities={caps} enabled={false}
       modelType="" cvFolds={5} sampling=""
       onEnabled={onEnabled} onModelType={vi.fn()} onCvFolds={vi.fn()} onSampling={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/预测|prediction/i));
+    fireEvent.click(screen.getByLabelText(/prediction/i));
     expect(onEnabled).toHaveBeenCalledWith(true);
   });
 
@@ -27,7 +27,7 @@ describe("PredictionControls", () => {
     render(<PredictionControls capabilities={caps} enabled={true}
       modelType="prediction_lasso" cvFolds={5} sampling=""
       onEnabled={vi.fn()} onModelType={onModel} onCvFolds={vi.fn()} onSampling={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText(/algorithm|算法/i), { target: { value: "prediction_ridge" } });
+    fireEvent.change(screen.getByLabelText(/algorithm/i), { target: { value: "prediction_ridge" } });
     expect(onModel).toHaveBeenCalledWith("prediction_ridge");
   });
 
@@ -35,7 +35,7 @@ describe("PredictionControls", () => {
     render(<PredictionControls capabilities={caps} enabled={false}
       modelType="" cvFolds={5} sampling=""
       onEnabled={vi.fn()} onModelType={vi.fn()} onCvFolds={vi.fn()} onSampling={vi.fn()} />);
-    expect(screen.queryByLabelText(/algorithm|算法/i)).toBeNull();
+    expect(screen.queryByLabelText(/algorithm/i)).toBeNull();
   });
 
   it("renders nothing when manifest has no prediction models", () => {
@@ -55,12 +55,12 @@ describe("PredictionControls", () => {
       dataStructure="grouped" groupColumn="firm" timeColumn=""
       onEnabled={vi.fn()} onModelType={vi.fn()} onCvFolds={vi.fn()} onSampling={vi.fn()}
       onDataStructure={onStructure} onGroupColumn={onGroup} onTimeColumn={vi.fn()} />);
-    expect(screen.getByLabelText(/data structure|数据结构/i)).toHaveValue("grouped");
-    fireEvent.change(screen.getByLabelText(/data structure|数据结构/i), {
+    expect(screen.getByLabelText(/data structure/i)).toHaveValue("grouped");
+    fireEvent.change(screen.getByLabelText(/data structure/i), {
       target: { value: "iid" },
     });
     expect(onStructure).toHaveBeenCalledWith("iid");
-    fireEvent.change(screen.getByLabelText(/group column|分组列/i), {
+    fireEvent.change(screen.getByLabelText(/group column/i), {
       target: { value: "year" },
     });
     expect(onGroup).toHaveBeenCalledWith("year");

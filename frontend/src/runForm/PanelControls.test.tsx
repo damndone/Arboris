@@ -36,6 +36,6 @@ describe("PanelControls", () => {
     const noCov: Capabilities = { schema_version: 2, model_types: [], imputation_methods: [] };
     render(<PanelControls capabilities={noCov} columns={["firm"]} entity="" time="" covariance=""
       onEntity={vi.fn()} onTime={vi.fn()} onCovariance={vi.fn()} />);
-    expect(screen.queryByText(/covariance|标准误/i)).toBeNull();
+    expect(screen.queryByText(/covariance/i)).toBeNull();
   });
 });

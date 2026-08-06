@@ -447,6 +447,18 @@ def _fit_ols(ctx, env):
 
 
 
+#: Terms the result payload and the design engine spell differently.  The engine
+#: follows R (`(Intercept)`) so its output can be compared to `survey` directly;
+#: the payload has used `Intercept` since well before this version.  One mapping
+#: here beats each caller guessing.
+_DESIGN_TERM_ALIASES = {"Intercept": "(Intercept)"}
+
+
+def _design_term(payload_term: str) -> str:
+    """The name the design engine uses for a term the payload calls `payload_term`."""
+    return _DESIGN_TERM_ALIASES.get(payload_term, payload_term)
+
+
 def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
     """Replace the naive variance with the design-based one, in place.
 
@@ -460,6 +472,7 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
 
     from ...survey.adapters import build_design_from_artifacts
     from ...survey.engine import estimate_with_design
+    from ...survey.errors import SurveyEngineError
 
     design = build_design_from_artifacts(ctx.data.frame, ctx.artifacts)
     if design is None:
@@ -479,11 +492,22 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
 
     critical = float(stats.t.ppf(0.975, result.residual_degf))
     coefficients = primary.get("coefficients") or {}
+    unmatched = [
+        term for term in coefficients if _design_term(term) not in result.standard_errors
+    ]
+    if unmatched:
+        # Skipping these is what a browser run exposed: the payload names the
+        # intercept `Intercept` while the engine names it `(Intercept)`, so the
+        # intercept quietly kept its naive 0.7804 next to slopes carrying the
+        # design's 0.1773.  A coefficient that silently keeps the wrong variance
+        # is worse than a run that refuses, because nothing marks it as different.
+        raise SurveyEngineError(
+            "design variance produced no standard error for "
+            f"{unmatched}; the engine reported {sorted(result.standard_errors)}"
+        )
     for term, entry in coefficients.items():
-        if term not in result.standard_errors:
-            continue
-        se = result.standard_errors[term]
-        estimate = float(entry.get("estimate", result.estimates[term]))
+        se = result.standard_errors[_design_term(term)]
+        estimate = float(entry.get("estimate", result.estimates[_design_term(term)]))
         entry["std_error"] = se
         entry["ci_lower"] = estimate - critical * se
         entry["ci_upper"] = estimate + critical * se

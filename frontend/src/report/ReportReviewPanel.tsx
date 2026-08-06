@@ -92,8 +92,8 @@ export function ReportReviewPanel({
           className="report-review-panel__empty"
           role={workspace.reportLoadError ? "alert" : undefined}
         >
-          <strong>{workspace.reportLoadError ? "报告加载失败" : "暂时没有报告"}</strong>
-          <p>{workspace.reportLoadError ?? "当前 run 尚未生成报告，生成入口在 Report 页的写作区域。"}</p>
+          <strong>{workspace.reportLoadError ? "Report failed to load" : "No report yet"}</strong>
+          <p>{workspace.reportLoadError ?? "This run has not produced a report yet; the writing area on the Report tab creates one."}</p>
           {onOpenReport && (
             <button type="button" onClick={onOpenReport}>Open Report</button>
           )}
@@ -102,7 +102,7 @@ export function ReportReviewPanel({
         <>
           {workspace.reportLoadError && (
             <div data-testid="report-review-load-warning" className="report-review-panel__load-warning" role="alert">
-              报告在线加载失败，当前显示本地缓存：{workspace.reportLoadError}
+              The report could not be loaded from the server; showing the local cache: {workspace.reportLoadError}
             </div>
           )}
           <div className="report-review-panel__status">

@@ -31,6 +31,7 @@ vi.mock("../../capabilities/useCapabilities", () => ({
         replicate_types: ["brr", "jackknife"],
         lonely_psu_policies: ["fail", "adjust"],
         design_fields: [],
+        sampling_weight_families: ["ols", "logit", "probit", "poisson"],
       },
       imputation_methods: [],
       covariance_options: [{ key: "robust", label: "Robust" }],
@@ -539,7 +540,7 @@ describe("GenesisWizard", () => {
 
   it("resuming a structural draft round-trips saved params so re-save does not strip them", async () => {
     // B2 regression (2026-07-08): adoptDraft used to restore only
-    // y/x/focal/model_type. Resuming an IV draft and pressing 保存模型配置 then
+    // y/x/focal/model_type. Resuming an IV draft and pressing Save model then
     // rebuilt params from pristine role state, silently deleting
     // iv_endog/iv_instruments from the saved draft.
     const base = draftResponse("h1", "configured", "configured");
@@ -579,7 +580,7 @@ describe("GenesisWizard", () => {
     render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "继续" }),
+      await screen.findByRole("button", { name: "Resume" }),
     );
     // The IV role picker must show the saved assignment (endog/instrument
     // restored, and those columns folded back into the UI X list).
@@ -631,7 +632,7 @@ describe("GenesisWizard", () => {
 
     render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "继续" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
     const saveTable = await screen.findByTestId("genesis-save-table");
     expect(saveTable).toBeEnabled();
     fireEvent.click(saveTable);
@@ -712,7 +713,7 @@ describe("GenesisWizard", () => {
     fireEvent.click(screen.getByTestId("genesis-save-model"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      /请选择算法|algorithm/,
+      /algorithm/,
     );
     expect(api.patchDraftNode).toHaveBeenCalledTimes(1);
   });
@@ -991,6 +992,7 @@ describe("GenesisWizard exposes the v1.8.7 declarations", () => {
 
   it("renders the survey design controls with options taken from capabilities", async () => {
     await reachModelStep();
+    fireEvent.change(await screen.findByLabelText("model type"), { target: { value: "ols" } });
     await waitFor(() => {
       expect(screen.getByLabelText("Complex survey design")).toBeInTheDocument();
     });
@@ -999,6 +1001,19 @@ describe("GenesisWizard exposes the v1.8.7 declarations", () => {
       "brr",
       "jackknife",
     ]);
+  });
+
+  it("keeps the design controls off families whose engine refuses a sampling weight", async () => {
+    /**
+     * `cs_did` is not in the server's `sampling_weight_families`.  Offering it a
+     * design would produce a run the engine rejects for a reason nothing on the
+     * form explains.
+     */
+    await reachModelStep();
+    fireEvent.change(await screen.findByLabelText("model type"), { target: { value: "cs_did" } });
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Complex survey design")).not.toBeInTheDocument();
+    });
   });
 
   it("renders the ANOVA controls with no preset sums-of-squares type", async () => {

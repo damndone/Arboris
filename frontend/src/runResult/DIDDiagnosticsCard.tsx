@@ -55,10 +55,10 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
   const esOk = d.event_study.applicable !== false && d.event_study.event_time.length > 0;
   const baconOk = d.goodman_bacon.applicable !== false;
   const ptColor = d.parallel_trends.verdict === "not_rejected" ? "#137a3a" : "#c0392b";
-  const ptText = d.parallel_trends.verdict === "not_rejected" ? "未拒绝" : "已拒绝";
+  const ptText = d.parallel_trends.verdict === "not_rejected" ? "not rejected" : "rejected";
   return (
     <section className="ios-card did-diagnostics" aria-label="did-diagnostics">
-      <div className="ios-card-title">DID 诊断</div>
+      <div className="ios-card-title">DID diagnostics</div>
       <div>
         <span>ATT</span>{" "}
         <strong style={{ fontSize: 20 }}>{d.att.estimate.toFixed(2)}</strong>{" "}
@@ -67,24 +67,24 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
       </div>
 
       <div>
-        <span>事件研究</span>{" "}
+        <span>Event study</span>{" "}
         {esOk ? <EventStudyChart es={d.event_study} />
-              : <span aria-label="did-event-study-skipped">事件研究不可识别(单一处理时点或缺少参照期)</span>}
+              : <span aria-label="did-event-study-skipped">Event study not identified (a single treatment period, or no reference period)</span>}
       </div>
 
       <div>
-        平行趋势 <span style={{ color: ptColor }}>{ptText}</span>
+        Parallel trends <span style={{ color: ptColor }}>{ptText}</span>
         {d.parallel_trends.pvalue != null && <> (p={d.parallel_trends.pvalue.toFixed(3)})</>}
       </div>
 
       <div>
         Goodman-Bacon{" "}
         {baconOk && d.goodman_bacon.forbidden_weight != null
-          ? <>坏比较权重 {(d.goodman_bacon.forbidden_weight * 100).toFixed(0)}% · 加权均值 {(d.goodman_bacon.weighted_avg ?? 0).toFixed(2)}</>
-          : <span>不可用</span>}
+          ? <>Forbidden-comparison weight {(d.goodman_bacon.forbidden_weight * 100).toFixed(0)}% · weighted mean {(d.goodman_bacon.weighted_avg ?? 0).toFixed(2)}</>
+          : <span>unavailable</span>}
       </div>
 
-      <button onClick={() => setOpen((v) => !v)}>{open ? "▾ 收起" : "▸ 展开完整数据"}</button>
+      <button onClick={() => setOpen((v) => !v)}>{open ? "▾ Collapse" : "▸ Expand full data"}</button>
 
       {open && (
         <div>
@@ -104,7 +104,7 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
           )}
           {baconOk && (
             <table aria-label="did-bacon-table">
-              <thead><tr><th>比较类型</th><th>权重</th><th>估计</th></tr></thead>
+              <thead><tr><th>Comparison</th><th>Weight</th><th>Estimate</th></tr></thead>
               <tbody>
                 {d.goodman_bacon.components.map((c, i) => (
                   <tr key={i}><td>{c.type}</td><td>{c.weight.toFixed(2)}</td>
@@ -113,9 +113,9 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
               </tbody>
             </table>
           )}
-          <div>规格: entity={d.spec.entity} · time={d.spec.time} · 处理单位
-            {d.spec.n_treated_units} · 从不处理 {d.spec.n_never_treated} · 错位
-            {d.spec.staggered ? "是" : "否"}</div>
+          <div>Spec: entity={d.spec.entity} · time={d.spec.time} · treated units
+            {d.spec.n_treated_units} · never treated {d.spec.n_never_treated} · staggered
+            {d.spec.staggered ? "yes" : "no"}</div>
           {d.interpretation_restriction && (
             <div role="note" style={{ borderLeft: "3px solid #f0a020", paddingLeft: 8 }}>
               ⚠ {d.interpretation_restriction}

@@ -3,7 +3,7 @@
 // modal (CreateProjectModal, reused by T11's topbar switcher).
 //
 // Opening a recent probes the backend first (fetchRuns) so a deleted/moved
-// project marks the card 失效 with a 移除 affordance instead of navigating
+// project marks the card stale with a remove affordance instead of navigating
 // into a dead graph.
 
 import { useState } from "react";
@@ -41,10 +41,10 @@ export function LauncherRoute() {
     <section className="panel" aria-labelledby="launcher-heading">
       <div className="panel-heading">
         <h2 id="launcher-heading">Workbench</h2>
-        <span>选择或新建一个项目开始。</span>
+        <span>Choose a project or create a new one to begin.</span>
       </div>
       <button type="button" onClick={() => setModalOpen(true)}>
-        新建项目
+        New project
       </button>
       <RecentProjectsPanel onOpenProject={goToProject} />
       <CreateProjectModal

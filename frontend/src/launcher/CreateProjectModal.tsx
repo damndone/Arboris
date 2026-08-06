@@ -99,7 +99,7 @@ export function CreateProjectModal({
       setName(folderName);
     }
     setBrowseWarning(
-      "Browse 只能读取浏览器提供的相对文件夹名，不能获得后端可访问的绝对父目录。请确认或手动输入 Parent folder 后再创建。",
+      "Browse only sees the relative folder name the browser hands over, not an absolute parent directory the backend can reach. Confirm or type the parent folder before creating.",
     );
   }
 
@@ -127,7 +127,7 @@ export function CreateProjectModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="panel-heading">
-          <h2 id={CREATE_PROJECT_TITLE_ID}>新建项目</h2>
+          <h2 id={CREATE_PROJECT_TITLE_ID}>New project</h2>
           <button
             type="button"
             onClick={onClose}
@@ -138,7 +138,7 @@ export function CreateProjectModal({
           </button>
         </div>
         <p className="field-hint" style={{ margin: "0 0 12px" }}>
-          输入后端可访问的绝对父目录；浏览器不能可靠返回本机绝对路径。创建后会进入数据上传步骤。
+          Enter an absolute parent directory the backend can reach; browsers cannot reliably report a local absolute path. Creating the project moves on to the data upload step.
         </p>
         <div className="create-project-form">
           <label>

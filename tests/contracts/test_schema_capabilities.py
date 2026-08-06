@@ -121,8 +121,10 @@ SCHEMA: dict = {
                 "replicate_types",
                 "lonely_psu_policies",
                 "design_fields",
+                "sampling_weight_families",
             ],
             "properties": {
+                "sampling_weight_families": {"type": "array", "items": {"type": "string"}},
                 "variance_methods": {"type": "array", "items": {"type": "string"}},
                 "variance_method_requirements": {
                     "type": "object",

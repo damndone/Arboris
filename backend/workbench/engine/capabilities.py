@@ -457,10 +457,19 @@ def _survey_design_capability() -> dict:
     which variance channel a given estimator can use instead of carrying a
     hard-coded list that silently rots as families are added.
     """
+    from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
     from ..survey.design import LONELY_PSU_POLICIES, REPLICATE_TYPES
     from ..survey.estimator import VARIANCE_METHOD_REQUIREMENTS
 
     return {
+        # Read off the family contracts, not listed by hand: a family that gains
+        # or loses `sampling` moves the design controls with it, and the form
+        # never offers a design to an engine that would refuse the weight.
+        "sampling_weight_families": sorted(
+            key
+            for key, contract in MODEL_FAMILY_CONTRACTS.items()
+            if "sampling" in contract.allows_weights
+        ),
         "variance_methods": sorted(VARIANCE_METHOD_REQUIREMENTS),
         "variance_method_requirements": {
             method: sorted(caps) for method, caps in VARIANCE_METHOD_REQUIREMENTS.items()
