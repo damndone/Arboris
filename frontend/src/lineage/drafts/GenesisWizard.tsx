@@ -22,6 +22,18 @@ import { ModelTypeSelect } from "../../runForm/ModelTypeSelect";
 import { ImputationControls } from "../../runForm/ImputationControls";
 import { PanelControls } from "../../runForm/PanelControls";
 import { LmmControls, type LmmControlValue } from "../../runForm/LmmControls";
+import {
+  SurveyDesignControls,
+  emptySurveyDesign,
+  hasSurveyDesign,
+  type SurveyDesignValue,
+} from "../../runForm/SurveyDesignControls";
+import {
+  AnovaControls,
+  emptyAnovaOptions,
+  toAnovaModelOptions,
+  type AnovaOptionsValue,
+} from "../../runForm/AnovaControls";
 import { PredictionControls } from "../../runForm/PredictionControls";
 import { FocalSelect } from "../../runForm/FocalSelect";
 import { IVControls, type IVRoleValue } from "../../runForm/IVControls";
@@ -191,6 +203,8 @@ export function GenesisWizard({
   const [frequencyWeight, setFrequencyWeight] = useState("");
   const [analysisWeight, setAnalysisWeight] = useState("");
   const [samplingWeight, setSamplingWeight] = useState("");
+  const [surveyDesign, setSurveyDesign] = useState<SurveyDesignValue>(emptySurveyDesign);
+  const [anovaOptions, setAnovaOptions] = useState<AnovaOptionsValue>(emptyAnovaOptions);
   const [weightParamsPresent, setWeightParamsPresent] = useState({
     frequency: false,
     analysis: false,
@@ -662,6 +676,26 @@ export function GenesisWizard({
     if (!isIV && !usesDidRoles && !isDcdh && focal.length > 0) {
       params.focal_x = focal.filter((col) => exogColumns.includes(col));
     }
+    // Sent only when a design was actually declared: the backend keys its
+    // refusal of a sampling weight on whether one is present, so an empty
+    // field must not read as a declaration.
+    if (hasSurveyDesign(surveyDesign)) {
+      params.survey_strata_col = surveyDesign.survey_strata_col;
+      params.survey_psu_col = surveyDesign.survey_psu_col;
+      params.survey_fpc_col = surveyDesign.survey_fpc_col;
+      params.survey_replicate_type = surveyDesign.survey_replicate_type;
+      params.survey_lonely_psu = surveyDesign.survey_lonely_psu;
+      params.survey_weight_frame = surveyDesign.survey_weight_frame;
+      params.survey_subpop = surveyDesign.survey_subpop;
+      if (surveyDesign.survey_replicate_weights.length > 0) {
+        params.survey_replicate_weights = JSON.stringify(
+          surveyDesign.survey_replicate_weights,
+        );
+      }
+    }
+    if (modelType === "anova") {
+      params.model_options = JSON.stringify(toAnovaModelOptions(anovaOptions));
+    }
     return params;
   }
 
@@ -915,6 +949,21 @@ export function GenesisWizard({
               onChange={setModelType}
             />
           </label>
+          {modelType === "anova" && (
+            <AnovaControls
+              columns={columnNames}
+              value={anovaOptions}
+              onChange={setAnovaOptions}
+            />
+          )}
+          {capabilities?.survey_design && (
+            <SurveyDesignControls
+              columns={columnNames}
+              capability={capabilities.survey_design}
+              value={surveyDesign}
+              onChange={setSurveyDesign}
+            />
+          )}
           <ImputationControls
             capabilities={capabilities}
             value={imputationMethod}

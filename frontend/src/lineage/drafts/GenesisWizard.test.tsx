@@ -20,7 +20,18 @@ vi.mock("../../capabilities/useCapabilities", () => ({
         { key: "multinomial_logit", label: "Multinomial logit", group: "Nominal" },
         { key: "survival_cox", label: "Survival / Cox", group: "Survival" },
         { key: "quantile_regression", label: "Quantile regression", group: "Robust / distributional" },
+        { key: "anova", label: "ANOVA / ANCOVA", group: "ANOVA" },
       ],
+      survey_design: {
+        variance_methods: ["linearization", "replicate"],
+        variance_method_requirements: {
+          linearization: ["deterministic_refit", "influence_function"],
+          replicate: ["deterministic_refit"],
+        },
+        replicate_types: ["brr", "jackknife"],
+        lonely_psu_policies: ["fail", "adjust"],
+        design_fields: [],
+      },
       imputation_methods: [],
       covariance_options: [{ key: "robust", label: "Robust" }],
       prediction_models: [{ key: "prediction_ridge", label: "Ridge" }],
@@ -949,5 +960,55 @@ describe("GenesisWizard", () => {
         },
       }),
     );
+  });
+});
+
+
+/**
+ * GenesisWizard is the entry point a user actually reaches from "Import data
+ * and create analysis". RunForm imports the same controls and looks almost
+ * identical, and wiring only RunForm left these controls unreachable in the
+ * product while every component test and every RunForm test stayed green --
+ * the failure was visible only in a browser. These assertions exist so the
+ * same mistake fails here instead.
+ */
+describe("GenesisWizard exposes the v1.8.7 declarations", () => {
+  async function reachModelStep() {
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+    vi.spyOn(api, "previewFile").mockResolvedValue(preview());
+    vi.spyOn(api, "uploadDataset").mockResolvedValue({ sha256: sha, filename: "d.csv" });
+    vi.spyOn(api, "createGenesisDraft").mockResolvedValue(draftResponse("h1"));
+    const patch = vi.spyOn(api, "patchDraftNode")
+      .mockResolvedValue(draftResponse("h2", "configured", "pending"));
+
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Dataset file"), {
+      target: { files: [new File(["y,x\n1,2\n3,4"], "d.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(await screen.findByTestId("genesis-save-table"));
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+  }
+
+  it("renders the survey design controls with options taken from capabilities", async () => {
+    await reachModelStep();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Complex survey design")).toBeInTheDocument();
+    });
+    const replicate = screen.getByLabelText("Survey replicate type") as HTMLSelectElement;
+    expect([...replicate.options].map((o) => o.value).filter(Boolean)).toEqual([
+      "brr",
+      "jackknife",
+    ]);
+  });
+
+  it("renders the ANOVA controls with no preset sums-of-squares type", async () => {
+    await reachModelStep();
+    fireEvent.change(await screen.findByLabelText("model type"), {
+      target: { value: "anova" },
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("ANOVA settings")).toBeInTheDocument();
+    });
+    expect((screen.getByLabelText("ANOVA sums of squares") as HTMLSelectElement).value).toBe("");
   });
 });
