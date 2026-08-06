@@ -151,18 +151,20 @@ def test_the_executor_can_carry_every_field_the_proposal_may_declare():
     assert checked >= 4, "the scan matched almost nothing and proves little"
 
 
-def test_agent_cannot_be_told_to_switch_family_without_a_route():
-    """Switching to a family (e.g. ANOVA) is a model_params change, not an option.
+def test_creating_a_first_run_is_still_not_agent_reachable():
+    """Switching family now works; creating one from nothing still does not.
 
-    Recorded as an assertion rather than a comment so the day a route appears,
-    this test fails and the claim in the release notes has to be rewritten.
+    `model.rerun` re-runs an existing node under a different family. `model.genesis`
+    builds a first run from a dataset and stays `natural_language_enabled=False`,
+    so "start an analysis for me" is not something an Agent can do. Asserted so
+    the day that changes, the release-notes claim has to be rewritten rather than
+    quietly becoming false.
     """
     genesis = OperationRegistry().require("model.genesis")
-    assert genesis.natural_language_enabled is False, (
-        "model.genesis became natural-language reachable; the v1.8.7 release notes "
-        "claim family switching is not agent-reachable and must be corrected"
-    )
+    assert genesis.natural_language_enabled is False
 
+    # `model_params` remains the genesis envelope and is not a rerun field; a
+    # family switch on a rerun is a flat `model_type`, checked above.
     with pytest.raises(OperationValidationError):
         _validate_rerun({"model_params": {"model_type": "anova"}})
 
@@ -241,3 +243,115 @@ def test_a_rerun_override_actually_produces_a_design_run(tmp_path):
     ]:
         entry = child["coefficients"][payload_term]
         assert entry["std_error"] == pytest.approx(oracle["se"][oracle_term], rel=1e-8)
+
+
+def test_agent_can_switch_the_model_family_and_carry_the_new_family_options():
+    """Switching family is a rerun override, and the Agent may ask for it.
+
+    `resolve_overrides_target` has re-resolved the contract against the new
+    `model_type` since v1.6.0, so the executor has always supported this; only
+    the Agent's change whitelist stood in the way. Options for the target family
+    ride `model_options`, which the same proposal already carries.
+    """
+    _validate_rerun({"model_type": "anova", "model_options": {"sums_of_squares": 3}})
+
+
+def test_switching_to_a_family_that_needs_more_is_refused_by_the_engine_not_the_agent():
+    """The Agent may *ask*; the target family's own contract still decides.
+
+    Letting the proposal through is only safe because the override is validated
+    against the target family's published params, so an under-specified switch
+    fails there rather than producing a run configured by omission.
+    """
+    from workbench.lineage.op_contract import (
+        OpOverrideError,
+        resolve_overrides_target,
+        validate_overrides,
+    )
+    from workbench.lineage.op_contract import _contract_for_model_type
+
+    ols = _contract_for_model_type("ols")
+    overrides = {"model_type": "anova", "entity_col": "psu"}
+    target = resolve_overrides_target(ols, overrides)
+    assert target.op_type == "anova", "the contract did not follow the switch"
+
+    # `entity_col` is an OLS field; against the ANOVA contract it is unknown.
+    with pytest.raises(OpOverrideError):
+        validate_overrides(target, overrides)
+
+
+def test_switching_family_on_a_rerun_actually_produces_the_new_family(tmp_path):
+    """The switch the Agent may now propose, executed end to end.
+
+    Structural agreement is not evidence that a family switch runs: the override
+    has to survive contract re-resolution, the target family's own validation and
+    the pipeline. This takes an OLS fitted on factorial data and reruns it as
+    ANCOVA -- the continuous covariate is inherited from the parent, so the
+    correct oracle is the ANCOVA one -- checking the child against R.
+    """
+    import json
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from workbench.api import app
+    from workbench.artifacts import read_json
+    from workbench.projects import create_project
+
+    fixtures = Path(__file__).parent / "fixtures" / "anova"
+    oracle = json.loads((fixtures / "oracle.json").read_text())["ancova"]["type_3"]
+
+    project = create_project(tmp_path, "switch")
+    source = project.root / "anova.csv"
+    source.write_text((fixtures / "anova.csv").read_text())
+
+    client = TestClient(app)
+    with source.open("rb") as handle:
+        created = client.post(
+            "/runs",
+            files={"file": ("anova.csv", handle, "text/csv")},
+            data={
+                "project_root": str(project.root), "mode": "auto", "model_type": "ols",
+                "y": "score", "x": "factor_a,factor_b,covariate",
+            },
+        )
+    assert created.status_code == 200, created.text
+    parent_id = created.json()["run_id"]
+    _await_run(client, project.root, parent_id)
+
+    rerun = client.post(
+        f"/runs/{parent_id}/rerun",
+        params={"project_root": str(project.root)},
+        json={
+            "from_node": "model:ols_1",
+            "op_overrides": {
+                "model_type": "anova",
+                "model_options": {
+                    "sums_of_squares": 3,
+                    "categorical": ["factor_a", "factor_b"],
+                    "interactions": [["factor_a", "factor_b"]],
+                },
+            },
+            "rerun_reason": "agent_confirmed",
+        },
+    )
+    assert rerun.status_code == 200, rerun.text
+    child_id = rerun.json()["run_id"]
+    _await_run(client, project.root, child_id)
+
+    results = project.root / "runs" / child_id / "model_results"
+    produced = sorted(p.name for p in results.glob("*.json"))
+    assert any(name.startswith("anova") for name in produced), (
+        f"the switch was accepted but produced {produced}"
+    )
+
+    child = read_json(next(p for p in results.glob("anova*.json")))
+    rows = {row["term"]: row for row in child["anova_table"]}
+    assert child["sums_of_squares_type"] == 3
+    checked = 0
+    for term, expected in oracle.items():
+        if term not in rows:
+            continue
+        checked += 1
+        assert rows[term]["sum_sq"] == pytest.approx(expected["sum_sq"], rel=1e-8)
+    assert checked >= 3, f"almost nothing was compared; produced terms {sorted(rows)}"

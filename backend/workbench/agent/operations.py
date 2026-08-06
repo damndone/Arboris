@@ -746,7 +746,22 @@ def _model_rerun_change_branch() -> dict[str, Any]:
     """
     from ..survey.fields import DESIGN_FIELD_SPECS
 
-    properties: dict[str, Any] = {"model_options": {"type": "object"}}
+    properties: dict[str, Any] = {
+        "model_options": {"type": "object"},
+        # No enum here on purpose: the legal families are a runtime registry, and
+        # a list frozen into this schema would drift the moment a pack is added.
+        # `inspect_operation_contract` returns the live set together with the
+        # target family's required fields, which is what a switch actually needs.
+        "model_type": {
+            "type": "string",
+            "description": (
+                "Switch the model family. This changes what the analysis means, "
+                "not just how it is estimated, so the new family's own required "
+                "fields must be supplied in the same patch. Read the legal values "
+                "and those requirements from inspect_operation_contract first."
+            ),
+        },
+    }
     for field_name in model_rerun_change_fields():
         if field_name.endswith("_weight"):
             properties[field_name] = {
@@ -1023,7 +1038,12 @@ def model_rerun_change_fields() -> tuple[str, ...]:
         for contract in MODEL_FAMILY_CONTRACTS.values()
         for kind in contract.allows_weights
     }
-    return ("model_options", *sorted(weights), *DESIGN_FIELDS)
+    # `model_type` switches the family. The executor has re-resolved the
+    # contract against the new family since v1.6.0 (`resolve_overrides_target`),
+    # and validates the rest of the patch against *that* family's params, so an
+    # under-specified switch is refused there rather than silently running a
+    # model configured by omission. Only the Agent whitelist stood in the way.
+    return ("model_type", "model_options", *sorted(weights), *DESIGN_FIELDS)
 
 
 def _model_rerun_editable_schema() -> dict[str, Any]:
