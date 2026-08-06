@@ -30,8 +30,11 @@ import {
 } from "./manualRerunPatch";
 
 export function OperationSection({ node }: { node: GraphViewNode }) {
+  // Object-valued params have no scalar control and would render as
+  // "[object Object]" -- observed in the browser once v1.8.7 published `labels`
+  // for every family. They are edited through their own forms, not here.
   const schema = node.editableSchema?.filter(
-    (control) => !(control.key === "model_options" && String(control.kind) === "object"),
+    (control) => String(control.kind) !== "object",
   );
   const rerun = useRerun();
   const resolved = useResolvedNodeOperationContext();

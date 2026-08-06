@@ -249,3 +249,55 @@ def test_the_agent_has_a_tool_that_reads_these_findings():
     window = source[start:start + 2600].lower()
     assert "quote these values" in window or "quote these figures" in window
     assert "never as a verdict" in window
+
+
+def test_the_advisory_tool_actually_returns_the_findings(tmp_path):
+    """Asserting the tool *exists* is not asserting that it runs.
+
+    The first version of this file checked that the method was defined and that
+    a ToolDefinition referenced it, and both passed while a mistyped relative
+    import made every live call raise TypeError. A DeepSeek turn hit it twice and
+    worked around it; nothing in the suite noticed, because nothing called it.
+    """
+    from workbench.agent.context_tools import NodeOperationContextProvider
+
+    frame = pd.read_csv(FIXTURES / "design.csv")
+    source = tmp_path / "advisory_tool.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "advisory_tool")
+    outcome = run_workflow(
+        project.root, [source], mode="auto", model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    assert outcome["status"] == "completed", outcome
+    run_id = outcome["run_id"]
+
+    # Through the registered handler, not the provider method. Calling the
+    # method directly is what the first version of this test did, and it passed
+    # while the handler raised TypeError on every live call: it forwarded one
+    # argument to a two-argument helper. The handler is the path an Agent takes.
+    from workbench.agent.tools import ToolContext
+
+    provider = NodeOperationContextProvider(project.root)
+    definition = next(
+        tool
+        for tool in provider.tool_definitions(session_id="s1", chain_id="c1")
+        if tool.tool_id == "inspect_design_advisories"
+    )
+    payload = definition.handler(
+        {
+            "owner_run_id": run_id,
+            "op_node_id": "model:ols_1",
+            "active_head_run_id": run_id,
+        },
+        ToolContext(session_id="s1", metadata={}),
+    )
+
+    assert set(payload) >= {
+        "measurement_advisories", "measurement_uncertain", "design_findings", "note",
+    }
+    kinds = {finding["kind"] for finding in payload["design_findings"]}
+    assert "design_effect" in kinds, kinds
+    # The figures the model is told to quote have to be present to quote.
+    effect = next(f for f in payload["design_findings"] if f["kind"] == "design_effect")
+    assert effect["evidence"]["design_effect"] > 1

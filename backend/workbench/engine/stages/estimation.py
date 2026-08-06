@@ -884,6 +884,11 @@ class EstimationStage:
                         "analysis_weight": analysis_weight,
                     },
                 )
+            # v1.8.7 A1-11 / A1-13: refuse combinations that would otherwise
+            # succeed while answering a different question. Checked before the
+            # weight-support gate so an incoherent pairing is reported as such,
+            # rather than as a family that has not been wired up yet.
+            _check_survey_composition(ctx, handler.model_type, sampling_weight)
             try:
                 _validate_model_family_weights(
                     handler.model_type,
@@ -1201,6 +1206,7 @@ def _write_design_precheck(ctx, env, model_results) -> None:
             ctx.artifacts.get("_normalized_y") or "",
             *(ctx.artifacts.get("_normalized_x") or []),
         ],
+        rows_before_cleaning=ctx.artifacts.get("_raw_row_count"),
     )
     if not findings:
         return
@@ -1212,3 +1218,35 @@ def _write_design_precheck(ctx, env, model_results) -> None:
         env.run_root, "design_precheck", path, "design_precheck", "estimation",
         ["cleaned_dataset"],
     )
+
+
+def _check_survey_composition(ctx, model_type: str, sampling_weight: str) -> None:
+    """Surface a survey composition refusal as a typed workflow failure."""
+    from ...orchestrator._errors import WorkflowValidationError
+    from ...survey.composability import (
+        SurveyCompositionRefusal,
+        check_design_composition,
+    )
+
+    strata = str(ctx.artifacts.get("_survey_strata_col") or "").strip()
+    psu = str(ctx.artifacts.get("_survey_psu_col") or "").strip()
+    try:
+        check_design_composition(
+            model_type=model_type,
+            has_design=bool(strata or psu),
+            has_sampling_weight=bool(sampling_weight),
+            entity_column=str(ctx.artifacts.get("_entity_col") or "").strip() or None,
+            time_column=str(ctx.artifacts.get("_time_col") or "").strip() or None,
+            weight_frame=str(ctx.artifacts.get("_survey_weight_frame") or "").strip() or None,
+        )
+    except SurveyCompositionRefusal as exc:
+        raise WorkflowValidationError(
+            exc.code,
+            str(exc),
+            {
+                "model_type": model_type,
+                "survey_strata_col": strata,
+                "survey_psu_col": psu,
+                "sampling_weight": sampling_weight,
+            },
+        ) from exc

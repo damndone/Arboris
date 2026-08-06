@@ -202,3 +202,23 @@ def _sample_labels(labels: Mapping[str, str], limit: int = 3) -> str:
 def _sample_values(values: Sequence[Any], limit: int = 6) -> str:
     rendered = ", ".join(str(v) for v in values[:limit])
     return rendered + (", ..." if len(values) > limit else "")
+
+
+def split_proposable(
+    entries: Sequence[Mapping[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Separate what the evidence supports declaring from what it does not.
+
+    An Agent may batch the first group into one proposal. The second must be
+    reported and left out of it: a column with three integer levels and no value
+    labels has the shape of a rating and equally the shape of a count, and
+    declaring it on that basis is a guess wearing the same clothes as the
+    well-evidenced ones. Fifty columns declared in one click is the feature; one
+    wrong declaration hidden among them, silent from then on, is the cost.
+    """
+    proposable: list[dict[str, Any]] = []
+    uncertain: list[dict[str, Any]] = []
+    for entry in entries:
+        target = proposable if entry.get("confidence") == "high" else uncertain
+        target.append(dict(entry))
+    return proposable, uncertain

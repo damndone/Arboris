@@ -374,3 +374,61 @@ def _await(client, project_root, run_id, timeout=90.0):
             return
         time.sleep(0.1)
     raise AssertionError(f"run {run_id} never reached a terminal status")
+
+
+# ---------------------------------------------------------------------------
+# A2-4 -- the columns the evidence does not actually support
+# ---------------------------------------------------------------------------
+
+def test_low_confidence_columns_are_listed_separately_and_not_proposed():
+    """A batch proposal must not quietly carry the guesses along with the facts.
+
+    A questionnaire yields two kinds of column: ones whose value labels say
+    plainly that the numbers are categories, and ones that merely have few
+    integer levels -- a shape shared by ratings and by counts. Sweeping the
+    second kind into the same proposal buys volume at the cost of the user's
+    trust in the whole batch, and one wrong declaration is silent afterwards.
+    """
+    import numpy as np
+
+    from workbench.measurement import build_advisory, split_proposable
+
+    rng = np.random.default_rng(20260814)
+    n = 200
+    frame = pd.DataFrame(
+        {
+            "q1": rng.integers(1, 6, size=n),   # labelled below -- strong evidence
+            "q2": rng.integers(1, 6, size=n),   # no labels -- shape only
+            "x": np.round(rng.normal(size=n), 6),
+        }
+    )
+    advisory = build_advisory(
+        frame,
+        ["q1", "q2"],
+        routed_as={"q1": "count", "q2": "count"},
+        value_labels={
+            "q1": {"1": "never", "2": "rarely", "3": "sometimes", "4": "often", "5": "always"}
+        },
+    )
+
+    proposable, uncertain = split_proposable(advisory["entries"])
+
+    assert [entry["column"] for entry in proposable] == ["q1"]
+    assert [entry["column"] for entry in uncertain] == ["q2"]
+    # The uncertain ones are still reported -- withheld from the patch, not hidden.
+    assert uncertain[0]["confidence"] == "low"
+    assert uncertain[0]["evidence"]["has_value_labels"] is False
+
+
+def test_the_agent_tool_separates_proposable_columns_from_uncertain_ones(tmp_path):
+    """The split has to reach the model, or it is a detail nothing acts on."""
+    source = (
+        Path(__file__).parent.parent / "backend/workbench/agent/context_tools.py"
+    ).read_text()
+    assert "measurement_uncertain" in source, (
+        "the advisory tool exposes no uncertain bucket, so a model cannot tell "
+        "which columns it may declare from which it must ask about"
+    )
+    start = source.index('tool_id="inspect_design_advisories"')
+    window = source[start:start + 2600].lower()
+    assert "uncertain" in window, "the tool description never mentions the split"

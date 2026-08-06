@@ -71,6 +71,7 @@ def collect_design_findings(
     survey_design: Mapping[str, Any] | None = None,
     weight_column: str | None = None,
     modelled_columns: Sequence[str] = (),
+    rows_before_cleaning: int | None = None,
 ) -> list[dict[str, Any]]:
     """Facts worth a question, each carrying the numbers behind it."""
     declared = dict(declared or {})
@@ -86,6 +87,9 @@ def collect_design_findings(
 
     if survey_design:
         findings.extend(_design_effect_findings(survey_design))
+        findings.extend(
+            _filtered_data_findings(len(frame), rows_before_cleaning)
+        )
 
     if weight_column and weight_column in frame.columns:
         findings.extend(_weight_findings(frame, weight_column))
@@ -219,3 +223,37 @@ def build_precheck(findings: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "and questions, not conclusions; the reading of them is the user's."
         ),
     }
+
+
+def _filtered_data_findings(
+    rows_analysed: int, rows_before: int | None
+) -> list[dict[str, Any]]:
+    """A design declared over data that lost rows before it was applied.
+
+    Not a refusal -- dropping duplicated or incomplete rows is ordinary and
+    usually right. But the design names the population the *original* frame was
+    drawn from, and the analysis sample no longer is that frame. Weights still
+    sum to the population total, so nothing in the output shows the gap.
+    """
+    if rows_before is None or rows_before <= rows_analysed:
+        return []
+    dropped = rows_before - rows_analysed
+    return [
+        {
+            "kind": "design_over_filtered_data",
+            "column": None,
+            "evidence": {
+                "rows_before": int(rows_before),
+                "rows_analysed": int(rows_analysed),
+                "rows_dropped": int(dropped),
+                "share_dropped": dropped / rows_before,
+            },
+            "message": (
+                f"{dropped} of {rows_before} rows were removed before the model ran, "
+                f"leaving {rows_analysed}. The declared design describes the sample "
+                "as originally drawn, so the weights still refer to the full "
+                "population while the analysis covers a subset of it. Whether that "
+                "gap matters depends on why the rows went."
+            ),
+        }
+    ]

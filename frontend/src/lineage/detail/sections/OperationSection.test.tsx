@@ -362,3 +362,34 @@ describe("OperationSection (editable)", () => {
     expect(screen.getByTestId("operation-control-covariance").textContent).toContain("clustered");
   });
 });
+
+describe("object-valued params", () => {
+  it("does not render a control for a param whose value is an object", () => {
+    /**
+     * There is no scalar control for `kind: "object"`, so the fallback rendered
+     * the value directly and the drawer showed "[object Object]". Observed in a
+     * browser once v1.8.7 began publishing `labels` for every family -- the
+     * whole suite was green while the panel showed that string to every user.
+     *
+     * Filtered by kind rather than by key: the previous guard named
+     * `model_options` specifically, so the next object-valued param repeated it.
+     */
+    resolvedContextMock.current = null;
+    const node = modelNode();
+    node.editableSchema = [
+      ...(node.editableSchema ?? []),
+      {
+        kind: "object",
+        key: "labels",
+        label: "Column metadata",
+        value: { measurement_level: { q1: "ordinal" } },
+      } as unknown as NonNullable<typeof node.editableSchema>[number],
+    ];
+
+    render(<OperationSection node={node as unknown as GraphViewNode} />);
+    expect(screen.queryByText(/\[object Object\]/)).toBeNull();
+    expect(screen.queryByText(/Column metadata/)).toBeNull();
+    // The scalar controls beside it are unaffected.
+    expect(screen.getByText(/Covariance/)).toBeInTheDocument();
+  });
+});

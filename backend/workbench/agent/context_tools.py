@@ -320,7 +320,7 @@ class NodeOperationContextProvider:
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
                     active_head_run_id=self._tool_active_head(
-                        arguments.get("active_head_run_id")
+                        chain_id, str(arguments["active_head_run_id"])
                     ),
                 )
             )
@@ -797,7 +797,10 @@ class NodeOperationContextProvider:
                 description=(
                     "Read what this run assumed and could not verify: measurement "
                     "levels that were never declared (an integer rating analysed as "
-                    "a count), columns that look like an undeclared sampling design, "
+                    "a count) -- split into `measurement_advisories`, which the "
+                    "evidence supports declaring, and `measurement_uncertain`, "
+                    "which you must ask about rather than declare. Also columns "
+                    "that look like an undeclared sampling design, "
                     "the design effect and effective sample size, and extreme "
                     "sampling weights. Every figure here was computed by the engine "
                     "-- quote these values rather than deriving your own, and present "
@@ -1561,10 +1564,20 @@ class NodeOperationContextProvider:
             # the rest of the context.
             return [dict(entry) for entry in entries[:12]]
 
+        from ..measurement import split_proposable
+
+        # Split rather than one list: an Agent must be able to tell the columns
+        # whose value labels evidence a declaration from the ones that merely
+        # share a shape with them. Batching the second kind into a proposal is a
+        # guess the user cannot see afterwards.
+        proposable, uncertain = split_proposable(
+            _read("measurement/advisory.json", "entries")
+        )
         return {
             **canonical,
             "node": _bounded_node(node),
-            "measurement_advisories": _read("measurement/advisory.json", "entries"),
+            "measurement_advisories": proposable,
+            "measurement_uncertain": uncertain,
             "design_findings": _read("measurement/design_precheck.json", "findings"),
             "note": (
                 "Computed by the engine. Quote these figures rather than deriving "
