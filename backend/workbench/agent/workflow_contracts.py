@@ -2110,12 +2110,25 @@ def validate_workflow_steps(
             not isinstance(item, str) or not item for item in depends_on
         ):
             raise OperationValidationError(f"workflow step {step_id} depends_on must be step ids")
-        _validate_step_spec(str(operation_id), spec)
+        # `source` is a composition-level field owned by the workflow, not by
+        # any one operation's spec contract, so it is validated here and kept
+        # out of the per-operation validator that would reject it as unknown.
+        source_commitment = spec.get("source")
+        operation_spec = {key: value for key, value in spec.items() if key != "source"}
+        if source_commitment is not None:
+            _validate_source_commitment(step_id, source_commitment)
+        _validate_step_spec(str(operation_id), operation_spec)
+        normalized_spec = dict(operation_spec)
+        if source_commitment is not None:
+            normalized_spec["source"] = {
+                "from_step": str(source_commitment["from_step"]),
+                "output": str(source_commitment["output"]),
+            }
         normalized.append(
             {
                 "step_id": step_id,
                 "operation_id": str(operation_id),
-                "spec": dict(spec),
+                "spec": normalized_spec,
                 "depends_on": list(dict.fromkeys(depends_on)),
                 "expected_artifacts": [
                     str(item) for item in entry.get("expected_artifacts", []) or []
@@ -2165,6 +2178,35 @@ def validate_workflow_steps(
                     )
                 produced.update(outputs)
     return ordered
+
+
+# The only output binding a step may commit to consuming today. Keeping this a
+# closed set means a typo is a compile error rather than a runtime KeyError.
+SUPPORTED_STEP_OUTPUTS = frozenset({"produced_dataset"})
+
+
+def _validate_source_commitment(step_id: str, source: Any) -> None:
+    """Validate one step's declared upstream input reference."""
+
+    if not isinstance(source, Mapping):
+        raise OperationValidationError(f"workflow step {step_id} source must be an object")
+    unknown = set(source) - {"from_step", "output"}
+    if unknown:
+        raise OperationValidationError(
+            f"workflow step {step_id} source contains unknown field(s): "
+            + ", ".join(sorted(unknown))
+        )
+    from_step = source.get("from_step")
+    if not isinstance(from_step, str) or not from_step:
+        raise OperationValidationError(
+            f"workflow step {step_id} source.from_step must be a step id"
+        )
+    output = source.get("output")
+    if output not in SUPPORTED_STEP_OUTPUTS:
+        raise OperationValidationError(
+            f"workflow step {step_id} source.output must be one of: "
+            + ", ".join(sorted(SUPPORTED_STEP_OUTPUTS))
+        )
 
 
 def _topological_order(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
