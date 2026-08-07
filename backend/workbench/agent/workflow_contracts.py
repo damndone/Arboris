@@ -1775,6 +1775,10 @@ def workflow_dispatcher_key(operation_id: str) -> str:
 
 _STEP_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
+# The only output binding a step may commit to consuming today. Keeping this a
+# closed set means a typo is a compile error rather than a runtime KeyError.
+SUPPORTED_STEP_OUTPUTS = frozenset({"produced_dataset"})
+
 
 def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
     """Every source column a step spec references, for schema checking."""
@@ -2121,11 +2125,11 @@ def validate_workflow_steps(
         if declares_source:
             _validate_source_commitment(step_id, source_commitment)
         _validate_step_spec(str(operation_id), operation_spec)
-        normalized_spec = dict(operation_spec)
+        normalized_spec = operation_spec
         if declares_source:
             normalized_spec["source"] = {
-                "from_step": str(source_commitment["from_step"]),
-                "output": str(source_commitment["output"]),
+                "from_step": source_commitment["from_step"],
+                "output": source_commitment["output"],
             }
         normalized.append(
             {
@@ -2183,11 +2187,6 @@ def validate_workflow_steps(
     return ordered
 
 
-# The only output binding a step may commit to consuming today. Keeping this a
-# closed set means a typo is a compile error rather than a runtime KeyError.
-SUPPORTED_STEP_OUTPUTS = frozenset({"produced_dataset"})
-
-
 def _validate_source_commitment(step_id: str, source: Any) -> None:
     """Validate one step's declared upstream input reference."""
 
@@ -2202,7 +2201,7 @@ def _validate_source_commitment(step_id: str, source: Any) -> None:
     from_step = source.get("from_step")
     if not isinstance(from_step, str) or not from_step:
         raise OperationValidationError(
-            f"workflow step {step_id} source.from_step must be a step id"
+            f"workflow step {step_id} source.from_step must name another step in this plan"
         )
     output = source.get("output")
     if output not in SUPPORTED_STEP_OUTPUTS:
@@ -2239,6 +2238,7 @@ def _topological_order(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ordered
 
 __all__ = [
+    "SUPPORTED_STEP_OUTPUTS",
     "WORKFLOW_OPERATION_ID",
     "WORKFLOW_OPERATION_VERSION",
     "WORKFLOW_STEP_OPERATIONS",

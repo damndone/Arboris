@@ -1,8 +1,8 @@
-"""P0 composition seam: a step consuming the dataset another step produced.
+"""P0 composition seam: a step declaring its input as another step's output.
 
-These invariants belong to the composition itself: the declared source resolves,
-the referenced step really produces a dataset, and the downstream step reads
-that output rather than the raw data.
+This slice covers the declaration itself, which belongs to the composition
+rather than to any one operation's spec contract: a well-formed `source` is
+accepted and preserved, and every malformed shape is refused by name.
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ def test_source_without_a_usable_from_step_is_rejected(from_step: object) -> Non
 
     with pytest.raises(
         OperationValidationError,
-        match=r"step only source\.from_step must be a step id",
+        match=r"step only source\.from_step must name another step in this plan",
     ):
         validate_workflow_steps(
             _step_with_source({"from_step": from_step, "output": "produced_dataset"})
