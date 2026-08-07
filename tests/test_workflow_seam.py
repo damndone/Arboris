@@ -1408,3 +1408,195 @@ def test_a_step_publishing_an_unstorable_binding_fails_rather_than_losing_it(
     # is the shape a later resume would misdiagnose.
     assert state.steps["first"].produced_dataset is None
     assert state.steps["second"].status == "blocked"
+
+
+# --- The three guarantees the composition seam rests on -----------------------
+#
+# Task 1-5 built the mechanism; what follows pins the three properties that make
+# it safe to cache, resume and compose. Each one is written so that the defect it
+# names would otherwise pass silently.
+
+
+def _head_variant(input_columns: list[str]) -> list[dict]:
+    """`first -> second`, varying only what `first` multiplies.
+
+    `second` is deliberately untouched between variants: it always derives
+    `scaled` from `doubled`, the column `first` publishes under both. That is
+    what makes the fingerprint claim below mean something -- the downstream spec
+    really is byte-identical across the two plans.
+    """
+
+    first = _numeric_step("first", "doubled")
+    first["spec"]["recipes"][0]["input_columns"] = input_columns
+    return [first, _chained_step("second", "first", "scaled", "doubled")]
+
+
+def _two_plans_on_one_project(tmp_path: Path, plan_a: list[dict], plan_b: list[dict]):
+    """Compile two plans against the same target, so only the steps differ.
+
+    Compiling against two projects would give the drafts different run ids, and
+    every fingerprint would then differ for a reason that has nothing to do with
+    the property under test.
+    """
+
+    frame = _chain_frame()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    target = {"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id}
+
+    def build(steps: list[dict]):
+        return compile_workflow(
+            workflow_id="wf_seam",
+            target=dict(target),
+            preconditions={"context_fingerprint": "sha256:fixture"},
+            steps=steps,
+            available_columns=list(frame.columns),
+        )
+
+    return project, build(plan_a), build(plan_b)
+
+
+def test_changing_the_chain_head_reidentifies_every_step_below_it(
+    tmp_path: Path,
+) -> None:
+    """Guarantee 1: a step's identity covers what it consumes, not just its spec.
+
+    `_make_step` folds `dependency_fingerprints` into each step's identity, and
+    Task 2 put `from_step` into `depends_on` -- so a chained step inherits that
+    coverage. This asserts the consequence: edit the head of a chain and the step
+    below it is a different step, *even though its own spec is unchanged*.
+
+    Without it, a cache or a resume keyed on the downstream fingerprint would
+    hand back a result computed from the previous version of the upstream table.
+    Nothing about that result looks wrong; it is simply an answer to the old
+    question.
+    """
+
+    _, baseline, altered = _two_plans_on_one_project(
+        tmp_path,
+        _head_variant(["size", "weight"]),
+        _head_variant(["size", "outcome"]),
+    )
+
+    # The premise, asserted rather than assumed: the downstream steps are the
+    # same declaration in both plans. If this ever stops holding, the test below
+    # is proving nothing.
+    assert baseline.steps[1].spec == altered.steps[1].spec
+    assert baseline.steps[1].step_id == altered.steps[1].step_id
+    assert baseline.steps[1].depends_on == altered.steps[1].depends_on
+    assert baseline.target == altered.target
+
+    assert baseline.steps[0].fingerprint != altered.steps[0].fingerprint
+    assert baseline.steps[1].fingerprint != altered.steps[1].fingerprint
+    assert baseline.plan_fingerprint != altered.plan_fingerprint
+
+
+def test_a_failed_chain_head_blocks_the_step_below_it(tmp_path: Path) -> None:
+    """Guarantee 2: no upstream output means no run -- never the original table.
+
+    `second` here is written so that it *could* run on the workflow target: it
+    multiplies `weight` by `size`, both of which exist in the untransformed
+    frame. That is the whole point. A downstream step whose columns only exist
+    after the transform would fail loudly under a silent fallback, and the guard
+    would pass for the wrong reason -- it would be testing a missing column, not
+    the seam.
+
+    The failure mode being excluded is the expensive one this repository has
+    already shipped once: a step quietly reading the pre-transform data, the run
+    reporting success, the report reading normally, and every number in it being
+    an answer about the wrong dataset.
+    """
+
+    project, draft = _compiled_chain(
+        tmp_path,
+        [
+            _numeric_step("first", "doubled"),
+            _chained_step("second", "first", "scaled", "weight"),
+        ],
+    )
+    real = build_workflow_step_executor(project, draft)
+
+    def head_fails(step, previous):
+        if step.step_id == "first":
+            raise WorkflowExecutionError("simulated head failure")
+        return real(step, previous)
+
+    state = WorkflowExecutor(project).execute(draft, head_fails)
+
+    assert state.steps["first"].status == "failed"
+    # blocked, specifically: not `failed` (which would say `second` was tried
+    # and broke) and not `completed` (which would say it produced something).
+    assert state.steps["second"].status == "blocked", state.steps["second"].error
+    assert state.steps["second"].artifact_ids == ()
+    assert state.steps["second"].produced_dataset is None
+    assert state.status == "failed"
+
+    # And nothing was computed behind the status: `scaled` is the column only
+    # `second` writes, so its absence from every table in the run is the
+    # evidence that no fallback result reached disk.
+    run_root = project / "runs" / str(draft.target["run_id"])
+    for path in sorted(run_root.rglob("*.csv")):
+        assert "scaled" not in pd.read_csv(path).columns, path
+
+
+def _explore_step(step_id: str) -> dict:
+    """One exploration declaration, reused verbatim on both sides."""
+
+    return {
+        "step_id": step_id,
+        "operation_id": "statistical.explore",
+        "spec": {
+            "operation": "summarize_detail",
+            # Columns that exist in the target and in the derived table alike,
+            # so the two steps really are the same exploration.
+            "selected_columns": ["size", "weight"],
+        },
+    }
+
+
+def test_the_same_exploration_on_a_derived_table_is_a_different_identity(
+    tmp_path: Path,
+) -> None:
+    """Guarantee 3: the fingerprint follows the data actually read.
+
+    Two steps, the same `ExplorationSpec`, the same workflow target. One reads
+    the target; the other reads a derived table published by `first`. They must
+    not land on the same identity.
+
+    That identity is a path -- `artifacts/statistical_exploration/{fp}.json`.
+    A collision has two outcomes, both bad: the second exploration silently
+    returns the first one's stored numbers, or the store refuses a perfectly
+    legal plan as ambiguous. Today `derive_numeric` only appends columns, so a
+    collision would return numbers that happen to agree; once P3's subset and
+    reshape change rows and values, the same collision returns numbers that do
+    not.
+    """
+
+    from workbench.agent.workflow_runtime import _exploration_spec
+
+    project, draft = _compiled_chain(
+        tmp_path,
+        [
+            _numeric_step("first", "doubled"),
+            _explore_step("direct"),
+            _sourced(_explore_step("derived"), "first"),
+        ],
+    )
+    by_id = {step.step_id: step for step in draft.steps}
+
+    # The premise: one and the same exploration on both sides. The `source`
+    # commitment is a routing instruction, not part of the exploration, so it
+    # does not reach the spec the fingerprint is computed from -- which is
+    # exactly why the digest has to carry the difference.
+    assert _exploration_spec(by_id["direct"].spec) == _exploration_spec(
+        by_id["derived"].spec
+    )
+
+    executor = build_workflow_step_executor(project, draft)
+    upstream = executor(by_id["first"], {})
+    direct = executor(by_id["direct"], {})
+    derived = executor(by_id["derived"], {"first": upstream})
+
+    assert direct.result_fingerprint != derived.result_fingerprint
+    # The identity is a location, so state the consequence directly: the two
+    # records must not share an artifact.
+    assert set(direct.artifact_ids).isdisjoint(derived.artifact_ids)
