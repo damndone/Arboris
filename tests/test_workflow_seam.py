@@ -9,6 +9,7 @@ such a reference to resolve against.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -237,4 +238,17 @@ def test_a_dataset_producing_step_publishes_a_resolvable_binding(tmp_path: Path)
     assert produced["run_id"] == draft.target["run_id"]
     assert produced["node_ref"].startswith("data-derive-numeric:")
     assert produced["result_fingerprint"] == result.result_fingerprint
-    assert produced["artifact_id"] in result.artifact_ids
+
+    # The binding promises a readable dataset, so follow it the way a consumer
+    # would. The step registers two artifacts and only one of them is the data;
+    # resolving the id to its file and finding the derived column is what tells
+    # the two apart, where "is one of this step's artifacts" would not.
+    run_root = project / "runs" / produced["run_id"]
+    index = json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))
+    entry = next(
+        item
+        for item in index["artifacts"]
+        if item["artifact_id"] == produced["artifact_id"]
+    )
+    published = pd.read_csv(run_root / entry["path"])
+    assert list(published["doubled"]) == [2.0, 4.0, 6.0, 8.0]
