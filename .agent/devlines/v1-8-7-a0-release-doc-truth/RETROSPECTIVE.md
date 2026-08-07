@@ -1,0 +1,58 @@
+# Retrospective — v1-8-7-a0-release-doc-truth
+
+## Goal
+
+# v1.8.7 A0 发布文档事实修正 Objective  v1.8.7 块 0，起手即做，纯文档，不触碰任何产品代码。  已发布的 v1.8.6 release notes 内部自相矛盾：头部称「已发布（tag：\`v1.8.6\`）」， 而第 79 行与第 96 行仍称「未 push、未建 PR、未 merge、未 tag」。发布时只改了头部。 实际状态为 \`origin/main\` = tag \`v1.8.6\` = \`9d5e947\`，PR 已 merge。  同时 \`followups/BACKLOG.md\` 的 §0 / §0.1 / §1 仍停在 v1.8.0–v1.8.1 时期， §1 表最新只到 \`V1.8.5-TYPED-MEMORY\`，v1.8.6 一条未进， 违反 \`docs/superpowers/README.md\`「唯一 live 滚动欠账清单」的约定。  这是已发布文档里的事实错误，不拖成长期欠账。  ## 必须完成  1. 修正 \`docs/releases/v1.8.6-release-notes.md\` 第 79 行：删除「版本整合以及明确的    push/merge/tag 授权仍未执行」一句，保留同段其余的浏览器验收记录（那部分属实）。 2. 修正同文件第 96 行：「未 push、未建 PR、未 merge、未 tag」改为实际发布事实    （已 push、PR 已 merge、tag \`v1.8.6\` = \`9d5e947\` = \`origin/main\`）。 3. 除上述两处外，release notes 其余内容**一字不改**——尤其不得改动验证等级章节    与本地验证摘要中的任何数字。 4. \`followups/BACKLOG.md\` 补齐 v1.8.6：§0 / §0.1 版本状态更新到 v1.8.6 已发布，    §1 表补入 v1.8.6 产生的开放欠账，恢复「唯一 live 滚动清单」性质。  ## 明确不做  - 不改 v1.8.6 的任何技术结论、验证等级或实测数字。 - 不归档任何文档（版本收尾仪式不属本 objective）。 - 不触碰产品代码、测试或 fixture。 - 不 push / 不建 PR / 不 merge / 不 tag。  ## 可证伪验收  - \`docs/releases/v1.8.6-release-notes.md\` 全文再无与实际发布状态冲突的表述；   用 \`grep -n "未 push\|未建 PR\|未 merge\|未 tag\|授权仍未执行"\` 对该文件应无命中。 - 该文件相对 \`9d5e947\` 的 diff **仅限**第 79 行与第 96 行所在的两处，   \`git diff --stat\` 显示改动局限于这一个文件，且验证等级章节与本地验证摘要   逐字节不变。 - \`followups/BACKLOG.md\` 中出现 v1.8.6 条目，且 §0.1 版本状态含 v1.8.6 已发布。 - \`git diff --check\` 干净。 - 全量 gate 不受影响（纯文档改动，后端/前端测试数与 golden 均不变）。
+
+## Final status
+
+STARTED
+
+## Metrics
+
+- Failure frequency: N/A (sample=0)
+- Repeat rate: N/A (sample=0)
+- Recurrence rate: N/A (sample=0)
+- MTTR: N/A (sample=0; unresolved=0)
+- Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
+- Spec churn: N/A (sample=0)
+- Plan churn: N/A (sample=0)
+- Gate waste rate: N/A (sample=0)
+- Same-state retry rate: N/A (sample=0)
+- Token waste: N/A (sample=0)
+
+## All failures
+
+- None recorded.
+
+## All errors
+
+- None recorded.
+
+## All gaps
+
+- None recorded.
+
+## All waste
+
+- None recorded.
+
+## Root causes and solutions
+
+- None recorded.
+
+## Added tests
+
+- No test evidence recorded.
+
+## New rules
+
+- No rule candidate recorded.
+
+## Future guidance
+
+- No guidance recorded.
+
+## Event index
+
+- #1: `2ef11536-5177-4cf6-8f99-2a58a1dcfe4b` | 2026-08-05T17:02:22.442Z | STATE_CHANGE/line_started | incident=`3e83ef3d-7a75-4613-8ba7-a950f0f8679a` | lesson_key=`frozen-context-before-start` | event_sha256=`a06325d24023b2c14661f8d8cbfb22bf84e9afd13e4909dace671b43f73ed14e`

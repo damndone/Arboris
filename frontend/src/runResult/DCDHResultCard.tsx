@@ -42,16 +42,16 @@ export function DCDHResultCard(props: { result?: DCDHResult }) {
 
   return (
     <section className="diagnostics-card" aria-label="dCDH event study">
-      <h3 className="subhead">de Chaisemartin-D'Haultfœuille DID（非吸收 · 动态事件研究）</h3>
+      <h3 className="subhead">de Chaisemartin-D'Haultfœuille DID (non-absorbing — dynamic event study)</h3>
 
       <table className="diagnostics-table" aria-label="dcdh-event-study-table">
         <thead>
           <tr>
-            <th>事件期</th>
-            <th>类型</th>
-            <th>估计</th>
+            <th>Event time</th>
+            <th>Kind</th>
+            <th>Estimate</th>
             <th>SE</th>
-            <th>统一带 (sup-t)</th>
+            <th>Uniform band (sup-t)</th>
             <th>switchers</th>
           </tr>
         </thead>
@@ -59,7 +59,7 @@ export function DCDHResultCard(props: { result?: DCDHResult }) {
           {es.event_time.map((ev, i) => (
             <tr key={ev} className={es.kind[i] === "placebo" ? "dcdh-placebo-row" : "dcdh-effect-row"}>
               <td>{ev}</td>
-              <td>{es.kind[i] === "placebo" ? "placebo（预趋势）" : "effect"}</td>
+              <td>{es.kind[i] === "placebo" ? "placebo (pre-trend)" : "effect"}</td>
               <td>{fmt(es.estimate[i])}</td>
               <td>{fmt(es.se[i])}</td>
               <td>
@@ -72,7 +72,7 @@ export function DCDHResultCard(props: { result?: DCDHResult }) {
       </table>
 
       <div className="dcdh-overall" aria-label="dcdh-overall-att">
-        总体 ATT：{fmt(oa.estimate)}（SE {fmt(oa.se)}）
+        Overall ATT: {fmt(oa.estimate)} (SE {fmt(oa.se)}）
         {oa.experimental && (
           <span className="ios-badge" aria-label="dcdh-experimental"> experimental</span>
         )}
@@ -80,7 +80,7 @@ export function DCDHResultCard(props: { result?: DCDHResult }) {
 
       {result.diagnostics.excluded_units && result.diagnostics.excluded_units.length > 0 && (
         <div className="ios-hint" aria-label="dcdh-excluded">
-          已排除 baseline=1 单位：{result.diagnostics.excluded_units.length} 个
+          Units excluded for baseline=1: {result.diagnostics.excluded_units.length}
         </div>
       )}
 

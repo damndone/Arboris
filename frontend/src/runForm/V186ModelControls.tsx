@@ -76,7 +76,7 @@ function ColumnSelect(props: {
         required={props.required}
         onChange={(event) => props.onChange(event.target.value)}
       >
-        <option value="">{props.required ? "(选择必填列)" : "(不使用)"}</option>
+        <option value="">{props.required ? "(select a required column)" : "(not used)"}</option>
         {props.columns.map((column) => (
           <option key={column} value={column}>{column}</option>
         ))}
@@ -108,7 +108,7 @@ function JsonOptionsEditor(props: {
       setError(null);
       props.onChange(parsed as V186ModelOptions);
     } catch {
-      setError("model_options 必须是 JSON 对象");
+      setError("model_options must be a JSON object");
     }
   }
 
@@ -137,7 +137,7 @@ export function V186ModelControls(props: {
   if (modelType === "ordinal_logit") {
     return (
       <div className="ios-group" aria-label="Ordinal logit settings">
-        <p className="ios-hint">有序类别结果。可直接编辑发送给后端的 model_options JSON。</p>
+        <p className="ios-hint">Ordered categorical outcome. The model_options JSON sent to the backend is editable directly.</p>
         <JsonOptionsEditor
           label="ordinal model options"
           options={options}
@@ -150,7 +150,7 @@ export function V186ModelControls(props: {
   if (modelType === "multinomial_logit") {
     return (
       <div className="ios-group" aria-label="Multinomial logit settings">
-        <p className="ios-hint">无序类别结果。可直接编辑发送给后端的 model_options JSON。</p>
+        <p className="ios-hint">Unordered categorical outcome. The model_options JSON sent to the backend is editable directly.</p>
         <JsonOptionsEditor
           label="multinomial model options"
           options={options}
@@ -163,7 +163,7 @@ export function V186ModelControls(props: {
   if (modelType === "survival_cox") {
     return (
       <div className="ios-group" aria-label="Survival Cox settings">
-        <p className="ios-hint">duration 使用 y；event 必须是 0/1 事件列，group 可选。</p>
+        <p className="ios-hint">duration uses y; event must be a 0/1 event column; group is optional.</p>
         <ColumnSelect
           label="survival event column"
           value={textOption(options, "event_column")}
@@ -203,7 +203,7 @@ export function V186ModelControls(props: {
     : "0.25, 0.5, 0.75";
   return (
     <div className="ios-group" aria-label="Quantile regression settings">
-      <p className="ios-hint">分位点用逗号分隔，每个值必须严格位于 0 和 1 之间。</p>
+      <p className="ios-hint">Quantiles are comma-separated; every value must lie strictly between 0 and 1.</p>
       <label className="ios-field">
         <span>quantiles</span>
         <input

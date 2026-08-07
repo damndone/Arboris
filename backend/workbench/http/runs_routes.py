@@ -67,6 +67,7 @@ from ..services.run_deletion import RunDeletionConfirmationError, RunDeletionSer
 from ..services.run_service import (
     _mark_interrupted_if_dead,
     _normalize_labels,
+    _parse_json_str_array,
     _read_upload_bytes,
     _sse_frame,
     _submit_run,
@@ -251,6 +252,14 @@ async def run_endpoint(
     frequency_weight: str = Form(""),
     analysis_weight: str = Form(""),
     sampling_weight: str = Form(""),
+    survey_strata_col: str = Form(""),
+    survey_psu_col: str = Form(""),
+    survey_fpc_col: str = Form(""),
+    survey_replicate_weights: str = Form(""),   # JSON array of column names
+    survey_replicate_type: str = Form(""),      # brr | jackknife | bootstrap | provided
+    survey_lonely_psu: str = Form(""),          # fail | remove | adjust | average | certainty
+    survey_weight_frame: str = Form(""),        # cross_sectional | longitudinal
+    survey_subpop: str = Form(""),
     iv_endog: str = Form(""),          # JSON array of column names, e.g. ["educ"]
     iv_instruments: str = Form(""),    # JSON array of column names
     did_mode: str = Form(""),
@@ -315,6 +324,14 @@ async def run_endpoint(
             "frequency_weight": frequency_weight,
             "analysis_weight": analysis_weight,
             "sampling_weight": sampling_weight,
+            "survey_strata_col": survey_strata_col,
+            "survey_psu_col": survey_psu_col,
+            "survey_fpc_col": survey_fpc_col,
+            "survey_replicate_weights": survey_replicate_weights,
+            "survey_replicate_type": survey_replicate_type,
+            "survey_lonely_psu": survey_lonely_psu,
+            "survey_weight_frame": survey_weight_frame,
+            "survey_subpop": survey_subpop,
             "iv_endog": iv_endog, "iv_instruments": iv_instruments,
             "did_mode": did_mode, "did_cohort_col": did_cohort_col,
             "did_treat_col": did_treat_col, "did_post_col": did_post_col,
@@ -358,6 +375,21 @@ async def batch_run_endpoint(
     file: UploadFile = File(...),
     sheet_name: str = Form(""),
     transpose: str = Form("false"),
+    # v1.8.7 block 1.  Batch used to forward only mode/y/x, so anything else a
+    # caller declared was dropped by FastAPI without a word -- a batch with a
+    # declared strata/PSU design came back computed as a simple random sample
+    # with no indication.  The design travels with the batch now, and
+    # sampling_weight comes with it because a design without its weight is only
+    # half a declaration.
+    sampling_weight: str = Form(""),
+    survey_strata_col: str = Form(""),
+    survey_psu_col: str = Form(""),
+    survey_fpc_col: str = Form(""),
+    survey_replicate_weights: str = Form(""),
+    survey_replicate_type: str = Form(""),
+    survey_lonely_psu: str = Form(""),
+    survey_weight_frame: str = Form(""),
+    survey_subpop: str = Form(""),
 ) -> dict:
     _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     if sheet_name or transpose == "true":
@@ -404,6 +436,17 @@ async def batch_run_endpoint(
             mode=mode,
             y_list=y_columns,
             x=x_columns,
+            sampling_weight=sampling_weight,
+            survey_strata_col=survey_strata_col,
+            survey_psu_col=survey_psu_col,
+            survey_fpc_col=survey_fpc_col,
+            survey_replicate_weights=_parse_json_str_array(
+                survey_replicate_weights, "survey_replicate_weights"
+            ),
+            survey_replicate_type=survey_replicate_type,
+            survey_lonely_psu=survey_lonely_psu,
+            survey_weight_frame=survey_weight_frame,
+            survey_subpop=survey_subpop,
         )
     finally:
         events.release_slot(None)

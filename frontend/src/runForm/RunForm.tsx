@@ -31,6 +31,19 @@ import {
   type ArmaGarchControlValue,
 } from "./ArmaGarchControls";
 import {
+  SurveyDesignControls,
+  emptySurveyDesign,
+  hasSurveyDesign,
+  surveyDesignApplies,
+  type SurveyDesignValue,
+} from "./SurveyDesignControls";
+import {
+  AnovaControls,
+  emptyAnovaOptions,
+  toAnovaModelOptions,
+  type AnovaOptionsValue,
+} from "./AnovaControls";
+import {
   V186ModelControls,
   isV186ModelType,
   normalizeV186ModelOptions,
@@ -55,6 +68,19 @@ export type RunFormProps = {
   setRequestState: (state: RequestState) => void;
   onRan?: (r: RunResponse) => void;
 };
+
+function surveyDesign2Extra(value: SurveyDesignValue) {
+  return {
+    surveyStrataCol: value.survey_strata_col,
+    surveyPsuCol: value.survey_psu_col,
+    surveyFpcCol: value.survey_fpc_col,
+    surveyReplicateWeights: value.survey_replicate_weights,
+    surveyReplicateType: value.survey_replicate_type,
+    surveyLonelyPsu: value.survey_lonely_psu,
+    surveyWeightFrame: value.survey_weight_frame,
+    surveySubpop: value.survey_subpop,
+  };
+}
 
 export function RunForm(props: RunFormProps) {
   const {
@@ -81,6 +107,8 @@ export function RunForm(props: RunFormProps) {
   const [frequencyWeight, setFrequencyWeight] = useState("");
   const [analysisWeight, setAnalysisWeight] = useState("");
   const [samplingWeight, setSamplingWeight] = useState("");
+  const [surveyDesign, setSurveyDesign] = useState<SurveyDesignValue>(emptySurveyDesign);
+  const [anovaOptions, setAnovaOptions] = useState<AnovaOptionsValue>(emptyAnovaOptions);
   const [lmmValue, setLmmValue] = useState<LmmControlValue>({
     subject_id: "",
     time: "",
@@ -298,6 +326,8 @@ export function RunForm(props: RunFormProps) {
     setFrequencyWeight("");
     setAnalysisWeight("");
     setSamplingWeight("");
+    setSurveyDesign(emptySurveyDesign());
+    setAnovaOptions(emptyAnovaOptions());
     if (!nextFile) {
       setPreviewState("idle");
       return;
@@ -463,7 +493,9 @@ export function RunForm(props: RunFormProps) {
                   )
                 : isV186ModelType(modelType)
                   ? normalizeV186ModelOptions(modelType, v186ModelOptionsByType[modelType])
-                  : undefined,
+                  : modelType === "anova"
+                    ? toAnovaModelOptions(anovaOptions)
+                    : undefined,
           // v1.6.5 role layer: declare focal only for user-focal families and
           // only over the columns actually posted as x. Structural families
           // (IV/DID/CS/SA/dCDH) get nothing — focal/treatment is structural.
@@ -474,6 +506,10 @@ export function RunForm(props: RunFormProps) {
           frequencyWeight,
           analysisWeight,
           samplingWeight,
+          // Sent only when a design was actually declared: an empty field must
+          // not read as a declaration, since the backend keys its refusal on
+          // whether one is present.
+          ...(hasSurveyDesign(surveyDesign) ? surveyDesign2Extra(surveyDesign) : {}),
         },
       );
       setLastRun(result);
@@ -593,6 +629,21 @@ export function RunForm(props: RunFormProps) {
               )}
             </>
           )}
+          {modelType === "anova" && (
+            <AnovaControls
+              columns={columnNames}
+              value={anovaOptions}
+              onChange={setAnovaOptions}
+            />
+          )}
+          {capabilities?.survey_design && surveyDesignApplies(capabilities.survey_design, modelType) && (
+            <SurveyDesignControls
+              columns={columnNames}
+              capability={capabilities.survey_design}
+              value={surveyDesign}
+              onChange={setSurveyDesign}
+            />
+          )}
           <ImputationControls
             capabilities={capabilities}
             value={imputationMethod}
@@ -630,7 +681,7 @@ export function RunForm(props: RunFormProps) {
           {modelType === "iv_2sls" && (
             <div className="ios-group" aria-label="IV controls">
               <p className="ios-hint">
-                把控制变量、内生变量、工具变量都加入 X，再在下方为每个变量指派角色
+                Add controls, endogenous variables and instruments all to X, then assign each one a role below
               </p>
               <IVControls
                 columns={xColumns}
@@ -639,7 +690,7 @@ export function RunForm(props: RunFormProps) {
               />
               {(capabilities?.covariance_options ?? []).length > 0 && (
                 <label className="ios-field">
-                  <span>标准误 covariance</span>
+                  <span>Covariance</span>
                   <select
                     aria-label="covariance"
                     value={covariance}

@@ -5,10 +5,10 @@ export function Trajectory({ context }: { context: unknown }) {
   if (trajectory === null) return null;
   return (
     <section aria-label="lmm-group-trajectory">
-      <h3>组别轨迹</h3>
+      <h3>Group trajectories</h3>
       <table>
         <thead>
-          <tr><th>组别</th><th>时间</th><th>观测均值</th><th>拟合均值</th></tr>
+          <tr><th>Group</th><th>Time</th><th>Observed mean</th><th>Fitted mean</th></tr>
         </thead>
         <tbody>
           {trajectory.groups.flatMap((group) => trajectory.time.map((time, index) => (

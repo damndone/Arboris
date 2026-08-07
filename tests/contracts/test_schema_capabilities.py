@@ -110,6 +110,32 @@ SCHEMA: dict = {
                 "additionalProperties": False,
             },
         },
+        # v1.8.7. Published so a caller can *derive* which variance channel an
+        # estimator can use, rather than carrying a hard-coded support list that
+        # rots silently as families are added.
+        "survey_design": {
+            "type": "object",
+            "required": [
+                "variance_methods",
+                "variance_method_requirements",
+                "replicate_types",
+                "lonely_psu_policies",
+                "design_fields",
+                "sampling_weight_families",
+            ],
+            "properties": {
+                "sampling_weight_families": {"type": "array", "items": {"type": "string"}},
+                "variance_methods": {"type": "array", "items": {"type": "string"}},
+                "variance_method_requirements": {
+                    "type": "object",
+                    "additionalProperties": {"type": "array", "items": {"type": "string"}},
+                },
+                "replicate_types": {"type": "array", "items": {"type": "string"}},
+                "lonely_psu_policies": {"type": "array", "items": {"type": "string"}},
+                "design_fields": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
     },
     "additionalProperties": False,
 }

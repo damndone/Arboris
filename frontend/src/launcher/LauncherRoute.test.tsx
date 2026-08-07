@@ -93,12 +93,12 @@ describe("LauncherRoute", () => {
     });
     renderAt("/");
     expect(await screen.findByTestId("project-graph-route")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "新建项目" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New project" })).not.toBeInTheDocument();
   });
 
   it("V10: bare / with NO recents still shows the launcher (no dead end)", () => {
     renderAt("/");
-    expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New project" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Workbench" })).toBeInTheDocument();
     expect(screen.queryByText(/Econometrics/i)).toBeNull();
   });
@@ -150,7 +150,7 @@ describe("LauncherRoute", () => {
     });
     renderAt("/");
 
-    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("parent folder"), {
@@ -174,7 +174,7 @@ describe("LauncherRoute", () => {
 
   it("create modal validation: empty parent or bad name disables Create", () => {
     renderAt("/");
-    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
 
     // Empty parent → disabled.
     const create = screen.getByRole("button", { name: "Create project" });
@@ -201,7 +201,7 @@ describe("LauncherRoute", () => {
 
   it("create modal keeps Browse as a guarded helper without synthesizing fake absolute paths", async () => {
     renderAt("/");
-    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
 
     expect(screen.getByRole("button", { name: "Browse" })).toBeInTheDocument();
     const folder = screen.getByLabelText("folder picker");
@@ -216,12 +216,12 @@ describe("LauncherRoute", () => {
     expect(screen.getByLabelText("parent folder")).toHaveValue("");
     expect(screen.getByLabelText("project name")).toHaveValue("picked-project");
     expect(
-      await screen.findByText(/不能获得后端可访问的绝对父目录/),
+      await screen.findByText(/not an absolute parent directory the backend can reach/),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create project" })).toBeDisabled();
   });
 
-  it("stale recent: PROJECT_NOT_FOUND marks the card 失效 with 移除, no navigation", async () => {
+  it("stale recent: PROJECT_NOT_FOUND marks the card stale with a remove action, no navigation", async () => {
     touchRecent("/gone/project");
     installFetchRouter((url) => {
       if (url.includes("/runs")) {
@@ -236,10 +236,10 @@ describe("LauncherRoute", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /project/ }));
 
-    expect(await screen.findByText("失效")).toBeInTheDocument();
+    expect(await screen.findByText("stale")).toBeInTheDocument();
     expect(screen.queryByTestId("project-graph-route")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "移除" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => {
       expect(screen.queryByText("/gone/project")).not.toBeInTheDocument();
     });
@@ -249,8 +249,8 @@ describe("LauncherRoute", () => {
   it("corrupt localStorage → empty state with a hint", () => {
     localStorage.setItem("workbench.recentProjects.v1", "{not json");
     renderAt("/");
-    expect(screen.getByText("最近项目将显示在这里。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
+    expect(screen.getByText("Recent projects appear here.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New project" })).toBeInTheDocument();
   });
 
   // ── T11 ride-alongs (T10 review) ──
@@ -289,7 +289,7 @@ describe("LauncherRoute", () => {
     renderAt("/");
 
     // First open: type a parent, trigger a failing create → inline error.
-    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
     fireEvent.change(screen.getByLabelText("parent folder"), {
       target: { value: "/tmp" },
     });
@@ -301,7 +301,7 @@ describe("LauncherRoute", () => {
 
     // Close then reopen: fields and error are reset to pristine defaults.
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
 
     expect(screen.getByLabelText("parent folder")).toHaveValue("");
     expect(screen.getByLabelText("project name")).toHaveValue("demo");

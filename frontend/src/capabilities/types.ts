@@ -45,6 +45,20 @@ export interface CovarianceOption {
   default?: boolean;
 }
 
+/** Published so the form can *derive* what composes instead of restating it.
+ *  A local copy of these option sets drifts the first time the backend adds or
+ *  withdraws a policy, and nothing reports the disagreement. */
+export interface SurveyDesignCapability {
+  variance_methods: string[];
+  variance_method_requirements: Record<string, string[]>;
+  replicate_types: string[];
+  lonely_psu_policies: string[];
+  design_fields: string[];
+  /** Families whose engine accepts a sampling weight; the design controls
+   *  belong to those and nowhere else. Server-derived, never restated here. */
+  sampling_weight_families: string[];
+}
+
 export interface Capabilities {
   schema_version: number;
   editable_stages?: string[];
@@ -53,4 +67,5 @@ export interface Capabilities {
   prediction_models?: PredictionModelEntry[];
   sampling_methods?: SamplingMethodEntry[];
   covariance_options?: CovarianceOption[];
+  survey_design?: SurveyDesignCapability;
 }

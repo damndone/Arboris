@@ -13,7 +13,7 @@ export function listRecents(): RecentProject[] {
     return Array.isArray(parsed)
       ? parsed.filter(
           // T11 R3: validate BOTH fields — a corrupt lastOpened would leak
-          // into `上次打开 {lastOpened}` rendering as "undefined"/objects.
+          // into `Last opened {lastOpened}` rendering as "undefined"/objects.
           (r) => typeof r?.root === "string" && typeof r?.lastOpened === "string"
         )
       : [];

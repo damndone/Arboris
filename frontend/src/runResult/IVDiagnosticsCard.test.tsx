@@ -1,3 +1,4 @@
+import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { IVDiagnosticsCard, type IVDiagnostics } from "./IVDiagnosticsCard";
@@ -12,10 +13,8 @@ const over: IVDiagnostics = {
 describe("IVDiagnosticsCard", () => {
   it("renders all three diagnostics + over-identified badge", () => {
     render(<IVDiagnosticsCard diagnostics={over} />);
-    expect(screen.getByText(/over-identified/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/第一阶段 F \(first-stage F\)/i),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText("IV identification")).toHaveTextContent("over-identified");
+    expect(screen.getByText(/First-stage F =/i)).toBeInTheDocument();
     expect(screen.getByText(/IV is warranted/i)).toBeInTheDocument();
     expect(screen.getByText(/24\.3/)).toBeInTheDocument(); // statistic visible
   });
@@ -24,7 +23,7 @@ describe("IVDiagnosticsCard", () => {
     const just: IVDiagnostics = { ...over, identification: "just",
       overidentification: { applicable: false, verdict: "Not applicable (just-identified)." } };
     render(<IVDiagnosticsCard diagnostics={just} />);
-    expect(screen.getByText(/just-identified · 恰好识别/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("IV identification")).toHaveTextContent("just-identified");
     expect(screen.getByText(/not applicable/i)).toBeInTheDocument();
   });
 

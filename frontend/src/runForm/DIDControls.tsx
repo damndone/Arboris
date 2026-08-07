@@ -36,39 +36,39 @@ export function DIDControls(props: {
 
   return (
     <div className="ios-group" aria-label="DID settings">
-      <div className="ios-group-label">DID 设定 · 选择输入模式与角色列</div>
+      <div className="ios-group-label">DID setup — input mode and role columns</div>
       <label className="ios-field">
-        <span>输入模式</span>
+        <span>Input mode</span>
         <select aria-label="did-mode" value={value.mode}
           onChange={(e) => set({ mode: e.target.value as DIDMode })}>
-          <option value="cohort">队列(首次处理时点)</option>
-          <option value="two_by_two">经典 2×2(组 + 期)</option>
-          <option value="status">处理状态(D_it)</option>
+          <option value="cohort">Cohort (first treatment period)</option>
+          <option value="two_by_two">Classic 2×2 (group + period)</option>
+          <option value="status">Treatment status (D_it)</option>
         </select>
       </label>
 
-      <ColumnSelect label="个体 (entity)" aria="did-entity" columns={columns}
+      <ColumnSelect label="Entity" aria="did-entity" columns={columns}
         value={value.entity} onChange={(v) => set({ entity: v })} />
-      <ColumnSelect label="时间 (time)" aria="did-time" columns={columns}
+      <ColumnSelect label="Time" aria="did-time" columns={columns}
         value={value.time} onChange={(v) => set({ time: v })} />
       {value.mode === "cohort" && (
-        <ColumnSelect label="首次处理时点 (cohort)" aria="did-cohort" columns={columns}
+        <ColumnSelect label="First treated period (cohort)" aria="did-cohort" columns={columns}
           value={value.cohort} onChange={(v) => set({ cohort: v })} />
       )}
       {value.mode === "two_by_two" && (
         <>
-          <ColumnSelect label="处理组 (treat)" aria="did-treat" columns={columns}
+          <ColumnSelect label="Treated group (treat)" aria="did-treat" columns={columns}
             value={value.treat} onChange={(v) => set({ treat: v })} />
-          <ColumnSelect label="时期 (post)" aria="did-post" columns={columns}
+          <ColumnSelect label="Period (post)" aria="did-post" columns={columns}
             value={value.post} onChange={(v) => set({ post: v })} />
         </>
       )}
       {value.mode === "status" && (
-        <ColumnSelect label="处理状态 (D_it)" aria="did-status" columns={columns}
+        <ColumnSelect label="Treatment status (D_it)" aria="did-status" columns={columns}
           value={value.status} onChange={(v) => set({ status: v })} />
       )}
       <div className="ios-hint" aria-live="polite">
-        需要 ≥2 个时间期,且至少 1 个处理单位 + 1 个对照(从不处理/尚未处理)。
+        Requires at least 2 time periods, and at least 1 treated unit plus 1 control (never-treated or not-yet-treated).
       </div>
     </div>
   );

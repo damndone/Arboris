@@ -17,7 +17,7 @@ describe("PacketPanel", () => {
     expect(screen.getByText("0.8")).toBeInTheDocument();
     expect(screen.getByLabelText("lmm-group-trajectory")).toBeInTheDocument();
     expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.queryByText(/确认|恢复|执行|rerun/i)).toBeNull();
+    expect(screen.queryByText(/confirm|restore|execute|rerun/i)).toBeNull();
   });
 
   it("shows server-projected artifact and source metadata without recomputing it", () => {
@@ -34,16 +34,16 @@ describe("PacketPanel", () => {
   it("presents unbalanced time as an unavailable trajectory without inventing points", () => {
     render(<PacketPanel result={unbalancedPublicModelResult()} />);
 
-    expect(screen.getByText("组别轨迹不可用")).toBeInTheDocument();
+    expect(screen.getByText("Group trajectories unavailable")).toBeInTheDocument();
     expect(screen.queryByLabelText("lmm-group-trajectory")).toBeNull();
   });
 
   it("presents a failed terminal result without a success claim or trajectory", () => {
     render(<PacketPanel result={failedPublicModelResult()} />);
 
-    expect(screen.getByText("模型拟合未完成")).toBeInTheDocument();
+    expect(screen.getByText("Model fit failed")).toBeInTheDocument();
     expect(screen.getByText("LMM_CONVERGENCE_FAILED")).toBeInTheDocument();
     expect(screen.queryByLabelText("lmm-group-trajectory")).toBeNull();
-    expect(screen.queryByText(/成功|complete/i)).toBeNull();
+    expect(screen.queryByText(/succeeded|complete/i)).toBeNull();
   });
 });

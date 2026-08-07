@@ -19,6 +19,10 @@ BUILTIN_PACK_DECLARATIONS: tuple[PackDeclaration, ...] = (
         model_type="time_series.ets",
     ),
     PackDeclaration(
+        module="workbench.engine.packs.anova",
+        model_type="anova",
+    ),
+    PackDeclaration(
         module="workbench.engine.packs.v186_model_families.ordinal_logit",
         model_type="ordinal_logit",
     ),

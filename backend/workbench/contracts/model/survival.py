@@ -10,7 +10,7 @@ from ..common.envelope import ContractError, require_exact_keys
 
 
 _VALIDATION_FIELDS = {"level", "external_oracle"}
-_VALIDATION_LEVEL = "internal_consistency_only"
+from .validation_levels import check_validation  # noqa: E402
 _EXTERNAL_ORACLE_STATUS = "not_verified"
 
 
@@ -85,16 +85,10 @@ def _require_list(value: Any, field_name: str) -> list[Any]:
 def _require_validation(value: Any) -> Mapping[str, str]:
     validation = _require_mapping(value, "survival_evidence.validation")
     require_exact_keys(validation, _VALIDATION_FIELDS, "survival_evidence.validation")
-    if validation["level"] != _VALIDATION_LEVEL:
-        raise ContractError(
-            "survival_evidence.validation.level must be internal_consistency_only "
-            "until an external oracle is run"
-        )
-    if validation["external_oracle"] != _EXTERNAL_ORACLE_STATUS:
-        raise ContractError(
-            "survival_evidence.validation.external_oracle must be not_verified "
-            "without Stata/R evidence"
-        )
+    # Shared with the family contracts rather than re-stated: the two used to
+    # carry separate copies of these constants, so raising the level in one made
+    # the other reject the payload the first had just started requiring.
+    check_validation(dict(validation), "survival_evidence.validation")
     return validation  # type: ignore[return-value]
 
 

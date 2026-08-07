@@ -532,7 +532,7 @@ test("/runs route with missing project_root falls back to the launcher", async (
 
   await waitFor(() => {
     // launcher-specific affordance (the shell h1 also matches /workbench/i)
-    expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New project" })).toBeInTheDocument();
   });
 });
 
@@ -785,7 +785,7 @@ test("HF2: /runs/:id?tab=lineage DOES apply lineage dark shell", () => {
 test("/ renders the launcher, not the submit form", async () => {
   renderAt("/");
 
-  expect(await screen.findByRole("button", { name: "新建项目" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "New project" })).toBeInTheDocument();
   expect(screen.queryByLabelText("parent folder")).not.toBeInTheDocument();
 });
 
@@ -856,13 +856,13 @@ test("/runs/:id redirect forwards the run id as ?run= and keeps other params (I2
 test("/runs/:id without project_root falls back to the launcher", async () => {
   renderAt("/runs/run-abc");
 
-  expect(await screen.findByRole("button", { name: "新建项目" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "New project" })).toBeInTheDocument();
 });
 
 test("/p/:slug/graph with a malformed slug falls back to the launcher (F5)", async () => {
   renderAt("/p/!!!not-base64!!!/graph");
 
-  expect(await screen.findByRole("button", { name: "新建项目" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "New project" })).toBeInTheDocument();
 });
 
 test("/p/:slug/graph on a zero-run project shows the empty canvas with the genesis CTA (T11)", async () => {
@@ -948,19 +948,19 @@ describe("validatePanelPrediction", () => {
     expect(validatePanelPrediction({
       modelType: "panel_ols", entity: "firm", time: "firm",
       isPanelData: true, predictionEnabled: false, predictionModelType: "",
-    })).toMatch(/相同|同一列|entity.*time/i);
+    })).toMatch(/same column|entity.*time/i);
   });
   it("flags prediction enabled without algorithm", () => {
     expect(validatePanelPrediction({
       modelType: "auto", entity: "", time: "",
       isPanelData: false, predictionEnabled: true, predictionModelType: "",
-    })).toMatch(/算法|algorithm/i);
+    })).toMatch(/algorithm/i);
   });
   it("flags panel selected, no columns, non-panel data", () => {
     expect(validatePanelPrediction({
       modelType: "panel_ols", entity: "", time: "",
       isPanelData: false, predictionEnabled: false, predictionModelType: "",
-    })).toMatch(/面板|panel/i);
+    })).toMatch(/panel/i);
   });
   it("passes a valid panel config", () => {
     expect(validatePanelPrediction({

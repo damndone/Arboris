@@ -878,14 +878,14 @@ describe("GraphCanvas", () => {
       renderCanvas();
       // Mapping per uiux/panels.jsx::stageLabel (L301-304).
       const expected: Record<string, string> = {
-        source: "原始",
-        eda: "探索",
-        clean: "清洗",
-        transform: "变换",
-        model: "模型",
-        diag: "诊断",
-        viz: "可视化",
-        report: "报告",
+        source: "Source",
+        eda: "Explore",
+        clean: "Clean",
+        transform: "Transform",
+        model: "Model",
+        diag: "Diagnostics",
+        viz: "Visualise",
+        report: "Report",
       };
       for (const [, label] of Object.entries(expected)) {
         expect(screen.getByText(label)).toBeInTheDocument();

@@ -43,6 +43,32 @@ def declare_pack() -> None:
             group="Panel",
             description="Repeated-measures linear mixed model with explicit subject, time, and group roles.",
             requires=("subject", "time", "group"),
-            params=(),
+            # v1.8.7. This was `()`, and an empty parameter list is what made
+            # LMM an island: the form drove it through hard-coded controls, a
+            # rerun rejected every field as unknown, and no Agent could name it.
+            # The five inputs travel in `model_options`, which is where the LMM
+            # contract has always read them -- declaring them here changes no
+            # execution path, only who can see them.
+            params=(
+                {"key": "model_type", "kind": "select", "label": "Model", "role": "model"},
+                {
+                    "key": "x",
+                    "kind": "columns",
+                    "label": "Regressors (X)",
+                    "required": False,
+                    "role": "x",
+                },
+                {
+                    "key": "model_options",
+                    "kind": "json",
+                    "label": "Repeated-measures options",
+                    "required": True,
+                    "role": "model_options",
+                    "options": [
+                        "subject_id", "time", "group", "fit_method", "random_slope",
+                    ],
+                    "value": {},
+                },
+            ),
         )
     )

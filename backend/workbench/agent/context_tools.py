@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 from pathlib import Path
 import re
+from collections.abc import Callable
 from typing import Any, Iterable, Protocol
 
 from ..artifacts import read_json, sha256_file
@@ -297,6 +298,25 @@ class NodeOperationContextProvider:
             return self.inspect_diagnostics(
                 InspectDiagnosticsRequest(
                     request_id=str(arguments.get("request_id") or "inspect-diagnostics"),
+                    owner_run_id=str(arguments["owner_run_id"]),
+                    op_node_id=str(arguments["op_node_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
+                )
+            )
+
+        def inspect_design_advisories(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_design_advisories(
+                InspectResultSummaryRequest(
+                    request_id=str(
+                        arguments.get("request_id") or "inspect-design-advisories"
+                    ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
                     active_head_run_id=self._tool_active_head(
@@ -751,6 +771,42 @@ class NodeOperationContextProvider:
                 scope_requirements=("project", "chain"),
                 max_output_budget=8192,
                 handler=inspect_diagnostics,
+            ),
+            ToolDefinition(
+                tool_id="inspect_design_advisories",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "owner_run_id",
+                        "op_node_id",
+                        "active_head_run_id",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string"},
+                        "owner_run_id": {"type": "string"},
+                        "op_node_id": {"type": "string"},
+                        "active_head_run_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_design_advisories,
+                description=(
+                    "Read what this run assumed and could not verify: measurement "
+                    "levels that were never declared (an integer rating analysed as "
+                    "a count) -- split into `measurement_advisories`, which the "
+                    "evidence supports declaring, and `measurement_uncertain`, "
+                    "which you must ask about rather than declare. Also columns "
+                    "that look like an undeclared sampling design, "
+                    "the design effect and effective sample size, and extreme "
+                    "sampling weights. Every figure here was computed by the engine "
+                    "-- quote these values rather than deriving your own, and present "
+                    "them as observations and questions, never as a verdict on the "
+                    "user's conclusions."
+                ),
             ),
             ToolDefinition(
                 tool_id="inspect_statistical_evidence",
@@ -1475,6 +1531,60 @@ class NodeOperationContextProvider:
             "omitted_sections": omitted_sections,
         }
 
+    def inspect_design_advisories(
+        self,
+        request: InspectResultSummaryRequest,
+    ) -> dict[str, Any]:
+        """Return what the run assumed but could not verify (v1.8.7 A2/A2b).
+
+        Both artifacts are produced deterministically by the engine and are
+        returned verbatim rather than summarised: an Agent re-deriving an
+        effective sample size from a rounded design effect would produce a figure
+        that reads as authoritative and disagrees with the result panel.
+        """
+        canonical, node, _manifest = self._read_node_snapshot(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            active_head_run_id=request.active_head_run_id,
+        )
+        run_root = self.project_root / "runs" / request.owner_run_id
+
+        def _read(relative: str, key: str) -> list[dict[str, Any]]:
+            path = run_root / relative
+            if not path.exists():
+                return []
+            try:
+                payload = read_json(path)
+            except (OSError, ValueError):
+                return []
+            entries = payload.get(key) or []
+            # Bounded like every other agent-facing projection: a questionnaire
+            # can raise a finding per column, and the whole list would crowd out
+            # the rest of the context.
+            return [dict(entry) for entry in entries[:12]]
+
+        from ..measurement import split_proposable
+
+        # Split rather than one list: an Agent must be able to tell the columns
+        # whose value labels evidence a declaration from the ones that merely
+        # share a shape with them. Batching the second kind into a proposal is a
+        # guess the user cannot see afterwards.
+        proposable, uncertain = split_proposable(
+            _read("measurement/advisory.json", "entries")
+        )
+        return {
+            **canonical,
+            "node": _bounded_node(node),
+            "measurement_advisories": proposable,
+            "measurement_uncertain": uncertain,
+            "design_findings": _read("measurement/design_precheck.json", "findings"),
+            "note": (
+                "Computed by the engine. Quote these figures rather than deriving "
+                "your own, and raise them as questions, not conclusions."
+            ),
+        }
+
     def inspect_statistical_evidence(
         self,
         request: InspectResultSummaryRequest,
@@ -2046,24 +2156,25 @@ class NodeOperationContextProvider:
         }:
             effective_model_type = input_model_types[0]
 
-        if effective_model_type == "time_series.ets":
+        recipe_projection = RECIPE_RESULT_PROJECTIONS.get(effective_model_type)
+        if recipe_projection is not None:
             from .recipe_contracts import recipe_contract
 
             registered = _resolve_verified_registered_artifact(
                 run_root,
-                artifact_id="ets_1",
+                artifact_id=recipe_projection.artifact_id,
                 expected_type="model_result",
             )
             summary = (
                 recipe_contract(effective_model_type).public_result_projection().build(
                     registered[0],
-                    artifact_id="ets_1",
+                    artifact_id=recipe_projection.artifact_id,
                     artifact_sha256=registered[1],
                 )
                 if registered is not None
                 else {
                     "available": False,
-                    "reason_code": "ETS_PUBLIC_RESULT_UNAVAILABLE",
+                    "reason_code": recipe_projection.unavailable_reason_code,
                 }
             )
             return {
@@ -3169,6 +3280,13 @@ def _bounded_result_summary(
     return {
         "available": summary_status == "complete" and preview.get("available") is True,
         "summary_status": summary_status,
+        # v1.8.7. Without these an Agent reads a design-based standard error as
+        # an ordinary one: it would speak about the precision of the estimate
+        # with no way to know the interval uses 8 degrees of freedom rather than
+        # 80 observations. `None` when no design was declared, so absence reads
+        # as absence rather than as a field that failed to load.
+        "survey_design": _bounded_survey_design(model_results),
+        "marginal_effects": _bounded_average_marginal_effects(model_results),
         "run_lifecycle_status": preview.get("run_lifecycle_status"),
         "trust_label": preview.get("trust_label"),
         "model_identity": model_identity,
@@ -3210,73 +3328,57 @@ def _bounded_model_family_evidence(
     primary = next((item for item in model_results if isinstance(item, dict)), None)
     if not isinstance(primary, dict):
         return None
-    model_type = primary.get("model_type")
-    if model_type == "ordinal_logit":
-        diagnostic_path = run_root / "model_results" / "diagnostics_ordinal_logit_1.json"
-        diagnostic = read_json(diagnostic_path) if diagnostic_path.is_file() else {}
-        parallel = diagnostic.get("parallel_lines") if isinstance(diagnostic, dict) else {}
-        parallel = parallel if isinstance(parallel, dict) else {}
-        return {
-            "contract": "workbench.ordinal_logit.result.v1",
-            "model_type": model_type,
-            "outcome_levels": _bounded_labels(primary.get("outcome_levels")),
-            "odds_ratios": _bounded_numeric_map(
-                primary.get("odds_ratios"),
-                fields=("odds_ratio", "ci_lower", "ci_upper"),
-            ),
-            "marginal_effects": _bounded_ordinal_marginal_effects(primary.get("marginal_effects")),
-            "predicted_probabilities": _bounded_ordinal_probabilities(primary.get("predicted_probabilities")),
-            "parallel_lines": _bounded_parallel_lines(parallel),
-        }
-    if model_type == "multinomial_logit":
-        diagnostic_path = run_root / "model_results" / "diagnostics_multinomial_logit_1.json"
-        diagnostic = read_json(diagnostic_path) if diagnostic_path.is_file() else {}
-        return {
-            "contract": "workbench.multinomial_logit.result.v1",
-            "model_type": model_type,
-            "outcome_levels": _bounded_labels(primary.get("outcome_levels")),
-            "base_category": _bounded_label(primary.get("base_category")),
-            "relative_risk_ratios": _bounded_numeric_map(
-                primary.get("relative_risk_ratios"),
-                fields=("relative_risk_ratio", "ci_lower", "ci_upper"),
-            ),
-            "marginal_effects": _bounded_multinomial_marginal_effects(primary.get("marginal_effects")),
-            "predicted_probabilities": _bounded_probability_map(primary.get("predicted_probabilities")),
-            "diagnostic": _bounded_family_diagnostic(diagnostic),
-        }
-    if model_type == "survival_cox":
-        packet_path = run_root / "survival" / "evidence.json"
+    spec = FAMILY_EVIDENCE_PROJECTIONS.get(primary.get("model_type"))
+    if spec is None:
+        return None
+    return _project_family_evidence(primary, spec, run_root)
+
+
+def _project_family_evidence(
+    primary: dict[str, Any], spec: "FamilyEvidenceSpec", run_root: Path
+) -> dict[str, Any] | None:
+    """Apply a family's declared projection.
+
+    Nothing here knows any family name.  Each family states which fields it
+    exposes and how each is bounded, so adding one is a table entry rather than
+    another branch -- the same move blocks 2 and 3 made in the design layer and
+    in `result_shape`. Leaving the branches here would just relocate the cost.
+    """
+    source: dict[str, Any] = primary
+    if spec.packet_path is not None:
+        packet_path = run_root / spec.packet_path
         packet = read_json(packet_path) if packet_path.is_file() else None
         if not isinstance(packet, dict):
             return None
-        return {
-            "contract": packet.get("contract"),
-            "model_type": model_type,
-            "duration_column": _bounded_label(packet.get("duration_column")),
-            "event_column": _bounded_label(packet.get("event_column")),
-            "nobs": _public_positive_int(packet.get("nobs")),
-            "censoring": _bounded_numeric_fields(packet.get("censoring"), fields=("events", "censored")),
-            "kaplan_meier": _bounded_survival_rows(packet.get("kaplan_meier"), limit=16),
-            "log_rank": _bounded_numeric_fields(
-                packet.get("log_rank"),
-                fields=("statistic", "p_value"),
-                string_fields=("status",),
-                list_fields=("groups",),
-            ),
-            "risk_set": _bounded_survival_rows(packet.get("risk_set"), limit=16),
-            "schoenfeld": _bounded_schoenfeld(packet.get("schoenfeld")),
-        }
-    if model_type == "quantile_regression":
-        return {
-            "contract": "workbench.quantile_regression.result.v1",
-            "model_type": model_type,
-            "quantiles": _bounded_numeric_list(primary.get("quantiles"), limit=7),
-            "fits": _bounded_quantile_fits(primary.get("fits")),
-            "confidence_intervals": _bounded_quantile_intervals(primary.get("confidence_intervals")),
-            "bootstrap": _bounded_bootstrap(primary.get("bootstrap")),
-            "cross_quantile_comparisons": _bounded_cross_quantile_comparisons(primary.get("cross_quantile_comparisons")),
-        }
-    return None
+        source = packet
+
+    sidecars: dict[str, dict[str, Any]] = {}
+    for name, relative in spec.sidecars.items():
+        sidecar_path = run_root / relative
+        loaded = read_json(sidecar_path) if sidecar_path.is_file() else {}
+        sidecars[name] = loaded if isinstance(loaded, dict) else {}
+
+    projected: dict[str, Any] = {
+        "contract": spec.contract if spec.contract is not None else source.get("contract"),
+        "model_type": primary.get("model_type"),
+    }
+    # How strongly this family's numbers were checked (v1.8.7 A3). Projected for
+    # every family rather than declared per family: it is a property of the
+    # result, and an Agent quoting a figure should be able to say what backs it
+    # instead of implying more than is known. Three of the four v1.8.6 families
+    # agree with R only within a solver tolerance.
+    validation = source.get("validation")
+    if isinstance(validation, dict):
+        projected["validation"] = _bounded_numeric_fields(
+            validation, fields=(), string_fields=("level", "external_oracle")
+        )
+    for field in spec.fields:
+        origin = sidecars[field.sidecar] if field.sidecar else source
+        value = origin.get(field.source_key)
+        if field.nested_key is not None:
+            value = value.get(field.nested_key) if isinstance(value, dict) else {}
+        projected[field.key] = field.bound(value)
+    return projected
 
 
 def _bounded_label(value: Any) -> str | None:
@@ -3437,6 +3539,28 @@ def _bounded_family_diagnostic(value: Any) -> dict[str, Any]:
             if isinstance(key, str) and isinstance(label, str)
         } if isinstance(value.get("validation"), dict) else {},
     }
+
+
+def _bounded_anova_rows(value: Any, *, limit: int = 24) -> list[dict[str, Any]]:
+    """An ANOVA table, bounded like every other agent-facing projection.
+
+    A factorial design with many levels can produce a long table; the limit
+    keeps this a summary rather than a data-export channel.
+    """
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for row in value[:limit]:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            _bounded_numeric_fields(
+                row,
+                fields=("sum_sq", "df", "f", "p_value", "partial_eta_squared"),
+                string_fields=("term",),
+            )
+        )
+    return rows
 
 
 def _bounded_survival_rows(value: Any, *, limit: int) -> list[dict[str, Any]]:
@@ -4438,3 +4562,195 @@ def read_prediction_research_evidence(
     """Read v1.8.6 prediction evidence through the shared projection."""
 
     return read_prediction_evidence_from_run_root(run_root, consumer=consumer)
+
+
+@dataclass(frozen=True)
+class FamilyEvidenceField:
+    """One projected field: where it comes from and how it is bounded."""
+
+    key: str
+    source_key: str
+    bound: Callable[[Any], Any]
+    sidecar: str | None = None
+    nested_key: str | None = None
+
+
+@dataclass(frozen=True)
+class FamilyEvidenceSpec:
+    """A family's declaration of what its evidence exposes.
+
+    The bounds are part of the declaration, not an afterthought: this projection
+    is what an agent sees, and an unbounded probability or survival table would
+    turn it into a data-export channel.
+    """
+
+    contract: str | None
+    fields: tuple[FamilyEvidenceField, ...]
+    packet_path: str | None = None
+    sidecars: dict[str, str] = field(default_factory=dict)
+
+
+FAMILY_EVIDENCE_PROJECTIONS: dict[str, FamilyEvidenceSpec] = {
+    "anova": FamilyEvidenceSpec(
+        contract="workbench.anova.result.v1",
+        fields=(
+            # The type is not decoration: on an unbalanced design Type I and
+            # Type III disagree (166.74 against 104.05 on the committed
+            # fixture), so a table quoted without it is ambiguous.
+            FamilyEvidenceField("sums_of_squares_type", "sums_of_squares_type", _public_positive_int),
+            FamilyEvidenceField("anova_table", "anova_table", _bounded_anova_rows),
+            FamilyEvidenceField(
+                "partial_eta_squared", "partial_eta_squared",
+                lambda v: _bounded_numeric_map(v, fields=("partial_eta_squared",)),
+            ),
+            FamilyEvidenceField("posthoc", "posthoc", lambda v: _bounded_anova_rows(v, limit=32)),
+        ),
+    ),
+    "ordinal_logit": FamilyEvidenceSpec(
+        contract="workbench.ordinal_logit.result.v1",
+        sidecars={"diagnostic": "model_results/diagnostics_ordinal_logit_1.json"},
+        fields=(
+            FamilyEvidenceField("outcome_levels", "outcome_levels", _bounded_labels),
+            FamilyEvidenceField(
+                "odds_ratios", "odds_ratios",
+                lambda v: _bounded_numeric_map(v, fields=("odds_ratio", "ci_lower", "ci_upper")),
+            ),
+            FamilyEvidenceField("marginal_effects", "marginal_effects", _bounded_ordinal_marginal_effects),
+            FamilyEvidenceField("predicted_probabilities", "predicted_probabilities", _bounded_ordinal_probabilities),
+            FamilyEvidenceField(
+                "parallel_lines", "parallel_lines", _bounded_parallel_lines, sidecar="diagnostic"
+            ),
+        ),
+    ),
+    "multinomial_logit": FamilyEvidenceSpec(
+        contract="workbench.multinomial_logit.result.v1",
+        sidecars={"diagnostic": "model_results/diagnostics_multinomial_logit_1.json"},
+        fields=(
+            FamilyEvidenceField("outcome_levels", "outcome_levels", _bounded_labels),
+            FamilyEvidenceField("base_category", "base_category", _bounded_label),
+            FamilyEvidenceField(
+                "relative_risk_ratios", "relative_risk_ratios",
+                lambda v: _bounded_numeric_map(
+                    v, fields=("relative_risk_ratio", "ci_lower", "ci_upper")
+                ),
+            ),
+            FamilyEvidenceField("marginal_effects", "marginal_effects", _bounded_multinomial_marginal_effects),
+            FamilyEvidenceField("predicted_probabilities", "predicted_probabilities", _bounded_probability_map),
+        ),
+    ),
+    "survival_cox": FamilyEvidenceSpec(
+        contract=None,  # the packet carries its own
+        packet_path="survival/evidence.json",
+        fields=(
+            FamilyEvidenceField("duration_column", "duration_column", _bounded_label),
+            FamilyEvidenceField("event_column", "event_column", _bounded_label),
+            FamilyEvidenceField("nobs", "nobs", _public_positive_int),
+            FamilyEvidenceField(
+                "censoring", "censoring",
+                lambda v: _bounded_numeric_fields(v, fields=("events", "censored")),
+            ),
+            FamilyEvidenceField("kaplan_meier", "kaplan_meier", lambda v: _bounded_survival_rows(v, limit=16)),
+            FamilyEvidenceField(
+                "log_rank", "log_rank",
+                lambda v: _bounded_numeric_fields(
+                    v, fields=("statistic", "p_value"),
+                    string_fields=("status",), list_fields=("groups",),
+                ),
+            ),
+            FamilyEvidenceField("risk_set", "risk_set", lambda v: _bounded_survival_rows(v, limit=16)),
+            FamilyEvidenceField("schoenfeld", "schoenfeld", _bounded_schoenfeld),
+        ),
+    ),
+    "quantile_regression": FamilyEvidenceSpec(
+        contract="workbench.quantile_regression.result.v1",
+        fields=(
+            FamilyEvidenceField("quantiles", "quantiles", lambda v: _bounded_numeric_list(v, limit=7)),
+            FamilyEvidenceField("fits", "fits", _bounded_quantile_fits),
+            FamilyEvidenceField("confidence_intervals", "confidence_intervals", _bounded_quantile_intervals),
+            FamilyEvidenceField("bootstrap", "bootstrap", _bounded_bootstrap),
+            FamilyEvidenceField(
+                "cross_quantile_comparisons", "cross_quantile_comparisons",
+                _bounded_cross_quantile_comparisons,
+            ),
+        ),
+    ),
+}
+
+
+@dataclass(frozen=True)
+class RecipeResultProjection:
+    """A family whose public result comes from its recipe contract.
+
+    Structurally different from `FamilyEvidenceSpec`: this path builds the
+    projection from a registered artifact via the family's recipe contract, so
+    only the artifact id and the unavailable reason vary. Declaring those two
+    keeps the entry condition a lookup rather than a family name in an `if`.
+    """
+
+    artifact_id: str
+    unavailable_reason_code: str
+
+
+RECIPE_RESULT_PROJECTIONS: dict[str, RecipeResultProjection] = {
+    "time_series.ets": RecipeResultProjection(
+        artifact_id="ets_1",
+        unavailable_reason_code="ETS_PUBLIC_RESULT_UNAVAILABLE",
+    ),
+}
+
+
+def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The terms every interval in this run is conditional on.
+
+    Returned alongside the coefficients rather than behind a separate tool: an
+    Agent that has the standard errors already has everything it needs to make a
+    claim about precision, so the qualification has to arrive with them.
+    """
+    for result in model_results:
+        if not isinstance(result, dict):
+            continue
+        design = result.get("survey_design")
+        if not isinstance(design, dict):
+            continue
+        return _bounded_numeric_fields(
+            design,
+            fields=(
+                "n_obs", "n_strata", "n_psu", "degf", "residual_degf",
+                "design_effect", "effective_sample_size",
+            ),
+            string_fields=(
+                "variance_method", "strata_column", "psu_column",
+                "weight_column", "replicate_type", "lonely_psu_policy",
+                "subpopulation",
+            ),
+        )
+    return None
+
+
+def _bounded_average_marginal_effects(
+    model_results: list[dict[str, Any]], *, limit: int = 16
+) -> list[dict[str, Any]]:
+    """A GLM coefficient is a log-odds; the marginal effect is what gets quoted.
+
+    v1.8.7 computes these for logit/probit/poisson and nothing exposed them, so
+    an Agent asked "how much does x move y" had only the log-odds to work from.
+    """
+    for result in model_results:
+        if not isinstance(result, dict):
+            continue
+        effects = result.get("marginal_effects")
+        if not isinstance(effects, list):
+            continue
+        rows: list[dict[str, Any]] = []
+        for row in effects[:limit]:
+            if not isinstance(row, dict):
+                continue
+            rows.append(
+                _bounded_numeric_fields(
+                    row,
+                    fields=("estimate", "std_error", "p_value", "ci_lower", "ci_upper"),
+                    string_fields=("term", "variable"),
+                )
+            )
+        return rows
+    return []

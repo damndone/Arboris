@@ -52,6 +52,10 @@ def build_regression_table(
                 "nobs": model_result.get("nobs"),
                 "r_squared": model_result.get("r_squared"),
                 "adjusted_r_squared": model_result.get("adjusted_r_squared"),
+                # The terms every standard error in this column is conditional
+                # on. A table pasted into a paper without them reports a
+                # precision the analysis did not have.
+                "survey_design": _design_summary(model_result.get("survey_design")),
             }
         )
         coefficients = model_result.get("coefficients", {})
@@ -132,6 +136,10 @@ def regression_table_export_rows(
             "term": row.get("term", ""),
             "label": row.get("label", row.get("term", "")),
         }
+        for model in models:
+            design = model.get("survey_design")
+            if design:
+                export_row[f"{model.get('id', '')} survey design"] = design
         cells = row.get("models", {})
         for model in models:
             model_id = str(model.get("id", ""))
@@ -259,7 +267,7 @@ def build_report_view_model(
 
     return {
         "title": summary.get("model_identity", {}).get("model_label", "Econometrics Report"),
-        "facts": _build_facts_list(summary),
+        "facts": _build_facts_list(summary) + _survey_design_facts(run_root),
         "critical_errors": critical_errors,
         "warnings": _render_issues(diagnostics.get("warnings", [])),
         "cautions": _render_issues(diagnostics.get("cautions", [])),
@@ -341,3 +349,71 @@ def _load_if_exists(path: Path) -> Any | None:
         except Exception:
             return None
     return None
+
+
+def _survey_design_facts(run_root: Path) -> list[str]:
+    """State the design in the report, or say nothing at all.
+
+    A design-based standard error that lives only in a JSON artifact leaves the
+    report claiming a precision the analysis did not have -- and the report is
+    where the number gets read. Appended to the facts rather than given its own
+    section so it sits beside the sample size and the model label, which is
+    where a reader looks for the terms an interval is conditional on.
+
+    Nothing is emitted for a run without a declared design: a section present on
+    every run stops carrying information.
+    """
+    for path in sorted((run_root / "model_results").glob("*.json")):
+        if path.name.startswith("diagnostics_"):
+            continue
+        try:
+            payload = read_json(path)
+        except (OSError, ValueError):
+            continue
+        design = payload.get("survey_design") if isinstance(payload, dict) else None
+        if not isinstance(design, dict):
+            continue
+
+        facts = [
+            "Standard errors are design-based, not the usual independent-sample "
+            f"kind: {design.get('variance_method', 'linearization')} over "
+            f"{design.get('n_strata', 0)} strata and {design.get('n_psu', 0)} PSUs "
+            f"(strata = {design.get('strata_column')}, PSU = {design.get('psu_column')})",
+            f"Design degrees of freedom: {design.get('degf')} "
+            f"(confidence intervals use this, not the sample size)",
+        ]
+        deff = design.get("design_effect")
+        n_eff = design.get("effective_sample_size")
+        if deff is not None and n_eff is not None:
+            facts.append(
+                f"Design effect {float(deff):.2f}; effective sample size "
+                f"{float(n_eff):.1f} of {design.get('n_obs')} observations"
+            )
+        if design.get("subpopulation"):
+            facts.append(
+                f"Subpopulation: {design['subpopulation']} "
+                "(taken on the full design, not by filtering the data first)"
+            )
+        return facts
+    return []
+
+
+def _design_summary(design: Any) -> str:
+    """One cell's worth of design, or nothing.
+
+    Compressed to a string rather than nested: this travels into XLSX, where a
+    cell holds a scalar, and a reader scanning a pasted table needs the terms at
+    a glance more than they need the full packet.
+    """
+    if not isinstance(design, Mapping):
+        return ""
+    parts = [
+        f"{design.get('variance_method', 'linearization')} design-based SE",
+        f"strata={design.get('strata_column')}",
+        f"PSU={design.get('psu_column')}",
+        f"degf={design.get('degf')}",
+    ]
+    deff = design.get("design_effect")
+    if deff is not None:
+        parts.append(f"DEFF={float(deff):.2f}")
+    return "; ".join(parts)

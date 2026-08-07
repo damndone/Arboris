@@ -211,6 +211,14 @@ def run_workflow(
     frequency_weight: str = "",
     analysis_weight: str = "",
     sampling_weight: str = "",
+    survey_strata_col: str = "",
+    survey_psu_col: str = "",
+    survey_fpc_col: str = "",
+    survey_replicate_weights: list[str] | None = None,
+    survey_replicate_type: str = "",
+    survey_lonely_psu: str = "",
+    survey_weight_frame: str = "",
+    survey_subpop: str = "",
     labels: dict[str, object] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
@@ -285,6 +293,14 @@ def run_workflow(
         "frequency_weight": frequency_weight,
         "analysis_weight": analysis_weight,
         "sampling_weight": sampling_weight,
+        "survey_strata_col": survey_strata_col,
+        "survey_psu_col": survey_psu_col,
+        "survey_fpc_col": survey_fpc_col,
+        "survey_replicate_weights": json.dumps(list(survey_replicate_weights or [])),
+        "survey_replicate_type": survey_replicate_type,
+        "survey_lonely_psu": survey_lonely_psu,
+        "survey_weight_frame": survey_weight_frame,
+        "survey_subpop": survey_subpop,
         "did_mode": did_mode,
         "did_cohort_col": did_cohort_col,
         "did_treat_col": did_treat_col,
@@ -407,6 +423,14 @@ def run_workflow(
             frequency_weight=frequency_weight,
             analysis_weight=analysis_weight,
             sampling_weight=sampling_weight,
+            survey_strata_col=survey_strata_col,
+            survey_psu_col=survey_psu_col,
+            survey_fpc_col=survey_fpc_col,
+            survey_replicate_weights=survey_replicate_weights,
+            survey_replicate_type=survey_replicate_type,
+            survey_lonely_psu=survey_lonely_psu,
+            survey_weight_frame=survey_weight_frame,
+            survey_subpop=survey_subpop,
             labels=normalized_labels,
             stop_reason=stop_reason,
         )
@@ -514,10 +538,38 @@ def run_batch_y_workflow(
     mode: str,
     y_list: list[str],
     x: list[str],
+    sampling_weight: str = "",
+    survey_strata_col: str = "",
+    survey_psu_col: str = "",
+    survey_fpc_col: str = "",
+    survey_replicate_weights: list[str] | None = None,
+    survey_replicate_type: str = "",
+    survey_lonely_psu: str = "",
+    survey_weight_frame: str = "",
+    survey_subpop: str = "",
 ) -> dict[str, Any]:
+    """Run one workflow per outcome column.
+
+    v1.8.7 block 1: this loop used to forward only ``mode``/``y``/``x``, so every
+    other declaration posted to ``/runs/batch`` was dropped without a word.  The
+    survey design travels with the batch now; ``sampling_weight`` comes with it
+    because a design without its weight is only half a declaration.
+    """
+
     runs: list[dict[str, str | None]] = []
     for y in y_list:
-        result = run_workflow(project_root, input_files, mode=mode, y=y, x=x)
+        result = run_workflow(
+            project_root, input_files, mode=mode, y=y, x=x,
+            sampling_weight=sampling_weight,
+            survey_strata_col=survey_strata_col,
+            survey_psu_col=survey_psu_col,
+            survey_fpc_col=survey_fpc_col,
+            survey_replicate_weights=survey_replicate_weights,
+            survey_replicate_type=survey_replicate_type,
+            survey_lonely_psu=survey_lonely_psu,
+            survey_weight_frame=survey_weight_frame,
+            survey_subpop=survey_subpop,
+        )
         run_id = result["run_id"]
         run_root = Path(project_root) / "runs" / run_id
         model_summary = _primary_model_summary(run_root)
@@ -580,6 +632,14 @@ def _run_workflow(
     frequency_weight: str = "",
     analysis_weight: str = "",
     sampling_weight: str = "",
+    survey_strata_col: str = "",
+    survey_psu_col: str = "",
+    survey_fpc_col: str = "",
+    survey_replicate_weights: list[str] | None = None,
+    survey_replicate_type: str = "",
+    survey_lonely_psu: str = "",
+    survey_weight_frame: str = "",
+    survey_subpop: str = "",
     labels: dict[str, object] | None = None,
     lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,
@@ -652,6 +712,16 @@ def _run_workflow(
     ctx.artifacts["_frequency_weight"] = frequency_weight
     ctx.artifacts["_analysis_weight"] = analysis_weight
     ctx.artifacts["_sampling_weight"] = sampling_weight
+    # v1.8.7 block 1: complex survey design declarations travel to ctx and stop
+    # here.  No stage reads them yet -- the variance engine consumes them later.
+    ctx.artifacts["_survey_strata_col"] = survey_strata_col
+    ctx.artifacts["_survey_psu_col"] = survey_psu_col
+    ctx.artifacts["_survey_fpc_col"] = survey_fpc_col
+    ctx.artifacts["_survey_replicate_weights"] = list(survey_replicate_weights or [])
+    ctx.artifacts["_survey_replicate_type"] = survey_replicate_type
+    ctx.artifacts["_survey_lonely_psu"] = survey_lonely_psu
+    ctx.artifacts["_survey_weight_frame"] = survey_weight_frame
+    ctx.artifacts["_survey_subpop"] = survey_subpop
     ctx.artifacts["_labels"] = normalized_labels
     ctx.artifacts["_iv_endog"] = [normalize_column_name(c) for c in (iv_endog or [])]
     ctx.artifacts["_iv_instruments"] = [normalize_column_name(c) for c in (iv_instruments or [])]

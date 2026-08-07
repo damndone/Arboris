@@ -23,13 +23,13 @@ describe("DIDDiagnosticsCard", () => {
   it("shows ATT headline and verdict pill collapsed", () => {
     render(<DIDDiagnosticsCard diagnostics={diag} />);
     expect(screen.getByText(/2\.13/)).toBeInTheDocument();
-    expect(screen.getByText(/未拒绝/)).toBeInTheDocument();
+    expect(screen.getByText(/not rejected/)).toBeInTheDocument();
   });
 
   it("reveals the full event-study table on expand", () => {
     render(<DIDDiagnosticsCard diagnostics={diag} />);
     expect(screen.queryByLabelText("did-event-study-table")).toBeNull();
-    fireEvent.click(screen.getByText(/展开完整数据/));
+    fireEvent.click(screen.getByText(/Expand full data/));
     expect(screen.getByLabelText("did-event-study-table")).toBeInTheDocument();
   });
 
@@ -38,10 +38,10 @@ describe("DIDDiagnosticsCard", () => {
       applicable: false, message: "DID_EVENT_STUDY_UNIDENTIFIED: ...",
       event_time: [], coef: [], se: [], ci_lower: [], ci_upper: [], ref_period: -1 } };
     render(<DIDDiagnosticsCard diagnostics={skipped} />);
-    expect(screen.getByText(/事件研究.*不可识别|不可识别/)).toBeInTheDocument();
+    expect(screen.getByText(/Event study not identified/)).toBeInTheDocument();
     // ATT still shown
     expect(screen.getByText(/2\.13/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/展开完整数据/));
+    fireEvent.click(screen.getByText(/Expand full data/));
     expect(screen.queryByLabelText("did-event-study-table")).toBeNull();
   });
 
@@ -53,7 +53,7 @@ describe("DIDDiagnosticsCard", () => {
       ci_lower: [-0.6, null as unknown as number, 1.4],
       ci_upper: [0.6, 2.6, 3.4], ref_period: -1 } };
     expect(() => render(<DIDDiagnosticsCard diagnostics={withNull} />)).not.toThrow();
-    fireEvent.click(screen.getByText(/展开完整数据/));
+    fireEvent.click(screen.getByText(/Expand full data/));
     const table = screen.getByLabelText("did-event-study-table");
     expect(table).toBeInTheDocument();
     // the null cell renders an em-dash placeholder

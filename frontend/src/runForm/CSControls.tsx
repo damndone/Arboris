@@ -18,11 +18,11 @@ export function CSControls(props: {
   return (
     <div className="ios-group" aria-label="CS settings">
       <div className="ios-group-label">
-        Callaway-Sant'Anna 设定 · 交错处理估计参数
+        Callaway-Sant'Anna setup — staggered adoption parameters
       </div>
 
       <label className="ios-field">
-        <span>对照组</span>
+        <span>Control group</span>
         <select
           aria-label="cs-control-group"
           value={value.controlGroup}
@@ -30,13 +30,13 @@ export function CSControls(props: {
             set({ controlGroup: e.target.value as CSValue["controlGroup"] })
           }
         >
-          <option value="never">从不处理 (never)</option>
-          <option value="not_yet">尚未处理 (not_yet)</option>
+          <option value="never">Never treated (never)</option>
+          <option value="not_yet">Not yet treated (not_yet)</option>
         </select>
       </label>
 
       <label className="ios-field">
-        <span>估计法</span>
+        <span>Estimation method</span>
         <select
           aria-label="cs-est-method"
           value={value.estMethod}
@@ -44,14 +44,14 @@ export function CSControls(props: {
             set({ estMethod: e.target.value as CSValue["estMethod"] })
           }
         >
-          <option value="dr">双重稳健 (dr)</option>
+          <option value="dr">Doubly robust (dr)</option>
           <option value="ipw">IPW</option>
-          <option value="reg">结果回归 (reg)</option>
+          <option value="reg">Outcome regression (reg)</option>
         </select>
       </label>
 
       <label className="ios-field">
-        <span>基期</span>
+        <span>Base period</span>
         <select
           aria-label="cs-base-period"
           value={value.basePeriod}
@@ -59,13 +59,13 @@ export function CSControls(props: {
             set({ basePeriod: e.target.value as CSValue["basePeriod"] })
           }
         >
-          <option value="varying">序贯 (varying)</option>
-          <option value="universal">固定 (universal)</option>
+          <option value="varying">Sequential (varying)</option>
+          <option value="universal">Fixed (universal)</option>
         </select>
       </label>
 
       <label className="ios-field">
-        <span>预期期数 (anticipation)</span>
+        <span>Anticipation periods</span>
         <input
           aria-label="cs-anticipation"
           type="number"
@@ -80,13 +80,13 @@ export function CSControls(props: {
       </label>
 
       <label className="ios-field">
-        <span>聚类变量 (cluster, 选填)</span>
+        <span>Cluster variable (optional)</span>
         <select
           aria-label="cs-cluster-var"
           value={value.clusterVar}
           onChange={(e) => set({ clusterVar: e.target.value })}
         >
-          <option value="">按实体 (entity, 默认)</option>
+          <option value="">By entity (default)</option>
           {columns.map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
@@ -94,7 +94,7 @@ export function CSControls(props: {
       </label>
 
       <label className="ios-row">
-        <span>honest-DID 敏感性 (Rambachan-Roth)</span>
+        <span>honest-DID sensitivity (Rambachan-Roth)</span>
         <input
           type="checkbox"
           aria-label="cs-honest-did"

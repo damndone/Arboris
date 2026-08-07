@@ -67,7 +67,7 @@ def _normalize_labels(value: object) -> dict[str, object]:
     if value is None or value == "":
         return {}
     payload = canonicalize_model_options(value)
-    allowed = {"variable_labels", "value_labels"}
+    allowed = {"variable_labels", "value_labels", "measurement_level"}
     unknown = sorted(set(payload) - allowed)
     if unknown:
         raise ValueError(f"labels contains unknown field(s): {', '.join(unknown)}")
@@ -93,7 +93,32 @@ def _normalize_labels(value: object) -> dict[str, object]:
                 raise ValueError("labels.value_labels entries must map string values to labels")
             normalized_mapping[raw_value] = label
         normalized_values[column] = normalized_mapping
-    return {"variable_labels": normalized_variables, "value_labels": normalized_values}
+
+    # v1.8.7 block 1: measurement_level is carried here as pure transport.  The
+    # shape is validated like its siblings, but the level *value* is deliberately
+    # not checked against an enum and nothing routes on it yet -- interpretation
+    # belongs to the measurement-level work, not to a wiring block.
+    measurement_level = payload.get("measurement_level", {})
+    if not isinstance(measurement_level, Mapping):
+        raise ValueError("labels.measurement_level must be an object")
+    normalized_levels: dict[str, str] = {}
+    for column, level in measurement_level.items():
+        if not isinstance(column, str) or not column or not isinstance(level, str) or not level:
+            raise ValueError(
+                "labels.measurement_level must map non-empty column names to levels"
+            )
+        normalized_levels[column] = level
+
+    normalized: dict[str, object] = {
+        "variable_labels": normalized_variables,
+        "value_labels": normalized_values,
+    }
+    # Only surface the key when the caller actually declared one.  Emitting it
+    # unconditionally would change the labels payload shape for every existing
+    # run, which is a behaviour change -- not allowed in a wiring block.
+    if normalized_levels:
+        normalized["measurement_level"] = normalized_levels
+    return normalized
 
 
 class LmmExecutionAdmissionError(RuntimeError):
@@ -256,7 +281,12 @@ async def _write_upload(file: UploadFile, target: Path, max_bytes: int) -> None:
             handle.write(chunk)
 
 
-def encode_form_override(key: str, value: object) -> str:
+#: Form fields persisted as objects rather than as JSON text. `model_options`
+#: is handled separately by the merge itself; these are the rest.
+_STRUCTURED_FORM_OVERRIDES = frozenset({"labels"})
+
+
+def encode_form_override(key: str, value: object) -> object:
     """Encode an operation override using the run form's wire format.
 
     Column selectors are submitted as comma-separated form fields, while other
@@ -264,6 +294,12 @@ def encode_form_override(key: str, value: object) -> str:
     """
     if key in {"x", "focal_x"} and isinstance(value, list):
         return ",".join(str(item) for item in value)
+    # `labels` is persisted in the form as an object, not as JSON text -- see
+    # `_submit_run`, which stores the normalized mapping. Encoding an override
+    # to a string here would hand `_normalize_labels` a str and fail with
+    # MODEL_OPTIONS_NOT_OBJECT, which names the wrong field entirely.
+    if key in _STRUCTURED_FORM_OVERRIDES and isinstance(value, dict):
+        return value
     return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
 
 
@@ -629,6 +665,21 @@ def _submit_run(
         form.get("sampling_weight", ""),
         labels,
         statistical_tests_request,
+        # Appended positionally at the tail, matching the order in _bg_run.
+        # executor.submit is called positionally throughout, and existing test
+        # doubles spy it as ``fake_submit(fn, *args)``; appending keeps both the
+        # argument order and those doubles intact, while inserting next to the
+        # weights would have shifted every argument after them.
+        form.get("survey_strata_col", ""),
+        form.get("survey_psu_col", ""),
+        form.get("survey_fpc_col", ""),
+        _parse_json_str_array(
+            form.get("survey_replicate_weights", ""), "survey_replicate_weights"
+        ),
+        form.get("survey_replicate_type", ""),
+        form.get("survey_lonely_psu", ""),
+        form.get("survey_weight_frame", ""),
+        form.get("survey_subpop", ""),
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -678,6 +729,17 @@ def _bg_run(
     sampling_weight: str = "",
     labels: dict[str, object] | None = None,
     statistical_tests_request: dict | None = None,
+    # v1.8.7 block 1.  Appended at the tail and passed by keyword at the submit
+    # site: the executor.submit call above is fully positional, so inserting
+    # these next to the weights would silently shift every argument after them.
+    survey_strata_col: str = "",
+    survey_psu_col: str = "",
+    survey_fpc_col: str = "",
+    survey_replicate_weights: list[str] | None = None,
+    survey_replicate_type: str = "",
+    survey_lonely_psu: str = "",
+    survey_weight_frame: str = "",
+    survey_subpop: str = "",
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -749,6 +811,14 @@ def _bg_run(
             frequency_weight=frequency_weight,
             analysis_weight=analysis_weight,
             sampling_weight=sampling_weight,
+            survey_strata_col=survey_strata_col,
+            survey_psu_col=survey_psu_col,
+            survey_fpc_col=survey_fpc_col,
+            survey_replicate_weights=survey_replicate_weights,
+            survey_replicate_type=survey_replicate_type,
+            survey_lonely_psu=survey_lonely_psu,
+            survey_weight_frame=survey_weight_frame,
+            survey_subpop=survey_subpop,
             labels=labels,
             statistical_tests=statistical_tests_request,
             lmm_execution_admission=lmm_execution_admission,

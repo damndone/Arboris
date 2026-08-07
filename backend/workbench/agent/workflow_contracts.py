@@ -266,6 +266,15 @@ ModelFamilySpecValidator = Callable[[Mapping[str, Any]], None]
 ModelFamilyDataValidator = Callable[[pd.DataFrame, Mapping[str, Any]], None]
 
 
+from .result_shapes import (  # noqa: E402  -- keeps the contract next to its registry
+    ResultShapeError,
+    get_result_shape,
+    is_registered,
+    register_result_shape,
+    registered_result_shapes,
+)
+
+
 @dataclass(frozen=True)
 class ModelFamilyContract:
     """The complete workflow admission contract for one model family.
@@ -292,6 +301,11 @@ class ModelFamilyContract:
     requires_nonempty_predictors: bool = True
     allows_covariance: bool = True
     allows_weights: tuple[str, ...] = ()
+    #: v1.8.7. Which statsmodels GLM link this family's fit corresponds to, if
+    #: any. Declaring it is the whole cost of joining the design-variance engine
+    #: -- the shared adapter does the rest, and neither the engine nor the
+    #: adapter ever asks which family it is holding.
+    survey_glm_family: str | None = None
     supported_split_kinds: tuple[str, ...] = ()
     requires_branch_figures: bool = False
     context_spec_fields: tuple[str, ...] = ()
@@ -307,12 +321,15 @@ class ModelFamilyContract:
     def __post_init__(self) -> None:
         if self.required_spec_field_mode not in {"all", "any"}:
             raise ValueError("ModelFamilyContract required_spec_field_mode is invalid")
-        if self.result_shape not in {
-            "coefficient_intervals",
-            "effect_estimate_bundle",
-            "event_study_bundle",
-        }:
-            raise ValueError("ModelFamilyContract result_shape is invalid")
+        # The shape must be declared, not drawn from a fixed list.  A closed
+        # enum here is what kept factor loadings, reliability coefficients and
+        # cluster assignments from being registrable at all -- their results are
+        # none of the three kinds a regression produces.
+        if not is_registered(self.result_shape):
+            raise ResultShapeError(
+                f"ModelFamilyContract result_shape {self.result_shape!r} is not declared; "
+                "call register_result_shape() with its minimal payload schema first"
+            )
         if not self.family or not self.expected_artifacts:
             raise ValueError("ModelFamilyContract requires family and expected artifacts")
         if not set(self.column_spec_fields) <= set(self.context_spec_fields):
@@ -378,6 +395,34 @@ def _build_generalized_model_params(
         }
 
     return _build
+
+
+def genesis_run_params(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Run-level declarations a genesis step carries, for any family.
+
+    These are properties of the *data and how it was collected*, not of the
+    model: a sampling design and a measurement level mean the same thing
+    whichever estimator reads them. Extracted once here rather than in each
+    family's parameter builder, which is where they were being dropped -- an
+    Agent could name a design in its plan, the run would succeed, and ordinary
+    standard errors would come back with nothing reporting the loss.
+
+    Empty declarations are omitted rather than passed as "": downstream an empty
+    string reads as a column literally named "".
+    """
+    from ..survey.fields import DESIGN_FIELDS
+
+    params: dict[str, Any] = {}
+    for key in ("sampling_weight", "frequency_weight", "analysis_weight", *DESIGN_FIELDS):
+        value = spec.get(key)
+        if isinstance(value, str) and value.strip():
+            params[key] = value.strip()
+        elif isinstance(value, (list, tuple)) and value:
+            params[key] = [str(item) for item in value]
+    labels = spec.get("labels")
+    if isinstance(labels, Mapping) and labels:
+        params["labels"] = dict(labels)
+    return params
 
 
 def _build_model_params_with_options(
@@ -721,8 +766,21 @@ def _build_dcdh_model_params(
 
 
 MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
+    "anova": ModelFamilyContract(
+        family="anova",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=lambda spec: {},
+        expected_artifacts=("anova_1",),
+        result_shape="anova_table",
+        allows_covariance=False,
+        model_options_fields=("sums_of_squares", "categorical", "interactions", "posthoc"),
+        model_options_required_fields=("sums_of_squares",),
+    ),
     "ols": ModelFamilyContract(
         family="ols",
+        survey_glm_family="gaussian",
         required_spec_fields=(),
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
@@ -730,12 +788,14 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         expected_artifacts=("ols_1", "diagnostic_summary"),
         result_shape="coefficient_intervals",
         forbidden_spec_fields_message="model.genesis ols does not accept panel entity_col or time_col",
-        allows_weights=("frequency", "analysis"),
+        allows_weights=("frequency", "analysis", "sampling"),
         supported_split_kinds=("iid", "grouped"),
         requires_branch_figures=True,
     ),
     "logit": ModelFamilyContract(
         family="logit",
+        survey_glm_family="binomial",
+        allows_weights=("sampling",),
         required_spec_fields=(),
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
@@ -748,6 +808,8 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     ),
     "probit": ModelFamilyContract(
         family="probit",
+        survey_glm_family="binomial",
+        allows_weights=("sampling",),
         required_spec_fields=(),
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
@@ -760,6 +822,8 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     ),
     "poisson": ModelFamilyContract(
         family="poisson",
+        survey_glm_family="poisson",
+        allows_weights=("sampling",),
         required_spec_fields=(),
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
@@ -1016,6 +1080,37 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         validate_model_options=_validate_survival_model_options,
         supported_split_kinds=("iid", "grouped"),
     ),
+    # v1.8.7. LMM was the one family the form could run and an Agent could not
+    # start. Nothing about its execution changes here -- the options contract,
+    # the pre-fit sealed input and the packet envelope are untouched; this only
+    # states, where every other family states it, which declarations it takes.
+    "linear_mixed_effects": ModelFamilyContract(
+        family="linear_mixed_effects",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        # The repeated-measures structure lives in model_options, not in the
+        # panel fields: `subject_id` is the unit measured repeatedly, which is
+        # not the same idea as a panel entity with fixed effects.
+        forbidden_spec_fields=("entity_col", "time_col"),
+        forbidden_spec_fields_message=(
+            "model.genesis linear_mixed_effects takes subject_id and time through "
+            "model_options, not the panel entity_col/time_col fields"
+        ),
+        build_model_params=_build_model_params_with_options("linear_mixed_effects"),
+        expected_artifacts=("linear_mixed_effects_1",),
+        result_shape="coefficient_intervals",
+        allows_covariance=False,
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        model_options_fields=(
+            "subject_id", "time", "group", "fit_method", "random_slope",
+        ),
+        # A plan without these would fit an ordinary regression and call it a
+        # repeated-measures model.
+        model_options_required_fields=("subject_id", "time", "group"),
+        model_options_column_fields=("subject_id", "time", "group"),
+        supported_split_kinds=("grouped",),
+    ),
     "quantile_regression": ModelFamilyContract(
         family="quantile_regression",
         required_spec_fields=(),
@@ -1232,6 +1327,39 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     return contract
 
 
+def _workflow_executable_family_sentence() -> str:
+    """The families an Agent may name, derived from the registry."""
+    families = sorted(key for key in MODEL_FAMILY_CONTRACTS if key != "auto")
+    return (
+        "Registered workflow-executable model family: "
+        + ", ".join(families)
+        + ". Every branch in one step uses this same family."
+    )
+
+
+def _genesis_survey_fields() -> dict[str, str]:
+    """The sampling-design declarations, described where they are declared.
+
+    A first run must be able to state a design: reachable only on a rerun means
+    the analysis has to be built by hand before an Agent can touch it, which is
+    the opposite of driving the workbench from one sentence.
+    """
+    from ..survey.fields import DESIGN_FIELD_SPECS
+
+    described = {
+        spec["key"]: (
+            f"{spec['label']}."
+            + (f" One of: {', '.join(spec['options'])}." if spec.get("options") else "")
+        )
+        for spec in DESIGN_FIELD_SPECS
+    }
+    described["sampling_weight"] = (
+        "Column holding the sampling weight. A survey design requires one, and a "
+        "sampling weight without a declared design is refused -- give both or neither."
+    )
+    return described
+
+
 WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
     "statistical.explore": StepSpecContract(
         summary=(
@@ -1357,13 +1485,13 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
     "model.genesis": StepSpecContract(
         summary="Estimate one or more models from the source table.",
         fields={
-            "model_family": (
-                "Registered workflow-executable model family: ols, logit, probit, poisson, "
-                "negative_binomial, glm:binomial, glm:poisson, glm:negative_binomial, "
-                "panel_ols, iv_2sls, did, cs_did, sa_did, dcdh, ordinal_logit, "
-                "multinomial_logit, survival_cox, or quantile_regression. "
-                "Every branch in one step uses this same family."
-            ),
+            # Read off the registry, never typed out: this sentence is the only
+            # place an Agent learns which families exist, and a hand-written
+            # list goes stale the first time one is added. `anova` shipped in
+            # v1.8.7 while this text still named the previous eighteen, so a
+            # request for a factorial ANOVA had nowhere to land -- and nothing
+            # failed, because prose does not fail.
+            "model_family": _workflow_executable_family_sentence(),
             "covariance": "Default covariance for every branch.",
             "model_options": (
                 "Family-owned JSON options. Only the selected model family's declared "
@@ -1383,6 +1511,13 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             "did_treat_col": "Treatment-group indicator for did_mode two_by_two.",
             "did_post_col": "Post-period indicator for did_mode two_by_two.",
             "did_status_col": "Absorbing treatment-status indicator for did_mode status.",
+            **_genesis_survey_fields(),
+            "labels": (
+                "Column metadata. `measurement_level` maps column names to "
+                "nominal / ordinal / scale / count and decides how each column is "
+                "modelled -- an integer rating left undeclared is analysed as a "
+                "count. Declare every column in one step rather than one at a time."
+            ),
             "branches": (
                 "List of {branch_id, outcome, predictors[, categorical]"
                 "[, polynomials][, covariance]}; one estimated model per entry. "

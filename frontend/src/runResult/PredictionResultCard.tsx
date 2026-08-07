@@ -21,7 +21,7 @@ export function PredictionResultCard(props: { result: PredictionResultData | und
   if (!r) return null;
   return (
     <section className="ios-card prediction-result" aria-label="Prediction result">
-      <div className="ios-card-title">🔮 预测 / ML — {r.model_type}</div>
+      <div className="ios-card-title">🔮 Prediction / ML — {r.model_type}</div>
       <ul className="ios-metric-list">
         <li><span>Test R²</span><strong>{fmt(r.metrics.test_r2)}</strong></li>
         <li><span>Test RMSE</span><strong>{fmt(r.metrics.test_rmse)}</strong></li>

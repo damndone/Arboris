@@ -29,7 +29,7 @@ describe("RecentProjectsPanel", () => {
 
   it("renders an explicit empty state", () => {
     render(<RecentProjectsPanel onOpenProject={vi.fn()} />);
-    expect(screen.getByText("最近项目将显示在这里。"))
+    expect(screen.getByText("Recent projects appear here."))
       .toBeInTheDocument();
   });
 
@@ -67,8 +67,8 @@ describe("RecentProjectsPanel", () => {
     render(<RecentProjectsPanel onOpenProject={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /gone/ }));
-    expect(await screen.findByText("失效")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "移除" }));
+    expect(await screen.findByText("stale")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(listRecents()).toEqual([]));
   });
 });

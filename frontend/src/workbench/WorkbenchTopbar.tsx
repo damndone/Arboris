@@ -48,8 +48,8 @@ function projectName(root: string): string {
 }
 
 /**
- * v1.6.8 T11 — topbar project switcher: 「项目名 ▾」 opens a dropdown of
- * recent projects (current one marked) plus 「＋ 新建项目…」 which reuses the
+ * v1.6.8 T11 — topbar project switcher: the project name opens a dropdown of
+ * recent projects (current one marked) plus a new-project entry which reuses the
  * launcher's CreateProjectModal. Selecting / creating touches recents and
  * navigates to the project's graph home. Popover conventions mirror
  * ContextMenu.tsx (card background, 12px radius, separator ring).

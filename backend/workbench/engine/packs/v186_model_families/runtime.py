@@ -15,8 +15,7 @@ from ....contracts.model.v186_model_families import (
     OrdinalResultContract,
     QuantileRegressionResultContract,
     SurvivalEvidenceContract,
-    V186_EXTERNAL_ORACLE_STATUS,
-    V186_VALIDATION_LEVEL,
+    validation_payload,
 )
 from ....contracts.model.multinomial_logit import MultinomialLogitRequest
 from ....contracts.model.ordered_logit import OrderedLogitRequest
@@ -162,11 +161,14 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
-def _validation_metadata() -> dict[str, str]:
-    return {
-        "level": V186_VALIDATION_LEVEL,
-        "external_oracle": V186_EXTERNAL_ORACLE_STATUS,
-    }
+def _validation_metadata(model_type: str) -> dict[str, str]:
+    """What this family was checked against, read from the declaration table.
+
+    Per family rather than one constant: v1.8.7's A3 oracles put the four on
+    three different footings, and a shared flag could only be right for one of
+    them.
+    """
+    return validation_payload(model_type)
 
 
 def _exp_or_none(value: Any) -> float | None:
@@ -287,7 +289,7 @@ def fit_ordinal(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         "model_type": "ordinal_logit",
         "parallel_lines": parallel,
         "nobs": int(len(frame)),
-        "validation": _validation_metadata(),
+        "validation": _validation_metadata("ordinal_logit"),
     }
     OrdinalDiagnosticsContract.from_dict(diagnostic)
     _persist_packet(env, "diagnostics_ordinal_logit_1", "model_results/diagnostics_ordinal_logit_1.json", diagnostic)
@@ -305,7 +307,7 @@ def fit_ordinal(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         "predicted_probabilities": [{"row": int(index), "probabilities": {category: _json_safe(probabilities[index, pos]) for pos, category in enumerate(categories)}} for index in range(len(probabilities))],
         "marginal_effects": _marginal_probability_effects(model, fitted.params, exog, slope_names, categories),
         "diagnostic_artifacts": ["diagnostics_ordinal_logit_1"],
-        "validation": _validation_metadata(),
+        "validation": _validation_metadata("ordinal_logit"),
     }
     OrdinalResultContract.from_dict(primary)
     return "ordinal_logit_1", primary, None
@@ -414,7 +416,7 @@ def fit_multinomial(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         },
         "marginal_effects": marginal_effects,
         "diagnostic_artifacts": ["diagnostics_multinomial_logit_1"],
-        "validation": _validation_metadata(),
+        "validation": _validation_metadata("multinomial_logit"),
     }
     MultinomialResultContract.from_dict(primary)
     _persist_packet(
@@ -427,7 +429,7 @@ def fit_multinomial(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
             "outcome_levels": outcome_levels,
             "base_category": base_category,
             "nobs": int(len(frame)),
-            "validation": _validation_metadata(),
+            "validation": _validation_metadata("multinomial_logit"),
         },
     )
     return "multinomial_logit_1", primary, None
@@ -547,7 +549,7 @@ def fit_survival(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         "log_rank": log_rank,
         "risk_set": risk_set,
         "schoenfeld": schoenfeld,
-        "validation": _validation_metadata(),
+        "validation": _validation_metadata("survival_cox"),
     }
     SurvivalEvidenceContract.from_dict(evidence)
     _persist_packet(env, "survival_evidence", "survival/evidence.json", evidence, artifact_type="survival_evidence")
@@ -636,7 +638,7 @@ def fit_quantile(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         "confidence_intervals": confidence_intervals,
         "bootstrap": bootstrap,
         "cross_quantile_comparisons": comparisons,
-        "validation": _validation_metadata(),
+        "validation": _validation_metadata("quantile_regression"),
     }
     QuantileRegressionResultContract.from_dict(primary)
     return "quantile_regression_1", primary, median

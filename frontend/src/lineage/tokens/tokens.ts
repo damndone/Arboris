@@ -1,5 +1,5 @@
 /**
- * 统计学分析工作台 — Design Tokens (TypeScript)
+ * Statistical analysis workbench — Design Tokens (TypeScript)
  *
  * Generated equivalents of styles.css :root variables.
  * Import these constants OR consume the CSS variables directly (`var(--text)`).

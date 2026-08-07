@@ -22,6 +22,19 @@ import { ModelTypeSelect } from "../../runForm/ModelTypeSelect";
 import { ImputationControls } from "../../runForm/ImputationControls";
 import { PanelControls } from "../../runForm/PanelControls";
 import { LmmControls, type LmmControlValue } from "../../runForm/LmmControls";
+import {
+  SurveyDesignControls,
+  emptySurveyDesign,
+  hasSurveyDesign,
+  surveyDesignApplies,
+  type SurveyDesignValue,
+} from "../../runForm/SurveyDesignControls";
+import {
+  AnovaControls,
+  emptyAnovaOptions,
+  toAnovaModelOptions,
+  type AnovaOptionsValue,
+} from "../../runForm/AnovaControls";
 import { PredictionControls } from "../../runForm/PredictionControls";
 import { FocalSelect } from "../../runForm/FocalSelect";
 import { IVControls, type IVRoleValue } from "../../runForm/IVControls";
@@ -191,6 +204,8 @@ export function GenesisWizard({
   const [frequencyWeight, setFrequencyWeight] = useState("");
   const [analysisWeight, setAnalysisWeight] = useState("");
   const [samplingWeight, setSamplingWeight] = useState("");
+  const [surveyDesign, setSurveyDesign] = useState<SurveyDesignValue>(emptySurveyDesign);
+  const [anovaOptions, setAnovaOptions] = useState<AnovaOptionsValue>(emptyAnovaOptions);
   const [weightParamsPresent, setWeightParamsPresent] = useState({
     frequency: false,
     analysis: false,
@@ -267,7 +282,7 @@ export function GenesisWizard({
 
     // B2 (2026-07-08): saved model params must round-trip into the FULL form
     // state, not just y/x/focal. Otherwise resuming a structural draft
-    // (IV/DID/CS/SA/dCDH/panel/prediction) and pressing "保存模型配置" rebuilds
+    // (IV/DID/CS/SA/dCDH/panel/prediction) and pressing "Save model" rebuilds
     // params from pristine role state and silently strips the saved roles.
     // Convention (matches the y/x guards above): restore only what is present;
     // never reset absent fields, because adoptDraft also runs after table-only
@@ -436,7 +451,7 @@ export function GenesisWizard({
       });
       adoptDraft(created);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "创建创世 draft 失败");
+      setError(err instanceof Error ? err.message : "Could not create the genesis draft");
     } finally {
       setBusy(null);
     }
@@ -543,7 +558,7 @@ export function GenesisWizard({
       setValidation(null);
       adoptDraft(response);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存表格配置失败");
+      setError(err instanceof Error ? err.message : "Could not save the table configuration");
     } finally {
       setBusy(null);
     }
@@ -662,6 +677,26 @@ export function GenesisWizard({
     if (!isIV && !usesDidRoles && !isDcdh && focal.length > 0) {
       params.focal_x = focal.filter((col) => exogColumns.includes(col));
     }
+    // Sent only when a design was actually declared: the backend keys its
+    // refusal of a sampling weight on whether one is present, so an empty
+    // field must not read as a declaration.
+    if (hasSurveyDesign(surveyDesign)) {
+      params.survey_strata_col = surveyDesign.survey_strata_col;
+      params.survey_psu_col = surveyDesign.survey_psu_col;
+      params.survey_fpc_col = surveyDesign.survey_fpc_col;
+      params.survey_replicate_type = surveyDesign.survey_replicate_type;
+      params.survey_lonely_psu = surveyDesign.survey_lonely_psu;
+      params.survey_weight_frame = surveyDesign.survey_weight_frame;
+      params.survey_subpop = surveyDesign.survey_subpop;
+      if (surveyDesign.survey_replicate_weights.length > 0) {
+        params.survey_replicate_weights = JSON.stringify(
+          surveyDesign.survey_replicate_weights,
+        );
+      }
+    }
+    if (modelType === "anova") {
+      params.model_options = JSON.stringify(toAnovaModelOptions(anovaOptions));
+    }
     return params;
   }
 
@@ -688,14 +723,14 @@ export function GenesisWizard({
         return;
       }
     } else if (!y.trim() || (modelType !== "linear_mixed_effects" && xColumns.length === 0)) {
-      setError("请选择 y，并至少选择一个 x。");
+      setError("Choose a y and at least one x.");
       return;
     }
     if (
       modelType === "linear_mixed_effects" &&
       (!lmmValue.subject_id || !lmmValue.time || !lmmValue.group)
     ) {
-      setError("LMM 需要指定受试者、时间和组别列。");
+      setError("LMM needs a subject, time and group column.");
       return;
     }
     if (
@@ -703,19 +738,19 @@ export function GenesisWizard({
       (!v186ModelOptionsByType.survival_cox?.event_column ||
         typeof v186ModelOptionsByType.survival_cox.event_column !== "string")
     ) {
-      setError("Survival / Cox 需要指定 event 列。");
+      setError("Survival / Cox needs an event column.");
       return;
     }
     if (modelType === "panel_ols" && entityCol && timeCol && entityCol === timeCol) {
-      setError("个体列与时间列不能是同一列 (entity == time)。");
+      setError("The entity and time columns cannot be the same column (entity == time).");
       return;
     }
     if (predictionEnabled && !predictionModelType) {
-      setError("已开启预测，请选择算法 (algorithm)。");
+      setError("Prediction is enabled — choose an algorithm.");
       return;
     }
     if (predictionEnabled && predictionDataStructure === "unknown") {
-      setError("预测必须声明数据结构 (IID、分组、时间或面板)。");
+      setError("Prediction requires a declared data structure (IID, grouped, temporal or panel).");
       return;
     }
     if (
@@ -723,7 +758,7 @@ export function GenesisWizard({
       predictionDataStructure === "grouped" &&
       !predictionGroupColumn
     ) {
-      setError("分组预测必须指定分组列。");
+      setError("Grouped prediction needs a group column.");
       return;
     }
     if (
@@ -731,7 +766,7 @@ export function GenesisWizard({
       predictionDataStructure === "panel" &&
       !predictionEntityColumn
     ) {
-      setError("面板预测必须指定个体列。");
+      setError("Panel prediction needs an entity column.");
       return;
     }
     if (
@@ -739,7 +774,7 @@ export function GenesisWizard({
       (predictionDataStructure === "temporal" || predictionDataStructure === "panel") &&
       !predictionTimeColumn
     ) {
-      setError("时间或面板预测必须指定时间列。");
+      setError("Temporal or panel prediction needs a time column.");
       return;
     }
     setBusy("model");
@@ -751,7 +786,7 @@ export function GenesisWizard({
       setValidation(null);
       adoptDraft(response);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存模型配置失败");
+      setError(err instanceof Error ? err.message : "Could not save the model configuration");
     } finally {
       setBusy(null);
     }
@@ -771,7 +806,7 @@ export function GenesisWizard({
       setValidation(nextValidation);
       onDraftValidated?.(draft.draft_id, nextValidation);
       if (!nextValidation.executable) {
-        setError("创世链路还不能执行，请先处理校验问题。");
+        setError("The genesis pipeline cannot run yet — resolve the validation problems first.");
         return;
       }
       setBusy("execute");
@@ -784,7 +819,7 @@ export function GenesisWizard({
       onDraftExecuted?.(result, draft.draft_id);
     } catch (err) {
       if (executing) onDraftFailed?.(draft.draft_id);
-      setError(err instanceof Error ? err.message : "执行创世链路失败");
+      setError(err instanceof Error ? err.message : "Could not execute the genesis pipeline");
     } finally {
       setBusy(null);
     }
@@ -811,10 +846,10 @@ export function GenesisWizard({
     : null;
 
   return (
-    <div data-testid="genesis-wizard" style={{ display: "grid", gap: 18 }}>
+    <div data-testid="genesis-wizard" className="genesis-wizard">
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 16 }}>新链路</h2>
+          <h2 style={{ margin: 0, fontSize: 16 }}>New pipeline</h2>
           {draftId && (
             <p className="mono" style={{ margin: "4px 0 0", fontSize: 11 }}>
               {draftId}
@@ -828,22 +863,22 @@ export function GenesisWizard({
 
       {resumeCandidate && !draft && (
         <section className="ios-group" data-testid="genesis-resume">
-          <div className="ios-group-label">继续上次的链路</div>
+          <div className="ios-group-label">Resume the previous pipeline</div>
           <p className="ios-hint" style={{ marginTop: 0 }}>
-            文件已保存到项目中；换表或重新预览时需要重新选择本地文件。
+            The file is stored in the project; switching tables or re-previewing needs the local file selected again.
           </p>
           <button
             type="button"
             onClick={handleResume}
             disabled={busy !== null}
           >
-            继续
+            Resume
           </button>
         </section>
       )}
 
       <section className="ios-group">
-        <div className="ios-group-label">1. 数据文件</div>
+        <div className="ios-group-label">1. Data file</div>
         <label className="ios-field">
           <span>Dataset file</span>
           <input
@@ -863,7 +898,7 @@ export function GenesisWizard({
 
       {draft && (
         <section className="ios-group">
-          <div className="ios-group-label">2. 表格</div>
+          <div className="ios-group-label">2. Table</div>
           <label className="ios-field">
             <span>Sheet</span>
             <select
@@ -899,14 +934,14 @@ export function GenesisWizard({
             onClick={saveTable}
             disabled={!canSaveTable || busy !== null}
           >
-            保存表格
+            Save table
           </button>
         </section>
       )}
 
       {draft && (
         <section className="ios-group">
-          <div className="ios-group-label">3. 模型</div>
+          <div className="ios-group-label">3. Model</div>
           <label className="ios-field">
             <span>Model type</span>
             <ModelTypeSelect
@@ -915,6 +950,21 @@ export function GenesisWizard({
               onChange={setModelType}
             />
           </label>
+          {modelType === "anova" && (
+            <AnovaControls
+              columns={columnNames}
+              value={anovaOptions}
+              onChange={setAnovaOptions}
+            />
+          )}
+          {capabilities?.survey_design && surveyDesignApplies(capabilities.survey_design, modelType) && (
+            <SurveyDesignControls
+              columns={columnNames}
+              capability={capabilities.survey_design}
+              value={surveyDesign}
+              onChange={setSurveyDesign}
+            />
+          )}
           <ImputationControls
             capabilities={capabilities}
             value={imputationMethod}
@@ -965,7 +1015,7 @@ export function GenesisWizard({
           {modelType === "iv_2sls" && (
             <div className="ios-group">
               <p className="ios-hint">
-                把控制变量、内生变量、工具变量都加入 X，再在下方为每个变量指派角色。
+                Add controls, endogenous variables and instruments all to X, then assign each one a role below.
               </p>
               <IVControls
                 columns={xColumns}
@@ -1004,38 +1054,38 @@ export function GenesisWizard({
           )}
           <div className="ios-group" aria-label="Weight settings">
             <p className="ios-hint">
-              权重会写入本次 Run 的证据。frequency / analysis 可用于 OLS；sampling 目前会明确拒绝，请通过现有 entity_col + covariance=clustered 通道声明 strata/PSU。
+              Weights are recorded in this run's evidence. A sampling weight additionally requires a complex survey design to be declared below; without one the run is refused, because a weight alone does not tell the engine how the sample was drawn.
             </p>
             <label className="ios-field">
-              <span>频数权重 frequency weight（可选）</span>
+              <span>Frequency weight (optional)</span>
               <select aria-label="frequency weight" value={frequencyWeight}
                 onChange={(e) => {
                   setFrequencyWeight(e.target.value);
                   setWeightParamsPresent((current) => ({ ...current, frequency: true }));
                 }}>
-                <option value="">(不使用)</option>
+                <option value="">(not used)</option>
                 {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
               </select>
             </label>
             <label className="ios-field">
-              <span>分析权重 analysis weight（可选）</span>
+              <span>Analysis weight (optional)</span>
               <select aria-label="analysis weight" value={analysisWeight}
                 onChange={(e) => {
                   setAnalysisWeight(e.target.value);
                   setWeightParamsPresent((current) => ({ ...current, analysis: true }));
                 }}>
-                <option value="">(不使用)</option>
+                <option value="">(not used)</option>
                 {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
               </select>
             </label>
             <label className="ios-field">
-              <span>抽样权重 sampling weight（当前会拒绝）</span>
+              <span>Sampling weight (requires a survey design)</span>
               <select aria-label="sampling weight" value={samplingWeight}
                 onChange={(e) => {
                   setSamplingWeight(e.target.value);
                   setWeightParamsPresent((current) => ({ ...current, sampling: true }));
                 }}>
-                <option value="">(不使用)</option>
+                <option value="">(not used)</option>
                 {columnNames.map((column) => <option key={column} value={column}>{column}</option>)}
               </select>
             </label>
@@ -1084,7 +1134,7 @@ export function GenesisWizard({
               value={y}
               onChange={(event) => setY(event.target.value)}
             >
-              <option value="">(选择)</option>
+              <option value="">(select)</option>
               {columnNames.map((column) => (
                 <option key={column} value={column}>
                   {column}
@@ -1126,14 +1176,14 @@ export function GenesisWizard({
             onClick={saveModel}
             disabled={!canSaveModel || busy !== null}
           >
-            保存模型
+            Save model
           </button>
         </section>
       )}
 
       {draft && (
         <section className="ios-group">
-          <div className="ios-group-label">4. 运行</div>
+          <div className="ios-group-label">4. Run</div>
           {validation && validation.checks.length > 0 && (
             <ul style={{ margin: "0 0 10px", paddingLeft: 18 }}>
               {validation.checks.map((check) => (
@@ -1149,14 +1199,14 @@ export function GenesisWizard({
             onClick={validateAndExecute}
             disabled={!canRun || busy !== null}
           >
-            验证并运行
+            Validate and run
           </button>
         </section>
       )}
 
       {busy && (
         <div role="status" className="ios-hint">
-          {busy === "execute" ? "执行中..." : "处理中..."}
+          {busy === "execute" ? "Running…" : "Working…"}
         </div>
       )}
       {error && (

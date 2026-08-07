@@ -140,25 +140,38 @@ def test_undeclared_logit_weight_fails_before_result_artifact(tmp_path) -> None:
     assert not (run_root / "model_results" / "logit_1.json").exists()
 
 
-def test_ols_sampling_weight_fails_closed_with_cluster_channel_next_step() -> None:
-    with pytest.raises(ValueError) as error:
-        run_ols(
-            _frame(),
-            y="y",
-            x=["x"],
-            robust=False,
-            model_id="sampling",
-            weights={"kind": "sampling", "column": "freq"},
-        )
+def test_ols_accepts_a_sampling_weight_and_defers_its_variance() -> None:
+    """v1.8.7 replaced the blanket refusal here, and the advice it carried.
 
-    assert str(error.value) == (
-        "OLS_SAMPLING_WEIGHT_UNSUPPORTED: sampling_weight requires a declared "
-        "strata/PSU design; declare strata/PSU through the existing "
-        "entity_col + covariance=clustered channel"
+    The old message told the user to reach for `entity_col + covariance=clustered`
+    instead. That is a category error rather than a smaller hammer: a clustered
+    covariance ignores the variance reduction stratification buys and yields no
+    design degrees of freedom, so it answers a different question. `run_ols` now
+    fits the weighted point estimate and marks the variance as belonging to the
+    design engine, which is the only component that sees the strata and PSUs.
+    """
+    result, _ = run_ols(
+        _frame(),
+        y="y",
+        x=["x"],
+        robust=False,
+        model_id="sampling",
+        weights={"kind": "sampling", "column": "freq"},
     )
 
+    assert result["weights"]["kind"] == "sampling"
+    assert result["weights"]["executed"] is True
+    assert result["weights"]["variance_owner"] == "survey_design_engine"
 
-def test_workflow_sampling_weight_fails_without_result_and_names_cluster_channel(tmp_path) -> None:
+
+def test_workflow_sampling_weight_without_a_declared_design_still_fails_closed(tmp_path) -> None:
+    """Undeclared design still refuses -- but no longer misdirects.
+
+    v1.8.7 unlocks `sampling_weight` only when a design is declared. What
+    changed is the advice: the message used to name the clustered-covariance
+    channel as the next step, which would have produced a confidently wrong
+    standard error. It now names the fields actually required.
+    """
     source = tmp_path / "sampling.csv"
     pd.DataFrame(
         {
@@ -183,8 +196,15 @@ def test_workflow_sampling_weight_fails_without_result_and_names_cluster_channel
     run_root = project.root / "runs" / outcome["run_id"]
     errors = read_json(run_root / "errors.json")
     issue = errors["issues"][-1]
-    assert issue["code"] == "OLS_SAMPLING_WEIGHT_UNSUPPORTED"
-    assert "entity_col + covariance=clustered channel" in issue["message"]
+    # The stage wraps the fit failure, so the specific refusal travels in the
+    # message rather than the code.
+    assert issue["code"] in {"OLS_SAMPLING_WEIGHT_UNSUPPORTED", "MODEL_FIT_FAILED"}
+    assert "OLS_SAMPLING_WEIGHT_UNSUPPORTED" in issue["message"]
+    assert "survey_strata_col" in issue["message"] or "sampling design" in issue["message"]
+    assert "covariance=clustered" not in issue["message"], (
+        "the refusal must not send the user to a channel that answers a "
+        "different question"
+    )
     assert not (run_root / "model_results" / "ols_1.json").exists()
 
 

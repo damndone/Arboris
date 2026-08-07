@@ -32,18 +32,18 @@ export function IVControls(props: {
   const nInstr = value.instruments.length;
   let badge: string;
   if (nEndog === 0) {
-    badge = "请指派至少一个内生变量";
+    badge = "Assign at least one endogenous variable";
   } else if (nInstr < nEndog) {
-    badge = "欠识别 under-identified（工具数 < 内生数）";
+    badge = "Under-identified (fewer instruments than endogenous variables)";
   } else if (nInstr === nEndog) {
-    badge = "恰好识别 just-identified";
+    badge = "Just-identified";
   } else {
-    badge = "过度识别 over-identified";
+    badge = "Over-identified";
   }
 
   return (
     <div className="ios-group" aria-label="IV settings">
-      <div className="ios-group-label">IV 设定 · 给每个变量指派角色</div>
+      <div className="ios-group-label">IV setup — assign a role to each variable</div>
       {columns.map((col) => (
         <label className="ios-field" key={col}>
           <span>{col}</span>
@@ -52,9 +52,9 @@ export function IVControls(props: {
             value={roleOf(col, value)}
             onChange={(e) => assign(col, e.target.value as Role)}
           >
-            <option value="exog">外生控制</option>
-            <option value="endog">内生</option>
-            <option value="instrument">工具</option>
+            <option value="exog">Exogenous control</option>
+            <option value="endog">Endogenous</option>
+            <option value="instrument">Instrument</option>
           </select>
         </label>
       ))}

@@ -100,7 +100,7 @@ describe("ProjectSwitcher (T11)", () => {
     expect(screen.queryByTestId("project-switcher-menu")).toBeNull();
   });
 
-  it("＋ 新建项目… creates a project and hands off directly to genesis upload", async () => {
+  it("the new-project entry creates a project and hands off directly to genesis upload", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       status: 200,

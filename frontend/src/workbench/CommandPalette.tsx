@@ -86,7 +86,7 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
   const openGenesisAction = useMemo<PaletteItem>(
     () => ({
       id: "open-genesis",
-      label: "打开数据上传",
+      label: "Open data upload",
       disabled: effectiveProjectRoot ? false : { reason: "Project root required" },
       invoke: () => {
         if (!effectiveProjectRoot) return;
