@@ -1779,6 +1779,11 @@ _STEP_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # closed set means a typo is a compile error rather than a runtime KeyError.
 SUPPORTED_STEP_OUTPUTS = frozenset({"produced_dataset"})
 
+# Which step kinds persist a dataset child that a later step can consume.
+# `statistical.derive_numeric` is the only one today (workflow_runtime's
+# `_persist_numeric_derivation`); the data transforms join it in P3.
+STEP_PRODUCES_DATASET = frozenset({"statistical.derive_numeric"})
+
 
 def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
     """Every source column a step spec references, for schema checking."""
@@ -2143,6 +2148,35 @@ def validate_workflow_steps(
             }
         )
 
+    # Resolve source commitments before the dependency checks below, because
+    # resolving one writes a new entry into depends_on that must be checked.
+    by_id = {step["step_id"]: step for step in normalized}
+    for step in normalized:
+        source = step["spec"].get("source")
+        if source is None:
+            continue
+        from_step = str(source["from_step"])
+        if from_step == step["step_id"]:
+            raise OperationValidationError(
+                f"workflow step {step['step_id']} source refers to itself"
+            )
+        producer = by_id.get(from_step)
+        if producer is None:
+            raise OperationValidationError(
+                f"workflow step {step['step_id']} source refers to unknown step: {from_step}"
+            )
+        if producer["operation_id"] not in STEP_PRODUCES_DATASET:
+            raise OperationValidationError(
+                f"workflow step {step['step_id']} source refers to {from_step}, which "
+                f"does not produce a dataset: {producer['operation_id']}"
+            )
+        # Consuming a step's output is an ordering constraint, so the reference
+        # becomes a real dependency. Reusing depends_on means the existing
+        # topological sort, cycle refusal, fail-closed gating and
+        # dependency_fingerprints all cover chained steps with no new machinery.
+        if from_step not in step["depends_on"]:
+            step["depends_on"] = [*step["depends_on"], from_step]
+
     known = {step["step_id"] for step in normalized}
     for step in normalized:
         missing = [dep for dep in step["depends_on"] if dep not in known]
@@ -2198,8 +2232,11 @@ def _validate_source_commitment(step_id: str, source: Any) -> None:
             f"workflow step {step_id} source contains unknown field(s): "
             + ", ".join(sorted(unknown))
         )
+    # Held to the same pattern as step_id itself: an id that could never name a
+    # step is a format error, and reporting it later as an unresolvable
+    # reference would point the author at a missing step rather than the typo.
     from_step = source.get("from_step")
-    if not isinstance(from_step, str) or not from_step:
+    if not isinstance(from_step, str) or _STEP_ID_PATTERN.fullmatch(from_step) is None:
         raise OperationValidationError(
             f"workflow step {step_id} source.from_step must name another step in this plan"
         )
@@ -2238,6 +2275,7 @@ def _topological_order(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ordered
 
 __all__ = [
+    "STEP_PRODUCES_DATASET",
     "SUPPORTED_STEP_OUTPUTS",
     "WORKFLOW_OPERATION_ID",
     "WORKFLOW_OPERATION_VERSION",
