@@ -1080,6 +1080,37 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         validate_model_options=_validate_survival_model_options,
         supported_split_kinds=("iid", "grouped"),
     ),
+    # v1.8.7. LMM was the one family the form could run and an Agent could not
+    # start. Nothing about its execution changes here -- the options contract,
+    # the pre-fit sealed input and the packet envelope are untouched; this only
+    # states, where every other family states it, which declarations it takes.
+    "linear_mixed_effects": ModelFamilyContract(
+        family="linear_mixed_effects",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        # The repeated-measures structure lives in model_options, not in the
+        # panel fields: `subject_id` is the unit measured repeatedly, which is
+        # not the same idea as a panel entity with fixed effects.
+        forbidden_spec_fields=("entity_col", "time_col"),
+        forbidden_spec_fields_message=(
+            "model.genesis linear_mixed_effects takes subject_id and time through "
+            "model_options, not the panel entity_col/time_col fields"
+        ),
+        build_model_params=_build_model_params_with_options("linear_mixed_effects"),
+        expected_artifacts=("linear_mixed_effects_1",),
+        result_shape="coefficient_intervals",
+        allows_covariance=False,
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        model_options_fields=(
+            "subject_id", "time", "group", "fit_method", "random_slope",
+        ),
+        # A plan without these would fit an ordinary regression and call it a
+        # repeated-measures model.
+        model_options_required_fields=("subject_id", "time", "group"),
+        model_options_column_fields=("subject_id", "time", "group"),
+        supported_split_kinds=("grouped",),
+    ),
     "quantile_regression": ModelFamilyContract(
         family="quantile_regression",
         required_spec_fields=(),

@@ -57,6 +57,11 @@ def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -
         "multinomial_logit",
         "survival_cox",
         "quantile_regression",
+        # v1.8.7: LMM joined the registry so a composed plan can name it. Its
+        # execution is unchanged and still gated by frozen local containment;
+        # what changed is that it is declared here like every other family
+        # instead of being driven by hard-coded UI controls alone.
+        "linear_mixed_effects",
     }
 
     ols = MODEL_FAMILY_CONTRACTS["ols"]
