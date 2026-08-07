@@ -343,6 +343,20 @@ def _committed_source_binding(
         )
     produced = upstream.payload.get(str(commitment["output"]))
     if not isinstance(produced, Mapping):
+        # Two different faults, two different places to look. A live upstream
+        # result without the binding means the producing step really published
+        # nothing. A result the executor rebuilt from persisted state without it
+        # means the state record never carried the binding -- the producing step
+        # is fine, and sending the reader to audit its output wastes the whole
+        # investigation on a step that is working.
+        if upstream.restored_from_state:
+            raise WorkflowExecutionError(
+                f"workflow step {step.step_id} source {from_step} completed in an "
+                f"earlier pass, but its {commitment['output']!r} binding did not "
+                "survive into the persisted workflow state; the state record "
+                "predates binding persistence, so this plan cannot resume -- "
+                "re-run it from the start"
+            )
         raise WorkflowExecutionError(
             f"workflow step {step.step_id} source {from_step} published no "
             f"{commitment['output']!r} binding"

@@ -10,6 +10,7 @@ such a reference to resolve against.
 from __future__ import annotations
 
 import dataclasses
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -18,9 +19,11 @@ import pytest
 from tests.test_data_column_cast import _source_project
 from workbench.agent.operations import OperationValidationError
 from workbench.agent.workflow import (
+    PERSISTED_STEP_OUTPUT,
     WorkflowExecutionError,
     WorkflowExecutor,
     WorkflowStepResult,
+    WorkflowStepState,
     compile_workflow,
 )
 from workbench.agent import workflow_contracts
@@ -1160,3 +1163,197 @@ def test_every_consuming_operation_records_the_dataset_it_actually_read(
         if value != expected[field]
     ]
     assert not lies, "lineage records name a dataset the step never read:\n" + "\n".join(lies)
+
+
+# --- Resume: the binding has to survive the gap between two passes ----------
+#
+# `WorkflowExecutor.execute` rebuilds `completed_results` for already-completed
+# steps out of persisted `WorkflowStepState`, not out of the results the
+# executor returned in the earlier pass. Anything a step published that is not
+# in that state is gone by the time a resumed downstream step asks for it.
+
+
+def _state_path(project: Path, workflow_id: str = "wf_seam") -> Path:
+    return project / "workbench" / "workflows" / f"{workflow_id}.jsonl"
+
+
+def _state_records(project: Path, workflow_id: str = "wf_seam") -> list[dict]:
+    return [
+        json.loads(line)
+        for line in _state_path(project, workflow_id).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _interrupted_chain(tmp_path: Path):
+    """Run `first -> second` through the executor, failing on `second`.
+
+    Uses the real step executor for `first`, so the state left behind is the
+    state a genuine interruption leaves behind, not a hand-built approximation.
+    """
+
+    project, draft = _compiled_chain(
+        tmp_path,
+        [
+            _numeric_step("first", "doubled"),
+            _chained_step("second", "first", "scaled", "doubled"),
+        ],
+    )
+    real = build_workflow_step_executor(project, draft)
+
+    def interrupted(step, previous):
+        if step.step_id == "second":
+            raise WorkflowExecutionError("simulated interruption")
+        return real(step, previous)
+
+    first_pass = WorkflowExecutor(project).execute(draft, interrupted)
+    assert first_pass.status == "failed"
+    assert first_pass.steps["first"].status == "completed"
+    assert first_pass.steps["second"].status == "failed"
+    return project, draft, real
+
+
+def test_a_resumed_chain_can_still_resolve_the_upstream_binding(tmp_path: Path) -> None:
+    """Resume rebuilds completed results from state, so the binding must persist.
+
+    Without persistence this is not a wrong number, it is a chain that can never
+    be resumed at all: `second` asks `first` for the dataset it published, and
+    the rebuilt result carries an empty payload.
+    """
+
+    project, draft, real = _interrupted_chain(tmp_path)
+
+    resumed = WorkflowExecutor(project).execute(draft, real)
+
+    assert resumed.steps["second"].status == "completed", resumed.steps["second"].error
+    assert resumed.status == "completed"
+
+
+def test_the_published_binding_reaches_the_persisted_state_file(tmp_path: Path) -> None:
+    """Assert on the bytes on disk, not only that a resume happened to work.
+
+    A resume can pass for reasons that have nothing to do with persistence --
+    an in-process cache, a step that re-derives its own input. What the next
+    process gets is whatever is in this file.
+    """
+
+    project, draft, _ = _interrupted_chain(tmp_path)
+
+    completed = [
+        record
+        for record in _state_records(project)
+        if record["steps"]["first"]["status"] == "completed"
+    ]
+    assert completed, "the first step never reached a completed state record"
+    binding = completed[-1]["steps"]["first"]["produced_dataset"]
+
+    assert binding["schema_version"] == "workflow-produced-dataset.v1"
+    assert binding["run_id"] == draft.target["run_id"]
+    # The persisted binding must name the derived dataset, not the workflow's
+    # own target: a binding that pointed back at the target would resume
+    # cleanly and feed the untransformed table to every downstream step.
+    assert binding["artifact_id"] != str(draft.target["artifact_id"])
+    assert binding["node_ref"] != str(draft.target["node_ref"])
+    _, published = resolve_statistical_source(
+        project,
+        source_run_id=str(binding["run_id"]),
+        source_node_id=str(binding["node_ref"]),
+        source_artifact_id=str(binding["artifact_id"]),
+    )
+    assert list(published["doubled"]) == [3.0, 6.0, 9.0, 12.0]
+
+
+def test_only_the_declared_output_binding_is_persisted(tmp_path: Path) -> None:
+    """The resume surface is the declared contract, not the whole payload.
+
+    `produced_dataset` is the one block another step may commit to consuming.
+    Persisting the entire payload would widen the coupling between steps from
+    that contract to "whatever the upstream happened to put there", which is
+    the exact seam this slice exists to narrow.
+    """
+
+    project, _, _ = _interrupted_chain(tmp_path)
+
+    completed = [
+        record
+        for record in _state_records(project)
+        if record["steps"]["first"]["status"] == "completed"
+    ][-1]["steps"]["first"]
+
+    # `output_columns` is the other half of this producer's live payload.
+    assert "output_columns" not in completed
+    assert "payload" not in completed
+
+
+def test_the_persisted_output_key_is_the_whole_supported_set() -> None:
+    """If a second consumable output is declared, resume has to carry it too.
+
+    The state field is named for one binding. Growing SUPPORTED_STEP_OUTPUTS
+    without growing the state would reintroduce exactly this bug for the new
+    output, silently, so the growth has to fail here first.
+    """
+
+    assert workflow_contracts.SUPPORTED_STEP_OUTPUTS == {PERSISTED_STEP_OUTPUT}
+
+
+def test_a_state_record_without_a_binding_still_loads(tmp_path: Path) -> None:
+    """State written before binding persistence must not break on read."""
+
+    legacy = WorkflowStepState.from_dict(
+        {
+            "step_id": "first",
+            "fingerprint": "sha256:legacy",
+            "status": "completed",
+            "artifact_ids": ["workflow_derived_numeric_legacy"],
+            "row_counts": {"doubled": 4},
+            "error": None,
+            "result_fingerprint": "sha256:legacy",
+        }
+    )
+
+    assert legacy.produced_dataset is None
+    assert legacy.status == "completed"
+
+
+def test_a_non_object_persisted_binding_is_refused_rather_than_read(tmp_path: Path) -> None:
+    """A corrupt binding in the state file is not a binding with missing keys."""
+
+    with pytest.raises(WorkflowExecutionError, match=r"produced_dataset.*must be an object"):
+        WorkflowStepState.from_dict(
+            {
+                "step_id": "first",
+                "fingerprint": "sha256:legacy",
+                "status": "completed",
+                "produced_dataset": "workflow_derived_numeric_legacy",
+            }
+        )
+
+
+def test_a_binding_lost_across_resume_names_the_persistence_gap(tmp_path: Path) -> None:
+    """The two ways a binding can be absent send a reader to different places.
+
+    "the upstream published nothing" points at the producing step's output;
+    "the binding did not survive resume" points at the state file, and the
+    producing step is blameless. Reporting the first for the second sends
+    whoever hits it to audit a step that is working correctly.
+    """
+
+    project, draft, real = _interrupted_chain(tmp_path)
+
+    # Rewrite the state the way a pre-persistence version of this executor
+    # would have written it, then resume against it.
+    stripped = []
+    for record in _state_records(project):
+        for step_state in record["steps"].values():
+            step_state.pop(PERSISTED_STEP_OUTPUT, None)
+        stripped.append(json.dumps(record, ensure_ascii=False))
+    _state_path(project).write_text("\n".join(stripped) + "\n", encoding="utf-8")
+
+    resumed = WorkflowExecutor(project).execute(draft, real)
+
+    assert resumed.steps["second"].status == "failed"
+    error = resumed.steps["second"].error or ""
+    assert "did not survive" in error, error
+    assert "persisted workflow state" in error, error
+    # Must not be reported as an upstream that published nothing.
+    assert "published no" not in error, error

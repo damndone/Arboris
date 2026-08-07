@@ -18,6 +18,11 @@ from .workflow_contracts import WORKFLOW_TEMPLATE, validate_workflow_steps
 # older records keep their previous value; it is metadata, not a gate.
 WORKFLOW_SCHEMA_VERSION = "workflow.v1"
 
+# The one payload block a completed step carries across a resume. It is the
+# only output another step may commit to consuming (SUPPORTED_STEP_OUTPUTS in
+# workflow_contracts), which is exactly why it is singled out here.
+PERSISTED_STEP_OUTPUT = "produced_dataset"
+
 
 def _canonical(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -78,6 +83,18 @@ class WorkflowExecutionError(RuntimeError):
     """Raised when a workflow cannot safely continue or resume."""
 
 
+def _publishable_binding(result: "WorkflowStepResult") -> dict[str, Any] | None:
+    """The declared output block to carry into persisted state, if any.
+
+    Shape is not validated here. The runtime that consumes the binding already
+    refuses an unreadable one by name, and duplicating that check would make the
+    executor a second authority on a contract it does not own.
+    """
+
+    produced = result.payload.get(PERSISTED_STEP_OUTPUT)
+    return dict(produced) if isinstance(produced, Mapping) else None
+
+
 @dataclass(frozen=True)
 class WorkflowStepResult:
     """Bounded result returned by one workflow step executor."""
@@ -87,6 +104,12 @@ class WorkflowStepResult:
     empty_group_values: list[Any] = field(default_factory=list)
     result_fingerprint: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
+    # True only for results the executor reconstructed from persisted state on
+    # resume, never for one an executor just returned. A consumer that cannot
+    # find what it needs has to tell the two apart: an absent binding on a live
+    # result means the upstream published nothing, while on a restored result it
+    # means the state record did not carry it, and the upstream is blameless.
+    restored_from_state: bool = False
 
 
 @dataclass(frozen=True)
@@ -98,6 +121,13 @@ class WorkflowStepState:
     row_counts: dict[str, int] = field(default_factory=dict)
     error: str | None = None
     result_fingerprint: str | None = None
+    # The one published block a later step may depend on, carried across a
+    # resume. Deliberately this block alone and not the whole payload: a step's
+    # payload is its own business, and persisting all of it would widen what one
+    # step can depend on from a declared contract to "whatever the upstream
+    # happened to put there" -- the coupling this composition seam exists to
+    # keep narrow. A new consumable output must be added here on purpose.
+    produced_dataset: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -108,10 +138,24 @@ class WorkflowStepState:
             "row_counts": dict(self.row_counts),
             "error": self.error,
             "result_fingerprint": self.result_fingerprint,
+            PERSISTED_STEP_OUTPUT: (
+                dict(self.produced_dataset) if self.produced_dataset is not None else None
+            ),
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "WorkflowStepState":
+        produced = value.get(PERSISTED_STEP_OUTPUT)
+        # Absent is the ordinary case: a step that produced no dataset, or a
+        # record written before this field existed. A present-but-not-an-object
+        # value is neither -- it is a corrupt record, and reading it optimistically
+        # would push a bare TypeError into the consuming step's error field.
+        if produced is not None and not isinstance(produced, Mapping):
+            raise WorkflowExecutionError(
+                f"workflow step state {value.get('step_id')!r} carries a "
+                f"{PERSISTED_STEP_OUTPUT} that must be an object, got "
+                f"{type(produced).__name__}"
+            )
         return cls(
             step_id=str(value["step_id"]),
             fingerprint=str(value["fingerprint"]),
@@ -120,6 +164,7 @@ class WorkflowStepState:
             row_counts={str(key): int(item) for key, item in (value.get("row_counts") or {}).items()},
             error=value.get("error"),
             result_fingerprint=value.get("result_fingerprint"),
+            produced_dataset=dict(produced) if produced is not None else None,
         )
 
 
@@ -220,6 +265,15 @@ class WorkflowExecutor:
                 result_fingerprint=(
                     step_state.result_fingerprint or step_state.fingerprint
                 ),
+                # Rebuilt from persisted state, so only what the state carries
+                # is available here -- never the payload the step returned in
+                # the earlier pass, which died with that process.
+                payload=(
+                    {PERSISTED_STEP_OUTPUT: dict(step_state.produced_dataset)}
+                    if step_state.produced_dataset
+                    else {}
+                ),
+                restored_from_state=True,
             )
             for step_id, step_state in states.items()
             if step_state.status == "completed"
@@ -271,6 +325,7 @@ class WorkflowExecutor:
                     artifact_ids=tuple(result.artifact_ids),
                     row_counts=dict(result.row_counts),
                     result_fingerprint=(result.result_fingerprint or step.fingerprint),
+                    produced_dataset=_publishable_binding(result),
                 )
                 states[step.step_id] = completed
                 completed_results[step.step_id] = result
@@ -475,6 +530,7 @@ def execute_workflow(
 
 
 __all__ = [
+    "PERSISTED_STEP_OUTPUT",
     "WORKFLOW_SCHEMA_VERSION",
     "WorkflowDraft",
     "WorkflowExecutionError",
