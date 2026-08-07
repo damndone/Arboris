@@ -16,9 +16,14 @@ import pytest
 
 from tests.test_data_column_cast import _source_project
 from workbench.agent.operations import OperationValidationError
-from workbench.agent.workflow import compile_workflow
+from workbench.agent.workflow import (
+    WorkflowExecutionError,
+    WorkflowExecutor,
+    compile_workflow,
+)
 from workbench.agent.workflow_contracts import validate_workflow_steps
 from workbench.agent.workflow_runtime import build_workflow_step_executor
+from workbench.artifacts import read_json, sha256_file, write_json
 from workbench.statistical_exploration import resolve_statistical_source
 
 
@@ -264,3 +269,150 @@ def test_a_dataset_producing_step_publishes_a_resolvable_binding(tmp_path: Path)
     # since re-deriving it from the same step record compares it to itself.
     assert produced["content_sha256"] == context["source_sha256"]
     assert list(published["doubled"]) == [3.0, 6.0, 9.0, 12.0]
+
+
+def _chained_step(step_id: str, from_step: str, output_name: str, on_column: str) -> dict:
+    """A step that reads another step's output and derives from a column in it."""
+
+    step = _numeric_step(step_id, output_name)
+    step["spec"]["source"] = {"from_step": from_step, "output": "produced_dataset"}
+    step["spec"]["recipes"] = [
+        {
+            "operator": "multiply",
+            "input_columns": [on_column, "size"],
+            "output_name": output_name,
+        }
+    ]
+    return step
+
+
+def test_a_chained_step_reads_the_upstream_output_not_the_original(tmp_path: Path) -> None:
+    """The whole point of P0: step two sees step one's result.
+
+    `first` derives `doubled`; `second` derives from `doubled`, which does not
+    exist in the original source at all. Values are asserted, not just status:
+    a step that completes on the wrong frame is the exact failure this seam is
+    supposed to make impossible.
+    """
+
+    project, draft = _compiled_chain(
+        tmp_path,
+        [
+            _numeric_step("first", "doubled"),
+            _chained_step("second", "first", "scaled", "doubled"),
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.steps["second"].status == "completed", state.steps["second"].error
+    frame = pd.read_csv(
+        _artifact_path(
+            project,
+            str(draft.target["run_id"]),
+            state.steps["second"].artifact_ids[0],
+        )
+    )
+    # doubled = size * weight = size * 3; scaled = doubled * size = 3 * size**2.
+    assert list(frame["doubled"]) == [3.0, 6.0, 9.0, 12.0]
+    assert list(frame["scaled"]) == [3.0, 12.0, 27.0, 48.0]
+
+
+def test_a_chained_step_reads_the_bytes_the_upstream_step_published(
+    tmp_path: Path,
+) -> None:
+    """Proves *where* the input came from, not merely that the values are right.
+
+    Replaying the upstream recipes onto the original target happens to yield the
+    same numbers today, so a value assertion alone cannot tell the two
+    mechanisms apart. Rewriting the persisted dataset can: a step that resolves
+    its declared source reads those bytes and refuses them as no longer the ones
+    the completed step published, while a step replaying recipes never looks at
+    the file and sails past.
+
+    The run's own artifact index is rewritten to match, which is the whole point
+    -- that is the state a run directory rebuilt between resumes would be in, so
+    the resolver's index check passes and the binding's content hash is the only
+    thing standing between the plan and a frame nobody's step produced.
+    """
+
+    project, draft = _compiled_chain(
+        tmp_path,
+        [
+            _numeric_step("first", "doubled"),
+            _chained_step("second", "first", "scaled", "doubled"),
+        ],
+    )
+    executor = build_workflow_step_executor(project, draft)
+    upstream = executor(draft.steps[0], {})
+
+    produced = upstream.payload["produced_dataset"]
+    persisted = _artifact_path(project, produced["run_id"], produced["artifact_id"])
+    tampered = pd.read_csv(persisted)
+    tampered["doubled"] = [30.0, 60.0, 90.0, 120.0]
+    persisted.write_text(tampered.to_csv(index=False), encoding="utf-8")
+    _reindex_artifact(project, produced["run_id"], produced["artifact_id"], persisted)
+
+    with pytest.raises(WorkflowExecutionError, match="different content"):
+        executor(draft.steps[1], {"first": upstream})
+
+
+def _reindex_artifact(
+    project: Path, run_id: str, artifact_id: str, path: Path
+) -> None:
+    """Re-record an artifact's digest so the run index agrees with its file."""
+
+    index_path = project / "runs" / run_id / "artifacts_index.json"
+    index = read_json(index_path)
+    for record in index["artifacts"]:
+        if record["artifact_id"] == artifact_id:
+            record["sha256"] = sha256_file(path)
+            write_json(index_path, index)
+            return
+    raise AssertionError(f"unregistered artifact: {artifact_id}")
+
+
+def _artifact_path(project: Path, run_id: str, artifact_id: str) -> Path:
+    """Locate a registered artifact's file through the run's own index."""
+
+    run_root = project / "runs" / run_id
+    index = read_json(run_root / "artifacts_index.json")
+    for record in index["artifacts"]:
+        if record["artifact_id"] == artifact_id:
+            return run_root / record["path"]
+    raise AssertionError(f"unregistered artifact: {artifact_id}")
+
+
+def test_a_second_dataset_producer_alongside_a_source_is_rejected() -> None:
+    """Two upstream datasets, one read: refuse rather than discard one silently."""
+
+    downstream = _chained_step("second", "first", "scaled", "doubled")
+    downstream["depends_on"] = ["unrelated"]
+
+    with pytest.raises(
+        OperationValidationError,
+        match=r"step second declares more than one data source",
+    ):
+        validate_workflow_steps(
+            [
+                _numeric_step("first", "doubled"),
+                _numeric_step("unrelated", "sidelined"),
+                downstream,
+            ]
+        )
+
+
+def test_the_declared_source_own_ancestors_are_not_a_second_source() -> None:
+    """A chain is one source, not three: only strays outside the lineage fail."""
+
+    ordered = validate_workflow_steps(
+        [
+            _numeric_step("base", "doubled"),
+            _chained_step("middle", "base", "scaled", "doubled"),
+            _chained_step("last", "middle", "rescaled", "scaled"),
+        ]
+    )
+
+    assert [item["step_id"] for item in ordered] == ["base", "middle", "last"]

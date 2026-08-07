@@ -248,12 +248,63 @@ def _workflow_input_frame(
     draft: WorkflowDraft,
     step: Any,
     dependency_graph: Mapping[str, tuple[str, ...]],
+    previous: Mapping[str, WorkflowStepResult],
+    root: Path,
 ) -> pd.DataFrame:
-    """Rebuild the exact transformed input for a step from its declared DAG."""
+    """Rebuild the exact input for a step from its declared DAG.
 
+    A step that committed to another step's output resolves that persisted
+    dataset -- and stops there. Replaying the declared recipes afterwards would
+    apply the same derivations a second time onto a frame that already carries
+    them, which is why this returns early rather than layering the two.
+    Everything else keeps the original behaviour: start from the workflow's own
+    target and replay the declared numeric derivations.
+    """
+
+    if "source" in step.spec:
+        return _resolve_committed_source_frame(step, previous, root)
     frame = source_frame
     for transform_step in _upstream_numeric_steps(draft, str(step.step_id), dependency_graph):
         frame, _ = _apply_numeric_recipes(frame, transform_step.spec["recipes"])
+    return frame
+
+
+def _resolve_committed_source_frame(
+    step: Any,
+    previous: Mapping[str, WorkflowStepResult],
+    root: Path,
+) -> pd.DataFrame:
+    """Load the dataset the upstream step actually persisted."""
+
+    commitment = step.spec["source"]
+    from_step = str(commitment["from_step"])
+    upstream = previous.get(from_step)
+    if upstream is None:
+        raise WorkflowExecutionError(
+            f"workflow step {step.step_id} source {from_step} has not completed"
+        )
+    produced = upstream.payload.get(str(commitment["output"]))
+    if not isinstance(produced, Mapping):
+        raise WorkflowExecutionError(
+            f"workflow step {step.step_id} source {from_step} published no "
+            f"{commitment['output']!r} binding"
+        )
+    context, frame = resolve_statistical_source(
+        root,
+        source_run_id=str(produced["run_id"]),
+        source_node_id=str(produced["node_ref"]),
+        source_artifact_id=str(produced["artifact_id"]),
+    )
+    # Execution-time half of the guarantee: compare the bytes that actually
+    # arrived against the bytes the upstream step published. Comparing step
+    # fingerprints here would look like a check and never fire -- the binding
+    # carries the producing step's own fingerprint, so both sides are the same
+    # value no matter which artifact the binding points at.
+    if str(produced["content_sha256"]) != str(context["source_sha256"]):
+        raise WorkflowExecutionError(
+            f"workflow step {step.step_id} source {from_step} resolved to different "
+            "content than the completed step published"
+        )
     return frame
 
 
@@ -606,7 +657,7 @@ def build_workflow_step_executor(
         operation_id = step.operation_id
         dispatcher_key = workflow_dispatcher_key(operation_id)
         step_frame = _workflow_input_frame(
-            source_frame, draft, step, dependency_graph
+            source_frame, draft, step, dependency_graph, previous, root
         )
         if dispatcher_key == "workbench.agent.workflow_runtime.statistical_explore" and "plots" not in step.spec:
             return _exploration_step(

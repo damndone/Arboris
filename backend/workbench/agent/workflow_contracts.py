@@ -2206,6 +2206,8 @@ def validate_workflow_steps(
             raise OperationValidationError(f"workflow step {step['step_id']} depends on itself")
 
     ordered = _topological_order(normalized)
+    # Only safe once the plan is known to be acyclic: this walks ancestors.
+    _reject_multiple_data_sources(ordered)
 
     if available_columns is not None:
         available = {str(column) for column in available_columns}
@@ -2236,6 +2238,55 @@ def validate_workflow_steps(
                     )
                 produced.update(outputs)
     return ordered
+
+
+def _reject_multiple_data_sources(steps: list[dict[str, Any]]) -> None:
+    """Refuse a step that would have two upstream datasets but read only one.
+
+    A step that commits to `source` reads exactly that dataset at execution
+    time. Any *other* dataset-producing ancestor it declares is therefore
+    computed and then dropped without a word: the author reads the plan as
+    "both transforms applied" and gets one of them. That silent discard is the
+    failure mode this whole seam exists to remove, so the shape is refused
+    while the plan is still text rather than settled by a "who wins" rule.
+
+    Ancestors of the declared source are exempt -- they are how that dataset
+    was built, so they are already inside the frame this step reads.
+    """
+
+    by_id = {step["step_id"]: step for step in steps}
+    ancestors_cache: dict[str, frozenset[str]] = {}
+
+    def ancestors(step_id: str) -> frozenset[str]:
+        cached = ancestors_cache.get(step_id)
+        if cached is not None:
+            return cached
+        collected: set[str] = set()
+        for dependency in by_id[step_id]["depends_on"]:
+            collected.add(dependency)
+            collected |= ancestors(dependency)
+        resolved = frozenset(collected)
+        ancestors_cache[step_id] = resolved
+        return resolved
+
+    for step in steps:
+        if "source" not in step["spec"]:
+            continue
+        from_step = str(step["spec"]["source"]["from_step"])
+        declared_lineage = {from_step} | ancestors(from_step)
+        discarded = sorted(
+            candidate
+            for candidate in ancestors(step["step_id"]) - declared_lineage
+            if by_id[candidate]["operation_id"] in STEP_PRODUCES_DATASET
+        )
+        if discarded:
+            raise OperationValidationError(
+                f"workflow step {step['step_id']} declares more than one data source: "
+                f"it reads {from_step}, so the dataset(s) produced by "
+                + ", ".join(discarded)
+                + " would be silently discarded. A step can only have one data "
+                "source; route the other transform through it."
+            )
 
 
 def _validate_source_commitment(step_id: str, source: Any) -> None:
