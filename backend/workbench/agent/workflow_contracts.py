@@ -211,6 +211,18 @@ class StepSpecContract:
     #: its `source`. A per-operation fact, so it is declared here with the rest
     #: of them rather than in a set maintained alongside the registry.
     produces_dataset: bool = False
+    #: Whether the runtime hands this step the resolved input frame at all.
+    #: A step that never receives one cannot honour a `source`: the resolution
+    #: would succeed, every check would pass, and the frame would be dropped
+    #: while the step read the workflow's original target instead. Declaring
+    #: `source` on such a step is refused rather than silently ignored.
+    consumes_input_frame: bool = True
+    #: Whether the runtime can reconstruct this step's effect by replaying its
+    #: declared spec onto the workflow target. Only true for the one operation
+    #: `_upstream_numeric_steps` knows how to replay; every other dataset
+    #: producer must be read through `source`, because an unreplayable
+    #: transform that nothing reads is a step whose work silently vanishes.
+    replayable_by_recipe: bool = False
 
     @property
     def allowed(self) -> frozenset[str]:
@@ -1461,6 +1473,10 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         # workflow_runtime's `_persist_numeric_derivation` writes a dataset
         # child; the data transforms join it in P3.
         produces_dataset=True,
+        # `_upstream_numeric_steps` reconstructs exactly this operation by
+        # re-applying its recipes to the workflow target. It is the only one it
+        # can, which is why the replay path is a whitelist and not a default.
+        replayable_by_recipe=True,
     ),
     "statistical.derived_group_summarize": StepSpecContract(
         summary="Summarize columns within each derived group.",
@@ -1699,6 +1715,8 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         diff_builder_key="report.compose.diff.v1",
         verification_builder_key="report.compose.verification.v1",
         ui_description="Assemble the completed steps into a report.",
+        # Composes completed steps' evidence; it never opens the data at all.
+        consumes_input_frame=False,
     ),
     "model.custom": StepSpecContract(
         summary=(
@@ -1738,6 +1756,9 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         diff_builder_key="capability_factory.custom.diff.v1",
         verification_builder_key="capability_factory.custom.verification.v1",
         ui_description="Run one explicitly admitted custom capability through the Proposal/Risk and containment gates.",
+        # The authorized gateway resolves its own data through the binding the
+        # server owns; the runtime never hands it the workflow's input frame.
+        consumes_input_frame=False,
     ),
 }
 
@@ -1794,6 +1815,28 @@ STEP_PRODUCES_DATASET = frozenset(
     operation_id
     for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
     if contract.produces_dataset
+)
+
+# Which step kinds the runtime is handed the resolved input frame for, and can
+# therefore honour a `source` commitment. The rest resolve their own data, so a
+# `source` on them would validate, resolve, and then be dropped in silence.
+STEP_CONSUMES_INPUT_FRAME = frozenset(
+    operation_id
+    for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
+    if contract.consumes_input_frame
+)
+
+# Which dataset producers the runtime's recipe-replay path can reconstruct from
+# the workflow target. Today this equals STEP_PRODUCES_DATASET, which is exactly
+# why it has to be written down separately: the moment P3 adds a reshape or a
+# subset the two diverge, and a downstream step that neither replays that
+# transform nor reads it through `source` would model the untransformed table
+# and report success. Naming the whitelist makes that divergence a compile
+# error instead of a silently wrong number.
+STEP_REPLAYABLE_BY_RECIPE = frozenset(
+    operation_id
+    for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
+    if contract.replayable_by_recipe
 )
 
 
@@ -2141,6 +2184,18 @@ def validate_workflow_steps(
         operation_spec = {key: value for key, value in spec.items() if key != "source"}
         if declares_source:
             _validate_source_commitment(step_id, source_commitment)
+            # The commitment is only meaningful if the executor is handed the
+            # frame it resolves. On an operation that resolves its own data the
+            # reference would validate, resolve, pass every integrity check, and
+            # then be discarded -- an accepted declaration with no effect, which
+            # is the shape this seam exists to eliminate. Close the contract on
+            # the consuming side too.
+            if operation_id not in STEP_CONSUMES_INPUT_FRAME:
+                raise OperationValidationError(
+                    f"workflow step {step_id} operation {operation_id} does not read "
+                    "a workflow input frame, so it cannot declare a source. Operations "
+                    "that can: " + ", ".join(sorted(STEP_CONSUMES_INPUT_FRAME))
+                )
         _validate_step_spec(str(operation_id), operation_spec)
         normalized_spec = operation_spec
         if declares_source:
@@ -2206,8 +2261,8 @@ def validate_workflow_steps(
             raise OperationValidationError(f"workflow step {step['step_id']} depends on itself")
 
     ordered = _topological_order(normalized)
-    # Only safe once the plan is known to be acyclic: this walks ancestors.
-    _reject_multiple_data_sources(ordered)
+    # Takes the ordered plan, not the raw one: ancestor resolution depends on it.
+    _reject_unreadable_data_sources(ordered)
 
     if available_columns is not None:
         available = {str(column) for column in available_columns}
@@ -2240,48 +2295,77 @@ def validate_workflow_steps(
     return ordered
 
 
-def _reject_multiple_data_sources(steps: list[dict[str, Any]]) -> None:
-    """Refuse a step that would have two upstream datasets but read only one.
+def _step_ancestors(steps: list[dict[str, Any]]) -> dict[str, frozenset[str]]:
+    """Transitive dependencies per step, from an already topologically ordered plan.
 
-    A step that commits to `source` reads exactly that dataset at execution
-    time. Any *other* dataset-producing ancestor it declares is therefore
-    computed and then dropped without a word: the author reads the plan as
-    "both transforms applied" and gets one of them. That silent discard is the
-    failure mode this whole seam exists to remove, so the shape is refused
-    while the plan is still text rather than settled by a "who wins" rule.
+    The ordering is a real precondition, so it is enforced structurally rather
+    than by a comment: every dependency is resolved before the step that names
+    it, and an unordered input raises KeyError on the spot instead of recursing.
+    """
 
-    Ancestors of the declared source are exempt -- they are how that dataset
-    was built, so they are already inside the frame this step reads.
+    ancestors: dict[str, frozenset[str]] = {}
+    for step in steps:
+        collected: set[str] = set()
+        for dependency in step["depends_on"]:
+            collected.add(dependency)
+            collected |= ancestors[dependency]
+        ancestors[step["step_id"]] = frozenset(collected)
+    return ancestors
+
+
+def _reject_unreadable_data_sources(steps: list[dict[str, Any]]) -> None:
+    """Refuse plans whose declared transforms could not all reach the step reading them.
+
+    Two shapes, one failure: a step estimating on data that is not what the plan
+    reads as its input, with nothing going red.
+
+    First, a step that commits to `source` reads exactly that dataset at
+    execution time, so any *other* dataset-producing ancestor it declares is
+    computed and then dropped without a word -- the author reads the plan as
+    "both transforms applied" and gets one of them. Ancestors of the declared
+    source are exempt: they are how that dataset was built, so they are already
+    inside the frame the step reads.
+
+    Second, a step that declares *no* source is served by the runtime's replay
+    path, which reconstructs its ancestors by re-applying their specs to the
+    workflow target. That path only knows how to replay
+    STEP_REPLAYABLE_BY_RECIPE. Any other dataset producer upstream of it would
+    simply be skipped, and the step would run against the original table while
+    the plan says otherwise. Today the two sets are equal so this cannot happen;
+    the rule exists so that the day P3 adds a transform without wiring it up,
+    the plan fails to compile rather than quietly reporting the wrong number.
     """
 
     by_id = {step["step_id"]: step for step in steps}
-    ancestors_cache: dict[str, frozenset[str]] = {}
-
-    def ancestors(step_id: str) -> frozenset[str]:
-        cached = ancestors_cache.get(step_id)
-        if cached is not None:
-            return cached
-        collected: set[str] = set()
-        for dependency in by_id[step_id]["depends_on"]:
-            collected.add(dependency)
-            collected |= ancestors(dependency)
-        resolved = frozenset(collected)
-        ancestors_cache[step_id] = resolved
-        return resolved
+    ancestors = _step_ancestors(steps)
 
     for step in steps:
+        step_id = step["step_id"]
         if "source" not in step["spec"]:
+            unreplayable = sorted(
+                candidate
+                for candidate in ancestors[step_id]
+                if by_id[candidate]["operation_id"] in STEP_PRODUCES_DATASET
+                and by_id[candidate]["operation_id"] not in STEP_REPLAYABLE_BY_RECIPE
+            )
+            if unreplayable:
+                raise OperationValidationError(
+                    f"workflow step {step_id} does not declare a source, so it reads "
+                    "the original table; the dataset(s) produced by "
+                    + ", ".join(unreplayable)
+                    + " would be ignored. Declare source.from_step to read them."
+                )
             continue
         from_step = str(step["spec"]["source"]["from_step"])
-        declared_lineage = {from_step} | ancestors(from_step)
+        declared_lineage = {from_step} | ancestors[from_step]
         discarded = sorted(
             candidate
-            for candidate in ancestors(step["step_id"]) - declared_lineage
+            for candidate in ancestors[step_id] - declared_lineage
             if by_id[candidate]["operation_id"] in STEP_PRODUCES_DATASET
         )
         if discarded:
             raise OperationValidationError(
-                f"workflow step {step['step_id']} declares more than one data source: "
+                f"workflow step {step_id} declares more than one data source: "
                 f"it reads {from_step}, so the dataset(s) produced by "
                 + ", ".join(discarded)
                 + " would be silently discarded. A step can only have one data "
@@ -2343,7 +2427,9 @@ def _topological_order(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ordered
 
 __all__ = [
+    "STEP_CONSUMES_INPUT_FRAME",
     "STEP_PRODUCES_DATASET",
+    "STEP_REPLAYABLE_BY_RECIPE",
     "SUPPORTED_STEP_OUTPUTS",
     "WORKFLOW_OPERATION_ID",
     "WORKFLOW_OPERATION_VERSION",

@@ -47,6 +47,7 @@ from ..services.draft_materialization import create_genesis_draft
 from ..services.draft_service import execute_genesis_draft
 from .workflow import WorkflowDraft, WorkflowExecutionError, WorkflowStepResult
 from .workflow_contracts import (
+    STEP_REPLAYABLE_BY_RECIPE,
     family_context_columns,
     genesis_run_params,
     model_family_contract,
@@ -239,7 +240,12 @@ def _upstream_numeric_steps(
     return tuple(
         item
         for item in draft.steps
-        if item.step_id in seen and item.operation_id == "statistical.derive_numeric"
+        # Read from the contract rather than naming the operation here. The
+        # compile-time rule that refuses an unreplayable producer upstream of a
+        # sourceless step is derived from the same declaration, so the two
+        # cannot drift apart into a plan that compiles and then skips a
+        # transform.
+        if item.step_id in seen and item.operation_id in STEP_REPLAYABLE_BY_RECIPE
     )
 
 

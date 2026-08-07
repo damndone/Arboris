@@ -22,6 +22,7 @@ from workbench.agent.workflow import (
     WorkflowStepResult,
     compile_workflow,
 )
+from workbench.agent import workflow_contracts
 from workbench.agent.workflow_contracts import validate_workflow_steps
 from workbench.agent.workflow_runtime import build_workflow_step_executor
 from workbench.artifacts import read_json, sha256_file, write_json
@@ -494,3 +495,76 @@ def test_the_declared_source_own_ancestors_are_not_a_second_source() -> None:
     )
 
     assert [item["step_id"] for item in ordered] == ["base", "middle", "last"]
+
+
+def test_a_step_that_never_receives_the_frame_cannot_declare_a_source() -> None:
+    """Closing the contract on the consuming side, not only the producing one.
+
+    `report.compose` resolves nothing from the data -- the runtime never hands
+    it an input frame. A `source` on it would validate, resolve, pass every
+    integrity check, and then be dropped, leaving a plan that reads as though a
+    transform were applied to a step that never opened the data at all.
+    """
+
+    report = {
+        "step_id": "report",
+        "operation_id": "report.compose",
+        "depends_on": ["first"],
+        "spec": {
+            "sections": ["descriptives"],
+            "source": {"from_step": "first", "output": "produced_dataset"},
+        },
+    }
+
+    with pytest.raises(
+        OperationValidationError,
+        match=r"step report operation report\.compose does not read a workflow input frame",
+    ):
+        validate_workflow_steps([_numeric_step("first", "doubled"), report])
+
+
+def test_an_unreplayable_producer_upstream_of_a_sourceless_step_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rule that is deliberately inert today, and must not be inert in P3.
+
+    A step declaring no `source` is served by the recipe-replay path, which can
+    only reconstruct the operations in STEP_REPLAYABLE_BY_RECIPE. Any other
+    dataset producer upstream of it is skipped in silence and the step runs
+    against the original table while the plan says otherwise.
+
+    Today every producer happens to be replayable, so the rule can never fire on
+    a real plan -- which is exactly why it needs a test that removes that
+    coincidence. Emptying the whitelist is the same condition P3 creates the
+    moment it registers a reshape without wiring it into the replay path.
+    """
+
+    monkeypatch.setattr(workflow_contracts, "STEP_REPLAYABLE_BY_RECIPE", frozenset())
+
+    downstream = _numeric_step("second", "scaled")
+    downstream["depends_on"] = ["first"]
+
+    with pytest.raises(
+        OperationValidationError,
+        match=r"step second does not declare a source, so it reads the original table",
+    ):
+        validate_workflow_steps([_numeric_step("first", "doubled"), downstream])
+
+
+def test_the_replay_path_and_the_compile_rule_read_the_same_declaration() -> None:
+    """One declaration, two consumers -- so they cannot drift into disagreement.
+
+    The runtime decides what to replay and the compiler decides what must be
+    read through `source`. If those were two hand-maintained lists, P3 could
+    satisfy one and not the other, which is the silent-wrong-number case this
+    rule exists to prevent.
+    """
+
+    declared = {
+        operation_id
+        for operation_id, contract in workflow_contracts.WORKFLOW_STEP_SPEC_CONTRACTS.items()
+        if contract.replayable_by_recipe
+    }
+
+    assert workflow_contracts.STEP_REPLAYABLE_BY_RECIPE == declared
+    assert declared <= workflow_contracts.STEP_PRODUCES_DATASET
