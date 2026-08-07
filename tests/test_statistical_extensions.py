@@ -21,6 +21,7 @@ def test_extension_contract_declares_clustering_and_discriminant_without_agent_r
             "multivariate.discriminant",
             "multivariate.correspondence",
             "multivariate.mca",
+            "multivariate.manova",
         }
     )
     assert MULTIVARIATE_EXTENSION_OPERATION_IDS <= MULTIVARIATE_ALL_OPERATION_IDS

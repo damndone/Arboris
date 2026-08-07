@@ -32,3 +32,9 @@
 - User authorized the next independent pack slice: MANOVA + Power Analysis, followed by Cramér's V/McNemar, each with an external numerical oracle.
 - Formal scope was expanded through `devline_control.py rescope-context` for the new contracts, pack directories, tests, design, and implementation-plan paths.
 - Stage 10 design and implementation plan are written; implementation remains isolated from Claude's Agent/workflow paths.
+- Implemented MANOVA with structured factor/covariate/interactions, four multivariate tests, bounded retained-position evidence, statistic-range checks, and statsmodels numerical Oracle coverage.
+- Implemented Power Analysis for independent t, one-way ANOVA, and two-proportion z with explicit effect-size semantics, exact-one-unknown solving, bounded Cartesian sensitivity grids, closed status/reason contracts, and SHA-256 evidence binding.
+- Implemented Cramér's V and McNemar with strict count precision guards, explicit correction/exactness policies, operation-specific contract fields, and base-R Oracle coverage.
+- Review fixes were applied through TDD after independent spec/quality review; the final integrated P7/new-module suite passed 171 tests with 2 known statsmodels ComplexWarnings.
+- Adjacent Agent/workflow regression suite passed 81 tests with existing numerical/third-party warnings; protected-path comparison is empty and `git diff --check` passes.
+- Stage 10 is complete as a standalone kernel/contract/test slice. Agent reachability, frontend, browser acceptance, full gate, merge, push, and release remain explicitly unverified/deferred.

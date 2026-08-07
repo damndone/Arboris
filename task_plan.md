@@ -23,7 +23,7 @@
 - [complete] Stage 7 — VAR stability and IRF confidence bands
 - [complete] Stage 8 — correspondence analysis and MCA
 - [complete] Stage 9 — external numerical oracle and final verification
-- [in_progress] Stage 10 — MANOVA, power analysis, and categorical-test packs
+- [complete] Stage 10 — MANOVA, power analysis, and categorical-test packs
 
 ## Stage 10 scope
 
@@ -32,6 +32,16 @@
 - Cramér's V and McNemar are a separate categorical-count pack with explicit correction/exactness policies.
 - External oracle tests use direct statsmodels and optional base R only inside tests.
 - No Agent, P0/P1/P2/P3, data-management, persistence, frontend, or existing time-series C1 paths may change.
+
+## Stage 10 verification
+
+- [complete] MANOVA: structured terms, four multivariate statistics, bounded provenance, response/design fail-closed checks, statsmodels oracle.
+- [complete] Power Analysis: independent t, one-way ANOVA, two-proportion z, exact-one-unknown solver, bounded Cartesian sensitivity grid, closed contract and evidence digest, statsmodels oracles.
+- [complete] Cramér's V/McNemar: strict integer tables, explicit correction/exactness, operation-specific contract fields, precision guard, base-R oracle.
+- [complete] Focused P7/new-module integration suite: 171 passed, 2 statsmodels ComplexWarnings.
+- [complete] Adjacent Agent/workflow regression suite: 81 passed; warnings are existing numerical/third-party warnings.
+- [complete] Protected-path comparison and diff checks.
+- [ ] Agent reachability, frontend, browser, full gate, merge, push, and release acceptance remain deferred to the P1/P2 integration wave.
 
 ## Decision rules
 
@@ -46,6 +56,8 @@
 - Intentional red-test checkpoints initially failed on missing time-series model exports; the implementation then added the independent model modules and all six model tests passed.
 - A NumPy-array-to-contract boundary was identified in the first time-series diagnostics run and closed with a local JSON-native conversion helper before proceeding.
 - VECM log likelihood can be a complex scalar with zero imaginary part; the time-series JSON boundary now normalizes only near-real complex values and rejects materially complex/non-finite results.
+- Early repeated `rescope-context` calls replaced the frozen scope one path at a time; this was corrected by one audited full-scope rescope and subsequent FMS verification. No Context Pack was hand-edited.
+- Review-driven fixes closed float64 count precision loss, MANOVA term collisions/statistic bounds/output bounds, power-contract nonfinite/semantic/grid/digest validation, and adjacent exact-surface assertions.
 
 ## Phase 2 decisions
 

@@ -34,3 +34,11 @@
 - Runtime formula construction must quote column names and must not accept arbitrary formula text from a future Agent.
 - Power analysis must solve exactly one declared unknown and retain the effect-size convention in the result; sensitivity grids must be explicit and bounded.
 - Categorical tables must be finite, non-negative integer counts. A 2x2 McNemar table with no discordant pairs is a rejection, not a zero statistic.
+
+## Stage 10 verification findings
+
+- MANOVA uses quoted structured terms rather than accepting arbitrary formula text; term-ID collisions fail closed, residual response degeneracy is distinct from design singularity, retained positions are bounded, and statistic-specific ranges are checked.
+- Power Analysis rejects nonfinite/oversized inputs at both contract and solver boundaries, requires one declared unknown, validates design-specific semantics, uses exact Cartesian sensitivity-grid signatures, and carries a SHA-256 evidence digest for result/grid readback.
+- Cramér's V/McNemar reject counts that cannot be exactly represented by the float backend before conversion, preserve exact McNemar discordant counts, require operation-specific payload fields, and match a base-R oracle.
+- The P7/new-module suite passed 171 tests with two known statsmodels Johansen ComplexWarnings; the adjacent Agent/workflow suite passed 81 tests with existing numerical/third-party warnings.
+- No Claude-owned Agent/workflow/frontend path changed; these kernels remain unreachable from natural-language Agent until the later CapabilityContract/P1/P2 integration.

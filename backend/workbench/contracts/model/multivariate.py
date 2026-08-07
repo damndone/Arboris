@@ -34,6 +34,7 @@ MULTIVARIATE_EXTENSION_OPERATION_IDS = frozenset(
         "multivariate.discriminant",
         "multivariate.correspondence",
         "multivariate.mca",
+        "multivariate.manova",
     }
 )
 MULTIVARIATE_ALL_OPERATION_IDS = (
@@ -68,6 +69,9 @@ MULTIVARIATE_REASON_CODES = frozenset(
         "MULTIVARIATE_DUPLICATE_CATEGORY_LABEL",
         "MULTIVARIATE_INVALID_CATEGORY",
         "MULTIVARIATE_OUTPUT_TOO_LARGE",
+        "MULTIVARIATE_INVALID_FACTOR_INTERACTION",
+        "MULTIVARIATE_SINGULAR_DESIGN",
+        "MULTIVARIATE_INSUFFICIENT_RESIDUAL_DF",
     }
 )
 
@@ -132,14 +136,14 @@ class MultivariateInput:
         require_exact_keys(value, _INPUT_FIELDS, "multivariate input")
         return cls(
             operation_id=value["operation_id"],
-            columns=tuple(value["columns"]),
+            columns=_normalize_columns(value["columns"]),
             missing_policy=value["missing_policy"],
         )
 
 
 @dataclass(frozen=True)
 class MultivariateResultEnvelope:
-    """Immutable result envelope shared by PCA, EFA, and reliability kernels."""
+    """Immutable result envelope shared by all standalone multivariate kernels."""
 
     operation_id: str
     status: str
@@ -186,7 +190,7 @@ class MultivariateResultEnvelope:
             status=value["status"],
             reason_code=value["reason_code"],
             n_observations=value["n_observations"],
-            columns=tuple(value["columns"]),
+            columns=_normalize_columns(value["columns"]),
             result=value["result"],
         )
 

@@ -33,6 +33,7 @@ from .discriminant import (
     fit_discriminant,
 )
 from .efa import EFA_EXTRACTIONS, EFA_ROTATIONS, fit_efa
+from .manova import MANOVA_MAX_RETAINED_POSITIONS, MANOVA_STATISTICS, fit_manova
 from .pca import PCA_COMPONENT_SELECTIONS, PCA_MATRICES, fit_pca
 from .reliability import cronbach_alpha
 
@@ -46,6 +47,9 @@ __all__ = [
     "PCA_MATRICES",
     "EFA_EXTRACTIONS",
     "EFA_ROTATIONS",
+    "MANOVA_MAX_RETAINED_POSITIONS",
+    "MANOVA_STATISTICS",
+    "fit_manova",
     "CLUSTERING_ALGORITHMS",
     "CLUSTERING_LINKAGES",
     "CLUSTERING_METRICS",
