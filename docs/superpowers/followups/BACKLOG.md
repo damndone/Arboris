@@ -275,3 +275,17 @@ DetailHeader 渲染 `{runId} · {nodeKey}`（森林下 nodeKey 是 64-hex hash�
 - **`exploration_fingerprint` 与 artifact 路径的碰撞面**：已在 Task 4.6 改为吃真实来源的
   sha，但 P3 引入 reshape/subset（改行、改值）后，需要复核同 spec 不同上游帧是否还有
   其他共享 key 的路径。见 P0 计划 Task 6 的范围补充。
+
+- **`branches` payload 有与 `produced_dataset` 完全相同的 resume 缺陷**
+  （`backend/workbench/agent/workflow_runtime.py`：`:1250` 发布，`:1332` 读取，
+  `:1567`/`:1687`/`:1734` 三个 step 家族消费）。它不随 `WorkflowStepState` 持久化，
+  所以上游 branch 生产者完成后一旦中断，resume 时 `previous[dep].payload` 是空的，
+  报错是 `{step_id} must directly depend on a completed model branch: {branch_id}`
+  ——把人送去查 `depends_on` 声明，而那里没有问题。
+
+  与 v1.8.8 Task 5 修的是同一个病，但 `branches` 不是 `SUPPORTED_STEP_OUTPUTS` 成员、
+  不在声明式 source 契约里，所以不在那个任务范围内。**它也没有 `payload["result"]`
+  那样的 `_result_from_artifact_ids` 兜底**——那条路 resume 会降级读 artifact，
+  `branches` 这条路直接骗人。
+
+  ⚠️ **不要把「链式 resume 通了」读成「resume 全通了」。** 发现于 v1.8.8 Task 5 审查。
