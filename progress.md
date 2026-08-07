@@ -27,3 +27,5 @@
 - Implemented bounded SVD correspondence analysis and explicitly labelled indicator-CA MCA with category/missing-data safety policies.
 - Added R base SVD and direct statsmodels numerical oracle tests; the combined extension suite passes: 46 tests, with 2 existing statsmodels ComplexWarning messages in the direct oracle call.
 - Next: run adjacent Agent regression tests, protected-path comparison, formal event verification, and final handoff.
+- Final verification passed: extension suite 46 tests, adjacent Agent/workflow suite 36 tests, `git diff --check`, protected-path comparison, and formal FMS verification.
+- Formal events recorded for the VECM near-real complex boundary and the initial degenerate CA Oracle fixture; both were resolved with fail-closed or invariant-aware handling.

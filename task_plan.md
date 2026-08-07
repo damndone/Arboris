@@ -22,7 +22,7 @@
 - [complete] Stage 6 — cointegration and VECM
 - [complete] Stage 7 — VAR stability and IRF confidence bands
 - [complete] Stage 8 — correspondence analysis and MCA
-- [in_progress] Stage 9 — external numerical oracle and final verification
+- [complete] Stage 9 — external numerical oracle and final verification
 
 ## Decision rules
 

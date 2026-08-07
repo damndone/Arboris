@@ -140,5 +140,5 @@
 - [x] Write oracle tests that compare direct statsmodels reference outputs and a base-R SVD reference for a fixed CA table; skip only when the external executable is unavailable.
 - [x] Run oracle tests and record exact skip/pass state; an unavailable oracle is not reported as a numerical pass.
 - [x] Add no runtime dependency on R or shell execution; keep all oracle calls inside tests with fixed inputs and argv-based subprocess invocation.
-- [ ] Run the complete extension suite, adjacent Agent tests, protected-path diff, `git diff --check`, and formal FMS verification.
-- [ ] Record the remaining Agent/UI/browser/full-gate limits and commit the verification update.
+- [x] Run the complete extension suite, adjacent Agent tests, protected-path diff, `git diff --check`, and formal FMS verification.
+- [x] Record the remaining Agent/UI/browser/full-gate limits and commit the verification update.
