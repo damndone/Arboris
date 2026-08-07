@@ -19,6 +19,7 @@ from workbench.agent.operations import OperationValidationError
 from workbench.agent.workflow import (
     WorkflowExecutionError,
     WorkflowExecutor,
+    WorkflowStepResult,
     compile_workflow,
 )
 from workbench.agent.workflow_contracts import validate_workflow_steps
@@ -375,6 +376,65 @@ def test_a_chained_step_reads_the_bytes_the_upstream_step_published(
 
     with pytest.raises(WorkflowExecutionError, match="different content"):
         executor(draft.steps[1], {"first": upstream})
+
+
+def test_an_unresolved_source_refuses_rather_than_falling_back(tmp_path: Path) -> None:
+    """No upstream result means no input -- not the original table instead.
+
+    Returning the workflow's own target here would be the exact defect this
+    seam exists to remove: the step would estimate on untransformed data, report
+    `completed`, and carry provenance saying it consumed the transform.
+    """
+
+    project, draft = _compiled_chain(
+        tmp_path,
+        [
+            _numeric_step("first", "doubled"),
+            _chained_step("second", "first", "scaled", "doubled"),
+        ],
+    )
+    executor = build_workflow_step_executor(project, draft)
+
+    with pytest.raises(
+        WorkflowExecutionError,
+        match=r"workflow step second source first has not completed",
+    ):
+        executor(draft.steps[1], {})
+
+
+def test_an_upstream_without_the_declared_binding_refuses(tmp_path: Path) -> None:
+    """A completed upstream that published nothing is still an unresolved input.
+
+    Distinguished from the unresolved case on purpose: "the step never ran" and
+    "the step ran but did not publish what you committed to reading" send an
+    author to different places. Neither may quietly become the original table.
+    """
+
+    project, draft = _compiled_chain(
+        tmp_path,
+        [
+            _numeric_step("first", "doubled"),
+            _chained_step("second", "first", "scaled", "doubled"),
+        ],
+    )
+    executor = build_workflow_step_executor(project, draft)
+    upstream = executor(draft.steps[0], {})
+    without_binding = WorkflowStepResult(
+        artifact_ids=list(upstream.artifact_ids),
+        row_counts=dict(upstream.row_counts),
+        result_fingerprint=upstream.result_fingerprint,
+        payload={
+            key: value
+            for key, value in upstream.payload.items()
+            if key != "produced_dataset"
+        },
+    )
+
+    with pytest.raises(
+        WorkflowExecutionError,
+        match=r"workflow step second source first published no 'produced_dataset' binding",
+    ):
+        executor(draft.steps[1], {"first": without_binding})
 
 
 def _reindex_artifact(
