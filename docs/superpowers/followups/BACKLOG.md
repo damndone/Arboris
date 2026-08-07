@@ -261,3 +261,17 @@ DetailHeader 渲染 `{runId} · {nodeKey}`（森林下 nodeKey 是 64-hex hash�
 
 > 整理 followups 时（2026-07-08）逐份核销：只有 v1.5.0 的 REV-3 曾滚入本 live backlog，
 > **已于 v1.6.9 清掉**（见 §3）。更早版本滚入的债至此全部清空；其余更早 followups 已冻结进 `archive/`。
+
+---
+
+## 6. v1.8.8 P0 途中发现、不在本版范围的
+
+- **`_persist_model_post_estimation_result` 里 `"model_artifact_id": "ols_1"` 是硬编码**
+  （`backend/workbench/agent/workflow_runtime.py`）。非 OLS 族的 post-estimation 记录会写
+  一个不存在的 artifact 名。它就在刚修正的 `source` 血缘块旁边，属于同一类「落盘记录
+  声称的事实与实际不符」，但触发条件不同（换模型族而非换数据来源），故单列。
+  发现于 v1.8.8 Task 4.6。
+
+- **`exploration_fingerprint` 与 artifact 路径的碰撞面**：已在 Task 4.6 改为吃真实来源的
+  sha，但 P3 引入 reshape/subset（改行、改值）后，需要复核同 spec 不同上游帧是否还有
+  其他共享 key 的路径。见 P0 计划 Task 6 的范围补充。
