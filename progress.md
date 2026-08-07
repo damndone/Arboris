@@ -11,4 +11,8 @@
 - Clustering and existing multivariate tests pass: 21 tests.
 - Implemented LDA/QDA with explicit empirical/declared priors, diagonal ridge regularization, fail-closed singular covariance handling, deterministic stratified holdout, bounded predictions, and confusion/accuracy/macro-F1 evidence.
 - Multivariate extension and existing pack tests pass: 24 tests.
-- Next: implement strict time-series input, ACF/PACF, ADF, and KPSS diagnostics.
+- Implemented strict time-series ordering, complete-case input preparation, bounded ACF/PACF, and explicit ADF/KPSS diagnostics; no frequency inference or automatic differencing is performed.
+- Time-series diagnostic tests pass: 4 tests.
+- Implemented explicit ARIMA/SARIMA, VAR, predictive-precedence Granger, and bounded IRF kernels with estimator/version provenance and JSON-safe outputs.
+- Time-series model tests pass: 6 tests.
+- Next: run the combined extension suite, adjacent Agent regression tests, protected-path diff checks, and formal FMS verification.
