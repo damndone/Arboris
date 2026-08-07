@@ -23,6 +23,15 @@
 - [complete] Stage 7 — VAR stability and IRF confidence bands
 - [complete] Stage 8 — correspondence analysis and MCA
 - [complete] Stage 9 — external numerical oracle and final verification
+- [in_progress] Stage 10 — MANOVA, power analysis, and categorical-test packs
+
+## Stage 10 scope
+
+- MANOVA is a new multivariate kernel with explicit structured terms and all four classic multivariate test statistics.
+- Power analysis is a separate contract/pack for independent t, one-way ANOVA, and two-proportion normal-approximation designs with an exactly-one-unknown solver boundary and bounded sensitivity grids.
+- Cramér's V and McNemar are a separate categorical-count pack with explicit correction/exactness policies.
+- External oracle tests use direct statsmodels and optional base R only inside tests.
+- No Agent, P0/P1/P2/P3, data-management, persistence, frontend, or existing time-series C1 paths may change.
 
 ## Decision rules
 

@@ -29,3 +29,6 @@
 - Next: run adjacent Agent regression tests, protected-path comparison, formal event verification, and final handoff.
 - Final verification passed: extension suite 46 tests, adjacent Agent/workflow suite 36 tests, `git diff --check`, protected-path comparison, and formal FMS verification.
 - Formal events recorded for the VECM near-real complex boundary and the initial degenerate CA Oracle fixture; both were resolved with fail-closed or invariant-aware handling.
+- User authorized the next independent pack slice: MANOVA + Power Analysis, followed by Cramér's V/McNemar, each with an external numerical oracle.
+- Formal scope was expanded through `devline_control.py rescope-context` for the new contracts, pack directories, tests, design, and implementation-plan paths.
+- Stage 10 design and implementation plan are written; implementation remains isolated from Claude's Agent/workflow paths.

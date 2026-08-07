@@ -26,3 +26,11 @@
 - `VARResults.is_stable()` is available on the wrapper, while `VARResults.roots` are inverse characteristic roots; stability evidence will report companion eigenvalues explicitly to avoid root-convention ambiguity.
 - VECM rank must be derived before fitting. A rank-zero Johansen result is not silently converted into a rank-one VECM.
 - CA/MCA will use a shared SVD core. MCA output will identify itself as `indicator_ca` and will not claim corrected inertia.
+
+## Stage 10 design findings
+
+- MANOVA belongs in the existing multivariate result envelope, while power analysis and categorical tests need independent envelopes because their inputs are not multivariate column selections.
+- The installed statsmodels 0.14.6 exposes `MANOVA.from_formula`, `FTestAnovaPower`, `TTestIndPower`, `NormalIndPower`, and McNemar support; no dependency installation is required.
+- Runtime formula construction must quote column names and must not accept arbitrary formula text from a future Agent.
+- Power analysis must solve exactly one declared unknown and retain the effect-size convention in the result; sensitivity grids must be explicit and bounded.
+- Categorical tables must be finite, non-negative integer counts. A 2x2 McNemar table with no discordant pairs is a rejection, not a zero statistic.
