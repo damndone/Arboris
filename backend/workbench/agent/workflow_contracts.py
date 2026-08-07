@@ -2113,13 +2113,16 @@ def validate_workflow_steps(
         # `source` is a composition-level field owned by the workflow, not by
         # any one operation's spec contract, so it is validated here and kept
         # out of the per-operation validator that would reject it as unknown.
+        # Keyed on presence, not on truthiness: an explicit `"source": None` is
+        # a malformed commitment and must be rejected, never silently dropped.
+        declares_source = "source" in spec
         source_commitment = spec.get("source")
         operation_spec = {key: value for key, value in spec.items() if key != "source"}
-        if source_commitment is not None:
+        if declares_source:
             _validate_source_commitment(step_id, source_commitment)
         _validate_step_spec(str(operation_id), operation_spec)
         normalized_spec = dict(operation_spec)
-        if source_commitment is not None:
+        if declares_source:
             normalized_spec["source"] = {
                 "from_step": str(source_commitment["from_step"]),
                 "output": str(source_commitment["output"]),
