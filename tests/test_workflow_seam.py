@@ -9,7 +9,6 @@ such a reference to resolve against.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pandas as pd
@@ -20,6 +19,7 @@ from workbench.agent.operations import OperationValidationError
 from workbench.agent.workflow import compile_workflow
 from workbench.agent.workflow_contracts import validate_workflow_steps
 from workbench.agent.workflow_runtime import build_workflow_step_executor
+from workbench.statistical_exploration import resolve_statistical_source
 
 
 def _numeric_step(step_id: str, output_name: str) -> dict:
@@ -200,8 +200,11 @@ def test_source_commitment_cannot_form_a_cycle() -> None:
 def _chain_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
+            # weight is 3.0 so that size * weight is unique in this frame: with
+            # a weight of 2.0 the product equals `outcome` column for column,
+            # and a derivation that merely copied outcome would still pass.
             "size": [1.0, 2.0, 3.0, 4.0],
-            "weight": [2.0, 2.0, 2.0, 2.0],
+            "weight": [3.0, 3.0, 3.0, 3.0],
             "outcome": [2.0, 4.0, 6.0, 8.0],
             "wave": ["a", "a", "b", "b"],
         }
@@ -234,21 +237,30 @@ def test_a_dataset_producing_step_publishes_a_resolvable_binding(tmp_path: Path)
     result = executor(draft.steps[0], {})
 
     produced = result.payload["produced_dataset"]
-    assert set(produced) == {"run_id", "node_ref", "artifact_id", "result_fingerprint"}
+    assert set(produced) == {
+        "schema_version",
+        "run_id",
+        "node_ref",
+        "artifact_id",
+        "content_sha256",
+        "result_fingerprint",
+    }
+    assert produced["schema_version"] == "workflow-produced-dataset.v1"
     assert produced["run_id"] == draft.target["run_id"]
-    assert produced["node_ref"].startswith("data-derive-numeric:")
     assert produced["result_fingerprint"] == result.result_fingerprint
 
-    # The binding promises a readable dataset, so follow it the way a consumer
-    # would. The step registers two artifacts and only one of them is the data;
-    # resolving the id to its file and finding the derived column is what tells
-    # the two apart, where "is one of this step's artifacts" would not.
-    run_root = project / "runs" / produced["run_id"]
-    index = json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))
-    entry = next(
-        item
-        for item in index["artifacts"]
-        if item["artifact_id"] == produced["artifact_id"]
+    # Resolve the binding through the resolver a consuming step will use, rather
+    # than re-reading the index by hand: that is what "resolvable" has to mean,
+    # and it also enforces that node_ref and artifact_id name the same dataset.
+    context, published = resolve_statistical_source(
+        project,
+        source_run_id=produced["run_id"],
+        source_node_id=produced["node_ref"],
+        source_artifact_id=produced["artifact_id"],
     )
-    published = pd.read_csv(run_root / entry["path"])
-    assert list(published["doubled"]) == [2.0, 4.0, 6.0, 8.0]
+
+    # The published hash must match the bytes the resolver actually read. This
+    # is the check a consumer can fail; result_fingerprint cannot serve here,
+    # since re-deriving it from the same step record compares it to itself.
+    assert produced["content_sha256"] == context["source_sha256"]
+    assert list(published["doubled"]) == [3.0, 6.0, 9.0, 12.0]

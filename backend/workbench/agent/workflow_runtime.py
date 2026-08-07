@@ -55,6 +55,9 @@ from .workflow_contracts import (
 
 
 _NUMERIC_DERIVATION_SCHEMA = "workflow-derived-numeric.v1"
+# Versioned because a consuming step reads this block back from persisted state
+# on resume, and because every dataset-producing operation will publish it.
+_PRODUCED_DATASET_SCHEMA = "workflow-produced-dataset.v1"
 
 # The artifact types a declared post-estimation step can persist. Both are
 # already registered evidence; this is the read side of the same contract.
@@ -390,13 +393,14 @@ def _persist_numeric_derivation(
         )
 
     GraphStore(root / "runs").mutate(source_run_id, add_child)
+    data_sha256 = sha256_file(data_path)
     node_index_path = run_root / "node_index.json"
     if node_index_path.is_file():
         node_index = read_json(node_index_path)
         entry = {
-            "node_hash": sha256_file(data_path),
+            "node_hash": data_sha256,
             "producing_stage": "workflow.derive_numeric",
-            "cas_ref": {"node_hash": sha256_file(data_path), "artifact": data_rel},
+            "cas_ref": {"node_hash": data_sha256, "artifact": data_rel},
         }
         existing = node_index.get(child_node_id)
         if existing is not None and existing != entry:
@@ -409,14 +413,23 @@ def _persist_numeric_derivation(
         result_fingerprint=fingerprint,
         payload={
             "output_columns": summaries,
-            "child_node_id": child_node_id,
             # The standard binding a later step commits to consuming. Every
             # dataset-producing step publishes this exact shape, so resolution
             # never branches on which operation produced the input.
             "produced_dataset": {
+                "schema_version": _PRODUCED_DATASET_SCHEMA,
                 "run_id": source_run_id,
                 "node_ref": child_node_id,
                 "artifact_id": data_artifact_id,
+                # The two hashes are not interchangeable. content_sha256 digests
+                # the bytes on disk, so a consumer comparing it against what it
+                # actually read detects a binding that points at the wrong
+                # artifact, or a run directory rewritten between resumes.
+                # result_fingerprint is the producing step's own fingerprint and
+                # is provenance only: a consumer that re-derives it from the same
+                # step record is comparing a value against itself, which no input
+                # can falsify. Verify with content_sha256, attribute with this.
+                "content_sha256": data_sha256,
                 "result_fingerprint": fingerprint,
             },
         },
