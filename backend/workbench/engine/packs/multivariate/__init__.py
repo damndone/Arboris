@@ -6,16 +6,23 @@ over explicit data frames and option policies, ready for a later capability
 adapter without changing the numerical kernels.
 """
 
-from .common import MultivariatePackError, PreparedNumericFrame, prepare_numeric_frame
-from .efa import fit_efa
-from .pca import fit_pca
+from workbench.contracts.model.multivariate import (
+    MULTIVARIATE_CONTRACT_VERSION,
+    MULTIVARIATE_OPERATION_IDS,
+)
+
+from .efa import EFA_EXTRACTIONS, EFA_ROTATIONS, fit_efa
+from .pca import PCA_COMPONENT_SELECTIONS, PCA_MATRICES, fit_pca
 from .reliability import cronbach_alpha
 
 __all__ = [
-    "MultivariatePackError",
-    "PreparedNumericFrame",
-    "prepare_numeric_frame",
-    "fit_pca",
-    "fit_efa",
     "cronbach_alpha",
+    "fit_efa",
+    "fit_pca",
+    "MULTIVARIATE_CONTRACT_VERSION",
+    "MULTIVARIATE_OPERATION_IDS",
+    "PCA_COMPONENT_SELECTIONS",
+    "PCA_MATRICES",
+    "EFA_EXTRACTIONS",
+    "EFA_ROTATIONS",
 ]

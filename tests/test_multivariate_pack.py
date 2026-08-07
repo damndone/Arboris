@@ -237,6 +237,41 @@ def test_pca_normalizes_component_signs_and_validates_selection_bounds():
         )
 
 
+def test_pca_supports_kaiser_and_cumulative_variance_selection_policies():
+    from workbench.engine.packs.multivariate import fit_pca
+    from workbench.engine.packs.multivariate.common import MultivariatePackError
+
+    frame = _unequal_scale_frame()
+    columns = ["small", "large", "middle"]
+    kaiser = fit_pca(
+        frame,
+        columns,
+        matrix="correlation",
+        component_selection="kaiser",
+    )
+    cumulative = fit_pca(
+        frame,
+        columns,
+        matrix="correlation",
+        component_selection="cumulative_variance",
+        variance_threshold=0.8,
+    )
+
+    assert 1 <= kaiser["result"]["n_components"] <= len(columns)
+    selected = cumulative["result"]["n_components"]
+    cumulative_values = cumulative["result"]["cumulative_explained_variance"]
+    assert cumulative_values[selected - 1] >= 0.8
+    if selected > 1:
+        assert cumulative_values[selected - 2] < 0.8
+    with pytest.raises(MultivariatePackError, match="MULTIVARIATE_UNSUPPORTED_OPTION"):
+        fit_pca(
+            frame,
+            columns,
+            matrix="covariance",
+            component_selection="kaiser",
+        )
+
+
 def _reliability_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -437,3 +472,63 @@ def test_efa_rejects_unsupported_methods_and_normalizes_signs_deterministically(
             ["v1", "v2", "v3", "v4", "v5", "v6"],
             **{**kwargs, "rotation": "quartimax"},
         )
+
+
+def test_multivariate_surface_is_narrow_and_results_are_json_safe_and_deterministic():
+    import workbench.engine.packs.multivariate as multivariate
+    from workbench.canonical import canonical_json_v1
+    from workbench.contracts.model.multivariate import (
+        MULTIVARIATE_CONTRACT_VERSION,
+        MULTIVARIATE_OPERATION_IDS,
+    )
+
+    assert set(multivariate.__all__) == {
+        "cronbach_alpha",
+        "fit_efa",
+        "fit_pca",
+        "MULTIVARIATE_CONTRACT_VERSION",
+        "MULTIVARIATE_OPERATION_IDS",
+        "PCA_COMPONENT_SELECTIONS",
+        "PCA_MATRICES",
+        "EFA_EXTRACTIONS",
+        "EFA_ROTATIONS",
+    }
+    assert multivariate.MULTIVARIATE_CONTRACT_VERSION == MULTIVARIATE_CONTRACT_VERSION
+    assert multivariate.MULTIVARIATE_OPERATION_IDS == MULTIVARIATE_OPERATION_IDS
+
+    pca = multivariate.fit_pca(
+        _unequal_scale_frame(),
+        ["small", "large", "middle"],
+        matrix="correlation",
+        component_selection="fixed",
+        n_components=2,
+        include_scores=True,
+        max_score_rows=2,
+    )
+    efa = multivariate.fit_efa(
+        _efa_frame(),
+        ["v1", "v2", "v3", "v4", "v5", "v6"],
+        n_factors=2,
+        extraction="principal_axis",
+        rotation="varimax",
+        kmo_threshold=0.6,
+        bartlett_alpha=0.05,
+    )
+    alpha = multivariate.cronbach_alpha(_reliability_frame(), ["item_1", "item_2", "item_3"])
+
+    for result in (pca, efa, alpha):
+        json.dumps(result, ensure_ascii=False, allow_nan=False)
+        assert canonical_json_v1(result) == canonical_json_v1(result)
+    assert pca["result"]["scores_row_count"] == 2
+    assert pca["result"]["scores_truncated"] is True
+    assert canonical_json_v1(pca) == canonical_json_v1(
+        multivariate.fit_pca(
+            _unequal_scale_frame(),
+            ["small", "large", "middle"],
+            matrix="correlation",
+            component_selection="fixed",
+            n_components=2,
+            include_scores=True,
+            max_score_rows=2,
+        )
+    )

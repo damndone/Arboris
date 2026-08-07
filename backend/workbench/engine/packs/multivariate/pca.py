@@ -120,9 +120,19 @@ def fit_pca(
         raise MultivariatePackError(
             "MULTIVARIATE_INVALID_OPTION", "max_score_rows must be a positive integer"
         )
+    if isinstance(columns, (str, bytes)):
+        raise MultivariatePackError(
+            "MULTIVARIATE_BAD_INPUT", "columns must be an array of column names"
+        )
+    try:
+        requested_columns = list(columns)
+    except TypeError as exc:
+        raise MultivariatePackError(
+            "MULTIVARIATE_BAD_INPUT", "columns must be an array of column names"
+        ) from exc
     prepared = prepare_numeric_frame(
         frame,
-        list(columns),
+        requested_columns,
         missing_policy=missing_policy,
     )
     values = prepared.frame.to_numpy(dtype=float)
@@ -148,7 +158,13 @@ def fit_pca(
         working = centered
 
     matrix_values = np.atleast_2d(np.cov(working, rowvar=False, ddof=1))
-    eigenvalues, eigenvectors = np.linalg.eigh(matrix_values)
+    try:
+        eigenvalues, eigenvectors = np.linalg.eigh(matrix_values)
+    except np.linalg.LinAlgError as exc:
+        raise MultivariatePackError(
+            "MULTIVARIATE_NUMERIC_DEGENERACY",
+            "eigendecomposition of the PCA matrix failed",
+        ) from exc
     order = np.argsort(eigenvalues)[::-1]
     eigenvalues = np.asarray(eigenvalues[order], dtype=float)
     eigenvectors = np.asarray(eigenvectors[:, order], dtype=float)

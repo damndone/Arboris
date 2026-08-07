@@ -72,7 +72,16 @@ def prepare_numeric_frame(
             "MULTIVARIATE_UNSUPPORTED_MISSING_POLICY",
             "only complete_case_v1 is currently declared",
         )
-    normalized_columns = list(columns)
+    if isinstance(columns, (str, bytes)):
+        raise MultivariatePackError(
+            "MULTIVARIATE_BAD_INPUT", "columns must be an array of column names"
+        )
+    try:
+        normalized_columns = list(columns)
+    except TypeError as exc:
+        raise MultivariatePackError(
+            "MULTIVARIATE_BAD_INPUT", "columns must be an array of column names"
+        ) from exc
     _validate_columns(frame, normalized_columns)
 
     selected = frame.loc[:, normalized_columns].copy()
@@ -83,7 +92,7 @@ def prepare_numeric_frame(
                 "MULTIVARIATE_NON_NUMERIC_COLUMN",
                 f"column {column!r} is not a real numeric column",
             )
-        if np.issubdtype(dtype, np.complexfloating):
+        if pd.api.types.is_complex_dtype(dtype):
             raise MultivariatePackError(
                 "MULTIVARIATE_NON_NUMERIC_COLUMN",
                 f"column {column!r} is complex-valued",
@@ -144,7 +153,11 @@ def json_native(value: Any) -> Any:
     if isinstance(value, (np.bool_,)):
         return bool(value)
     if isinstance(value, dict):
-        return {str(key): json_native(item) for key, item in value.items()}
+        if any(type(key) is not str for key in value):
+            raise MultivariatePackError(
+                "MULTIVARIATE_BAD_INPUT", "result mapping keys must already be strings"
+            )
+        return {key: json_native(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [json_native(item) for item in value]
     if isinstance(value, float) and not np.isfinite(value):

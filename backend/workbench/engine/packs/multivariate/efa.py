@@ -159,9 +159,19 @@ def fit_efa(
 ) -> dict[str, object]:
     """Fit EFA only after declared KMO and Bartlett hard gates pass."""
 
+    if isinstance(columns, (str, bytes)):
+        raise MultivariatePackError(
+            "MULTIVARIATE_BAD_INPUT", "columns must be an array of column names"
+        )
+    try:
+        requested_columns = list(columns)
+    except TypeError as exc:
+        raise MultivariatePackError(
+            "MULTIVARIATE_BAD_INPUT", "columns must be an array of column names"
+        ) from exc
     prepared = prepare_numeric_frame(
         frame,
-        list(columns),
+        requested_columns,
         missing_policy=missing_policy,
     )
     values = prepared.frame.to_numpy(dtype=float)
@@ -188,15 +198,21 @@ def fit_efa(
             "Bartlett's test is not significant at the declared alpha",
         )
 
-    fitted = Factor(
-        corr=correlation,
-        n_factor=n_factors,
-        method=_EXTRACTION_METHODS[extraction],
-        nobs=n_observations,
-        endog_names=list(prepared.columns),
-    ).fit(maxiter=100, tol=1e-8)
-    if rotation != "none":
-        fitted.rotate(rotation)
+    try:
+        fitted = Factor(
+            corr=correlation,
+            n_factor=n_factors,
+            method=_EXTRACTION_METHODS[extraction],
+            nobs=n_observations,
+            endog_names=list(prepared.columns),
+        ).fit(maxiter=100, tol=1e-8)
+        if rotation != "none":
+            fitted.rotate(rotation)
+    except (ValueError, np.linalg.LinAlgError) as exc:
+        raise MultivariatePackError(
+            "MULTIVARIATE_NUMERIC_DEGENERACY",
+            "the declared EFA estimator or rotation could not fit this matrix",
+        ) from exc
     loadings = _normalize_loading_signs(_real_loading_array(fitted.loadings))
     if not np.isfinite(loadings).all():
         raise MultivariatePackError(

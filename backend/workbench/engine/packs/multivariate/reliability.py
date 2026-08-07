@@ -103,7 +103,16 @@ def cronbach_alpha(
     minimum/maximum scale bounds.
     """
 
-    normalized_items = tuple(items)
+    if isinstance(items, (str, bytes)):
+        raise MultivariatePackError(
+            "MULTIVARIATE_BAD_INPUT", "items must be an array of item names"
+        )
+    try:
+        normalized_items = tuple(items)
+    except TypeError as exc:
+        raise MultivariatePackError(
+            "MULTIVARIATE_BAD_INPUT", "items must be an array of item names"
+        ) from exc
     reverse_set, bounds = _validate_item_options(
         normalized_items,
         reverse_scored,
