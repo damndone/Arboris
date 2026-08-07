@@ -3280,6 +3280,13 @@ def _bounded_result_summary(
     return {
         "available": summary_status == "complete" and preview.get("available") is True,
         "summary_status": summary_status,
+        # v1.8.7. Without these an Agent reads a design-based standard error as
+        # an ordinary one: it would speak about the precision of the estimate
+        # with no way to know the interval uses 8 degrees of freedom rather than
+        # 80 observations. `None` when no design was declared, so absence reads
+        # as absence rather than as a field that failed to load.
+        "survey_design": _bounded_survey_design(model_results),
+        "marginal_effects": _bounded_average_marginal_effects(model_results),
         "run_lifecycle_status": preview.get("run_lifecycle_status"),
         "trust_label": preview.get("trust_label"),
         "model_identity": model_identity,
@@ -3355,6 +3362,16 @@ def _project_family_evidence(
         "contract": spec.contract if spec.contract is not None else source.get("contract"),
         "model_type": primary.get("model_type"),
     }
+    # How strongly this family's numbers were checked (v1.8.7 A3). Projected for
+    # every family rather than declared per family: it is a property of the
+    # result, and an Agent quoting a figure should be able to say what backs it
+    # instead of implying more than is known. Three of the four v1.8.6 families
+    # agree with R only within a solver tolerance.
+    validation = source.get("validation")
+    if isinstance(validation, dict):
+        projected["validation"] = _bounded_numeric_fields(
+            validation, fields=(), string_fields=("level", "external_oracle")
+        )
     for field in spec.fields:
         origin = sidecars[field.sidecar] if field.sidecar else source
         value = origin.get(field.source_key)
@@ -3522,6 +3539,28 @@ def _bounded_family_diagnostic(value: Any) -> dict[str, Any]:
             if isinstance(key, str) and isinstance(label, str)
         } if isinstance(value.get("validation"), dict) else {},
     }
+
+
+def _bounded_anova_rows(value: Any, *, limit: int = 24) -> list[dict[str, Any]]:
+    """An ANOVA table, bounded like every other agent-facing projection.
+
+    A factorial design with many levels can produce a long table; the limit
+    keeps this a summary rather than a data-export channel.
+    """
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for row in value[:limit]:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            _bounded_numeric_fields(
+                row,
+                fields=("sum_sq", "df", "f", "p_value", "partial_eta_squared"),
+                string_fields=("term",),
+            )
+        )
+    return rows
 
 
 def _bounded_survival_rows(value: Any, *, limit: int) -> list[dict[str, Any]]:
@@ -4552,6 +4591,21 @@ class FamilyEvidenceSpec:
 
 
 FAMILY_EVIDENCE_PROJECTIONS: dict[str, FamilyEvidenceSpec] = {
+    "anova": FamilyEvidenceSpec(
+        contract="workbench.anova.result.v1",
+        fields=(
+            # The type is not decoration: on an unbalanced design Type I and
+            # Type III disagree (166.74 against 104.05 on the committed
+            # fixture), so a table quoted without it is ambiguous.
+            FamilyEvidenceField("sums_of_squares_type", "sums_of_squares_type", _public_positive_int),
+            FamilyEvidenceField("anova_table", "anova_table", _bounded_anova_rows),
+            FamilyEvidenceField(
+                "partial_eta_squared", "partial_eta_squared",
+                lambda v: _bounded_numeric_map(v, fields=("partial_eta_squared",)),
+            ),
+            FamilyEvidenceField("posthoc", "posthoc", lambda v: _bounded_anova_rows(v, limit=32)),
+        ),
+    ),
     "ordinal_logit": FamilyEvidenceSpec(
         contract="workbench.ordinal_logit.result.v1",
         sidecars={"diagnostic": "model_results/diagnostics_ordinal_logit_1.json"},
@@ -4643,3 +4697,60 @@ RECIPE_RESULT_PROJECTIONS: dict[str, RecipeResultProjection] = {
         unavailable_reason_code="ETS_PUBLIC_RESULT_UNAVAILABLE",
     ),
 }
+
+
+def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The terms every interval in this run is conditional on.
+
+    Returned alongside the coefficients rather than behind a separate tool: an
+    Agent that has the standard errors already has everything it needs to make a
+    claim about precision, so the qualification has to arrive with them.
+    """
+    for result in model_results:
+        if not isinstance(result, dict):
+            continue
+        design = result.get("survey_design")
+        if not isinstance(design, dict):
+            continue
+        return _bounded_numeric_fields(
+            design,
+            fields=(
+                "n_obs", "n_strata", "n_psu", "degf", "residual_degf",
+                "design_effect", "effective_sample_size",
+            ),
+            string_fields=(
+                "variance_method", "strata_column", "psu_column",
+                "weight_column", "replicate_type", "lonely_psu_policy",
+                "subpopulation",
+            ),
+        )
+    return None
+
+
+def _bounded_average_marginal_effects(
+    model_results: list[dict[str, Any]], *, limit: int = 16
+) -> list[dict[str, Any]]:
+    """A GLM coefficient is a log-odds; the marginal effect is what gets quoted.
+
+    v1.8.7 computes these for logit/probit/poisson and nothing exposed them, so
+    an Agent asked "how much does x move y" had only the log-odds to work from.
+    """
+    for result in model_results:
+        if not isinstance(result, dict):
+            continue
+        effects = result.get("marginal_effects")
+        if not isinstance(effects, list):
+            continue
+        rows: list[dict[str, Any]] = []
+        for row in effects[:limit]:
+            if not isinstance(row, dict):
+                continue
+            rows.append(
+                _bounded_numeric_fields(
+                    row,
+                    fields=("estimate", "std_error", "p_value", "ci_lower", "ci_upper"),
+                    string_fields=("term", "variable"),
+                )
+            )
+        return rows
+    return []
