@@ -1784,6 +1784,44 @@ def workflow_step_vocabulary() -> dict[str, Any]:
         },
         "reported_percentiles": list(_REPORTED_PERCENTILES),
         "step_id_pattern": _STEP_ID_PATTERN.pattern,
+        # The composition seam. Every value below is read from the same
+        # declarations the validator refuses against, so an operation that
+        # gains `produces_dataset` becomes nameable by a plan in the same edit
+        # that registers it. A hand-written list here would be the second place
+        # to remember, and the one that goes stale.
+        "source": {
+            "purpose": (
+                "By default every step reads the workflow's own target dataset. "
+                "A step that must instead read the dataset an earlier step "
+                "produced declares `source` inside its `spec`."
+            ),
+            "shape": {
+                "from_step": (
+                    "The step_id of the earlier step in this same plan whose "
+                    "output this step reads."
+                ),
+                "output": (
+                    "Which of that step's outputs to read, from the supported "
+                    "output values listed with this entry."
+                ),
+            },
+            "outputs": sorted(SUPPORTED_STEP_OUTPUTS),
+            "produced_by": sorted(STEP_PRODUCES_DATASET),
+            "declarable_by": sorted(STEP_CONSUMES_INPUT_FRAME),
+            "semantics": (
+                "from_step may only name a step whose operation is one of the "
+                "dataset producers listed here, and only a step whose operation "
+                "is listed as able to declare a source may carry one. Declaring "
+                "a source is also "
+                "declaring a dependency: from_step is folded into depends_on, so "
+                "the step runs after its producer and is blocked, never run "
+                "against the original table, if that producer fails. A step has "
+                "exactly one data source -- `source` is a single object, never a "
+                "list -- and a step that declares none reads the workflow target. "
+                "To work from two produced datasets, produce the combination in "
+                "one step and read that step."
+            ),
+        },
         "ordering": (
             "Steps form a DAG via `depends_on` (step_ids) and run in topological "
             "order. A step whose dependency failed is blocked, never skipped."

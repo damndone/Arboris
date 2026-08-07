@@ -170,6 +170,25 @@ def _step_vocabulary_lines() -> str:
         f"  - Reported percentile grid: {grid}. Write 25 for the first quartile, never 0.25."
     )
     lines.append(f"  - {vocabulary['ordering']}")
+    # The dict is not the prompt: only what is rendered here reaches the Agent.
+    # A step's input source is published as prose for the same reason the field
+    # names above are -- a capability the Agent cannot name is a capability it
+    # never uses.
+    source = vocabulary["source"]
+    shape = ", ".join(f"{name} ({text})" for name, text in source["shape"].items())
+    lines.append(f"  - {source['purpose']} Its fields are: {shape}")
+    lines.append(f"      source.output must be one of: {', '.join(source['outputs'])}.")
+    lines.append(
+        "      Only these steps produce a dataset a source may name: "
+        + ", ".join(source["produced_by"])
+        + "."
+    )
+    lines.append(
+        "      Only these steps may declare a source: "
+        + ", ".join(source["declarable_by"])
+        + "."
+    )
+    lines.append(f"      {source['semantics']}")
     return "\n".join(lines)
 
 

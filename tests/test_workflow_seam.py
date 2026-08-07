@@ -27,7 +27,10 @@ from workbench.agent.workflow import (
     compile_workflow,
 )
 from workbench.agent import workflow_contracts
-from workbench.agent.workflow_contracts import validate_workflow_steps
+from workbench.agent.workflow_contracts import (
+    validate_workflow_steps,
+    workflow_step_vocabulary,
+)
 from workbench.agent.workflow_runtime import build_workflow_step_executor
 from workbench.artifacts import read_json, sha256_file, write_json
 from workbench.graph_store import GraphStore
@@ -1637,3 +1640,110 @@ def test_the_same_exploration_on_a_derived_table_is_a_different_identity(
     # The identity is a location, so state the consequence directly: the two
     # records must not share an artifact.
     assert set(direct.artifact_ids).isdisjoint(derived.artifact_ids)
+
+
+# --- The seam's only reader that is not a test -------------------------------
+#
+# Everything above verifies that a declared `source` is validated, resolved,
+# executed and recovered correctly. None of it puts the field within reach of
+# the planning agent, which learns real field names from exactly one place:
+# workflow_step_vocabulary(). A seam the agent cannot name is a seam only the
+# test suite uses.
+
+
+def test_the_vocabulary_publishes_the_source_field() -> None:
+    """The planning agent's only route to the composition seam."""
+
+    source = workflow_step_vocabulary()["source"]
+
+    assert set(source["shape"]) == {"from_step", "output"}
+    assert source["purpose"]
+    assert source["semantics"]
+
+
+def test_the_published_source_sets_are_the_declared_ones() -> None:
+    """Published from the same constants the validator refuses against.
+
+    A hand-written list here would be a second place to remember, and the one
+    that goes stale: the agent would be taught an operation the compiler
+    rejects, or -- worse -- never told about one it would have accepted.
+    """
+
+    source = workflow_step_vocabulary()["source"]
+
+    assert set(source["outputs"]) == set(workflow_contracts.SUPPORTED_STEP_OUTPUTS)
+    assert set(source["produced_by"]) == set(workflow_contracts.STEP_PRODUCES_DATASET)
+    assert set(source["declarable_by"]) == set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME)
+
+
+def test_the_published_sets_track_the_declarations_they_are_read_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Drift guard: a newly declared capability must publish itself.
+
+    This is the live half of the derivation chain. The other half --
+    ``constant == comprehension over WORKFLOW_STEP_SPEC_CONTRACTS`` -- is
+    asserted in the contract tests below; together they say that registering a
+    step operation with ``produces_dataset=True`` reaches the agent with no
+    second edit. Standing in for that future registration by extending the
+    constants is what makes the guard fail against a hard-coded list, which is
+    the failure mode it exists to catch.
+    """
+
+    monkeypatch.setattr(
+        workflow_contracts,
+        "STEP_PRODUCES_DATASET",
+        frozenset({*workflow_contracts.STEP_PRODUCES_DATASET, "data.future_reshape"}),
+    )
+    monkeypatch.setattr(
+        workflow_contracts,
+        "STEP_CONSUMES_INPUT_FRAME",
+        frozenset({*workflow_contracts.STEP_CONSUMES_INPUT_FRAME, "data.future_reshape"}),
+    )
+    monkeypatch.setattr(
+        workflow_contracts,
+        "SUPPORTED_STEP_OUTPUTS",
+        frozenset({*workflow_contracts.SUPPORTED_STEP_OUTPUTS, "produced_summary"}),
+    )
+
+    source = workflow_step_vocabulary()["source"]
+
+    assert "data.future_reshape" in source["produced_by"]
+    assert "data.future_reshape" in source["declarable_by"]
+    assert "produced_summary" in source["outputs"]
+
+
+def test_the_source_sets_are_derived_from_the_step_contracts() -> None:
+    """The other half of the chain: constants are never hand-kept lists."""
+
+    contracts = workflow_contracts.WORKFLOW_STEP_SPEC_CONTRACTS
+
+    assert workflow_contracts.STEP_PRODUCES_DATASET == {
+        operation_id
+        for operation_id, contract in contracts.items()
+        if contract.produces_dataset
+    }
+    assert workflow_contracts.STEP_CONSUMES_INPUT_FRAME == {
+        operation_id
+        for operation_id, contract in contracts.items()
+        if contract.consumes_input_frame
+    }
+
+
+def test_the_agent_protocol_text_carries_the_source_field() -> None:
+    """The vocabulary dict is not the prompt; the rendered lines are.
+
+    The chain protocol renders selected vocabulary keys into text, so a key
+    added to the dict and not to the renderer is published to nobody. That is
+    the same out-of-reach failure this whole version exists to fix, and it
+    would be invisible to a dict-level assertion.
+    """
+
+    from workbench.http.agent_routes import _step_vocabulary_lines
+
+    rendered = _step_vocabulary_lines()
+
+    assert "source" in rendered
+    assert "from_step" in rendered
+    for operation_id in workflow_contracts.STEP_PRODUCES_DATASET:
+        assert operation_id in rendered
