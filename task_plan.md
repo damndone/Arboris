@@ -15,7 +15,7 @@
 
 - [complete] Stage 0 — same-worktree formal line scope, design, and implementation plan
 - [complete] Stage 1 — deterministic clustering kernel: k-means and hierarchical clustering
-- [pending] Stage 2 — safe LDA/QDA discriminant kernel with validation evidence
+- [complete] Stage 2 — safe LDA/QDA discriminant kernel with validation evidence
 - [pending] Stage 3 — time-series input boundary, ACF/PACF and unit-root diagnostics
 - [pending] Stage 4 — explicit ARIMA/SARIMA and VAR/Granger/IRF kernels
 - [pending] Stage 5 — shared JSON surface, adjacent regression tests, protected-path and FMS verification

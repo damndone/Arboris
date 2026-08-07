@@ -19,6 +19,12 @@ from .clustering import (
     CLUSTERING_STANDARDIZATIONS,
     fit_clustering,
 )
+from .discriminant import (
+    DISCRIMINANT_EVALUATIONS,
+    DISCRIMINANT_METHODS,
+    DISCRIMINANT_PRIOR_POLICIES,
+    fit_discriminant,
+)
 from .efa import EFA_EXTRACTIONS, EFA_ROTATIONS, fit_efa
 from .pca import PCA_COMPONENT_SELECTIONS, PCA_MATRICES, fit_pca
 from .reliability import cronbach_alpha
@@ -39,4 +45,8 @@ __all__ = [
     "CLUSTERING_SELECTIONS",
     "CLUSTERING_STANDARDIZATIONS",
     "fit_clustering",
+    "DISCRIMINANT_EVALUATIONS",
+    "DISCRIMINANT_METHODS",
+    "DISCRIMINANT_PRIOR_POLICIES",
+    "fit_discriminant",
 ]

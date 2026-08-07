@@ -498,6 +498,10 @@ def test_multivariate_surface_is_narrow_and_results_are_json_safe_and_determinis
         "CLUSTERING_SELECTIONS",
         "CLUSTERING_STANDARDIZATIONS",
         "fit_clustering",
+        "DISCRIMINANT_EVALUATIONS",
+        "DISCRIMINANT_METHODS",
+        "DISCRIMINANT_PRIOR_POLICIES",
+        "fit_discriminant",
     }
     assert multivariate.MULTIVARIATE_CONTRACT_VERSION == MULTIVARIATE_CONTRACT_VERSION
     assert multivariate.MULTIVARIATE_OPERATION_IDS == MULTIVARIATE_OPERATION_IDS

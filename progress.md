@@ -9,4 +9,6 @@
 - Rescoped the same formal line to include the existing multivariate surface test and the new extension paths.
 - Implemented deterministic k-means and hierarchical clustering with explicit standardization, selection, linkage/metric, seed, iteration, and bounded assignment policies.
 - Clustering and existing multivariate tests pass: 21 tests.
-- Next: implement LDA/QDA discriminant analysis with explicit priors, regularization, and holdout evaluation.
+- Implemented LDA/QDA with explicit empirical/declared priors, diagonal ridge regularization, fail-closed singular covariance handling, deterministic stratified holdout, bounded predictions, and confusion/accuracy/macro-F1 evidence.
+- Multivariate extension and existing pack tests pass: 24 tests.
+- Next: implement strict time-series input, ACF/PACF, ADF, and KPSS diagnostics.
