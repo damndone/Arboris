@@ -42,3 +42,12 @@
 - Cramér's V/McNemar reject counts that cannot be exactly represented by the float backend before conversion, preserve exact McNemar discordant counts, require operation-specific payload fields, and match a base-R oracle.
 - The P7/new-module suite passed 171 tests with two known statsmodels Johansen ComplexWarnings; the adjacent Agent/workflow suite passed 81 tests with existing numerical/third-party warnings.
 - No Claude-owned Agent/workflow/frontend path changed; these kernels remain unreachable from natural-language Agent until the later CapabilityContract/P1/P2 integration.
+
+## Stage 11 design findings
+
+- The installed environment has statsmodels 0.14.6, SciPy 1.18.0, NumPy 2.5.0, and pandas 3.0.4; `AnovaRM` and `statsmodels.stats.meta_analysis` are available without installing dependencies.
+- R 4.6.0 has the `survival` and `lme4` packages, but not `pROC`, `metafor`, or `meta`; ROC and meta Oracles therefore use independent base-R formulas rather than unavailable packages.
+- Statsmodels `AnovaRM` explicitly rejects between-subject effects; mixed ANOVA needs a separate balanced error-layer calculation and must not be falsely labelled as an AnovaRM result.
+- Existing automatic `statistical_tests` already contains Mann-Whitney, Kruskal-Wallis, Wilcoxon, rank correlations, and variance/normality evidence; Stage 11 must not duplicate those functions.
+- Existing `survival_cox` remains a separate model family. The new survival pack is limited to KM, log-rank, and RMST and must not modify Cox files.
+- ROC accepts labels and scores only; meta-analysis accepts study-level effects/variances only. Neither module may create training splits, retrieve source studies, or call Agent/runtime code.

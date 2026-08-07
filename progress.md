@@ -38,3 +38,6 @@
 - Review fixes were applied through TDD after independent spec/quality review; the final integrated P7/new-module suite passed 171 tests with 2 known statsmodels ComplexWarnings.
 - Adjacent Agent/workflow regression suite passed 81 tests with existing numerical/third-party warnings; protected-path comparison is empty and `git diff --check` passes.
 - Stage 10 is complete as a standalone kernel/contract/test slice. Agent reachability, frontend, browser acceptance, full gate, merge, push, and release remain explicitly unverified/deferred.
+- User authorized Stage 11: classic repeated-measures/mixed ANOVA, survival extensions, ROC/classification diagnostics, and meta-analysis, with external R/statsmodels Oracles and parallel subagent development.
+- Brainstorming selected four independent packs rather than modifying automatic statistical tests, Cox/LMM, prediction infrastructure, or Agent/P0 paths. Design and implementation plan documents were added for each pack.
+- Formal P7 scope was expanded through `devline_control.py rescope-context` to include all Stage 11 contracts, pack directories, tests, and docs. Implementation has not started yet.

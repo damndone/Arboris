@@ -24,6 +24,7 @@
 - [complete] Stage 8 — correspondence analysis and MCA
 - [complete] Stage 9 — external numerical oracle and final verification
 - [complete] Stage 10 — MANOVA, power analysis, and categorical-test packs
+- [in_progress] Stage 11 — classic RM-ANOVA/mixed design, survival extensions, ROC diagnostics, and meta-analysis
 
 ## Stage 10 scope
 
@@ -42,6 +43,26 @@
 - [complete] Adjacent Agent/workflow regression suite: 81 passed; warnings are existing numerical/third-party warnings.
 - [complete] Protected-path comparison and diff checks.
 - [ ] Agent reachability, frontend, browser, full gate, merge, push, and release acceptance remain deferred to the P1/P2 integration wave.
+
+## Stage 11 scope
+
+- Four disjoint standalone packs: `repeated_measures_anova`, `survival_analysis`,
+  `roc_diagnostics`, and `meta_analysis`.
+- Each pack owns a new model contract, pack directory, focused tests, and an external
+  numerical Oracle; no Agent registry, orchestrator, frontend, prediction runner, or
+  existing Cox/LMM/automatic statistical-test path changes.
+- Oracle policy: statsmodels `AnovaRM` plus R `aov` for RM-ANOVA; R `survival` for KM/
+  log-rank; base R rank/trapezoid formulas for ROC; direct statsmodels meta-analysis
+  reference calls plus base R formulas for meta-analysis.
+- All four modules require explicit semantic columns/policies, bounded JSON-safe output,
+  stable error/reason fields, and fail-closed behavior for invalid or ambiguous input.
+
+## Stage 11 execution map
+
+- [in_progress] Design/spec/plan documents and formal scope rescope.
+- [pending] Parallel TDD implementation: RM-ANOVA, Survival, ROC, Meta-analysis.
+- [pending] Per-pack spec review, quality review, and external Oracle re-run.
+- [pending] Integrated P7 regression, protected-path check, FMS verify, and local commit.
 
 ## Decision rules
 
