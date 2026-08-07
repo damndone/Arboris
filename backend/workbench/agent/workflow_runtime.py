@@ -275,6 +275,33 @@ def _workflow_input_frame(
     return frame
 
 
+_PRODUCED_DATASET_FIELDS = ("run_id", "node_ref", "artifact_id", "content_sha256")
+
+
+def _require_binding_shape(step: Any, from_step: str, produced: Mapping[str, Any]) -> None:
+    """Refuse a binding this runtime cannot read, naming what is wrong.
+
+    The binding is read back from persisted state on resume, so it can outlive
+    the code that wrote it. Without this the first sign of a version skew is a
+    bare KeyError swallowed by the executor into `error="'node_ref'"`, which
+    tells whoever reads it nothing at all -- and the schema version would be a
+    field nobody ever compared.
+    """
+
+    version = produced.get("schema_version")
+    if version != _PRODUCED_DATASET_SCHEMA:
+        raise WorkflowExecutionError(
+            f"workflow step {step.step_id} source {from_step} published a "
+            f"{version!r} binding, but this runtime reads {_PRODUCED_DATASET_SCHEMA!r}"
+        )
+    missing = [field for field in _PRODUCED_DATASET_FIELDS if not produced.get(field)]
+    if missing:
+        raise WorkflowExecutionError(
+            f"workflow step {step.step_id} source {from_step} published an incomplete "
+            "binding, missing: " + ", ".join(missing)
+        )
+
+
 def _resolve_committed_source_frame(
     step: Any,
     previous: Mapping[str, WorkflowStepResult],
@@ -295,6 +322,7 @@ def _resolve_committed_source_frame(
             f"workflow step {step.step_id} source {from_step} published no "
             f"{commitment['output']!r} binding"
         )
+    _require_binding_shape(step, from_step, produced)
     context, frame = resolve_statistical_source(
         root,
         source_run_id=str(produced["run_id"]),

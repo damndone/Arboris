@@ -9,6 +9,7 @@ such a reference to resolve against.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pandas as pd
@@ -568,3 +569,45 @@ def test_the_replay_path_and_the_compile_rule_read_the_same_declaration() -> Non
 
     assert workflow_contracts.STEP_REPLAYABLE_BY_RECIPE == declared
     assert declared <= workflow_contracts.STEP_PRODUCES_DATASET
+
+
+def _binding_but(tmp_path: Path, **overrides: object):
+    """A completed upstream whose published binding has been tampered with."""
+
+    project, draft = _compiled_chain(
+        tmp_path,
+        [_numeric_step("first", "doubled"), _chained_step("second", "first", "scaled", "doubled")],
+    )
+    executor = build_workflow_step_executor(project, draft)
+    upstream = executor(draft.steps[0], {})
+    binding = {**upstream.payload["produced_dataset"], **overrides}
+    for key, value in overrides.items():
+        if value is None:
+            binding.pop(key, None)
+    tampered = dataclasses.replace(
+        upstream, payload={**upstream.payload, "produced_dataset": binding}
+    )
+    return draft, executor, {"first": tampered}
+
+
+def test_a_binding_from_an_unknown_schema_version_is_refused(tmp_path: Path) -> None:
+    """The version is compared, not merely written.
+
+    A binding read back on resume can outlive the code that wrote it, so an
+    unrecognised version has to stop the step rather than be read optimistically
+    with whatever fields happen to still line up.
+    """
+
+    draft, executor, previous = _binding_but(tmp_path, schema_version="workflow-produced-dataset.v2")
+
+    with pytest.raises(WorkflowExecutionError, match=r"published a .* binding, but this runtime reads"):
+        executor(draft.steps[1], previous)
+
+
+def test_a_binding_missing_a_required_field_names_the_field(tmp_path: Path) -> None:
+    """A bare KeyError here becomes error="'node_ref'" and tells the reader nothing."""
+
+    draft, executor, previous = _binding_but(tmp_path, node_ref=None)
+
+    with pytest.raises(WorkflowExecutionError, match=r"incomplete binding, missing: node_ref"):
+        executor(draft.steps[1], previous)
