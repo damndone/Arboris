@@ -286,13 +286,19 @@ def _chained_step(step_id: str, from_step: str, output_name: str, on_column: str
     return step
 
 
-def test_a_chained_step_reads_the_upstream_output_not_the_original(tmp_path: Path) -> None:
-    """The whole point of P0: step two sees step one's result.
+def test_a_chained_plan_runs_end_to_end_with_the_right_numbers(tmp_path: Path) -> None:
+    """A two-step chain completes and the arithmetic is right.
 
-    `first` derives `doubled`; `second` derives from `doubled`, which does not
-    exist in the original source at all. Values are asserted, not just status:
-    a step that completes on the wrong frame is the exact failure this seam is
-    supposed to make impossible.
+    Values are asserted, not just status: "the run finished" and "the run
+    computed the right thing" are different claims, and only the second one is
+    worth anything to whoever reads the result.
+
+    What this does NOT prove is *where* `second` got its input. It passed before
+    the executor learned to resolve a declared `source` at all, because replaying
+    `first`'s recipes onto the original target happens to produce the same
+    numbers -- see the next test for why that is currently unavoidable, and
+    treat `test_a_chained_step_reads_the_bytes_the_upstream_step_published` as
+    the only evidence covering the seam itself.
     """
 
     project, draft = _compiled_chain(
@@ -325,12 +331,24 @@ def test_a_chained_step_reads_the_bytes_the_upstream_step_published(
 ) -> None:
     """Proves *where* the input came from, not merely that the values are right.
 
-    Replaying the upstream recipes onto the original target happens to yield the
-    same numbers today, so a value assertion alone cannot tell the two
-    mechanisms apart. Rewriting the persisted dataset can: a step that resolves
+    Why this has to go the long way round: no value assertion can currently tell
+    "read the dataset the upstream step persisted" apart from "replay the
+    upstream step's recipes onto the original target". `statistical.derive_numeric`
+    is today's only operation with `produces_dataset=True`, and it can only add
+    columns -- it never changes row count, drops a column, or alters a dtype.
+    So the two mechanisms are provably identical column for column on every
+    chain that can be written right now, and a passing value test says nothing
+    about which one ran.
+
+    Rewriting the persisted dataset is what separates them: a step that resolves
     its declared source reads those bytes and refuses them as no longer the ones
     the completed step published, while a step replaying recipes never looks at
     the file and sails past.
+
+    When P3's data transforms land this stops being the only available lever --
+    a reshape changes row count and a subset drops columns, so the mechanisms
+    become distinguishable by value. This test stays valid either way; it is
+    just no longer carrying the seam alone.
 
     The run's own artifact index is rewritten to match, which is the whole point
     -- that is the state a run directory rebuilt between resumes would be in, so
