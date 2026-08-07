@@ -1333,9 +1333,15 @@ def test_a_binding_lost_across_resume_names_the_persistence_gap(tmp_path: Path) 
     """The two ways a binding can be absent send a reader to different places.
 
     "the upstream published nothing" points at the producing step's output;
-    "the binding did not survive resume" points at the state file, and the
-    producing step is blameless. Reporting the first for the second sends
-    whoever hits it to audit a step that is working correctly.
+    "the binding did not survive resume" points at the round trip through the
+    state file. Reporting the first for the second sends whoever hits it to
+    audit a step whose output is intact.
+
+    What the branch may NOT do is pick one cause of the loss and assert it. A
+    stale state record and a producer that never published are both reachable
+    here, and they need opposite responses -- re-run, or fix the producer. A
+    message naming only the first tells whoever hit the second to re-run into an
+    identical failure.
     """
 
     project, draft, real = _interrupted_chain(tmp_path)
@@ -1357,3 +1363,48 @@ def test_a_binding_lost_across_resume_names_the_persistence_gap(tmp_path: Path) 
     assert "persisted workflow state" in error, error
     # Must not be reported as an upstream that published nothing.
     assert "published no" not in error, error
+    # Both causes have to be on offer, with what to do about each.
+    assert "re-running the plan from the start" in error, error
+    assert "without publishing the binding" in error, error
+
+
+def test_a_step_publishing_an_unstorable_binding_fails_rather_than_losing_it(
+    tmp_path: Path,
+) -> None:
+    """A non-Mapping binding is dropped in silence if it is merely coerced away.
+
+    Nothing downstream would see the loss on this pass -- the consuming step
+    reads the live payload. It surfaces one resume later, as a state record with
+    no binding, and the resume path then reports it as a persistence gap: the
+    state file blamed for a value the producer handed over and the executor
+    threw away. Refusing at the point of loss is what keeps the later diagnosis
+    honest.
+    """
+
+    project, draft = _compiled_chain(
+        tmp_path,
+        [
+            _numeric_step("first", "doubled"),
+            _chained_step("second", "first", "scaled", "doubled"),
+        ],
+    )
+    real = build_workflow_step_executor(project, draft)
+
+    def publishes_a_list(step, previous):
+        result = real(step, previous)
+        if step.step_id != "first":
+            return result
+        return dataclasses.replace(
+            result,
+            payload={**result.payload, "produced_dataset": ["not", "an", "object"]},
+        )
+
+    state = WorkflowExecutor(project).execute(draft, publishes_a_list)
+
+    assert state.steps["first"].status == "failed"
+    error = state.steps["first"].error or ""
+    assert "produced_dataset that must be an object, got list" in error, error
+    # The step must not be recorded as completed-with-nothing-published, which
+    # is the shape a later resume would misdiagnose.
+    assert state.steps["first"].produced_dataset is None
+    assert state.steps["second"].status == "blocked"

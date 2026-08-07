@@ -350,12 +350,21 @@ def _committed_source_binding(
         # is fine, and sending the reader to audit its output wastes the whole
         # investigation on a step that is working.
         if upstream.restored_from_state:
+            # What is known: the result was rebuilt from the state record, and
+            # the record carried no binding. Why it carried none is not known
+            # here, and naming one cause would send readers of the other causes
+            # to the wrong place -- including toward a re-run that fails
+            # identically. So the branch reports the fact and lists what can
+            # produce it, rather than asserting which one happened.
             raise WorkflowExecutionError(
                 f"workflow step {step.step_id} source {from_step} completed in an "
                 f"earlier pass, but its {commitment['output']!r} binding did not "
-                "survive into the persisted workflow state; the state record "
-                "predates binding persistence, so this plan cannot resume -- "
-                "re-run it from the start"
+                "survive into the persisted workflow state. Two things can cause "
+                "this and they need different fixes: the state record was written "
+                "before bindings were persisted, in which case re-running the plan "
+                "from the start resolves it; or the producing step completes "
+                "without publishing the binding, in which case a re-run fails the "
+                "same way and the producer is what to fix"
             )
         raise WorkflowExecutionError(
             f"workflow step {step.step_id} source {from_step} published no "

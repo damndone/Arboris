@@ -86,13 +86,30 @@ class WorkflowExecutionError(RuntimeError):
 def _publishable_binding(result: "WorkflowStepResult") -> dict[str, Any] | None:
     """The declared output block to carry into persisted state, if any.
 
-    Shape is not validated here. The runtime that consumes the binding already
-    refuses an unreadable one by name, and duplicating that check would make the
-    executor a second authority on a contract it does not own.
+    The binding's *shape* is not judged here -- whether its fields are complete,
+    its schema version readable, its run the right one. The runtime that consumes
+    it already refuses an unreadable binding by name, and duplicating that would
+    make the executor a second authority on a contract it does not own. A
+    Mapping with bad contents therefore reaches disk as written and is rejected
+    on the consuming side, where the error can say what is actually wrong.
+
+    A non-Mapping is a different thing: not a binding this function declines to
+    judge, but no binding at all. Coercing it to None would drop a value the step
+    did publish without a sound, and the resume path would later report the loss
+    as a persistence gap -- blaming the state file for what the producer did.
+    Absent is fine and ordinary; present-but-unstorable is a defect, and the read
+    side (`WorkflowStepState.from_dict`) already refuses the same shape.
     """
 
-    produced = result.payload.get(PERSISTED_STEP_OUTPUT)
-    return dict(produced) if isinstance(produced, Mapping) else None
+    if PERSISTED_STEP_OUTPUT not in result.payload:
+        return None
+    produced = result.payload[PERSISTED_STEP_OUTPUT]
+    if not isinstance(produced, Mapping):
+        raise WorkflowExecutionError(
+            f"workflow step published a {PERSISTED_STEP_OUTPUT} that must be an "
+            f"object, got {type(produced).__name__}"
+        )
+    return dict(produced)
 
 
 @dataclass(frozen=True)
@@ -268,9 +285,12 @@ class WorkflowExecutor:
                 # Rebuilt from persisted state, so only what the state carries
                 # is available here -- never the payload the step returned in
                 # the earlier pass, which died with that process.
+                # `is not None`, matching `from_dict`: absence and emptiness are
+                # one question, and answering it two ways in two places is how
+                # the halves of a round trip drift apart.
                 payload=(
                     {PERSISTED_STEP_OUTPUT: dict(step_state.produced_dataset)}
-                    if step_state.produced_dataset
+                    if step_state.produced_dataset is not None
                     else {}
                 ),
                 restored_from_state=True,
