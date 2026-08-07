@@ -7,11 +7,15 @@ adapter without changing the numerical kernels.
 """
 
 from .common import MultivariatePackError, PreparedNumericFrame, prepare_numeric_frame
+from .efa import fit_efa
 from .pca import fit_pca
+from .reliability import cronbach_alpha
 
 __all__ = [
     "MultivariatePackError",
     "PreparedNumericFrame",
     "prepare_numeric_frame",
     "fit_pca",
+    "fit_efa",
+    "cronbach_alpha",
 ]

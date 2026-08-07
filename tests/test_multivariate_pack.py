@@ -235,3 +235,205 @@ def test_pca_normalizes_component_signs_and_validates_selection_bounds():
             matrix="correlation",
             component_selection="cumulative_variance",
         )
+
+
+def _reliability_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "item_1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "item_2": [2.0, 3.0, 4.0, 5.0, 6.0],
+            "item_3": [1.0, 3.0, 5.0, 7.0, 9.0],
+        }
+    )
+
+
+def test_cronbach_alpha_matches_standard_identity_and_item_diagnostics():
+    from workbench.engine.packs.multivariate import cronbach_alpha
+
+    frame = _reliability_frame()
+    items = ["item_1", "item_2", "item_3"]
+    result = cronbach_alpha(frame, items)
+    payload = result["result"]
+
+    item_variance_sum = frame[items].var(ddof=1).sum()
+    total_variance = frame[items].sum(axis=1).var(ddof=1)
+    expected_alpha = len(items) / (len(items) - 1) * (
+        1.0 - item_variance_sum / total_variance
+    )
+    assert result["operation_id"] == "multivariate.cronbach_alpha"
+    assert result["status"] == "completed"
+    assert payload["item_order"] == items
+    assert payload["alpha"] == pytest.approx(expected_alpha)
+    assert len(payload["item_diagnostics"]) == len(items)
+    for diagnostic, item in zip(payload["item_diagnostics"], items):
+        rest = frame[items].sum(axis=1) - frame[item]
+        expected_correlation = np.corrcoef(frame[item], rest)[0, 1]
+        assert diagnostic["item"] == item
+        assert diagnostic["corrected_item_total_correlation"] == pytest.approx(
+            expected_correlation
+        )
+
+
+def test_cronbach_alpha_reports_alpha_if_deleted_and_explicit_reverse_manifest():
+    from workbench.engine.packs.multivariate import cronbach_alpha
+
+    frame = pd.DataFrame(
+        {
+            "q1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "q2_reverse": [5.0, 4.0, 3.0, 2.0, 1.0],
+            "q3": [1.0, 2.0, 3.0, 4.0, 5.0],
+        }
+    )
+    result = cronbach_alpha(
+        frame,
+        ["q1", "q2_reverse", "q3"],
+        reverse_scored=["q2_reverse"],
+        reverse_bounds={"q2_reverse": (1.0, 5.0)},
+    )
+    payload = result["result"]
+
+    assert payload["reverse_scoring"] == [
+        {
+            "item": "q2_reverse",
+            "minimum": 1.0,
+            "maximum": 5.0,
+        }
+    ]
+    diagnostics = {row["item"]: row for row in payload["item_diagnostics"]}
+    assert diagnostics["q2_reverse"]["alpha_if_deleted"] is not None
+    assert payload["alpha"] == pytest.approx(1.0)
+
+
+def test_cronbach_alpha_requires_bounds_and_never_infers_reverse_scoring_from_names():
+    from workbench.engine.packs.multivariate import cronbach_alpha
+    from workbench.engine.packs.multivariate.common import MultivariatePackError
+
+    frame = pd.DataFrame(
+        {
+            "positive": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "reverse_worded": [5.0, 4.0, 2.0, 2.0, 1.0],
+        }
+    )
+
+    with pytest.raises(MultivariatePackError, match="MULTIVARIATE_INVALID_OPTION"):
+        cronbach_alpha(frame, ["positive", "reverse_worded"], reverse_scored=["reverse_worded"])
+
+    no_inference = cronbach_alpha(frame, ["positive", "reverse_worded"])
+    assert no_inference["result"]["reverse_scoring"] == []
+
+
+def _efa_frame() -> pd.DataFrame:
+    rng = np.random.default_rng(20260807)
+    factor_1 = rng.normal(size=120)
+    factor_2 = rng.normal(size=120)
+    noise = rng.normal(scale=0.25, size=(120, 6))
+    return pd.DataFrame(
+        {
+            "v1": factor_1 + noise[:, 0],
+            "v2": 0.9 * factor_1 + noise[:, 1],
+            "v3": 0.8 * factor_1 + noise[:, 2],
+            "v4": factor_2 + noise[:, 3],
+            "v5": 0.9 * factor_2 + noise[:, 4],
+            "v6": 0.8 * factor_2 + noise[:, 5],
+        }
+    )
+
+
+def _near_identity_frame() -> pd.DataFrame:
+    values = np.arange(1.0, 13.0)
+    base = np.column_stack(
+        [np.sin(values), np.cos(values), np.sin(2.0 * values)]
+    )
+    base[:, 1] += 0.05 * base[:, 0]
+    base[:, 2] += 0.05 * base[:, 0]
+    return pd.DataFrame(base, columns=["x1", "x2", "x3"])
+
+
+def test_efa_reports_kmo_bartlett_policy_and_supports_declared_methods_and_rotations():
+    from workbench.engine.packs.multivariate import fit_efa
+
+    columns = ["v1", "v2", "v3", "v4", "v5", "v6"]
+    for extraction in ("principal_axis", "maximum_likelihood"):
+        for rotation in ("none", "varimax", "promax", "oblimin"):
+            result = fit_efa(
+                _efa_frame(),
+                columns,
+                n_factors=2,
+                extraction=extraction,
+                rotation=rotation,
+                kmo_threshold=0.6,
+                bartlett_alpha=0.05,
+            )
+            payload = result["result"]
+            assert result["operation_id"] == "multivariate.efa"
+            assert result["status"] == "completed"
+            assert payload["n_factors"] == 2
+            assert payload["extraction"] == extraction
+            assert payload["rotation"] == rotation
+            assert 0.0 <= payload["kmo"] <= 1.0
+            assert payload["bartlett"]["p_value"] < 0.05
+            assert len(payload["loadings"]) == len(columns)
+            assert len(payload["loadings"][0]) == 2
+
+
+def test_efa_hard_rejects_low_kmo_and_non_significant_bartlett_before_extraction():
+    from workbench.engine.packs.multivariate import fit_efa
+    from workbench.engine.packs.multivariate.common import MultivariatePackError
+
+    orthogonal = pd.DataFrame(
+        {
+            "x1": [1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+            "x2": [0.0, 0.0, 1.0, -1.0, 0.0, 0.0],
+            "x3": [0.0, 0.0, 0.0, 0.0, 1.0, -1.0],
+        }
+    )
+    with pytest.raises(MultivariatePackError, match="MULTIVARIATE_FACTORABILITY_FAILED"):
+        fit_efa(
+            orthogonal,
+            ["x1", "x2", "x3"],
+            n_factors=1,
+            extraction="principal_axis",
+            rotation="none",
+            kmo_threshold=0.6,
+            bartlett_alpha=0.05,
+        )
+
+    with pytest.raises(MultivariatePackError, match="MULTIVARIATE_FACTORABILITY_FAILED"):
+        fit_efa(
+            _near_identity_frame(),
+            ["x1", "x2", "x3"],
+            n_factors=1,
+            extraction="principal_axis",
+            rotation="none",
+            kmo_threshold=0.4,
+            bartlett_alpha=0.05,
+        )
+
+
+def test_efa_rejects_unsupported_methods_and_normalizes_signs_deterministically():
+    from workbench.engine.packs.multivariate import fit_efa
+    from workbench.engine.packs.multivariate.common import MultivariatePackError
+
+    kwargs = {
+        "n_factors": 2,
+        "extraction": "principal_axis",
+        "rotation": "none",
+        "kmo_threshold": 0.6,
+        "bartlett_alpha": 0.05,
+    }
+    first = fit_efa(_efa_frame(), ["v1", "v2", "v3", "v4", "v5", "v6"], **kwargs)
+    second = fit_efa(_efa_frame(), ["v1", "v2", "v3", "v4", "v5", "v6"], **kwargs)
+    assert first == second
+
+    with pytest.raises(MultivariatePackError, match="MULTIVARIATE_UNSUPPORTED_OPTION"):
+        fit_efa(
+            _efa_frame(),
+            ["v1", "v2", "v3", "v4", "v5", "v6"],
+            **{**kwargs, "extraction": "principal_components"},
+        )
+    with pytest.raises(MultivariatePackError, match="MULTIVARIATE_UNSUPPORTED_OPTION"):
+        fit_efa(
+            _efa_frame(),
+            ["v1", "v2", "v3", "v4", "v5", "v6"],
+            **{**kwargs, "rotation": "quartimax"},
+        )
