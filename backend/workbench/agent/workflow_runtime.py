@@ -268,7 +268,9 @@ def _workflow_input_frame(
     """
 
     if "source" in step.spec:
-        return _resolve_committed_source_frame(step, previous, root)
+        return _resolve_committed_source_frame(
+            step, previous, root, workflow_run_id=str(draft.target["run_id"])
+        )
     frame = source_frame
     for transform_step in _upstream_numeric_steps(draft, str(step.step_id), dependency_graph):
         frame, _ = _apply_numeric_recipes(frame, transform_step.spec["recipes"])
@@ -278,7 +280,9 @@ def _workflow_input_frame(
 _PRODUCED_DATASET_FIELDS = ("run_id", "node_ref", "artifact_id", "content_sha256")
 
 
-def _require_binding_shape(step: Any, from_step: str, produced: Mapping[str, Any]) -> None:
+def _require_binding_shape(
+    step: Any, from_step: str, produced: Mapping[str, Any], workflow_run_id: str
+) -> None:
     """Refuse a binding this runtime cannot read, naming what is wrong.
 
     The binding is read back from persisted state on resume, so it can outlive
@@ -286,6 +290,14 @@ def _require_binding_shape(step: Any, from_step: str, produced: Mapping[str, Any
     bare KeyError swallowed by the executor into `error="'node_ref'"`, which
     tells whoever reads it nothing at all -- and the schema version would be a
     field nobody ever compared.
+
+    The run is checked here too, because this step's own output is persisted on
+    the workflow's target run and its lineage names the binding's node as the
+    parent. A binding from another run would therefore write an edge pointing at
+    a node that does not exist in the mutated graph -- a dangling lineage claim
+    with no error attached. No plan can currently produce one, since the only
+    dataset producer publishes the target run's id; that is a property of
+    today's operations, not a guarantee of this contract.
     """
 
     version = produced.get("schema_version")
@@ -300,14 +312,27 @@ def _require_binding_shape(step: Any, from_step: str, produced: Mapping[str, Any
             f"workflow step {step.step_id} source {from_step} published an incomplete "
             "binding, missing: " + ", ".join(missing)
         )
+    if str(produced["run_id"]) != workflow_run_id:
+        raise WorkflowExecutionError(
+            f"workflow step {step.step_id} source {from_step} published a binding on "
+            f"run {produced['run_id']}, but this workflow runs on run "
+            f"{workflow_run_id}; consuming it would give this step a parent node "
+            "that the mutated graph does not contain"
+        )
 
 
-def _resolve_committed_source_frame(
+def _committed_source_binding(
     step: Any,
     previous: Mapping[str, WorkflowStepResult],
-    root: Path,
-) -> pd.DataFrame:
-    """Load the dataset the upstream step actually persisted."""
+    workflow_run_id: str,
+) -> Mapping[str, Any]:
+    """Return the validated binding a step committed to consuming.
+
+    One resolution shared by the two halves that must agree: the frame a step
+    computes from, and the lineage it then claims. Resolving them separately is
+    how a step ends up correctly consuming an upstream dataset while reporting
+    the original table as its parent.
+    """
 
     commitment = step.spec["source"]
     from_step = str(commitment["from_step"])
@@ -322,7 +347,55 @@ def _resolve_committed_source_frame(
             f"workflow step {step.step_id} source {from_step} published no "
             f"{commitment['output']!r} binding"
         )
-    _require_binding_shape(step, from_step, produced)
+    _require_binding_shape(step, from_step, produced, workflow_run_id)
+    return produced
+
+
+def _lineage_source(
+    draft: WorkflowDraft,
+    step: Any,
+    source_context: Mapping[str, Any],
+    previous: Mapping[str, WorkflowStepResult],
+) -> dict[str, str]:
+    """Where this step's output is actually derived from, for the record.
+
+    A step that declared a `source` computed from the upstream dataset, so the
+    graph edge, the recipe's source block and the artifact inputs must all name
+    that dataset. Naming `draft.target` instead produces no error and no red
+    test -- it just makes the lineage say the original table produced a node it
+    did not, which misdirects rerun, comparison, explanation and reporting
+    alike. A step without a `source` really is derived from the target, and
+    keeps naming it.
+    """
+
+    if "source" not in step.spec:
+        return {
+            "artifact_id": str(draft.target["artifact_id"]),
+            "node_ref": str(draft.target["node_ref"]),
+            "sha256": str(source_context["source_sha256"]),
+        }
+    produced = _committed_source_binding(
+        step, previous, str(draft.target["run_id"])
+    )
+    return {
+        "artifact_id": str(produced["artifact_id"]),
+        "node_ref": str(produced["node_ref"]),
+        "sha256": str(produced["content_sha256"]),
+    }
+
+
+def _resolve_committed_source_frame(
+    step: Any,
+    previous: Mapping[str, WorkflowStepResult],
+    root: Path,
+    *,
+    workflow_run_id: str,
+) -> pd.DataFrame:
+    """Load the dataset the upstream step actually persisted."""
+
+    commitment = step.spec["source"]
+    from_step = str(commitment["from_step"])
+    produced = _committed_source_binding(step, previous, workflow_run_id)
     context, frame = resolve_statistical_source(
         root,
         source_run_id=str(produced["run_id"]),
@@ -368,10 +441,16 @@ def _persist_numeric_derivation(
     source_context: Mapping[str, Any],
     frame: pd.DataFrame,
     step: Any,
+    previous: Mapping[str, WorkflowStepResult],
 ) -> WorkflowStepResult:
     """Persist a derived dataset + recipe and add one visible graph child."""
 
     derived, summaries = _apply_numeric_recipes(frame, step.spec["recipes"])
+    lineage = _lineage_source(draft, step, source_context, previous)
+    # The output is written into the workflow's target run regardless of which
+    # dataset it derives from; only the lineage references follow the real
+    # source. `_lineage_source` refuses a binding from any other run, so the
+    # parent node named below always exists in the graph mutated here.
     source_run_id = str(draft.target["run_id"])
     run_root = root / "runs" / source_run_id
     fingerprint = str(step.fingerprint)
@@ -387,8 +466,8 @@ def _persist_numeric_derivation(
         "workflow_step_id": str(step.step_id),
         "workflow_step_fingerprint": fingerprint,
         "source": {
-            "artifact_id": str(draft.target["artifact_id"]),
-            "sha256": str(source_context["source_sha256"]),
+            "artifact_id": lineage["artifact_id"],
+            "sha256": lineage["sha256"],
         },
         "recipes": [dict(recipe) for recipe in step.spec["recipes"]],
         "result": {"path": data_rel, "output_columns": summaries},
@@ -412,7 +491,7 @@ def _persist_numeric_derivation(
         path=data_path,
         artifact_type="derived_data",
         step="workflow.derive_numeric",
-        inputs=[str(draft.target["artifact_id"])],
+        inputs=[lineage["artifact_id"]],
     )
     _ensure_runtime_artifact(
         run_root,
@@ -420,11 +499,11 @@ def _persist_numeric_derivation(
         path=recipe_path,
         artifact_type="metadata",
         step="workflow.derive_numeric",
-        inputs=[str(draft.target["artifact_id"]), data_artifact_id],
+        inputs=[lineage["artifact_id"], data_artifact_id],
     )
     child_node_id = f"data-derive-numeric:{fingerprint[:24]}"
     branch_id = f"workflow-numeric:{fingerprint[:20]}"
-    source_node_id = str(draft.target["node_ref"])
+    source_node_id = lineage["node_ref"]
 
     def add_child(graph: Graph) -> Graph:
         if child_node_id in graph.nodes:
@@ -708,6 +787,7 @@ def build_workflow_step_executor(
                 source_context=source_context,
                 frame=step_frame,
                 step=step,
+                previous=previous,
             )
         if dispatcher_key == "workbench.agent.workflow_runtime.statistical_derive_boolean":
             detail, detail_step_id, detail_fingerprint = _detail_result(

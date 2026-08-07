@@ -27,6 +27,7 @@ from workbench.agent import workflow_contracts
 from workbench.agent.workflow_contracts import validate_workflow_steps
 from workbench.agent.workflow_runtime import build_workflow_step_executor
 from workbench.artifacts import read_json, sha256_file, write_json
+from workbench.graph_store import GraphStore
 from workbench.statistical_exploration import resolve_statistical_source
 
 
@@ -611,3 +612,155 @@ def test_a_binding_missing_a_required_field_names_the_field(tmp_path: Path) -> N
 
     with pytest.raises(WorkflowExecutionError, match=r"incomplete binding, missing: node_ref"):
         executor(draft.steps[1], previous)
+
+
+def test_a_binding_from_another_run_is_refused_rather_than_dangling(
+    tmp_path: Path,
+) -> None:
+    """A cross-run binding would put a parent on the graph that this run lacks.
+
+    The derived dataset is persisted on the workflow's own target run, and the
+    graph mutated is that run's graph. Pointing `parent_stage_id` at a node
+    living in a different run would write an edge whose source does not exist
+    here -- a lineage claim no reader can follow, and no error anywhere.
+
+    No plan can produce this today, because the only dataset producer publishes
+    the target run's id. That is a property of today's operations, not a
+    guarantee of the contract, so it is checked rather than assumed.
+    """
+
+    draft, executor, previous = _binding_but(tmp_path, run_id="run_elsewhere")
+
+    with pytest.raises(
+        WorkflowExecutionError,
+        match=r"published a binding on run run_elsewhere, but this workflow runs on run",
+    ):
+        executor(draft.steps[1], previous)
+
+
+def _run_chain(tmp_path: Path) -> tuple[Path, object, dict]:
+    """Run `first -> second` where `second` declares `first` as its source."""
+
+    project, draft = _compiled_chain(
+        tmp_path,
+        [
+            _numeric_step("first", "doubled"),
+            _chained_step("second", "first", "scaled", "doubled"),
+        ],
+    )
+    executor = build_workflow_step_executor(project, draft)
+    upstream = executor(draft.steps[0], {})
+    downstream = executor(draft.steps[1], {"first": upstream})
+    return project, draft, {"first": upstream, "second": downstream}
+
+
+def _derived_node_id(result: WorkflowStepResult) -> str:
+    return str(result.payload["produced_dataset"]["node_ref"])
+
+
+def test_a_chained_step_claims_its_upstream_as_its_graph_parent(tmp_path: Path) -> None:
+    """The graph must name the dataset the step actually consumed.
+
+    A node whose parent is `stage:source` says the original table produced it.
+    That claim is read by rerun (which would believe editing the source affects
+    this node), by comparison, by AI explanation and by the report -- and it is
+    false the moment the step declared a `source`. Nothing errors; the graph
+    simply lies.
+    """
+
+    project, draft, results = _run_chain(tmp_path)
+
+    graph = GraphStore(project / "runs").read(str(draft.target["run_id"]))
+    upstream_node = _derived_node_id(results["first"])
+    child_node = _derived_node_id(results["second"])
+
+    assert graph.nodes[child_node].parent_stage_id == upstream_node
+    assert graph.nodes[upstream_node].parent_stage_id == "stage:source"
+    assert graph.edges[f"edge:{child_node}"].source_id == upstream_node
+    assert graph.branches[
+        graph.nodes[child_node].branch_id
+    ].forked_from_node_id == upstream_node
+
+
+def test_a_chained_step_records_its_upstream_dataset_in_the_recipe(
+    tmp_path: Path,
+) -> None:
+    """recipe.json is the replayable record; its source must be the real one.
+
+    Naming the original artifact here would make the recipe unreplayable in the
+    precise way that is hardest to notice: replaying it reproduces different
+    numbers while every hash in the file checks out.
+    """
+
+    project, draft, results = _run_chain(tmp_path)
+
+    upstream = results["first"].payload["produced_dataset"]
+    recipe_path = _artifact_path(
+        project,
+        str(draft.target["run_id"]),
+        results["second"].artifact_ids[1],
+    )
+    recipe = read_json(recipe_path)
+
+    assert recipe["source"]["artifact_id"] == upstream["artifact_id"]
+    assert recipe["source"]["sha256"] == upstream["content_sha256"]
+
+
+def test_a_chained_step_registers_its_upstream_artifact_as_its_input(
+    tmp_path: Path,
+) -> None:
+    """The artifacts index is the other lineage record, and must agree."""
+
+    project, draft, results = _run_chain(tmp_path)
+
+    upstream_artifact = results["first"].payload["produced_dataset"]["artifact_id"]
+    data_artifact_id, recipe_artifact_id = results["second"].artifact_ids[:2]
+    index = read_json(
+        project / "runs" / str(draft.target["run_id"]) / "artifacts_index.json"
+    )
+    records = {item["artifact_id"]: item for item in index["artifacts"]}
+
+    assert records[data_artifact_id]["inputs"] == [upstream_artifact]
+    assert records[recipe_artifact_id]["inputs"] == [
+        upstream_artifact,
+        data_artifact_id,
+    ]
+
+
+def test_a_sourceless_step_still_claims_the_original_table(tmp_path: Path) -> None:
+    """The unchanged half of the contract, asserted rather than assumed.
+
+    A step that declares no source really is derived from the workflow target,
+    so its lineage must keep naming it -- correcting the chained case must not
+    quietly re-point the ordinary one.
+    """
+
+    project, draft = _compiled_chain(tmp_path, [_numeric_step("first", "doubled")])
+    executor = build_workflow_step_executor(project, draft)
+
+    result = executor(draft.steps[0], {})
+
+    run_id = str(draft.target["run_id"])
+    node_id = _derived_node_id(result)
+    graph = GraphStore(project / "runs").read(run_id)
+    assert graph.nodes[node_id].parent_stage_id == str(draft.target["node_ref"])
+    assert graph.edges[f"edge:{node_id}"].source_id == str(draft.target["node_ref"])
+
+    data_artifact_id, recipe_artifact_id = result.artifact_ids[:2]
+    recipe = read_json(_artifact_path(project, run_id, recipe_artifact_id))
+    assert recipe["source"]["artifact_id"] == str(draft.target["artifact_id"])
+    context, _frame = resolve_statistical_source(
+        project,
+        source_run_id=run_id,
+        source_node_id=str(draft.target["node_ref"]),
+        source_artifact_id=str(draft.target["artifact_id"]),
+    )
+    assert recipe["source"]["sha256"] == context["source_sha256"]
+
+    index = read_json(project / "runs" / run_id / "artifacts_index.json")
+    records = {item["artifact_id"]: item for item in index["artifacts"]}
+    assert records[data_artifact_id]["inputs"] == [str(draft.target["artifact_id"])]
+    assert records[recipe_artifact_id]["inputs"] == [
+        str(draft.target["artifact_id"]),
+        data_artifact_id,
+    ]
