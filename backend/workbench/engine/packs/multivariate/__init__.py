@@ -19,6 +19,13 @@ from .clustering import (
     CLUSTERING_STANDARDIZATIONS,
     fit_clustering,
 )
+from .correspondence import (
+    MAX_CA_CATEGORIES,
+    MAX_CA_DIMENSIONS,
+    MCA_MISSING_POLICIES,
+    fit_correspondence,
+    fit_mca,
+)
 from .discriminant import (
     DISCRIMINANT_EVALUATIONS,
     DISCRIMINANT_METHODS,
@@ -45,6 +52,11 @@ __all__ = [
     "CLUSTERING_SELECTIONS",
     "CLUSTERING_STANDARDIZATIONS",
     "fit_clustering",
+    "MAX_CA_CATEGORIES",
+    "MAX_CA_DIMENSIONS",
+    "MCA_MISSING_POLICIES",
+    "fit_correspondence",
+    "fit_mca",
     "DISCRIMINANT_EVALUATIONS",
     "DISCRIMINANT_METHODS",
     "DISCRIMINANT_PRIOR_POLICIES",

@@ -500,9 +500,14 @@ def test_multivariate_surface_is_narrow_and_results_are_json_safe_and_determinis
         "fit_clustering",
         "DISCRIMINANT_EVALUATIONS",
         "DISCRIMINANT_METHODS",
-        "DISCRIMINANT_PRIOR_POLICIES",
-        "fit_discriminant",
-    }
+            "DISCRIMINANT_PRIOR_POLICIES",
+            "fit_discriminant",
+            "MAX_CA_CATEGORIES",
+            "MAX_CA_DIMENSIONS",
+            "MCA_MISSING_POLICIES",
+            "fit_correspondence",
+            "fit_mca",
+        }
     assert multivariate.MULTIVARIATE_CONTRACT_VERSION == MULTIVARIATE_CONTRACT_VERSION
     assert multivariate.MULTIVARIATE_OPERATION_IDS == MULTIVARIATE_OPERATION_IDS
 

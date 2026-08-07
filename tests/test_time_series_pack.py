@@ -30,6 +30,8 @@ def test_time_series_contract_declares_the_complete_standalone_surface():
         "time_series.var",
         "time_series.granger",
         "time_series.irf",
+        "time_series.cointegration",
+        "time_series.vecm",
     }
     envelope = make_time_series_result(
         operation_id="time_series.acf",

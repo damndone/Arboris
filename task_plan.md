@@ -21,8 +21,8 @@
 - [complete] Stage 5 — shared JSON surface, adjacent regression tests, protected-path and FMS verification
 - [complete] Stage 6 — cointegration and VECM
 - [complete] Stage 7 — VAR stability and IRF confidence bands
-- [in_progress] Stage 8 — correspondence analysis and MCA
-- [pending] Stage 9 — external numerical oracle and final verification
+- [complete] Stage 8 — correspondence analysis and MCA
+- [in_progress] Stage 9 — external numerical oracle and final verification
 
 ## Decision rules
 

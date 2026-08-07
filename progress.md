@@ -24,3 +24,6 @@
 - Added VAR companion eigenvalue/modulus evidence, safe unstable-fit rejection/report-only policy, and asymptotic-normal IRF confidence bands with explicit method labels.
 - Stability/IRF model tests pass: 11 tests.
 - Next: implement the shared SVD correspondence-analysis core and indicator-CA MCA.
+- Implemented bounded SVD correspondence analysis and explicitly labelled indicator-CA MCA with category/missing-data safety policies.
+- Added R base SVD and direct statsmodels numerical oracle tests; the combined extension suite passes: 46 tests, with 2 existing statsmodels ComplexWarning messages in the direct oracle call.
+- Next: run adjacent Agent regression tests, protected-path comparison, formal event verification, and final handoff.

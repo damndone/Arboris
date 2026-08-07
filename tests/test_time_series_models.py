@@ -146,6 +146,63 @@ def test_engle_granger_rejects_more_than_two_series_without_coercion():
         )
 
 
+def test_johansen_packet_matches_direct_statsmodels_reference_call():
+    from statsmodels.tsa.vector_ar.vecm import coint_johansen
+
+    from workbench.engine.packs.time_series import run_cointegration
+
+    frame = _cointegrated_frame()
+    expected = coint_johansen(frame[["x", "y"]].to_numpy(), 0, 1)
+    result = run_cointegration(
+        frame,
+        time_column="time",
+        value_columns=["x", "y"],
+        time_order="declared_monotonic",
+        method="johansen",
+        det_order=0,
+        k_ar_diff=1,
+        confidence_level=0.95,
+    )
+    trace_test = result["result"]["trace_tests"][0]
+    assert trace_test["statistic"] == pytest.approx(expected.lr1[0], rel=1e-12, abs=1e-12)
+    assert trace_test["critical_value"] == pytest.approx(expected.cvt[0, 1], rel=1e-12, abs=1e-12)
+
+
+def test_irf_bands_and_stability_match_direct_statsmodels_reference_call():
+    from scipy.stats import norm
+    from statsmodels.tsa.api import VAR
+
+    from workbench.engine.packs.time_series import run_irf
+
+    frame = _stable_var_frame()
+    values = frame[["x", "y"]].to_numpy()
+    expected_fit = VAR(values).fit(2, trend="c")
+    expected_irf = expected_fit.irf(periods=4)
+    expected_response = expected_irf.irfs
+    expected_se = expected_irf.stderr(orth=False)
+    critical_value = norm.ppf(0.5 + 0.9 / 2.0)
+    result = run_irf(
+        frame,
+        time_column="time",
+        value_columns=["x", "y"],
+        time_order="declared_monotonic",
+        lags=2,
+        trend="c",
+        horizon=4,
+        orthogonalized=False,
+        confidence_level=0.9,
+        ci_method="asymptotic_normal",
+    )
+    assert np.allclose(result["result"]["responses"], expected_response, rtol=1e-12, atol=1e-12)
+    assert np.allclose(
+        result["result"]["lower"],
+        expected_response - critical_value * expected_se,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+    assert result["result"]["stability"]["is_stable"] == bool(expected_fit.is_stable())
+
+
 def test_arima_and_sarima_keep_explicit_orders_and_bound_forecasts():
     from workbench.engine.packs.time_series import fit_arima
 

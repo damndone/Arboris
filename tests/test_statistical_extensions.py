@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -13,9 +16,154 @@ def test_extension_contract_declares_clustering_and_discriminant_without_agent_r
     )
 
     assert MULTIVARIATE_EXTENSION_OPERATION_IDS == frozenset(
-        {"multivariate.clustering", "multivariate.discriminant"}
+        {
+            "multivariate.clustering",
+            "multivariate.discriminant",
+            "multivariate.correspondence",
+            "multivariate.mca",
+        }
     )
     assert MULTIVARIATE_EXTENSION_OPERATION_IDS <= MULTIVARIATE_ALL_OPERATION_IDS
+
+
+def _ca_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [[20.0, 10.0, 10.0], [10.0, 20.0, 10.0], [10.0, 10.0, 20.0]],
+        index=["row_a", "row_b", "row_c"],
+        columns=["col_x", "col_y", "col_z"],
+    )
+
+
+def test_correspondence_analysis_returns_masses_coordinates_contributions_and_inertia():
+    from workbench.engine.packs.multivariate import fit_correspondence
+
+    result = fit_correspondence(_ca_table(), n_dimensions=2)
+    payload = result["result"]
+    assert result["operation_id"] == "multivariate.correspondence"
+    assert payload["method"] == "ca"
+    assert payload["row_labels"] == ["row_a", "row_b", "row_c"]
+    assert payload["column_labels"] == ["col_x", "col_y", "col_z"]
+    assert payload["row_masses"] == pytest.approx([1 / 3] * 3)
+    assert payload["column_masses"] == pytest.approx([1 / 3] * 3)
+    assert len(payload["singular_values"]) == 2
+    assert len(payload["row_principal_coordinates"]) == 3
+    assert len(payload["column_principal_coordinates"]) == 3
+    assert len(payload["row_contributions"]) == 3
+    assert payload["total_inertia"] > 0
+    json.dumps(result, allow_nan=False)
+
+
+def test_mca_constructs_deterministic_indicator_ca_without_raw_rows():
+    from workbench.engine.packs.multivariate import fit_mca
+
+    frame = pd.DataFrame(
+        {
+            "color": ["red", "blue", "red", "green", "blue", "green"],
+            "size": ["S", "M", "L", "S", "L", "M"],
+        }
+    )
+    first = fit_mca(frame, columns=["color", "size"], n_dimensions=2)
+    second = fit_mca(frame, columns=["color", "size"], n_dimensions=2)
+    assert first == second
+    payload = first["result"]
+    assert first["operation_id"] == "multivariate.mca"
+    assert payload["method"] == "mca"
+    assert payload["construction"] == "indicator_ca"
+    assert payload["indicator_columns"] == [
+        "color=blue",
+        "color=green",
+        "color=red",
+        "size=L",
+        "size=M",
+        "size=S",
+    ]
+    assert payload["n_observations"] == 6
+    assert "raw_rows" not in payload
+    json.dumps(first, allow_nan=False)
+
+
+def test_ca_mca_reject_negative_counts_missing_values_and_category_overflow():
+    from workbench.engine.packs.multivariate import fit_correspondence, fit_mca
+    from workbench.engine.packs.multivariate.common import MultivariatePackError
+
+    negative = _ca_table()
+    negative.loc["row_a", "col_x"] = -1.0
+    with pytest.raises(MultivariatePackError, match="MULTIVARIATE_INVALID_CATEGORY_TABLE"):
+        fit_correspondence(negative, n_dimensions=2)
+
+    missing = pd.DataFrame({"a": ["x", None, "y"], "b": ["u", "v", "v"]})
+    complete_case = fit_mca(
+        missing,
+        columns=["a", "b"],
+        n_dimensions=1,
+        missing_policy="complete_case_v1",
+    )
+    assert complete_case["result"]["retained_positions"] == [0, 2]
+    with pytest.raises(MultivariatePackError, match="MULTIVARIATE_UNSUPPORTED_MISSING_POLICY"):
+        fit_mca(missing, columns=["a", "b"], n_dimensions=1, missing_policy="reject")
+
+    overflow = pd.DataFrame(
+        {"a": [f"level_{index}" for index in range(101)], "b": ["same"] * 101}
+    )
+    with pytest.raises(MultivariatePackError, match="MULTIVARIATE_CATEGORY_OVERFLOW"):
+        fit_mca(overflow, columns=["a", "b"], n_dimensions=2)
+
+
+def _assert_svd_columns_match_up_to_sign(actual: np.ndarray, expected: np.ndarray) -> None:
+    assert actual.shape == expected.shape
+    for dimension in range(actual.shape[1]):
+        assert np.allclose(
+            actual[:, dimension], expected[:, dimension], rtol=1e-12, atol=1e-12
+        ) or np.allclose(
+            actual[:, dimension], -expected[:, dimension], rtol=1e-12, atol=1e-12
+        )
+
+
+def test_correspondence_matches_independent_base_r_svd_oracle():
+    rscript = shutil.which("Rscript")
+    if rscript is None:
+        pytest.skip("Rscript unavailable; external CA oracle is not installed")
+    from workbench.engine.packs.multivariate import fit_correspondence
+
+    oracle_table = pd.DataFrame(
+        [[30.0, 5.0, 2.0], [8.0, 25.0, 4.0], [3.0, 7.0, 20.0]],
+        index=["row_a", "row_b", "row_c"],
+        columns=["col_x", "col_y", "col_z"],
+    )
+    script = r"""
+table <- matrix(c(30, 5, 2, 8, 25, 4, 3, 7, 20), nrow=3, byrow=TRUE)
+probability <- table / sum(table)
+row_mass <- rowSums(probability)
+column_mass <- colSums(probability)
+standardized <- diag(1 / sqrt(row_mass)) %*% (probability - row_mass %o% column_mass) %*% diag(1 / sqrt(column_mass))
+decomposition <- svd(standardized, nu=3, nv=3)
+row_coordinates <- sweep(decomposition$u[, 1:2, drop=FALSE], 2, decomposition$d[1:2], "*")
+column_coordinates <- sweep(decomposition$v[, 1:2, drop=FALSE], 2, decomposition$d[1:2], "*")
+cat(paste(sprintf("%.17g", decomposition$d[1:2]), collapse=","), "\n")
+cat(paste(sprintf("%.17g", as.vector(row_coordinates)), collapse=","), "\n")
+cat(paste(sprintf("%.17g", as.vector(column_coordinates)), collapse=","), "\n")
+"""
+    completed = subprocess.run(
+        [rscript, "--vanilla", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    assert len(lines) == 3
+    singular_values = np.fromstring(lines[0], sep=",")
+    row_coordinates = np.fromstring(lines[1], sep=",").reshape(3, 2, order="F")
+    column_coordinates = np.fromstring(lines[2], sep=",").reshape(3, 2, order="F")
+
+    result = fit_correspondence(oracle_table, n_dimensions=2)["result"]
+    assert np.allclose(result["singular_values"], singular_values, rtol=1e-12, atol=1e-12)
+    _assert_svd_columns_match_up_to_sign(
+        np.asarray(result["row_principal_coordinates"]), row_coordinates
+    )
+    _assert_svd_columns_match_up_to_sign(
+        np.asarray(result["column_principal_coordinates"]), column_coordinates
+    )
 
 
 def _cluster_frame() -> pd.DataFrame:

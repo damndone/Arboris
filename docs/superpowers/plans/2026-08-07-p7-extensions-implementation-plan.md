@@ -125,11 +125,11 @@
 - Modify: `backend/workbench/contracts/model/multivariate.py`
 - Test: `tests/test_statistical_extensions.py`
 
-- [ ] Write red tests for CA masses/coordinates/inertia, MCA indicator construction, deterministic category ordering, and unsafe table/missing-category rejection.
-- [ ] Run only CA/MCA tests and confirm missing-symbol failures.
-- [ ] Implement one bounded SVD-based CA core reused by CA and explicitly labelled indicator-CA MCA.
-- [ ] Return coordinates/contributions/inertia as JSON-safe evidence without raw input rows or hidden category coercion.
-- [ ] Run focused multivariate tests and commit.
+- [x] Write red tests for CA masses/coordinates/inertia, MCA indicator construction, deterministic category ordering, and unsafe table/missing-category rejection.
+- [x] Run only CA/MCA tests and confirm missing-symbol failures.
+- [x] Implement one bounded SVD-based CA core reused by CA and explicitly labelled indicator-CA MCA.
+- [x] Return coordinates/contributions/inertia as JSON-safe evidence without raw input rows or hidden category coercion.
+- [x] Run focused multivariate tests and commit.
 
 ### Task 10: External numerical oracle
 
@@ -137,8 +137,8 @@
 - Modify: `tests/test_time_series_models.py`
 - Modify: `tests/test_statistical_extensions.py`
 
-- [ ] Write oracle tests that compare direct statsmodels reference outputs and a base-R SVD reference for a fixed CA table; skip only when the external executable is unavailable.
-- [ ] Run oracle tests and record exact skip/pass state; an unavailable oracle is not reported as a numerical pass.
-- [ ] Add no runtime dependency on R or shell execution; keep all oracle calls inside tests with fixed inputs and argv-based subprocess invocation.
+- [x] Write oracle tests that compare direct statsmodels reference outputs and a base-R SVD reference for a fixed CA table; skip only when the external executable is unavailable.
+- [x] Run oracle tests and record exact skip/pass state; an unavailable oracle is not reported as a numerical pass.
+- [x] Add no runtime dependency on R or shell execution; keep all oracle calls inside tests with fixed inputs and argv-based subprocess invocation.
 - [ ] Run the complete extension suite, adjacent Agent tests, protected-path diff, `git diff --check`, and formal FMS verification.
 - [ ] Record the remaining Agent/UI/browser/full-gate limits and commit the verification update.
