@@ -407,7 +407,19 @@ def _persist_numeric_derivation(
         artifact_ids=[data_artifact_id, recipe_artifact_id],
         row_counts={item["output_name"]: item["nonmissing_count"] for item in summaries},
         result_fingerprint=fingerprint,
-        payload={"output_columns": summaries, "child_node_id": child_node_id},
+        payload={
+            "output_columns": summaries,
+            "child_node_id": child_node_id,
+            # The standard binding a later step commits to consuming. Every
+            # dataset-producing step publishes this exact shape, so resolution
+            # never branches on which operation produced the input.
+            "produced_dataset": {
+                "run_id": source_run_id,
+                "node_ref": child_node_id,
+                "artifact_id": data_artifact_id,
+                "result_fingerprint": fingerprint,
+            },
+        },
     )
 
 

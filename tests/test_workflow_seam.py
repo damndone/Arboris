@@ -2,15 +2,23 @@
 
 This slice covers the declaration itself, which belongs to the composition
 rather than to any one operation's spec contract: a well-formed `source` is
-accepted and preserved, and every malformed shape is refused by name.
+accepted and preserved, and every malformed shape is refused by name. It also
+covers the other half of the seam: what a dataset-producing step publishes for
+such a reference to resolve against.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pandas as pd
 import pytest
 
+from tests.test_data_column_cast import _source_project
 from workbench.agent.operations import OperationValidationError
+from workbench.agent.workflow import compile_workflow
 from workbench.agent.workflow_contracts import validate_workflow_steps
+from workbench.agent.workflow_runtime import build_workflow_step_executor
 
 
 def _numeric_step(step_id: str, output_name: str) -> dict:
@@ -186,3 +194,47 @@ def test_source_commitment_cannot_form_a_cycle() -> None:
 
     with pytest.raises(OperationValidationError, match="cycle"):
         validate_workflow_steps([first, second])
+
+
+def _chain_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "size": [1.0, 2.0, 3.0, 4.0],
+            "weight": [2.0, 2.0, 2.0, 2.0],
+            "outcome": [2.0, 4.0, 6.0, 8.0],
+            "wave": ["a", "a", "b", "b"],
+        }
+    )
+
+
+def _compiled_chain(tmp_path: Path, steps: list[dict]):
+    frame = _chain_frame()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = compile_workflow(
+        workflow_id="wf_seam",
+        target={
+            "run_id": run_id,
+            "node_ref": "stage:source",
+            "artifact_id": artifact_id,
+        },
+        preconditions={"context_fingerprint": "sha256:fixture"},
+        steps=steps,
+        available_columns=list(frame.columns),
+    )
+    return project, draft
+
+
+def test_a_dataset_producing_step_publishes_a_resolvable_binding(tmp_path: Path) -> None:
+    """The output block carries everything a downstream step needs to resolve."""
+
+    project, draft = _compiled_chain(tmp_path, [_numeric_step("first", "doubled")])
+    executor = build_workflow_step_executor(project, draft)
+
+    result = executor(draft.steps[0], {})
+
+    produced = result.payload["produced_dataset"]
+    assert set(produced) == {"run_id", "node_ref", "artifact_id", "result_fingerprint"}
+    assert produced["run_id"] == draft.target["run_id"]
+    assert produced["node_ref"].startswith("data-derive-numeric:")
+    assert produced["result_fingerprint"] == result.result_fingerprint
+    assert produced["artifact_id"] in result.artifact_ids
