@@ -18,3 +18,11 @@
 - Clustering must make scale, distance/linkage, cluster-count policy, random seed, iteration caps, and assignment-output bounds explicit.
 - Discriminant analysis must make class labels, priors, covariance regularization, and evaluation split explicit; singular covariance is a hard error unless regularization is declared.
 - Time-series kernels must not sort or infer frequency silently. ARIMA/SARIMA orders, VAR lag, deterministic trend, and Granger direction are explicit. Unit-root and ACF/PACF diagnostics are evidence, not autonomous model-selection commands.
+
+## Phase 2 design findings
+
+- statsmodels 0.14.6 exposes `coint_johansen`, `VECM`, IR standard errors, and VAR stability helpers; no new Python dependency is required.
+- Rscript is available with base R and MASS, but `vars` and `FactoMineR` are unavailable. CA oracle coverage therefore uses base-R SVD; time-series oracle coverage uses direct statsmodels reference calls.
+- `VARResults.is_stable()` is available on the wrapper, while `VARResults.roots` are inverse characteristic roots; stability evidence will report companion eigenvalues explicitly to avoid root-convention ambiguity.
+- VECM rank must be derived before fitting. A rank-zero Johansen result is not silently converted into a rank-one VECM.
+- CA/MCA will use a shared SVD core. MCA output will identify itself as `indicator_ca` and will not claim corrected inertia.

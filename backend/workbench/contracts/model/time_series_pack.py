@@ -21,6 +21,8 @@ TIME_SERIES_PACK_OPERATION_IDS = frozenset(
         "time_series.var",
         "time_series.granger",
         "time_series.irf",
+        "time_series.cointegration",
+        "time_series.vecm",
     }
 )
 _FIELDS = {

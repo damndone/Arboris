@@ -5,6 +5,7 @@ from .errors import TimeSeriesPackError
 from .input import PreparedTimeSeries, prepare_time_series
 from .models import fit_arima
 from .var import fit_var, run_granger, run_irf
+from .cointegration import fit_vecm, run_cointegration
 
 __all__ = [
     "PreparedTimeSeries",
@@ -18,4 +19,6 @@ __all__ = [
     "fit_var",
     "run_granger",
     "run_irf",
+    "run_cointegration",
+    "fit_vecm",
 ]

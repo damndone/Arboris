@@ -18,7 +18,11 @@
 - [complete] Stage 2 — safe LDA/QDA discriminant kernel with validation evidence
 - [complete] Stage 3 — time-series input boundary, ACF/PACF and unit-root diagnostics
 - [complete] Stage 4 — explicit ARIMA/SARIMA and VAR/Granger/IRF kernels
-- [in_progress] Stage 5 — shared JSON surface, adjacent regression tests, protected-path and FMS verification
+- [complete] Stage 5 — shared JSON surface, adjacent regression tests, protected-path and FMS verification
+- [complete] Stage 6 — cointegration and VECM
+- [in_progress] Stage 7 — VAR stability and IRF confidence bands
+- [pending] Stage 8 — correspondence analysis and MCA
+- [pending] Stage 9 — external numerical oracle and final verification
 
 ## Decision rules
 
@@ -32,3 +36,12 @@
 
 - Intentional red-test checkpoints initially failed on missing time-series model exports; the implementation then added the independent model modules and all six model tests passed.
 - A NumPy-array-to-contract boundary was identified in the first time-series diagnostics run and closed with a local JSON-native conversion helper before proceeding.
+- VECM log likelihood can be a complex scalar with zero imaginary part; the time-series JSON boundary now normalizes only near-real complex values and rejects materially complex/non-finite results.
+
+## Phase 2 decisions
+
+- Cointegration rank is evidence-derived by Johansen trace testing; VECM never accepts a free-form rank that bypasses the test.
+- VAR stability is reported from companion eigenvalues; unstable fits are rejected by default unless `report_only` is explicitly selected.
+- IRF bands are asymptotic-normal in this slice and labelled as such; no bootstrap wording is permitted.
+- CA and MCA share one SVD core; MCA is explicitly labelled `indicator_ca` and does not claim an inertia correction that is not implemented.
+- R is used only as a fixed-input test oracle. Runtime code never invokes R or a shell.

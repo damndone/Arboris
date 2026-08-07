@@ -25,6 +25,14 @@ def json_native(value: Any) -> Any:
         return number
     if isinstance(value, np.bool_):
         return bool(value)
+    if isinstance(value, (complex, np.complexfloating)):
+        number = complex(value)
+        if not np.isfinite(number.real) or not np.isfinite(number.imag) or abs(number.imag) > 1e-10:
+            raise TimeSeriesPackError(
+                "TIME_SERIES_NON_FINITE_RESULT",
+                "result contains a materially complex number",
+            )
+        return float(number.real)
     if isinstance(value, dict):
         if any(type(key) is not str for key in value):
             raise TimeSeriesPackError(

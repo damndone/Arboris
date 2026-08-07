@@ -32,3 +32,56 @@ Provide a strict univariate/multivariate time-index boundary, ACF/PACF, ADF/KPSS
 ## Verification
 
 Each module follows TDD with numerical fixtures and adversarial failure cases. The final batch runs focused tests, adjacent Agent regression tests, `git diff --check`, protected-path comparison against the baseline, and formal FMS verification. Full Agent reachability, browser acceptance, and release readiness remain explicitly unverified.
+
+## Phase 2: cointegration, VECM, VAR inference, and correspondence analysis
+
+The next slice stays inside the two standalone packs. It adds no operation
+registry entry, Agent vocabulary, orchestrator branch, persistence adapter, or
+frontend surface. The existing P1/P2 boundary therefore remains intact: a
+future capability adapter can consume these packets, but natural-language
+reachability is deliberately not claimed yet.
+
+### Cointegration and VECM
+
+`time_series.cointegration` supports explicitly selected Engle-Granger or
+Johansen evidence. Engle-Granger is restricted to an ordered pair and uses an
+explicit lag cap with no automatic lag search. Johansen accepts explicit
+deterministic-term and differenced-lag policies; trace and maximum-eigenvalue
+statistics, critical values, rejection flags, and the sequential rank decision
+are returned. The rank is evidence-derived, never a free-form user input.
+
+`time_series.vecm` derives its cointegration rank from the declared Johansen
+trace policy, then fits VECM with an explicit `k_ar_diff` and deterministic
+policy. It returns alpha, beta, short-run gamma, deterministic terms, relative
+forecasts, and estimator provenance. It does not infer time frequency or
+silently difference source data. Rank-zero evidence is reported as a rejected
+VECM fit rather than forcing a false equilibrium model.
+
+### VAR stability and IRF confidence bands
+
+VAR results include companion-matrix eigenvalues, their moduli, and the
+stability decision. `fit_var` has an explicit stability policy: the safe
+default rejects an unstable fit, while `report_only` returns the evidence for
+an explicitly chosen diagnostic workflow. IRF returns lower and upper bands
+alongside responses. The first supported interval method is labelled
+`asymptotic_normal` and is calculated from statsmodels' IR standard errors and
+the declared confidence level; no bootstrap claim is emitted.
+
+### Correspondence analysis (CA/MCA)
+
+`multivariate.correspondence` accepts a finite non-negative contingency table;
+`multivariate.mca` accepts complete-case categorical columns and constructs an
+explicit disjunctive indicator table. Both use the same SVD-based CA core,
+bounded category/dimension counts, deterministic labels, row/column masses,
+principal coordinates, contributions, singular values, and inertia. MCA is
+labelled `indicator_ca` so it does not pretend to apply an unimplemented
+small-sample inertia correction. Missing values, category overflow, negative
+counts, duplicate string labels, and all-zero margins fail closed.
+
+### External numerical oracle
+
+The tests compare time-series packets against direct statsmodels reference
+calls and compare a fixed CA table against an independent base-R SVD oracle.
+The oracle tests assert statistics, singular values, coordinates, and selected
+confidence endpoints within declared tolerances. They are verification-only;
+the runtime never shells out to R or trusts an LLM for numerical conclusions.

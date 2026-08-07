@@ -17,6 +17,115 @@ def _model_frame(n: int = 96) -> pd.DataFrame:
     return pd.DataFrame({"time": time, "x": x, "y": y})
 
 
+def _cointegrated_frame(n: int = 160) -> pd.DataFrame:
+    rng = np.random.default_rng(11)
+    x = np.cumsum(rng.normal(size=n))
+    y = x + 0.15 * rng.normal(size=n)
+    return pd.DataFrame({"time": np.arange(1.0, n + 1.0), "x": x, "y": y})
+
+
+def _independent_random_walk_frame(n: int = 160) -> pd.DataFrame:
+    rng = np.random.default_rng(23)
+    x = np.cumsum(rng.normal(size=n))
+    y = np.cumsum(rng.normal(size=n))
+    return pd.DataFrame({"time": np.arange(1.0, n + 1.0), "x": x, "y": y})
+
+
+def test_cointegration_reports_ordered_engle_granger_and_johansen_rank_evidence():
+    from workbench.engine.packs.time_series import run_cointegration
+
+    frame = _cointegrated_frame()
+    engle_granger = run_cointegration(
+        frame,
+        time_column="time",
+        value_columns=["x", "y"],
+        time_order="declared_monotonic",
+        method="engle_granger",
+        max_lag=1,
+        confidence_level=0.95,
+    )
+    johansen = run_cointegration(
+        frame,
+        time_column="time",
+        value_columns=["x", "y"],
+        time_order="declared_monotonic",
+        method="johansen",
+        det_order=0,
+        k_ar_diff=1,
+        confidence_level=0.95,
+    )
+    assert engle_granger["operation_id"] == "time_series.cointegration"
+    assert engle_granger["result"]["method"] == "engle_granger"
+    assert engle_granger["result"]["ordered_pair"] == {"dependent": "x", "regressor": "y"}
+    assert johansen["result"]["method"] == "johansen"
+    assert johansen["result"]["rank_decision"]["trace_rank"] == 1
+    assert johansen["result"]["rank_decision"]["maximum_eigenvalue_rank"] == 1
+    assert len(johansen["result"]["trace_tests"]) == 2
+    json.dumps(johansen, allow_nan=False)
+
+
+def test_vecm_derives_rank_and_returns_explicit_equilibrium_parameters():
+    from workbench.engine.packs.time_series import fit_vecm
+
+    result = fit_vecm(
+        _cointegrated_frame(),
+        time_column="time",
+        value_columns=["x", "y"],
+        time_order="declared_monotonic",
+        det_order=0,
+        k_ar_diff=1,
+        deterministic="co",
+        forecast_horizon=3,
+        confidence_level=0.9,
+    )
+    payload = result["result"]
+    assert result["operation_id"] == "time_series.vecm"
+    assert payload["rank"] == 1
+    assert payload["rank_policy"] == "johansen_trace"
+    assert len(payload["alpha"]) == 2
+    assert len(payload["beta"]) == 2
+    assert len(payload["gamma"]) == 2
+    assert len(payload["forecast"]["mean"]) == 3
+    json.dumps(result, allow_nan=False)
+
+
+def test_vecm_rejects_rank_zero_instead_of_fabricating_an_equilibrium_model():
+    from workbench.engine.packs.time_series import fit_vecm
+
+    result = fit_vecm(
+        _independent_random_walk_frame(),
+        time_column="time",
+        value_columns=["x", "y"],
+        time_order="declared_monotonic",
+        det_order=0,
+        k_ar_diff=1,
+        deterministic="co",
+        forecast_horizon=2,
+        confidence_level=0.9,
+    )
+    assert result["status"] == "rejected"
+    assert result["reason_code"] == "TIME_SERIES_NO_COINTEGRATION"
+    assert result["result"]["rank"] == 0
+    assert "alpha" not in result["result"]
+
+
+def test_engle_granger_rejects_more_than_two_series_without_coercion():
+    from workbench.engine.packs.time_series import run_cointegration
+    from workbench.engine.packs.time_series.errors import TimeSeriesPackError
+
+    frame = _cointegrated_frame().assign(z=lambda value: value["x"] * 0.5)
+    with pytest.raises(TimeSeriesPackError, match="TIME_SERIES_INVALID_OPTION"):
+        run_cointegration(
+            frame,
+            time_column="time",
+            value_columns=["x", "y", "z"],
+            time_order="declared_monotonic",
+            method="engle_granger",
+            max_lag=1,
+            confidence_level=0.95,
+        )
+
+
 def test_arima_and_sarima_keep_explicit_orders_and_bound_forecasts():
     from workbench.engine.packs.time_series import fit_arima
 

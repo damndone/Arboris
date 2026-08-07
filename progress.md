@@ -16,3 +16,8 @@
 - Implemented explicit ARIMA/SARIMA, VAR, predictive-precedence Granger, and bounded IRF kernels with estimator/version provenance and JSON-safe outputs.
 - Time-series model tests pass: 6 tests.
 - Next: run the combined extension suite, adjacent Agent regression tests, protected-path diff checks, and formal FMS verification.
+- User approved Phase 2: cointegration/VECM, VAR stability and IRF confidence bands, CA/MCA, and external numerical oracle validation.
+- Phase 2 design is recorded in the existing P7 design and implementation-plan documents; no Agent, P0, P1, P2, orchestrator, frontend, or persistence path is in scope.
+- Implemented Engle-Granger/Johansen cointegration evidence and rank-derived VECM with explicit deterministic/lag policies; rank-zero VECM returns a rejected packet rather than fabricating an equilibrium model.
+- Cointegration/VECM model tests pass: 10 tests.
+- Next: add VAR companion stability evidence and explicitly labelled asymptotic-normal IRF confidence bands.
