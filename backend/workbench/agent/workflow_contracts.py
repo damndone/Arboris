@@ -207,6 +207,10 @@ class StepSpecContract:
     ui_description: str = ""
     example_prompts: tuple[str, ...] = ()
     natural_language_enabled: bool = False
+    #: Whether this step persists a dataset child a later step can consume as
+    #: its `source`. A per-operation fact, so it is declared here with the rest
+    #: of them rather than in a set maintained alongside the registry.
+    produces_dataset: bool = False
 
     @property
     def allowed(self) -> frozenset[str]:
@@ -1454,6 +1458,9 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         diff_builder_key="exploration.derived_diff.v1",
         verification_builder_key="exploration.derived_verification.v1",
         ui_description="Create declared numeric columns without arbitrary code.",
+        # workflow_runtime's `_persist_numeric_derivation` writes a dataset
+        # child; the data transforms join it in P3.
+        produces_dataset=True,
     ),
     "statistical.derived_group_summarize": StepSpecContract(
         summary="Summarize columns within each derived group.",
@@ -1780,9 +1787,14 @@ _STEP_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 SUPPORTED_STEP_OUTPUTS = frozenset({"produced_dataset"})
 
 # Which step kinds persist a dataset child that a later step can consume.
-# `statistical.derive_numeric` is the only one today (workflow_runtime's
-# `_persist_numeric_derivation`); the data transforms join it in P3.
-STEP_PRODUCES_DATASET = frozenset({"statistical.derive_numeric"})
+# Derived rather than listed, so that registering a step operation stays a
+# single edit to WORKFLOW_STEP_SPEC_CONTRACTS: a hand-kept set beside the
+# registry is a second place to remember, and the one that gets forgotten.
+STEP_PRODUCES_DATASET = frozenset(
+    operation_id
+    for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
+    if contract.produces_dataset
+)
 
 
 def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
@@ -2148,14 +2160,18 @@ def validate_workflow_steps(
             }
         )
 
-    # Resolve source commitments before the dependency checks below, because
-    # resolving one writes a new entry into depends_on that must be checked.
+    # Resolve source commitments before `_topological_order` runs: until the
+    # reference is folded into depends_on, neither the ordering nor the cycle
+    # refusal can see that edge at all.
     by_id = {step["step_id"]: step for step in normalized}
     for step in normalized:
-        source = step["spec"].get("source")
-        if source is None:
+        # Keyed on presence for the same reason the spec check above is: an
+        # explicit `source: null` was already refused, so a missing key here
+        # means the step declared no source rather than a malformed one.
+        if "source" not in step["spec"]:
             continue
-        from_step = str(source["from_step"])
+        source = step["spec"]["source"]
+        from_step = source["from_step"]
         if from_step == step["step_id"]:
             raise OperationValidationError(
                 f"workflow step {step['step_id']} source refers to itself"
@@ -2168,7 +2184,8 @@ def validate_workflow_steps(
         if producer["operation_id"] not in STEP_PRODUCES_DATASET:
             raise OperationValidationError(
                 f"workflow step {step['step_id']} source refers to {from_step}, which "
-                f"does not produce a dataset: {producer['operation_id']}"
+                f"does not produce a dataset: {producer['operation_id']}. Steps that "
+                "produce a dataset: " + ", ".join(sorted(STEP_PRODUCES_DATASET))
             )
         # Consuming a step's output is an ordering constraint, so the reference
         # becomes a real dependency. Reusing depends_on means the existing
