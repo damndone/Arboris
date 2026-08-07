@@ -397,6 +397,34 @@ def _build_generalized_model_params(
     return _build
 
 
+def genesis_run_params(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Run-level declarations a genesis step carries, for any family.
+
+    These are properties of the *data and how it was collected*, not of the
+    model: a sampling design and a measurement level mean the same thing
+    whichever estimator reads them. Extracted once here rather than in each
+    family's parameter builder, which is where they were being dropped -- an
+    Agent could name a design in its plan, the run would succeed, and ordinary
+    standard errors would come back with nothing reporting the loss.
+
+    Empty declarations are omitted rather than passed as "": downstream an empty
+    string reads as a column literally named "".
+    """
+    from ..survey.fields import DESIGN_FIELDS
+
+    params: dict[str, Any] = {}
+    for key in ("sampling_weight", "frequency_weight", "analysis_weight", *DESIGN_FIELDS):
+        value = spec.get(key)
+        if isinstance(value, str) and value.strip():
+            params[key] = value.strip()
+        elif isinstance(value, (list, tuple)) and value:
+            params[key] = [str(item) for item in value]
+    labels = spec.get("labels")
+    if isinstance(labels, Mapping) and labels:
+        params["labels"] = dict(labels)
+    return params
+
+
 def _build_model_params_with_options(
     model_type: str,
 ) -> ModelParameterBuilder:
@@ -1268,6 +1296,39 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     return contract
 
 
+def _workflow_executable_family_sentence() -> str:
+    """The families an Agent may name, derived from the registry."""
+    families = sorted(key for key in MODEL_FAMILY_CONTRACTS if key != "auto")
+    return (
+        "Registered workflow-executable model family: "
+        + ", ".join(families)
+        + ". Every branch in one step uses this same family."
+    )
+
+
+def _genesis_survey_fields() -> dict[str, str]:
+    """The sampling-design declarations, described where they are declared.
+
+    A first run must be able to state a design: reachable only on a rerun means
+    the analysis has to be built by hand before an Agent can touch it, which is
+    the opposite of driving the workbench from one sentence.
+    """
+    from ..survey.fields import DESIGN_FIELD_SPECS
+
+    described = {
+        spec["key"]: (
+            f"{spec['label']}."
+            + (f" One of: {', '.join(spec['options'])}." if spec.get("options") else "")
+        )
+        for spec in DESIGN_FIELD_SPECS
+    }
+    described["sampling_weight"] = (
+        "Column holding the sampling weight. A survey design requires one, and a "
+        "sampling weight without a declared design is refused -- give both or neither."
+    )
+    return described
+
+
 WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
     "statistical.explore": StepSpecContract(
         summary=(
@@ -1393,13 +1454,13 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
     "model.genesis": StepSpecContract(
         summary="Estimate one or more models from the source table.",
         fields={
-            "model_family": (
-                "Registered workflow-executable model family: ols, logit, probit, poisson, "
-                "negative_binomial, glm:binomial, glm:poisson, glm:negative_binomial, "
-                "panel_ols, iv_2sls, did, cs_did, sa_did, dcdh, ordinal_logit, "
-                "multinomial_logit, survival_cox, or quantile_regression. "
-                "Every branch in one step uses this same family."
-            ),
+            # Read off the registry, never typed out: this sentence is the only
+            # place an Agent learns which families exist, and a hand-written
+            # list goes stale the first time one is added. `anova` shipped in
+            # v1.8.7 while this text still named the previous eighteen, so a
+            # request for a factorial ANOVA had nowhere to land -- and nothing
+            # failed, because prose does not fail.
+            "model_family": _workflow_executable_family_sentence(),
             "covariance": "Default covariance for every branch.",
             "model_options": (
                 "Family-owned JSON options. Only the selected model family's declared "
@@ -1419,6 +1480,13 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             "did_treat_col": "Treatment-group indicator for did_mode two_by_two.",
             "did_post_col": "Post-period indicator for did_mode two_by_two.",
             "did_status_col": "Absorbing treatment-status indicator for did_mode status.",
+            **_genesis_survey_fields(),
+            "labels": (
+                "Column metadata. `measurement_level` maps column names to "
+                "nominal / ordinal / scale / count and decides how each column is "
+                "modelled -- an integer rating left undeclared is analysed as a "
+                "count. Declare every column in one step rather than one at a time."
+            ),
             "branches": (
                 "List of {branch_id, outcome, predictors[, categorical]"
                 "[, polynomials][, covariance]}; one estimated model per entry. "

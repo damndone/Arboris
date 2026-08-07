@@ -48,6 +48,7 @@ from ..services.draft_service import execute_genesis_draft
 from .workflow import WorkflowDraft, WorkflowExecutionError, WorkflowStepResult
 from .workflow_contracts import (
     family_context_columns,
+    genesis_run_params,
     model_family_contract,
     workflow_dispatcher_key,
 )
@@ -915,6 +916,10 @@ def _execute_model_genesis_branches(
             model_params = family_contract.build_model_params(
                 branch_spec, branch, list(branch_predictors), branch_covariance
             )
+            # Run-level declarations belong to the data, not to the family, so
+            # they are merged once here instead of in eighteen parameter
+            # builders -- which is where they were being dropped.
+            model_params.update(genesis_run_params(branch_spec))
             stored = create_genesis_draft(
                 root,
                 upload_sha256=branch_upload_sha,
