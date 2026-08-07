@@ -31,6 +31,26 @@ def _independent_random_walk_frame(n: int = 160) -> pd.DataFrame:
     return pd.DataFrame({"time": np.arange(1.0, n + 1.0), "x": x, "y": y})
 
 
+def _unstable_var_frame(n: int = 100) -> pd.DataFrame:
+    rng = np.random.default_rng(99)
+    x = np.zeros(n)
+    y = np.zeros(n)
+    for index in range(1, n):
+        x[index] = 1.08 * x[index - 1] + rng.normal(scale=0.4)
+        y[index] = 0.5 * y[index - 1] + 0.2 * x[index - 1] + rng.normal(scale=0.4)
+    return pd.DataFrame({"time": np.arange(1.0, n + 1.0), "x": x, "y": y})
+
+
+def _stable_var_frame(n: int = 120) -> pd.DataFrame:
+    rng = np.random.default_rng(31)
+    x = np.zeros(n)
+    y = np.zeros(n)
+    for index in range(2, n):
+        x[index] = 0.45 * x[index - 1] + 0.10 * x[index - 2] + rng.normal(scale=0.3)
+        y[index] = 0.25 * y[index - 1] + 0.35 * x[index - 1] + rng.normal(scale=0.3)
+    return pd.DataFrame({"time": np.arange(1.0, n + 1.0), "x": x, "y": y})
+
+
 def test_cointegration_reports_ordered_engle_granger_and_johansen_rank_evidence():
     from workbench.engine.packs.time_series import run_cointegration
 
@@ -196,7 +216,7 @@ def test_var_is_explicitly_lagged_and_returns_bounded_forecasts():
     from workbench.engine.packs.time_series import fit_var
 
     result = fit_var(
-        _model_frame(),
+        _stable_var_frame(),
         time_column="time",
         value_columns=["x", "y"],
         time_order="declared_monotonic",
@@ -212,6 +232,50 @@ def test_var_is_explicitly_lagged_and_returns_bounded_forecasts():
     assert len(result["result"]["forecast"]["mean"][0]) == 2
     assert set(result["result"]["parameters"]) == {"x", "y"}
     json.dumps(result, allow_nan=False)
+
+
+def test_var_reports_companion_stability_and_rejects_unstable_fit_by_default():
+    from workbench.engine.packs.time_series import fit_var
+    from workbench.engine.packs.time_series.errors import TimeSeriesPackError
+
+    stable = fit_var(
+        _stable_var_frame(),
+        time_column="time",
+        value_columns=["x", "y"],
+        time_order="declared_monotonic",
+        lags=2,
+        trend="c",
+        forecast_horizon=2,
+        confidence_level=0.9,
+    )
+    assert stable["result"]["stability"]["is_stable"] is True
+    assert stable["result"]["stability"]["max_modulus"] < 1.0
+    assert len(stable["result"]["stability"]["companion_eigenvalues"]) == 4
+
+    with pytest.raises(TimeSeriesPackError, match="TIME_SERIES_UNSTABLE"):
+        fit_var(
+            _unstable_var_frame(),
+            time_column="time",
+            value_columns=["x", "y"],
+            time_order="declared_monotonic",
+            lags=1,
+            trend="c",
+            forecast_horizon=2,
+            confidence_level=0.9,
+        )
+    report_only = fit_var(
+        _unstable_var_frame(),
+        time_column="time",
+        value_columns=["x", "y"],
+        time_order="declared_monotonic",
+        lags=1,
+        trend="c",
+        forecast_horizon=2,
+        confidence_level=0.9,
+        stability_policy="report_only",
+    )
+    assert report_only["result"]["stability"]["is_stable"] is False
+    assert report_only["result"]["policy"]["stability_policy"] == "report_only"
 
 
 def test_granger_direction_is_predictive_precedence_not_causality():
@@ -238,7 +302,7 @@ def test_irf_horizon_and_orthogonalization_are_explicit():
     from workbench.engine.packs.time_series import run_irf
 
     result = run_irf(
-        _model_frame(),
+        _stable_var_frame(),
         time_column="time",
         value_columns=["x", "y"],
         time_order="declared_monotonic",
@@ -246,10 +310,16 @@ def test_irf_horizon_and_orthogonalization_are_explicit():
         trend="c",
         horizon=4,
         orthogonalized=False,
+        confidence_level=0.9,
+        ci_method="asymptotic_normal",
     )
     assert result["operation_id"] == "time_series.irf"
     assert result["result"]["policy"]["horizon"] == 4
     assert result["result"]["policy"]["orthogonalized"] is False
+    assert result["result"]["policy"]["ci_method"] == "asymptotic_normal"
+    assert len(result["result"]["lower"]) == 5
+    assert len(result["result"]["upper"]) == 5
+    assert len(result["result"]["lower"][0]) == 2
     assert len(result["result"]["responses"]) == 5
     json.dumps(result, allow_nan=False)
 
@@ -260,7 +330,7 @@ def test_var_family_rejects_unsafe_options():
 
     with pytest.raises(TimeSeriesPackError, match="TIME_SERIES_INVALID_OPTION"):
         fit_var(
-            _model_frame(),
+            _stable_var_frame(),
             time_column="time",
             value_columns=["x", "y"],
             time_order="declared_monotonic",

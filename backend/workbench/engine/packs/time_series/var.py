@@ -8,8 +8,10 @@ import warnings
 import numpy as np
 import pandas as pd
 import statsmodels
+from scipy.stats import norm
 from statsmodels.tsa.api import VAR
 from statsmodels.tsa.stattools import grangercausalitytests
+from statsmodels.tsa.vector_ar.util import comp_matrix
 
 from workbench.contracts.model.time_series_pack import make_time_series_result
 
@@ -22,6 +24,8 @@ from .models import MAX_FORECAST_HORIZON, _validate_confidence
 MAX_VAR_LAGS = 50
 VAR_TRENDS = frozenset({"n", "c", "ct", "ctt"})
 GRANGER_TESTS = frozenset({"ssr_ftest", "ssr_chi2test", "lrtest", "params_ftest"})
+STABILITY_POLICIES = frozenset({"reject_unstable", "report_only"})
+IRF_CI_METHODS = frozenset({"asymptotic_normal"})
 
 
 def _validate_var_options(
@@ -51,6 +55,42 @@ def _validate_var_options(
                 "TIME_SERIES_INVALID_OPTION",
                 f"horizon must be an integer in [0, {MAX_FORECAST_HORIZON}]",
             )
+
+
+def _validate_stability_policy(stability_policy: str) -> None:
+    if stability_policy not in STABILITY_POLICIES:
+        raise TimeSeriesPackError(
+            "TIME_SERIES_INVALID_OPTION",
+            "stability_policy must be reject_unstable or report_only",
+        )
+
+
+def _stability_evidence(fitted: object) -> dict[str, object]:
+    try:
+        coefficients = np.asarray(getattr(fitted, "coefs"), dtype=float)
+        eigenvalues = np.linalg.eigvals(comp_matrix(coefficients))
+    except (ValueError, np.linalg.LinAlgError, TypeError) as exc:
+        raise TimeSeriesPackError(
+            "TIME_SERIES_NUMERIC_FAILURE", "VAR stability could not be evaluated"
+        ) from exc
+    if not np.isfinite(eigenvalues.real).all() or not np.isfinite(eigenvalues.imag).all():
+        raise TimeSeriesPackError(
+            "TIME_SERIES_NUMERIC_FAILURE", "VAR stability contains non-finite eigenvalues"
+        )
+    moduli = np.abs(eigenvalues)
+    return {
+        "is_stable": bool(getattr(fitted, "is_stable")()),
+        "companion_eigenvalues": [
+            {
+                "real": float(value.real),
+                "imaginary": float(value.imag),
+                "modulus": float(abs(value)),
+            }
+            for value in eigenvalues
+        ],
+        "max_modulus": float(np.max(moduli)),
+        "stability_convention": "companion_eigenvalue_modulus_less_than_one",
+    }
 
 
 def _prepare_var(
@@ -128,6 +168,7 @@ def fit_var(
     trend: str = "c",
     forecast_horizon: int = 1,
     confidence_level: float = 0.95,
+    stability_policy: str = "reject_unstable",
 ) -> dict[str, object]:
     """Fit one explicitly lagged VAR model; no information-criterion selection."""
 
@@ -139,7 +180,13 @@ def fit_var(
     )
     _validate_var_options(lags=lags, trend=trend, forecast_horizon=forecast_horizon)
     _validate_confidence(confidence_level)
+    _validate_stability_policy(stability_policy)
     values, fitted, warning_messages = _fit_var_model(prepared, lags=lags, trend=trend)
+    stability = _stability_evidence(fitted)
+    if not stability["is_stable"] and stability_policy == "reject_unstable":
+        raise TimeSeriesPackError(
+            "TIME_SERIES_UNSTABLE", "VAR companion eigenvalues do not satisfy stability"
+        )
     try:
         mean, lower, upper = fitted.forecast_interval(
             values[-lags:], steps=forecast_horizon, alpha=1.0 - confidence_level
@@ -152,6 +199,7 @@ def fit_var(
             "value_columns": list(prepared.value_columns),
             "estimator": {"library": "statsmodels", "version": statsmodels.__version__},
             "parameters": _var_parameters(fitted, prepared.value_columns),
+            "stability": stability,
             "aic": float(fitted.aic),
             "bic": float(fitted.bic),
             "forecast": {
@@ -167,6 +215,7 @@ def fit_var(
                 "trend": trend,
                 "forecast_horizon": forecast_horizon,
                 "confidence_level": confidence_level,
+                "stability_policy": stability_policy,
                 "frequency_inferred": False,
             },
             "retained_positions": list(prepared.retained_positions),
@@ -276,6 +325,9 @@ def run_irf(
     trend: str = "c",
     horizon: int = 10,
     orthogonalized: bool = True,
+    confidence_level: float = 0.95,
+    ci_method: str = "asymptotic_normal",
+    stability_policy: str = "reject_unstable",
 ) -> dict[str, object]:
     """Return a bounded VAR impulse-response surface with explicit conventions."""
 
@@ -286,15 +338,30 @@ def run_irf(
         time_order=time_order,
     )
     _validate_var_options(lags=lags, trend=trend, horizon=horizon)
+    _validate_confidence(confidence_level)
+    _validate_stability_policy(stability_policy)
+    if ci_method not in IRF_CI_METHODS:
+        raise TimeSeriesPackError(
+            "TIME_SERIES_INVALID_OPTION", "ci_method must be asymptotic_normal"
+        )
     if type(orthogonalized) is not bool:
         raise TimeSeriesPackError(
             "TIME_SERIES_INVALID_OPTION", "orthogonalized must be a boolean"
         )
     values, fitted, warning_messages = _fit_var_model(prepared, lags=lags, trend=trend)
+    stability = _stability_evidence(fitted)
+    if not stability["is_stable"] and stability_policy == "reject_unstable":
+        raise TimeSeriesPackError(
+            "TIME_SERIES_UNSTABLE", "VAR companion eigenvalues do not satisfy stability"
+        )
     try:
         irf = fitted.irf(periods=horizon)
         responses = irf.orth_irfs if orthogonalized else irf.irfs
-        if not np.isfinite(responses).all():
+        standard_errors = irf.stderr(orth=orthogonalized)
+        critical_value = norm.ppf(0.5 + confidence_level / 2.0)
+        lower = responses - critical_value * standard_errors
+        upper = responses + critical_value * standard_errors
+        if not np.isfinite(np.concatenate((responses, lower, upper))).all():
             raise TimeSeriesPackError(
                 "TIME_SERIES_NUMERIC_FAILURE", "IRF returned non-finite responses"
             )
@@ -308,6 +375,9 @@ def run_irf(
         "shock_order": list(prepared.value_columns),
         "response_order": list(prepared.value_columns),
         "responses": responses,
+        "lower": lower,
+        "upper": upper,
+        "stability": stability,
         "warnings": list(warning_messages),
         "policy": {
             "time_order": time_order,
@@ -315,6 +385,9 @@ def run_irf(
             "trend": trend,
             "horizon": horizon,
             "orthogonalized": orthogonalized,
+            "confidence_level": confidence_level,
+            "ci_method": ci_method,
+            "stability_policy": stability_policy,
             "frequency_inferred": False,
         },
         "retained_positions": list(prepared.retained_positions),
@@ -331,7 +404,9 @@ def run_irf(
 
 __all__ = [
     "GRANGER_TESTS",
+    "IRF_CI_METHODS",
     "MAX_VAR_LAGS",
+    "STABILITY_POLICIES",
     "VAR_TRENDS",
     "fit_var",
     "run_granger",

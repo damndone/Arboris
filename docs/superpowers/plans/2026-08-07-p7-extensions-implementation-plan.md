@@ -111,11 +111,11 @@
 - Modify: `backend/workbench/engine/packs/time_series/var.py`
 - Modify: `tests/test_time_series_models.py`
 
-- [ ] Write red tests for stable/unstable companion evidence, explicit unstable-fit policy, and IRF asymptotic confidence bands with a declared confidence level/method.
-- [ ] Run the new VAR tests and confirm the current result is missing stability/band evidence.
-- [ ] Add companion eigenvalue/modulus evidence and fail-closed default stability policy to VAR.
-- [ ] Add asymptotic-normal IRF lower/upper bands from statsmodels standard errors; label the method and never call it bootstrap.
-- [ ] Run focused and existing time-series model tests and commit.
+- [x] Write red tests for stable/unstable companion evidence, explicit unstable-fit policy, and IRF asymptotic confidence bands with a declared confidence level/method.
+- [x] Run the new VAR tests and confirm the current result is missing stability/band evidence.
+- [x] Add companion eigenvalue/modulus evidence and fail-closed default stability policy to VAR.
+- [x] Add asymptotic-normal IRF lower/upper bands from statsmodels standard errors; label the method and never call it bootstrap.
+- [x] Run focused and existing time-series model tests and commit.
 
 ### Task 9: Correspondence analysis and MCA
 

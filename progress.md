@@ -21,3 +21,6 @@
 - Implemented Engle-Granger/Johansen cointegration evidence and rank-derived VECM with explicit deterministic/lag policies; rank-zero VECM returns a rejected packet rather than fabricating an equilibrium model.
 - Cointegration/VECM model tests pass: 10 tests.
 - Next: add VAR companion stability evidence and explicitly labelled asymptotic-normal IRF confidence bands.
+- Added VAR companion eigenvalue/modulus evidence, safe unstable-fit rejection/report-only policy, and asymptotic-normal IRF confidence bands with explicit method labels.
+- Stability/IRF model tests pass: 11 tests.
+- Next: implement the shared SVD correspondence-analysis core and indicator-CA MCA.
