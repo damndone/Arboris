@@ -1,0 +1,33 @@
+# P7 Extensions: clustering, discriminant, and time-series kernels
+
+## Goal
+
+在现有 P7 多元统计 worktree 中增加可独立验证的聚类、判别分析和时间序列统计内核；保持与 Claude 当前 Agent/P0/P1/P2 文件完全隔离，给后续 CapabilityContract 与自然语言 Agent 接入留下稳定、显式、可组合的接口。
+
+## Scope and boundaries
+
+- 允许修改：`multivariate` pack、独立 `time_series` pack、对应 model contracts、专用 tests、design/plan docs。
+- 禁止修改：`backend/workbench/agent/**`、`frontend/src/workbench/agent/**`、现有 workflow seam、OperationRegistry、orchestrator、context tools、现有 time-series diagnostics C1 contract。
+- 不安装新依赖；使用仓库已有 NumPy/pandas/SciPy/statsmodels。
+- 不做自动模型选择、隐式标准化、静默缺失值处理、原始行回传或 Agent 注册。
+
+## Stages
+
+- [complete] Stage 0 — same-worktree formal line scope, design, and implementation plan
+- [complete] Stage 1 — deterministic clustering kernel: k-means and hierarchical clustering
+- [pending] Stage 2 — safe LDA/QDA discriminant kernel with validation evidence
+- [pending] Stage 3 — time-series input boundary, ACF/PACF and unit-root diagnostics
+- [pending] Stage 4 — explicit ARIMA/SARIMA and VAR/Granger/IRF kernels
+- [pending] Stage 5 — shared JSON surface, adjacent regression tests, protected-path and FMS verification
+
+## Decision rules
+
+1. Every new public behavior begins with a failing test.
+2. Every estimator receives explicit options and returns its policy/provenance.
+3. Numerical degeneracy becomes a stable pack error; no pseudoinverse or fallback is implicit.
+4. Candidate comparison is evidence-producing only; the kernel never silently chooses a winner.
+5. Commits remain self-contained and touch no Claude-owned paths.
+
+## Errors encountered
+
+None yet.

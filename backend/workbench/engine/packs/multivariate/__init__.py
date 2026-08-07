@@ -11,6 +11,14 @@ from workbench.contracts.model.multivariate import (
     MULTIVARIATE_OPERATION_IDS,
 )
 
+from .clustering import (
+    CLUSTERING_ALGORITHMS,
+    CLUSTERING_LINKAGES,
+    CLUSTERING_METRICS,
+    CLUSTERING_SELECTIONS,
+    CLUSTERING_STANDARDIZATIONS,
+    fit_clustering,
+)
 from .efa import EFA_EXTRACTIONS, EFA_ROTATIONS, fit_efa
 from .pca import PCA_COMPONENT_SELECTIONS, PCA_MATRICES, fit_pca
 from .reliability import cronbach_alpha
@@ -25,4 +33,10 @@ __all__ = [
     "PCA_MATRICES",
     "EFA_EXTRACTIONS",
     "EFA_ROTATIONS",
+    "CLUSTERING_ALGORITHMS",
+    "CLUSTERING_LINKAGES",
+    "CLUSTERING_METRICS",
+    "CLUSTERING_SELECTIONS",
+    "CLUSTERING_STANDARDIZATIONS",
+    "fit_clustering",
 ]

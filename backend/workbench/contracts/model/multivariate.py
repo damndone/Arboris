@@ -28,6 +28,15 @@ MULTIVARIATE_OPERATION_IDS = frozenset(
         "multivariate.cronbach_alpha",
     }
 )
+MULTIVARIATE_EXTENSION_OPERATION_IDS = frozenset(
+    {
+        "multivariate.clustering",
+        "multivariate.discriminant",
+    }
+)
+MULTIVARIATE_ALL_OPERATION_IDS = (
+    MULTIVARIATE_OPERATION_IDS | MULTIVARIATE_EXTENSION_OPERATION_IDS
+)
 MULTIVARIATE_MISSING_POLICIES = frozenset({"complete_case_v1"})
 MULTIVARIATE_STATUSES = frozenset({"completed", "rejected", "failed"})
 MULTIVARIATE_REASON_CODES = frozenset(
@@ -70,7 +79,7 @@ def _require_non_empty_string(value: Any, field_name: str) -> None:
 
 
 def _require_operation_id(value: Any) -> None:
-    if type(value) is not str or value not in MULTIVARIATE_OPERATION_IDS:
+    if type(value) is not str or value not in MULTIVARIATE_ALL_OPERATION_IDS:
         raise ContractError("operation_id is not a declared multivariate operation")
 
 
@@ -195,6 +204,8 @@ def make_result_envelope(
 __all__ = [
     "MULTIVARIATE_CONTRACT",
     "MULTIVARIATE_CONTRACT_VERSION",
+    "MULTIVARIATE_ALL_OPERATION_IDS",
+    "MULTIVARIATE_EXTENSION_OPERATION_IDS",
     "MULTIVARIATE_MISSING_POLICIES",
     "MULTIVARIATE_OPERATION_IDS",
     "MULTIVARIATE_REASON_CODES",

@@ -492,6 +492,12 @@ def test_multivariate_surface_is_narrow_and_results_are_json_safe_and_determinis
         "PCA_MATRICES",
         "EFA_EXTRACTIONS",
         "EFA_ROTATIONS",
+        "CLUSTERING_ALGORITHMS",
+        "CLUSTERING_LINKAGES",
+        "CLUSTERING_METRICS",
+        "CLUSTERING_SELECTIONS",
+        "CLUSTERING_STANDARDIZATIONS",
+        "fit_clustering",
     }
     assert multivariate.MULTIVARIATE_CONTRACT_VERSION == MULTIVARIATE_CONTRACT_VERSION
     assert multivariate.MULTIVARIATE_OPERATION_IDS == MULTIVARIATE_OPERATION_IDS
