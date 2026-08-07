@@ -319,7 +319,17 @@ def test_ols_step_uses_native_genesis_and_persists_one_run_per_branch(tmp_path) 
     )
 
     result = _execute_ols_branches(
-        project, draft, {"source_sha256": upload_sha}, frame, model_step
+        project,
+        draft,
+        # The lineage the executor resolves for a sourceless step: the
+        # workflow's own target.
+        {
+            "artifact_id": artifact_id,
+            "node_ref": "stage:source",
+            "sha256": upload_sha,
+        },
+        frame,
+        model_step,
     )
 
     assert len(result.payload["branches"]) == 2
@@ -353,7 +363,17 @@ def test_ols_step_preserves_each_declared_branch_covariance(tmp_path) -> None:
     model_step = next(step for step in draft.steps if step.operation_id == "model.genesis")
 
     result = _execute_ols_branches(
-        project, draft, {"source_sha256": upload_sha}, frame, model_step
+        project,
+        draft,
+        # The lineage the executor resolves for a sourceless step: the
+        # workflow's own target.
+        {
+            "artifact_id": artifact_id,
+            "node_ref": "stage:source",
+            "sha256": upload_sha,
+        },
+        frame,
+        model_step,
     )
 
     persisted = {

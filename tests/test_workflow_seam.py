@@ -764,3 +764,399 @@ def test_a_sourceless_step_still_claims_the_original_table(tmp_path: Path) -> No
         str(draft.target["artifact_id"]),
         data_artifact_id,
     ]
+
+
+# --- The lineage meta-guard -------------------------------------------------
+#
+# Every operation the runtime hands a resolved input frame to may declare a
+# `source`, and every one of them writes down where its output came from. Those
+# two facts have to stay joined: a step that computes from an upstream dataset
+# and then records `draft.target` produces no error, no red test and a graph
+# that says the original table produced numbers it never touched.
+#
+# Nothing about the code makes that joining automatic -- `_lineage_source` is
+# reusable, but forgetting to call it costs nothing. So the guard is derived
+# from the contract instead: the case registry below must cover
+# STEP_CONSUMES_INPUT_FRAME exactly, and each case runs a real chain and reads
+# the reference actually written to disk. Registering a new consuming operation
+# without wiring its lineage turns this file red twice over -- once because the
+# registry is incomplete, and once because the claim it writes is the target.
+
+
+def _meta_frame() -> pd.DataFrame:
+    """A frame big enough to estimate on, with a column worth deriving."""
+
+    return pd.DataFrame(
+        {
+            "wave": [1, 2, 3, 4] * 12,
+            "outcome": [100.0 + index * 2.5 for index in range(48)],
+            "rate_a": [float(index % 17) for index in range(48)],
+            "rate_b": [float((index * 7) % 13) for index in range(48)],
+            "size": [200.0 + index * 7 for index in range(48)],
+        }
+    )
+
+
+def _sourced(step: dict, from_step: str = "first") -> dict:
+    step["spec"]["source"] = {"from_step": from_step, "output": "produced_dataset"}
+    return step
+
+
+def _meta_plan() -> list[dict]:
+    """One plan whose every consuming step reads `first`'s output.
+
+    `first` is the only step without a `source`: it is the upstream whose
+    published binding every other step here must end up naming.
+    """
+
+    return [
+        {
+            "step_id": "first",
+            "operation_id": "statistical.derive_numeric",
+            "spec": {
+                "recipes": [
+                    {
+                        "operator": "multiply",
+                        "input_columns": ["size", "rate_a"],
+                        "output_name": "scaled",
+                    }
+                ]
+            },
+        },
+        _sourced(
+            {
+                "step_id": "detail",
+                "operation_id": "statistical.explore",
+                "spec": {
+                    "operation": "summarize_detail",
+                    "selected_columns": ["size", "scaled"],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "scatter",
+                "operation_id": "statistical.explore",
+                "spec": {
+                    "operation": "scatter",
+                    "plots": [{"x_column": "scaled", "y_column": "outcome"}],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "chained",
+                "operation_id": "statistical.derive_numeric",
+                "spec": {
+                    "recipes": [
+                        {
+                            "operator": "multiply",
+                            "input_columns": ["scaled", "size"],
+                            "output_name": "rescaled",
+                        }
+                    ]
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "split",
+                "operation_id": "statistical.derive_boolean",
+                "depends_on": ["detail"],
+                "spec": {
+                    "recipes": [
+                        {
+                            "source_column": "size",
+                            "percentile": 25,
+                            "comparison": "lte",
+                            "output_name": "small_unit",
+                        }
+                    ]
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "compare",
+                "operation_id": "statistical.derived_group_summarize",
+                "depends_on": ["split"],
+                "spec": {
+                    "groups": [
+                        {
+                            "source_column": "size",
+                            "percentile": 25,
+                            "comparison": "lte",
+                            "output_name": "small_unit",
+                        }
+                    ],
+                    "summarize_columns": ["outcome"],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "models",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "ols",
+                    "covariance": "unadjusted",
+                    "branches": [
+                        {
+                            "branch_id": "curved",
+                            "outcome": "outcome",
+                            "predictors": ["scaled", "rate_b"],
+                            "polynomials": [{"column": "scaled", "degree": 2}],
+                        }
+                    ],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "joint",
+                "operation_id": "model.joint_f_test",
+                "depends_on": ["models"],
+                "spec": {
+                    "branch_id": "curved",
+                    "term_selectors": [{"kind": "linear", "column": "rate_b"}],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "white",
+                "operation_id": "model.white_test",
+                "depends_on": ["models"],
+                "spec": {"branch_id": "curved"},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "stationary",
+                "operation_id": "model.quadratic_stationary_point",
+                "depends_on": ["models"],
+                "spec": {"branch_id": "curved", "column": "scaled"},
+            }
+        ),
+    ]
+
+
+# Which step in the plan above exercises which operation. Several operations
+# reach the persist layer by more than one route -- `statistical.explore` alone
+# has a plain branch and a plots branch that call it from different places --
+# so this maps to a list rather than a single step.
+_LINEAGE_META_STEPS: dict[str, tuple[str, ...]] = {
+    "statistical.derive_numeric": ("chained",),
+    "statistical.explore": ("detail", "scatter"),
+    "statistical.derive_boolean": ("split",),
+    "statistical.derived_group_summarize": ("compare",),
+    "model.genesis": ("models",),
+    "model.joint_f_test": ("joint",),
+    "model.white_test": ("white",),
+    "model.quadratic_stationary_point": ("stationary",),
+}
+
+# Operations that write no source reference at all, and so cannot be checked
+# by reading one back. Empty today, and deliberately explicit: a silent skip
+# here would turn this guard into a test that passes because it looked at
+# nothing. Adding an entry requires stating why the operation records no
+# provenance, which is a claim worth having to write down.
+_LINEAGE_META_UNRECORDED: dict[str, str] = {}
+
+
+def _meta_project(tmp_path: Path):
+    """A project whose source run carries the upload model.genesis re-estimates from."""
+
+    from workbench.lineage.run_inputs import write_run_inputs
+    from workbench.lineage.upload_store import store_upload_bytes
+
+    frame = _meta_frame()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="fixture-dag",
+    )
+    draft = compile_workflow(
+        workflow_id="wf_lineage_meta",
+        target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
+        preconditions={"context_fingerprint": "sha256:fixture"},
+        steps=_meta_plan(),
+        available_columns=list(frame.columns),
+    )
+    return project, draft
+
+
+def _exploration_claims(project: Path, draft, step_id: str, result) -> dict[str, dict[str, str]]:
+    """Every persisted exploration record this step wrote, and its named source."""
+
+    run_id = str(draft.target["run_id"])
+    claims: dict[str, dict[str, str]] = {}
+    for artifact_id in result.artifact_ids:
+        path = _artifact_path(project, run_id, artifact_id)
+        if path.suffix == ".json":
+            payload = read_json(path)
+            if not isinstance(payload, dict) or "source_artifact_id" not in payload:
+                continue
+            claims[f"{step_id}:{artifact_id}"] = {
+                "artifact_id": str(payload["source_artifact_id"]),
+                "sha256": str(payload["source_sha256"]),
+            }
+            continue
+        if path.suffix != ".txt":
+            # Exports (CSV, PDF) carry the numbers, not a provenance header.
+            continue
+        # The human-readable transcript states the same provenance in prose,
+        # and is the copy a person is most likely to believe. It is checked
+        # here rather than trusted to follow the JSON.
+        lines = dict(
+            line.split(": ", 1)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if ": " in line
+        )
+        if "source_artifact_id" not in lines:
+            continue
+        claims[f"{step_id}:{artifact_id}"] = {
+            "artifact_id": lines["source_artifact_id"],
+            "sha256": lines["source_sha256"],
+        }
+    return claims
+
+
+def _numeric_recipe_claims(project: Path, draft, step_id: str, result) -> dict[str, dict[str, str]]:
+    """The replayable recipe plus the graph edge the derived dataset hangs from."""
+
+    run_id = str(draft.target["run_id"])
+    recipe = read_json(_artifact_path(project, run_id, result.artifact_ids[1]))
+    node_id = str(result.payload["produced_dataset"]["node_ref"])
+    graph = GraphStore(project / "runs").read(run_id)
+    return {
+        f"{step_id}:recipe": {
+            "artifact_id": str(recipe["source"]["artifact_id"]),
+            "sha256": str(recipe["source"]["sha256"]),
+        },
+        f"{step_id}:graph": {"node_ref": str(graph.nodes[node_id].parent_stage_id)},
+    }
+
+
+def _post_estimation_claims(project: Path, draft, step_id: str, result) -> dict[str, dict[str, str]]:
+    """The `source` block of the persisted test/post-estimation artifact."""
+
+    run_id = str(draft.target["run_id"])
+    payload = read_json(_artifact_path(project, run_id, result.artifact_ids[0]))
+    source = payload["source"]
+    return {
+        f"{step_id}:artifact": {
+            "artifact_id": str(source["artifact_id"]),
+            "node_ref": str(source["node_ref"]),
+            "sha256": str(source["sha256"]),
+        }
+    }
+
+
+def _genesis_claims(project: Path, draft, step_id: str, result) -> dict[str, dict[str, str]]:
+    """The exploration context stored on every Genesis draft this step created."""
+
+    from workbench.lineage.pipeline_drafts import PipelineDraftStore
+
+    store = PipelineDraftStore(project)
+    claims: dict[str, dict[str, str]] = {}
+    for summary in store.list():
+        stored = store.get(summary["draft_id"])
+        context = stored.draft.get("exploration_context") or {}
+        if context.get("workflow_step_id") != step_id:
+            continue
+        claims[f"{step_id}:{summary['draft_id']}"] = {
+            "artifact_id": str(context["source_artifact_id"]),
+            "node_ref": str(context["source_node_id"]),
+            "sha256": str(context["source_sha256"]),
+        }
+    return claims
+
+
+_LINEAGE_META_READERS = {
+    "statistical.derive_numeric": _numeric_recipe_claims,
+    "statistical.explore": _exploration_claims,
+    "statistical.derive_boolean": _exploration_claims,
+    "statistical.derived_group_summarize": _exploration_claims,
+    "model.genesis": _genesis_claims,
+    "model.joint_f_test": _post_estimation_claims,
+    "model.white_test": _post_estimation_claims,
+    "model.quadratic_stationary_point": _post_estimation_claims,
+}
+
+
+def test_the_lineage_case_registry_covers_every_consuming_operation() -> None:
+    """Registering a consuming operation must force a lineage decision.
+
+    The registry is the half of the guard that cannot be satisfied by accident:
+    a new entry in STEP_CONSUMES_INPUT_FRAME with no case here fails before any
+    chain runs, and the only way past it is to either exercise the operation or
+    write down why it records no source at all.
+    """
+
+    covered = set(_LINEAGE_META_STEPS) | set(_LINEAGE_META_UNRECORDED)
+
+    assert covered == set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME)
+    assert not (set(_LINEAGE_META_STEPS) & set(_LINEAGE_META_UNRECORDED))
+    assert set(_LINEAGE_META_READERS) == set(_LINEAGE_META_STEPS)
+
+
+def test_every_consuming_operation_records_the_dataset_it_actually_read(
+    tmp_path: Path,
+) -> None:
+    """One chain per consuming operation, checked against what reached the disk.
+
+    Each step here computes from `first`'s derived dataset. Recording
+    `draft.target` instead is invisible from the numbers -- they are right --
+    and visible only here: the artifact, the recipe, the graph edge and the
+    Genesis context all have to name the binding that was actually read.
+    """
+
+    project, draft = _meta_project(tmp_path)
+    executor = build_workflow_step_executor(project, draft)
+    by_id = {step.step_id: step for step in draft.steps}
+
+    results: dict[str, WorkflowStepResult] = {}
+    for step in draft.steps:
+        results[step.step_id] = executor(step, results)
+
+    binding = results["first"].payload["produced_dataset"]
+    expected = {
+        "artifact_id": str(binding["artifact_id"]),
+        "node_ref": str(binding["node_ref"]),
+        "sha256": str(binding["content_sha256"]),
+    }
+    # The whole guard rests on the two being distinguishable: if the derived
+    # dataset happened to share the target's identity, every assertion below
+    # would pass no matter what the runtime wrote.
+    assert expected["artifact_id"] != str(draft.target["artifact_id"])
+    assert expected["node_ref"] != str(draft.target["node_ref"])
+
+    checked: dict[str, dict[str, str]] = {}
+    for operation_id, step_ids in _LINEAGE_META_STEPS.items():
+        reader = _LINEAGE_META_READERS[operation_id]
+        for step_id in step_ids:
+            assert by_id[step_id].operation_id == operation_id
+            claims = reader(project, draft, step_id, results[step_id])
+            assert claims, f"{operation_id} wrote no source reference to read back"
+            checked.update(claims)
+
+    assert checked
+    # Collected rather than asserted one at a time: when several paths lie, the
+    # reader needs the whole list, not whichever one sorts first.
+    lies = [
+        f"{where} records {field}={value!r}, but the step read {expected[field]!r}"
+        for where, claim in sorted(checked.items())
+        for field, value in sorted(claim.items())
+        if value != expected[field]
+    ]
+    assert not lies, "lineage records name a dataset the step never read:\n" + "\n".join(lies)

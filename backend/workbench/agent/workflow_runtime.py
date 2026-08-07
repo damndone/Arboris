@@ -366,6 +366,12 @@ def _lineage_source(
     did not, which misdirects rerun, comparison, explanation and reporting
     alike. A step without a `source` really is derived from the target, and
     keeps naming it.
+
+    This is resolved once per step in the executor and handed to whatever
+    persists the step's output, rather than left for each persist function to
+    remember. The persist functions no longer receive `source_context` at all,
+    so a new one cannot reach for the target's digest by habit: the only source
+    identity in scope is the one this returns.
     """
 
     if "source" not in step.spec:
@@ -438,15 +444,13 @@ def _persist_numeric_derivation(
     *,
     root: Path,
     draft: WorkflowDraft,
-    source_context: Mapping[str, Any],
+    lineage: Mapping[str, str],
     frame: pd.DataFrame,
     step: Any,
-    previous: Mapping[str, WorkflowStepResult],
 ) -> WorkflowStepResult:
     """Persist a derived dataset + recipe and add one visible graph child."""
 
     derived, summaries = _apply_numeric_recipes(frame, step.spec["recipes"])
-    lineage = _lineage_source(draft, step, source_context, previous)
     # The output is written into the workflow's target run regardless of which
     # dataset it derives from; only the lineage references follow the real
     # source. `_lineage_source` refuses a binding from any other run, so the
@@ -636,18 +640,34 @@ def _record_artifact_ids(record: Mapping[str, Any]) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
-def _result_from_artifact_ids(run_root: Path, artifact_ids: list[str] | tuple[str, ...]) -> dict[str, Any]:
+def _result_from_artifact_ids(
+    run_root: Path, artifact_ids: list[str] | tuple[str, ...]
+) -> dict[str, Any] | None:
+    """Read a step's result block back off disk, or None if it holds none.
+
+    Returning None rather than raising, because the caller is searching a
+    dependency chain rather than fetching one known artifact. A dataset
+    producer upstream carries a CSV and a recipe and no result block at all --
+    a legitimate shape now that a step can declare another step's output as its
+    source, which puts that producer in its `depends_on`. Aborting here would
+    end the search at the first such dependency instead of continuing to the
+    step that does hold the evidence; the caller still refuses when the whole
+    chain yields nothing.
+    """
+
     index = _read_artifacts_index(run_root)
     wanted = set(artifact_ids)
     for item in index.get("artifacts", []):
         if item.get("artifact_id") not in wanted:
             continue
         path = run_root / str(item.get("path", ""))
-        if path.is_file():
+        # Only JSON documents can carry a result block; a derived data.csv read
+        # as JSON is a decode error, not an answer.
+        if path.is_file() and path.suffix == ".json":
             payload = read_json(path)
             if isinstance(payload, Mapping) and isinstance(payload.get("result"), Mapping):
                 return dict(payload["result"])
-    raise WorkflowExecutionError("workflow dependency artifact is unavailable")
+    return None
 
 
 def _detail_result(
@@ -682,6 +702,8 @@ def _detail_result(
             if isinstance(cached.payload.get("result"), Mapping)
             else _result_from_artifact_ids(run_root, cached.artifact_ids)
         )
+        if result is None:
+            continue
         variables = result.get("variables")
         if isinstance(variables, Mapping) and any(
             isinstance(entry, Mapping) and "percentiles" in entry
@@ -706,30 +728,57 @@ def _result_row_counts(result: Mapping[str, Any]) -> dict[str, int]:
     return counts
 
 
+def _persist_workflow_exploration(
+    root: Path,
+    draft: WorkflowDraft,
+    lineage: Mapping[str, str],
+    *,
+    spec: ExplorationSpec,
+    result: Mapping[str, Any],
+    frame: pd.DataFrame,
+) -> tuple[dict[str, Any], str]:
+    """The single place a workflow exploration record names its source.
+
+    Four dispatch branches persist exploration records -- the plain explore,
+    the plots explore, derive_boolean and derived_group_summarize -- and each
+    used to spell out `draft.target` for itself. Four copies of a source
+    reference is four chances to write the wrong one, and the numbers stay
+    right when it happens, so nothing complains.
+
+    The fingerprint is derived from the same digest, which is not decoration:
+    it is the record's identity on disk. Keying it on the target while
+    computing from a derived dataset makes two different explorations collide
+    on one artifact path.
+    """
+
+    fingerprint = exploration_fingerprint(str(lineage["sha256"]), spec)
+    record = persist_exploration(
+        root,
+        source_run_id=str(draft.target["run_id"]),
+        source_node_id=str(lineage["node_ref"]),
+        source_artifact_id=str(lineage["artifact_id"]),
+        source_sha256=str(lineage["sha256"]),
+        spec=spec,
+        result=dict(result),
+        fingerprint=fingerprint,
+        source_frame=frame,
+    )
+    return record, fingerprint
+
+
 def _exploration_step(
     *,
     root: Path,
     draft: WorkflowDraft,
-    source_context: Mapping[str, Any],
+    lineage: Mapping[str, str],
     source_frame: pd.DataFrame,
     spec: ExplorationSpec,
     frame: pd.DataFrame | None = None,
 ) -> WorkflowStepResult:
     evaluated_frame = source_frame if frame is None else frame
     result = execute_exploration(evaluated_frame, spec)
-    source_run_id = str(draft.target["run_id"])
-    source_sha = str(source_context["source_sha256"])
-    fingerprint = exploration_fingerprint(source_sha, spec)
-    record = persist_exploration(
-        root,
-        source_run_id=source_run_id,
-        source_node_id=str(draft.target["node_ref"]),
-        source_artifact_id=str(draft.target["artifact_id"]),
-        source_sha256=source_sha,
-        spec=spec,
-        result=result,
-        fingerprint=fingerprint,
-        source_frame=evaluated_frame,
+    record, fingerprint = _persist_workflow_exploration(
+        root, draft, lineage, spec=spec, result=result, frame=evaluated_frame
     )
     return WorkflowStepResult(
         artifact_ids=_record_artifact_ids(record),
@@ -772,11 +821,16 @@ def build_workflow_step_executor(
         step_frame = _workflow_input_frame(
             source_frame, draft, step, dependency_graph, previous, root
         )
+        # Resolved here, beside the frame, so the data a step reads and the
+        # source its output claims come from one decision. `source_context` is
+        # deliberately not forwarded past this point: every branch below
+        # receives `lineage` and nothing else that could name the target.
+        lineage = _lineage_source(draft, step, source_context, previous)
         if dispatcher_key == "workbench.agent.workflow_runtime.statistical_explore" and "plots" not in step.spec:
             return _exploration_step(
                 root=root,
                 draft=draft,
-                source_context=source_context,
+                lineage=lineage,
                 source_frame=step_frame,
                 spec=_exploration_spec(step.spec),
             )
@@ -784,10 +838,9 @@ def build_workflow_step_executor(
             return _persist_numeric_derivation(
                 root=root,
                 draft=draft,
-                source_context=source_context,
+                lineage=lineage,
                 frame=step_frame,
                 step=step,
-                previous=previous,
             )
         if dispatcher_key == "workbench.agent.workflow_runtime.statistical_derive_boolean":
             detail, detail_step_id, detail_fingerprint = _detail_result(
@@ -827,17 +880,8 @@ def build_workflow_step_executor(
                         f"{step.step_id} threshold for {recipe['output_name']} "
                         f"is not sourced from {detail_step_id}"
                     )
-                fingerprint = exploration_fingerprint(str(source_context["source_sha256"]), spec)
-                record = persist_exploration(
-                    root,
-                    source_run_id=str(draft.target["run_id"]),
-                    source_node_id=str(draft.target["node_ref"]),
-                    source_artifact_id=str(draft.target["artifact_id"]),
-                    source_sha256=str(source_context["source_sha256"]),
-                    spec=spec,
-                    result=result,
-                    fingerprint=fingerprint,
-                    source_frame=step_frame,
+                record, _fingerprint = _persist_workflow_exploration(
+                    root, draft, lineage, spec=spec, result=result, frame=step_frame
                 )
                 artifact_ids.extend(_record_artifact_ids(record))
                 row_counts[recipe["output_name"]] = int(
@@ -885,17 +929,8 @@ def build_workflow_step_executor(
                     raise WorkflowExecutionError(
                         f"{step.step_id} empty derived group: {recipe['output_name']}"
                     )
-                fingerprint = exploration_fingerprint(str(source_context["source_sha256"]), spec)
-                record = persist_exploration(
-                    root,
-                    source_run_id=str(draft.target["run_id"]),
-                    source_node_id=str(draft.target["node_ref"]),
-                    source_artifact_id=str(draft.target["artifact_id"]),
-                    source_sha256=str(source_context["source_sha256"]),
-                    spec=spec,
-                    result=result,
-                    fingerprint=fingerprint,
-                    source_frame=grouped,
+                record, _fingerprint = _persist_workflow_exploration(
+                    root, draft, lineage, spec=spec, result=result, frame=grouped
                 )
                 artifact_ids.extend(_record_artifact_ids(record))
                 row_counts[recipe["output_name"]] = int(result["filtered_row_count"])
@@ -914,17 +949,8 @@ def build_workflow_step_executor(
                     options={"x_column": plot["x_column"], "y_column": plot["y_column"]},
                 )
                 result = execute_exploration(step_frame, spec)
-                fingerprint = exploration_fingerprint(str(source_context["source_sha256"]), spec)
-                record = persist_exploration(
-                    root,
-                    source_run_id=str(draft.target["run_id"]),
-                    source_node_id=str(draft.target["node_ref"]),
-                    source_artifact_id=str(draft.target["artifact_id"]),
-                    source_sha256=str(source_context["source_sha256"]),
-                    spec=spec,
-                    result=result,
-                    fingerprint=fingerprint,
-                    source_frame=step_frame,
+                record, _fingerprint = _persist_workflow_exploration(
+                    root, draft, lineage, spec=spec, result=result, frame=step_frame
                 )
                 artifact_ids.extend(_record_artifact_ids(record))
                 row_counts[f"{plot['x_column']}->{plot['y_column']}"] = int(
@@ -938,24 +964,24 @@ def build_workflow_step_executor(
             return _execute_model_genesis_branches(
                 root,
                 draft,
-                source_context,
+                lineage,
                 step_frame,
                 step,
                 raw_source_frame=source_frame,
             )
         if dispatcher_key == "workbench.agent.workflow_runtime.model_joint_f_test":
             return _execute_model_joint_f_test(
-                root, draft, source_context, step_frame, step, previous
+                root, draft, lineage, step_frame, step, previous
             )
         if dispatcher_key == "workbench.agent.workflow_runtime.model_white_test":
             return _execute_model_white_test(
-                root, draft, source_context, step_frame, step, previous
+                root, draft, lineage, step_frame, step, previous
             )
         if dispatcher_key == (
             "workbench.agent.workflow_runtime.model_quadratic_stationary_point"
         ):
             return _execute_model_quadratic_stationary_point(
-                root, draft, source_context, step_frame, step, previous
+                root, draft, lineage, step_frame, step, previous
             )
         if dispatcher_key == "capability_factory.custom_dispatcher":
             if not callable(custom_step_executor):
@@ -985,7 +1011,7 @@ def build_workflow_step_executor(
 def _execute_model_genesis_branches(
     root: Path,
     draft: WorkflowDraft,
-    source_context: Mapping[str, Any],
+    lineage: Mapping[str, str],
     source_frame: pd.DataFrame,
     step: Any = None,
     *,
@@ -1087,10 +1113,15 @@ def _execute_model_genesis_branches(
                 "workflow_step_id": workflow_step_id,
                 "branch_id": branch_id,
                 "source_run_id": source_run_id,
-                "source_node_id": str(draft.target["node_ref"]),
-                "source_artifact_id": str(draft.target["artifact_id"]),
-                "source_sha256": source_context["source_sha256"],
-                "exploration_fingerprint": exploration_fingerprint(str(source_context["source_sha256"]), spec),
+                # The dataset this branch was actually built from. A branch
+                # reading an upstream step's output is estimated on that table;
+                # naming the workflow target here would hand every reader of
+                # this draft -- resume, comparison, the report -- a digest that
+                # belongs to data the model never saw.
+                "source_node_id": str(lineage["node_ref"]),
+                "source_artifact_id": str(lineage["artifact_id"]),
+                "source_sha256": str(lineage["sha256"]),
+                "exploration_fingerprint": exploration_fingerprint(str(lineage["sha256"]), spec),
                 "filters": [],
                 "spec": spec.to_dict(),
                 "outcome_column": branch["outcome"],
@@ -1209,7 +1240,7 @@ def _execute_model_genesis_branches(
 def _execute_ols_branches(
     root: Path,
     draft: WorkflowDraft,
-    source_context: Mapping[str, Any],
+    lineage: Mapping[str, str],
     source_frame: pd.DataFrame,
     step: Any = None,
     *,
@@ -1220,7 +1251,7 @@ def _execute_ols_branches(
     return _execute_model_genesis_branches(
         root,
         draft,
-        source_context,
+        lineage,
         source_frame,
         step,
         raw_source_frame=raw_source_frame,
@@ -1449,7 +1480,7 @@ def _persist_model_post_estimation_result(
     artifact_type: str,
     result: Mapping[str, Any],
     model_run_id: str,
-    source_sha256: str,
+    lineage: Mapping[str, str],
 ) -> WorkflowStepResult:
     """Persist one durable, idempotent post-estimation artifact on the source run."""
 
@@ -1461,10 +1492,13 @@ def _persist_model_post_estimation_result(
     payload = {
         "schema_version": "workbench.workflow.post-estimation/v1",
         "source": {
+            # run_id stays the workflow's target run because that is where this
+            # artifact is written; the node, artifact and digest name the data
+            # the test was computed on, which a `source` commitment moves.
             "run_id": str(draft.target["run_id"]),
-            "node_ref": str(draft.target["node_ref"]),
-            "artifact_id": str(draft.target["artifact_id"]),
-            "sha256": source_sha256,
+            "node_ref": str(lineage["node_ref"]),
+            "artifact_id": str(lineage["artifact_id"]),
+            "sha256": str(lineage["sha256"]),
             "model_run_id": model_run_id,
             "model_artifact_id": "ols_1",
             "workflow_id": draft.workflow_id,
@@ -1491,7 +1525,7 @@ def _persist_model_post_estimation_result(
             artifact_path,
             artifact_type,
             str(step.operation_id),
-            [str(draft.target["artifact_id"])],
+            [str(lineage["artifact_id"])],
         )
     else:
         record = existing[0]
@@ -1511,7 +1545,7 @@ def _persist_model_post_estimation_result(
 def _execute_model_joint_f_test(
     root: Path,
     draft: WorkflowDraft,
-    source_context: Mapping[str, Any],
+    lineage: Mapping[str, str],
     source_frame: pd.DataFrame,
     step: Any,
     previous: Mapping[str, WorkflowStepResult],
@@ -1555,7 +1589,7 @@ def _execute_model_joint_f_test(
         artifact_type="statistical_test",
         result=result,
         model_run_id=str(branch["run_id"]),
-        source_sha256=str(source_context["source_sha256"]),
+        lineage=lineage,
     )
 
 
@@ -1629,7 +1663,7 @@ def _white_test_statistics(
 def _execute_model_white_test(
     root: Path,
     draft: WorkflowDraft,
-    source_context: Mapping[str, Any],
+    lineage: Mapping[str, str],
     source_frame: pd.DataFrame,
     step: Any,
     previous: Mapping[str, WorkflowStepResult],
@@ -1671,14 +1705,14 @@ def _execute_model_white_test(
         artifact_type="statistical_test",
         result=result,
         model_run_id=str(branch["run_id"]),
-        source_sha256=str(source_context["source_sha256"]),
+        lineage=lineage,
     )
 
 
 def _execute_model_quadratic_stationary_point(
     root: Path,
     draft: WorkflowDraft,
-    source_context: Mapping[str, Any],
+    lineage: Mapping[str, str],
     source_frame: pd.DataFrame,
     step: Any,
     previous: Mapping[str, WorkflowStepResult],
@@ -1750,7 +1784,7 @@ def _execute_model_quadratic_stationary_point(
         artifact_type="post_estimation",
         result=result,
         model_run_id=str(branch["run_id"]),
-        source_sha256=str(source_context["source_sha256"]),
+        lineage=lineage,
     )
 
 
