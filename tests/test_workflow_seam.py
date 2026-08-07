@@ -1452,7 +1452,7 @@ def _two_plans_on_one_project(tmp_path: Path, plan_a: list[dict], plan_b: list[d
             available_columns=list(frame.columns),
         )
 
-    return project, build(plan_a), build(plan_b)
+    return build(plan_a), build(plan_b)
 
 
 def test_changing_the_chain_head_reidentifies_every_step_below_it(
@@ -1471,7 +1471,7 @@ def test_changing_the_chain_head_reidentifies_every_step_below_it(
     question.
     """
 
-    _, baseline, altered = _two_plans_on_one_project(
+    baseline, altered = _two_plans_on_one_project(
         tmp_path,
         _head_variant(["size", "weight"]),
         _head_variant(["size", "outcome"]),
@@ -1495,10 +1495,24 @@ def test_a_failed_chain_head_blocks_the_step_below_it(tmp_path: Path) -> None:
 
     `second` here is written so that it *could* run on the workflow target: it
     multiplies `weight` by `size`, both of which exist in the untransformed
-    frame. That is the whole point. A downstream step whose columns only exist
-    after the transform would fail loudly under a silent fallback, and the guard
-    would pass for the wrong reason -- it would be testing a missing column, not
-    the seam.
+    frame. Do not "simplify" it to derive from `doubled` like the other chained
+    steps in this file.
+
+    The reason is not that a `doubled` downstream would let the guard pass --
+    it would not. The assertion is `== "blocked"`, so the `failed` that a
+    missing column produces is caught too. The reason is that a fallback can be
+    written two ways, and only this one pins both:
+
+      * fall back to a branch that replays the upstream recipes: a `doubled`
+        downstream and a `weight` downstream both reach `completed`;
+      * fall back to the bare `source_frame` with no replay: a `weight`
+        downstream still reaches `completed`, while a `doubled` downstream dies
+        on the missing column and goes red for the wrong reason.
+
+    So `weight` is the only shape that reproduces the production accident under
+    *either* implementation of the defect, instead of sometimes catching it as
+    a KeyError. A guard that goes red for the wrong reason still passes review
+    and stops protecting the moment the fallback is written the other way.
 
     The failure mode being excluded is the expensive one this repository has
     already shipped once: a step quietly reading the pre-transform data, the run
@@ -1571,7 +1585,7 @@ def test_the_same_exploration_on_a_derived_table_is_a_different_identity(
     not.
     """
 
-    from workbench.agent.workflow_runtime import _exploration_spec
+    from workbench.agent.workflow_runtime import _exploration_spec, _lineage_source
 
     project, draft = _compiled_chain(
         tmp_path,
@@ -1594,6 +1608,29 @@ def test_the_same_exploration_on_a_derived_table_is_a_different_identity(
     executor = build_workflow_step_executor(project, draft)
     upstream = executor(by_id["first"], {})
     direct = executor(by_id["direct"], {})
+
+    # Check the digest each step's identity is keyed on BEFORE the derived step
+    # runs, because the exploration store refuses a colliding artifact binding
+    # on its own. Waiting for that would make this guard red for a reason it
+    # does not own -- it would be leaning on another layer's determinism check,
+    # and would go quiet the moment that check moved or relaxed.
+    source_context, _ = resolve_statistical_source(
+        project,
+        source_run_id=str(draft.target["run_id"]),
+        source_node_id=str(draft.target["node_ref"]),
+        source_artifact_id=str(draft.target["artifact_id"]),
+    )
+    published = str(upstream.payload["produced_dataset"]["content_sha256"])
+    direct_sha = _lineage_source(draft, by_id["direct"], source_context, {})["sha256"]
+    derived_sha = _lineage_source(
+        draft, by_id["derived"], source_context, {"first": upstream}
+    )["sha256"]
+
+    assert direct_sha == str(source_context["source_sha256"])
+    # The derived step keys on the table it read, not the workflow's target.
+    assert derived_sha == published, derived_sha
+    assert derived_sha != direct_sha
+
     derived = executor(by_id["derived"], {"first": upstream})
 
     assert direct.result_fingerprint != derived.result_fingerprint
