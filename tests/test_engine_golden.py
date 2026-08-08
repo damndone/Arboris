@@ -120,7 +120,7 @@ def test_golden_imputation(tmp_path):
     frame.to_csv(source, index=False)
     project = create_project(tmp_path, "demo")
     (project.root / "config.yml").write_text(
-        "imputation_method: mice\nimputation_m: 2\nimputation_max_iter: 2\n",
+        "imputation_method: mice\nimputation_m: 1\nimputation_max_iter: 2\n",
         encoding="utf-8",
     )
     result = run_workflow(project.root, [source], mode="auto", y="y", x=["x"])
@@ -129,6 +129,10 @@ def test_golden_imputation(tmp_path):
     snap = _capture(run_root)
     # Guard: the imputation branch must have fired for this golden to be meaningful.
     assert "imputed_dataset" in snap["artifacts"]
+    summary = read_json(run_root / "imputation" / "mice_summary.json")
+    assert summary["m"] == 1
+    assert summary["persisted_datasets"] == 1
+    assert summary["pooled_estimates"] is False
     _assert_or_write_golden("imputation", snap)
 
 

@@ -107,16 +107,21 @@ def test_mice_multiple_imputation_persists_ordered_dataset_artifacts_and_manifes
     assert cleaned_path.read_bytes() == original_cleaned
     assert summary["persisted_datasets"] == 2
     assert summary["pooled_estimates"] is False
+    assert not (run.root / "processed" / "imputed_dataset.parquet").exists()
 
     expected_artifacts = [
         ("imputed_dataset_0001", "processed/imputed_dataset_0001.parquet"),
         ("imputed_dataset_0002", "processed/imputed_dataset_0002.parquet"),
     ]
     artifact_records = read_json(run.root / "artifacts_index.json")["artifacts"]
+    artifact_ids = {artifact["artifact_id"] for artifact in artifact_records}
+    assert "imputed_dataset" not in artifact_ids
+    assert {"imputed_dataset_0001", "imputed_dataset_0002"} <= artifact_ids
+    assert "mice_manifest" in artifact_ids
     dataset_records = [
         (artifact["artifact_id"], artifact["path"])
         for artifact in artifact_records
-        if artifact["artifact_id"].startswith("imputed_dataset_")
+        if artifact["artifact_id"].startswith("imputed_dataset")
     ]
     assert dataset_records == expected_artifacts
     assert all((run.root / path).is_file() for _, path in expected_artifacts)
@@ -124,6 +129,8 @@ def test_mice_multiple_imputation_persists_ordered_dataset_artifacts_and_manifes
     # Wished-for manifest API: ordered artifact identity is persisted separately
     # from the summary so downstream stages cannot silently select the first file.
     manifest = read_json(run.root / "imputation" / "mice_manifest.json")
+    assert manifest["count"] == 2
+    assert manifest["mode"] == "multiple_imputation"
     assert manifest["datasets"] == [
         {"artifact_id": artifact_id, "path": path}
         for artifact_id, path in expected_artifacts
