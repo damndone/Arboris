@@ -11,7 +11,7 @@ property each capability states about itself rather than one a human re-checks.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Iterable, NamedTuple
 
 
 CAPABILITY_KINDS = frozenset(
@@ -508,6 +508,51 @@ def capability_inventory() -> tuple[CapabilityContract, ...]:
     )
 
 
+class CapabilityReachabilityGuard(NamedTuple):
+    """The complete reachability partition derived from one inventory."""
+
+    inventory: tuple[CapabilityContract, ...]
+    directly_reachable: tuple[CapabilityContract, ...]
+    composition_reachable: tuple[CapabilityContract, ...]
+    reachable: tuple[CapabilityContract, ...]
+    exempt: tuple[CapabilityContract, ...]
+    gaps: tuple[CapabilityContract, ...]
+
+
+def capability_reachability_guard(
+    inventory: Iterable[CapabilityContract] | None = None,
+) -> CapabilityReachabilityGuard:
+    """Classify every supplied capability without changing the denominator."""
+
+    items = tuple(capability_inventory() if inventory is None else inventory)
+    direct = tuple(item for item in items if item.directly_reachable_by)
+    composed = tuple(item for item in items if item.composition_reachable_by)
+    reachable_ids = {item.capability_id for item in direct} | {
+        item.capability_id for item in composed
+    }
+    reachable = tuple(item for item in items if item.capability_id in reachable_ids)
+    exempt = tuple(
+        item
+        for item in items
+        if item.capability_id not in reachable_ids
+        and item.reachability_exempt_reason is not None
+    )
+    gaps = tuple(
+        item
+        for item in items
+        if item.capability_id not in reachable_ids
+        and item.reachability_exempt_reason is None
+    )
+    return CapabilityReachabilityGuard(
+        inventory=items,
+        directly_reachable=direct,
+        composition_reachable=composed,
+        reachable=reachable,
+        exempt=exempt,
+        gaps=gaps,
+    )
+
+
 class UnreachableCapabilities(NamedTuple):
     """The two ways a capability can be out of reach, kept apart.
 
@@ -525,7 +570,9 @@ class UnreachableCapabilities(NamedTuple):
     gaps: tuple[CapabilityContract, ...]
 
 
-def unreachable_capabilities() -> UnreachableCapabilities:
+def unreachable_capabilities(
+    inventory: Iterable[CapabilityContract] | None = None,
+) -> UnreachableCapabilities:
     """Split what cannot be reached into what was closed and what was missed.
 
     Collapsing the two hides whichever one matters. Treating every gap as an
@@ -535,27 +582,20 @@ def unreachable_capabilities() -> UnreachableCapabilities:
     of both sides by being forgotten here.
     """
 
-    exempt: list[CapabilityContract] = []
-    gaps: list[CapabilityContract] = []
-    for item in capability_inventory():
-        if item.is_reachable:
-            continue
-        # __post_init__ has already refused a blank reason and refused a reason
-        # on a reachable entry, so this is the whole space of what is left.
-        if item.reachability_exempt_reason is None:
-            gaps.append(item)
-        else:
-            exempt.append(item)
-    return UnreachableCapabilities(exempt=tuple(exempt), gaps=tuple(gaps))
+    report = capability_reachability_guard(inventory)
+    return UnreachableCapabilities(exempt=report.exempt, gaps=report.gaps)
 
 
 __all__ = [
     "CAPABILITY_KINDS",
     "CAPABILITY_SURFACES",
     "MODEL_TYPE_SELECTORS",
+    "CAPABILITY_REACHABILITY_EXEMPTIONS",
     "CapabilityContract",
     "CapabilitySurfaceDecision",
+    "CapabilityReachabilityGuard",
     "UnreachableCapabilities",
     "capability_inventory",
+    "capability_reachability_guard",
     "unreachable_capabilities",
 ]

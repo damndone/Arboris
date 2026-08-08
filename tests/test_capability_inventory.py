@@ -241,6 +241,89 @@ def test_the_two_closed_operations_are_explicitly_exempt() -> None:
     assert all(item.reachability_exempt_reason for item in result.exempt)
 
 
+def test_natural_language_reachability_guard_pins_current_truth() -> None:
+    from workbench.agent.capability_contract import capability_reachability_guard
+
+    report = capability_reachability_guard()
+
+    assert (
+        len(report.inventory),
+        len(report.directly_reachable),
+        len(report.composition_reachable),
+        len(report.reachable),
+        len(report.exempt),
+        len(report.gaps),
+    ) == (54, 4, 30, 34, 2, 18)
+    assert {item.capability_id for item in report.gaps} == {
+        "model.time_series.arma_garch",
+        "model.time_series.ets",
+        "model.auto",
+        "test.anova",
+        "test.chi_square",
+        "test.correlations",
+        "test.evidence",
+        "test.fisher_exact",
+        "test.nonparametric",
+        "test.rank_correlations",
+        "test.t_tests",
+        "prediction.prediction_lasso",
+        "prediction.prediction_ridge",
+        "prediction.prediction_random_forest",
+        "imputation.mice",
+        "resample.smote",
+        "resample.oversample",
+        "resample.undersample",
+    }
+    assert {item.capability_id for item in report.exempt} == {
+        "code.execute",
+        "data.column.cast",
+    }
+
+
+def test_reachability_guard_derives_its_denominator_from_the_supplied_inventory() -> None:
+    from workbench.agent.capability_contract import (
+        CapabilityContract,
+        capability_inventory,
+        capability_reachability_guard,
+    )
+
+    fake = CapabilityContract(
+        capability_id="pack.injected_for_guard",
+        kind="pack",
+        summary="An injected capability used to test the denominator.",
+    )
+    inventory = (*capability_inventory(), fake)
+    report = capability_reachability_guard(inventory)
+
+    assert (
+        len(report.inventory),
+        {item.capability_id for item in report.gaps},
+    ) == (
+        len(inventory),
+        {
+            "pack.injected_for_guard",
+            "model.time_series.arma_garch",
+            "model.time_series.ets",
+            "model.auto",
+            "test.anova",
+            "test.chi_square",
+            "test.correlations",
+            "test.evidence",
+            "test.fisher_exact",
+            "test.nonparametric",
+            "test.rank_correlations",
+            "test.t_tests",
+            "prediction.prediction_lasso",
+            "prediction.prediction_ridge",
+            "prediction.prediction_random_forest",
+            "imputation.mice",
+            "resample.smote",
+            "resample.oversample",
+            "resample.undersample",
+        },
+    )
+
+
 def test_unwired_model_selector_and_model_families_remain_real_gaps() -> None:
     """A form capability without a NL or step route remains a real gap."""
 
