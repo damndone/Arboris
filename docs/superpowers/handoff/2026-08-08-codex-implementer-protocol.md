@@ -173,10 +173,40 @@ Claude 从 git 重新核验（不看汇报也能做完）
 
 ### 4.3 什么时候必须停下来问用户
 
-- 计划本身错了（本版发生过四次，包括「组合不存在」和「Task 4 把缺口当豁免」）
+**停下来：**
+
+- **用户/Claude 写的目标书或设计文档错了**（本版发生过四次，包括「组合不存在」
+  和「Task 4 把缺口当豁免」）
 - 要改动 P0/P1 的地基（`capability_contract.py` / `workflow_contracts.py` 的契约字段）
 - 要放宽任何一条硬规矩
 - 红测**意外通过**——那说明测试是假的，别自己换个断言绕过去
+
+**不要停，自己查了改掉继续：**
+
+- **你自己写的计划里有事实错误**，而那个事实**一条命令就能问出来**
+
+> ⚠️ 这条是 2026-08-08 补的，因为原文只写「计划本身错了」，没说**谁的**计划。
+> Codex 据此把自己计划里猜错的两个 capability id 判为「计划本身错误」并停工，
+> 而那两个 id 跑一行就能问出来，且 Claude 的三份文档里从未出现过它们。
+
+### 4.4 事实只从注册表来，不从猜
+
+这条是上面那条的根因，也是本仓库的老账：交接书 §3 记过一次
+**用 grep 字符串字面量盘操作清单**，多算进了四个根本没注册的 id。
+
+**任何 capability_id / operation_id / 字段名，写进计划或测试之前，先问活的注册表。**
+
+```bash
+cd /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.8/backend && PYTHONPATH=$PWD ../.venv/bin/python -c "
+import workbench.orchestrator
+from workbench.agent.capability_contract import capability_inventory
+for i in sorted(capability_inventory(), key=lambda x: x.capability_id):
+    print(f'{i.capability_id:44s} {i.kind}')
+"
+```
+
+猜出来的 id 写进计划，会让后面每一条引用它的测试都失败，
+而失败原因看起来像「实现不对」而不是「id 猜错了」——**这本身就是一次假红。**
 
 ---
 
