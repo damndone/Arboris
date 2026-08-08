@@ -1,7 +1,7 @@
 # P7 的 29 个统计能力如何接入 CapabilityContract
 
 - 日期：2026-08-08
-- 状态：设计说明，**不含实现**（实现要等 P7 merge 进主线）
+- 状态：设计说明，**不含实现**（实现要等 P7 merge 进主线）；已按 P2 的可达性契约校正豁免语义
 - 相关：`docs/superpowers/plans/2026-08-07-v1.8.8-p1-capability-contract.md`（P1 Task 5）、
   `docs/superpowers/plans/2026-08-07-v1.8.8-p0-composition-seam.md`
 - 被说明的代码：`/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.8-p7-multivariate`
@@ -193,10 +193,27 @@ statistical.explore                 False
 它实际表达的意思（「注册了哪个 operation」而不是「自然语言能提哪个」）。
 
 29 个新能力接入时**不要**照抄现状。它们的正确形态是
-`proposed_by=()`、`composable_as=(operation_id,)`，
-外加**在 `reachability_exempt_reason` 里写明「pack step 不作为顶层提案暴露，
-经 operation.multi_step 组合」** —— 这样它们落在 Task 4 分区的 `exempt` 一侧，
-而不是 `gaps` 一侧。见 §5。
+`proposed_by=()`、`composable_as=(operation_id,)`，且
+`reachability_exempt_reason=None`。
+
+这里的语义必须分开：`proposed_by=()` 只表示它没有独立的顶层提案入口；
+只要 `composable_as` 指向一个真实注册的 workflow step，并且
+`operation.multi_step` 对自然语言开放，它就是**组合可达能力**，不能再标记
+`reachability_exempt_reason`。否则 `CapabilityContract.__post_init__` 会拒绝它，
+而且会把已经打通的能力错误地记成“有意关闭”。见 §5。
+
+如果确实需要向人或 Agent 解释“它不作为顶层提案暴露”，请在 P7 的 pack
+声明/适配层增加独立的 `top_level_exposure_note`（或等价字段）。这个字段只是
+说明元数据，不参与 `is_reachable`、`unreachable_capabilities()` 或 P2 守卫，
+不得复用 `reachability_exempt_reason`。
+
+### 2.4 `reachability_exempt_reason` 的唯一边界
+
+`reachability_exempt_reason` 只表示**当前没有有效可达路径、但这是经过审议的
+产品关闭或阶段性延期**。因此它只能和无效/空的 `proposed_by`、
+`composable_as` 共存；一旦某条直接或组合路径生效，就必须在同一个变更中清除
+豁免理由。P7 的“不是顶层 operation”不构成豁免理由，因为它仍然可以通过
+`operation.multi_step` 被自然语言调用。
 
 ---
 
@@ -328,11 +345,12 @@ P2 的守卫会断言「每条能力要么可达、要么有陈述的豁免理�
 `unreachable_capabilities()` 把不可达分成 `exempt`（有理由）和 `gaps`（无理由），
 守卫应当**接受 exempt、在 gaps 上失败**。
 
-今天的事实被 `test_todays_unreachable_capabilities_are_all_gaps` 钉死：
-`exempt` 为空、`gaps` 15 条（8 检验族 + 3 预测模型 + 4 数据准备）。
+P2 完成后的当前基线由能力清单测试钉死：inventory=54、direct=4、
+composition=30、reachable=34、exempt=2、gaps=18；两个 exempt 只允许是
+`code.execute` 与 `data.column.cast`，P7 pack 不得借用这条通道。
 
 如果 29 条能力在 P2 之后以 `proposed_by=()`、`composable_as=()`、
-无豁免理由的形态接入，`gaps` 会从 15 涨到 44，守卫立刻红。
+无豁免理由的形态接入，`gaps` 会从 18 涨到 47，守卫立刻红。
 
 ### 5.2 判断：**这不是「期望的红」，要分期**
 
@@ -348,25 +366,29 @@ P2 的守卫会断言「每条能力要么可达、要么有陈述的豁免理�
 
 **建议顺序：**
 
-1. **先解决 §2.3**（`proposed_by` 的高估）。这一步不涉及 P7，
-   但它决定守卫在存量 54 条上是不是绿的。**在这之前上 P2 的守卫没有意义** ——
-   一条建立在错误可达性上的绿线，正是 v1.8.7 交付的那种东西。
-2. **P2 上守卫**，基线是修正后的存量清单。此时 `gaps` 是一个人读得完的数字，
-   每一条都指着一个真缺口。
+1. **保留 P2 已完成的 §2.3 修正**（`proposed_by` 只记录真实顶层自然语言入口）。
+   P7 接入不得把这一语义改回“只要注册过就算可提议”。
+2. **以 P2 的守卫基线继续**，当前 `gaps` 是 18 条真实缺口，`exempt` 是两个
+   明确关闭项；组合可达的 P7 step 不进入任何一个集合。
 3. **P7 merge**，`capability_inventory()` **暂不收录**这 29 条（它们此时既没有
    operation 注册也没有 step 契约，本来就不在任何一个活注册表里，
    所以「不收录」是自动的，不需要写豁免）。
-4. **分批接入，每批自带 exempt 或可达状态**，每批都是一次守卫从绿到绿的变更：
+4. **分批接入，每批自带“可达”或“真实豁免”状态，二者互斥**，每批都是一次
+   守卫从绿到绿的变更：
    - 批 1：§3.2 的 23 条帧原生能力，注册为 workflow step，
-     `composable_as=(operation_id,)` → **可达**，不需要豁免。
+     `composable_as=(operation_id,)`、`reachability_exempt_reason=None`
+     → **组合可达**，不需要豁免。`proposed_by=()` 仍然是正确的。
    - 批 2：roc / categorical / meta 6 条，先写输入适配再注册。
-     如果适配要押后，就带着**明写的豁免理由**接入
+     如果适配要押后，且当前没有可工作的 workflow step，就以
+     `composable_as=()` 加上**明写的豁免理由**接入
      （「内核消费的是两列序列 / 交叉表 / study 表，step_frame 适配未完成」）——
-     这才是 `reachability_exempt_reason` 的正当用法：
-     一个**做过的决定**，而不是一个被粉饰的窟窿。
+     这才是 `reachability_exempt_reason` 的正当用法：一个**做过的决定**，
+     而不是一个被粉饰的窟窿。适配完成时，必须在同一个变更中改为有效的
+     `composable_as=(operation_id,)` 并清除豁免理由。
    - 批 3：power_analysis，先解决 §4 的枚举问题和「不吃数据」的形态问题。
 
-关键点：**每一批都在同一个 commit 里既加能力又给出它的可达性状态**。
+关键点：**每一批都在同一个 commit 里既加能力又给出它的可达性状态**；
+有效的 `composable_as` 与 `reachability_exempt_reason` 永远不能同时出现。
 29 条一次性落地、可达性留到下一步补，就是让守卫先红 29 条再慢慢变绿 ——
 中间那段时间守卫是被无视的，而被无视的守卫和没有守卫是一回事。
 
@@ -436,7 +458,8 @@ chain agent 看不见。必须**同时**改 `_step_vocabulary_lines()`。
 
 ## 7. 待办清单（接入前）
 
-- [ ] §2.3：修正 `proposed_by` 的高估（或改名），**先于 P2 守卫**
+- [x] §2.3：修正 `proposed_by` 的高估并通过 P2 守卫；P7 另须遵守 §2.3/§2.4
+  的“组合可达不豁免”规则
 - [ ] §2.2：决定 `_operation_capabilities()` 如何与 pack step 互不重复
 - [ ] §4：补齐 `POWER_ANALYSIS_OPERATION_IDS` + 元测试，或改用显式声明表
 - [ ] §1.1：确认枚举取到 `MULTIVARIATE_ALL_OPERATION_IDS` 而非第一个 frozenset
