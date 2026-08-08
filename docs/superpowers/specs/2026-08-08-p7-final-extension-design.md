@@ -63,7 +63,7 @@ R、statsmodels 和直接公式只允许出现在测试 Oracle。运行时使用
 - Synthetic Control donor pool 不可识别时不能伪造权重；
 - 诊断计算失败时不能返回“看起来正常”的空结果。
 
-## 五个 pack 的范围、边际与局限
+## 五个扩展领域、六个 pack 的范围、边际与局限
 
 ### A. 非参数/稳健推断
 
@@ -159,7 +159,7 @@ Synthetic Control 初始 operation：
 
 ## 并行与审查策略
 
-先顺序完成一个极小的 P7 extension metadata contract，统一 `scope`/`limitations`/`not_claimed` 的校验；之后五个 pack 使用互不重叠的 contract、pack 和 test 文件。
+先顺序完成一个极小的 P7 extension metadata contract，统一 `scope`/`limitations`/`not_claimed` 的校验；之后五个扩展领域拆成六个互不重叠的 pack（Matching 与 Synthetic Control 分开），各自拥有 contract、pack 和 test 文件。
 
 代码实现按 fresh subagent 逐任务交接，避免多个实现 agent 同时修改共享文件；Oracle 研究、只读保护路径审查和测试设计可以并行。每个任务都必须经过：
 
@@ -175,7 +175,7 @@ Synthetic Control 初始 operation：
 
 冻结前必须满足：
 
-- 五个 pack 都有 contract、engine、Oracle、adversarial tests 和边际/局限元数据；
+- 五个扩展领域的六个 pack 都有 contract、engine、Oracle、adversarial tests 和边际/局限元数据；
 - 运行时无 R/shell/eval/exec/import-path execution；
 - 统一资源上限、NaN/Inf、退化和失败语义通过；
 - 与已有 P7 及 survey/MI/resampling 回归全绿；
