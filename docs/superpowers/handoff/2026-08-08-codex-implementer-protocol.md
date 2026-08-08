@@ -72,10 +72,17 @@ cd /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.8/backend && PYTHONP
 
 ```bash
 cd /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.8 && PYTHONPATH=$PWD/backend ./.venv/bin/python -m pytest tests -q \
-  --ignore=tests/test_cs_did_oracle.py --ignore=tests/test_sa_did_oracle.py --ignore=tests/test_cs_did_clustering.py
+  --ignore=tests/test_cs_did_oracle.py --ignore=tests/test_cs_did_clustering.py
 ```
 
-后三个文件在 collection 阶段就 `FileNotFoundError`（缺 R oracle fixture），与任何改动无关。
+后两个文件在沙箱内 collection 阶段就 `FileNotFoundError`（缺 R oracle fixture）。
+**宿主上 R fixture 存在，gate 会跑它们**——这 26 条（15 + 11）正是沙箱内 4831
+与宿主 gate 4857 的全部差额。核对两个数字时记得算上。
+
+> ⚠️ 本文初稿把 `test_sa_did_oracle.py` 也列进 `--ignore`，**那个文件根本不存在**。
+> 名字是从一份子 agent 汇报里抄来的、没核。pytest 对不存在的 `--ignore` 路径
+> 静默接受，所以这个错误一直没暴露——又一次静默 no-op。
+> 「只信 git 不信汇报」这条对 Claude 自己同样适用。
 
 **④ full gate 只能在宿主终端跑。** agent 沙箱里那段 containment 检查会**假报约 20 个失败**（macOS 拒绝嵌套 `sandbox_apply`）。
 
