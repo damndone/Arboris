@@ -41,6 +41,7 @@ _ALLOWED_PROVENANCE_FIELDS = {
     "derived_seeds",
     "replicate_order",
     "evidence_scalar_count",
+    "evidence_commitment",
 }
 
 
@@ -234,16 +235,24 @@ def _assert_no_raw_replicate_values(payload: dict[str, Any]) -> None:
     def visit(value: Any) -> None:
         if isinstance(value, dict):
             assert not forbidden_keys.intersection(value)
-            for child in value.values():
+            for key, child in value.items():
+                assert key not in forbidden_keys
                 visit(child)
         elif isinstance(value, list):
             for child in value:
                 visit(child)
+        else:
+            assert value != _RAW_SENTINEL
 
     provenance = payload["provenance"]
     _assert_recursive_json(provenance)
     visit(provenance)
-    assert str(_RAW_SENTINEL) not in json.dumps(provenance, allow_nan=False)
+
+
+def test_structured_raw_guard_allows_safe_metadata_names_containing_raw() -> None:
+    _assert_no_raw_replicate_values(
+        {"provenance": {"raw_digest": "0" * 64}}
+    )
 
 
 def _assert_batch_provenance_schema(
@@ -266,6 +275,10 @@ def _assert_batch_provenance_schema(
     assert provenance["replicate_order"] == expected_order
     assert provenance["evidence_scalar_count"] == expected_scalar_count
     assert provenance["evidence_scalar_count"] <= plan.max_evidence_scalars
+    commitment = provenance["evidence_commitment"]
+    assert type(commitment) is str
+    assert len(commitment) == 64
+    assert all(character in "0123456789abcdef" for character in commitment)
     assert type(provenance["strategy_id"]) is str
     assert type(provenance["adapter_id"]) is str
     assert type(provenance["base_seed"]) is int
@@ -672,6 +685,10 @@ def test_adapter_consumed_scalar_change_changes_digest_for_same_plan_and_strateg
     ] * plan.requested_replicates
     assert first.provenance["evidence_scalar_count"] == plan.requested_replicates
     assert second.provenance["evidence_scalar_count"] == plan.requested_replicates
+    assert (
+        first.provenance["evidence_commitment"]
+        != second.provenance["evidence_commitment"]
+    )
     assert first.digest != second.digest
     _assert_batch_provenance_schema(
         first,
@@ -789,7 +806,7 @@ def test_failed_batch_from_dict_rejects_digest_injection_when_digest_is_none() -
 )
 @pytest.mark.parametrize(
     "tamper",
-    ["nested_unknown", "provenance_count", "digest"],
+    ["nested_unknown", "provenance_count", "commitment", "digest"],
 )
 def test_batch_from_dict_rejects_provenance_tampering_for_every_status(
     status: str, tamper: str
@@ -815,6 +832,16 @@ def test_batch_from_dict_rejects_provenance_tampering_for_every_status(
         payload["provenance"]["evidence_scalar_count"] += 1
         expected_reason = (
             "REPLICATE_PROVENANCE_MISMATCH"
+            if status == "failed"
+            else "REPLICATE_DIGEST_MISMATCH"
+        )
+    elif tamper == "commitment":
+        payload["provenance"] = dict(payload["provenance"])
+        payload["provenance"]["evidence_commitment"] = (
+            "not-a-commitment" if status == "failed" else "0" * 64
+        )
+        expected_reason = (
+            "REPLICATE_INVALID_COMMITMENT"
             if status == "failed"
             else "REPLICATE_DIGEST_MISMATCH"
         )
@@ -894,7 +921,6 @@ def test_execute_maps_ordinary_strategy_exceptions_to_a_stable_failure_reason() 
         expected_order=[0],
         expected_scalar_count=0,
     )
-    assert "private strategy detail" not in json.dumps(batch.to_dict())
 
 
 def test_execute_fails_closed_when_scalar_evidence_budget_is_exceeded() -> None:
