@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 from dataclasses import FrozenInstanceError, replace
 from typing import Any
@@ -42,6 +43,7 @@ _ALLOWED_PROVENANCE_FIELDS = {
     "replicate_order",
     "evidence_scalar_count",
     "evidence_commitment",
+    "provenance_commitment",
 }
 
 
@@ -118,6 +120,35 @@ class _OffsetScalarAdapter(_ScalarAdapter):
         return ReplicateEvidence(
             scalars={
                 "adapter_score": transformed.scalars["adapter_score"] + self.offset
+            }
+        )
+
+
+class _ExplodingAdapter(_ScalarAdapter):
+    def adapt(
+        self,
+        evidence: ReplicateEvidence,
+        *,
+        plan: ReplicatePlan,
+        replicate_index: int,
+    ) -> ReplicateEvidence:
+        self.calls.append((plan.kind, replicate_index))
+        raise RuntimeError("private adapter detail must not escape the batch")
+
+
+class _TwoScalarAdapter(_ScalarAdapter):
+    def adapt(
+        self,
+        evidence: ReplicateEvidence,
+        *,
+        plan: ReplicatePlan,
+        replicate_index: int,
+    ) -> ReplicateEvidence:
+        self.calls.append((plan.kind, replicate_index))
+        return ReplicateEvidence(
+            scalars={
+                "adapter_score": float(evidence.scalars["score"]),
+                "adapter_index": float(replicate_index),
             }
         )
 
@@ -279,6 +310,10 @@ def _assert_batch_provenance_schema(
     assert type(commitment) is str
     assert len(commitment) == 64
     assert all(character in "0123456789abcdef" for character in commitment)
+    provenance_commitment = provenance["provenance_commitment"]
+    assert type(provenance_commitment) is str
+    assert len(provenance_commitment) == 64
+    assert all(character in "0123456789abcdef" for character in provenance_commitment)
     assert type(provenance["strategy_id"]) is str
     assert type(provenance["adapter_id"]) is str
     assert type(provenance["base_seed"]) is int
@@ -952,3 +987,105 @@ def test_execute_rejects_non_scalar_evidence_before_digesting_or_publishing_it()
     with pytest.raises(ReplicateCombineError) as caught:
         execute(plan, registry=registry)
     _assert_reason(caught.value, "REPLICATE_NON_SCALAR_EVIDENCE")
+
+
+def test_batch_constructor_reuses_public_validation_for_raw_provenance() -> None:
+    batch = execute(_plan(), registry=_registry()[0])
+    payload = batch.to_dict()
+    provenance = dict(payload["provenance"])
+    provenance["raw_values"] = [_RAW_SENTINEL]
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch(
+            kind=payload["kind"],
+            requested_count=payload["requested_count"],
+            succeeded_count=payload["succeeded_count"],
+            failed_count=payload["failed_count"],
+            seed=payload["seed"],
+            status=payload["status"],
+            reason_code=payload["reason_code"],
+            failure_reasons=payload["failure_reasons"],
+            provenance=provenance,
+            digest=payload["digest"],
+        )
+    _assert_reason(caught.value, "REPLICATE_UNKNOWN_FIELD")
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "reason_code"),
+    [
+        ("kind", "jackknife", "REPLICATE_INVALID_KIND"),
+        ("requested_count", MAX_REQUESTED_REPLICATES + 1, "REPLICATE_REQUESTED_COUNT_EXCEEDS_LIMIT"),
+    ],
+)
+def test_batch_from_dict_rejects_invalid_kind_and_request_boundaries(
+    field_name: str, value: Any, reason_code: str
+) -> None:
+    payload = execute(_plan(), registry=_registry()[0]).to_dict()
+    payload[field_name] = value
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(payload)
+    _assert_reason(caught.value, reason_code)
+
+
+def test_execute_maps_adapter_exception_to_a_stable_failure_reason() -> None:
+    strategy = _DeterministicStrategy()
+    adapter = _ExplodingAdapter()
+    registry, _ = _registry(strategy=strategy, adapter=adapter)
+    batch = execute(
+        _plan(requested_replicates=1, max_failures=1, max_evidence_scalars=2),
+        registry=registry,
+    )
+
+    assert batch.status == "completed_with_failures"
+    assert batch.failure_reasons == {"REPLICATE_ADAPTER_EXCEPTION": 1}
+    assert adapter.calls == [("multiple_imputation", 0)]
+
+
+def test_execute_rejects_cross_replicate_scalar_budget_overflow_with_stable_error() -> None:
+    strategy = _DeterministicStrategy()
+    adapter = _TwoScalarAdapter()
+    registry, _ = _registry(strategy=strategy, adapter=adapter)
+
+    with pytest.raises(ReplicateCombineError) as caught:
+        execute(_plan(max_evidence_scalars=1), registry=registry)
+    _assert_reason(caught.value, "REPLICATE_EVIDENCE_BUDGET_EXCEEDED")
+
+
+def test_failed_batch_preserves_variable_adapter_scalar_count_and_roundtrips() -> None:
+    strategy = _FailingStrategy(fail_indices=frozenset({0, 1}))
+    adapter = _TwoScalarAdapter()
+    registry, _ = _registry(strategy=strategy, adapter=adapter)
+    batch = execute(
+        _plan(max_failures=1, max_evidence_scalars=8),
+        registry=registry,
+    )
+
+    assert batch.status == "failed"
+    assert batch.provenance["evidence_scalar_count"] == 4
+    assert ReplicateBatch.from_dict(batch.to_dict()).to_dict() == batch.to_dict()
+
+
+def test_batch_from_dict_rejects_non_string_status_with_stable_reason() -> None:
+    payload = execute(_plan(), registry=_registry()[0]).to_dict()
+    payload["status"] = []
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(payload)
+    _assert_reason(caught.value, "REPLICATE_INVALID_BATCH_FIELD")
+
+
+def test_batch_from_dict_rejects_rehashed_public_provenance_tampering() -> None:
+    payload = execute(_plan(), registry=_registry()[0]).to_dict()
+    payload["provenance"] = dict(payload["provenance"])
+    payload["provenance"]["evidence_scalar_count"] += 1
+    unsigned = dict(payload)
+    unsigned.pop("digest")
+    payload["digest"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(payload)
+    _assert_reason(caught.value, "REPLICATE_PROVENANCE_MISMATCH")
