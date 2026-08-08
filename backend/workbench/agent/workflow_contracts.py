@@ -100,7 +100,7 @@ def workflow_proposal_schema() -> dict[str, Any]:
                                 "step_id": {"type": "string", "minLength": 1},
                                 "operation_id": {
                                     "type": "string",
-                                    "enum": list(WORKFLOW_STEP_OPERATIONS),
+                                    "enum": list(workflow_step_operations()),
                                 },
                                 "spec": {"type": "object"},
                                 "depends_on": {
@@ -223,6 +223,55 @@ class StepSpecContract:
     #: producer must be read through `source`, because an unreplayable
     #: transform that nothing reads is a step whose work silently vanishes.
     replayable_by_recipe: bool = False
+    #: Closed values for fields whose vocabulary is smaller than their JSON type.
+    field_enums: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Capability inventory identity projected from this declaration.
+    capability_kind: str = "data_operation"
+    #: Informational explanation for a capability that is composable but not a
+    #: top-level proposal. This is deliberately independent of reachability
+    #: exemptions.
+    top_level_exposure_note: str | None = None
+
+    def __post_init__(self) -> None:
+        field_names = set(self.fields)
+        unknown_required = set(self.required) - field_names
+        if unknown_required:
+            raise ValueError(
+                "workflow step required field(s) are undeclared: "
+                + ", ".join(sorted(unknown_required))
+            )
+        unknown_types = set(self.field_types) - field_names
+        if unknown_types:
+            raise ValueError(
+                "workflow step field type(s) are undeclared: "
+                + ", ".join(sorted(unknown_types))
+            )
+        unknown_enums = set(self.field_enums) - field_names
+        if unknown_enums:
+            raise ValueError(
+                "workflow step enum field(s) are undeclared: "
+                + ", ".join(sorted(unknown_enums))
+            )
+        for name, values in self.field_enums.items():
+            if not isinstance(values, tuple) or not values:
+                raise ValueError(
+                    f"workflow step field enum {name!r} must be a non-empty tuple"
+                )
+            if any(type(value) is not str or not value for value in values):
+                raise ValueError(
+                    f"workflow step field enum {name!r} must contain non-empty strings"
+                )
+            if len(set(values)) != len(values):
+                raise ValueError(f"workflow step field enum {name!r} contains duplicates")
+        from .capability_contract import CAPABILITY_KINDS
+
+        if self.capability_kind not in CAPABILITY_KINDS:
+            raise ValueError(
+                "workflow step capability kind must be one of: "
+                + ", ".join(sorted(CAPABILITY_KINDS))
+            )
+        if self.top_level_exposure_note is not None and not self.top_level_exposure_note.strip():
+            raise ValueError("workflow step top-level exposure note must not be blank")
 
     @property
     def allowed(self) -> frozenset[str]:
@@ -235,6 +284,9 @@ class StepSpecContract:
             "fields": dict(self.fields),
             "optional": sorted(set(self.fields) - set(self.required)),
             "field_types": dict(self.field_types),
+            "field_enums": {
+                name: list(values) for name, values in self.field_enums.items()
+            },
             "semantic_validator_key": self.semantic_validator_key,
             "reference_resolver_key": self.reference_resolver_key,
             "column_extractor_key": self.column_extractor_key,
@@ -252,6 +304,11 @@ class StepSpecContract:
             "ui_description": self.ui_description,
             "example_prompts": list(self.example_prompts),
             "natural_language_enabled": self.natural_language_enabled,
+            "produces_dataset": self.produces_dataset,
+            "consumes_input_frame": self.consumes_input_frame,
+            "replayable_by_recipe": self.replayable_by_recipe,
+            "capability_kind": self.capability_kind,
+            "top_level_exposure_note": self.top_level_exposure_note,
         }
 
     def to_schema(self) -> dict[str, Any]:
@@ -261,6 +318,7 @@ class StepSpecContract:
             "string": "string",
             "list": "array",
             "object": "object",
+            "nullable_string": ["string", "null"],
         }
         properties: dict[str, dict[str, Any]] = {}
         for name, description in self.fields.items():
@@ -268,6 +326,8 @@ class StepSpecContract:
             declared_type = self.field_types.get(name)
             if declared_type is not None:
                 field_schema["type"] = type_map.get(declared_type, declared_type)
+            if name in self.field_enums:
+                field_schema["enum"] = list(self.field_enums[name])
             properties[name] = field_schema
         return {
             "type": "object",
@@ -275,6 +335,37 @@ class StepSpecContract:
             "properties": properties,
             "additionalProperties": False,
         }
+
+
+def pack_step_contract(
+    *,
+    summary: str,
+    fields: Mapping[str, str],
+    required: tuple[str, ...],
+    field_types: Mapping[str, str],
+    field_enums: Mapping[str, tuple[str, ...]] | None = None,
+    dispatcher_key: str,
+    output_schema_ref: str,
+    top_level_exposure_note: str | None = None,
+) -> StepSpecContract:
+    """Build a non-top-level pack declaration for workflow composition."""
+
+    return StepSpecContract(
+        summary=summary,
+        fields=dict(fields),
+        required=tuple(required),
+        field_types=dict(field_types),
+        field_enums=dict(field_enums or {}),
+        output_schema_ref=output_schema_ref,
+        dispatcher_key=dispatcher_key,
+        ui_description=summary,
+        capability_kind="pack",
+        natural_language_enabled=False,
+        produces_dataset=False,
+        consumes_input_frame=True,
+        replayable_by_recipe=False,
+        top_level_exposure_note=top_level_exposure_note,
+    )
 
 
 ModelParameterBuilder = Callable[[Mapping[str, Any], Mapping[str, Any], list[str], str], dict[str, Any]]
@@ -1376,7 +1467,81 @@ def _genesis_survey_fields() -> dict[str, str]:
     return described
 
 
-WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
+def _validate_workflow_step_entry(
+    operation_id: str,
+    contract: StepSpecContract,
+) -> None:
+    if type(operation_id) is not str or not operation_id.strip():
+        raise ValueError("workflow step operation_id must be a non-empty string")
+    if not isinstance(contract, StepSpecContract):
+        raise TypeError("workflow step registry values must be StepSpecContract instances")
+
+
+class WorkflowStepContractRegistry(dict[str, StepSpecContract]):
+    """Live workflow declarations with synchronized derived projections."""
+
+    def __init__(
+        self,
+        initial: Mapping[str, StepSpecContract] | None = None,
+    ) -> None:
+        values = dict(initial or {})
+        for operation_id, contract in values.items():
+            _validate_workflow_step_entry(operation_id, contract)
+        super().__init__(values)
+
+    def __setitem__(self, operation_id: str, contract: StepSpecContract) -> None:
+        _validate_workflow_step_entry(operation_id, contract)
+        super().__setitem__(operation_id, contract)
+        _refresh_workflow_contract_views()
+
+    def __delitem__(self, operation_id: str) -> None:
+        super().__delitem__(operation_id)
+        _refresh_workflow_contract_views()
+
+    def update(
+        self,
+        *args: Mapping[str, StepSpecContract],
+        **kwargs: StepSpecContract,
+    ) -> None:
+        values = dict(*args, **kwargs)
+        for operation_id, contract in values.items():
+            _validate_workflow_step_entry(operation_id, contract)
+        super().update(values)
+        _refresh_workflow_contract_views()
+
+
+def _refresh_workflow_contract_views() -> None:
+    """Refresh every compatibility projection from the live declaration map."""
+
+    global _ALLOWED_SPEC_FIELDS
+    global STEP_CONSUMES_INPUT_FRAME
+    global STEP_PRODUCES_DATASET
+    global STEP_REPLAYABLE_BY_RECIPE
+    global WORKFLOW_STEP_OPERATIONS
+
+    WORKFLOW_STEP_OPERATIONS = tuple(WORKFLOW_STEP_SPEC_CONTRACTS)
+    _ALLOWED_SPEC_FIELDS = {
+        operation_id: contract.allowed
+        for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
+    }
+    STEP_PRODUCES_DATASET = frozenset(
+        operation_id
+        for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
+        if contract.produces_dataset
+    )
+    STEP_CONSUMES_INPUT_FRAME = frozenset(
+        operation_id
+        for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
+        if contract.consumes_input_frame
+    )
+    STEP_REPLAYABLE_BY_RECIPE = frozenset(
+        operation_id
+        for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
+        if contract.replayable_by_recipe
+    )
+
+
+WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContractRegistry({
     "statistical.explore": StepSpecContract(
         summary=(
             "One exploration over the source table: summarize / summarize_detail / "
@@ -1760,14 +1925,21 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         # server owns; the runtime never hands it the workflow's input frame.
         consumes_input_frame=False,
     ),
-}
+})
 
-WORKFLOW_STEP_OPERATIONS = tuple(WORKFLOW_STEP_SPEC_CONTRACTS)
+_refresh_workflow_contract_views()
 
-_ALLOWED_SPEC_FIELDS = {
-    operation_id: contract.allowed
-    for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
-}
+
+def register_workflow_step(operation_id: str, contract: StepSpecContract) -> None:
+    """Register one workflow step and refresh all declaration projections."""
+
+    WORKFLOW_STEP_SPEC_CONTRACTS[operation_id] = contract
+
+
+def workflow_step_operations() -> tuple[str, ...]:
+    """Return the current operation IDs from the live step registry."""
+
+    return tuple(WORKFLOW_STEP_SPEC_CONTRACTS)
 
 
 def workflow_step_vocabulary() -> dict[str, Any]:
@@ -1844,39 +2016,6 @@ _STEP_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # The only output binding a step may commit to consuming today. Keeping this a
 # closed set means a typo is a compile error rather than a runtime KeyError.
 SUPPORTED_STEP_OUTPUTS = frozenset({"produced_dataset"})
-
-# Which step kinds persist a dataset child that a later step can consume.
-# Derived rather than listed, so that registering a step operation stays a
-# single edit to WORKFLOW_STEP_SPEC_CONTRACTS: a hand-kept set beside the
-# registry is a second place to remember, and the one that gets forgotten.
-STEP_PRODUCES_DATASET = frozenset(
-    operation_id
-    for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
-    if contract.produces_dataset
-)
-
-# Which step kinds the runtime is handed the resolved input frame for, and can
-# therefore honour a `source` commitment. The rest resolve their own data, so a
-# `source` on them would validate, resolve, and then be dropped in silence.
-STEP_CONSUMES_INPUT_FRAME = frozenset(
-    operation_id
-    for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
-    if contract.consumes_input_frame
-)
-
-# Which dataset producers the runtime's recipe-replay path can reconstruct from
-# the workflow target. Today this equals STEP_PRODUCES_DATASET, which is exactly
-# why it has to be written down separately: the moment P3 adds a reshape or a
-# subset the two diverge, and a downstream step that neither replays that
-# transform nor reads it through `source` would model the untransformed table
-# and report success. Naming the whitelist makes that divergence a compile
-# error instead of a silently wrong number.
-STEP_REPLAYABLE_BY_RECIPE = frozenset(
-    operation_id
-    for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items()
-    if contract.replayable_by_recipe
-)
-
 
 def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
     """Every source column a step spec references, for schema checking."""
@@ -2207,7 +2346,7 @@ def validate_workflow_steps(
             raise OperationValidationError(f"duplicate workflow step_id: {step_id}")
         seen_ids.add(step_id)
         operation_id = entry.get("operation_id")
-        if operation_id not in WORKFLOW_STEP_OPERATIONS:
+        if operation_id not in workflow_step_operations():
             raise OperationValidationError(
                 f"workflow step {step_id} operation_id is unsupported: {operation_id!r}"
             )
@@ -2482,10 +2621,14 @@ __all__ = [
     "WORKFLOW_STEP_SPEC_CONTRACTS",
     "WORKFLOW_TEMPLATE",
     "StepSpecContract",
+    "WorkflowStepContractRegistry",
+    "pack_step_contract",
+    "register_workflow_step",
     "validate_workflow_operation",
     "validate_workflow_steps",
     "workflow_authorization",
     "workflow_proposal_schema",
+    "workflow_step_operations",
     "workflow_step_vocabulary",
     "workflow_dispatcher_key",
 ]

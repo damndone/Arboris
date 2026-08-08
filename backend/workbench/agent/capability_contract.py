@@ -100,6 +100,9 @@ class CapabilityContract:
     #: and presence with a stated reason are different claims, and only the
     #: second one survives someone asking "was this an oversight?".
     reachability_exempt_reason: str | None = None
+    #: Informational explanation for a composable capability that is not exposed
+    #: as an independent top-level proposal. This never changes reachability.
+    top_level_exposure_note: str | None = None
 
     def __post_init__(self) -> None:
         if not self.capability_id.strip():
@@ -113,6 +116,10 @@ class CapabilityContract:
             raise ValueError(
                 f"capability {self.capability_id} needs a summary: it is what a "
                 "reader and a model both see first"
+            )
+        if self.top_level_exposure_note is not None and not self.top_level_exposure_note.strip():
+            raise ValueError(
+                f"capability {self.capability_id} top-level exposure note must not be blank"
             )
         if self.reachability_exempt_reason is not None:
             if not self.reachability_exempt_reason.strip():
@@ -372,25 +379,35 @@ def _operation_capabilities() -> list[CapabilityContract]:
             + ", ".join(sorted(stale_exemptions))
         )
 
-    return [
-        CapabilityContract(
-            capability_id=operation_id,
-            kind="data_operation",
-            summary=str(entries[operation_id]["ui_description"]),
-            proposed_by=(
-                (operation_id,)
-                if entries[operation_id]["natural_language_enabled"]
-                else ()
-            ),
-            composable_as=(
-                (operation_id,) if operation_id in WORKFLOW_STEP_SPEC_CONTRACTS else ()
-            ),
-            reachability_exempt_reason=CAPABILITY_REACHABILITY_EXEMPTIONS.get(
-                operation_id
-            ),
+    capabilities: list[CapabilityContract] = []
+    for operation_id in sorted(entries):
+        step_contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
+        capabilities.append(
+            CapabilityContract(
+                capability_id=operation_id,
+                kind=(
+                    step_contract.capability_kind
+                    if step_contract is not None
+                    else "data_operation"
+                ),
+                summary=str(entries[operation_id]["ui_description"]),
+                proposed_by=(
+                    (operation_id,)
+                    if entries[operation_id]["natural_language_enabled"]
+                    else ()
+                ),
+                composable_as=(operation_id,) if step_contract is not None else (),
+                reachability_exempt_reason=CAPABILITY_REACHABILITY_EXEMPTIONS.get(
+                    operation_id
+                ),
+                top_level_exposure_note=(
+                    step_contract.top_level_exposure_note
+                    if step_contract is not None
+                    else None
+                ),
+            )
         )
-        for operation_id in sorted(entries)
-    ]
+    return capabilities
 
 
 def _statistical_test_capabilities() -> list[CapabilityContract]:
