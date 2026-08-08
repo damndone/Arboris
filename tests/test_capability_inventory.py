@@ -240,3 +240,193 @@ def test_no_summary_is_the_capability_name_echoed_back() -> None:
         # A real description of when to use something does not fit in three
         # words; a name pasted into the field always does.
         assert len(summary.split()) >= 4, f"{item.capability_id}: {summary!r}"
+
+
+# --- Task 3: the surfaces of build_capabilities(), each with a recorded verdict.
+
+
+def test_every_capability_surface_carries_a_recorded_judgment() -> None:
+    """A key of the manifest is either in the inventory or explicitly not.
+
+    This is the invariant Task 3 exists for. Before it, five families were
+    absent from the inventory and nothing distinguished "considered and ruled
+    out" from "nobody thought of it" -- which is the exact shape of the
+    previous version's miss. Asserting set equality against the live manifest
+    means the next key added to `build_capabilities()` fails here until someone
+    writes down which of the two it is.
+    """
+
+    from workbench.agent.capability_contract import CAPABILITY_SURFACES
+    from workbench.engine.capabilities import build_capabilities
+
+    declared = {decision.surface for decision in CAPABILITY_SURFACES}
+
+    assert declared == set(build_capabilities())
+
+
+def test_the_surfaces_ruled_out_say_why_rather_than_being_absent() -> None:
+    """Exclusion is a claim with a stated reason, not a silent omission.
+
+    Naming these four here is deliberate: each is a plausible capability that
+    was examined and rejected, and a future reader has to be able to see the
+    rejection. Asserting only "not in the inventory" would pass equally well if
+    the family had never been considered at all.
+    """
+
+    from workbench.agent.capability_contract import CAPABILITY_SURFACES
+
+    by_surface = {decision.surface: decision for decision in CAPABILITY_SURFACES}
+
+    for surface in (
+        "covariance_options",
+        "survey_design",
+        "editable_stages",
+        "schema_version",
+    ):
+        decision = by_surface[surface]
+        assert not decision.is_capability, surface
+        assert decision.produces_kinds == (), surface
+        # A one-word "no" is not a reason anybody can act on later.
+        assert len(decision.reason.split()) >= 8, surface
+
+
+def test_every_surface_judged_a_capability_actually_reaches_the_inventory() -> None:
+    """`is_capability=True` has to be load-bearing, not a comment.
+
+    A surface can be declared included and still contribute nothing if its
+    derivation is never wired into `capability_inventory()`; that would be the
+    same silent hole with a nicer label on it.
+    """
+
+    from workbench.agent.capability_contract import (
+        CAPABILITY_KINDS,
+        CAPABILITY_SURFACES,
+        capability_inventory,
+    )
+
+    listed_kinds = {item.kind for item in capability_inventory()}
+
+    included = [d for d in CAPABILITY_SURFACES if d.is_capability]
+    assert included
+    for decision in included:
+        assert decision.produces_kinds, decision.surface
+        for kind in decision.produces_kinds:
+            assert kind in CAPABILITY_KINDS, decision.surface
+            assert kind in listed_kinds, decision.surface
+
+
+def test_every_prediction_model_is_in_the_inventory() -> None:
+    """A fourth prediction model joins by being published, not by being typed
+    into this file."""
+
+    from workbench.agent.capability_contract import capability_inventory
+    from workbench.engine.capabilities import build_capabilities
+
+    listed = {
+        item.capability_id
+        for item in capability_inventory()
+        if item.kind == "prediction_model"
+    }
+    published = {
+        f"prediction.{entry['key']}"
+        for entry in build_capabilities()["prediction_models"]
+    }
+
+    assert published == listed
+    assert "prediction.prediction_lasso" in listed
+
+
+def test_every_imputation_and_resampling_method_is_in_the_inventory() -> None:
+    """The two frame-preparation registries land under one kind."""
+
+    from workbench.agent.capability_contract import capability_inventory
+    from workbench.engine.capabilities import build_capabilities
+
+    manifest = build_capabilities()
+    listed = {
+        item.capability_id
+        for item in capability_inventory()
+        if item.kind == "data_preparation"
+    }
+    published = {
+        f"imputation.{entry['key']}" for entry in manifest["imputation_methods"]
+    } | {f"resample.{entry['key']}" for entry in manifest["sampling_methods"]}
+
+    assert published == listed
+    assert {"imputation.mice", "resample.smote"} <= listed
+
+
+def test_prediction_and_preparation_capabilities_can_be_asked_for_by_nobody() -> None:
+    """The finding this task exists to surface, asserted rather than narrated.
+
+    `prediction_model_type`, `imputation_method` and `prediction_sampling_method`
+    are run-config fields carried only by the HTTP run form and the CLI. No
+    registered operation names any of them, so a Lasso prediction, a MICE
+    imputation and a SMOTE rebalance are all unreachable from natural language
+    today. They are listed as unreachable, not exempt: this is a gap to close,
+    not a door deliberately shut.
+    """
+
+    from workbench.agent.capability_contract import capability_inventory
+    from workbench.engine.capabilities import build_capabilities
+
+    subject = [
+        item
+        for item in capability_inventory()
+        if item.kind in {"prediction_model", "data_preparation"}
+    ]
+
+    # Counted off the manifest, not written down: a fourth prediction model has
+    # to arrive here as another unreachable entry rather than as a red test
+    # somebody deletes.
+    manifest = build_capabilities()
+    expected = sum(
+        len(manifest[surface])
+        for surface in ("prediction_models", "imputation_methods", "sampling_methods")
+    )
+    assert expected
+    assert len(subject) == expected
+
+    for item in subject:
+        assert not item.is_reachable, item.capability_id
+        assert item.reachability_exempt_reason is None, item.capability_id
+
+
+def test_a_surface_judged_a_capability_must_name_what_it_produces() -> None:
+    """The verdict and the kinds it implies cannot disagree.
+
+    A row saying "yes, this is a capability" while naming no kind is a verdict
+    that costs nothing and proves nothing, and the inventory-coverage test above
+    would have nothing to check it against.
+    """
+
+    from workbench.agent.capability_contract import CapabilitySurfaceDecision
+
+    with pytest.raises(ValueError, match=r"must\s+name the kinds it produces"):
+        CapabilitySurfaceDecision(
+            surface="prediction_models",
+            is_capability=True,
+            reason="An estimator a user asks for by name rather than a setting.",
+        )
+
+    with pytest.raises(ValueError, match=r"must\s+name the kinds it produces"):
+        CapabilitySurfaceDecision(
+            surface="covariance_options",
+            is_capability=False,
+            reason="A parameter of an estimator rather than something that runs.",
+            produces_kinds=("model_family",),
+        )
+
+
+def test_a_surface_cannot_produce_a_kind_the_inventory_does_not_know() -> None:
+    """A typo in a kind fails here, not by quietly matching nothing later."""
+
+    from workbench.agent.capability_contract import CapabilitySurfaceDecision
+
+    with pytest.raises(ValueError, match=r"produces unknown kind"):
+        CapabilitySurfaceDecision(
+            surface="prediction_models",
+            is_capability=True,
+            reason="An estimator a user asks for by name rather than a setting.",
+            produces_kinds=("prediction-model",),
+        )

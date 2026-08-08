@@ -14,12 +14,35 @@ from dataclasses import dataclass
 
 
 CAPABILITY_KINDS = frozenset(
-    # "selector" is not an estimator or a transform: it is a user-selectable
-    # entry that resolves to one of the others. `auto` is one, and it needs a
-    # kind of its own -- calling it a model family would have the inventory
-    # assert an estimator exists that does not, and leaving it out would hide a
-    # capability the product visibly offers.
-    {"model_family", "selector", "data_operation", "statistical_test", "pack"}
+    {
+        "model_family",
+        # "selector" is not an estimator or a transform: it is a user-selectable
+        # entry that resolves to one of the others. `auto` is one, and it needs
+        # a kind of its own -- calling it a model family would have the
+        # inventory assert an estimator exists that does not, and leaving it out
+        # would hide a capability the product visibly offers.
+        "selector",
+        # "data_operation" means specifically a registered `OperationRegistry`
+        # entry, which is why the frame-preparation methods below could not
+        # borrow it: they are named methods on the run config, not operations.
+        "data_operation",
+        "statistical_test",
+        # A prediction model is never a legal `model_type`. It travels the
+        # separate `prediction_model_type` config field, is dispatched by the
+        # diagnostics stage, and returns out-of-sample metrics instead of
+        # coefficients -- passing one as `model_type` does not run it, it falls
+        # through to the y-type default. Filing these under "model_family"
+        # would make that silent passthrough look like a supported path, and
+        # would make their absence from MODEL_FAMILY_CONTRACTS read as an
+        # oversight rather than a category difference.
+        "prediction_model",
+        # One kind for both frame-preparation registries (imputation and
+        # class-imbalance resampling) rather than one each: they share a shape
+        # -- a named method chosen on the run config that transforms the frame
+        # before a model is fit and produces no result of its own.
+        "data_preparation",
+        "pack",
+    }
 )
 
 #: model_types keys that resolve to a family rather than being one. Declared
@@ -62,6 +85,136 @@ class CapabilityContract:
     @property
     def is_reachable(self) -> bool:
         return bool(self.proposed_by or self.composable_as)
+
+
+@dataclass(frozen=True)
+class CapabilitySurfaceDecision:
+    """One key of `build_capabilities()`, and the verdict passed on it.
+
+    The test for "is this a capability?" is whether a user would say *do this
+    for me*. "Run a Lasso prediction" is a request; "do robust" is not a
+    sentence. But the verdict matters less than the fact that one was recorded:
+    an excluded family that is simply missing from the inventory is
+    indistinguishable from a family nobody thought about, and that is precisely
+    how the previous version came to publish a reach claim over a denominator
+    with an entire operation family missing from it. Every key gets a row here,
+    including the ones that are obviously not capabilities.
+    """
+
+    #: The `build_capabilities()` key this verdict is about.
+    surface: str
+    is_capability: bool
+    reason: str
+    #: The inventory kinds this surface contributes, empty when excluded. Stated
+    #: so the "included" verdict can be checked against the inventory instead of
+    #: being taken on faith.
+    produces_kinds: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.surface.strip():
+            raise ValueError("surface must be a non-empty string")
+        if not self.reason.strip():
+            raise ValueError(f"surface {self.surface} needs a reason")
+        if self.is_capability != bool(self.produces_kinds):
+            raise ValueError(
+                f"surface {self.surface}: a surface judged a capability must "
+                "name the kinds it produces, and one judged otherwise must "
+                "name none"
+            )
+        unknown = set(self.produces_kinds) - CAPABILITY_KINDS
+        if unknown:
+            raise ValueError(
+                f"surface {self.surface} produces unknown kind(s): "
+                + ", ".join(sorted(unknown))
+            )
+
+
+#: Every key `build_capabilities()` publishes, with the judgment passed on it.
+#: A test asserts this covers the live manifest exactly, so a new key cannot be
+#: added to the product without someone deciding which of the two it is.
+CAPABILITY_SURFACES: tuple[CapabilitySurfaceDecision, ...] = (
+    CapabilitySurfaceDecision(
+        surface="model_types",
+        is_capability=True,
+        reason=(
+            "Each entry is an estimator a user asks for by name -- 'fit a "
+            "Cox model' -- plus the `auto` router that resolves to one."
+        ),
+        produces_kinds=("model_family", "selector"),
+    ),
+    CapabilitySurfaceDecision(
+        surface="prediction_models",
+        is_capability=True,
+        reason=(
+            "'Predict this with a random forest' is a request for a specific "
+            "estimator, not a setting on some other request."
+        ),
+        produces_kinds=("prediction_model",),
+    ),
+    CapabilitySurfaceDecision(
+        surface="imputation_methods",
+        is_capability=True,
+        reason=(
+            "'Impute the missing values with MICE' is a thing a user asks to "
+            "have done; it changes which rows the model sees at all."
+        ),
+        produces_kinds=("data_preparation",),
+    ),
+    CapabilitySurfaceDecision(
+        surface="sampling_methods",
+        is_capability=True,
+        reason=(
+            "'Rebalance the classes with SMOTE' is a request. It only applies "
+            "on the prediction path, but that is a composition constraint, "
+            "not a demotion to being somebody else's parameter."
+        ),
+        produces_kinds=("data_preparation",),
+    ),
+    CapabilitySurfaceDecision(
+        surface="covariance_options",
+        is_capability=False,
+        reason=(
+            "A parameter of an estimator, not something that runs. 'Do robust "
+            "for me' is not a sentence; 'fit OLS with robust standard errors' "
+            "is one request with an argument. It is already published as the "
+            "`covariance` param on every family that takes it, so its reach "
+            "is that family's reach and needs no second denominator entry."
+        ),
+    ),
+    CapabilitySurfaceDecision(
+        surface="survey_design",
+        is_capability=False,
+        reason=(
+            "A cross-cutting attribute of a run, like Stata's `svyset`: "
+            "nothing executes 'a survey design'. It changes the variance "
+            "channel of whichever estimator is already being asked for, and "
+            "`_attach_survey_design_params` publishes it as params on the "
+            "families that accept it -- the product itself already treats it "
+            "as arguments. Counting it as a capability would create an entry "
+            "with no result and no id a user could name, while its real reach "
+            "question ('can family F's design be set through an operation?') "
+            "is per-family and already carried by that family's entry."
+        ),
+    ),
+    CapabilitySurfaceDecision(
+        surface="editable_stages",
+        is_capability=False,
+        reason=(
+            "An editing surface: which stage of an existing run the editor may "
+            "reopen. 'Do model for me' is not a request, and the thing that "
+            "gets edited is already in the inventory as the model family."
+        ),
+    ),
+    CapabilitySurfaceDecision(
+        surface="schema_version",
+        is_capability=False,
+        reason=(
+            "The wire version of the manifest itself. Listed only so this "
+            "table can be asserted equal to the live manifest's key set, which "
+            "is what stops a future key from being added unexamined."
+        ),
+    ),
+)
 
 
 def _model_capabilities() -> list[CapabilityContract]:
@@ -179,6 +332,82 @@ def _statistical_test_capabilities() -> list[CapabilityContract]:
     ]
 
 
+def _prediction_capabilities() -> list[CapabilityContract]:
+    """Every prediction model, with the reach it actually has: none.
+
+    A prediction run is requested through the `prediction_model_type` field of
+    the run config, which only the HTTP run form and the CLI populate. No
+    registered operation carries that field -- `model.rerun`'s override set is
+    derived from a family's published params, and `prediction_model_type` is
+    not one of them -- so no Agent can ask for a Lasso prediction at all. That
+    is a finding, so these are listed as unreachable rather than left out.
+    """
+
+    from workbench.engine.capabilities import build_capabilities
+
+    return [
+        CapabilityContract(
+            # Prefix plus the registry key verbatim, so the wire value a caller
+            # must send is recoverable from the capability id. Trimming the
+            # redundant-looking `prediction_` would break that.
+            capability_id=f"prediction.{entry['key']}",
+            kind="prediction_model",
+            # PREDICTION_UI registers a three-word description ("L1-regularized
+            # linear prediction."), which says what the estimator is but not
+            # the thing a planner most needs: that asking for it is a different
+            # kind of request than asking for a model family. The channel is
+            # appended rather than the description being rewritten, because
+            # rewriting it would change what the run form shows a human.
+            summary=(
+                f"{str(entry['description']).rstrip('.')}. Fit and scored out "
+                "of sample by the prediction protocol (hold-out split with "
+                "cross-validation), not by the estimation stage."
+            ),
+        )
+        for entry in build_capabilities()["prediction_models"]
+    ]
+
+
+def _data_preparation_capabilities() -> list[CapabilityContract]:
+    """Imputation and class-imbalance resampling, both equally out of reach.
+
+    `imputation_method` and `prediction_sampling_method` are run-config fields
+    on the same footing as `prediction_model_type`: reachable from the run form
+    and the CLI, named by no operation. MICE is the sharper case of the two --
+    it decides whether rows with missing values are dropped or filled, so an
+    Agent driving an analysis cannot influence the sample it estimates on.
+    """
+
+    from workbench.engine.capabilities import build_capabilities
+
+    manifest = build_capabilities()
+    capabilities = [
+        CapabilityContract(
+            capability_id=f"imputation.{entry['key']}",
+            kind="data_preparation",
+            summary=str(entry["description"]),
+        )
+        for entry in manifest["imputation_methods"]
+    ]
+    capabilities.extend(
+        CapabilityContract(
+            capability_id=f"resample.{entry['key']}",
+            kind="data_preparation",
+            # SAMPLING_UI registers a label and nothing else, so state what is
+            # actually known about the method and say the description is
+            # missing. Passing the label through as the summary would satisfy
+            # Task 1's non-empty check while telling a planner nothing.
+            summary=(
+                f"Class-imbalance resampling offered as {entry['label']!r}, "
+                "applied to the training split before a prediction model is "
+                "fit. No description is registered for it."
+            ),
+        )
+        for entry in manifest["sampling_methods"]
+    )
+    return capabilities
+
+
 def capability_inventory() -> tuple[CapabilityContract, ...]:
     """The enumerable set of things this product can be asked to do.
 
@@ -192,12 +421,16 @@ def capability_inventory() -> tuple[CapabilityContract, ...]:
         *_model_capabilities(),
         *_operation_capabilities(),
         *_statistical_test_capabilities(),
+        *_prediction_capabilities(),
+        *_data_preparation_capabilities(),
     )
 
 
 __all__ = [
     "CAPABILITY_KINDS",
+    "CAPABILITY_SURFACES",
     "MODEL_TYPE_SELECTORS",
     "CapabilityContract",
+    "CapabilitySurfaceDecision",
     "capability_inventory",
 ]
