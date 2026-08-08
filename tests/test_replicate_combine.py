@@ -22,6 +22,8 @@ from workbench.contracts.model.replicate_combine import (
 from workbench.engine.replicate_combine import (
     ReplicateAdapter,
     ReplicateBatch,
+    ReplicateCombiner,
+    ReplicateCombinedResult,
     ReplicateCombineError,
     ReplicateEvidence,
     ReplicateExecutionError,
@@ -29,6 +31,7 @@ from workbench.engine.replicate_combine import (
     ReplicateStrategy,
     dispatch_combiner,
     execute,
+    execute_and_combine,
 )
 
 
@@ -151,6 +154,25 @@ class _TwoScalarAdapter(_ScalarAdapter):
                 "adapter_index": float(replicate_index),
             }
         )
+
+
+class _MeanCombiner(ReplicateCombiner):
+    combiner_id = "distribution_ci"
+
+    def combine(
+        self,
+        evidence: tuple[ReplicateEvidence, ...],
+        *,
+        plan: ReplicatePlan,
+        batch: ReplicateBatch,
+    ) -> dict[str, float | int]:
+        assert plan.kind == "bootstrap"
+        assert batch.succeeded_count == len(evidence)
+        values = [float(item.scalars["adapter_score"]) for item in evidence]
+        return {
+            "replicate_count": len(values),
+            "mean": sum(values) / len(values),
+        }
 
 
 class _FailingStrategy(_DeterministicStrategy):
@@ -284,6 +306,53 @@ def test_structured_raw_guard_allows_safe_metadata_names_containing_raw() -> Non
     _assert_no_raw_replicate_values(
         {"provenance": {"raw_digest": "0" * 64}}
     )
+
+
+def test_typed_combiner_receives_internal_evidence_and_publishes_only_aggregate() -> None:
+    registry, _adapter = _registry()
+    registry.register_combiner(_MeanCombiner())
+    plan = _plan(
+        kind="bootstrap",
+        combiner_id="distribution_ci",
+        requested_replicates=4,
+    )
+
+    combined = execute_and_combine(plan, registry=registry)
+
+    assert isinstance(combined, ReplicateCombinedResult)
+    assert combined.batch.status == "completed"
+    assert combined.result["replicate_count"] == 4
+    assert "replicate_values" not in json.dumps(combined.to_dict())
+    assert "raw_data" not in json.dumps(combined.to_dict())
+    assert ReplicateCombinedResult(
+        batch=combined.batch,
+        result=combined.result,
+    ).to_dict() == combined.to_dict()
+
+
+def test_typed_combiner_must_be_registered_before_execution() -> None:
+    registry, _adapter = _registry()
+    plan = _plan(kind="bootstrap", combiner_id="distribution_ci")
+
+    with pytest.raises(ReplicateCombineError) as caught:
+        execute_and_combine(plan, registry=registry)
+
+    _assert_reason(caught.value, "REPLICATE_COMBINER_NOT_REGISTERED")
+
+
+def test_typed_combiner_rejects_raw_replicate_fields() -> None:
+    class _UnsafeCombiner(_MeanCombiner):
+        def combine(self, evidence, *, plan, batch):
+            return {"replicate_values": [1.0, 2.0]}
+
+    registry, _adapter = _registry()
+    registry.register_combiner(_UnsafeCombiner())
+    plan = _plan(kind="bootstrap", combiner_id="distribution_ci")
+
+    with pytest.raises(ReplicateCombineError) as caught:
+        execute_and_combine(plan, registry=registry)
+
+    _assert_reason(caught.value, "REPLICATE_RAW_VALUES_FORBIDDEN")
 
 
 def _assert_batch_provenance_schema(

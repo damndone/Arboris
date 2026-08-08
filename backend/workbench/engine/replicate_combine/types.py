@@ -247,6 +247,88 @@ class ReplicateAdapter:
         raise NotImplementedError
 
 
+class ReplicateCombiner:
+    """Typed internal combiner; its raw evidence never crosses the runner boundary."""
+
+    combiner_id: ClassVar[str] = ""
+
+    def combine(
+        self,
+        evidence: Sequence[ReplicateEvidence],
+        *,
+        plan: ReplicatePlan,
+        batch: "ReplicateBatch",
+    ) -> Mapping[str, Any]:
+        raise NotImplementedError
+
+
+_FORBIDDEN_COMBINED_KEYS = frozenset(
+    {
+        "replicate_rows",
+        "replicate_values",
+        "raw_data",
+        "raw_rows",
+        "raw_values",
+        "distribution_values",
+    }
+)
+
+
+def _validate_combined_result(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ReplicateCombineError(
+            "REPLICATE_COMBINER_INVALID_RESULT", "combiner result must be a mapping"
+        )
+
+    def visit(node: Any, label: str) -> None:
+        if isinstance(node, Mapping):
+            if any(key in _FORBIDDEN_COMBINED_KEYS for key in node):
+                raise ReplicateCombineError(
+                    "REPLICATE_RAW_VALUES_FORBIDDEN",
+                    f"combiner result contains raw replicate field at {label}",
+                )
+            if any(type(key) is not str for key in node):
+                raise ReplicateCombineError(
+                    "REPLICATE_COMBINER_INVALID_RESULT",
+                    f"combiner result keys at {label} must be strings",
+                )
+            for key, child in node.items():
+                visit(child, f"{label}.{key}")
+            return
+        if isinstance(node, list):
+            for index, child in enumerate(node):
+                visit(child, f"{label}[{index}]")
+            return
+        _require_json(node, label)
+
+    visit(value, "result")
+    return _copy_json(value)
+
+
+@dataclass(frozen=True, init=False)
+class ReplicateCombinedResult:
+    """Aggregate combiner output paired with its bounded execution batch."""
+
+    batch: "ReplicateBatch"
+    _result: Mapping[str, Any]
+
+    def __init__(self, *, batch: "ReplicateBatch", result: Mapping[str, Any]) -> None:
+        if not isinstance(batch, ReplicateBatch):
+            raise ReplicateCombineError(
+                "REPLICATE_INVALID_BATCH", "combined result requires a ReplicateBatch"
+            )
+        normalized = _validate_combined_result(result)
+        object.__setattr__(self, "batch", batch)
+        object.__setattr__(self, "_result", freeze_json(normalized, "result"))
+
+    @property
+    def result(self) -> dict[str, Any]:
+        return thaw_json(self._result)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"batch": self.batch.to_dict(), "result": self.result}
+
+
 @dataclass(frozen=True, init=False)
 class ReplicateBatch:
     """Bounded execution evidence; no replicate rows or scalar values."""
@@ -556,6 +638,8 @@ __all__ = [
     "BATCH_CONTRACT",
     "ReplicateAdapter",
     "ReplicateBatch",
+    "ReplicateCombiner",
+    "ReplicateCombinedResult",
     "ReplicateEvidence",
     "ReplicateStrategy",
     "compute_provenance_commitment",

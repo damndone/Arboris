@@ -14,6 +14,9 @@ from .errors import STABLE_FAILURE_REASONS, ReplicateCombineError, ReplicateExec
 from .types import (
     ReplicateAdapter,
     ReplicateBatch,
+    ReplicateCombiner,
+    ReplicateCombinedResult,
+    ReplicateEvidence,
     ReplicateStrategy,
     _batch_digest,
     evidence_commitment,
@@ -28,6 +31,7 @@ class ReplicateRegistry:
     def __init__(self) -> None:
         self._strategies: dict[str, ReplicateStrategy] = {}
         self._adapters: dict[str, ReplicateAdapter] = {}
+        self._combiners: dict[str, ReplicateCombiner] = {}
 
     def register_strategy(self, strategy: ReplicateStrategy) -> None:
         if not isinstance(strategy, ReplicateStrategy):
@@ -49,6 +53,16 @@ class ReplicateRegistry:
             raise ReplicateCombineError("REPLICATE_ADAPTER_NOT_TYPED", "adapter_id is required")
         self._adapters[adapter_id] = adapter
 
+    def register_combiner(self, combiner: ReplicateCombiner) -> None:
+        if not isinstance(combiner, ReplicateCombiner):
+            raise ReplicateCombineError(
+                "REPLICATE_COMBINER_NOT_TYPED", "combiner must implement ReplicateCombiner"
+            )
+        combiner_id = getattr(combiner, "combiner_id", None)
+        if type(combiner_id) is not str or not combiner_id:
+            raise ReplicateCombineError("REPLICATE_COMBINER_NOT_TYPED", "combiner_id is required")
+        self._combiners[combiner_id] = combiner
+
     def strategy(self, strategy_id: str) -> ReplicateStrategy:
         try:
             return self._strategies[strategy_id]
@@ -63,6 +77,14 @@ class ReplicateRegistry:
         except KeyError as exc:
             raise ReplicateCombineError(
                 "REPLICATE_ADAPTER_NOT_REGISTERED", "adapter_id is not registered"
+            ) from exc
+
+    def combiner(self, combiner_id: str) -> ReplicateCombiner:
+        try:
+            return self._combiners[combiner_id]
+        except KeyError as exc:
+            raise ReplicateCombineError(
+                "REPLICATE_COMBINER_NOT_REGISTERED", "combiner_id is not registered"
             ) from exc
 
 
@@ -137,8 +159,10 @@ def _make_batch(
     )
 
 
-def execute(plan: ReplicatePlan, *, registry: ReplicateRegistry) -> ReplicateBatch:
-    """Execute a bounded plan and publish only aggregate provenance."""
+def _execute_internal(
+    plan: ReplicatePlan, *, registry: ReplicateRegistry
+) -> tuple[ReplicateBatch, tuple[ReplicateEvidence, ...]]:
+    """Execute a plan and retain adapted evidence only for an internal combiner."""
 
     if not isinstance(plan, ReplicatePlan):
         raise ReplicateCombineError("REPLICATE_INVALID_PLAN", "plan must be a ReplicatePlan")
@@ -165,7 +189,7 @@ def execute(plan: ReplicatePlan, *, registry: ReplicateRegistry) -> ReplicateBat
             failed=0,
             failure_reasons={},
             provenance=provenance,
-        )
+        ), ()
 
     derived_seeds: list[int] = []
     order = list(range(plan.requested_replicates))
@@ -173,6 +197,7 @@ def execute(plan: ReplicatePlan, *, registry: ReplicateRegistry) -> ReplicateBat
     failure_reasons: Counter[str] = Counter()
     scalar_count = 0
     succeeded = 0
+    adapted_evidence: list[ReplicateEvidence] = []
 
     for replicate_index in range(plan.requested_replicates):
         seed = _derive_seed(plan.seed, replicate_index)
@@ -255,6 +280,7 @@ def execute(plan: ReplicatePlan, *, registry: ReplicateRegistry) -> ReplicateBat
                 "adapter": normalized,
             }
         )
+        adapted_evidence.append(ReplicateEvidence(scalars=normalized))
         succeeded += 1
 
     failed = plan.requested_replicates - succeeded
@@ -275,15 +301,57 @@ def execute(plan: ReplicatePlan, *, registry: ReplicateRegistry) -> ReplicateBat
         count=scalar_count,
         records=records,
     )
-    return _make_batch(
-        plan=plan,
-        status=status,
-        reason_code=reason_code,
-        succeeded=succeeded,
-        failed=failed,
-        failure_reasons=failure_map,
-        provenance=provenance,
+    return (
+        _make_batch(
+            plan=plan,
+            status=status,
+            reason_code=reason_code,
+            succeeded=succeeded,
+            failed=failed,
+            failure_reasons=failure_map,
+            provenance=provenance,
+        ),
+        tuple(adapted_evidence),
     )
 
 
-__all__ = ["ReplicateRegistry", "execute"]
+def execute(plan: ReplicatePlan, *, registry: ReplicateRegistry) -> ReplicateBatch:
+    """Execute a bounded plan and publish only aggregate provenance."""
+
+    batch, _evidence = _execute_internal(plan, registry=registry)
+    return batch
+
+
+def execute_and_combine(
+    plan: ReplicatePlan, *, registry: ReplicateRegistry
+) -> ReplicateCombinedResult:
+    """Execute and combine through the declared code-registered combiner.
+
+    Adapted scalar evidence stays inside this function.  The returned object
+    contains only the aggregate result and the public batch provenance.
+    """
+
+    if not isinstance(plan, ReplicatePlan):
+        raise ReplicateCombineError("REPLICATE_INVALID_PLAN", "plan must be a ReplicatePlan")
+    if not isinstance(registry, ReplicateRegistry):
+        raise ReplicateCombineError("REPLICATE_INVALID_REGISTRY", "registry is not typed")
+    dispatch_combiner(plan.combiner_id)
+    combiner = registry.combiner(plan.combiner_id)
+    batch, evidence = _execute_internal(plan, registry=registry)
+    if batch.status == "failed":
+        raise ReplicateCombineError(
+            "REPLICATE_COMBINE_UNAVAILABLE",
+            "a failed replicate batch cannot be combined",
+        )
+    try:
+        result = combiner.combine(evidence, plan=plan, batch=batch)
+    except ReplicateCombineError:
+        raise
+    except Exception as exc:
+        raise ReplicateCombineError(
+            "REPLICATE_COMBINER_FAILED", "combiner failed closed"
+        ) from exc
+    return ReplicateCombinedResult(batch=batch, result=result)
+
+
+__all__ = ["ReplicateRegistry", "execute", "execute_and_combine"]
