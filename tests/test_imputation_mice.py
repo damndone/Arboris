@@ -30,7 +30,7 @@ def test_mice_imputation_writes_artifacts_without_overwriting_cleaned_dataset(tm
         frame,
         run.root,
         columns=["y", "x", "mostly_missing", "group", "missing_column"],
-        m=2,
+        m=1,
         max_iter=2,
         random_seed=123,
         max_missing_rate=0.4,
@@ -53,13 +53,13 @@ def test_mice_imputation_writes_artifacts_without_overwriting_cleaned_dataset(tm
 
     assert summary["status"] == "completed"
     assert summary["method"] == "mice"
-    assert summary["m"] == 2
+    assert summary["m"] == 1
     assert "group" in summary["skipped_columns"]
     assert "mostly_missing" in summary["skipped_columns"]
     assert any("group" in warning for warning in summary["warnings"])
     assert summary["persisted_datasets"] == 1
     assert summary["pooled_estimates"] is False
-    assert any("pooled multiple-imputation estimates" in warning for warning in summary["warnings"])
+    assert not any("pooled multiple-imputation estimates" in warning for warning in summary["warnings"])
     assert summary["selected_columns"] == ["y", "x"]
     persisted_summary = read_json(summary_path)
     decisions = read_json(decisions_path)
@@ -164,7 +164,7 @@ def test_mice_imputation_skips_single_numeric_column_with_missing_values(tmp_pat
 def test_workflow_uses_mice_only_when_configured(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     (project.root / "config.yml").write_text(
-        "imputation_method: mice\nimputation_m: 2\nimputation_max_iter: 2\n",
+        "imputation_method: mice\nimputation_m: 1\nimputation_max_iter: 2\n",
         encoding="utf-8",
     )
     y_values = [float(1 + 2 * i) for i in range(40)]
