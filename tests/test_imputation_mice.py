@@ -77,6 +77,59 @@ def test_mice_imputation_writes_artifacts_without_overwriting_cleaned_dataset(tm
     assert {"imputed_dataset", "mice_summary", "mice_decisions"}.issubset(artifact_ids)
 
 
+def test_mice_multiple_imputation_persists_ordered_dataset_artifacts_and_manifest(
+    tmp_path: Path,
+):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    processed_dir = run.root / "processed"
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    cleaned_path = processed_dir / "cleaned_dataset.parquet"
+    frame = pd.DataFrame(
+        {
+            "y": [1.0, 2.0, np.nan, 4.0, 5.0],
+            "x": [2.0, np.nan, 6.0, 8.0, 10.0],
+        }
+    )
+    frame.to_parquet(cleaned_path, index=False)
+    original_cleaned = cleaned_path.read_bytes()
+
+    summary = run_mice_imputation(
+        frame,
+        run.root,
+        columns=["y", "x"],
+        m=2,
+        max_iter=2,
+        random_seed=123,
+    )
+
+    # Keep the existing safety boundary explicit: imputation may only add artifacts.
+    assert cleaned_path.read_bytes() == original_cleaned
+    assert summary["persisted_datasets"] == 2
+    assert summary["pooled_estimates"] is False
+
+    expected_artifacts = [
+        ("imputed_dataset_0001", "processed/imputed_dataset_0001.parquet"),
+        ("imputed_dataset_0002", "processed/imputed_dataset_0002.parquet"),
+    ]
+    artifact_records = read_json(run.root / "artifacts_index.json")["artifacts"]
+    dataset_records = [
+        (artifact["artifact_id"], artifact["path"])
+        for artifact in artifact_records
+        if artifact["artifact_id"].startswith("imputed_dataset_")
+    ]
+    assert dataset_records == expected_artifacts
+    assert all((run.root / path).is_file() for _, path in expected_artifacts)
+
+    # Wished-for manifest API: ordered artifact identity is persisted separately
+    # from the summary so downstream stages cannot silently select the first file.
+    manifest = read_json(run.root / "imputation" / "mice_manifest.json")
+    assert manifest["datasets"] == [
+        {"artifact_id": artifact_id, "path": path}
+        for artifact_id, path in expected_artifacts
+    ]
+
+
 def test_mice_imputation_skips_when_no_numeric_columns(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     run = create_run(project.root, mode="auto")
