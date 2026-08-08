@@ -47,6 +47,7 @@ def test_scope_is_immutable() -> None:
     "bad",
     [
         {**_scope(), "unknown": "rejected"},
+        {key: value for key, value in _scope().items() if key != "estimand"},
         {**_scope(), "estimand": ""},
         {**_scope(), "estimand": 1},
         {**_scope(), "assumptions": []},
@@ -55,7 +56,24 @@ def test_scope_is_immutable() -> None:
         {**_scope(), "unsupported_extensions": [{"raw_rows": [1]}]},
         {**_scope(), "raw_rows": [{"x": 1}]},
         {**_scope(), "formula": "y ~ x"},
+        {**_scope(), "input_semantics": "y ~ x"},
         {**_scope(), "input_semantics": "/tmp/raw.csv"},
+        {**_scope(), "input_semantics": "see /etc/hosts for example"},
+        {**_scope(), "input_semantics": r"C:\\raw.csv"},
+        {**_scope(), "input_semantics": "~/raw.csv"},
+        {**_scope(), "input_semantics": "./raw.csv"},
+        {**_scope(), "input_semantics": "../raw.csv"},
+        {**_scope(), "input_semantics": "data/raw.csv"},
+        {**_scope(), "input_semantics": "folder/file"},
+        {**_scope(), "input_semantics": r"folder\file"},
+        {**_scope(), "input_semantics": r"folder\\file"},
+        {**_scope(), "input_semantics": "see data/raw for preprocessing"},
+        {**_scope(), "input_semantics": "stored in folder/subfolder"},
+        {**_scope(), "input_semantics": r"folder\\file.csv"},
+        {**_scope(), "input_semantics": "file:raw.csv"},
+        {**_scope(), "input_semantics": "import os"},
+        {**_scope(), "input_semantics": "exec(unsafe)"},
+        {**_scope(), "input_semantics": "eval(unsafe)"},
     ],
 )
 def test_scope_rejects_unsafe_or_incomplete_metadata(bad: dict[str, object]) -> None:
@@ -76,3 +94,19 @@ def test_scope_rejects_nested_raw_payloads() -> None:
 
     with pytest.raises(ContractError):
         P7ScopeMetadata.from_dict(bad)
+
+
+def test_scope_accepts_safe_punctuation_and_explanatory_prose() -> None:
+    scope = P7ScopeMetadata.from_dict(
+        _scope(
+            input_semantics=(
+                "supports A/B comparisons; x ~ y notation is explanatory; "
+                "we discuss the /api/v1 endpoint and file: semantics; "
+                "import is discussed conceptually; group/time interaction and x/y notation"
+            ),
+            limitations=[r"a backslash may appear in prose but is not a path"],
+        )
+    )
+
+    assert scope.input_semantics.startswith("supports A/B")
+    assert scope.limitations == (r"a backslash may appear in prose but is not a path",)

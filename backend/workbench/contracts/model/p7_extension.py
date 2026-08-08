@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from workbench.contracts.common.envelope import ContractError, require_exact_keys
@@ -29,7 +30,57 @@ _P7_SCOPE_SEQUENCE_FIELDS = (
     "not_claimed",
     "unsupported_extensions",
 )
-_PATH_OR_CODE_MARKERS = ("/", "\\", "~", "file:", "import ", "exec(", "eval(")
+_UNSAFE_SCOPE_PATTERNS = (
+    # Reject explicit relative path prefixes, but not ordinary prose such as A/B.
+    re.compile(r"(?i)(?:^|[\s\"'(])\.\.?[\\/]"),
+    # Common local filesystem roots are unambiguous; endpoint prose such as /api/v1 is not.
+    re.compile(
+        r"(?i)(?:^|[\s\"'(])/(?:users|home|private|var|tmp|etc|usr|opt|bin|sbin|"
+        r"dev|proc|sys|mnt|srv|root)(?:[\\/]|$)"
+    ),
+    # An absolute path with a filename extension remains path-shaped even outside known roots.
+    re.compile(
+        r"(?i)(?:^|[\s\"'(])/(?:[A-Za-z0-9_.-]+[\\/])+"
+        r"[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,16}(?=$|[\s\"'),;])"
+    ),
+    re.compile(r"(?i)(?:^|[\s\"'(])(?:[A-Z]:[\\/]|\\\\)"),
+    re.compile(r"(?i)(?:^|[\s\"'(])~[\\/]"),
+    # A bare relative path is rejected only when the whole field is that token.
+    re.compile(r"(?i)^\s*(?:[A-Za-z0-9_.-]{2,}[\\/]+)+[A-Za-z0-9_.-]+\s*$"),
+    # Embedded no-extension paths need explicit path context; this preserves group/time prose.
+    re.compile(
+        r"(?i)\b(?:see|stored\s+in|located\s+at|read\s+from|loaded?\s+from|"
+        r"path(?:\s+is)?|file)\s+(?:[A-Za-z0-9_.-]{2,}[\\/])+"
+        r"[A-Za-z0-9_.-]+(?=$|[\s\"'),;])"
+    ),
+    # A directory-like token ending in a filename extension is path-shaped in prose too.
+    re.compile(
+        r"(?i)(?:^|[\s\"'(])(?:[A-Za-z0-9_.-]+[\\/]+)+"
+        r"[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,16}(?=$|[\s\"'),;])"
+    ),
+    # `file:` is allowed as prose unless it introduces a path or filename.
+    re.compile(
+        r"(?i)\bfile:(?:[\\/]|[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,16}"
+        r"(?=$|[\s\"'),;]))"
+    ),
+    # Reject import statements, not ordinary prose that uses the word import.
+    re.compile(
+        r"(?im)^\s*(?:from\s+[A-Za-z_][A-Za-z0-9_.]*\s+)?import\s+"
+        r"[A-Za-z_][A-Za-z0-9_.]*(?:\s+as\s+[A-Za-z_][A-Za-z0-9_.]*)?"
+        r"(?:\s*;.*)?\s*$"
+    ),
+    re.compile(r"(?i)\b(?:exec|eval)\s*\("),
+    re.compile(
+        r"^\s*[A-Za-z_][A-Za-z0-9_.]*\s*~\s*[A-Za-z_][A-Za-z0-9_.]*"
+        r"(?:\s*[+*:\-]\s*[A-Za-z_][A-Za-z0-9_.]*)*\s*$"
+    ),
+)
+
+
+def _contains_unsafe_scope_shape(value: str) -> bool:
+    """Reject path/code-shaped tokens without banning ordinary punctuation prose."""
+
+    return any(pattern.search(value) for pattern in _UNSAFE_SCOPE_PATTERNS)
 
 
 def _bounded_text(value: Any, field_name: str, *, limit: int) -> str:
@@ -39,8 +90,7 @@ def _bounded_text(value: Any, field_name: str, *, limit: int) -> str:
         raise ContractError(f"{field_name} exceeds the {limit}-character limit")
     if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
         raise ContractError(f"{field_name} must be valid JSON text")
-    lowered = value.lower()
-    if any(marker in lowered for marker in _PATH_OR_CODE_MARKERS):
+    if _contains_unsafe_scope_shape(value):
         raise ContractError(f"{field_name} must not contain a path or executable expression")
     return value
 
