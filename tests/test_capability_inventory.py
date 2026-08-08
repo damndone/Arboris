@@ -392,6 +392,133 @@ def test_prediction_and_preparation_capabilities_can_be_asked_for_by_nobody() ->
         assert item.reachability_exempt_reason is None, item.capability_id
 
 
+def test_the_inventory_separates_a_closed_door_from_a_missing_one() -> None:
+    """Two different facts, and collapsing them hides whichever one matters.
+
+    A capability nobody wired up and a capability deliberately withheld are not
+    the same claim. P2's guard has to fail on the first and accept the second,
+    so P1 has to be able to tell them apart before P2 can assert anything.
+    """
+
+    from workbench.agent.capability_contract import unreachable_capabilities
+
+    exempt, gaps = unreachable_capabilities()
+
+    for item in exempt:
+        assert item.reachability_exempt_reason, item.capability_id
+    for item in gaps:
+        assert item.reachability_exempt_reason is None, item.capability_id
+    assert not (set(exempt) & set(gaps))
+
+
+def test_todays_unreachable_capabilities_are_all_gaps() -> None:
+    """Recording the number is the point: it is the size of the promise
+    'natural language reaches every capability' currently overstates by.
+
+    This test pins today's facts on purpose, so it is *expected* to go red the
+    day someone closes one of these gaps or shuts a door deliberately. That is
+    not the test breaking: it is the record of the shortfall asking to be
+    updated in the same change that alters it, instead of the number quietly
+    getting smaller with nobody noticing it moved.
+    """
+
+    from workbench.agent.capability_contract import unreachable_capabilities
+
+    exempt, gaps = unreachable_capabilities()
+
+    assert not exempt, [item.capability_id for item in exempt]
+    assert {item.kind for item in gaps} == {
+        "statistical_test",
+        "prediction_model",
+        "data_preparation",
+    }
+    assert len(gaps) == 15
+
+
+def test_the_partition_covers_every_unreachable_capability_and_nothing_else() -> None:
+    """Two lists that agree with each other can still both be wrong.
+
+    The partition tests above are satisfied by returning nothing at all on the
+    exempt side, and by dropping a capability from both sides. Neither would be
+    caught by asking each list about itself, so the partition is checked against
+    the inventory it partitions: every unreachable entry lands on exactly one
+    side, and no reachable entry lands on either.
+    """
+
+    from workbench.agent.capability_contract import (
+        capability_inventory,
+        unreachable_capabilities,
+    )
+
+    inventory = capability_inventory()
+    unreachable = {item for item in inventory if not item.is_reachable}
+    assert unreachable
+
+    exempt, gaps = unreachable_capabilities()
+
+    assert set(exempt) | set(gaps) == unreachable
+    assert len(exempt) + len(gaps) == len(unreachable)
+    reachable = {item for item in inventory if item.is_reachable}
+    assert reachable
+    assert not (reachable & (set(exempt) | set(gaps)))
+
+
+def test_the_two_sides_of_the_partition_are_reachable_by_name() -> None:
+    """Positional unpacking of two same-typed lists is one typo from a lie.
+
+    A caller that writes `gaps, exempt = ...` gets a guard that passes on gaps
+    and fails on stated exemptions, with nothing in the types to object. The
+    result names its sides so the mix-up has to be spelled out to happen.
+    """
+
+    from workbench.agent.capability_contract import unreachable_capabilities
+
+    result = unreachable_capabilities()
+
+    assert result.exempt == result[0]
+    assert result.gaps == result[1]
+    assert all(item.reachability_exempt_reason is None for item in result.gaps)
+
+
+def test_a_capability_cannot_be_reachable_and_exempt_at_once() -> None:
+    """An exemption reason on a reachable capability is a contradiction.
+
+    It reads as "deliberately withheld" while the capability is in fact wired
+    up, which would let a real closure be recorded on the wrong entry and never
+    show up on either side of the partition.
+    """
+
+    from workbench.agent.capability_contract import CapabilityContract
+
+    with pytest.raises(ValueError, match=r"reachable capability .* cannot"):
+        CapabilityContract(
+            capability_id="model.ols",
+            kind="model_family",
+            summary="Ordinary least squares.",
+            proposed_by=("model.genesis",),
+            reachability_exempt_reason="Withheld pending review.",
+        )
+
+
+def test_an_exemption_reason_must_say_something() -> None:
+    """A whitespace reason satisfies `is not None` and explains nothing.
+
+    The exempt side exists so a closure survives someone asking "was this an
+    oversight?"; a blank string answers that question with silence while
+    counting as an answer.
+    """
+
+    from workbench.agent.capability_contract import CapabilityContract
+
+    with pytest.raises(ValueError, match=r"exempt.*reason"):
+        CapabilityContract(
+            capability_id="prediction.lasso",
+            kind="prediction_model",
+            summary="L1-regularized linear prediction.",
+            reachability_exempt_reason="   ",
+        )
+
+
 def test_a_surface_judged_a_capability_must_name_what_it_produces() -> None:
     """The verdict and the kinds it implies cannot disagree.
 

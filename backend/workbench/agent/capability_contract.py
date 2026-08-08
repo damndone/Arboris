@@ -11,6 +11,7 @@ property each capability states about itself rather than one a human re-checks.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 
 CAPABILITY_KINDS = frozenset(
@@ -81,6 +82,21 @@ class CapabilityContract:
                 f"capability {self.capability_id} needs a summary: it is what a "
                 "reader and a model both see first"
             )
+        if self.reachability_exempt_reason is not None:
+            if not self.reachability_exempt_reason.strip():
+                # An empty reason passes `is not None` and answers "was this an
+                # oversight?" with silence while counting as an answer.
+                raise ValueError(
+                    f"capability {self.capability_id} is marked exempt and must "
+                    "state a reason: a blank one records a closure nobody can "
+                    "check"
+                )
+            if self.is_reachable:
+                raise ValueError(
+                    f"reachable capability {self.capability_id} cannot also be "
+                    "exempt from reachability: it is wired up, so an exemption "
+                    "reason on it records a closure that did not happen"
+                )
 
     @property
     def is_reachable(self) -> bool:
@@ -426,11 +442,54 @@ def capability_inventory() -> tuple[CapabilityContract, ...]:
     )
 
 
+class UnreachableCapabilities(NamedTuple):
+    """The two ways a capability can be out of reach, kept apart.
+
+    A tuple so `exempt, gaps = unreachable_capabilities()` reads naturally, and
+    named so it does not have to. Both sides are lists of the same type, which
+    means a caller who writes `gaps, exempt = ...` gets a guard that waves gaps
+    through and rejects stated closures, with nothing in the types to object.
+    """
+
+    #: Capabilities the product deliberately does not expose, each carrying the
+    #: reason. A guard should accept these.
+    exempt: tuple[CapabilityContract, ...]
+    #: Capabilities nobody wired up. A guard should fail on these -- they are
+    #: the amount by which "natural language reaches everything" overstates.
+    gaps: tuple[CapabilityContract, ...]
+
+
+def unreachable_capabilities() -> UnreachableCapabilities:
+    """Split what cannot be reached into what was closed and what was missed.
+
+    Collapsing the two hides whichever one matters. Treating every gap as an
+    exemption dresses up the shortfall this inventory exists to expose; treating
+    every exemption as a gap makes a decision look like an oversight. The
+    partition is over `capability_inventory()`, so a capability cannot fall out
+    of both sides by being forgotten here.
+    """
+
+    exempt: list[CapabilityContract] = []
+    gaps: list[CapabilityContract] = []
+    for item in capability_inventory():
+        if item.is_reachable:
+            continue
+        # __post_init__ has already refused a blank reason and refused a reason
+        # on a reachable entry, so this is the whole space of what is left.
+        if item.reachability_exempt_reason is None:
+            gaps.append(item)
+        else:
+            exempt.append(item)
+    return UnreachableCapabilities(exempt=tuple(exempt), gaps=tuple(gaps))
+
+
 __all__ = [
     "CAPABILITY_KINDS",
     "CAPABILITY_SURFACES",
     "MODEL_TYPE_SELECTORS",
     "CapabilityContract",
     "CapabilitySurfaceDecision",
+    "UnreachableCapabilities",
     "capability_inventory",
+    "unreachable_capabilities",
 ]
