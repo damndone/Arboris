@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
 from collections.abc import Mapping, Sequence
@@ -14,15 +15,58 @@ from .artifacts import register_artifact, write_json
 
 CATEGORY_MAX_UNIQUE = 20
 
-TEST_FAMILIES = {
-    "correlations": "correlations.json",
-    "rank_correlations": "rank_correlations.json",
-    "t_tests": "t_tests.json",
-    "anova": "anova.json",
-    "nonparametric": "nonparametric.json",
-    "chi_square": "chi_square.json",
-    "fisher_exact": "fisher_exact.json",
-    "evidence": "evidence.json",
+@dataclass(frozen=True)
+class TestFamilyContract:
+    """One statistical test family's artifact name and what it actually runs.
+
+    The summary is here rather than beside the capability inventory on purpose:
+    a description kept next to the consumer is a second copy that drifts the
+    first time a family changes what it computes. This is the declaration, and
+    the inventory reads it.
+    """
+
+    artifact_filename: str
+    summary: str
+
+
+TEST_FAMILIES: dict[str, TestFamilyContract] = {
+    "correlations": TestFamilyContract(
+        "correlations.json",
+        "Pearson correlation for every pair of numeric analysis columns.",
+    ),
+    "rank_correlations": TestFamilyContract(
+        "rank_correlations.json",
+        "Spearman and Kendall rank correlation, for monotonic association that "
+        "is not linear.",
+    ),
+    "t_tests": TestFamilyContract(
+        "t_tests.json",
+        "Welch two-sample t-test of a numeric outcome across a binary group.",
+    ),
+    "anova": TestFamilyContract(
+        "anova.json",
+        "One-way ANOVA of a numeric outcome across a categorical group with "
+        "three or more levels.",
+    ),
+    "nonparametric": TestFamilyContract(
+        "nonparametric.json",
+        "Mann-Whitney U and Kruskal-Wallis rank tests, for group differences "
+        "without a normality assumption.",
+    ),
+    "chi_square": TestFamilyContract(
+        "chi_square.json",
+        "Chi-square test of independence between two categorical columns.",
+    ),
+    "fisher_exact": TestFamilyContract(
+        "fisher_exact.json",
+        "Fisher exact test of independence, for tables too sparse for the "
+        "chi-square approximation.",
+    ),
+    "evidence": TestFamilyContract(
+        "evidence.json",
+        "Advanced evidence packet: effect sizes, ANOVA post-hoc comparisons, "
+        "variance tests, and paired or one-sample tests for declared targets.",
+    ),
 }
 
 
@@ -117,13 +161,13 @@ def write_statistical_test_artifacts(
 ) -> None:
     tests_dir = run_root / "statistical_tests"
     tests_dir.mkdir(parents=True, exist_ok=True)
-    for family, filename in TEST_FAMILIES.items():
+    for family, contract in TEST_FAMILIES.items():
         payload = results.get(family)
         if not isinstance(payload, dict):
             continue
         if family == "evidence" and not payload.get("results"):
             continue
-        path = tests_dir / filename
+        path = tests_dir / contract.artifact_filename
         write_json(path, payload)
         register_artifact(
             run_root,
