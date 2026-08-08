@@ -24,7 +24,7 @@
 - [complete] Stage 8 — correspondence analysis and MCA
 - [complete] Stage 9 — external numerical oracle and final verification
 - [complete] Stage 10 — MANOVA, power analysis, and categorical-test packs
-- [in_progress] Stage 11 — classic RM-ANOVA/mixed design, survival extensions, ROC diagnostics, and meta-analysis
+- [complete] Stage 11 — classic RM-ANOVA/mixed design, survival extensions, ROC diagnostics, and meta-analysis
 
 ## Stage 10 scope
 
@@ -59,10 +59,22 @@
 
 ## Stage 11 execution map
 
-- [in_progress] Design/spec/plan documents and formal scope rescope.
-- [pending] Parallel TDD implementation: RM-ANOVA, Survival, ROC, Meta-analysis.
-- [pending] Per-pack spec review, quality review, and external Oracle re-run.
-- [pending] Integrated P7 regression, protected-path check, FMS verify, and local commit.
+- [complete] Design/spec/plan documents and formal scope rescope.
+- [complete] Parallel TDD implementation: RM-ANOVA, Survival, ROC, Meta-analysis.
+- [complete] Per-pack spec review, independent quality review, and external Oracle re-run.
+- [complete] Integrated P7 regression, protected-path check, FMS verify, and local commit.
+
+## Stage 11 verification
+
+- [complete] RM-ANOVA/mixed design: 34 focused tests, 5 R Oracles including independent `stats::mauchly.test.SSD`; final quality review approved.
+- [complete] Survival KM/log-rank/RMST: 29 focused tests, 4 R `survfit` Oracles, bounded 100k-row performance probes; final quality review approved. R `survdiff` does not support delayed-entry counting-process input, so the limitation is explicit.
+- [complete] ROC/classification diagnostics: 35 focused tests, base-R Oracle, 500 ROC/PR and 400 calibration randomized checks; exact versus grid-sampled metrics and score-only provenance are contract-validated.
+- [complete] Meta-analysis: 52 focused tests, 7 statsmodels/HKSJ/base-R Oracles, 50 randomized fixed/DL/PM checks; nested evidence, correction semantics, and status/reason pairing are contract-validated.
+- [complete] Integrated new-pack suite: 150 passed; external Oracle subsets RM 2, Survival 4, ROC 1, Meta 3 passed.
+- [complete] Adjacent P7 suite: 171 passed with 2 existing statsmodels ComplexWarnings.
+- [complete] Adjacent Agent/workflow regression: 81 passed with existing numerical/third-party warnings.
+- [complete] Protected-path comparison is empty; Python compilation and runtime no-R/no-shell scan passed; formal FMS verification passed.
+- [ ] Agent reachability, frontend, browser, full gate, merge, push, and release acceptance remain deferred to the P1/P2 integration wave.
 
 ## Decision rules
 

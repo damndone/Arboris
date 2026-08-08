@@ -51,3 +51,12 @@
 - Existing automatic `statistical_tests` already contains Mann-Whitney, Kruskal-Wallis, Wilcoxon, rank correlations, and variance/normality evidence; Stage 11 must not duplicate those functions.
 - Existing `survival_cox` remains a separate model family. The new survival pack is limited to KM, log-rank, and RMST and must not modify Cox files.
 - ROC accepts labels and scores only; meta-analysis accepts study-level effects/variances only. Neither module may create training splits, retrieve source studies, or call Agent/runtime code.
+
+## Stage 11 verification findings
+
+- RM-ANOVA uses explicit balanced long-form input, one within factor, optional single between factor, subject/error strata, GG/HF corrections, and R-validated Mauchly evidence. Mixed HF uses residual error degrees of freedom; two-level sphericity corrections are reported as not applicable.
+- Survival uses pre-aggregated risk tables, R-compatible strict delayed-entry semantics (`entry < time`), explicit tie policy, log-domain underflow fail-closed behavior, exact integer/Fraction RMST where safe, and stable rejection for unsafe large-float tau or `entry == duration`. `survdiff` remains unavailable for delayed-entry counting-process Oracle checks in the installed R package.
+- ROC separates exact rank AUC from bounded grid-sampled ROC/PR areas, protects score-only provenance through persisted envelopes, and never trains, cross-validates, or silently selects a threshold.
+- Meta-analysis exposes fixed-effect, DerSimonian-Laird, and Paule-Mandel paths with explicit CI semantics, HKSJ support, converters, correction policies, bounded LOO evidence, recursive study-row validation, and digest-bound readback.
+- Independent quality review concluded `QUALITY_APPROVED` for all four packs. Final local verification is 150 focused tests, 10 external Oracle tests, 171 adjacent P7 tests, and 81 Agent/workflow tests; no Claude-owned path changed.
+- These are standalone evidence-bearing kernels only. Natural-language Agent reachability is intentionally deferred until the later CapabilityContract/P1/P2 integration wave, so no claim is made for browser, full gate, or end-to-end execution.
