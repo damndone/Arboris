@@ -242,6 +242,15 @@ def test_the_two_closed_operations_are_explicitly_exempt() -> None:
 
 
 def test_natural_language_reachability_guard_pins_current_truth() -> None:
+    """Pin today's reachability facts as an intentional change record.
+
+    This test is expected to go red when P5 wires a currently missing route.
+    For example, one newly reachable capability would change
+    ``(54, 4, 30, 34, 2, 18)`` to ``(54, 5, 30, 35, 2, 17)``. That is not a
+    stale test: the counts and gap IDs must be updated in the same deliberate
+    change that closes the gap, rather than silently weakening this record.
+    """
+
     from workbench.agent.capability_contract import capability_reachability_guard
 
     report = capability_reachability_guard()
