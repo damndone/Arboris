@@ -120,10 +120,9 @@ def test_a_selectable_family_without_an_admission_contract_is_not_composable() -
 
     `time_series.arma_garch` and `time_series.ets` can be picked in the model
     selector and run by hand, but neither has a `ModelFamilyContract`, so
-    `model_family_contract()` refuses them inside a workflow step. That is a
-    real partial-reach state: proposable, not composable. Flattening it to
-    either "reachable" or "absent" is the silent-exclusion failure this whole
-    task is a response to.
+    `model_family_contract()` refuses them inside a workflow step. They have
+    no natural-language proposal or composition route and therefore remain
+    real gaps instead of being counted as reachable by a form-only surface.
     """
 
     from workbench.agent.capability_contract import capability_inventory
@@ -135,9 +134,9 @@ def test_a_selectable_family_without_an_admission_contract_is_not_composable() -
         assert key not in MODEL_FAMILY_CONTRACTS
         item = by_id[f"model.{key}"]
         assert item.kind == "model_family"
-        assert "model.genesis" in item.proposed_by
+        assert item.proposed_by == ()
         assert item.composable_as == ()
-        assert item.is_reachable
+        assert not item.is_reachable
 
 
 def test_every_selectable_model_type_is_accounted_for() -> None:
@@ -174,12 +173,13 @@ def test_the_auto_selector_is_listed_as_a_selector_not_a_family() -> None:
     auto = by_id["model.auto"]
 
     assert auto.kind == "selector"
-    assert "model.genesis" in auto.proposed_by
+    assert auto.proposed_by == ()
     assert auto.composable_as == ()
+    assert not auto.is_reachable
 
 
 def test_the_standalone_operation_surfaces_are_in_the_inventory() -> None:
-    """The six operations that are not workflow steps propose themselves."""
+    """Standalone operations expose only their live proposal paths."""
 
     from workbench.agent.capability_contract import capability_inventory
     from workbench.agent.operations import OperationRegistry
@@ -189,14 +189,68 @@ def test_the_standalone_operation_surfaces_are_in_the_inventory() -> None:
     standalone = set(OperationRegistry().operation_ids()) - set(
         WORKFLOW_STEP_SPEC_CONTRACTS
     )
+    definitions = {
+        item["operation_id"]: item for item in OperationRegistry().capabilities()
+    }
 
     assert standalone
     for operation_id in standalone:
         item = by_id[operation_id]
         assert item.kind == "data_operation"
-        assert operation_id in item.proposed_by
+        if definitions[operation_id]["natural_language_enabled"]:
+            assert item.proposed_by == (operation_id,)
+            assert item.reachability_exempt_reason is None
+        else:
+            assert item.proposed_by == ()
+            assert item.reachability_exempt_reason is not None
         # Not a workflow step, so it cannot appear inside a multi-step plan.
         assert item.composable_as == ()
+
+
+def test_inventory_records_only_live_natural_language_proposers() -> None:
+    """The inventory must not promote registry membership into NL reach."""
+
+    from workbench.agent.capability_contract import capability_inventory
+
+    by_id = {item.capability_id: item for item in capability_inventory()}
+    direct_ids = {
+        item.capability_id for item in by_id.values() if item.directly_reachable_by
+    }
+
+    assert direct_ids == {
+        "data.columns.cast",
+        "graph.fork",
+        "model.rerun",
+        "operation.multi_step",
+    }
+    assert by_id["model.ols"].proposed_by == ()
+    assert by_id["model.ols"].composition_reachable_by == ("model.genesis",)
+
+
+def test_the_two_closed_operations_are_explicitly_exempt() -> None:
+    """The two product decisions are visible as reasons, not omissions."""
+
+    from workbench.agent.capability_contract import unreachable_capabilities
+
+    result = unreachable_capabilities()
+
+    assert {item.capability_id for item in result.exempt} == {
+        "code.execute",
+        "data.column.cast",
+    }
+    assert all(item.reachability_exempt_reason for item in result.exempt)
+
+
+def test_unwired_model_selector_and_model_families_remain_real_gaps() -> None:
+    """A form capability without a NL or step route remains a real gap."""
+
+    from workbench.agent.capability_contract import unreachable_capabilities
+
+    _exempt, gaps = unreachable_capabilities()
+
+    assert {"model.time_series.arma_garch", "model.time_series.ets", "model.auto"} <= {
+        item.capability_id for item in gaps
+    }
 
 
 def test_a_step_identity_is_one_capability_carrying_two_paths() -> None:
@@ -459,13 +513,18 @@ def test_todays_unreachable_capabilities_are_all_gaps() -> None:
 
     exempt, gaps = unreachable_capabilities()
 
-    assert not exempt, [item.capability_id for item in exempt]
+    assert {item.capability_id for item in exempt} == {
+        "code.execute",
+        "data.column.cast",
+    }
     assert {item.kind for item in gaps} == {
+        "model_family",
+        "selector",
         "statistical_test",
         "prediction_model",
         "data_preparation",
     }
-    assert len(gaps) == 15
+    assert len(gaps) == 18
 
 
 def test_the_partition_covers_every_unreachable_capability_and_nothing_else() -> None:
@@ -525,10 +584,10 @@ def test_a_capability_cannot_be_reachable_and_exempt_at_once() -> None:
 
     with pytest.raises(ValueError, match=r"reachable capability .* cannot"):
         CapabilityContract(
-            capability_id="model.ols",
-            kind="model_family",
-            summary="Ordinary least squares.",
-            proposed_by=("model.genesis",),
+            capability_id="data.columns.cast",
+            kind="data_operation",
+            summary="Cast several columns in the current dataset node.",
+            proposed_by=("data.columns.cast",),
             reachability_exempt_reason="Withheld pending review.",
         )
 

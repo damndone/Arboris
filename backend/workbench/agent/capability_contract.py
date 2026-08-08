@@ -51,6 +51,22 @@ CAPABILITY_KINDS = frozenset(
 #: inventory misdescribes.
 MODEL_TYPE_SELECTORS = frozenset({"auto"})
 
+# These are deliberate product closures, not missing registrations. Keeping
+# the reasons beside the ids makes a later inventory review fail loudly if a
+# closed operation is renamed or removed without updating the decision.
+CAPABILITY_REACHABILITY_EXEMPTIONS: dict[str, str] = {
+    "code.execute": (
+        "Arbitrary code execution remains closed to the natural-language Agent "
+        "by the product safety decision; use the explicit user-authorized code "
+        "path instead."
+    ),
+    "data.column.cast": (
+        "The single-column natural-language surface was superseded by the batch "
+        "data.columns.cast operation; the legacy identity remains for manual "
+        "typed-operation compatibility."
+    ),
+}
+
 
 def _live_natural_language_operation_ids() -> frozenset[str]:
     """Return operation ids the Agent proposal surface actually exposes."""
@@ -290,6 +306,7 @@ def _model_capabilities() -> list[CapabilityContract]:
     # module a participant in the engine/orchestrator import cycle.
     from workbench.engine.capabilities import build_capabilities
 
+    live_operations = _live_natural_language_operation_ids()
     from .workflow_contracts import MODEL_FAMILY_CONTRACTS
 
     selectable = {
@@ -318,10 +335,13 @@ def _model_capabilities() -> list[CapabilityContract]:
                 capability_id=f"model.{key}",
                 kind="selector" if key in MODEL_TYPE_SELECTORS else "model_family",
                 summary=summary,
-                # Top-level model.genesis does not restrict model_type to the
-                # admission table, so anything the selector offers can be
-                # proposed directly.
-                proposed_by=("model.genesis",) if entry is not None else (),
+                # A selector entry is only a direct NL path when its proposing
+                # operation is enabled on the real proposal surface.
+                proposed_by=(
+                    ("model.genesis",)
+                    if entry is not None and "model.genesis" in live_operations
+                    else ()
+                ),
                 # ...but a model.genesis *step* inside a plan calls
                 # model_family_contract(), which refuses anything not admitted.
                 composable_as=("model.genesis",) if admitted else (),
@@ -342,23 +362,34 @@ def _operation_capabilities() -> list[CapabilityContract]:
     from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
 
     registry = OperationRegistry()
-    summaries: dict[str, str] = {}
-    for entry in registry.capabilities():
-        # capabilities() is keyed by (id, version); the capability is the id, so
-        # the first registered version supplies the description.
-        summaries.setdefault(str(entry["operation_id"]), str(entry["ui_description"]))
+    entries = {
+        str(entry["operation_id"]): entry for entry in registry.capabilities()
+    }
+    stale_exemptions = set(CAPABILITY_REACHABILITY_EXEMPTIONS) - set(entries)
+    if stale_exemptions:
+        raise ValueError(
+            "reachability exemption names unregistered operation(s): "
+            + ", ".join(sorted(stale_exemptions))
+        )
 
     return [
         CapabilityContract(
             capability_id=operation_id,
             kind="data_operation",
-            summary=summaries[operation_id],
-            proposed_by=(operation_id,),
+            summary=str(entries[operation_id]["ui_description"]),
+            proposed_by=(
+                (operation_id,)
+                if entries[operation_id]["natural_language_enabled"]
+                else ()
+            ),
             composable_as=(
                 (operation_id,) if operation_id in WORKFLOW_STEP_SPEC_CONTRACTS else ()
             ),
+            reachability_exempt_reason=CAPABILITY_REACHABILITY_EXEMPTIONS.get(
+                operation_id
+            ),
         )
-        for operation_id in sorted(summaries)
+        for operation_id in sorted(entries)
     ]
 
 
