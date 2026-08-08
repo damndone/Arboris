@@ -48,6 +48,8 @@ PCA 消费数值矩阵，McNemar 消费配对列联表，Meta-analysis 消费研
 
 这些字段有长度、数量和字符串边界，不能注入原始数据、公式代码、文件路径或任意提示词。`not_claimed` 是安全边界的一部分：例如 Matching 不得把估计量自动描述成无条件因果事实，诊断检验不得把一个 p 值自动翻译成“模型有效/无效”。
 
+当前共享契约对文本安全采用“明确形态拒绝、统计 prose 放行”的边界：常见本地根路径、盘符/UNC/home/相对路径、带路径语境的相对 token、文件扩展名路径、独立 import 语句、`exec`/`eval` 和整段公式形态会拒绝；`A/B`、`x/y`、`group/time`、`/api/v1`、`file:` 语义和概念性 `import` 说明可以通过。它是有明确测试样例的 bounded heuristic，不是对自然语言中所有路径拼写的完备分类器；后续新增形态必须补正反例，不能用宽泛的字符禁令解决误报。
+
 ### 3. 运行时不执行 R、shell 或 Agent 生成的代码
 
 R、statsmodels 和直接公式只允许出现在测试 Oracle。运行时使用仓库已有 NumPy/pandas/SciPy/statsmodels；不安装新依赖，不接受 callback、公式字符串、import path 或表达式。
@@ -181,4 +183,3 @@ Synthetic Control 初始 operation：
 - formal devline verify 通过；
 - 生成 P7 freeze handoff，记录所有暂缓的空间回归、复杂 survey rank inference、Bayesian、自动模型选择和 Agent reachability；
 - 不 merge、push、tag、release，除非用户另行授权。
-
