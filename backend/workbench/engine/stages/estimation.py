@@ -446,6 +446,145 @@ def _fit_ols(ctx, env):
     return "ols_1", primary, fitted
 
 
+def _fit_pooled_ols(ctx, env, handles):
+    """Fit ordinary OLS on every MI handle and pool unrounded coefficients.
+
+    The helper deliberately returns no fitted object.  A fitted object from the
+    first imputation cannot stand in for pooled residuals, influence, or
+    covariance diagnostics.
+    """
+
+    from dataclasses import replace
+
+    from ...artifacts import register_artifact, write_json
+    from ..packs.missing_data.rubin import rubin_pool
+
+    if not isinstance(handles, list) or len(handles) < 2:
+        raise ValueError("MI_POOLING_INVALID_HANDLES: at least two handles are required")
+    source_artifacts = [handle.artifact_id for handle in handles]
+    per_imputation: list[dict[str, Any]] = []
+    for handle in handles:
+        try:
+            _model_id, primary, _fitted = _fit_ols(replace(ctx, data=handle), env)
+        except Exception as exc:
+            raise ValueError(
+                f"MI_POOLING_FAILED: OLS failed for {handle.artifact_id}: {type(exc).__name__}"
+            ) from exc
+        per_imputation.append(primary)
+
+    pooled = rubin_pool(per_imputation)
+    first = dict(per_imputation[0])
+    pooled_coefficients: dict[str, dict[str, Any]] = {}
+    for name, coefficient in pooled["coefficients"].items():
+        original = dict(first.get("coefficients", {}).get(name, {}))
+        lower, upper = coefficient["confidence_interval"]
+        for stale_field in (
+            "ci_lower",
+            "ci_upper",
+            "p_value_display",
+            "display_estimate",
+        ):
+            original.pop(stale_field, None)
+        original.update(
+            {
+                "estimate": coefficient["estimate"],
+                "std_error": coefficient["standard_error"],
+                "p_value": coefficient["p_value"],
+                "ci_lower": lower,
+                "ci_upper": upper,
+                "confidence_interval": [lower, upper],
+                "within_variance": coefficient["within_variance"],
+                "between_variance": coefficient["between_variance"],
+                "total_variance": coefficient["total_variance"],
+                "degrees_of_freedom": coefficient["degrees_of_freedom"],
+                "fraction_missing_information": coefficient[
+                    "fraction_missing_information"
+                ],
+            }
+        )
+        pooled_coefficients[name] = original
+
+    first["coefficients"] = pooled_coefficients
+    for stale_field in (
+        "r_squared",
+        "r_squared_adj",
+        "adjusted_r_squared",
+        "pseudo_r2",
+        "aic",
+        "bic",
+        "llf",
+        "f_statistic",
+        "f_p_value",
+        "df_model",
+        "df_resid",
+        "fitted_values_preview",
+        "residuals_preview",
+        "fitted_values",
+        "residuals",
+        "covariance_evidence",
+        "inference_config",
+        "source_eligible",
+    ):
+        first.pop(stale_field, None)
+    first["fit_statistics_semantics"] = "unavailable_for_pooled_multiple_imputation"
+    for stale_field in (
+        "dataset_snapshot_fingerprint",
+        "analysis_sample_fingerprint",
+        "point_estimation_fingerprint",
+        "coefficient_schema_fingerprint",
+        "inference_config_fingerprint",
+    ):
+        first.pop(stale_field, None)
+    first["warnings"] = list(first.get("warnings") or []) + [
+        "Residual and fit-statistic diagnostics are unavailable for the pooled result."
+    ]
+    first["multiple_imputation"] = {
+        "m": pooled["m"],
+        "pooling_method": pooled["pooling_method"],
+        "source_artifacts": source_artifacts,
+        "within_between_total_variance": True,
+        "evidence_digest": pooled["evidence_digest"],
+    }
+
+    pool_artifact_id = "rubin_pool_ols_1"
+    pool_path = env.run_root / "imputation" / f"{pool_artifact_id}.json"
+    write_json(
+        pool_path,
+        {
+            "contract": "missing_data.ols_pool",
+            "contract_version": "1.0",
+            "model_id": "ols_1",
+            "pooling": pooled,
+            "source_artifacts": source_artifacts,
+        },
+    )
+    register_artifact(
+        env.run_root,
+        pool_artifact_id,
+        pool_path,
+        "model_result",
+        "imputation",
+        source_artifacts,
+    )
+    summary = ctx.artifacts.get("_imputation_summary")
+    if isinstance(summary, dict):
+        ctx.artifacts["_imputation_summary"] = {
+            **summary,
+            "pooled_estimates": True,
+            "pooling_method": "rubin_t",
+            "pooling_artifact": pool_artifact_id,
+            "pooling_model_ids": ["ols_1"],
+        }
+    ctx.artifacts["_mi_pooling"] = {
+        "status": "completed",
+        "method": "rubin_t",
+        "m": pooled["m"],
+        "source_artifacts": source_artifacts,
+        "pool_artifact": pool_artifact_id,
+    }
+    return "ols_1", first, None
+
+
 
 #: Terms the result payload and the design engine spell differently.  The engine
 #: follows R (`(Intercept)`) so its output can be compared to `survey` directly;
@@ -854,9 +993,13 @@ class EstimationStage:
         run_root = env.run_root
         run_id = env.run_id
         recorder = env.recorder
-        model_input_ids = [ctx.data.artifact_id]
+        model_input_ids = list(
+            ctx.artifacts.get("_model_input_ids") or [ctx.data.artifact_id]
+        )
         model_options = ctx.artifacts.get("_model_options", {})
         model_options_binding = ctx.artifacts.get("_model_options_binding")
+        mi_handles = ctx.artifacts.get("_imputation_handles") or []
+        mi_pooling_attempted = False
 
         # Build a resolve view: prediction model types fall through to the
         # y_type default identically to legacy behavior (they're dispatched
@@ -970,7 +1113,26 @@ class EstimationStage:
             if handler.model_type == "linear_mixed_effects":
                 if env.lmm_execution_admission is None:
                     raise ModelOptionsValidationError("LMM_EXECUTION_BINDING_REQUIRED", "LMM requires a live admission.")
-            model_id, primary, fitted = handler.fit(ctx, env)
+            if len(mi_handles) > 1:
+                mi_pooling_attempted = True
+                if handler.model_type != "ols":
+                    raise WorkflowValidationError(
+                        "MI_MODEL_UNSUPPORTED",
+                        (
+                            "Multiple-imputation results currently support only "
+                            "ordinary OLS pooling; the requested model family was not fit."
+                        ),
+                        {
+                            "model_type": handler.model_type,
+                            "imputation_count": len(mi_handles),
+                            "source_artifacts": [
+                                handle.artifact_id for handle in mi_handles
+                            ],
+                        },
+                    )
+                model_id, primary, fitted = _fit_pooled_ols(ctx, env, mi_handles)
+            else:
+                model_id, primary, fitted = handler.fit(ctx, env)
             primary_inputs = ctx.artifacts.get("_primary_model_input_ids")
             if primary_inputs is not None:
                 if not isinstance(primary_inputs, list) or not all(
@@ -1090,7 +1252,7 @@ class EstimationStage:
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("estimation", "blocked", f"Model fit failed: {exc}")
 
-            if model_type != "auto" or is_model_options_error:
+            if model_type != "auto" or is_model_options_error or mi_pooling_attempted:
                 # 1.5.3.2 CONTRACT: explicit failure => structured `failed`.
                 # NO silent OLS fallback.
                 _write_manifest(

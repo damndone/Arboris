@@ -98,6 +98,8 @@ def test_mice_multiple_imputation_persists_ordered_dataset_artifacts_and_manifes
     frame.to_parquet(cleaned_path, index=False)
     original_cleaned = cleaned_path.read_bytes()
 
+    np.random.seed(991)
+    random_state_before = np.random.get_state()
     summary = run_mice_imputation(
         frame,
         run.root,
@@ -106,10 +108,16 @@ def test_mice_multiple_imputation_persists_ordered_dataset_artifacts_and_manifes
         max_iter=2,
         random_seed=123,
     )
-
+    random_state_after = np.random.get_state()
+    assert random_state_after[0] == random_state_before[0]
+    assert np.array_equal(random_state_after[1], random_state_before[1])
+    assert random_state_after[2:] == random_state_before[2:]
     # Keep the existing safety boundary explicit: imputation may only add artifacts.
     assert cleaned_path.read_bytes() == original_cleaned
     assert summary["persisted_datasets"] == 2
+    assert len(summary["derived_seeds"]) == 2
+    assert summary["derived_seeds"][0] == 123
+    assert summary["derived_seeds"][0] != summary["derived_seeds"][1]
     assert summary["pooled_estimates"] is False
     assert not (run.root / "processed" / "imputed_dataset.parquet").exists()
 
@@ -138,6 +146,10 @@ def test_mice_multiple_imputation_persists_ordered_dataset_artifacts_and_manifes
     assert manifest["datasets"] == [
         {"artifact_id": artifact_id, "path": path}
         for artifact_id, path in expected_artifacts
+    ]
+    assert manifest["seed_bindings"] == [
+        {"artifact_id": "imputed_dataset_0001", "seed": 123},
+        {"artifact_id": "imputed_dataset_0002", "seed": summary["derived_seeds"][1]},
     ]
 
 
@@ -215,6 +227,108 @@ def test_workflow_uses_mice_only_when_configured(tmp_path: Path):
     report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
     assert "MICE imputation: one persisted imputed dataset" in report_html
     assert "pooled estimates were not produced" in report_html
+
+
+def test_multiple_imputation_pools_ols_without_selecting_the_first_dataset(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    (project.root / "config.yml").write_text(
+        "imputation_method: mice\nimputation_m: 2\nimputation_max_iter: 2\n",
+        encoding="utf-8",
+    )
+    y_values = [float(1 + 2 * i) for i in range(40)]
+    x_values = [float(i) for i in range(40)]
+    for index in (5, 11, 17, 23):
+        y_values[index] = np.nan
+    for index in (7, 13, 19, 29):
+        x_values[index] = np.nan
+    source = tmp_path / "data.csv"
+    pd.DataFrame({"y": y_values, "x": x_values}).to_csv(source, index=False)
+
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x"])
+
+    run_root = project.root / "runs" / result["run_id"]
+    assert result["status"] == "completed"
+    summary = read_json(run_root / "imputation_summary.json")
+    assert summary["mode"] == "multiple_imputation"
+    assert summary["persisted_datasets"] == 2
+    assert summary["output_artifact"] == "mice_manifest"
+    assert summary["output_artifacts"] == [
+        "imputed_dataset_0001",
+        "imputed_dataset_0002",
+    ]
+    model_result = read_json(run_root / "model_results" / "ols_1.json")
+    assert model_result["multiple_imputation"]["m"] == 2
+    assert model_result["multiple_imputation"]["source_artifacts"] == summary["output_artifacts"]
+    for forbidden in (
+        "r_squared",
+        "r_squared_adj",
+        "adjusted_r_squared",
+        "pseudo_r2",
+        "aic",
+        "bic",
+        "llf",
+        "f_statistic",
+        "f_p_value",
+        "df_model",
+        "df_resid",
+        "fitted_values_preview",
+        "residuals_preview",
+        "fitted_values",
+        "residuals",
+        "covariance_evidence",
+        "inference_config",
+    ):
+        assert forbidden not in model_result
+    assert model_result["fit_statistics_semantics"] == "unavailable_for_pooled_multiple_imputation"
+    assert any(
+        coefficient["total_variance"] > coefficient["within_variance"]
+        for coefficient in model_result["coefficients"].values()
+    )
+    for coefficient in model_result["coefficients"].values():
+        assert "display_estimate" not in coefficient
+        assert coefficient["ci_lower"] == coefficient["confidence_interval"][0]
+        assert coefficient["ci_upper"] == coefficient["confidence_interval"][1]
+    artifact_records = read_json(run_root / "artifacts_index.json")["artifacts"]
+    ols_record = next(item for item in artifact_records if item["artifact_id"] == "ols_1")
+    assert ols_record["inputs"] == summary["output_artifacts"]
+    pool_record = next(
+        item for item in artifact_records if item["artifact_id"] == "rubin_pool_ols_1"
+    )
+    assert pool_record["inputs"] == summary["output_artifacts"]
+    diagnostics = read_json(run_root / "model_results" / "diagnostics_ols_1.json")
+    assert diagnostics["status"] == "unavailable"
+    assert diagnostics["reason_code"] == "MI_DIAGNOSTIC_NOT_POOLED"
+    report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
+    assert "pooled estimates were produced (method: rubin_t)" in report_html
+
+
+def test_multiple_imputation_rejects_unsupported_model_without_first_fit(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    (project.root / "config.yml").write_text(
+        "imputation_method: mice\nimputation_m: 2\nimputation_max_iter: 2\n",
+        encoding="utf-8",
+    )
+    y_values = [0.0, 1.0] * 20
+    x_values = [float(i) for i in range(40)]
+    y_values[5] = np.nan
+    x_values[7] = np.nan
+    source = tmp_path / "data.csv"
+    pd.DataFrame({"y": y_values, "x": x_values}).to_csv(source, index=False)
+
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x"],
+        model_type="logit",
+    )
+
+    run_root = project.root / "runs" / result["run_id"]
+    assert result["status"] == "failed"
+    issues = read_json(run_root / "errors.json")["issues"]
+    assert any(issue["code"] == "MI_MODEL_UNSUPPORTED" for issue in issues)
+    assert not (run_root / "model_results" / "logit_1.json").exists()
 
 
 def test_workflow_does_not_impute_by_default(tmp_path: Path):

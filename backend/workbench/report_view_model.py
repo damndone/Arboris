@@ -327,9 +327,12 @@ def _mice_imputation_fact(imputation: dict[str, Any]) -> str:
     persisted = imputation.get("persisted_datasets", 0)
     persisted_text = "one" if persisted == 1 else str(persisted)
     pooled = "were produced" if imputation.get("pooled_estimates") else "were not produced"
+    dataset_word = "dataset" if persisted == 1 else "datasets"
+    pooling_method = imputation.get("pooling_method")
+    pooling_text = f" (method: {pooling_method})" if pooling_method else ""
     return (
-        f"MICE imputation: {persisted_text} persisted imputed dataset; "
-        f"imputed columns: {columns_text}; pooled estimates {pooled}."
+        f"MICE imputation: {persisted_text} persisted imputed {dataset_word}; "
+        f"imputed columns: {columns_text}; pooled estimates {pooled}{pooling_text}."
     )
 
 

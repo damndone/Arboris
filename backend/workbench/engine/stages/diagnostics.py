@@ -177,6 +177,30 @@ class DiagnosticsStage:
         diag_x = [v for v in normalized_x if v != exposure_col] if exposure_col else normalized_x
         exog = modeling_frame[diag_x] if diag_x else pd.DataFrame(index=modeling_frame.index)
         diagnostic_artifacts: dict[str, dict[str, Any]] = {}
+        if ctx.artifacts.get("_mi_pooling") and not fitted_models:
+            for model_id, result in model_results:
+                unavailable = {
+                    "status": "unavailable",
+                    "reason_code": "MI_DIAGNOSTIC_NOT_POOLED",
+                    "model_id": model_id,
+                    "model_type": result.get("model_type", "ols"),
+                    "semantics": (
+                        "Residual, influence, and fit-statistic diagnostics are not "
+                        "claimed for a pooled multiple-imputation result."
+                    ),
+                    "source_artifacts": list(model_input_ids),
+                }
+                diag_path = run_root / "model_results" / f"diagnostics_{model_id}.json"
+                write_json(diag_path, unavailable)
+                register_artifact(
+                    run_root,
+                    f"diagnostics_{model_id}",
+                    diag_path,
+                    "model_diagnostic",
+                    "econometrics",
+                    model_input_ids,
+                )
+                diagnostic_artifacts[model_id] = unavailable
         for model_id, fitted in fitted_models.items():
             result_dict = dict(model_results)
             result = result_dict.get(model_id, {})
