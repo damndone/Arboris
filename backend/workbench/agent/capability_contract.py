@@ -52,6 +52,22 @@ CAPABILITY_KINDS = frozenset(
 MODEL_TYPE_SELECTORS = frozenset({"auto"})
 
 
+def _live_natural_language_operation_ids() -> frozenset[str]:
+    """Return operation ids the Agent proposal surface actually exposes."""
+
+    from .operations import OperationRegistry
+
+    return frozenset(OperationRegistry().natural_language_operation_ids())
+
+
+def _live_workflow_step_ids() -> frozenset[str]:
+    """Return workflow steps from the one authoritative step registry."""
+
+    from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+    return frozenset(WORKFLOW_STEP_SPEC_CONTRACTS)
+
+
 @dataclass(frozen=True)
 class CapabilityContract:
     capability_id: str
@@ -99,8 +115,27 @@ class CapabilityContract:
                 )
 
     @property
+    def directly_reachable_by(self) -> tuple[str, ...]:
+        """Return declared proposers that are enabled on the NL surface."""
+
+        live = _live_natural_language_operation_ids()
+        return tuple(
+            operation_id for operation_id in self.proposed_by if operation_id in live
+        )
+
+    @property
+    def composition_reachable_by(self) -> tuple[str, ...]:
+        """Return declared steps that the NL multi-step entry can compose."""
+
+        live = _live_natural_language_operation_ids()
+        if "operation.multi_step" not in live:
+            return ()
+        steps = _live_workflow_step_ids()
+        return tuple(step_id for step_id in self.composable_as if step_id in steps)
+
+    @property
     def is_reachable(self) -> bool:
-        return bool(self.proposed_by or self.composable_as)
+        return bool(self.directly_reachable_by or self.composition_reachable_by)
 
 
 @dataclass(frozen=True)

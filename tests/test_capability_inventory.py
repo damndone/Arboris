@@ -12,18 +12,51 @@ from workbench.agent.capability_contract import CapabilityContract
 
 
 def test_a_capability_declares_how_it_can_be_reached() -> None:
-    """A capability that names no path to itself is one nobody can ask for."""
+    """A capability names a live operation that can propose it directly."""
+
+    contract = CapabilityContract(
+        capability_id="data.columns.cast",
+        kind="data_operation",
+        summary="Cast several columns in the current dataset node.",
+        proposed_by=("data.columns.cast",),
+    )
+
+    assert contract.directly_reachable_by == ("data.columns.cast",)
+    assert contract.composition_reachable_by == ()
+    assert contract.is_reachable
+    assert contract.reachability_exempt_reason is None
+
+
+def test_a_capability_distinguishes_composition_from_direct_proposal() -> None:
+    """A disabled top-level operation can still be a multi-step capability."""
 
     contract = CapabilityContract(
         capability_id="model.ols",
         kind="model_family",
-        summary="Ordinary least squares.",
+        summary="Estimate an ordinary least squares model.",
         proposed_by=("model.genesis",),
         composable_as=("model.genesis",),
     )
 
+    assert contract.directly_reachable_by == ()
+    assert contract.composition_reachable_by == ("model.genesis",)
     assert contract.is_reachable
-    assert contract.reachability_exempt_reason is None
+
+
+def test_a_nonexistent_declared_path_is_not_reachable() -> None:
+    """A non-empty path declaration is not evidence that a consumer exists."""
+
+    contract = CapabilityContract(
+        capability_id="pack.missing",
+        kind="pack",
+        summary="A deliberately fake capability for the reachability guard.",
+        proposed_by=("model.genesis",),
+        composable_as=("workflow.not_registered",),
+    )
+
+    assert contract.directly_reachable_by == ()
+    assert contract.composition_reachable_by == ()
+    assert not contract.is_reachable
 
 
 def test_a_capability_with_no_path_is_not_reachable() -> None:
