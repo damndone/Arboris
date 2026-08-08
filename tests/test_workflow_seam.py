@@ -1747,3 +1747,19 @@ def test_the_agent_protocol_text_carries_the_source_field() -> None:
     assert "from_step" in rendered
     for operation_id in workflow_contracts.STEP_PRODUCES_DATASET:
         assert operation_id in rendered
+
+
+def test_a_source_beside_depends_on_is_told_where_it_belongs() -> None:
+    """The likeliest mistake gets the least useful message unless we help.
+
+    The vocabulary says `source` lives inside `spec`, but it sits alongside
+    `depends_on` conceptually, so an author placing it beside `depends_on` is
+    one move from a correct plan. A bare "unknown field" reads as "this seam
+    does not exist" and sends them to look for another way to express it.
+    """
+
+    misplaced = _numeric_step("second", "scaled")
+    misplaced["source"] = {"from_step": "first", "output": "produced_dataset"}
+
+    with pytest.raises(OperationValidationError, match=r"inside `spec`"):
+        validate_workflow_steps([_numeric_step("first", "doubled"), misplaced])

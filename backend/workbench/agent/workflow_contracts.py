@@ -2190,8 +2190,15 @@ def validate_workflow_steps(
             raise OperationValidationError("each workflow step must be an object")
         unknown = set(entry) - {"step_id", "operation_id", "spec", "depends_on", "expected_artifacts"}
         if unknown:
+            # `source` beside depends_on is the mistake the published vocabulary
+            # invites: both are composition-level, but only one lives at the top.
+            # "unknown field" would read as "this seam does not exist" and send
+            # the author away from a plan that is one move from being correct.
+            misplaced = " Did you mean to put it inside `spec`?" if "source" in unknown else ""
             raise OperationValidationError(
-                "workflow step contains unknown field(s): " + ", ".join(sorted(unknown))
+                "workflow step contains unknown field(s): "
+                + ", ".join(sorted(unknown))
+                + misplaced
             )
         step_id = entry.get("step_id")
         if not isinstance(step_id, str) or _STEP_ID_PATTERN.fullmatch(step_id) is None:
