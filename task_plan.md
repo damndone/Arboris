@@ -120,6 +120,7 @@
 - [complete] Nonparametric + diagnostics: 48 passed.
 - [complete] GLM + spatial: 44 passed, 1 optional `spdep` skip.
 - [complete] Matching + Synthetic Control: 51 passed, 2 optional package skips (`MatchIt`, `Synth`/`quadprog`).
+- [complete] Affected P7/MI/survey/resampling regression: 735 passed, 3 optional skips, 6 existing warnings.
 - [complete] Code commit: `5df5686` (`feat(p7): add final standalone statistical extension packs`).
 - [complete] P7 freeze docs: final design, implementation plan, and freeze handoff recorded in `docs/superpowers/`.
 - [ ] Agent/CapabilityContract/OperationRegistry/orchestrator/frontend reachability, browser acceptance, full release gate, merge, push, tag, and release remain intentionally deferred; these are not P7 kernel acceptance claims.
