@@ -54,12 +54,14 @@ def test_mice_imputation_writes_artifacts_without_overwriting_cleaned_dataset(tm
     assert summary["status"] == "completed"
     assert summary["method"] == "mice"
     assert summary["m"] == 1
+    assert summary["mode"] == "single_imputation"
     assert "group" in summary["skipped_columns"]
     assert "mostly_missing" in summary["skipped_columns"]
     assert any("group" in warning for warning in summary["warnings"])
     assert summary["persisted_datasets"] == 1
     assert summary["pooled_estimates"] is False
     assert not any("pooled multiple-imputation estimates" in warning for warning in summary["warnings"])
+    assert not (run.root / "processed" / "imputed_dataset_0001.parquet").exists()
     assert summary["selected_columns"] == ["y", "x"]
     persisted_summary = read_json(summary_path)
     decisions = read_json(decisions_path)
@@ -75,6 +77,8 @@ def test_mice_imputation_writes_artifacts_without_overwriting_cleaned_dataset(tm
         for artifact in read_json(run.root / "artifacts_index.json")["artifacts"]
     }
     assert {"imputed_dataset", "mice_summary", "mice_decisions"}.issubset(artifact_ids)
+    assert "mice_manifest" not in artifact_ids
+    assert not any(artifact_id.startswith("imputed_dataset_") for artifact_id in artifact_ids)
 
 
 def test_mice_multiple_imputation_persists_ordered_dataset_artifacts_and_manifest(

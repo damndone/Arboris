@@ -18,7 +18,7 @@ SCHEMA: dict = {
     "type": "object",
     "required": [
         "schema_version", "method", "status",
-        "imputed_columns", "input_artifact", "output_artifact",
+        "imputed_columns", "input_artifact", "output_artifact", "mode",
     ],
     "properties": {
         "schema_version": {"type": "integer", "minimum": 1},
@@ -29,6 +29,7 @@ SCHEMA: dict = {
         "imputed_columns": {"type": "array", "items": {"type": "string"}},
         "input_artifact": {"type": "string", "minLength": 1},
         "output_artifact": {"type": "string"},
+        "mode": {"type": "string", "enum": ["single_imputation", "multiple_imputation"]},
         # Method-specific (MICE) — already present in existing summary
         "selected_columns": {"type": "array", "items": {"type": "string"}},
         "skipped_columns": {"type": "array", "items": {"type": "string"}},
@@ -55,6 +56,10 @@ def test_sample_has_completed_mice():
     sample = json.loads((ROOT / "imputation_summary.mice.sample.json").read_text())
     assert sample["method"] == "mice"
     assert sample["status"] == "completed"
+    assert sample["mode"] == "single_imputation"
+    assert sample["m"] == 1
+    assert sample["persisted_datasets"] == 1
+    assert sample["output_artifact"] == "imputed_dataset"
 
 
 def test_sample_carries_new_v1_5_4_1_fields():
