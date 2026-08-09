@@ -253,16 +253,24 @@ def _cases() -> dict[str, tuple[pd.DataFrame | None, dict[str, object]]]:
             "column": ["x"] * 10 + ["y"] * 2 + ["x"] * 3 + ["y"] * 9,
         }
     )
-    for operation_id in ("categorical.cramers_v", "categorical.mcnemar"):
-        cases[operation_id] = (
-            category,
-            _request(
-                operation_id,
-                "typed",
-                {"row": "row", "column": "column"},
-                {"correction": False, "exact": False},
-            ),
-        )
+    cases["categorical.cramers_v"] = (
+        category,
+        _request(
+            "categorical.cramers_v",
+            "typed",
+            {"row": "row", "column": "column"},
+            {"correction": False},
+        ),
+    )
+    cases["categorical.mcnemar"] = (
+        category,
+        _request(
+            "categorical.mcnemar",
+            "typed",
+            {"row": "row", "column": "column"},
+            {"correction": False, "exact": False},
+        ),
+    )
 
     for operation_id, frame in _glm_frame().items():
         cases[operation_id] = (
@@ -291,8 +299,13 @@ def _cases() -> dict[str, tuple[pd.DataFrame | None, dict[str, object]]]:
 
     matching = _matching_frame()
     for operation_id in ("matching.att", "matching.balance"):
-        options = _matching_options()
-        if operation_id == "matching.balance":
+        if operation_id == "matching.att":
+            options = _matching_options()
+        else:
+            options = {
+                "balance_threshold": 0.1,
+                "missing_policy": "reject",
+            }
             options["matched_pairs"] = [
                 {"treated_position": 0, "control_position": 3, "control_unit": "c1"},
                 {"treated_position": 1, "control_position": 4, "control_unit": "c2"},
@@ -303,7 +316,11 @@ def _cases() -> dict[str, tuple[pd.DataFrame | None, dict[str, object]]]:
             _request(
                 operation_id,
                 "frame",
-                {"treatment": "treated", "outcome": "outcome", "id": "unit", "covariates": ["x", "z"]},
+                (
+                    {"treatment": "treated", "outcome": "outcome", "id": "unit", "covariates": ["x", "z"]}
+                    if operation_id == "matching.att"
+                    else {"treatment": "treated", "id": "unit", "covariates": ["x", "z"]}
+                ),
                 options,
             ),
         )
@@ -473,8 +490,40 @@ def _cases() -> dict[str, tuple[pd.DataFrame | None, dict[str, object]]]:
     cases["time_series.adf"] = (time_series, _request("time_series.adf", "frame", {"time": "time", "value": "value"}, {**time_options, "regression": "c", "autolag": "aic", "max_lag": 4}))
     cases["time_series.kpss"] = (time_series, _request("time_series.kpss", "frame", {"time": "time", "value": "value"}, {**time_options, "regression": "c", "nlags": "auto"}))
     cases["time_series.arima"] = (time_series, _request("time_series.arima", "frame", {"time": "time", "value": "value"}, {**time_options, "order": [1, 0, 0], "trend": "c", "forecast_horizon": 1}))
-    for operation_id in ("time_series.var", "time_series.irf"):
-        cases[operation_id] = (time_series, _request(operation_id, "frame", {"time": "time", "values": ["value", "other"]}, {**time_options, "lags": 1, "trend": "c", "forecast_horizon": 1, "confidence_level": 0.95, "stability_policy": "report_only", "horizon": 5, "orthogonalized": True, "ci_method": "asymptotic_normal"}))
+    cases["time_series.var"] = (
+        time_series,
+        _request(
+            "time_series.var",
+            "frame",
+            {"time": "time", "values": ["value", "other"]},
+            {
+                **time_options,
+                "lags": 1,
+                "trend": "c",
+                "forecast_horizon": 1,
+                "confidence_level": 0.95,
+                "stability_policy": "report_only",
+            },
+        ),
+    )
+    cases["time_series.irf"] = (
+        time_series,
+        _request(
+            "time_series.irf",
+            "frame",
+            {"time": "time", "values": ["value", "other"]},
+            {
+                **time_options,
+                "lags": 1,
+                "trend": "c",
+                "horizon": 5,
+                "orthogonalized": True,
+                "confidence_level": 0.95,
+                "ci_method": "asymptotic_normal",
+                "stability_policy": "report_only",
+            },
+        ),
+    )
     cases["time_series.cointegration"] = (time_series, _request("time_series.cointegration", "frame", {"time": "time", "values": ["value", "other"]}, {**time_options, "method": "engle_granger", "confidence_level": 0.95, "max_lag": 1, "trend": "c", "det_order": 0, "k_ar_diff": 1}))
     cases["time_series.vecm"] = (time_series, _request("time_series.vecm", "frame", {"time": "time", "values": ["value", "other"]}, {**time_options, "det_order": 0, "k_ar_diff": 1, "deterministic": "co", "forecast_horizon": 1, "confidence_level": 0.95}))
     cases["time_series.granger"] = (time_series, _request("time_series.granger", "frame", {"time": "time", "cause": "value", "effect": "other"}, {**time_options, "max_lag": 1, "test": "ssr_ftest"}))
@@ -503,6 +552,33 @@ def test_every_registered_p7_operation_completes_through_its_adapter() -> None:
         except Exception as exc:  # report all missing calls in one red test
             failures.append(f"{operation_id}: {type(exc).__name__}: {exc}")
     assert not failures, "P7 adapter calls failed:\n" + "\n".join(failures)
+
+
+def test_vif_completes_from_a_design_frame_without_a_fake_model_payload() -> None:
+    """The design-only VIF path must not require a fabricated response model."""
+
+    from workbench.agent.p7_pack_registry import p7_pack_registry
+
+    operation = p7_pack_registry.get("diagnostics.vif")
+    request = _request(
+        "diagnostics.vif",
+        "typed",
+        {"design": ["x1", "x2"]},
+    )
+    frame = pd.DataFrame(
+        {
+            "x1": np.linspace(-2.0, 2.0, 30),
+            "x2": np.cos(np.linspace(-1.5, 1.5, 30)),
+        }
+    )
+
+    operation.validate(request)
+    result = operation.execute(frame, request)
+    operation.validate_result(result)
+
+    assert result["operation_id"] == "diagnostics.vif"
+    assert result["status"] == "completed"
+    assert set(result["result"]["vif"]) == {"x1", "x2"}
 
 
 @pytest.mark.parametrize("design", ["independent_t", "one_way_anova", "two_proportion_z"])

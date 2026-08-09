@@ -156,6 +156,89 @@ def test_p7_is_registered_in_every_agent_consumer_and_reaches_multi_step() -> No
         assert capability.is_reachable is True
 
 
+def test_p7_step_contract_publishes_nested_request_shapes_and_frame_semantics() -> None:
+    """An Agent must see adapter-owned binding keys before it writes a step."""
+
+    from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+    vif = WORKFLOW_STEP_SPEC_CONTRACTS["diagnostics.vif"]
+    binding_schema = vif.field_schemas["column_bindings"]
+    assert binding_schema["required"] == ["design"]
+    assert binding_schema["properties"]["design"] == {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1},
+        "minItems": 1,
+    }
+    assert "predictors" not in binding_schema["properties"]
+
+    power = WORKFLOW_STEP_SPEC_CONTRACTS["power_analysis.solve"]
+    assert power.consumes_input_frame is False
+
+
+def test_power_step_rejects_a_source_commitment_it_cannot_consume() -> None:
+    """A source declaration must not be accepted and then ignored by power."""
+
+    from workbench.agent.operations import OperationValidationError
+    from workbench.agent.workflow import compile_workflow
+
+    with pytest.raises(OperationValidationError, match="does not read a workflow input frame"):
+        compile_workflow(
+            workflow_id="power-source-guard",
+            target={"run_id": "run", "node_ref": "stage:data", "artifact_id": "artifact"},
+            preconditions={"context_fingerprint": "fingerprint"},
+            steps=[
+                {
+                    "step_id": "upstream",
+                    "operation_id": "statistical.explore",
+                    "spec": {"operation": "summarize", "selected_columns": ["x"]},
+                },
+                {
+                    "step_id": "power",
+                    "operation_id": "power_analysis.solve",
+                    "depends_on": ["upstream"],
+                    "spec": {
+                        "input_mode": "typed",
+                        "column_bindings": {},
+                        "options": {"design": "independent_t", "solve_for": "power"},
+                        "source": {"from_step": "upstream", "output": "produced_dataset"},
+                    },
+                },
+            ],
+        )
+
+
+def test_p7_request_rejects_unknown_options_instead_of_dropping_them() -> None:
+    """An option absent from the declaration must never be silently ignored."""
+
+    from workbench.agent.p7_pack_registry import P7PackRegistryError, p7_pack_registry
+
+    operation = p7_pack_registry.get("missingness.profile")
+    with pytest.raises(P7PackRegistryError, match="unknown field\\(s\\): typo_policy"):
+        operation.validate(
+            {
+                "operation_id": "missingness.profile",
+                "input_mode": "frame",
+                "column_bindings": {},
+                "options": {"typo_policy": "ignore"},
+            }
+        )
+
+
+def test_diagnostics_schema_does_not_advertise_an_unused_time_binding() -> None:
+    """A binding that the adapter never reads must not be accepted or published."""
+
+    from workbench.agent.p7_pack_registry import p7_pack_registry
+
+    for operation_id in (
+        "diagnostics.breusch_pagan",
+        "diagnostics.white",
+        "diagnostics.breusch_godfrey",
+    ):
+        schema = p7_pack_registry.get(operation_id).request_schema
+        assert "time" not in schema.binding_shapes
+        assert "time" not in schema.field_schemas()["column_bindings"]["properties"]
+
+
 def test_p7_request_rejects_agent_code_and_missing_bindings() -> None:
     """Typed adapters reject unsafe or ambiguous input before engine execution."""
 

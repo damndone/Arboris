@@ -18,10 +18,15 @@ from workbench.agent.workflow_runtime import (
 from workbench.artifacts import sha256_file
 
 
-def _compile_p7(project_run: tuple[str, str], frame: pd.DataFrame):
+def _compile_p7(
+    project_run: tuple[str, str],
+    frame: pd.DataFrame,
+    *,
+    workflow_id: str = "wf-p7-generic-runtime",
+):
     run_id, artifact_id = project_run
     return compile_workflow(
-        workflow_id="wf-p7-generic-runtime",
+        workflow_id=workflow_id,
         target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
         preconditions={
             "context_version": "node-operation-context/v1",
@@ -36,7 +41,7 @@ def _compile_p7(project_run: tuple[str, str], frame: pd.DataFrame):
                 "spec": {
                     "input_mode": "typed",
                     "column_bindings": {"row": "row", "column": "column"},
-                    "options": {"correction": False, "exact": False},
+                    "options": {"correction": False},
                 },
             }
         ],
@@ -83,6 +88,39 @@ def test_p7_step_uses_generic_runtime_and_persists_provenance(tmp_path) -> None:
     assert projected[0]["pack_family"] == "categorical"
     assert projected[0]["workflow_step_id"] == "categorical_association"
     assert projected[0]["result"] == payload["result"]
+
+
+def test_repeating_a_p7_step_on_one_source_run_creates_distinct_artifacts(tmp_path) -> None:
+    """A second confirmed workflow must not collide with the first result path."""
+
+    frame = pd.DataFrame(
+        {
+            "row": ["a"] * 12 + ["b"] * 12,
+            "column": ["x"] * 10 + ["y"] * 2 + ["x"] * 3 + ["y"] * 9,
+        }
+    )
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    first_draft = _compile_p7(
+        (run_id, artifact_id), frame, workflow_id="wf-p7-repeat-1"
+    )
+    first = WorkflowExecutor(project).execute(
+        first_draft,
+        build_workflow_step_executor(project, first_draft),
+    )
+    second_draft = _compile_p7(
+        (run_id, artifact_id), frame, workflow_id="wf-p7-repeat-2"
+    )
+    second = WorkflowExecutor(project).execute(
+        second_draft,
+        build_workflow_step_executor(project, second_draft),
+    )
+
+    assert first.status == "completed", first.steps["categorical_association"].error
+    assert second.status == "completed", second.steps["categorical_association"].error
+    first_artifact = first.steps["categorical_association"].artifact_ids[0]
+    second_artifact = second.steps["categorical_association"].artifact_ids[0]
+    assert first_artifact != second_artifact
+    assert len(collect_post_estimation_results(project, run_id)) == 2
 
 
 def test_every_registered_p7_operation_completes_through_compiled_workflow(tmp_path) -> None:
@@ -200,7 +238,7 @@ def test_p7_step_composes_with_model_genesis_in_one_workflow(tmp_path) -> None:
                 "spec": {
                     "input_mode": "typed",
                     "column_bindings": {"row": "row", "column": "column"},
-                    "options": {"correction": False, "exact": False},
+                    "options": {"correction": False},
                 },
             },
             {

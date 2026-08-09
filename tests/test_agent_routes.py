@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
+from shutil import copytree
 
 from fastapi.testclient import TestClient
 
@@ -125,6 +126,146 @@ def test_agent_session_turn_is_durable_and_replayable(
         assert (project_root / "workbench" / "agent-events" / f"{session_id}.jsonl").is_file()
         assert not (project_root / "agent-sessions").exists()
         assert not (project_root / "agent-events").exists()
+
+
+def test_chain_session_canonicalizes_client_head_against_durable_chain(
+    tmp_path: Path,
+) -> None:
+    """A selected historical node keeps its owner while Chain head is server-owned."""
+
+    from workbench.agent.chains import ChainStore
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_inspectable_run(project_root)
+    copytree(project_root / "runs" / "run-a", project_root / "runs" / "run-b")
+    ChainStore(project_root / "workbench").create_root(
+        chain_id="chain-a",
+        run_family_id="legacy-family:run-a",
+        active_head_run_id="run-b",
+        agent_session_id="existing-chain-session",
+    )
+
+    packet = _context_packet()
+    packet.update(
+        {
+            "context_fingerprint": "client-preview-fingerprint",
+            "selection": {
+                "forest_node_key": "hash-a::model:ols_1",
+                "node_hash": "hash-a",
+            },
+            "operation_target": {
+                "owner_run_id": "run-a",
+                "op_node_id": "model:ols_1",
+                "node_hash": "hash-a",
+                "node_state": "materialized",
+            },
+            "ownership": {
+                "active_head_run_id": "run-a",
+                "owner_run_id": "run-a",
+                "owner_resolution": "active_head_contains_node",
+                "candidate_run_ids": ["run-a"],
+                "shared_by_run_ids": ["run-a"],
+            },
+        }
+    )
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-b",
+                "context_packet": packet,
+            },
+        )
+
+    assert created.status_code == 200, created.text
+    assert created.json()["context_fingerprint"] != "client-preview-fingerprint"
+    session_id = created.json()["session_id"]
+    entries = [
+        json.loads(line)
+        for line in (project_root / "workbench" / "agent-sessions" / f"{session_id}.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    context_entry = next(
+        entry for entry in entries if entry["payload"].get("message_type") == "agent_context"
+    )
+    canonical_packet = json.loads(context_entry["payload"]["content"].split("\n", 1)[1])
+
+    assert canonical_packet["ownership"]["active_head_run_id"] == "run-b"
+    assert canonical_packet["ownership"]["owner_run_id"] == "run-a"
+    assert canonical_packet["ownership"]["owner_resolution"] == "selected_run_hint"
+    assert canonical_packet["operation_target"]["owner_run_id"] == "run-a"
+    assert canonical_packet["context_fingerprint"] != "client-preview-fingerprint"
+    assert any(
+        "durable Chain active head" in warning
+        for warning in canonical_packet["context_diagnostics"]["warnings"]
+    )
+
+
+def test_chain_session_rebuilds_minimal_forest_selection_context(
+    tmp_path: Path,
+) -> None:
+    """The legacy surface must not make a Chain Agent guess node identity."""
+
+    from workbench.agent.chains import ChainStore
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_inspectable_run(project_root)
+    copytree(project_root / "runs" / "run-a", project_root / "runs" / "run-b")
+    ChainStore(project_root / "workbench").create_root(
+        chain_id="chain-a",
+        run_family_id="legacy-family:run-a",
+        active_head_run_id="run-b",
+        agent_session_id="existing-chain-session",
+    )
+
+    packet = _context_packet()
+    packet.update(
+        {
+            "context_fingerprint": "client-preview-fingerprint",
+            "selection": {"forest_node_key": "hash-a::model:ols_1"},
+        }
+    )
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-b",
+                "context_packet": packet,
+            },
+        )
+
+    assert created.status_code == 200, created.text
+    assert created.json()["context_fingerprint"] != "client-preview-fingerprint"
+    session_id = created.json()["session_id"]
+    entries = [
+        json.loads(line)
+        for line in (project_root / "workbench" / "agent-sessions" / f"{session_id}.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    context_entry = next(
+        entry for entry in entries if entry["payload"].get("message_type") == "agent_context"
+    )
+    canonical_packet = json.loads(context_entry["payload"]["content"].split("\n", 1)[1])
+
+    assert canonical_packet["ownership"]["active_head_run_id"] == "run-b"
+    assert canonical_packet["ownership"]["owner_run_id"] == "run-b"
+    assert canonical_packet["operation_target"] == {
+        "owner_run_id": "run-b",
+        "op_node_id": "model:ols_1",
+        "node_hash": "hash-a",
+    }
 
 
 def test_agent_turn_abort_rejects_when_the_session_has_no_active_turn(

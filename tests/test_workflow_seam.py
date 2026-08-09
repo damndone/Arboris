@@ -1118,7 +1118,7 @@ def test_the_lineage_case_registry_covers_every_consuming_operation() -> None:
     covered = (
         set(_LINEAGE_META_STEPS)
         | set(_LINEAGE_META_UNRECORDED)
-        | set(p7_pack_registry.operation_ids())
+        | (set(p7_pack_registry.operation_ids()) & set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME))
     )
 
     assert covered == set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME)

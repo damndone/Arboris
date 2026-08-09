@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
@@ -1632,7 +1633,8 @@ def _persist_p7_pack_result(
     run_root = root / "runs" / str(draft.target["run_id"])
     token = str(step.fingerprint).removeprefix("sha256:")[:24]
     operation_token = str(step.operation_id).replace(".", "_")
-    artifact_id = f"workflow_p7_{operation_token}_{token}"
+    workflow_token = hashlib.sha256(draft.workflow_id.encode("utf-8")).hexdigest()[:16]
+    artifact_id = f"workflow_p7_{operation_token}_{workflow_token}_{token}"
     artifact_path = run_root / "artifacts" / "p7_analysis" / f"{artifact_id}.json"
     payload = {
         "schema_version": "workbench.workflow.p7-pack/v1",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from copy import deepcopy
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -225,6 +226,10 @@ class StepSpecContract:
     replayable_by_recipe: bool = False
     #: Closed values for fields whose vocabulary is smaller than their JSON type.
     field_enums: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Nested schemas for object-valued fields. These are published alongside
+    #: the outer workflow step fields so a consumer can write a typed request
+    #: without guessing keys inside ``column_bindings`` or ``options``.
+    field_schemas: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     #: Capability inventory identity projected from this declaration.
     capability_kind: str = "data_operation"
     #: Informational explanation for a capability that is composable but not a
@@ -263,6 +268,14 @@ class StepSpecContract:
                 )
             if len(set(values)) != len(values):
                 raise ValueError(f"workflow step field enum {name!r} contains duplicates")
+        unknown_schemas = set(self.field_schemas) - field_names
+        if unknown_schemas:
+            raise ValueError(
+                "workflow step field schema(s) are undeclared: "
+                + ", ".join(sorted(unknown_schemas))
+            )
+        if any(not isinstance(schema, Mapping) for schema in self.field_schemas.values()):
+            raise ValueError("workflow step field schemas must be objects")
         from .capability_contract import CAPABILITY_KINDS
 
         if self.capability_kind not in CAPABILITY_KINDS:
@@ -286,6 +299,10 @@ class StepSpecContract:
             "field_types": dict(self.field_types),
             "field_enums": {
                 name: list(values) for name, values in self.field_enums.items()
+            },
+            "field_schemas": {
+                name: deepcopy(dict(schema))
+                for name, schema in self.field_schemas.items()
             },
             "semantic_validator_key": self.semantic_validator_key,
             "reference_resolver_key": self.reference_resolver_key,
@@ -322,9 +339,12 @@ class StepSpecContract:
         }
         properties: dict[str, dict[str, Any]] = {}
         for name, description in self.fields.items():
-            field_schema: dict[str, Any] = {"description": description}
+            field_schema: dict[str, Any] = deepcopy(
+                dict(self.field_schemas.get(name, {}))
+            )
+            field_schema.setdefault("description", description)
             declared_type = self.field_types.get(name)
-            if declared_type is not None:
+            if declared_type is not None and "type" not in field_schema and "oneOf" not in field_schema:
                 field_schema["type"] = type_map.get(declared_type, declared_type)
             if name in self.field_enums:
                 field_schema["enum"] = list(self.field_enums[name])
@@ -343,9 +363,11 @@ def pack_step_contract(
     fields: Mapping[str, str],
     required: tuple[str, ...],
     field_types: Mapping[str, str],
-    field_enums: Mapping[str, tuple[str, ...]] | None = None,
     dispatcher_key: str,
     output_schema_ref: str,
+    field_enums: Mapping[str, tuple[str, ...]] | None = None,
+    field_schemas: Mapping[str, Mapping[str, Any]] | None = None,
+    consumes_input_frame: bool = True,
     top_level_exposure_note: str | None = None,
 ) -> StepSpecContract:
     """Build a non-top-level pack declaration for workflow composition."""
@@ -356,6 +378,7 @@ def pack_step_contract(
         required=tuple(required),
         field_types=dict(field_types),
         field_enums=dict(field_enums or {}),
+        field_schemas=dict(field_schemas or {}),
         semantic_validator_key="p7.pack",
         column_extractor_key="p7.pack",
         output_schema_ref=output_schema_ref,
@@ -364,7 +387,7 @@ def pack_step_contract(
         capability_kind="pack",
         natural_language_enabled=False,
         produces_dataset=False,
-        consumes_input_frame=True,
+        consumes_input_frame=consumes_input_frame,
         replayable_by_recipe=False,
         top_level_exposure_note=top_level_exposure_note,
     )

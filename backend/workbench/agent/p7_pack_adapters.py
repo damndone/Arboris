@@ -120,6 +120,7 @@ def _validate_bindings(
     *,
     required: frozenset[str],
     optional: frozenset[str] = frozenset(),
+    shapes: Mapping[str, str] | None = None,
 ) -> Request:
     _operation_id, bindings, _options = _request_parts(request)
     unknown = set(bindings) - required - optional
@@ -134,6 +135,26 @@ def _validate_bindings(
             "P7 pack column_bindings is missing: " + ", ".join(sorted(missing))
         )
     for name, value in bindings.items():
+        shape = (shapes or {}).get(name)
+        if shape == "column" and type(value) is not str:
+            raise P7PackAdapterError(f"P7 pack binding {name} must be one column name")
+        if shape == "columns" and (
+            not isinstance(value, Sequence)
+            or isinstance(value, (str, bytes))
+        ):
+            raise P7PackAdapterError(
+                f"P7 pack binding {name} must be a column-name list"
+            )
+        if shape == "columns" and not value:
+            raise P7PackAdapterError(
+                f"P7 pack binding {name} must be a non-empty column-name list"
+            )
+        if shape == "column_or_columns" and type(value) is not str and not (
+            isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+        ):
+            raise P7PackAdapterError(
+                f"P7 pack binding {name} must be a column name or column-name list"
+            )
         if type(value) is str:
             if not value:
                 raise P7PackAdapterError(f"P7 pack binding {name} must not be empty")
@@ -150,6 +171,23 @@ def _validate_bindings(
                 f"P7 pack binding {name} must be a column name or column-name list"
             )
     return request
+
+
+def _validate_declared_bindings(request: Request) -> Request:
+    """Use the registry declaration for every adapter's binding vocabulary."""
+
+    from .p7_pack_registry import p7_request_schema
+
+    operation_id = request.get("operation_id")
+    if type(operation_id) is not str:
+        raise P7PackAdapterError("P7 pack request operation_id must be non-empty")
+    schema = p7_request_schema(operation_id)
+    return _validate_bindings(
+        request,
+        required=frozenset(schema.required_bindings),
+        optional=frozenset(schema.optional_bindings),
+        shapes=schema.binding_shapes,
+    )
 
 
 def _frame(frame: pd.DataFrame | None) -> pd.DataFrame:
@@ -306,10 +344,7 @@ def _generic_columns(request: Request) -> tuple[str, ...]:
 
 
 def validate_categorical_request(request: Request) -> Request:
-    return _validate_bindings(
-        request,
-        required=frozenset({"row", "column"}),
-    )
+    return _validate_declared_bindings(request)
 
 
 def execute_categorical(frame: pd.DataFrame | None, request: Request) -> Result:
@@ -337,10 +372,7 @@ def execute_categorical(frame: pd.DataFrame | None, request: Request) -> Result:
 
 
 def validate_glm_request(request: Request) -> Request:
-    return _validate_bindings(
-        request,
-        required=frozenset({"outcome", "predictors"}),
-    )
+    return _validate_declared_bindings(request)
 
 
 def execute_glm(frame: pd.DataFrame | None, request: Request) -> Result:
@@ -366,10 +398,7 @@ def execute_glm(frame: pd.DataFrame | None, request: Request) -> Result:
 
 
 def validate_iv_request(request: Request) -> Request:
-    return _validate_bindings(
-        request,
-        required=frozenset({"outcome", "exog", "endog", "instruments"}),
-    )
+    return _validate_declared_bindings(request)
 
 
 def execute_iv(frame: pd.DataFrame | None, request: Request) -> Result:
@@ -409,10 +438,7 @@ def execute_iv(frame: pd.DataFrame | None, request: Request) -> Result:
 
 
 def validate_matching_request(request: Request) -> Request:
-    return _validate_bindings(
-        request,
-        required=frozenset({"treatment", "outcome", "id", "covariates"}),
-    )
+    return _validate_declared_bindings(request)
 
 
 def _matching_options(options: Mapping[str, object]) -> dict[str, object]:
@@ -436,30 +462,29 @@ def execute_matching(frame: pd.DataFrame | None, request: Request) -> Result:
     source = _frame(frame)
     operation_id, bindings, options = _request_parts(request)
     _require_columns(source, bindings)
-    common = {
-        "treatment_column": _binding(bindings, "treatment"),
-        "outcome_column": _binding(bindings, "outcome"),
-        "covariate_columns": list(_binding_columns(bindings, "covariates")),
-        "id_column": _binding(bindings, "id"),
-    }
     from workbench.engine.packs.matching import assess_balance, estimate_att
 
     if operation_id == "matching.att":
+        common = {
+            "treatment_column": _binding(bindings, "treatment"),
+            "outcome_column": _binding(bindings, "outcome"),
+            "covariate_columns": list(_binding_columns(bindings, "covariates")),
+            "id_column": _binding(bindings, "id"),
+        }
         return estimate_att(source, **common, **_matching_options(options))
     if operation_id == "matching.balance":
         balance_options = {
-            key: value
-            for key, value in _matching_options(options).items()
-            if key in {"balance_threshold", "missing_policy"}
+            "balance_threshold": _option(options, "balance_threshold"),
+            "missing_policy": _option(options, "missing_policy"),
         }
         matched_pairs = options.get("matched_pairs")
         if matched_pairs is not None and not isinstance(matched_pairs, Sequence):
             raise P7PackAdapterError("matching matched_pairs must be an array")
         return assess_balance(
             source,
-            treatment_column=common["treatment_column"],
-            covariate_columns=common["covariate_columns"],
-            id_column=common["id_column"],
+            treatment_column=_binding(bindings, "treatment"),
+            covariate_columns=list(_binding_columns(bindings, "covariates")),
+            id_column=_binding(bindings, "id"),
             matched_pairs=cast(Sequence[Mapping[str, object]] | None, matched_pairs),
             **balance_options,
         )
@@ -470,10 +495,7 @@ def execute_matching(frame: pd.DataFrame | None, request: Request) -> Result:
 
 
 def validate_meta_request(request: Request) -> Request:
-    return _validate_bindings(
-        request,
-        required=frozenset({"study_id", "effect", "variance"}),
-    )
+    return _validate_declared_bindings(request)
 
 
 def _meta_studies(frame: pd.DataFrame, bindings: Mapping[str, object]) -> list[dict[str, object]]:
@@ -512,13 +534,13 @@ def execute_meta(frame: pd.DataFrame | None, request: Request) -> Result:
 def validate_missing_request(request: Request) -> Request:
     operation_id, _bindings, options = _request_parts(request)
     if operation_id == "missingness.profile":
-        return _validate_bindings(request, required=frozenset())
+        return _validate_declared_bindings(request)
     if operation_id == "missing_data.rubin_pool":
         if "model_results" not in options:
             raise P7PackAdapterError("missing_data.rubin_pool requires options.model_results")
         if not isinstance(options["model_results"], Sequence):
             raise P7PackAdapterError("missing_data.rubin_pool model_results must be an array")
-        return _validate_bindings(request, required=frozenset())
+        return _validate_declared_bindings(request)
     raise P7PackAdapterError(f"missing-data adapter received unsupported operation: {operation_id}")
 
 
@@ -544,13 +566,8 @@ def execute_missing(frame: pd.DataFrame | None, request: Request) -> Result:
 
 
 def validate_diagnostics_request(request: Request) -> Request:
-    operation_id, bindings, options = _request_parts(request)
-    required = {"response", "design"}
-    optional = {"time"}
-    if operation_id == "diagnostics.vif":
-        required = {"design"}
-        optional = set()
-    _validate_bindings(request, required=frozenset(required), optional=frozenset(optional))
+    operation_id, _bindings, options = _request_parts(request)
+    _validate_declared_bindings(request)
     if operation_id == "diagnostics.breusch_godfrey":
         _option(options, "lag")
         _option(options, "time_order")
@@ -599,6 +616,31 @@ def _diagnostic_design(
     return matrix, names, intercept, cast(str | None, intercept_column), response, residuals, fitted_values, metadata
 
 
+def _design_only_vif_metadata(design_columns: Sequence[str], observation_count: int) -> dict[str, object]:
+    """Build the neutral metadata envelope required by the frozen VIF engine.
+
+    VIF is a design-matrix diagnostic and does not need a response or fitted
+    residuals.  The shared frozen diagnostics contract still requires OLS
+    metadata, so provide only algebraic dimensions; never fabricate
+    coefficients, residuals, or a model-validity claim.
+    """
+
+    parameter_count = len(design_columns)
+    residual_df = observation_count - parameter_count
+    if residual_df < 1:
+        raise P7PackAdapterError(
+            "diagnostics.vif requires more observations than design columns"
+        )
+    return {
+        "model_type": "ols",
+        "parameter_count": parameter_count,
+        "residual_df": residual_df,
+        "residual_variance": 0.0,
+        "covariance": "unadjusted",
+        "parameter_names": list(design_columns),
+    }
+
+
 def execute_diagnostics(frame: pd.DataFrame | None, request: Request) -> Result:
     source = _frame(frame)
     operation_id, bindings, options = _request_parts(request)
@@ -614,6 +656,8 @@ def execute_diagnostics(frame: pd.DataFrame | None, request: Request) -> Result:
         generated_metadata,
     ) = _diagnostic_design(source, bindings, options)
     metadata = options.get("model_metadata", generated_metadata)
+    if operation_id == "diagnostics.vif" and not metadata:
+        metadata = _design_only_vif_metadata(design_columns, len(design))
     if not isinstance(metadata, Mapping):
         raise P7PackAdapterError("diagnostics model_metadata must be an object")
     common: dict[str, object] = {
@@ -683,7 +727,7 @@ def execute_diagnostics(frame: pd.DataFrame | None, request: Request) -> Result:
 
 
 def validate_multiple_comparisons_request(request: Request) -> Request:
-    return _validate_bindings(request, required=frozenset({"group", "value"}))
+    return _validate_declared_bindings(request)
 
 
 def _groups(source: pd.DataFrame, bindings: Mapping[str, object]) -> dict[str, list[float]]:
@@ -720,26 +764,18 @@ def execute_multiple_comparisons(frame: pd.DataFrame | None, request: Request) -
 
 def validate_multivariate_request(request: Request) -> Request:
     operation_id, _bindings, options = _request_parts(request)
-    required: set[str]
-    optional: set[str] = set()
-    if operation_id in {
+    if operation_id not in {
         "multivariate.pca",
         "multivariate.efa",
         "multivariate.cronbach_alpha",
         "multivariate.clustering",
         "multivariate.mca",
+        "multivariate.discriminant",
+        "multivariate.correspondence",
+        "multivariate.manova",
     }:
-        required = {"columns"}
-    elif operation_id == "multivariate.discriminant":
-        required = {"features", "target"}
-    elif operation_id == "multivariate.correspondence":
-        required = {"row", "column"}
-    elif operation_id == "multivariate.manova":
-        required = {"responses", "factors"}
-        optional = {"covariates"}
-    else:
         raise P7PackAdapterError(f"multivariate adapter received unsupported operation: {operation_id}")
-    _validate_bindings(request, required=frozenset(required), optional=frozenset(optional))
+    _validate_declared_bindings(request)
     if operation_id == "multivariate.efa":
         for name in ("n_factors", "extraction", "rotation", "kmo_threshold", "bartlett_alpha"):
             _option(options, name)
@@ -873,16 +909,16 @@ def validate_nonparametric_request(request: Request) -> Request:
         "nonparametric.spearman",
         "nonparametric.kendall",
     }:
-        required = {"x", "y"}
+        pass
     elif operation_id in {"nonparametric.kruskal_wallis"}:
-        required = {"group", "value"}
+        pass
     elif operation_id == "nonparametric.friedman":
-        required = {"columns"}
+        pass
     elif operation_id == "nonparametric.robust_summary":
-        required = {"values"}
+        pass
     else:
         raise P7PackAdapterError(f"nonparametric adapter received unsupported operation: {operation_id}")
-    return _validate_bindings(request, required=frozenset(required))
+    return _validate_declared_bindings(request)
 
 
 def execute_nonparametric(frame: pd.DataFrame | None, request: Request) -> Result:
@@ -923,11 +959,7 @@ def execute_nonparametric(frame: pd.DataFrame | None, request: Request) -> Resul
 
 
 def validate_repeated_measures_request(request: Request) -> Request:
-    return _validate_bindings(
-        request,
-        required=frozenset({"response", "subject", "within"}),
-        optional=frozenset({"between"}),
-    )
+    return _validate_declared_bindings(request)
 
 
 def execute_repeated_measures(frame: pd.DataFrame | None, request: Request) -> Result:
@@ -955,10 +987,9 @@ def execute_repeated_measures(frame: pd.DataFrame | None, request: Request) -> R
 
 def validate_resampling_request(request: Request) -> Request:
     operation_id, _bindings, _options = _request_parts(request)
-    required = {"values"} if operation_id == "resampling.bootstrap" else {"left", "right"}
     if operation_id not in {"resampling.bootstrap", "resampling.permutation"}:
         raise P7PackAdapterError(f"resampling adapter received unsupported operation: {operation_id}")
-    return _validate_bindings(request, required=frozenset(required))
+    return _validate_declared_bindings(request)
 
 
 def execute_resampling(frame: pd.DataFrame | None, request: Request) -> Result:
@@ -982,7 +1013,7 @@ def execute_resampling(frame: pd.DataFrame | None, request: Request) -> Result:
 
 
 def validate_roc_request(request: Request) -> Request:
-    return _validate_bindings(request, required=frozenset({"truth", "scores"}))
+    return _validate_declared_bindings(request)
 
 
 def execute_roc(frame: pd.DataFrame | None, request: Request) -> Result:
@@ -1021,10 +1052,7 @@ def execute_roc(frame: pd.DataFrame | None, request: Request) -> Result:
 
 
 def validate_spatial_request(request: Request) -> Request:
-    return _validate_bindings(
-        request,
-        required=frozenset({"values", "weights"}),
-    )
+    return _validate_declared_bindings(request)
 
 
 def execute_spatial(frame: pd.DataFrame | None, request: Request) -> Result:
@@ -1059,11 +1087,7 @@ def execute_spatial(frame: pd.DataFrame | None, request: Request) -> Result:
 
 
 def validate_survival_request(request: Request) -> Request:
-    return _validate_bindings(
-        request,
-        required=frozenset({"duration", "event"}),
-        optional=frozenset({"entry", "group"}),
-    )
+    return _validate_declared_bindings(request)
 
 
 def execute_survival(frame: pd.DataFrame | None, request: Request) -> Result:
@@ -1091,7 +1115,7 @@ def execute_survival(frame: pd.DataFrame | None, request: Request) -> Result:
 
 def validate_synthetic_request(request: Request) -> Request:
     operation_id, _bindings, options = _request_parts(request)
-    _validate_bindings(request, required=frozenset({"outcomes"}), optional=frozenset({"predictors"}))
+    _validate_declared_bindings(request)
     for name in ("treated_unit", "donor_pool", "periods", "pre_periods", "post_periods"):
         _option(options, name)
     if operation_id == "synthetic_control.placebo":
@@ -1144,7 +1168,7 @@ def validate_power_request(request: Request) -> Request:
         _option(options, name)
     if operation_id == "power_analysis.sensitivity_grid":
         _option(options, "axes")
-    return _validate_bindings(request, required=frozenset())
+    return _validate_declared_bindings(request)
 
 
 def _power_parameters(options: Mapping[str, object]) -> dict[str, object]:
@@ -1230,17 +1254,21 @@ def execute_power(frame: pd.DataFrame | None, request: Request) -> Result:
 
 
 def validate_time_series_request(request: Request) -> Request:
-    operation_id, bindings, options = _request_parts(request)
-    single = {"time_series.acf", "time_series.pacf", "time_series.adf", "time_series.kpss", "time_series.arima"}
-    if operation_id in single:
-        required = {"time", "value"}
-    elif operation_id in {"time_series.var", "time_series.irf", "time_series.cointegration", "time_series.vecm"}:
-        required = {"time", "values"}
-    elif operation_id == "time_series.granger":
-        required = {"time", "cause", "effect"}
-    else:
+    operation_id, _bindings, options = _request_parts(request)
+    if operation_id not in {
+        "time_series.acf",
+        "time_series.pacf",
+        "time_series.adf",
+        "time_series.kpss",
+        "time_series.arima",
+        "time_series.var",
+        "time_series.irf",
+        "time_series.cointegration",
+        "time_series.vecm",
+        "time_series.granger",
+    }:
         raise P7PackAdapterError(f"time-series adapter received unsupported operation: {operation_id}")
-    _validate_bindings(request, required=frozenset(required))
+    _validate_declared_bindings(request)
     _option(options, "time_order")
     return request
 
