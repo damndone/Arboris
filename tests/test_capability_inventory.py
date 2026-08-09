@@ -115,15 +115,8 @@ def test_every_model_family_appears_in_the_inventory() -> None:
     assert {f"model.{name}" for name in MODEL_FAMILY_CONTRACTS} <= families
 
 
-def test_a_selectable_family_without_an_admission_contract_is_not_composable() -> None:
-    """The asymmetry this inventory exists to expose, stated as an invariant.
-
-    `time_series.arma_garch` and `time_series.ets` can be picked in the model
-    selector and run by hand, but neither has a `ModelFamilyContract`, so
-    `model_family_contract()` refuses them inside a workflow step. They have
-    no natural-language proposal or composition route and therefore remain
-    real gaps instead of being counted as reachable by a form-only surface.
-    """
+def test_time_series_selector_entries_have_typed_composition_contracts() -> None:
+    """Recipe selectors remain separate from regression family admission."""
 
     from workbench.agent.capability_contract import capability_inventory
     from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
@@ -135,8 +128,8 @@ def test_a_selectable_family_without_an_admission_contract_is_not_composable() -
         item = by_id[f"model.{key}"]
         assert item.kind == "model_family"
         assert item.proposed_by == ()
-        assert item.composable_as == ()
-        assert not item.is_reachable
+        assert item.composable_as == (f"model.{key}",)
+        assert item.is_reachable
 
 
 def test_every_selectable_model_type_is_accounted_for() -> None:
@@ -174,8 +167,8 @@ def test_the_auto_selector_is_listed_as_a_selector_not_a_family() -> None:
 
     assert auto.kind == "selector"
     assert auto.proposed_by == ()
-    assert auto.composable_as == ()
-    assert not auto.is_reachable
+    assert auto.composable_as == ("model.auto",)
+    assert auto.is_reachable
 
 
 def test_the_standalone_operation_surfaces_are_in_the_inventory() -> None:
@@ -244,11 +237,8 @@ def test_the_two_closed_operations_are_explicitly_exempt() -> None:
 def test_natural_language_reachability_guard_pins_current_truth() -> None:
     """Pin today's reachability facts as an intentional change record.
 
-    This test is expected to go red when P5 wires a currently missing route.
-    For example, one newly reachable capability would change
-    ``(54, 4, 30, 34, 2, 18)`` to ``(54, 5, 30, 35, 2, 17)``. That is not a
-    stale test: the counts and gap IDs must be updated in the same deliberate
-    change that closes the gap, rather than silently weakening this record.
+    P5 intentionally updates this snapshot after wiring the live workflow
+    identities. The denominator and two explicit closures remain unchanged.
     """
 
     from workbench.agent.capability_contract import capability_reachability_guard
@@ -262,27 +252,8 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (54, 4, 30, 34, 2, 18)
-    assert {item.capability_id for item in report.gaps} == {
-        "model.time_series.arma_garch",
-        "model.time_series.ets",
-        "model.auto",
-        "test.anova",
-        "test.chi_square",
-        "test.correlations",
-        "test.evidence",
-        "test.fisher_exact",
-        "test.nonparametric",
-        "test.rank_correlations",
-        "test.t_tests",
-        "prediction.prediction_lasso",
-        "prediction.prediction_ridge",
-        "prediction.prediction_random_forest",
-        "imputation.mice",
-        "resample.smote",
-        "resample.oversample",
-        "resample.undersample",
-    }
+    ) == (54, 4, 48, 52, 2, 0)
+    assert {item.capability_id for item in report.gaps} == set()
     assert {item.capability_id for item in report.exempt} == {
         "code.execute",
         "data.column.cast",
@@ -309,40 +280,20 @@ def test_reachability_guard_derives_its_denominator_from_the_supplied_inventory(
         {item.capability_id for item in report.gaps},
     ) == (
         len(inventory),
-        {
-            "pack.injected_for_guard",
-            "model.time_series.arma_garch",
-            "model.time_series.ets",
-            "model.auto",
-            "test.anova",
-            "test.chi_square",
-            "test.correlations",
-            "test.evidence",
-            "test.fisher_exact",
-            "test.nonparametric",
-            "test.rank_correlations",
-            "test.t_tests",
-            "prediction.prediction_lasso",
-            "prediction.prediction_ridge",
-            "prediction.prediction_random_forest",
-            "imputation.mice",
-            "resample.smote",
-            "resample.oversample",
-            "resample.undersample",
-        },
+        {"pack.injected_for_guard"},
     )
 
 
-def test_unwired_model_selector_and_model_families_remain_real_gaps() -> None:
-    """A form capability without a NL or step route remains a real gap."""
+def test_time_series_and_auto_are_no_longer_unwired_gaps() -> None:
+    """The three selector-family gaps are closed by typed workflow steps."""
 
     from workbench.agent.capability_contract import unreachable_capabilities
 
     _exempt, gaps = unreachable_capabilities()
 
-    assert {"model.time_series.arma_garch", "model.time_series.ets", "model.auto"} <= {
-        item.capability_id for item in gaps
-    }
+    assert {item.capability_id for item in gaps}.isdisjoint(
+        {"model.time_series.arma_garch", "model.time_series.ets", "model.auto"}
+    )
 
 
 def test_a_step_identity_is_one_capability_carrying_two_paths() -> None:
@@ -358,10 +309,10 @@ def test_a_step_identity_is_one_capability_carrying_two_paths() -> None:
     from workbench.agent.operations import OperationRegistry
     from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
 
-    operations = [
-        item for item in capability_inventory() if item.kind == "data_operation"
-    ]
     operation_ids = set(OperationRegistry().operation_ids())
+    operations = [
+        item for item in capability_inventory() if item.capability_id in operation_ids
+    ]
 
     assert len(operations) == len(operation_ids)
     assert {item.capability_id for item in operations} == operation_ids
@@ -567,7 +518,8 @@ def test_prediction_and_preparation_capabilities_can_be_asked_for_by_nobody() ->
     assert len(subject) == expected
 
     for item in subject:
-        assert not item.is_reachable, item.capability_id
+        assert item.is_reachable, item.capability_id
+        assert item.composable_as == (item.capability_id,)
         assert item.reachability_exempt_reason is None, item.capability_id
 
 
@@ -590,16 +542,8 @@ def test_the_inventory_separates_a_closed_door_from_a_missing_one() -> None:
     assert not (set(exempt) & set(gaps))
 
 
-def test_todays_unreachable_capabilities_are_all_gaps() -> None:
-    """Recording the number is the point: it is the size of the promise
-    'natural language reaches every capability' currently overstates by.
-
-    This test pins today's facts on purpose, so it is *expected* to go red the
-    day someone closes one of these gaps or shuts a door deliberately. That is
-    not the test breaking: it is the record of the shortfall asking to be
-    updated in the same change that alters it, instead of the number quietly
-    getting smaller with nobody noticing it moved.
-    """
+def test_p5_leaves_no_unresolved_reachability_gaps() -> None:
+    """The live P2 partition is green after the deliberate P5 snapshot change."""
 
     from workbench.agent.capability_contract import unreachable_capabilities
 
@@ -609,14 +553,7 @@ def test_todays_unreachable_capabilities_are_all_gaps() -> None:
         "code.execute",
         "data.column.cast",
     }
-    assert {item.kind for item in gaps} == {
-        "model_family",
-        "selector",
-        "statistical_test",
-        "prediction_model",
-        "data_preparation",
-    }
-    assert len(gaps) == 18
+    assert gaps == ()
 
 
 def test_the_partition_covers_every_unreachable_capability_and_nothing_else() -> None:
