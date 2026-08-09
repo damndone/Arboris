@@ -10,7 +10,7 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 2/12 (16.7%; 16.7 per 100 events)
+- Failure frequency: 2/13 (15.4%; 15.4 per 100 events)
 - Repeat rate: 0/2 (0.0%)
 - Recurrence rate: 0/2 (0.0%)
 - MTTR: median=3017000 ms (sample=2; unresolved=0)
@@ -19,7 +19,7 @@ COMPLETED
 - Plan churn: N/A (sample=0)
 - Gate waste rate: 0/5 (0.0%)
 - Same-state retry rate: N/A (sample=0)
-- Token waste: N/A (sample=0)
+- Token waste: N/A (sample=0; coverage=0/1)
 
 ## All failures
 
@@ -36,12 +36,13 @@ COMPLETED
 
 ## All waste
 
-- None recorded.
+- #13 2026-08-09T00:19:16.000Z `temporary_scope_misroute`; cause_status: `known`; cause: The patch helper defaulted to the parent worktree while creating temporary formal event files instead of using the target worktree context.; resolution: `resolved`; lesson: Verify the patch helper working directory before creating even temporary files in a protected multi-worktree task.
 
 ## Root causes and solutions
 
 - `p5-reachability-contract-before-implementation`: occurrences=1; cause_status: `known`; root cause: The baseline lacks the typed workflow identities and named statistical executor required by the P5 objective.; solution: `open`
 - `p5-source-commitment-lineage`: occurrences=1; cause_status: `known`; root cause: Model auto consumed a derived workflow frame but Genesis treated it as the original upload because lineage identity alone was insufficient.; solution: `resolved`
+- `target-worktree-before-temp-patch`: occurrences=1; cause_status: `known`; root cause: The patch helper defaulted to the parent worktree while creating temporary formal event files instead of using the target worktree context.; solution: `resolved`
 
 ## Added tests
 
@@ -51,11 +52,13 @@ COMPLETED
 
 - `p5-reachability-contract-before-implementation`: line experience occurrence(s)=1
 - `p5-source-commitment-lineage`: line experience occurrence(s)=1
+- `target-worktree-before-temp-patch`: line experience occurrence(s)=1
 
 ## Future guidance
 
 - A workflow source commitment must control model execution even when the committed frame differs from the original upload.
 - Add each typed workflow contract and its executor seam only after a real red test.
+- Verify the patch helper working directory before creating even temporary files in a protected multi-worktree task.
 
 ## Event index
 
@@ -71,3 +74,4 @@ COMPLETED
 - #10: `58ed9c5b-7ddc-45d6-9f8d-e9f81bf3e9f0` | 2026-08-09T00:08:36.000Z | STATE_CHANGE/p2_snapshot_updated | incident=`aaf18b6f-42b6-42dc-86db-cf2cb122754a` | lesson_key=`p2-live-snapshot-change` | event_sha256=`e66b2670c92c59707787e939bd6d9c95d003a61e7dde6141cdeba69bcb295e62`
 - #11: `e0d8f70b-a7b1-4da9-a3dd-28e96d9fcae5` | 2026-08-09T00:16:00.000Z | STATE_CHANGE/p5_completed | incident=`b6a5eeb4-85bb-4dd9-bf33-2f52e685aa6e` | lesson_key=`p5-live-guard-closeout` | event_sha256=`08d1328bf8113c61ee2b680360614171538d9cee0a7f99302999814cd48294a0`
 - #12: `5a5e5c5f-a1d8-4c4a-9e7d-d59a19476211` | 2026-08-09T00:17:01.000Z | GATE/baseline_red_resolved | incident=`fb52a0c7-9488-4a79-b624-bd7151d90fd9` | lesson_key=`p5-reachability-contract-before-implementation` | event_sha256=`0bc1fc965b9cd25282f1f6c04e49e453f8b12699ab2ca97cbc9fb04e33348298`
+- #13: `c1c5c7f9-bb71-4b04-b2a1-33c1b329ba5f` | 2026-08-09T00:19:16.000Z | WASTE/temporary_scope_misroute | incident=`a2645d89-410a-47dc-a13f-f7b5c5b1d1e9` | lesson_key=`target-worktree-before-temp-patch` | event_sha256=`6b04899dec544f8664d948101a484b2087c66337cd8d3bca7e2330bc1132860d`
