@@ -859,6 +859,11 @@ def _execution_results_packet(
             "committed": raw.get("committed") is True,
             "artifact_validation": validation_packet,
             **(
+                {"artifact_validation_scope": dict(raw["artifact_validation_scope"])}
+                if isinstance(raw.get("artifact_validation_scope"), Mapping)
+                else {}
+            ),
+            **(
                 {"workflow_execution": dict(raw["workflow_execution"])}
                 if isinstance(raw.get("workflow_execution"), Mapping)
                 else {}

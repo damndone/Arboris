@@ -234,7 +234,12 @@ TRACE_EVENT_SCHEMAS: dict[str, _Schema] = {
     "artifact_contract.validation.completed": _Schema(
         "artifact-contract-validation-completed/v1",
         required=("option_id", "option_revision", "validation_status"),
-        optional=("missing_required", "warnings", "checked_dimensions"),
+        optional=(
+            "missing_required",
+            "warnings",
+            "checked_dimensions",
+            "artifact_validation_scope",
+        ),
     ),
     "active_head.changed": _Schema(
         "active-head-changed/v1",

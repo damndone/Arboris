@@ -223,6 +223,7 @@ class ExecutionOutcome:
     run_id: str | None
     execution_status: str
     artifact_validation: dict[str, Any]
+    artifact_validation_scope: dict[str, Any]
     active_head_advanced: bool
     lifecycle_status: str
 
@@ -237,6 +238,7 @@ class ExecutionOutcome:
             "run_id": self.run_id,
             "execution_status": self.execution_status,
             "artifact_validation": dict(self.artifact_validation),
+            "artifact_validation_scope": dict(self.artifact_validation_scope),
             "active_head_advanced": self.active_head_advanced,
             "lifecycle_status": self.lifecycle_status,
         }
@@ -2784,11 +2786,19 @@ class NotebookService:
                     option_id=option_id,
                     lifecycle_status=view.lifecycle_status,
                 )
-        artifacts = (
-            [dict(record) for record in produced_artifacts]
-            if produced_artifacts is not None
-            else self._read_run_artifacts(run_id)
-        )
+        ambient_records = self._read_run_artifacts(run_id)
+        if produced_artifacts is None:
+            artifacts = self._contract_artifact_projection(
+                current.artifact_contract, ambient_records
+            )
+            artifact_validation_scope = self._artifact_validation_scope(
+                "contract_projection", ambient_records
+            )
+        else:
+            artifacts = [dict(record) for record in produced_artifacts]
+            artifact_validation_scope = self._artifact_validation_scope(
+                "explicit_produced_artifacts", ambient_records
+            )
         validation = validate_produced_artifacts(current.artifact_contract, artifacts)
 
         committable = (
@@ -2818,6 +2828,7 @@ class NotebookService:
                         if issue["code"] == "ARTIFACT_REQUIRED_MISSING"
                     ],
                     "checked_dimensions": list(validation["checked_dimensions"]),
+                    "artifact_validation_scope": artifact_validation_scope,
                 },
             )
             if not committable:
@@ -2874,6 +2885,7 @@ class NotebookService:
                 "run_id": run_id,
                 "execution_status": execution_status,
                 "artifact_validation": validation,
+                "artifact_validation_scope": artifact_validation_scope,
                 "committed": committable,
                 **(
                     {"workflow_execution": dict(workflow_execution)}
@@ -2904,6 +2916,7 @@ class NotebookService:
             run_id=run_id,
             execution_status=execution_status,
             artifact_validation=validation,
+            artifact_validation_scope=artifact_validation_scope,
             active_head_advanced=advanced,
             lifecycle_status=self.store.read_option(notebook_id, option_id).lifecycle_status,
         )
@@ -3047,6 +3060,41 @@ class NotebookService:
                     if item.get("artifact_id") == artifact_id
                 )
         return records
+
+    @staticmethod
+    def _contract_artifact_projection(
+        contract: Any, ambient_records: Sequence[Mapping[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Project ambient records by the current declaration-owned identities.
+
+        Matching is intentionally by artifact identity only.  A record with a
+        declared identity but the wrong type must remain in the validation view
+        so the existing type guard can block the commit instead of being
+        silently reclassified as missing.
+        """
+
+        expected_types = {
+            str(expectation.artifact_id): str(expectation.artifact_type)
+            for expectation in contract.expected
+        }
+        return [
+            dict(record)
+            for record in ambient_records
+            if str(record.get("artifact_id")) in expected_types
+        ]
+
+    @staticmethod
+    def _artifact_validation_scope(
+        mode: str, ambient_records: Sequence[Mapping[str, Any]]
+    ) -> dict[str, Any]:
+        """Describe the validation input without reducing the ambient index."""
+
+        ambient_artifact_ids = sorted(str(record.get("artifact_id")) for record in ambient_records)
+        return {
+            "mode": mode,
+            "ambient_artifact_ids": ambient_artifact_ids,
+            "ambient_artifact_count": len(ambient_artifact_ids),
+        }
 
     # ------------------------------------------------------------------
     # Internals

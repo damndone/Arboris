@@ -967,6 +967,11 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
             "not_evaluated_dimensions": ["payload_schema"],
             "issues": [],
         },
+        "artifact_validation_scope": {
+            "mode": "explicit_produced_artifacts",
+            "ambient_artifact_ids": [],
+            "ambient_artifact_count": 0,
+        },
     }
 
 

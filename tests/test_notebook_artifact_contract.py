@@ -4,6 +4,7 @@ Spec §5 and the §9.2 acceptance list, criterion by criterion.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from workbench.agent.notebook import (
     build_artifact_contract,
     validate_produced_artifacts,
 )
+from workbench.agent.trace import TraceWriter
 from workbench.contracts.agent.notebook_option import ExpectedArtifact
 from workbench.lineage.run_family import bind_run_to_family
 
@@ -209,6 +211,187 @@ def test_the_report_always_names_what_was_and_was_not_checked() -> None:
     assert result["checked_dimensions"] == ["artifact_id", "artifact_type", "count", "step"]
     assert result["not_evaluated_dimensions"] == ["payload_schema"]
     assert result["validation_status"] == "passed"
+
+
+def test_completion_projects_the_contract_without_hiding_ambient_artifacts(
+    tmp_path: Path,
+) -> None:
+    """The option contract is narrow, while the durable run index stays complete."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="ambient", created_by="u")
+    context = service.compile_context(notebook.notebook_id)
+    (option,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            OptionDraft(
+                rank=1,
+                rationale="contract-owned result",
+                proposal=TypedProposal.from_dict(model_rerun_proposal("p1")),
+                expected_artifacts=(REQUIRED_PARAMETERS,),
+                option_id="opt_ambient",
+            )
+        ],
+    )
+    service.confirm(
+        notebook.notebook_id,
+        option.option_id,
+        option_revision=1,
+        proposal_id="p1",
+        proposal_revision=1,
+        context=service.compile_context(notebook.notebook_id),
+    )
+    run_root = make_run(project, "run_ambient")
+    ambient = [
+        _artifact("ts.parameters"),
+        _artifact("ts.chart.acf"),
+        _artifact("ts.chart.qq"),
+        _artifact("ts.diagnostics"),
+    ]
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({"schema_version": 1, "artifacts": ambient}), encoding="utf-8"
+    )
+    bind_run_to_family(run_root, run_family_id=notebook.run_family_id, bound_by="test")
+
+    trace = TraceWriter(
+        project,
+        scope={
+            "project_id": project.name,
+            "notebook_id": notebook.notebook_id,
+            "run_family_id": notebook.run_family_id,
+        },
+        versions={
+            "app_commit": "test",
+            "model_id": "test",
+            "prompt_version": "test",
+            "vocabulary_version": "test",
+            "context_profile": "notebook-plan/v1",
+        },
+    )
+    outcome = service.complete_execution(
+        notebook.notebook_id,
+        option.option_id,
+        execution_status="succeeded",
+        run_id="run_ambient",
+        trace=trace,
+    )
+
+    assert outcome.validation_status == "passed"
+    assert outcome.active_head_advanced is True
+    assert outcome.artifact_validation_scope == {
+        "mode": "contract_projection",
+        "ambient_artifact_ids": [
+            "ts.chart.acf",
+            "ts.chart.qq",
+            "ts.diagnostics",
+            "ts.parameters",
+        ],
+        "ambient_artifact_count": 4,
+    }
+    assert not any(
+        issue["code"] == "ARTIFACT_UNDECLARED"
+        for issue in outcome.artifact_validation["issues"]
+    )
+    (option_view,) = service.list_options(notebook.notebook_id)
+    persisted = option_view.execution_results[-1]
+    assert persisted["artifact_validation_scope"] == outcome.artifact_validation_scope
+    assert json.loads((run_root / "artifacts_index.json").read_text())["artifacts"] == ambient
+    validation_events = [
+        event
+        for event in TraceWriter.replay(project, trace.trace_id)
+        if event["event_type"] == "artifact_contract.validation.completed/v1"
+    ]
+    assert validation_events[-1]["payload"]["artifact_validation_scope"] == (
+        outcome.artifact_validation_scope
+    )
+
+
+def test_explicit_produced_artifacts_keep_undeclared_detection(tmp_path: Path) -> None:
+    """A caller-owned produced list remains strict and is not projected."""
+
+    service, notebook_id, _ = _executed_notebook(tmp_path, [])
+    notebook = service.get_notebook(notebook_id)
+    option = service.list_options(notebook_id)[0]
+    service.confirm(
+        notebook_id,
+        option.option_id,
+        option_revision=1,
+        proposal_id="p1",
+        proposal_revision=1,
+        context=service.compile_context(notebook_id),
+    )
+    outcome = service.complete_execution(
+        notebook_id,
+        option.option_id,
+        execution_status="succeeded",
+        produced_artifacts=[_artifact("ts.parameters"), _artifact("ts.chart.acf")],
+    )
+
+    assert outcome.validation_status == "passed"
+    assert [issue["code"] for issue in outcome.artifact_validation["issues"]] == [
+        "ARTIFACT_UNDECLARED"
+    ]
+    assert outcome.artifact_validation_scope["mode"] == "explicit_produced_artifacts"
+
+
+def test_contract_projection_keeps_wrong_type_blocking(tmp_path: Path) -> None:
+    """Narrowing the projection must not turn a wrong expected type into success."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="wrong type", created_by="u")
+    context = service.compile_context(notebook.notebook_id)
+    (option,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            OptionDraft(
+                rank=1,
+                rationale="wrong type",
+                proposal=TypedProposal.from_dict(model_rerun_proposal("p1")),
+                expected_artifacts=(REQUIRED_PARAMETERS,),
+                option_id="opt_wrong_type",
+            )
+        ],
+    )
+    service.confirm(
+        notebook.notebook_id,
+        option.option_id,
+        option_revision=1,
+        proposal_id="p1",
+        proposal_revision=1,
+        context=service.compile_context(notebook.notebook_id),
+    )
+    run_root = make_run(project, "run_wrong_type")
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artifacts": [
+                    _artifact("ts.parameters", artifact_type="figure"),
+                    _artifact("ts.chart.acf"),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    bind_run_to_family(run_root, run_family_id=notebook.run_family_id, bound_by="test")
+
+    outcome = service.complete_execution(
+        notebook.notebook_id,
+        option.option_id,
+        execution_status="succeeded",
+        run_id="run_wrong_type",
+    )
+
+    assert outcome.validation_status == "failed"
+    assert outcome.active_head_advanced is False
+    assert any(
+        issue["code"] == "ARTIFACT_TYPE_MISMATCH"
+        for issue in outcome.artifact_validation["issues"]
+    )
 
 
 # ----------------------------------------------------------------------
