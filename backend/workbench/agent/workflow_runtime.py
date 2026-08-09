@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -480,7 +482,8 @@ def _persist_numeric_derivation(
     # parent node named below always exists in the graph mutated here.
     source_run_id = str(draft.target["run_id"])
     run_root = root / "runs" / source_run_id
-    fingerprint = str(step.fingerprint)
+    result_fingerprint = str(step.fingerprint)
+    fingerprint = result_fingerprint.replace(":", "_")
     relative_dir = Path("derived") / "workflow_numeric" / fingerprint
     data_rel = (relative_dir / "data.csv").as_posix()
     recipe_rel = (relative_dir / "recipe.json").as_posix()
@@ -491,7 +494,7 @@ def _persist_numeric_derivation(
         "schema_version": _NUMERIC_DERIVATION_SCHEMA,
         "workflow_id": draft.workflow_id,
         "workflow_step_id": str(step.step_id),
-        "workflow_step_fingerprint": fingerprint,
+        "workflow_step_fingerprint": result_fingerprint,
         "source": {
             "artifact_id": lineage["artifact_id"],
             "sha256": lineage["sha256"],
@@ -622,6 +625,171 @@ def _persist_numeric_derivation(
                 # can falsify. Verify with content_sha256, attribute with this.
                 "content_sha256": data_sha256,
                 "result_fingerprint": fingerprint,
+            },
+        },
+    )
+
+
+def _persist_workflow_dataset_frame(
+    *,
+    root: Path,
+    draft: WorkflowDraft,
+    lineage: Mapping[str, str],
+    step: Any,
+    frame: pd.DataFrame,
+    dataset_label: str,
+    producer_step: str,
+    summary: Mapping[str, Any],
+) -> WorkflowStepResult:
+    """Persist one prepared frame and publish the standard source binding."""
+
+    source_run_id = str(draft.target["run_id"])
+    run_root = root / "runs" / source_run_id
+    result_fingerprint = str(step.fingerprint)
+    fingerprint = result_fingerprint.replace(":", "_")
+    safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", dataset_label)
+    relative_dir = Path("derived") / "workflow_datasets" / fingerprint[:24]
+    data_rel = (relative_dir / f"{safe_label}.parquet").as_posix()
+    metadata_rel = (relative_dir / f"{safe_label}.json").as_posix()
+    data_path = run_root / data_rel
+    metadata_path = run_root / metadata_rel
+    data_path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = frame.to_parquet(index=False)
+    if data_path.exists():
+        if data_path.read_bytes() != serialized:
+            raise WorkflowExecutionError(
+                f"{producer_step} dataset path is occupied by different content"
+            )
+    else:
+        data_path.write_bytes(serialized)
+    metadata = {
+        "schema_version": "workflow-prepared-dataset.v1",
+        "workflow_id": draft.workflow_id,
+        "workflow_step_id": str(step.step_id),
+        "workflow_step_fingerprint": result_fingerprint,
+        "producer": producer_step,
+        "source": {
+            "artifact_id": str(lineage["artifact_id"]),
+            "sha256": str(lineage["sha256"]),
+        },
+        "summary": dict(summary),
+        "row_count": int(len(frame)),
+        "columns": [str(column) for column in frame.columns],
+        "data_path": data_rel,
+    }
+    if metadata_path.exists():
+        if read_json(metadata_path) != metadata:
+            raise WorkflowExecutionError(
+                f"{producer_step} metadata path is occupied by different content"
+            )
+    else:
+        write_json(metadata_path, metadata)
+    data_artifact_id = f"workflow_{safe_label}_{fingerprint[:24]}"
+    metadata_artifact_id = f"workflow_{safe_label}_metadata_{fingerprint[:24]}"
+    _ensure_runtime_artifact(
+        run_root,
+        artifact_id=data_artifact_id,
+        path=data_path,
+        artifact_type="derived_data",
+        step=producer_step,
+        inputs=[str(lineage["artifact_id"])],
+    )
+    _ensure_runtime_artifact(
+        run_root,
+        artifact_id=metadata_artifact_id,
+        path=metadata_path,
+        artifact_type="metadata",
+        step=producer_step,
+        inputs=[str(lineage["artifact_id"]), data_artifact_id],
+    )
+    child_node_id = f"data-{safe_label}:{fingerprint[:24]}"
+    branch_id = f"workflow-{safe_label}:{fingerprint[:20]}"
+    source_node_id = str(lineage["node_ref"])
+
+    def add_child(graph: Graph) -> Graph:
+        existing = graph.nodes.get(child_node_id)
+        if existing is not None:
+            if existing.payload_ref != data_rel or existing.parent_stage_id != source_node_id:
+                raise WorkflowExecutionError(
+                    f"{producer_step} graph child identity is not deterministic"
+                )
+            return graph
+        child = Node(
+            id=child_node_id,
+            kind=NodeKind.DATASET_STAGE,
+            display_label=f"{dataset_label.title()} dataset",
+            created_at=datetime.now(timezone.utc).isoformat(),
+            parent_stage_id=source_node_id,
+            branch_id=branch_id,
+            trust=Trust.OK,
+            payload_ref=data_rel,
+            summary=f"{producer_step}: {len(frame)} rows",
+            annotations=(
+                {
+                    "type": "workflow_prepared_dataset",
+                    "producer": producer_step,
+                    "workflow_id": draft.workflow_id,
+                    "workflow_step_id": str(step.step_id),
+                    "metadata_path": metadata_rel,
+                },
+            ),
+            stage=Stage.TRANSFORM,
+        )
+        return Graph(
+            schema_version=graph.schema_version,
+            run_id=graph.run_id,
+            nodes={**graph.nodes, child_node_id: child},
+            edges={
+                **graph.edges,
+                f"edge:{child_node_id}": Edge(
+                    id=f"edge:{child_node_id}",
+                    source_id=source_node_id,
+                    target_id=child_node_id,
+                    op=producer_step,
+                    params={"workflow_step_id": str(step.step_id)},
+                ),
+            },
+            branches={
+                **graph.branches,
+                branch_id: BranchRef(
+                    id=branch_id,
+                    forked_from_node_id=source_node_id,
+                    head_node_ids=(child_node_id,),
+                ),
+            },
+            legacy=graph.legacy,
+        )
+
+    GraphStore(root / "runs").mutate(source_run_id, add_child)
+    data_sha256 = sha256_file(data_path)
+    node_index_path = run_root / "node_index.json"
+    if node_index_path.is_file():
+        node_index = read_json(node_index_path)
+        entry = {
+            "node_hash": data_sha256,
+            "producing_stage": producer_step,
+            "cas_ref": {"node_hash": data_sha256, "artifact": data_rel},
+        }
+        existing = node_index.get(child_node_id)
+        if existing is not None and existing != entry:
+            raise WorkflowExecutionError(
+                f"{producer_step} node identity is not deterministic"
+            )
+        if existing is None:
+            write_json(node_index_path, {**node_index, child_node_id: entry})
+    return WorkflowStepResult(
+        artifact_ids=[data_artifact_id, metadata_artifact_id],
+        row_counts={"source": int(len(frame))},
+        result_fingerprint=result_fingerprint,
+        payload={
+            "summary": dict(summary),
+            "produced_dataset": {
+                "schema_version": _PRODUCED_DATASET_SCHEMA,
+                "run_id": source_run_id,
+                "node_ref": child_node_id,
+                "artifact_id": data_artifact_id,
+                "content_sha256": data_sha256,
+                "result_fingerprint": result_fingerprint,
             },
         },
     )
@@ -812,6 +980,409 @@ def _exploration_step(
     )
 
 
+def _execute_named_statistical_step(
+    *,
+    root: Path,
+    draft: WorkflowDraft,
+    lineage: Mapping[str, str],
+    step: Any,
+    frame: pd.DataFrame,
+) -> WorkflowStepResult:
+    from ..statistical_tests import run_named_statistical_test
+
+    family = str(step.operation_id).removeprefix("test.")
+    result = run_named_statistical_test(
+        frame,
+        family=family,
+        analysis_columns=list(step.spec["analysis_columns"]),
+        dataset_sha256=str(lineage["sha256"]),
+        lineage_parent=str(lineage["artifact_id"]),
+        reference_means=step.spec.get("reference_means"),
+        paired_columns=[tuple(pair) for pair in step.spec.get("paired_columns", []) or []],
+    )
+    run_root = root / "runs" / str(draft.target["run_id"])
+    fingerprint = str(step.fingerprint).replace(":", "_")
+    artifact_id = f"statistical_tests_named_{family}_{fingerprint[:24]}"
+    relative = Path("statistical_tests") / f"{artifact_id}.json"
+    path = run_root / relative
+    envelope = {
+        "payload_schema": "workbench.statistical_tests.named-family",
+        "schema_version": 1,
+        "artifact_id": artifact_id,
+        "execution_mode": "named",
+        "source": {
+            "artifact_id": str(lineage["artifact_id"]),
+            "node_ref": str(lineage["node_ref"]),
+            "sha256": str(lineage["sha256"]),
+        },
+        "result": result,
+    }
+    if path.exists():
+        if read_json(path) != envelope:
+            raise WorkflowExecutionError(
+                f"named statistical artifact {artifact_id} is not deterministic"
+            )
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(path, envelope)
+    _ensure_runtime_artifact(
+        run_root,
+        artifact_id=artifact_id,
+        path=path,
+        artifact_type="statistical_test",
+        step=f"test.{family}",
+        inputs=[str(lineage["artifact_id"])],
+    )
+    return WorkflowStepResult(
+        artifact_ids=[artifact_id],
+        row_counts={"results": int(len(result.get("results", [])))},
+        result_fingerprint=str(step.fingerprint),
+        payload={"result": result, "execution_mode": "named"},
+    )
+
+
+def _execute_imputation_step(
+    *,
+    root: Path,
+    draft: WorkflowDraft,
+    lineage: Mapping[str, str],
+    step: Any,
+    frame: pd.DataFrame,
+) -> WorkflowStepResult:
+    if step.operation_id != "imputation.mice":
+        raise WorkflowExecutionError(
+            f"{step.operation_id} has no registered imputation owner"
+        )
+    from ..imputation import run_mice_imputation
+
+    run_root = root / "runs" / str(draft.target["run_id"])
+    summary = run_mice_imputation(
+        frame,
+        run_root,
+        list(step.spec["columns"]),
+        m=int(step.spec.get("m", 5)),
+        max_iter=int(step.spec.get("max_iter", 10)),
+        random_seed=int(step.spec.get("random_seed", 20260429)),
+        max_missing_rate=float(step.spec.get("max_missing_rate", 0.4)),
+    )
+    skipped = list(summary.get("skipped_columns", []))
+    if skipped:
+        raise WorkflowExecutionError(
+            "imputation.mice refused to silently drop declared column(s): "
+            + ", ".join(str(column) for column in skipped)
+        )
+    if summary.get("status") != "completed":
+        raise WorkflowExecutionError(
+            "imputation.mice did not produce a changed dataset; inspect the "
+            "persisted MICE summary before retrying"
+        )
+    imputed_path = run_root / "processed" / "imputed_dataset.parquet"
+    if not imputed_path.is_file():
+        raise WorkflowExecutionError(
+            "imputation.mice reported completion without its imputed_dataset artifact"
+        )
+    imputed = pd.read_parquet(imputed_path)
+    return _persist_workflow_dataset_frame(
+        root=root,
+        draft=draft,
+        lineage=lineage,
+        step=step,
+        frame=imputed,
+        dataset_label="imputation_mice",
+        producer_step="imputation.mice",
+        summary=summary,
+    )
+
+
+def _execute_resampling_step(
+    *,
+    root: Path,
+    draft: WorkflowDraft,
+    lineage: Mapping[str, str],
+    step: Any,
+    frame: pd.DataFrame,
+) -> WorkflowStepResult:
+    method = str(step.operation_id).removeprefix("resample.")
+    from ..prediction import build_sampler
+
+    target = str(step.spec["target_column"])
+    features = [str(column) for column in step.spec["feature_columns"]]
+    missing = [column for column in [target, *features] if column not in frame.columns]
+    if missing:
+        raise WorkflowExecutionError(
+            f"{step.operation_id} source columns are missing: " + ", ".join(missing)
+        )
+    selected = frame[[*features, target]].copy()
+    if selected.isna().any().any():
+        raise WorkflowExecutionError(
+            f"{step.operation_id} refuses missing target/features; impute first"
+        )
+    sampler = build_sampler(
+        method,
+        model_type="prediction_resampling",
+        random_seed=int(step.spec.get("random_seed", 0)),
+    )
+    if sampler is None:
+        raise WorkflowExecutionError(
+            f"{step.operation_id} did not resolve a sampler; no-op resampling is forbidden"
+        )
+    x_resampled, y_resampled = sampler.fit_resample(
+        selected[features], selected[target]
+    )
+    output = pd.DataFrame(x_resampled, columns=features)
+    output[target] = y_resampled
+    if output.empty:
+        raise WorkflowExecutionError(f"{step.operation_id} produced an empty training dataset")
+    return _persist_workflow_dataset_frame(
+        root=root,
+        draft=draft,
+        lineage=lineage,
+        step=step,
+        frame=output,
+        dataset_label=f"resample_{method}",
+        producer_step=step.operation_id,
+        summary={
+            "method": method,
+            "source_row_count": int(len(frame)),
+            "output_row_count": int(len(output)),
+            "target_column": target,
+            "feature_columns": features,
+        },
+    )
+
+
+def _execute_prediction_step(
+    *,
+    root: Path,
+    draft: WorkflowDraft,
+    lineage: Mapping[str, str],
+    step: Any,
+    frame: pd.DataFrame,
+) -> WorkflowStepResult:
+    from ..prediction import run_prediction_model_v186
+    from ..predictive_research.contracts import SamplingSpecV1
+
+    model_type = str(step.operation_id).removeprefix("prediction.")
+    sampling_value = step.spec.get("sampling")
+    sampling = None
+    if sampling_value is not None:
+        try:
+            sampling = SamplingSpecV1(**dict(sampling_value))
+        except (TypeError, ValueError) as exc:
+            raise WorkflowExecutionError(
+                f"{step.operation_id} sampling does not match SamplingSpecV1"
+            ) from exc
+    fingerprint = str(step.fingerprint).replace(":", "_")
+    model_id = f"workflow_{model_type}_{fingerprint[:24]}"
+    run_root = root / "runs" / str(draft.target["run_id"])
+    result = run_prediction_model_v186(
+        frame,
+        run_root,
+        y=str(step.spec["y"]),
+        x=[str(column) for column in step.spec["x"]],
+        model_type=model_type,
+        model_id=model_id,
+        final_holdout_fraction=float(step.spec["final_holdout_fraction"]),
+        cv_folds=int(step.spec["cv_folds"]),
+        shuffle=bool(step.spec["shuffle"]),
+        random_seed=int(step.spec["random_seed"]),
+        data_structure=str(step.spec["data_structure"]),
+        entity_column=step.spec.get("entity_column"),
+        group_column=step.spec.get("group_column"),
+        time_column=step.spec.get("time_column"),
+        sampling=sampling,
+        inputs=[str(lineage["artifact_id"])],
+        imputation_method=step.spec.get("imputation_method"),
+        imputation_max_iter=int(step.spec.get("imputation_max_iter", 10)),
+        imputation_max_missing_rate=float(
+            step.spec.get("imputation_max_missing_rate", 0.4)
+        ),
+    )
+    records = _read_artifacts_index(run_root).get("artifacts", [])
+    artifact_ids = [
+        str(item["artifact_id"])
+        for item in records
+        if isinstance(item.get("artifact_id"), str)
+        and (
+            item["artifact_id"] == model_id
+            or item["artifact_id"].startswith(f"{model_id}_")
+        )
+    ]
+    if not artifact_ids:
+        raise WorkflowExecutionError(
+            f"{step.operation_id} completed without registered prediction artifacts"
+        )
+    return WorkflowStepResult(
+        artifact_ids=artifact_ids,
+        row_counts={"source": int(len(frame))},
+        result_fingerprint=str(step.fingerprint),
+        payload={"result": result, "model_type": model_type, "source": dict(lineage)},
+    )
+
+
+class _WorkflowPackRecorder:
+    """No-op recorder for pack-owned evidence; workflow lineage is separate."""
+
+    def __getattr__(self, _name: str):
+        return lambda *args, **kwargs: None
+
+
+def _execute_time_series_recipe(
+    *,
+    root: Path,
+    draft: WorkflowDraft,
+    lineage: Mapping[str, str],
+    step: Any,
+    frame: pd.DataFrame,
+) -> WorkflowStepResult:
+    recipe_id = str(step.operation_id).removeprefix("model.")
+    options = dict(step.spec["model_options"])
+    if recipe_id == "time_series.arma_garch":
+        options["dataset_ref"] = str(lineage["artifact_id"])
+        from ..engine.packs.arma_garch.runner import fit_from_context
+    elif recipe_id == "time_series.ets":
+        from ..engine.packs.ets.runner import fit_from_context
+    else:
+        raise WorkflowExecutionError(f"{step.operation_id} has no registered Recipe owner")
+    from ..engine.context import DataHandle, ModelingContext, RunEnv
+
+    source_artifact = str(lineage["artifact_id"])
+    context = ModelingContext(
+        data=DataHandle.of(
+            frame,
+            artifact_id=source_artifact,
+            provenance=(source_artifact,),
+        ),
+        y_col=str(options.get("value_column", "")),
+        x_cols=[],
+        requested_model_type=recipe_id,
+        artifacts={
+            "_model_options": options,
+            "_frames": {source_artifact: frame},
+            "_raw_inputs": [source_artifact],
+            "_upload_hash": str(lineage["sha256"]),
+        },
+    )
+    run_root = root / "runs" / str(draft.target["run_id"])
+    env = RunEnv(
+        run_root=run_root,
+        run_id=str(draft.target["run_id"]),
+        recorder=_WorkflowPackRecorder(),
+    )
+    model_id, result, _fitted = fit_from_context(context, env)
+    artifact_ids: list[str]
+    if recipe_id == "time_series.ets":
+        fingerprint = str(step.fingerprint).replace(":", "_")
+        artifact_id = f"workflow_{recipe_id.replace('.', '_')}_{fingerprint[:24]}"
+        relative = Path("artifacts") / "time_series" / f"{artifact_id}.json"
+        path = run_root / relative
+        envelope = {
+            "artifact_id": artifact_id,
+            "payload_schema": "workbench.recipe.time_series.ets",
+            "schema_version": 1,
+            "model_id": model_id,
+            "source": dict(lineage),
+            "result": result,
+        }
+        if path.exists():
+            if read_json(path) != envelope:
+                raise WorkflowExecutionError(
+                    f"{step.operation_id} result artifact is not deterministic"
+                )
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_json(path, envelope)
+        _ensure_runtime_artifact(
+            run_root,
+            artifact_id=artifact_id,
+            path=path,
+            artifact_type="model_result",
+            step=step.operation_id,
+            inputs=[source_artifact],
+        )
+        artifact_ids = [artifact_id]
+    else:
+        records = _read_artifacts_index(run_root).get("artifacts", [])
+        artifact_ids = [
+            str(item["artifact_id"])
+            for item in records
+            if isinstance(item.get("artifact_id"), str)
+            and item["artifact_id"].startswith("ts.")
+            and item.get("step") == "arma_garch"
+        ]
+        if "ts.artifact_manifest" not in artifact_ids:
+            raise WorkflowExecutionError(
+                "time_series.arma_garch owner returned without ts.artifact_manifest"
+            )
+    return WorkflowStepResult(
+        artifact_ids=artifact_ids,
+        row_counts={"source": int(len(frame))},
+        result_fingerprint=str(step.fingerprint),
+        payload={
+            "recipe_id": recipe_id,
+            "model_id": model_id,
+            "result": result,
+            "source": dict(lineage),
+        },
+    )
+
+
+def _execute_model_auto(
+    *,
+    root: Path,
+    draft: WorkflowDraft,
+    lineage: Mapping[str, str],
+    step: Any,
+    frame: pd.DataFrame,
+) -> WorkflowStepResult:
+    from ..engine.packs.loader import bootstrap_builtin_packs
+    from ..engine.registry import DEFAULT_BY_Y_TYPE
+    from ..router import detect_y_kind
+
+    outcomes = {
+        str(branch["outcome"])
+        for branch in step.spec.get("branches", [])
+        if isinstance(branch, Mapping) and branch.get("outcome")
+    }
+    if len(outcomes) != 1:
+        raise WorkflowExecutionError(
+            "model.auto requires exactly one target column across its branches"
+        )
+    outcome = next(iter(outcomes))
+    if outcome not in frame.columns:
+        raise WorkflowExecutionError(
+            f"model.auto target column is missing from the resolved frame: {outcome}"
+        )
+    bootstrap_builtin_packs()
+    y_type = detect_y_kind(frame, outcome).value
+    resolved_family = DEFAULT_BY_Y_TYPE.get(y_type)
+    if not isinstance(resolved_family, str) or not resolved_family:
+        raise WorkflowExecutionError(
+            f"model.auto has no registered model family for target type {y_type!r}"
+        )
+    resolved_spec = {**step.spec, "model_family": resolved_family}
+    resolved_step = replace(step, spec=resolved_spec)
+    result = _execute_model_genesis_branches(
+        root,
+        draft,
+        lineage,
+        frame,
+        resolved_step,
+        raw_source_frame=frame,
+    )
+    return WorkflowStepResult(
+        artifact_ids=list(result.artifact_ids),
+        row_counts=dict(result.row_counts),
+        empty_group_values=list(result.empty_group_values),
+        result_fingerprint=result.result_fingerprint,
+        payload={
+            **result.payload,
+            "resolved_model_family": resolved_family,
+            "resolved_y_type": y_type,
+        },
+    )
+
+
 def build_workflow_step_executor(
     project_root: Path | str,
     draft: WorkflowDraft,
@@ -983,6 +1554,54 @@ def build_workflow_step_executor(
                 artifact_ids=list(dict.fromkeys(artifact_ids)),
                 row_counts=row_counts,
             )
+        if dispatcher_key == "workbench.agent.workflow_runtime.statistical_named_test":
+            return _execute_named_statistical_step(
+                root=root,
+                draft=draft,
+                lineage=lineage,
+                step=step,
+                frame=step_frame,
+            )
+        if dispatcher_key == "workbench.agent.workflow_runtime.imputation":
+            return _execute_imputation_step(
+                root=root,
+                draft=draft,
+                lineage=lineage,
+                step=step,
+                frame=step_frame,
+            )
+        if dispatcher_key == "workbench.agent.workflow_runtime.resampling":
+            return _execute_resampling_step(
+                root=root,
+                draft=draft,
+                lineage=lineage,
+                step=step,
+                frame=step_frame,
+            )
+        if dispatcher_key == "workbench.agent.workflow_runtime.prediction_model":
+            return _execute_prediction_step(
+                root=root,
+                draft=draft,
+                lineage=lineage,
+                step=step,
+                frame=step_frame,
+            )
+        if dispatcher_key == "workbench.agent.workflow_runtime.time_series_recipe":
+            return _execute_time_series_recipe(
+                root=root,
+                draft=draft,
+                lineage=lineage,
+                step=step,
+                frame=step_frame,
+            )
+        if dispatcher_key == "workbench.agent.workflow_runtime.model_auto":
+            return _execute_model_auto(
+                root=root,
+                draft=draft,
+                lineage=lineage,
+                step=step,
+                frame=step_frame,
+            )
         if dispatcher_key == "workbench.services.genesis":
             return _execute_model_genesis_branches(
                 root,
@@ -1085,8 +1704,13 @@ def _execute_model_genesis_branches(
         # is exactly the immutable raw source; otherwise store the complete,
         # server-derived table for this branch.
         raw_frame = source_frame if raw_source_frame is None else raw_source_frame
+        source_is_workflow_target = (
+            str(lineage["artifact_id"]) == str(draft.target["artifact_id"])
+            and str(lineage["node_ref"]) == str(draft.target["node_ref"])
+        )
         use_original_upload = (
-            list(branch_frame.columns) == list(raw_frame.columns)
+            source_is_workflow_target
+            and list(branch_frame.columns) == list(raw_frame.columns)
             and branch_frame.equals(raw_frame)
         )
         if use_original_upload:
