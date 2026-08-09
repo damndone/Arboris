@@ -9,12 +9,13 @@ inspectable AI-operation record targeted for the report slice and v1.7.
 """
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import json
 import math
 import os
 import re
+import time
 from contextlib import contextmanager
 from threading import RLock
 from urllib.parse import urlparse
@@ -54,6 +55,7 @@ from ..report_contract import (
     JOURNAL_FULL_REPORT_STANDARD,
     ReportContractError,
     ReportPacketContract,
+    bind_report_figures,
     validate_report_packet,
     validate_report_response,
 )
@@ -153,8 +155,8 @@ def _public_config_base_url(config) -> str | None:
 # model may only reference numbers through [[c:ID]] markers, and the client
 # renders every marker from ITS OWN table (never from model output), so a
 # hallucinated number cannot become a chip. Figures use the same boundary:
-# the model receives numeric source context and emits only figure markers; the
-# serving/export layers resolve those markers to the run-owned artifacts.
+# the model receives numeric source context; Workbench binds packet-owned
+# figure markers after the narrative passes the report contract.
 _REPORT_PROMPT_HEADER = (
     "You are the report writer of a local Workbench. The JSON "
     "packet below contains a fact_table: the ONLY numbers you may use. Each "
@@ -169,13 +171,11 @@ _REPORT_PROMPT_HEADER = (
     "- Never invent, round differently, or combine numbers not present in "
     "the fact_table. If something is missing, name the gap in Limitations "
     "instead of guessing.\n"
-    "- Use only the supplied figures. Include every supplied figure exactly "
-    "once in the Markdown and reference it with the exact marker "
-    "[[fig:artifact_id]]. "
-    "Never invent an artifact_id, never use a pixel-level claim, and do not "
-    "replace a figure marker with a data URI or an image. If a figure's "
-    "source is missing, "
-    "say so instead of guessing.\n"
+    "- Use only the supplied figures as server-owned evidence. Do not emit "
+    "any figure marker, artifact_id, data URI, or image in the Markdown; "
+    "Workbench appends each supplied figure marker exactly once after the "
+    "narrative passes validation. Never invent a figure or make a pixel-level "
+    "claim. If a figure's source is missing, say so instead of guessing.\n"
     "- Advisory text only: no executable actions, no code, no backend payloads.\n"
     "- Write in the language of the user's instruction."
 )
@@ -183,8 +183,9 @@ _REPORT_PROMPT_HEADER = (
 _REPORT_CORRECTION_PROMPT = (
     "Your previous report response violated the Workbench report contract. "
     "Rewrite the complete report in Markdown. Fix every listed violation, "
-    "preserve the supplied evidence boundary, and include each supplied figure "
-    "marker exactly once. Do not repeat any figure marker. For journal_full_v1, "
+    "preserve the supplied evidence boundary, and do not emit any figure "
+    "marker. Workbench binds each supplied figure marker after validation; do "
+    "not emit or repeat any figure marker. For journal_full_v1, "
     "keep every required heading, state the research question and limitation "
     "explicitly in the Abstract, and state the evidence or interpretation boundary "
     "explicitly in Limitations. Every numeric token must either be removed or be "
@@ -199,7 +200,8 @@ _REPORT_NUMERIC_FREE_CORRECTION_PROMPT = (
     "This is the final conservative correction for a journal_full_v1 report. "
     "Return the complete report, not an explanation of the correction. Keep all "
     "required headings, substantive qualitative interpretation, exact supplied "
-    "fact citations, and each supplied figure marker exactly once. The response "
+    "fact citations, and no figure marker. Workbench binds supplied figure "
+    "markers after validation. The response "
     "must contain no numeric tokens anywhere in prose: no digits, decimals, "
     "percentages, sample counts, p-values, confidence levels, or rounded estimates. "
     "Delete every unsupported numeric statement rather than paraphrasing or "
@@ -236,7 +238,7 @@ _REPORT_JOURNAL_PROMPT_ADDENDUM = (
     "capability named in the packet must be discussed in its corresponding "
     "section. Never round a supplied value. Before returning, verify that every "
     "required heading is present, every numeric token is immediately followed by "
-    "[[c:ID]], and every supplied figure marker appears exactly once. In "
+    "[[c:ID]], and no figure marker is emitted. In "
     "Limitations, use the literal phrase 'evidence boundary' and state that the "
     "report does not establish causal effects unless the packet explicitly provides "
     "a causal design."
@@ -874,7 +876,12 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
         {"role": "system", "content": _build_system_prompt(request)},
         {"role": "user", "content": _build_user_content(request)},
     ]
-    result = _chat_or_api_error(messages, config)
+    report_retry_budget = _ReportRetryBudget() if report_contract is not None else None
+    result = _chat_or_api_error(
+        messages,
+        config,
+        report_retry_budget=report_retry_budget,
+    )
     text = result["text"]
     report_quality: ReportQualityResult | None = None
     if report_contract is not None:
@@ -901,7 +908,11 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
                     + "; ".join(first_error.violations)[:1_000],
                 },
             ]
-            retry_result = _chat_or_api_error(retry_messages, config)
+            retry_result = _chat_or_api_error(
+                retry_messages,
+                config,
+                report_retry_budget=report_retry_budget,
+            )
             final_retry_succeeded = False
             try:
                 text, report_quality = _validate_report_text(
@@ -930,7 +941,9 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
                         },
                     ]
                     final_retry_result = _chat_or_api_error(
-                        final_retry_messages, config
+                        final_retry_messages,
+                        config,
+                        report_retry_budget=report_retry_budget,
                     )
                     try:
                         text, report_quality = _validate_report_text(
@@ -956,6 +969,14 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
                         details={
                             "retry_attempted": True,
                             "retry_count": retry_count,
+                            "transport_retry_attempted": bool(
+                                report_retry_budget and report_retry_budget.attempts
+                            ),
+                            "transport_retry_count": (
+                                report_retry_budget.attempts
+                                if report_retry_budget is not None
+                                else 0
+                            ),
                             "violations": list(final_error.violations),
                             "report_quality": (
                                 _quality_response_payload(failed_quality)
@@ -985,6 +1006,15 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
 # raising the default, which would make every small Ask AI call hang far longer
 # against a dead provider.
 REPORT_MODE_TIMEOUT_S = 300.0
+REPORT_TRANSPORT_RETRY_BACKOFF_S = 0.05
+
+
+@dataclass
+class _ReportRetryBudget:
+    """One idempotent transport retry shared by all Report provider calls."""
+
+    remaining: int = 1
+    attempts: int = 0
 
 
 def _timeout_for_mode(mode: str, config):
@@ -993,7 +1023,12 @@ def _timeout_for_mode(mode: str, config):
     return replace(config, timeout_s=min(REPORT_MODE_TIMEOUT_S, MAX_TIMEOUT_S))
 
 
-def _chat_or_api_error(messages: list[dict[str, Any]], config) -> dict[str, Any]:
+def _chat_or_api_error(
+    messages: list[dict[str, Any]],
+    config,
+    *,
+    report_retry_budget: _ReportRetryBudget | None = None,
+) -> dict[str, Any]:
     try:
         return chat_completion(messages, config)
     except LLMNotConfiguredError as exc:
@@ -1001,11 +1036,50 @@ def _chat_or_api_error(messages: list[dict[str, Any]], config) -> dict[str, Any]
             status_code=503, code="LLM_NOT_CONFIGURED", message=str(exc)
         ) from exc
     except LLMUpstreamError as exc:
+        if (
+            report_retry_budget is not None
+            and exc.retryable
+            and report_retry_budget.remaining > 0
+        ):
+            report_retry_budget.remaining -= 1
+            report_retry_budget.attempts += 1
+            time.sleep(REPORT_TRANSPORT_RETRY_BACKOFF_S)
+            try:
+                return chat_completion(messages, config)
+            except LLMNotConfiguredError as retry_error:
+                raise WorkbenchAPIError(
+                    status_code=503,
+                    code="LLM_NOT_CONFIGURED",
+                    message=str(retry_error),
+                ) from retry_error
+            except LLMUpstreamError as retry_error:
+                raise WorkbenchAPIError(
+                    status_code=502,
+                    code="LLM_UPSTREAM_ERROR",
+                    message=str(retry_error),
+                    details={
+                        "upstream_status": retry_error.upstream_status,
+                        "retryable": retry_error.retryable,
+                        "transport_retry_attempted": True,
+                        "transport_retry_count": report_retry_budget.attempts,
+                    },
+                ) from retry_error
         raise WorkbenchAPIError(
             status_code=502,
             code="LLM_UPSTREAM_ERROR",
             message=str(exc),
-            details={"upstream_status": exc.upstream_status},
+            details={
+                "upstream_status": exc.upstream_status,
+                "retryable": exc.retryable,
+                "transport_retry_attempted": bool(
+                    report_retry_budget and report_retry_budget.attempts
+                ),
+                "transport_retry_count": (
+                    report_retry_budget.attempts
+                    if report_retry_budget is not None
+                    else 0
+                ),
+            },
         ) from exc
 
 
@@ -1088,8 +1162,17 @@ def _validate_report_text(
     contract: ReportPacketContract,
 ) -> tuple[str, ReportQualityResult | None]:
     if contract.report_standard is None:
-        return validate_report_response(text, contract), None
-    quality = validate_report_response_quality(text, contract)
+        narrative = validate_report_response(
+            text,
+            contract,
+            require_figure_markers=False,
+        )
+        return bind_report_figures(narrative, contract), None
+    quality = validate_report_response_quality(
+        text,
+        contract,
+        require_figure_markers=False,
+    )
     if not quality.is_exportable:
         messages = [violation.message for violation in quality.violations]
         error = ReportContractError(
@@ -1100,7 +1183,12 @@ def _validate_report_text(
         # second attempt can tell the user which sections/evidence are missing.
         setattr(error, "quality", quality)
         raise error
-    return quality.normalized_text, quality
+    bound = bind_report_figures(quality.normalized_text, contract)
+    # Re-run the quality adapter against the final server-owned response so
+    # figure_counts and normalized_text describe exactly what the consumer
+    # receives, while the provider phase above remains marker-free.
+    final_quality = validate_report_response_quality(bound, contract)
+    return bound, final_quality
 
 
 def _quality_response_payload(result: ReportQualityResult) -> dict[str, Any]:

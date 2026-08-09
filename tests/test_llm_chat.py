@@ -309,6 +309,24 @@ class TestUpstreamFailures:
         error = response.json()["error"]
         assert error["code"] == "LLM_UPSTREAM_ERROR"
         assert error["details"]["upstream_status"] == status
+        assert error["details"]["transport_retry_attempted"] is False
+
+    def test_non_report_transient_transport_failure_is_not_retried(
+        self, api: TestClient, configured_env, monkeypatch
+    ):
+        seen = _install_upstream(
+            monkeypatch,
+            lambda request: (_ for _ in ()).throw(httpx.ReadError("connection reset")),
+        )
+
+        response = api.post("/llm/chat", json=_chat_body())
+
+        assert response.status_code == 502
+        details = response.json()["error"]["details"]
+        assert details["transport_retry_attempted"] is False
+        assert details["transport_retry_count"] == 0
+        assert details["retryable"] is True
+        assert len(seen) == 1
 
     def test_api_key_never_leaks_into_error(
         self, api: TestClient, configured_env, monkeypatch
@@ -400,13 +418,11 @@ class TestReportMode:
     def test_report_mode_accepted(self, api: TestClient, configured_env, monkeypatch):
         _install_upstream(
             monkeypatch,
-            lambda request: _ok_upstream(
-                "# Report [[c:c1]]\n[[fig:coef_plot]]"
-            ),
+            lambda request: _ok_upstream("# Report [[c:c1]]"),
         )
         response = api.post("/llm/chat", json=self._report_body())
         assert response.status_code == 200
-        assert response.json()["text"].startswith("# Report")
+        assert response.json()["text"] == "# Report [[c:c1]]\n\n[[fig:coef_plot]]"
 
     def test_invalid_report_is_retried_once_with_contract_correction(
         self, api: TestClient, configured_env, monkeypatch
@@ -414,7 +430,7 @@ class TestReportMode:
         responses = iter(
             [
                 _ok_upstream("# Report [[c:source:coef_plot]]"),
-                _ok_upstream("# Report [[c:c1]]\n[[fig:coef_plot]]"),
+                _ok_upstream("# Report [[c:c1]]"),
             ]
         )
         seen = _install_upstream(monkeypatch, lambda request: next(responses))
@@ -422,20 +438,57 @@ class TestReportMode:
         response = api.post("/llm/chat", json=self._report_body())
 
         assert response.status_code == 200, response.text
-        assert response.json()["text"] == "# Report [[c:c1]]\n[[fig:coef_plot]]"
+        assert response.json()["text"] == "# Report [[c:c1]]\n\n[[fig:coef_plot]]"
         assert len(seen) == 2
         retry_messages = json.loads(seen[1].content)["messages"]
         assert "contract" in retry_messages[-1]["content"].lower()
-        assert "do not repeat any figure marker" in retry_messages[-1]["content"].lower()
+        assert "do not emit or repeat any figure marker" in retry_messages[-1]["content"].lower()
         assert "delete the entire sentence" in retry_messages[-1]["content"].lower()
         assert "evidence boundary" in retry_messages[-1]["content"].lower()
+
+    def test_report_mode_retries_one_transient_transport_failure(
+        self, api, configured_env, monkeypatch
+    ):
+        attempts = 0
+
+        def handler(request: httpx.Request):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise httpx.ReadError("connection reset")
+            return _ok_upstream("# Report [[c:c1]]")
+
+        _install_upstream(monkeypatch, handler)
+
+        response = api.post("/llm/chat", json=self._report_body())
+
+        assert response.status_code == 200, response.text
+        assert response.json()["text"] == "# Report [[c:c1]]\n\n[[fig:coef_plot]]"
+        assert attempts == 2
+
+    def test_report_mode_exhausts_one_transient_transport_retry(
+        self, api, configured_env, monkeypatch
+    ):
+        seen = _install_upstream(
+            monkeypatch,
+            lambda request: (_ for _ in ()).throw(httpx.ReadError("connection reset")),
+        )
+
+        response = api.post("/llm/chat", json=self._report_body())
+
+        assert response.status_code == 502
+        details = response.json()["error"]["details"]
+        assert details["transport_retry_attempted"] is True
+        assert details["transport_retry_count"] == 1
+        assert details["retryable"] is True
+        assert len(seen) == 2
 
     def test_invalid_report_after_retry_fails_closed(
         self, api: TestClient, configured_env, monkeypatch
     ):
         seen = _install_upstream(
             monkeypatch,
-            lambda request: _ok_upstream("# Report [[c:c1]]"),
+            lambda request: _ok_upstream("# Report [[c:c99]]"),
         )
 
         response = api.post("/llm/chat", json=self._report_body())
@@ -481,16 +534,16 @@ class TestReportMode:
     ):
         seen = _install_upstream(
             monkeypatch,
-            lambda request: _ok_upstream(
-                "# Report [[c:c1]]\n[[fig:coef_plot]]"
-            ),
+            lambda request: _ok_upstream("# Report [[c:c1]]"),
         )
         api.post("/llm/chat", json=self._report_body())
         system_prompt = json.loads(seen[0].content)["messages"][0]["content"]
         assert "[[c:ID]]" in system_prompt
         assert "fact_table" in system_prompt
         assert "\"c1\"" in system_prompt and "0.86" in system_prompt
-        assert "[[fig:artifact_id]]" in system_prompt
+        assert "do not emit any figure marker" in system_prompt.lower()
+        assert "workbench appends each supplied figure marker" in system_prompt.lower()
+        assert "[[fig:artifact_id]]" not in system_prompt
         assert "coef_plot" in system_prompt
         assert "numeric source summary" in system_prompt
         # the node-context header must NOT leak into report mode
@@ -541,7 +594,6 @@ Regression estimate 0.86 [[c:c1]] and covariance HC1 [[c:c2]]. The positive asso
 
 ### Interpretation and implications
 The findings indicate an empirical association, not a causal effect, and the implication is limited to the supplied evidence.
-[[fig:coef_plot]]
 
 ## Diagnostics and robustness
 Diagnostics and robustness are discussed.

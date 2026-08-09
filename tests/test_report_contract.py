@@ -4,7 +4,9 @@ import pytest
 
 from workbench.report_contract import (
     ReportContractError,
+    bind_report_figures,
     validate_report_packet,
+    validate_report_narrative_response,
     validate_report_response,
 )
 
@@ -41,6 +43,38 @@ def test_response_normalizes_only_existing_numeric_fact_shorthand() -> None:
     assert isinstance(normalized, str)
     assert normalized == (
         "estimate 2.0 [[c:c1]]; p 0.01 [[c:c5]]\n"
+        "[[fig:coef_plot]]\n[[fig:event_study]]"
+    )
+
+
+def test_narrative_phase_accepts_citations_without_provider_figures() -> None:
+    packet = validate_report_packet(_packet())
+
+    normalized = validate_report_narrative_response(
+        "estimate 2.0 [[c:1]]; p 0.01 [[c:5]]",
+        packet,
+    )
+
+    assert normalized == "estimate 2.0 [[c:c1]]; p 0.01 [[c:c5]]"
+
+
+def test_narrative_phase_rejects_any_provider_figure_marker() -> None:
+    packet = validate_report_packet(_packet())
+
+    with pytest.raises(ReportContractError, match="provider figure marker"):
+        validate_report_narrative_response(
+            "estimate 2.0 [[c:c1]]\n[[fig:coef_plot]]",
+            packet,
+        )
+
+
+def test_server_figure_binding_uses_packet_order_and_validates_exact_once() -> None:
+    packet = validate_report_packet(_packet())
+
+    bound = bind_report_figures("estimate 2.0 [[c:c1]]", packet)
+
+    assert bound == (
+        "estimate 2.0 [[c:c1]]\n\n"
         "[[fig:coef_plot]]\n[[fig:event_study]]"
     )
 
