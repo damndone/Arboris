@@ -1109,7 +1109,17 @@ def test_the_lineage_case_registry_covers_every_consuming_operation() -> None:
     write down why it records no source at all.
     """
 
-    covered = set(_LINEAGE_META_STEPS) | set(_LINEAGE_META_UNRECORDED)
+    # P7 is declaration-driven and has a separate all-operation workflow
+    # provenance guard in test_p7_workflow_integration.py. Keep it in this
+    # coverage equation without pretending its 64 heterogeneous fixtures fit
+    # the legacy model-shaped plan below.
+    from workbench.agent.p7_pack_registry import p7_pack_registry
+
+    covered = (
+        set(_LINEAGE_META_STEPS)
+        | set(_LINEAGE_META_UNRECORDED)
+        | set(p7_pack_registry.operation_ids())
+    )
 
     assert covered == set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME)
     assert not (set(_LINEAGE_META_STEPS) & set(_LINEAGE_META_UNRECORDED))

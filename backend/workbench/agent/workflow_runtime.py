@@ -60,9 +60,9 @@ _NUMERIC_DERIVATION_SCHEMA = "workflow-derived-numeric.v1"
 # on resume, and because every dataset-producing operation will publish it.
 _PRODUCED_DATASET_SCHEMA = "workflow-produced-dataset.v1"
 
-# The artifact types a declared post-estimation step can persist. Both are
-# already registered evidence; this is the read side of the same contract.
-POST_ESTIMATION_ARTIFACT_TYPES = ("post_estimation", "statistical_test")
+# The artifact types a declared workflow-analysis step can persist. All are
+# registered evidence; this is the read side of the same contract.
+POST_ESTIMATION_ARTIFACT_TYPES = ("post_estimation", "statistical_test", "p7_analysis")
 
 # A product surface renders these inline, so the projection stays bounded
 # rather than growing with a project's workflow history.
@@ -75,12 +75,13 @@ def collect_post_estimation_results(
     *,
     limit: int = MAX_PROJECTED_POST_ESTIMATION_RESULTS,
 ) -> list[dict[str, Any]]:
-    """Project durable post-estimation evidence that belongs to one run.
+    """Project durable workflow-analysis evidence that belongs to one run.
 
     A completed workflow is not an answered question: the step writes a
     provenance-carrying artifact, but nothing renders it, so the user who
-    asked never sees the number. This is the read side that a product surface
-    consumes.
+    asked never sees the number. This is the read side that product and Agent
+    surfaces consume. P7 pack results use the same projection so a composed
+    statistical call is not executable-but-invisible.
 
     Relevance has two identities on purpose. The artifact is persisted on the
     workflow's *source* run, while the model it describes is a *child* run --
@@ -144,14 +145,40 @@ def _read_post_estimation_entry(
     result = payload.get("result")
     if not isinstance(source, Mapping) or not isinstance(result, Mapping):
         return None
+    artifact_type = str(record.get("artifact_type", ""))
+    if artifact_type == "p7_analysis":
+        required_source = {
+            "run_id",
+            "node_ref",
+            "artifact_id",
+            "sha256",
+            "workflow_id",
+            "workflow_step_id",
+            "workflow_step_fingerprint",
+            "operation_id",
+            "pack_family",
+        }
+        if payload.get("schema_version") != "workbench.workflow.p7-pack/v1":
+            raise WorkflowExecutionError("registered P7 analysis artifact has an invalid schema")
+        if set(required_source) - set(source):
+            raise WorkflowExecutionError("registered P7 analysis artifact has incomplete provenance")
+        if any(not isinstance(source.get(field_name), str) or not source[field_name] for field_name in required_source):
+            raise WorkflowExecutionError("registered P7 analysis artifact has invalid provenance")
+        if result.get("operation_id") != source.get("operation_id"):
+            raise WorkflowExecutionError("registered P7 analysis artifact operation identity is inconsistent")
     return {
         "artifact_id": str(record.get("artifact_id", "")),
-        "artifact_type": str(record.get("artifact_type", "")),
-        "operation_id": str(record.get("step", "")),
+        "artifact_type": artifact_type,
+        "operation_id": str(source.get("operation_id") or record.get("step", "")),
         "run_id": str(source.get("run_id", "")),
         "model_run_id": str(source.get("model_run_id", "")),
         "workflow_id": str(source.get("workflow_id", "")),
         "workflow_step_id": str(source.get("workflow_step_id", "")),
+        **(
+            {"pack_family": str(source["pack_family"]), "source_sha256": str(source["sha256"])}
+            if artifact_type == "p7_analysis"
+            else {}
+        ),
         "result": dict(result),
     }
 
@@ -849,6 +876,32 @@ def build_workflow_step_executor(
         # deliberately not forwarded past this point: every branch below
         # receives `lineage` and nothing else that could name the target.
         lineage = _lineage_source(draft, step, source_context, previous)
+        if dispatcher_key == "workbench.agent.workflow_runtime.p7_pack":
+            from .p7_pack_registry import p7_pack_registry
+
+            operation = p7_pack_registry.get(operation_id)
+            request = {
+                "operation_id": operation_id,
+                "input_mode": step.spec.get("input_mode"),
+                "column_bindings": step.spec.get("column_bindings"),
+                "options": step.spec.get("options"),
+            }
+            try:
+                operation.validate(request)
+                result = operation.execute(step_frame, request)
+                operation.validate_result(result)
+            except Exception as exc:
+                raise WorkflowExecutionError(
+                    f"P7 pack {operation_id} failed closed: {exc}"
+                ) from exc
+            return _persist_p7_pack_result(
+                root,
+                draft,
+                step,
+                result=result,
+                lineage=lineage,
+                pack_family=operation.pack_family,
+            )
         if dispatcher_key == "workbench.agent.workflow_runtime.statistical_explore" and "plots" not in step.spec:
             return _exploration_step(
                 root=root,
@@ -1562,6 +1615,77 @@ def _persist_model_post_estimation_result(
         row_counts={},
         result_fingerprint=str(step.fingerprint),
         payload={"result": dict(result), "model_run_id": model_run_id},
+    )
+
+
+def _persist_p7_pack_result(
+    root: Path,
+    draft: WorkflowDraft,
+    step: Any,
+    *,
+    result: Mapping[str, Any],
+    lineage: Mapping[str, str],
+    pack_family: str,
+) -> WorkflowStepResult:
+    """Persist one bounded P7 result with deterministic source provenance."""
+
+    run_root = root / "runs" / str(draft.target["run_id"])
+    token = str(step.fingerprint).removeprefix("sha256:")[:24]
+    operation_token = str(step.operation_id).replace(".", "_")
+    artifact_id = f"workflow_p7_{operation_token}_{token}"
+    artifact_path = run_root / "artifacts" / "p7_analysis" / f"{artifact_id}.json"
+    payload = {
+        "schema_version": "workbench.workflow.p7-pack/v1",
+        "source": {
+            "run_id": str(draft.target["run_id"]),
+            "node_ref": str(lineage["node_ref"]),
+            "artifact_id": str(lineage["artifact_id"]),
+            "sha256": str(lineage["sha256"]),
+            "workflow_id": draft.workflow_id,
+            "workflow_step_id": step.step_id,
+            "workflow_step_fingerprint": step.fingerprint,
+            "operation_id": step.operation_id,
+            "pack_family": pack_family,
+        },
+        "result": dict(result),
+    }
+    if artifact_path.exists():
+        if read_json(artifact_path) != payload:
+            raise WorkflowExecutionError("P7 analysis artifact path is occupied")
+    else:
+        write_json(artifact_path, payload)
+    index = _read_artifacts_index(run_root)
+    existing = [
+        item for item in index.get("artifacts", []) if item.get("artifact_id") == artifact_id
+    ]
+    if len(existing) > 1:
+        raise WorkflowExecutionError("P7 analysis artifact identity is duplicated")
+    if not existing:
+        register_artifact(
+            run_root,
+            artifact_id,
+            artifact_path,
+            "p7_analysis",
+            str(step.operation_id),
+            [str(lineage["artifact_id"])],
+        )
+    else:
+        record = existing[0]
+        if (
+            record.get("artifact_type") != "p7_analysis"
+            or record.get("path") != artifact_path.relative_to(run_root).as_posix()
+        ):
+            raise WorkflowExecutionError("P7 analysis artifact identity is inconsistent")
+    row_counts: dict[str, int] = {}
+    for field_name in ("n_observations", "n_rows", "n_units"):
+        value = result.get(field_name)
+        if type(value) is int and value >= 0:
+            row_counts[field_name] = value
+    return WorkflowStepResult(
+        artifact_ids=[artifact_id],
+        row_counts=row_counts,
+        result_fingerprint=str(step.fingerprint),
+        payload={"result": dict(result)},
     )
 
 

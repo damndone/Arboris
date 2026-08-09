@@ -1,0 +1,35 @@
+{
+  "zip": {
+    "seed": 7108,
+    "n": 600,
+    "zero_intercept": -0.35,
+    "zero_slope": 0.45,
+    "count_intercept": 0.25,
+    "count_slope": 0.3
+  },
+  "zinb": {
+    "seed": 7109,
+    "n": 700,
+    "zero_intercept": -0.45,
+    "zero_slope": 0.4,
+    "count_intercept": 0.2,
+    "count_slope": 0.25,
+    "alpha": 0.55
+  },
+  "hurdle": {
+    "seed": 7110,
+    "n": 650,
+    "positive_intercept": -0.25,
+    "positive_slope": 0.55,
+    "count_intercept": 0.35,
+    "count_slope": 0.25,
+    "alpha": 0.65
+  },
+  "beta": {
+    "seed": 7111,
+    "n": 500,
+    "mean_intercept": 0.2,
+    "mean_slope": 0.55,
+    "precision": 24.0
+  }
+}

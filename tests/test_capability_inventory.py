@@ -244,11 +244,12 @@ def test_the_two_closed_operations_are_explicitly_exempt() -> None:
 def test_natural_language_reachability_guard_pins_current_truth() -> None:
     """Pin today's reachability facts as an intentional change record.
 
-    This test is expected to go red when P5 wires a currently missing route.
-    For example, one newly reachable capability would change
-    ``(54, 4, 30, 34, 2, 18)`` to ``(54, 5, 30, 35, 2, 17)``. That is not a
-    stale test: the counts and gap IDs must be updated in the same deliberate
-    change that closes the gap, rather than silently weakening this record.
+        This test is expected to go red when P5 or P7 wires a currently missing
+        route. P7's declaration-driven adoption deliberately changed the pinned
+        truth from ``(54, 4, 30, 34, 2, 18)`` to
+        ``(118, 4, 94, 98, 2, 18)``. That is not a stale test: the counts and
+        gap IDs must be updated in the same deliberate change that closes a gap,
+        rather than silently weakening this record.
     """
 
     from workbench.agent.capability_contract import capability_reachability_guard
@@ -262,7 +263,7 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (54, 4, 30, 34, 2, 18)
+    ) == (118, 4, 94, 98, 2, 18)
     assert {item.capability_id for item in report.gaps} == {
         "model.time_series.arma_garch",
         "model.time_series.ets",
@@ -348,8 +349,8 @@ def test_unwired_model_selector_and_model_families_remain_real_gaps() -> None:
 def test_a_step_identity_is_one_capability_carrying_two_paths() -> None:
     """An operation that is also a step is not two capabilities.
 
-    Ten operation ids appear both as a top-level proposal surface and as a
-    workflow step. Counting them twice would inflate the denominator of any
+        Operation ids appear both as a top-level proposal surface and as a
+        workflow step. Counting them twice would inflate the denominator of any
     "how much is reachable" claim; that is what `proposed_by` and
     `composable_as` are two tuples for.
     """
@@ -359,7 +360,9 @@ def test_a_step_identity_is_one_capability_carrying_two_paths() -> None:
     from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
 
     operations = [
-        item for item in capability_inventory() if item.kind == "data_operation"
+        item
+        for item in capability_inventory()
+        if item.kind in {"data_operation", "pack"}
     ]
     operation_ids = set(OperationRegistry().operation_ids())
 

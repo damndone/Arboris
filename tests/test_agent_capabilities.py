@@ -39,26 +39,13 @@ def test_registered_operation_exposes_capability_metadata(
 
 
 def test_capability_projection_is_sorted_json_safe_and_secret_free() -> None:
+    """The projection stays sorted as live workflow declarations grow."""
+
     capabilities = OperationRegistry().capabilities()
 
-    assert [item["operation_id"] for item in capabilities] == [
-        "code.execute",
-        "data.column.cast",
-        "data.columns.cast",
-        "graph.fork",
-        "model.custom",
-        "model.genesis",
-        "model.joint_f_test",
-        "model.quadratic_stationary_point",
-        "model.rerun",
-        "model.white_test",
-        "operation.multi_step",
-        "report.compose",
-        "statistical.derive_boolean",
-        "statistical.derive_numeric",
-        "statistical.derived_group_summarize",
-        "statistical.explore",
-    ]
+    assert [item["operation_id"] for item in capabilities] == sorted(
+        OperationRegistry().operation_ids()
+    )
     assert all(isinstance(item["executor"], str) for item in capabilities)
     assert all("api_key" not in json.dumps(item) for item in capabilities)
     assert all("<function" not in json.dumps(item) for item in capabilities)

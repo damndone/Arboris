@@ -356,6 +356,8 @@ def pack_step_contract(
         required=tuple(required),
         field_types=dict(field_types),
         field_enums=dict(field_enums or {}),
+        semantic_validator_key="p7.pack",
+        column_extractor_key="p7.pack",
         output_schema_ref=output_schema_ref,
         dispatcher_key=dispatcher_key,
         ui_description=summary,
@@ -1927,6 +1929,10 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
     ),
 })
 
+from .p7_pack_registry import p7_workflow_step_contracts  # noqa: E402
+
+
+WORKFLOW_STEP_SPEC_CONTRACTS.update(p7_workflow_step_contracts())
 _refresh_workflow_contract_views()
 
 
@@ -2073,6 +2079,20 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
         for selector in spec.get("term_selectors", []) or []:
             if isinstance(selector, Mapping) and selector.get("column"):
                 columns.add(str(selector["column"]))
+    elif extractor_key == "p7.pack":
+        from .p7_pack_registry import p7_pack_registry
+
+        operation = p7_pack_registry.get(operation_id)
+        columns.update(
+            operation.extract_columns(
+                {
+                    "operation_id": operation_id,
+                    "input_mode": spec.get("input_mode"),
+                    "column_bindings": spec.get("column_bindings"),
+                    "options": spec.get("options"),
+                }
+            )
+        )
     return columns
 
 
@@ -2113,6 +2133,24 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
         _validate_declared_field_types(operation_id, spec, contract)
     validator_key = contract.semantic_validator_key if contract is not None else None
     if validator_key == "capability_factory.custom_operation":
+        return
+    if validator_key == "p7.pack":
+        from .p7_pack_registry import p7_pack_registry
+
+        try:
+            operation = p7_pack_registry.get(operation_id)
+            operation.validate(
+                {
+                    "operation_id": operation_id,
+                    "input_mode": spec.get("input_mode"),
+                    "column_bindings": spec.get("column_bindings"),
+                    "options": spec.get("options"),
+                }
+            )
+        except Exception as exc:
+            raise OperationValidationError(
+                f"invalid {operation_id} P7 pack spec: {exc}"
+            ) from exc
         return
     if validator_key == "statistical.exploration":
         if "plots" in spec:

@@ -1,0 +1,15 @@
+{
+  "balanced": [
+    {"unit": "t1", "treated": 1, "outcome": 10.0, "x": -1.0, "z": 0.0},
+    {"unit": "t2", "treated": 1, "outcome": 12.0, "x": 0.0, "z": 1.0},
+    {"unit": "t3", "treated": 1, "outcome": 14.0, "x": 1.0, "z": 2.0},
+    {"unit": "c1", "treated": 0, "outcome": 8.0, "x": -1.1, "z": 0.0},
+    {"unit": "c2", "treated": 0, "outcome": 10.0, "x": 0.1, "z": 1.0},
+    {"unit": "c3", "treated": 0, "outcome": 12.0, "x": 1.2, "z": 2.0}
+  ],
+  "tie": [
+    {"unit": "t1", "treated": 1, "outcome": 5.0, "x": 0.0},
+    {"unit": "c1", "treated": 0, "outcome": 3.0, "x": -1.0},
+    {"unit": "c2", "treated": 0, "outcome": 4.0, "x": 1.0}
+  ]
+}
