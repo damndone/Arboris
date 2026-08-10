@@ -7,7 +7,7 @@ import json
 import math
 from pathlib import Path
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Iterable, Protocol
 
 from ..artifacts import read_json, sha256_file
@@ -26,6 +26,8 @@ from ..analysis_loop.plan import PlanDiff
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
 from ..predictive_research.consumer_projection import read_prediction_evidence_from_run_root
+from ..data_operations import _read_frame
+from ..graph_model import NodeKind
 from .context_compiler import resolve_registered_artifact
 from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .recipes.registry import build_option_vocabulary, validate_model_options_patch
@@ -138,6 +140,13 @@ class InspectProjectDatasetSchemaRequest:
     """A bounded, project-wide lookup of one persisted dataset schema."""
 
     run_id: str
+
+
+@dataclass(frozen=True)
+class ListProjectDatasetsRequest:
+    """List graph-backed dataset identities with optional bounded detail."""
+
+    detail_for: tuple[dict[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -546,7 +555,68 @@ class NodeOperationContextProvider:
                 ],
             }
 
+        def list_project_datasets(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            raw_detail = arguments.get("detail_for", [])
+            if not isinstance(raw_detail, list) or len(raw_detail) > 8:
+                raise ToolVisibleError(
+                    "PROJECT_DATASET_DETAIL_INVALID: detail_for must contain at most eight run/node pairs."
+                )
+            detail_for: list[dict[str, str]] = []
+            for index, item in enumerate(raw_detail):
+                if not isinstance(item, dict) or set(item) != {"run_id", "node_id"}:
+                    raise ToolVisibleError(
+                        "PROJECT_DATASET_DETAIL_INVALID: "
+                        f"detail_for[{index}] must contain exactly run_id and node_id."
+                    )
+                run_id = item.get("run_id")
+                node_id = item.get("node_id")
+                if not isinstance(run_id, str) or not run_id.strip() or not isinstance(node_id, str) or not node_id.strip():
+                    raise ToolVisibleError(
+                        "PROJECT_DATASET_DETAIL_INVALID: detail_for identities must be non-empty strings."
+                    )
+                detail_for.append({"run_id": run_id, "node_id": node_id})
+            return self.list_project_datasets(
+                ListProjectDatasetsRequest(detail_for=tuple(detail_for))
+            )
+
         return [
+            ToolDefinition(
+                tool_id="list_project_datasets",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "detail_for": {
+                            "type": "array",
+                            "maxItems": 8,
+                            "items": {
+                                "type": "object",
+                                "required": ["run_id", "node_id"],
+                                "properties": {
+                                    "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                                    "node_id": {"type": "string", "minLength": 1, "maxLength": 300},
+                                },
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=16384,
+                handler=list_project_datasets,
+                description=(
+                    "List real graph-backed dataset run/node/artifact identities. "
+                    "Use detail_for for at most eight datasets when dtype, unique-count, "
+                    "and nonzero missing-rate facts are needed."
+                ),
+            ),
             ToolDefinition(
                 tool_id="inspect_data_schema",
                 version="v1",
@@ -1642,6 +1712,195 @@ class NodeOperationContextProvider:
             "result_summary": result_summary,
             "omitted_sections": omitted_sections,
         }
+
+    def list_project_datasets(
+        self,
+        request: ListProjectDatasetsRequest,
+    ) -> dict[str, Any]:
+        """Return real materialized dataset identities from graph and index evidence."""
+
+        detail_keys = {(item["run_id"], item["node_id"]) for item in request.detail_for}
+        runs_root = self.project_root / "runs"
+        datasets: list[dict[str, Any]] = []
+        unavailable: list[dict[str, str]] = []
+        omitted_sections: list[str] = []
+        if runs_root.is_dir():
+            run_dirs = sorted(item for item in runs_root.iterdir() if item.is_dir())
+        else:
+            run_dirs = []
+
+        for run_root in run_dirs:
+            run_id = run_root.name
+            try:
+                graph = GraphStore(runs_root).read(run_id)
+            except Exception as exc:  # noqa: BLE001 - convert corrupt evidence to a visible record
+                unavailable.append(
+                    {
+                        "run_id": run_id,
+                        "node_id": "*",
+                        "reason": f"graph_unavailable: {exc}",
+                    }
+                )
+                continue
+            dataset_nodes = [
+                node
+                for node in graph.nodes.values()
+                if node.kind == NodeKind.DATASET_STAGE
+            ]
+            if not dataset_nodes:
+                continue
+            try:
+                index_payload = read_json(run_root / "artifacts_index.json")
+            except (OSError, ValueError) as exc:
+                for node in sorted(dataset_nodes, key=lambda item: item.id):
+                    unavailable.append(
+                        {
+                            "run_id": run_id,
+                            "node_id": node.id,
+                            "reason": f"artifact_index_unavailable: {exc}",
+                        }
+                    )
+                continue
+            records = index_payload.get("artifacts") if isinstance(index_payload, Mapping) else None
+            if not isinstance(records, list):
+                for node in sorted(dataset_nodes, key=lambda item: item.id):
+                    unavailable.append(
+                        {
+                            "run_id": run_id,
+                            "node_id": node.id,
+                            "reason": "artifact_index_invalid: artifacts is not a list",
+                        }
+                    )
+                continue
+
+            for node in sorted(dataset_nodes, key=lambda item: item.id):
+                artifact, reason = self._dataset_artifact_record(run_root, node, records)
+                if artifact is None:
+                    unavailable.append(
+                        {"run_id": run_id, "node_id": node.id, "reason": reason or "unavailable"}
+                    )
+                    continue
+                relative = artifact["path"]
+                path = (run_root / relative).resolve()
+                try:
+                    frame = _read_frame(path)
+                except Exception as exc:  # noqa: BLE001 - expose unusable materialized evidence
+                    unavailable.append(
+                        {
+                            "run_id": run_id,
+                            "node_id": node.id,
+                            "reason": f"dataset_read_failed: {exc}",
+                        }
+                    )
+                    continue
+                columns = [str(column) for column in frame.columns]
+                public_columns = columns[:64]
+                columns_omitted = max(0, len(columns) - len(public_columns))
+                if columns_omitted:
+                    omitted_sections.append(f"{run_id}:{node.id}:columns")
+                no_missing = [
+                    column for column in columns if not bool(frame[column].isna().any())
+                ]
+                public_no_missing = no_missing[:64]
+                if len(no_missing) > len(public_no_missing):
+                    omitted_sections.append(f"{run_id}:{node.id}:columns_without_missing")
+                entry: dict[str, Any] = {
+                    "run_id": run_id,
+                    "node_id": node.id,
+                    "artifact_id": artifact["artifact_id"],
+                    "row_count": int(len(frame)),
+                    "column_count": int(len(columns)),
+                    "columns": public_columns,
+                    "columns_omitted": columns_omitted,
+                    "columns_without_missing": public_no_missing,
+                }
+                if (run_id, node.id) in detail_keys:
+                    entry["column_details"] = [
+                        self._dataset_column_detail(frame, column)
+                        for column in public_columns
+                    ]
+                datasets.append(entry)
+
+        missing_details = detail_keys - {
+            (entry["run_id"], entry["node_id"])
+            for entry in datasets
+        }
+        if missing_details:
+            known_unavailable = {
+                (entry["run_id"], entry["node_id"])
+                for entry in unavailable
+            }
+            unresolved = sorted(missing_details - known_unavailable)
+            if unresolved:
+                raise ToolVisibleError(
+                    "PROJECT_DATASET_DETAIL_UNAVAILABLE: no graph-backed dataset exists for "
+                    + ", ".join(f"{run_id}/{node_id}" for run_id, node_id in unresolved)
+                )
+
+        return {
+            "datasets": datasets,
+            "datasets_omitted": 0,
+            "unavailable": unavailable,
+            "omitted_sections": omitted_sections,
+        }
+
+    @staticmethod
+    def _dataset_artifact_record(
+        run_root: Path,
+        node: Any,
+        records: list[Any],
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        if node.payload_ref:
+            candidates = [
+                item
+                for item in records
+                if isinstance(item, Mapping) and item.get("path") == node.payload_ref
+            ]
+        elif node.id in {"stage:raw", "stage:source"}:
+            candidates = [
+                item
+                for item in records
+                if isinstance(item, Mapping)
+                and item.get("artifact_type") == "raw_data"
+                and str(item.get("path") or "").startswith("raw_snapshot/")
+            ]
+        else:
+            return None, "dataset_node_has_no_materialized_payload"
+        if len(candidates) != 1:
+            return None, f"dataset_artifact_identity_ambiguous: {len(candidates)} matching records"
+        candidate = candidates[0]
+        artifact_id = candidate.get("artifact_id")
+        relative = candidate.get("path")
+        if not isinstance(artifact_id, str) or not artifact_id.strip():
+            return None, "dataset_artifact_has_no_id"
+        if not isinstance(relative, str) or not relative.strip():
+            return None, "dataset_artifact_has_no_path"
+        path = (run_root / relative).resolve()
+        try:
+            path.relative_to(run_root.resolve())
+        except ValueError:
+            return None, "dataset_artifact_escapes_run_root"
+        if not path.is_file():
+            return None, "dataset_artifact_file_missing"
+        expected_sha = candidate.get("sha256")
+        if not isinstance(expected_sha, str) or not expected_sha:
+            return None, "dataset_artifact_has_no_hash"
+        if sha256_file(path) != expected_sha:
+            return None, "dataset_artifact_hash_mismatch"
+        return {"artifact_id": artifact_id, "path": relative}, None
+
+    @staticmethod
+    def _dataset_column_detail(frame: Any, column: str) -> dict[str, Any]:
+        series = frame[column]
+        detail: dict[str, Any] = {
+            "name": column,
+            "dtype": str(series.dtype),
+            "unique_count": int(series.nunique(dropna=True)),
+        }
+        missing_rate = float(series.isna().mean()) if len(series) else 0.0
+        if missing_rate > 0:
+            detail["missing_rate"] = missing_rate
+        return detail
 
     def inspect_project_model_coefficients(
         self,

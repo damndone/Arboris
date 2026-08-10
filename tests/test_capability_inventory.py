@@ -218,7 +218,12 @@ def test_inventory_records_only_live_natural_language_proposers() -> None:
     }
 
     assert direct_ids == {
+        "data.append",
         "data.columns.cast",
+        "data.feature_recipe",
+        "data.merge",
+        "data.reshape",
+        "data.subset",
         "graph.fork",
         "model.rerun",
         "operation.multi_step",
@@ -244,9 +249,9 @@ def test_the_two_closed_operations_are_explicitly_exempt() -> None:
 def test_natural_language_reachability_guard_pins_current_truth() -> None:
     """Pin today's reachability facts as an intentional change record.
 
-    This test is expected to go red when P5 wires a currently missing route.
-    For example, one newly reachable capability would change
-    ``(54, 4, 30, 34, 2, 18)`` to ``(54, 5, 30, 35, 2, 17)``. That is not a
+    This test is expected to go red when a later phase wires a currently missing route.
+    P4 intentionally changes the live reachability truth to
+    ``(65, 9, 41, 45, 2, 18)``. That is not a
     stale test: the counts and gap IDs must be updated in the same deliberate
     change that closes the gap, rather than silently weakening this record.
     """
@@ -262,7 +267,7 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (54, 4, 30, 34, 2, 18)
+    ) == (65, 9, 41, 45, 2, 18)
     assert {item.capability_id for item in report.gaps} == {
         "model.time_series.arma_garch",
         "model.time_series.ets",

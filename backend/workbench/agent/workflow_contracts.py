@@ -225,6 +225,10 @@ class StepSpecContract:
     replayable_by_recipe: bool = False
     #: Closed values for fields whose vocabulary is smaller than their JSON type.
     field_enums: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Closed JSON-schema fragments for nested values. The descriptions/types
+    #: above remain the published vocabulary; these fragments make the same
+    #: declaration enforce object keys, item shapes, and bounded values.
+    field_schemas: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     #: Capability inventory identity projected from this declaration.
     capability_kind: str = "data_operation"
     #: Informational explanation for a capability that is composable but not a
@@ -263,6 +267,17 @@ class StepSpecContract:
                 )
             if len(set(values)) != len(values):
                 raise ValueError(f"workflow step field enum {name!r} contains duplicates")
+        unknown_schemas = set(self.field_schemas) - field_names
+        if unknown_schemas:
+            raise ValueError(
+                "workflow step schema field(s) are undeclared: "
+                + ", ".join(sorted(unknown_schemas))
+            )
+        for name, schema in self.field_schemas.items():
+            if not isinstance(schema, Mapping) or not schema:
+                raise ValueError(
+                    f"workflow step field schema {name!r} must be a non-empty object"
+                )
         from .capability_contract import CAPABILITY_KINDS
 
         if self.capability_kind not in CAPABILITY_KINDS:
@@ -286,6 +301,9 @@ class StepSpecContract:
             "field_types": dict(self.field_types),
             "field_enums": {
                 name: list(values) for name, values in self.field_enums.items()
+            },
+            "field_schemas": {
+                name: dict(schema) for name, schema in self.field_schemas.items()
             },
             "semantic_validator_key": self.semantic_validator_key,
             "reference_resolver_key": self.reference_resolver_key,
@@ -322,7 +340,10 @@ class StepSpecContract:
         }
         properties: dict[str, dict[str, Any]] = {}
         for name, description in self.fields.items():
-            field_schema: dict[str, Any] = {"description": description}
+            field_schema: dict[str, Any] = {
+                "description": description,
+                **dict(self.field_schemas.get(name, {})),
+            }
             declared_type = self.field_types.get(name)
             if declared_type is not None:
                 field_schema["type"] = type_map.get(declared_type, declared_type)
@@ -1930,6 +1951,446 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
 _refresh_workflow_contract_views()
 
 
+def _string_list_field_schema() -> dict[str, Any]:
+    return {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": True,
+        "items": {"type": "string", "minLength": 1},
+    }
+
+
+def _growth_policy_field_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "max_rows": {"type": "integer", "minimum": 0},
+            "max_growth_factor": {"type": "number", "exclusiveMinimum": 0},
+        },
+        "additionalProperties": False,
+        "minProperties": 1,
+    }
+
+
+def _data_management_step_contracts() -> dict[str, StepSpecContract]:
+    """The P4 declarations projected into every workflow consumer."""
+
+    dispatcher = "workbench.agent.workflow_runtime.data_operation"
+    filter_schema = {
+        "type": "object",
+        "required": ["column", "op"],
+        "properties": {
+            "column": {"type": "string", "minLength": 1},
+            "op": {
+                "type": "string",
+                "enum": [
+                    "eq",
+                    "ne",
+                    "gt",
+                    "ge",
+                    "lt",
+                    "le",
+                    "in",
+                    "not_in",
+                    "between",
+                    "is_missing",
+                    "not_missing",
+                ],
+            },
+            # Values are checked against the selected operator by the semantic
+            # validator; JSON values are intentionally not coerced here.
+            "value": {},
+        },
+        "additionalProperties": False,
+    }
+    aggregation_schema = {
+        "type": "object",
+        "required": ["column", "func", "output"],
+        "properties": {
+            "column": {"type": "string", "minLength": 1},
+            "func": {
+                "type": "string",
+                "enum": ["sum", "mean", "median", "min", "max", "count", "std"],
+            },
+            "output": {"type": "string", "minLength": 1},
+        },
+        "additionalProperties": False,
+    }
+    fill_strategy_schema = {
+        "type": "object",
+        "required": ["column", "strategy"],
+        "properties": {
+            "column": {"type": "string", "minLength": 1},
+            "strategy": {
+                "type": "string",
+                "enum": ["drop_rows", "constant", "mean", "median", "mode"],
+            },
+            "value": {},
+        },
+        "additionalProperties": False,
+    }
+    recipe_parameters_schema = {
+        "type": "object",
+        "properties": {
+            "left": {"type": "string", "minLength": 1},
+            "right": {"type": "string", "minLength": 1},
+            "input": {"type": "string", "minLength": 1},
+            "base": {},
+            "numerator": {"type": "string", "minLength": 1},
+            "denominator": {"type": "string", "minLength": 1},
+            "zero_policy": {"type": "string", "enum": ["fail_closed"]},
+            "mapping": {
+                "type": "object",
+                "additionalProperties": {},
+            },
+            "default": {},
+            "operator": {
+                "type": "string",
+                "enum": ["add", "subtract", "multiply"],
+            },
+        },
+        "additionalProperties": False,
+    }
+
+    def contract(
+        operation_id: str,
+        summary: str,
+        fields: Mapping[str, str],
+        required: tuple[str, ...],
+        field_types: Mapping[str, str],
+        field_schemas: Mapping[str, Mapping[str, Any]],
+        *,
+        field_enums: Mapping[str, tuple[str, ...]] | None = None,
+        natural_language_enabled: bool = False,
+    ) -> StepSpecContract:
+        return StepSpecContract(
+            summary=summary,
+            fields=fields,
+            required=required,
+            field_types=field_types,
+            field_enums=field_enums or {},
+            field_schemas=field_schemas,
+            semantic_validator_key=f"data.{operation_id.removeprefix('data.')}",
+            reference_resolver_key="workflow.source_columns",
+            column_extractor_key=f"data.{operation_id.removeprefix('data.')}",
+            output_schema_ref=f"workbench.data.{operation_id.removeprefix('data.')}/v1",
+            dispatcher_key=dispatcher,
+            scope="dataset data management",
+            risk_level="mutating",
+            reconciler_key=dispatcher,
+            diff_builder_key="data.operation.diff.v1",
+            verification_builder_key="data.operation.verification.v1",
+            ui_description=summary,
+            natural_language_enabled=natural_language_enabled,
+            produces_dataset=True,
+            consumes_input_frame=True,
+            replayable_by_recipe=False,
+            capability_kind="data_operation",
+        )
+
+    secondary_fields = {
+        "secondary_run_id": "Real run id for the secondary dataset, discovered from project evidence.",
+        "secondary_node_id": "Real graph node id for the secondary dataset.",
+        "secondary_artifact_id": "Real artifact-index id for the secondary dataset.",
+    }
+    contracts: dict[str, StepSpecContract] = {
+        "data.merge": contract(
+            "data.merge",
+            "Merge the current dataset with a declared secondary dataset.",
+            {
+                **secondary_fields,
+                "keys": "Non-empty join-key column list present in both datasets.",
+                "how": "Join mode: left, right, inner, or outer.",
+                "indicator": "Optional true or a non-empty output-column name.",
+                "growth_policy": "Explicit row-growth bound.",
+                "max_growth_factor": "Legacy growth-factor bound.",
+            },
+            ("secondary_run_id", "secondary_node_id", "secondary_artifact_id", "keys"),
+            {
+                "secondary_run_id": "string",
+                "secondary_node_id": "string",
+                "secondary_artifact_id": "string",
+                "keys": "list",
+                "how": "string",
+                "growth_policy": "object",
+                "max_growth_factor": "number",
+            },
+            {
+                "secondary_run_id": {"type": "string", "minLength": 1},
+                "secondary_node_id": {"type": "string", "minLength": 1},
+                "secondary_artifact_id": {"type": "string", "minLength": 1},
+                "keys": _string_list_field_schema(),
+                "how": {"type": "string", "enum": ["left", "right", "inner", "outer"]},
+                "indicator": {"type": ["boolean", "string"], "minLength": 1},
+                "growth_policy": _growth_policy_field_schema(),
+                "max_growth_factor": {"type": "number", "exclusiveMinimum": 0},
+            },
+            field_enums={"how": ("left", "right", "inner", "outer")},
+            natural_language_enabled=True,
+        ),
+        "data.append": contract(
+            "data.append",
+            "Append a declared secondary dataset with an explicit schema policy.",
+            {
+                **secondary_fields,
+                "schema_policy": "Schema policy: exact or union.",
+                "row_growth_policy": "Explicit row-growth bound.",
+                "max_growth_factor": "Legacy growth-factor bound.",
+            },
+            ("secondary_run_id", "secondary_node_id", "secondary_artifact_id"),
+            {
+                "secondary_run_id": "string",
+                "secondary_node_id": "string",
+                "secondary_artifact_id": "string",
+                "schema_policy": "string",
+                "row_growth_policy": "object",
+                "max_growth_factor": "number",
+            },
+            {
+                "secondary_run_id": {"type": "string", "minLength": 1},
+                "secondary_node_id": {"type": "string", "minLength": 1},
+                "secondary_artifact_id": {"type": "string", "minLength": 1},
+                "schema_policy": {"type": "string", "enum": ["exact", "union"]},
+                "row_growth_policy": _growth_policy_field_schema(),
+                "max_growth_factor": {"type": "number", "exclusiveMinimum": 0},
+            },
+            field_enums={"schema_policy": ("exact", "union")},
+            natural_language_enabled=True,
+        ),
+        "data.reshape": contract(
+            "data.reshape",
+            "Reshape the current dataset with an explicitly declared direction.",
+            {
+                "direction": "Direction: wide_to_long or long_to_wide.",
+                "id_columns": "Identifier columns for wide_to_long.",
+                "value_columns": "Measured wide columns for wide_to_long.",
+                "index": "Index columns for long_to_wide.",
+                "columns": "Long-form column containing wide labels.",
+                "values": "Long-form value column.",
+                "var_name": "Output variable-name column for wide_to_long.",
+                "value_name": "Output value column for wide_to_long.",
+            },
+            ("direction",),
+            {
+                "direction": "string",
+                "id_columns": "list",
+                "value_columns": "list",
+                "index": "list",
+                "columns": "string",
+                "values": "string",
+                "var_name": "string",
+                "value_name": "string",
+            },
+            {
+                "direction": {"type": "string", "enum": ["wide_to_long", "long_to_wide"]},
+                "id_columns": _string_list_field_schema(),
+                "value_columns": _string_list_field_schema(),
+                "index": _string_list_field_schema(),
+                "columns": {"type": "string", "minLength": 1},
+                "values": {"type": "string", "minLength": 1},
+                "var_name": {"type": "string", "minLength": 1},
+                "value_name": {"type": "string", "minLength": 1},
+            },
+            field_enums={"direction": ("wide_to_long", "long_to_wide")},
+            natural_language_enabled=True,
+        ),
+        "data.subset": contract(
+            "data.subset",
+            "Subset rows and columns with closed comparison operators.",
+            {
+                "columns": "Explicit output columns.",
+                "filters": "ANDed closed filters with column, op, and operator value.",
+                "equals": "Legacy equality map retained for compatibility.",
+                "row_indices": "Explicit zero-based row indices.",
+                "row_index_range": "Bounded half-open row range.",
+                "row_range": "Legacy alias for row_index_range.",
+            },
+            ("columns",),
+            {
+                "columns": "list",
+                "filters": "list",
+                "equals": "object",
+                "row_indices": "list",
+                "row_index_range": "object",
+                "row_range": "object",
+            },
+            {
+                "columns": _string_list_field_schema(),
+                "filters": {"type": "array", "items": filter_schema},
+                "equals": {"type": "object", "additionalProperties": {}},
+                "row_indices": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": True,
+                    "items": {"type": "integer", "minimum": 0},
+                },
+                "row_index_range": {
+                    "type": "object",
+                    "required": ["start", "stop"],
+                    "properties": {
+                        "start": {"type": "integer", "minimum": 0},
+                        "stop": {"type": "integer", "minimum": 0},
+                    },
+                    "additionalProperties": False,
+                },
+                "row_range": {
+                    "type": "object",
+                    "required": ["start", "stop"],
+                    "properties": {
+                        "start": {"type": "integer", "minimum": 0},
+                        "stop": {"type": "integer", "minimum": 0},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            natural_language_enabled=True,
+        ),
+        "data.feature_recipe": contract(
+            "data.feature_recipe",
+            "Create one typed feature recipe child from the registered recipe vocabulary.",
+            {
+                "recipe_id": "Stable feature recipe identity.",
+                "recipe_operation_id": "interaction, log, ratio, recode, or derived_variable.",
+                "inputs": "Source columns consumed by the recipe.",
+                "output": "One output column name.",
+                "output_type": "Output type label.",
+                "parameters": "Closed operation-specific recipe parameters.",
+                "fit_scope": "stateless, date_local, or period_fitted.",
+                "missing_policy": "Explicit missing-value policy.",
+                "outlier_policy": "Explicit outlier policy.",
+            },
+            ("recipe_id", "recipe_operation_id", "inputs", "output", "parameters"),
+            {
+                "recipe_id": "string",
+                "recipe_operation_id": "string",
+                "inputs": "list",
+                "output": "string",
+                "output_type": "string",
+                "parameters": "object",
+                "fit_scope": "string",
+                "missing_policy": "string",
+                "outlier_policy": "string",
+            },
+            {
+                "recipe_id": {"type": "string", "minLength": 1},
+                "recipe_operation_id": {
+                    "type": "string",
+                    "enum": ["interaction", "log", "ratio", "recode", "derived_variable"],
+                },
+                "inputs": _string_list_field_schema(),
+                "output": {"type": "string", "minLength": 1},
+                "output_type": {"type": "string", "enum": ["numeric", "string", "boolean"]},
+                "parameters": recipe_parameters_schema,
+                "fit_scope": {
+                    "type": "string",
+                    "enum": ["stateless", "date_local", "period_fitted"],
+                },
+                "missing_policy": {"type": "string", "minLength": 1},
+                "outlier_policy": {"type": "string", "minLength": 1},
+            },
+            field_enums={
+                "recipe_operation_id": (
+                    "interaction",
+                    "log",
+                    "ratio",
+                    "recode",
+                    "derived_variable",
+                ),
+                "fit_scope": ("stateless", "date_local", "period_fitted"),
+                "output_type": ("numeric", "string", "boolean"),
+            },
+            natural_language_enabled=True,
+        ),
+        "data.dedupe": contract(
+            "data.dedupe",
+            "Remove duplicate rows using an explicit key and keep policy.",
+            {"columns": "Deduplication key columns.", "keep": "first or last occurrence."},
+            ("columns", "keep"),
+            {"columns": "list", "keep": "string"},
+            {
+                "columns": _string_list_field_schema(),
+                "keep": {"type": "string", "enum": ["first", "last"]},
+            },
+        ),
+        "data.rename": contract(
+            "data.rename",
+            "Rename existing columns with collision-checked mapping.",
+            {"mapping": "Non-empty old-column to new-column mapping."},
+            ("mapping",),
+            {"mapping": "object"},
+            {
+                "mapping": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {"type": "string", "minLength": 1},
+                }
+            },
+        ),
+        "data.aggregate": contract(
+            "data.aggregate",
+            "Aggregate rows by declared groups and named functions.",
+            {"group_by": "Group-key columns.", "aggregations": "Named aggregation declarations."},
+            ("group_by", "aggregations"),
+            {"group_by": "list", "aggregations": "list"},
+            {
+                "group_by": _string_list_field_schema(),
+                "aggregations": {"type": "array", "minItems": 1, "items": aggregation_schema},
+            },
+        ),
+        "data.fill_missing": contract(
+            "data.fill_missing",
+            "Resolve missing values with an explicit per-column strategy.",
+            {"strategies": "Per-column drop, constant, mean, median, or mode strategies."},
+            ("strategies",),
+            {"strategies": "list"},
+            {"strategies": {"type": "array", "minItems": 1, "items": fill_strategy_schema}},
+        ),
+        "data.tsset": contract(
+            "data.tsset",
+            "Declare and stably order a time or panel-time index.",
+            {
+                "time_column": "Time column.",
+                "frequency": "Declared frequency: D, W, M, Q, or Y.",
+                "panel_id_column": "Optional panel identifier column.",
+            },
+            ("time_column", "frequency"),
+            {"time_column": "string", "frequency": "string", "panel_id_column": "string"},
+            {
+                "time_column": {"type": "string", "minLength": 1},
+                "frequency": {"type": "string", "enum": ["D", "W", "M", "Q", "Y"]},
+                "panel_id_column": {"type": "string", "minLength": 1},
+            },
+            field_enums={"frequency": ("D", "W", "M", "Q", "Y")},
+        ),
+        "data.lag": contract(
+            "data.lag",
+            "Create deterministic lag columns from an ordered dataset.",
+            {
+                "columns": "Columns to lag.",
+                "lags": "Positive integer lag periods.",
+                "difference": "Optional non-negative difference order before lagging.",
+            },
+            ("columns", "lags"),
+            {"columns": "list", "lags": "list", "difference": "integer"},
+            {
+                "columns": _string_list_field_schema(),
+                "lags": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": True,
+                    "items": {"type": "integer", "minimum": 1},
+                },
+                "difference": {"type": "integer", "minimum": 0},
+            },
+        ),
+    }
+    return contracts
+
+
+for _data_operation_id, _data_operation_contract in _data_management_step_contracts().items():
+    WORKFLOW_STEP_SPEC_CONTRACTS[_data_operation_id] = _data_operation_contract
+
+
 def register_workflow_step(operation_id: str, contract: StepSpecContract) -> None:
     """Register one workflow step and refresh all declaration projections."""
 
@@ -2073,6 +2534,49 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
         for selector in spec.get("term_selectors", []) or []:
             if isinstance(selector, Mapping) and selector.get("column"):
                 columns.add(str(selector["column"]))
+    elif extractor_key and extractor_key.startswith("data."):
+        operation = extractor_key.removeprefix("data.")
+        if operation in {"merge", "append"}:
+            columns.update(str(item) for item in spec.get("keys", []) or [])
+        elif operation == "reshape":
+            direction = spec.get("direction")
+            if direction == "wide_to_long":
+                columns.update(str(item) for item in spec.get("id_columns", []) or [])
+                columns.update(str(item) for item in spec.get("value_columns", []) or [])
+            elif direction == "long_to_wide":
+                columns.update(str(item) for item in spec.get("index", []) or [])
+                columns.update(str(item) for item in ("columns", "values") if spec.get(item))
+        elif operation == "subset":
+            columns.update(str(item) for item in spec.get("columns", []) or [])
+            equals = spec.get("equals")
+            if isinstance(equals, Mapping):
+                columns.update(str(item) for item in equals)
+            for item in spec.get("filters", []) or []:
+                if isinstance(item, Mapping) and item.get("column"):
+                    columns.add(str(item["column"]))
+        elif operation == "feature_recipe":
+            columns.update(str(item) for item in spec.get("inputs", []) or [])
+        elif operation == "dedupe":
+            columns.update(str(item) for item in spec.get("columns", []) or [])
+        elif operation == "rename":
+            mapping = spec.get("mapping")
+            if isinstance(mapping, Mapping):
+                columns.update(str(item) for item in mapping)
+        elif operation == "aggregate":
+            columns.update(str(item) for item in spec.get("group_by", []) or [])
+            for item in spec.get("aggregations", []) or []:
+                if isinstance(item, Mapping) and item.get("column"):
+                    columns.add(str(item["column"]))
+        elif operation == "fill_missing":
+            for item in spec.get("strategies", []) or []:
+                if isinstance(item, Mapping) and item.get("column"):
+                    columns.add(str(item["column"]))
+        elif operation == "tsset":
+            for key in ("time_column", "panel_id_column"):
+                if spec.get(key):
+                    columns.add(str(spec[key]))
+        elif operation == "lag":
+            columns.update(str(item) for item in spec.get("columns", []) or [])
     return columns
 
 
@@ -2112,6 +2616,9 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
             )
         _validate_declared_field_types(operation_id, spec, contract)
     validator_key = contract.semantic_validator_key if contract is not None else None
+    if validator_key and validator_key.startswith("data."):
+        _validate_data_management_step(operation_id, spec)
+        return
     if validator_key == "capability_factory.custom_operation":
         return
     if validator_key == "statistical.exploration":
@@ -2287,12 +2794,367 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
             )
 
 
+def _schema_value_matches(value: Any, schema: Mapping[str, Any]) -> bool:
+    """Small closed-schema evaluator for workflow declarations."""
+
+    if not isinstance(schema, Mapping):
+        return False
+    if "const" in schema:
+        expected = schema["const"]
+        if type(value) is not type(expected) or value != expected:
+            return False
+    if "enum" in schema:
+        if not any(type(value) is type(candidate) and value == candidate for candidate in schema["enum"]):
+            return False
+    for union_key in ("oneOf", "anyOf"):
+        if union_key in schema:
+            matches = sum(
+                _schema_value_matches(value, candidate)
+                for candidate in schema[union_key]
+            )
+            if union_key == "oneOf" and matches != 1:
+                return False
+            if union_key == "anyOf" and matches == 0:
+                return False
+    declared_type = schema.get("type")
+    if declared_type is not None:
+        types = declared_type if isinstance(declared_type, list) else [declared_type]
+        if not any(
+            {
+                "object": isinstance(value, Mapping),
+                "array": isinstance(value, list),
+                "string": isinstance(value, str) and not isinstance(value, bool),
+                "boolean": type(value) is bool,
+                "integer": type(value) is int,
+                "number": (isinstance(value, (int, float)) and not isinstance(value, bool)),
+                "null": value is None,
+            }.get(type_name, False)
+            for type_name in types
+        ):
+            return False
+    if isinstance(value, str) and "minLength" in schema and len(value) < schema["minLength"]:
+        return False
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if "minimum" in schema and value < schema["minimum"]:
+            return False
+        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
+            return False
+    if isinstance(value, list):
+        if "minItems" in schema and len(value) < schema["minItems"]:
+            return False
+        if schema.get("uniqueItems") and len({repr(item) for item in value}) != len(value):
+            return False
+        item_schema = schema.get("items")
+        if item_schema is not None and any(
+            not _schema_value_matches(item, item_schema) for item in value
+        ):
+            return False
+    if isinstance(value, Mapping):
+        required = schema.get("required", [])
+        if any(field_name not in value for field_name in required):
+            return False
+        properties = schema.get("properties", {})
+        if not isinstance(properties, Mapping):
+            return False
+        additional = schema.get("additionalProperties", True)
+        for key, item in value.items():
+            if key in properties:
+                if not _schema_value_matches(item, properties[key]):
+                    return False
+            elif additional is False:
+                return False
+            elif isinstance(additional, Mapping) and not _schema_value_matches(item, additional):
+                return False
+        if "minProperties" in schema and len(value) < schema["minProperties"]:
+            return False
+    return True
+
+
+def _validate_data_management_step(operation_id: str, spec: Mapping[str, Any]) -> None:
+    """Validate semantic choices that JSON shape alone cannot express."""
+
+    from ..data_operations import (
+        AGGREGATE_FUNCTIONS,
+        FILL_MISSING_STRATEGIES,
+        SUBSET_FILTER_OPERATORS,
+        TSSET_FREQUENCIES,
+    )
+
+    operation = operation_id.removeprefix("data.")
+
+    def text(value: Any, label: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise OperationValidationError(f"{operation_id} {label} must be a non-empty string")
+        return value
+
+    def strings(value: Any, label: str) -> list[str]:
+        if not isinstance(value, list) or not value or any(
+            not isinstance(item, str) or not item.strip() for item in value
+        ):
+            raise OperationValidationError(f"{operation_id} {label} must be a non-empty string list")
+        if len(set(value)) != len(value):
+            raise OperationValidationError(f"{operation_id} {label} must not contain duplicates")
+        return list(value)
+
+    if operation in {"merge", "append"}:
+        if operation == "merge":
+            keys = strings(spec.get("keys"), "keys")
+            how = spec.get("how", "left")
+            if how not in {"left", "right", "inner", "outer"}:
+                raise OperationValidationError(
+                    f"{operation_id} how must be left, right, inner, or outer"
+                )
+            indicator = spec.get("indicator")
+            if indicator is not None and not (
+                indicator is True or (isinstance(indicator, str) and indicator.strip())
+            ):
+                raise OperationValidationError(
+                    f"{operation_id} indicator must be true or a non-empty string"
+                )
+            if not keys:
+                raise OperationValidationError(f"{operation_id} requires keys")
+        else:
+            if spec.get("schema_policy", "exact") not in {"exact", "union"}:
+                raise OperationValidationError(
+                    f"{operation_id} schema_policy must be exact or union"
+                )
+        return
+    if operation == "reshape":
+        direction = spec.get("direction")
+        if direction == "wide_to_long":
+            id_columns = strings(spec.get("id_columns"), "id_columns")
+            value_columns = strings(spec.get("value_columns"), "value_columns")
+            if set(id_columns) & set(value_columns):
+                raise OperationValidationError(
+                    f"{operation_id} id_columns and value_columns must be disjoint"
+                )
+            if any(key in spec for key in ("index", "columns", "values")):
+                raise OperationValidationError(
+                    f"{operation_id} wide_to_long does not accept long_to_wide fields"
+                )
+            var_name = text(spec.get("var_name", "variable"), "var_name")
+            value_name = text(spec.get("value_name", "value"), "value_name")
+            if var_name == value_name or var_name in id_columns or value_name in id_columns:
+                raise OperationValidationError(
+                    f"{operation_id} output names must not collide with id_columns"
+                )
+        elif direction == "long_to_wide":
+            index = strings(spec.get("index"), "index")
+            columns = text(spec.get("columns"), "columns")
+            values = text(spec.get("values"), "values")
+            if len(set(index + [columns, values])) != len(index) + 2:
+                raise OperationValidationError(
+                    f"{operation_id} index, columns, and values must be distinct"
+                )
+            if any(key in spec for key in ("id_columns", "value_columns", "var_name", "value_name")):
+                raise OperationValidationError(
+                    f"{operation_id} long_to_wide does not accept wide_to_long fields"
+                )
+        else:
+            raise OperationValidationError(
+                f"{operation_id} direction must be wide_to_long or long_to_wide"
+            )
+        return
+    if operation == "subset":
+        strings(spec.get("columns"), "columns")
+        filters = spec.get("filters", [])
+        if not isinstance(filters, list):
+            raise OperationValidationError(f"{operation_id} filters must be a list")
+        filter_columns: list[str] = []
+        for index, item in enumerate(filters):
+            if not isinstance(item, Mapping):
+                raise OperationValidationError(f"{operation_id} filters[{index}] must be an object")
+            column = text(item.get("column"), f"filters[{index}].column")
+            operator = item.get("op")
+            if operator not in SUBSET_FILTER_OPERATORS:
+                raise OperationValidationError(
+                    f"{operation_id} filters[{index}].op is not a closed comparison operator"
+                )
+            has_value = "value" in item
+            if operator in {"is_missing", "not_missing"} and has_value:
+                raise OperationValidationError(
+                    f"{operation_id} filters[{index}] must not carry value for {operator}"
+                )
+            if operator not in {"is_missing", "not_missing"} and not has_value:
+                raise OperationValidationError(
+                    f"{operation_id} filters[{index}] requires value for {operator}"
+                )
+            if operator in {"in", "not_in"} and (
+                not isinstance(item.get("value"), list) or not item["value"]
+            ):
+                raise OperationValidationError(
+                    f"{operation_id} filters[{index}] value must be a non-empty list"
+                )
+            if operator == "between":
+                value = item.get("value")
+                if not isinstance(value, list) or len(value) != 2:
+                    raise OperationValidationError(
+                        f"{operation_id} filters[{index}] between requires two bounds"
+                    )
+                try:
+                    if value[0] > value[1]:
+                        raise OperationValidationError(
+                            f"{operation_id} filters[{index}] lower bound exceeds upper bound"
+                        )
+                except TypeError as exc:
+                    raise OperationValidationError(
+                        f"{operation_id} filters[{index}] bounds are not comparable"
+                    ) from exc
+            filter_columns.append(column)
+        equals = spec.get("equals", {})
+        if not isinstance(equals, Mapping):
+            raise OperationValidationError(f"{operation_id} equals must be an object")
+        overlap = set(equals) & set(filter_columns)
+        if overlap:
+            raise OperationValidationError(
+                f"{operation_id} equals and filters overlap: {', '.join(sorted(overlap))}"
+            )
+        if spec.get("row_indices") is not None and (
+            spec.get("row_index_range") is not None or spec.get("row_range") is not None
+        ):
+            raise OperationValidationError(
+                f"{operation_id} row_indices and row range are mutually exclusive"
+            )
+        return
+    if operation == "feature_recipe":
+        recipe_operation = spec.get("recipe_operation_id")
+        inputs = strings(spec.get("inputs"), "inputs")
+        parameters = spec.get("parameters")
+        if not isinstance(parameters, Mapping):
+            raise OperationValidationError(f"{operation_id} parameters must be an object")
+        allowed: dict[str, set[str]] = {
+            "interaction": {"left", "right"},
+            "log": {"input", "base"},
+            "ratio": {"numerator", "denominator", "zero_policy"},
+            "recode": {"input", "mapping", "default"},
+            "derived_variable": {"operator"},
+        }
+        required: dict[str, set[str]] = {
+            "interaction": {"left", "right"},
+            "log": {"input"},
+            "ratio": {"numerator", "denominator", "zero_policy"},
+            "recode": {"input", "mapping"},
+            "derived_variable": {"operator"},
+        }
+        if recipe_operation not in allowed:
+            raise OperationValidationError(f"{operation_id} recipe operation is not registered")
+        unknown = set(parameters) - allowed[recipe_operation]
+        if unknown:
+            raise OperationValidationError(
+                f"{operation_id} parameters contain unsupported fields: {sorted(unknown)}"
+            )
+        missing = required[recipe_operation] - set(parameters)
+        if missing:
+            raise OperationValidationError(
+                f"{operation_id} parameters are missing: {sorted(missing)}"
+            )
+        if recipe_operation in {"interaction", "ratio"} and len(inputs) != 2:
+            raise OperationValidationError(f"{operation_id} {recipe_operation} requires two inputs")
+        if recipe_operation in {"log", "recode"} and len(inputs) != 1:
+            raise OperationValidationError(f"{operation_id} {recipe_operation} requires one input")
+        if recipe_operation == "derived_variable" and len(inputs) != 2:
+            raise OperationValidationError(f"{operation_id} derived_variable requires two inputs")
+        for key in ("left", "right", "input", "numerator", "denominator"):
+            if key in parameters and parameters[key] not in inputs:
+                raise OperationValidationError(
+                    f"{operation_id} parameter {key} must reference inputs"
+                )
+        if recipe_operation == "ratio" and parameters.get("zero_policy") != "fail_closed":
+            raise OperationValidationError(f"{operation_id} ratio requires zero_policy=fail_closed")
+        if recipe_operation == "recode" and not isinstance(parameters.get("mapping"), Mapping):
+            raise OperationValidationError(f"{operation_id} recode mapping must be an object")
+        if recipe_operation == "derived_variable" and parameters.get("operator") not in {
+            "add",
+            "subtract",
+            "multiply",
+        }:
+            raise OperationValidationError(
+                f"{operation_id} derived_variable operator is not registered"
+            )
+        for policy_name in ("missing_policy", "outlier_policy"):
+            if policy_name in spec and spec[policy_name] == "silent":
+                raise OperationValidationError(
+                    f"{operation_id} {policy_name} cannot be silent"
+                )
+        return
+    if operation == "dedupe":
+        strings(spec.get("columns"), "columns")
+        if spec.get("keep") not in {"first", "last"}:
+            raise OperationValidationError(f"{operation_id} keep must be first or last")
+        return
+    if operation == "rename":
+        mapping = spec.get("mapping")
+        if not isinstance(mapping, Mapping) or not mapping:
+            raise OperationValidationError(f"{operation_id} mapping must be a non-empty object")
+        old = list(mapping)
+        new = list(mapping.values())
+        if any(not isinstance(item, str) or not item.strip() for item in old + new):
+            raise OperationValidationError(f"{operation_id} mapping names must be non-empty strings")
+        if len(set(new)) != len(new):
+            raise OperationValidationError(f"{operation_id} mapping values must be distinct")
+        return
+    if operation == "aggregate":
+        group_by = strings(spec.get("group_by"), "group_by")
+        aggregations = spec.get("aggregations")
+        if not isinstance(aggregations, list) or not aggregations:
+            raise OperationValidationError(f"{operation_id} aggregations must be non-empty")
+        outputs: set[str] = set()
+        for item in aggregations:
+            if not isinstance(item, Mapping):
+                raise OperationValidationError(f"{operation_id} aggregation must be an object")
+            if item.get("func") not in AGGREGATE_FUNCTIONS:
+                raise OperationValidationError(f"{operation_id} aggregation function is not registered")
+            output = text(item.get("output"), "aggregation.output")
+            if output in outputs or output in group_by:
+                raise OperationValidationError(f"{operation_id} aggregation output collides: {output}")
+            outputs.add(output)
+        return
+    if operation == "fill_missing":
+        strategies = spec.get("strategies")
+        if not isinstance(strategies, list) or not strategies:
+            raise OperationValidationError(f"{operation_id} strategies must be non-empty")
+        seen: set[str] = set()
+        for item in strategies:
+            if not isinstance(item, Mapping):
+                raise OperationValidationError(f"{operation_id} strategy must be an object")
+            column = text(item.get("column"), "strategy.column")
+            strategy = item.get("strategy")
+            if strategy not in FILL_MISSING_STRATEGIES:
+                raise OperationValidationError(f"{operation_id} strategy is not registered")
+            if column in seen:
+                raise OperationValidationError(f"{operation_id} declares duplicate column: {column}")
+            seen.add(column)
+            if strategy == "constant" and "value" not in item:
+                raise OperationValidationError(f"{operation_id} constant requires value")
+            if strategy != "constant" and "value" in item:
+                raise OperationValidationError(f"{operation_id} value is only valid for constant")
+        return
+    if operation == "tsset":
+        text(spec.get("time_column"), "time_column")
+        if spec.get("frequency") not in TSSET_FREQUENCIES:
+            raise OperationValidationError(f"{operation_id} frequency is not registered")
+        if spec.get("panel_id_column") == spec.get("time_column"):
+            raise OperationValidationError(f"{operation_id} panel and time columns must differ")
+        return
+    if operation == "lag":
+        strings(spec.get("columns"), "columns")
+        lags = spec.get("lags")
+        if not isinstance(lags, list) or not lags or any(
+            type(lag) is not int or lag <= 0 for lag in lags
+        ) or len(set(lags)) != len(lags):
+            raise OperationValidationError(f"{operation_id} lags must be unique positive integers")
+        difference = spec.get("difference", 0)
+        if type(difference) is not int or difference < 0:
+            raise OperationValidationError(f"{operation_id} difference must be non-negative")
+        return
+
+
 def _validate_declared_field_types(
     operation_id: str,
     spec: Mapping[str, Any],
     contract: StepSpecContract,
 ) -> None:
-    """Apply only the small JSON type vocabulary declared by a contract."""
+    """Apply the declaration's top-level and nested closed schema."""
 
     for field_name, type_name in contract.field_types.items():
         if field_name not in spec or spec[field_name] is None:
@@ -2302,6 +3164,10 @@ def _validate_declared_field_types(
             "string": isinstance(value, str) and not isinstance(value, bool),
             "list": isinstance(value, list),
             "object": isinstance(value, Mapping),
+            "boolean": type(value) is bool,
+            "integer": type(value) is int,
+            "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+            "nullable_string": value is None or (isinstance(value, str) and not isinstance(value, bool)),
         }.get(type_name)
         if valid is None:
             raise OperationValidationError(
@@ -2311,6 +3177,73 @@ def _validate_declared_field_types(
             raise OperationValidationError(
                 f"{operation_id} field {field_name} must be a {type_name}"
             )
+    for field_name, enum_values in contract.field_enums.items():
+        if field_name in spec and spec[field_name] is not None and spec[field_name] not in enum_values:
+            raise OperationValidationError(
+                f"{operation_id} field {field_name} must be one of: "
+                + ", ".join(enum_values)
+            )
+    for field_name, schema in contract.field_schemas.items():
+        if field_name in spec and spec[field_name] is not None and not _schema_value_matches(
+            spec[field_name], schema
+        ):
+            raise OperationValidationError(
+                f"{operation_id} field {field_name} does not match its closed schema"
+            )
+
+
+def _data_output_columns(
+    operation_id: str, spec: Mapping[str, Any], visible: set[str]
+) -> set[str]:
+    """Project a data-operation output shape for downstream compile checks."""
+
+    operation = operation_id.removeprefix("data.")
+    if operation == "subset":
+        return {str(column) for column in spec.get("columns", [])}
+    if operation == "rename":
+        mapping = spec.get("mapping", {})
+        return (visible - set(mapping)) | {str(value) for value in mapping.values()}
+    if operation == "aggregate":
+        return {
+            *[str(column) for column in spec.get("group_by", [])],
+            *[
+                str(item["output"])
+                for item in spec.get("aggregations", [])
+                if isinstance(item, Mapping) and item.get("output")
+            ],
+        }
+    if operation == "reshape":
+        if spec.get("direction") == "wide_to_long":
+            return {
+                *[str(column) for column in spec.get("id_columns", [])],
+                str(spec.get("var_name", "variable")),
+                str(spec.get("value_name", "value")),
+            }
+        # Long-to-wide output labels are data values, not declaration fields;
+        # retain only the deterministic index/value columns until runtime sees
+        # the actual materialized categories.
+        return {
+            *[str(column) for column in spec.get("index", [])],
+            str(spec.get("values")),
+        }
+    if operation == "lag":
+        return {
+            *visible,
+            *[
+                f"{column}_lag{lag}"
+                for column in spec.get("columns", [])
+                for lag in spec.get("lags", [])
+            ],
+        }
+    if operation == "feature_recipe":
+        return {*visible, str(spec.get("output"))}
+    # append/merge may add columns from the secondary dataset, which is a
+    # runtime-bound identity. Keep the known primary columns and add the
+    # declared merge indicator when it is deterministic.
+    if operation == "merge" and spec.get("indicator") is not None:
+        indicator = spec["indicator"]
+        return {*visible, "_merge" if indicator is True else str(indicator)}
+    return set(visible)
 
 
 def validate_workflow_steps(
@@ -2450,32 +3383,60 @@ def validate_workflow_steps(
 
     if available_columns is not None:
         available = {str(column) for column in available_columns}
-        # Columns a step creates become available to later steps: a derived
-        # indicator is a legitimate input downstream even though it is absent
-        # from the raw source schema.
-        produced: set[str] = set()
+        # Each source commitment names a dataset branch, so column visibility
+        # is branch-local rather than a mutable global set.  Sibling steps that
+        # all consume `first` must see the columns published by `first`, not
+        # whichever sibling happened to be validated immediately before them.
+        output_columns: dict[str, set[str]] = {}
+        ancestors = _step_ancestors(ordered)
         for step in ordered:
+            source = step["spec"].get("source")
+            if isinstance(source, Mapping):
+                input_visible = set(output_columns[source["from_step"]])
+            else:
+                input_visible = set(available)
+                # Preserve the established sourceless replay contract for the
+                # two declaration-defined column derivations.  They are not
+                # persisted source branches, so their declared output columns
+                # are the only ancestor state a sourceless consumer can see.
+                for ancestor_id in ancestors[step["step_id"]]:
+                    ancestor = next(
+                        candidate
+                        for candidate in ordered
+                        if candidate["step_id"] == ancestor_id
+                    )
+                    if ancestor["operation_id"] in {
+                        "statistical.derive_numeric",
+                        "statistical.derive_boolean",
+                    }:
+                        input_visible.update(output_columns[ancestor_id])
             referenced = _spec_columns(step["operation_id"], step["spec"])
-            missing = sorted(referenced - available - produced)
+            missing = sorted(referenced - input_visible)
             if missing:
                 raise OperationValidationError(
                     f"workflow step {step['step_id']} references missing column(s): "
                     + ", ".join(missing)
                 )
+            result_visible = set(input_visible)
             if step["operation_id"] == "statistical.derive_boolean":
-                produced.update(
+                result_visible.update(
                     str(recipe["output_name"]) for recipe in step["spec"]["recipes"]
                 )
             if step["operation_id"] == "statistical.derive_numeric":
                 outputs = {
                     str(recipe["output_name"]) for recipe in step["spec"]["recipes"]
                 }
-                collisions = sorted(outputs & (available | produced))
+                collisions = sorted(outputs & input_visible)
                 if collisions:
                     raise OperationValidationError(
                         "derive_numeric output column already exists: " + ", ".join(collisions)
                     )
-                produced.update(outputs)
+                result_visible.update(outputs)
+            if step["operation_id"].startswith("data."):
+                result_visible = _data_output_columns(
+                    step["operation_id"], step["spec"], input_visible
+                )
+            output_columns[step["step_id"]] = result_visible
     return ordered
 
 

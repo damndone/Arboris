@@ -124,7 +124,54 @@ class FeatureRecipeEffect:
         }
 
 
-DataTransformOperation = Literal["merge", "append", "reshape", "subset"]
+DataTransformOperation = Literal[
+    "merge",
+    "append",
+    "reshape",
+    "subset",
+    "dedupe",
+    "rename",
+    "aggregate",
+    "fill_missing",
+    "tsset",
+    "lag",
+]
+ALLOWED_DATA_TRANSFORM_OPERATIONS = frozenset(
+    {
+        "merge",
+        "append",
+        "reshape",
+        "subset",
+        "dedupe",
+        "rename",
+        "aggregate",
+        "fill_missing",
+        "tsset",
+        "lag",
+    }
+)
+SUBSET_FILTER_OPERATORS = frozenset(
+    {
+        "eq",
+        "ne",
+        "gt",
+        "ge",
+        "lt",
+        "le",
+        "in",
+        "not_in",
+        "between",
+        "is_missing",
+        "not_missing",
+    }
+)
+AGGREGATE_FUNCTIONS = frozenset(
+    {"sum", "mean", "median", "min", "max", "count", "std"}
+)
+FILL_MISSING_STRATEGIES = frozenset(
+    {"drop_rows", "constant", "mean", "median", "mode"}
+)
+TSSET_FREQUENCIES = frozenset({"D", "W", "M", "Q", "Y"})
 
 
 @dataclass(frozen=True)
@@ -144,8 +191,11 @@ class DataTransformSpecV1:
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field_name} must be a non-empty string")
-        if self.operation not in {"merge", "append", "reshape", "subset"}:
-            raise ValueError("operation must be merge, append, reshape, or subset")
+        if self.operation not in ALLOWED_DATA_TRANSFORM_OPERATIONS:
+            raise DataColumnCastValidationError(
+                "operation must be one of: "
+                + ", ".join(sorted(ALLOWED_DATA_TRANSFORM_OPERATIONS))
+            )
         if self.operation in {"merge", "append"}:
             if not all((self.secondary_run_id, self.secondary_node_id, self.secondary_artifact_id)):
                 raise ValueError(f"{self.operation} requires a secondary source artifact")
@@ -290,6 +340,131 @@ def _schema_signature(frame: pd.DataFrame) -> tuple[tuple[str, str], ...]:
     return tuple((str(column), str(frame[column].dtype)) for column in frame.columns)
 
 
+def _reject_unknown_parameters(
+    parameters: Mapping[str, Any], allowed: set[str], operation: str
+) -> None:
+    unknown = set(parameters) - allowed
+    if unknown:
+        raise DataColumnCastValidationError(
+            f"data.{operation} contains unsupported fields: {sorted(unknown)}"
+        )
+
+
+def _require_non_empty_string(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise DataColumnCastValidationError(f"{name} must be a non-empty string")
+    return value
+
+
+def _require_string_list(value: Any, name: str) -> list[str]:
+    if not isinstance(value, list) or not value or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        raise DataColumnCastValidationError(f"{name} must be a non-empty list of strings")
+    if len(set(value)) != len(value):
+        raise DataColumnCastValidationError(f"{name} must not contain duplicates")
+    return list(value)
+
+
+def _require_columns_exist(frame: pd.DataFrame, columns: list[str], name: str) -> None:
+    missing = [column for column in columns if column not in frame.columns]
+    if missing:
+        raise DataColumnCastValidationError(f"{name} columns missing: {missing}")
+
+
+def _require_nested_keys(
+    value: Any,
+    *,
+    name: str,
+    required: set[str],
+    optional: set[str] = set(),
+) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise DataColumnCastValidationError(f"{name} must be an object")
+    allowed = required | optional
+    unknown = set(value) - allowed
+    if unknown:
+        raise DataColumnCastValidationError(
+            f"{name} contains unsupported fields: {sorted(unknown)}"
+        )
+    missing = required - set(value)
+    if missing:
+        raise DataColumnCastValidationError(
+            f"{name} is missing required fields: {sorted(missing)}"
+        )
+    return value
+
+
+def _subset_filter_mask(series: pd.Series, filter_spec: Mapping[str, Any], name: str) -> pd.Series:
+    filter_keys = _require_nested_keys(
+        filter_spec,
+        name=name,
+        required={"column", "op"},
+        optional={"value"},
+    )
+    column = _require_non_empty_string(filter_keys["column"], f"{name}.column")
+    operator = _require_non_empty_string(filter_keys["op"], f"{name}.op")
+    if operator not in SUBSET_FILTER_OPERATORS:
+        raise DataColumnCastValidationError(
+            f"{name}.op must be one of: {', '.join(sorted(SUBSET_FILTER_OPERATORS))}"
+        )
+    has_value = "value" in filter_keys
+    if operator in {"is_missing", "not_missing"}:
+        if has_value:
+            raise DataColumnCastValidationError(
+                f"{name}.value is not allowed for {operator}"
+            )
+    elif not has_value:
+        raise DataColumnCastValidationError(f"{name}.value is required for {operator}")
+
+    value = filter_keys.get("value")
+    try:
+        if operator == "eq":
+            mask = series.eq(value)
+        elif operator == "ne":
+            mask = series.notna() & series.ne(value)
+        elif operator == "gt":
+            mask = series.notna() & series.gt(value)
+        elif operator == "ge":
+            mask = series.notna() & series.ge(value)
+        elif operator == "lt":
+            mask = series.notna() & series.lt(value)
+        elif operator == "le":
+            mask = series.notna() & series.le(value)
+        elif operator in {"in", "not_in"}:
+            if not isinstance(value, list) or not value:
+                raise DataColumnCastValidationError(
+                    f"{name}.value must be a non-empty list for {operator}"
+                )
+            mask = series.isin(value)
+            if operator == "not_in":
+                mask = series.notna() & ~mask
+        elif operator == "between":
+            if not isinstance(value, list) or len(value) != 2:
+                raise DataColumnCastValidationError(
+                    f"{name}.value must contain exactly two bounds for between"
+                )
+            lower, upper = value
+            if lower > upper:
+                raise DataColumnCastValidationError(
+                    f"{name}.value lower bound must not exceed upper bound"
+                )
+            mask = series.notna() & series.ge(lower) & series.le(upper)
+        elif operator == "is_missing":
+            mask = series.isna()
+        else:
+            mask = series.notna()
+    except DataColumnCastValidationError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise DataColumnCastValidationError(
+            f"{name} could not be applied to column {column!r}: {exc}"
+        ) from exc
+    if not isinstance(mask, pd.Series):
+        raise DataColumnCastValidationError(f"{name} did not produce a row mask")
+    return mask.fillna(False).astype(bool)
+
+
 def _execute_data_transform(
     left: pd.DataFrame,
     spec: DataTransformSpecV1,
@@ -297,6 +472,9 @@ def _execute_data_transform(
 ) -> pd.DataFrame:
     parameters = dict(spec.parameters)
     if spec.operation == "append":
+        _reject_unknown_parameters(
+            parameters, {"schema_policy", "row_growth_policy", "max_growth_factor"}, "append"
+        )
         if right is None:
             raise DataColumnCastValidationError("append requires a secondary frame")
         schema_policy = parameters.get("schema_policy", "exact")
@@ -323,11 +501,14 @@ def _execute_data_transform(
         )
         return output
     if spec.operation == "merge":
+        _reject_unknown_parameters(
+            parameters,
+            {"keys", "how", "indicator", "growth_policy", "max_growth_factor"},
+            "merge",
+        )
         if right is None:
             raise DataColumnCastValidationError("merge requires a secondary frame")
-        keys = parameters.get("keys")
-        if not isinstance(keys, list) or not keys or any(not isinstance(key, str) for key in keys):
-            raise DataColumnCastValidationError("merge requires a non-empty list of join keys")
+        keys = _require_string_list(parameters.get("keys"), "merge.keys")
         missing_left = [key for key in keys if key not in left.columns]
         missing_right = [key for key in keys if key not in right.columns]
         if missing_left or missing_right:
@@ -341,8 +522,31 @@ def _execute_data_transform(
         how = parameters.get("how", "left")
         if not isinstance(how, str) or how not in {"left", "right", "inner", "outer"}:
             raise DataColumnCastValidationError("merge how must be left, right, inner, or outer")
+        indicator = parameters.get("indicator")
+        if indicator is not None:
+            if indicator is True:
+                indicator_name = "_merge"
+            elif isinstance(indicator, str) and indicator.strip():
+                indicator_name = indicator
+            else:
+                raise DataColumnCastValidationError(
+                    "merge.indicator must be true or a non-empty output-column name"
+                )
+            if indicator_name in left.columns or indicator_name in right.columns:
+                raise DataColumnCastValidationError(
+                    f"merge indicator column collides with an existing column: {indicator_name}"
+                )
+        else:
+            indicator_name = False
         try:
-            merged = left.merge(right, on=keys, how=how, suffixes=("_left", "_right"), validate="many_to_one")
+            merged = left.merge(
+                right,
+                on=keys,
+                how=how,
+                suffixes=("_left", "_right"),
+                validate="many_to_one",
+                indicator=indicator_name,
+            )
         except (pd.errors.MergeError, ValueError) as exc:
             raise DataColumnCastValidationError(f"merge key contract rejected: {exc}") from exc
         _enforce_growth_policy(
@@ -357,43 +561,48 @@ def _execute_data_transform(
         )
         return merged
     if spec.operation == "reshape":
+        _reject_unknown_parameters(
+            parameters,
+            {
+                "direction",
+                "id_columns",
+                "value_columns",
+                "index",
+                "columns",
+                "values",
+                "var_name",
+                "value_name",
+            },
+            "reshape",
+        )
         direction = parameters.get("direction")
         if direction == "wide_to_long":
-            id_columns = parameters.get("id_columns")
-            value_columns = parameters.get("value_columns")
-            if not isinstance(id_columns, list) or not isinstance(value_columns, list) or not id_columns or not value_columns:
-                raise DataColumnCastValidationError("wide_to_long requires id_columns and value_columns")
-            missing = [
-                column
-                for column in [*id_columns, *value_columns]
-                if not isinstance(column, str) or column not in left.columns
-            ]
-            if missing:
+            id_columns = _require_string_list(parameters.get("id_columns"), "reshape.id_columns")
+            value_columns = _require_string_list(
+                parameters.get("value_columns"), "reshape.value_columns"
+            )
+            _require_columns_exist(left, [*id_columns, *value_columns], "reshape")
+            var_name = _require_non_empty_string(
+                parameters.get("var_name", "variable"), "reshape.var_name"
+            )
+            value_name = _require_non_empty_string(
+                parameters.get("value_name", "value"), "reshape.value_name"
+            )
+            if var_name == value_name or var_name in id_columns or value_name in id_columns:
                 raise DataColumnCastValidationError(
-                    f"DATA_RESHAPE_COLUMNS_MISSING: {missing}"
+                    "wide_to_long output names must not collide with id_columns"
                 )
             return left.melt(
                 id_vars=id_columns,
                 value_vars=value_columns,
-                var_name=str(parameters.get("var_name", "variable")),
-                value_name=str(parameters.get("value_name", "value")),
+                var_name=var_name,
+                value_name=value_name,
             )
         if direction == "long_to_wide":
-            index = parameters.get("index")
-            columns = parameters.get("columns")
-            values = parameters.get("values")
-            if not isinstance(index, list) or not isinstance(columns, str) or not isinstance(values, str):
-                raise DataColumnCastValidationError("long_to_wide requires index, columns, and values")
-            required = [*index, columns, values]
-            missing = [
-                column
-                for column in required
-                if not isinstance(column, str) or column not in left.columns
-            ]
-            if not index or missing:
-                raise DataColumnCastValidationError(
-                    f"DATA_RESHAPE_COLUMNS_MISSING: {missing or ['index']}"
-                )
+            index = _require_string_list(parameters.get("index"), "reshape.index")
+            columns = _require_non_empty_string(parameters.get("columns"), "reshape.columns")
+            values = _require_non_empty_string(parameters.get("values"), "reshape.values")
+            _require_columns_exist(left, [*index, columns, values], "reshape")
             try:
                 return left.pivot(index=index, columns=columns, values=values).reset_index()
             except (ValueError, KeyError) as exc:
@@ -402,21 +611,58 @@ def _execute_data_transform(
                 ) from exc
         raise DataColumnCastValidationError("reshape direction must be wide_to_long or long_to_wide")
     if spec.operation == "subset":
-        columns = parameters.get("columns")
-        if not isinstance(columns, list) or not columns:
-            raise DataColumnCastValidationError("subset requires an explicit non-empty columns list")
-        missing = [column for column in columns if column not in left.columns]
-        if missing:
-            raise DataColumnCastValidationError(f"subset columns missing: {missing}")
-        result = left.loc[:, columns].copy()
-        filters = parameters.get("equals", {})
-        if not isinstance(filters, Mapping):
-            raise DataColumnCastValidationError("subset equals filters must be an object")
-        for column, value in filters.items():
-            if column not in result.columns:
-                raise DataColumnCastValidationError(f"subset filter column missing: {column}")
-            result = result[result[column] == value]
+        _reject_unknown_parameters(
+            parameters,
+            {"columns", "equals", "filters", "row_indices", "row_index_range", "row_range"},
+            "subset",
+        )
+        columns = _require_string_list(parameters.get("columns"), "subset.columns")
+        _require_columns_exist(left, columns, "subset")
+        legacy_equals = parameters.get("equals", {})
+        if not isinstance(legacy_equals, Mapping):
+            raise DataColumnCastValidationError("subset.equals must be an object")
+        if any(not isinstance(column, str) or not column.strip() for column in legacy_equals):
+            raise DataColumnCastValidationError("subset.equals keys must be non-empty strings")
+        _require_columns_exist(left, list(legacy_equals), "subset.equals")
+        filters = parameters.get("filters")
+        if filters is None:
+            filters = []
+        if not isinstance(filters, list):
+            raise DataColumnCastValidationError("subset.filters must be a list")
+        filter_columns: list[str] = []
+        for index, filter_spec in enumerate(filters):
+            parsed = _require_nested_keys(
+                filter_spec,
+                name=f"subset.filters[{index}]",
+                required={"column", "op"},
+                optional={"value"},
+            )
+            filter_column = _require_non_empty_string(
+                parsed["column"], f"subset.filters[{index}].column"
+            )
+            filter_columns.append(filter_column)
+            _require_columns_exist(left, [filter_column], "subset.filters")
+            _subset_filter_mask(left[filter_column], parsed, f"subset.filters[{index}]")
+        overlap = set(legacy_equals) & set(filter_columns)
+        if overlap:
+            raise DataColumnCastValidationError(
+                "subset.equals and subset.filters cannot both declare: "
+                + ", ".join(sorted(overlap))
+            )
+        mask = pd.Series(True, index=left.index)
+        for column, value in legacy_equals.items():
+            mask &= left[column].eq(value).fillna(False)
+        for index, filter_spec in enumerate(filters):
+            column = str(filter_spec["column"])
+            mask &= _subset_filter_mask(
+                left[column], filter_spec, f"subset.filters[{index}]"
+            )
+        result = left.loc[mask].loc[:, columns].copy()
         row_indices = parameters.get("row_indices")
+        if "row_index_range" in parameters and "row_range" in parameters:
+            raise DataColumnCastValidationError(
+                "DATA_SUBSET_ROW_INDEX_INVALID: row_index_range and row_range are aliases"
+            )
         row_index_range = parameters.get("row_index_range", parameters.get("row_range"))
         if row_indices is not None and row_index_range is not None:
             raise DataColumnCastValidationError(
@@ -436,6 +682,11 @@ def _execute_data_transform(
             result = result.iloc[row_indices]
         elif row_index_range is not None:
             if isinstance(row_index_range, Mapping):
+                unknown = set(row_index_range) - {"start", "stop"}
+                if unknown:
+                    raise DataColumnCastValidationError(
+                        "DATA_SUBSET_ROW_INDEX_INVALID: row_index_range contains unsupported fields"
+                    )
                 start = row_index_range.get("start")
                 stop = row_index_range.get("stop")
             elif isinstance(row_index_range, (list, tuple)) and len(row_index_range) == 2:
@@ -448,12 +699,232 @@ def _execute_data_transform(
                 or start < 0
                 or stop < start
                 or stop > len(result)
-            ):
+                ):
                 raise DataColumnCastValidationError(
                     "DATA_SUBSET_ROW_INDEX_INVALID: row_index_range must be a bounded [start, stop) range"
                 )
             result = result.iloc[start:stop]
         return result.reset_index(drop=True)
+    if spec.operation == "dedupe":
+        _reject_unknown_parameters(parameters, {"columns", "keep"}, "dedupe")
+        columns = _require_string_list(parameters.get("columns"), "dedupe.columns")
+        _require_columns_exist(left, columns, "dedupe")
+        keep = parameters.get("keep")
+        if keep not in {"first", "last"}:
+            raise DataColumnCastValidationError("dedupe.keep must be first or last")
+        return left.drop_duplicates(subset=columns, keep=keep, ignore_index=True)
+    if spec.operation == "rename":
+        _reject_unknown_parameters(parameters, {"mapping"}, "rename")
+        mapping = parameters.get("mapping")
+        if not isinstance(mapping, Mapping) or not mapping:
+            raise DataColumnCastValidationError("rename.mapping must be a non-empty object")
+        if any(
+            not isinstance(old, str)
+            or not old.strip()
+            or not isinstance(new, str)
+            or not new.strip()
+            for old, new in mapping.items()
+        ):
+            raise DataColumnCastValidationError(
+                "rename.mapping keys and values must be non-empty strings"
+            )
+        old_columns = list(mapping)
+        new_columns = list(mapping.values())
+        _require_columns_exist(left, old_columns, "rename")
+        if len(set(new_columns)) != len(new_columns):
+            raise DataColumnCastValidationError("rename.mapping new names must be distinct")
+        untouched = set(left.columns) - set(old_columns)
+        collisions = sorted(set(new_columns) & untouched)
+        if collisions:
+            raise DataColumnCastValidationError(
+                f"rename.mapping collides with existing columns: {collisions}"
+            )
+        return left.rename(columns=dict(mapping), copy=True)
+    if spec.operation == "aggregate":
+        _reject_unknown_parameters(parameters, {"group_by", "aggregations"}, "aggregate")
+        group_by = _require_string_list(parameters.get("group_by"), "aggregate.group_by")
+        _require_columns_exist(left, group_by, "aggregate")
+        aggregations = parameters.get("aggregations")
+        if not isinstance(aggregations, list) or not aggregations:
+            raise DataColumnCastValidationError(
+                "aggregate.aggregations must be a non-empty list"
+            )
+        named: dict[str, pd.NamedAgg] = {}
+        for index, aggregation in enumerate(aggregations):
+            parsed = _require_nested_keys(
+                aggregation,
+                name=f"aggregate.aggregations[{index}]",
+                required={"column", "func", "output"},
+            )
+            column = _require_non_empty_string(
+                parsed["column"], f"aggregate.aggregations[{index}].column"
+            )
+            function = _require_non_empty_string(
+                parsed["func"], f"aggregate.aggregations[{index}].func"
+            )
+            output = _require_non_empty_string(
+                parsed["output"], f"aggregate.aggregations[{index}].output"
+            )
+            _require_columns_exist(left, [column], "aggregate")
+            if function not in AGGREGATE_FUNCTIONS:
+                raise DataColumnCastValidationError(
+                    f"aggregate function must be one of: {', '.join(sorted(AGGREGATE_FUNCTIONS))}"
+                )
+            if output in group_by or output in named:
+                raise DataColumnCastValidationError(
+                    f"aggregate output collides with an existing output: {output}"
+                )
+            named[output] = pd.NamedAgg(column=column, aggfunc=function)
+        try:
+            return left.groupby(group_by, dropna=False, sort=False).agg(**named).reset_index()
+        except (TypeError, ValueError, KeyError) as exc:
+            raise DataColumnCastValidationError(f"aggregate failed: {exc}") from exc
+    if spec.operation == "fill_missing":
+        _reject_unknown_parameters(parameters, {"strategies"}, "fill_missing")
+        strategies = parameters.get("strategies")
+        if not isinstance(strategies, list) or not strategies:
+            raise DataColumnCastValidationError(
+                "fill_missing.strategies must be a non-empty list"
+            )
+        result = left.copy()
+        seen_columns: set[str] = set()
+        for index, strategy_spec in enumerate(strategies):
+            parsed = _require_nested_keys(
+                strategy_spec,
+                name=f"fill_missing.strategies[{index}]",
+                required={"column", "strategy"},
+                optional={"value"},
+            )
+            column = _require_non_empty_string(
+                parsed["column"], f"fill_missing.strategies[{index}].column"
+            )
+            strategy = _require_non_empty_string(
+                parsed["strategy"], f"fill_missing.strategies[{index}].strategy"
+            )
+            _require_columns_exist(result, [column], "fill_missing")
+            if column in seen_columns:
+                raise DataColumnCastValidationError(
+                    f"fill_missing may declare one strategy per column: {column}"
+                )
+            seen_columns.add(column)
+            if strategy not in FILL_MISSING_STRATEGIES:
+                raise DataColumnCastValidationError(
+                    "fill_missing strategy must be one of: "
+                    + ", ".join(sorted(FILL_MISSING_STRATEGIES))
+                )
+            has_value = "value" in parsed
+            if strategy == "constant":
+                if not has_value:
+                    raise DataColumnCastValidationError(
+                        f"fill_missing.strategies[{index}].value is required for constant"
+                    )
+                result[column] = result[column].fillna(parsed["value"])
+                continue
+            if has_value:
+                raise DataColumnCastValidationError(
+                    f"fill_missing.strategies[{index}].value is only allowed for constant"
+                )
+            if strategy == "drop_rows":
+                result = result.dropna(subset=[column])
+                continue
+            series = result[column]
+            if not series.notna().any():
+                raise DataColumnCastValidationError(
+                    f"fill_missing cannot calculate {strategy} for all-missing column {column}"
+                )
+            try:
+                if strategy == "mean":
+                    fill_value = series.mean()
+                elif strategy == "median":
+                    fill_value = series.median()
+                else:
+                    modes = series.mode(dropna=True)
+                    if modes.empty:
+                        raise DataColumnCastValidationError(
+                            f"fill_missing cannot calculate mode for column {column}"
+                        )
+                    fill_value = modes.iloc[0]
+                if pd.isna(fill_value):
+                    raise DataColumnCastValidationError(
+                        f"fill_missing calculated a missing {strategy} for column {column}"
+                    )
+                result[column] = series.fillna(fill_value)
+            except DataColumnCastValidationError:
+                raise
+            except (TypeError, ValueError) as exc:
+                raise DataColumnCastValidationError(
+                    f"fill_missing {strategy} failed for column {column}: {exc}"
+                ) from exc
+        return result.reset_index(drop=True)
+    if spec.operation == "tsset":
+        _reject_unknown_parameters(
+            parameters, {"time_column", "frequency", "panel_id_column"}, "tsset"
+        )
+        time_column = _require_non_empty_string(
+            parameters.get("time_column"), "tsset.time_column"
+        )
+        frequency = _require_non_empty_string(parameters.get("frequency"), "tsset.frequency")
+        if frequency not in TSSET_FREQUENCIES:
+            raise DataColumnCastValidationError(
+                "tsset.frequency must be one of: " + ", ".join(sorted(TSSET_FREQUENCIES))
+            )
+        panel_column = parameters.get("panel_id_column")
+        if panel_column is not None:
+            panel_column = _require_non_empty_string(panel_column, "tsset.panel_id_column")
+        required_columns = [time_column] + ([panel_column] if panel_column else [])
+        _require_columns_exist(left, required_columns, "tsset")
+        converted = pd.to_datetime(left[time_column], errors="coerce")
+        if converted.isna().any():
+            raise DataColumnCastValidationError(
+                f"tsset.time_column contains missing or invalid time values: {time_column}"
+            )
+        duplicate_keys = [panel_column, time_column] if panel_column else [time_column]
+        if panel_column and left[panel_column].isna().any():
+            raise DataColumnCastValidationError("tsset.panel_id_column must not contain missing values")
+        if left.duplicated(duplicate_keys).any():
+            raise DataColumnCastValidationError(
+                "tsset rejects duplicate time keys for the declared panel"
+            )
+        working = left.copy()
+        sort_key = "__workbench_tsset_time__"
+        while sort_key in working.columns:
+            sort_key = f"_{sort_key}"
+        working[sort_key] = converted
+        sort_columns = ([panel_column] if panel_column else []) + [sort_key]
+        return (
+            working.sort_values(sort_columns, kind="mergesort")
+            .drop(columns=[sort_key])
+            .reset_index(drop=True)
+        )
+    if spec.operation == "lag":
+        _reject_unknown_parameters(parameters, {"columns", "lags", "difference"}, "lag")
+        columns = _require_string_list(parameters.get("columns"), "lag.columns")
+        _require_columns_exist(left, columns, "lag")
+        lags = parameters.get("lags")
+        if not isinstance(lags, list) or not lags or any(
+            type(lag) is not int or lag <= 0 for lag in lags
+        ):
+            raise DataColumnCastValidationError(
+                "lag.lags must be a non-empty list of positive integers"
+            )
+        if len(set(lags)) != len(lags):
+            raise DataColumnCastValidationError("lag.lags must not contain duplicates")
+        difference = parameters.get("difference", 0)
+        if type(difference) is not int or difference < 0:
+            raise DataColumnCastValidationError(
+                "lag.difference must be a non-negative integer"
+            )
+        output_names = [f"{column}_lag{lag}" for column in columns for lag in lags]
+        if len(set(output_names)) != len(output_names) or set(output_names) & set(left.columns):
+            raise DataColumnCastValidationError(
+                f"lag output columns collide with existing columns: {output_names}"
+            )
+        result = left.copy()
+        for column in columns:
+            base = result[column].diff(difference) if difference else result[column]
+            for lag in lags:
+                result[f"{column}_lag{lag}"] = base.shift(lag)
+        return result
     raise DataColumnCastValidationError(f"unsupported data operation: {spec.operation}")
 
 

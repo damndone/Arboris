@@ -453,6 +453,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     tool_ids = {item["tool_id"] for item in registry.descriptors()}
     assert {
         "propose_operation",
+        "list_project_datasets",
         "inspect_node_context",
         "inspect_operation_contract",
         "inspect_diagnostics",
@@ -466,6 +467,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         for item in registry.descriptors()
         if item["tool_id"]
         in {
+            "list_project_datasets",
             "inspect_node_context",
             "inspect_operation_contract",
             "inspect_diagnostics",
@@ -476,6 +478,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         }
     }
     assert set(descriptors) == {
+        "list_project_datasets",
         "inspect_node_context",
         "inspect_operation_contract",
         "inspect_diagnostics",
@@ -490,7 +493,9 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         # The contract tool returns schema rather than rows, so it carries a
         # larger budget than the row-dumping inspectors — see its definition.
         expected = (
-            12288
+            16384
+            if descriptor["tool_id"] == "list_project_datasets"
+            else 12288
             if descriptor["tool_id"]
             in {"inspect_operation_contract", "inspect_time_series_summary"}
             else 8192

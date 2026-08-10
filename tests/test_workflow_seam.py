@@ -795,6 +795,7 @@ def _meta_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "wave": [1, 2, 3, 4] * 12,
+            "time": pd.date_range("2020-01-01", periods=48, freq="D"),
             "outcome": [100.0 + index * 2.5 for index in range(48)],
             "rate_a": [float(index % 17) for index in range(48)],
             "rate_b": [float((index * 7) % 13) for index in range(48)],
@@ -808,7 +809,7 @@ def _sourced(step: dict, from_step: str = "first") -> dict:
     return step
 
 
-def _meta_plan() -> list[dict]:
+def _meta_plan(*, secondary_run_id: str, secondary_artifact_id: str) -> list[dict]:
     """One plan whose every consuming step reads `first`'s output.
 
     `first` is the only step without a `source`: it is the upstream whose
@@ -944,6 +945,117 @@ def _meta_plan() -> list[dict]:
                 "spec": {"branch_id": "curved", "column": "scaled"},
             }
         ),
+        _sourced(
+            {
+                "step_id": "data_merge",
+                "operation_id": "data.merge",
+                "spec": {
+                    "secondary_run_id": secondary_run_id,
+                    "secondary_node_id": "stage:source",
+                    "secondary_artifact_id": secondary_artifact_id,
+                    "keys": ["outcome"],
+                    "how": "left",
+                    "indicator": "merge_status",
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "data_append",
+                "operation_id": "data.append",
+                "spec": {
+                    "secondary_run_id": secondary_run_id,
+                    "secondary_node_id": "stage:source",
+                    "secondary_artifact_id": secondary_artifact_id,
+                    "schema_policy": "union",
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "data_reshape",
+                "operation_id": "data.reshape",
+                "spec": {
+                    "direction": "wide_to_long",
+                    "id_columns": ["wave", "outcome"],
+                    "value_columns": ["rate_a", "rate_b"],
+                    "var_name": "metric",
+                    "value_name": "metric_value",
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "data_subset",
+                "operation_id": "data.subset",
+                "spec": {
+                    "columns": ["wave", "scaled"],
+                    "filters": [{"column": "wave", "op": "ge", "value": 1}],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "data_feature_recipe",
+                "operation_id": "data.feature_recipe",
+                "spec": {
+                    "recipe_id": "meta_interaction",
+                    "recipe_operation_id": "interaction",
+                    "inputs": ["rate_a", "rate_b"],
+                    "output": "rate_interaction",
+                    "parameters": {"left": "rate_a", "right": "rate_b"},
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "data_dedupe",
+                "operation_id": "data.dedupe",
+                "spec": {"columns": ["wave", "outcome"], "keep": "first"},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "data_rename",
+                "operation_id": "data.rename",
+                "spec": {"mapping": {"scaled": "scaled_renamed"}},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "data_aggregate",
+                "operation_id": "data.aggregate",
+                "spec": {
+                    "group_by": ["wave"],
+                    "aggregations": [
+                        {"column": "outcome", "func": "mean", "output": "outcome_mean"}
+                    ],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "data_fill_missing",
+                "operation_id": "data.fill_missing",
+                "spec": {
+                    "strategies": [{"column": "rate_a", "strategy": "mean"}],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "data_tsset",
+                "operation_id": "data.tsset",
+                "spec": {"time_column": "time", "frequency": "D"},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "data_lag",
+                "operation_id": "data.lag",
+                "spec": {"columns": ["outcome"], "lags": [1]},
+            }
+        ),
     ]
 
 
@@ -960,6 +1072,17 @@ _LINEAGE_META_STEPS: dict[str, tuple[str, ...]] = {
     "model.joint_f_test": ("joint",),
     "model.white_test": ("white",),
     "model.quadratic_stationary_point": ("stationary",),
+    "data.merge": ("data_merge",),
+    "data.append": ("data_append",),
+    "data.reshape": ("data_reshape",),
+    "data.subset": ("data_subset",),
+    "data.feature_recipe": ("data_feature_recipe",),
+    "data.dedupe": ("data_dedupe",),
+    "data.rename": ("data_rename",),
+    "data.aggregate": ("data_aggregate",),
+    "data.fill_missing": ("data_fill_missing",),
+    "data.tsset": ("data_tsset",),
+    "data.lag": ("data_lag",),
 }
 
 # Operations that write no source reference at all, and so cannot be checked
@@ -995,7 +1118,10 @@ def _meta_project(tmp_path: Path):
         workflow_id="wf_lineage_meta",
         target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
         preconditions={"context_fingerprint": "sha256:fixture"},
-        steps=_meta_plan(),
+        steps=_meta_plan(
+            secondary_run_id=run_id,
+            secondary_artifact_id=artifact_id,
+        ),
         available_columns=list(frame.columns),
     )
     return project, draft
@@ -1088,6 +1214,39 @@ def _genesis_claims(project: Path, draft, step_id: str, result) -> dict[str, dic
     return claims
 
 
+def _data_management_claims(
+    project: Path, draft, step_id: str, result
+) -> dict[str, dict[str, str]]:
+    """Read data-operation provenance from all three durable records."""
+
+    run_id = str(draft.target["run_id"])
+    binding = result.payload["produced_dataset"]
+    data_artifact_id = str(binding["artifact_id"])
+    recipe_artifact_id = str(result.artifact_ids[1])
+    index = read_json(project / "runs" / run_id / "artifacts_index.json")
+    records = {item["artifact_id"]: item for item in index["artifacts"]}
+    data_record = records[data_artifact_id]
+    recipe = read_json(_artifact_path(project, run_id, recipe_artifact_id))
+    source_sha = (
+        recipe.get("preview", {}).get("source_sha256")
+        if isinstance(recipe.get("preview"), dict)
+        else recipe.get("source_sha256")
+    )
+    graph = GraphStore(project / "runs").read(run_id)
+    child = graph.nodes[str(binding["node_ref"])]
+    return {
+        f"{step_id}:artifact-input": {
+            "artifact_id": str(data_record["inputs"][0]),
+        },
+        f"{step_id}:recipe": {
+            "sha256": str(source_sha),
+        },
+        f"{step_id}:graph": {
+            "node_ref": str(child.parent_stage_id),
+        },
+    }
+
+
 _LINEAGE_META_READERS = {
     "statistical.derive_numeric": _numeric_recipe_claims,
     "statistical.explore": _exploration_claims,
@@ -1097,6 +1256,17 @@ _LINEAGE_META_READERS = {
     "model.joint_f_test": _post_estimation_claims,
     "model.white_test": _post_estimation_claims,
     "model.quadratic_stationary_point": _post_estimation_claims,
+    "data.merge": _data_management_claims,
+    "data.append": _data_management_claims,
+    "data.reshape": _data_management_claims,
+    "data.subset": _data_management_claims,
+    "data.feature_recipe": _data_management_claims,
+    "data.dedupe": _data_management_claims,
+    "data.rename": _data_management_claims,
+    "data.aggregate": _data_management_claims,
+    "data.fill_missing": _data_management_claims,
+    "data.tsset": _data_management_claims,
+    "data.lag": _data_management_claims,
 }
 
 

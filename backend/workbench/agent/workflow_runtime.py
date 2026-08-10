@@ -14,6 +14,14 @@ import pandas as pd
 from scipy import stats
 
 from ..artifacts import read_json, register_artifact, sha256_file, write_json, write_text_durable
+from ..data_operations import (
+    DataTransformSpecV1,
+    FeatureRecipeOperationSpecV1,
+    apply_data_transform,
+    apply_feature_recipe_operation,
+    preview_data_transform,
+    preview_feature_recipe,
+)
 from ..econometrics.runner import apply_ols_covariance, run_ols
 from ..exports import export_pdf, export_xlsx
 from ..graph_model import BranchRef, Edge, Graph, Node, NodeKind, Stage, Trust
@@ -31,6 +39,7 @@ from ..model_terms import (
     expand_branch_terms,
     polynomial_column_name,
 )
+from ..predictive_research.contracts import FeatureRecipeV1
 from ..reporting import render_html_report
 from ..repository.run_repository import _read_artifacts_index
 from ..statistical_exploration import (
@@ -812,6 +821,107 @@ def _exploration_step(
     )
 
 
+def _persist_data_management_step(
+    *,
+    root: Path,
+    draft: WorkflowDraft,
+    lineage: Mapping[str, str],
+    step: Any,
+) -> WorkflowStepResult:
+    """Execute every declared P4 data producer through one service adapter."""
+
+    operation_id = str(step.operation_id)
+    operation = operation_id.removeprefix("data.")
+    source_run_id = str(draft.target["run_id"])
+    source_node_id = str(lineage["node_ref"])
+    source_artifact_id = str(lineage["artifact_id"])
+    run_root = root / "runs" / source_run_id
+    execution_key = f"exec_{step.fingerprint}"
+
+    if operation == "feature_recipe":
+        recipe = FeatureRecipeV1(
+            recipe_id=str(step.spec["recipe_id"]),
+            operation_id=str(step.spec["recipe_operation_id"]),
+            operation_version=1,
+            inputs=tuple(str(item) for item in step.spec["inputs"]),
+            outputs=(str(step.spec["output"]),),
+            output_types=(str(step.spec.get("output_type", "numeric")),),
+            parameters=dict(step.spec["parameters"]),
+            fit_scope=str(step.spec.get("fit_scope", "stateless")),
+            source_artifact=source_artifact_id,
+            lineage_parent=source_node_id,
+            missing_policy=str(step.spec.get("missing_policy", "fail_closed")),
+            outlier_policy=str(step.spec.get("outlier_policy", "preserve")),
+        )
+        typed_spec = FeatureRecipeOperationSpecV1(
+            source_run_id=source_run_id,
+            source_node_id=source_node_id,
+            source_artifact_id=source_artifact_id,
+            recipe=recipe,
+        )
+        preview = preview_feature_recipe(root, typed_spec)
+        effect = apply_feature_recipe_operation(
+            root, typed_spec, preview, execution_key_value=execution_key
+        )
+        output_columns = list(preview.output_columns)
+        row_count_before = preview.row_count
+        row_count_after = preview.row_count
+        fingerprint = preview.fingerprint
+    else:
+        parameters = {
+            key: value
+            for key, value in step.spec.items()
+            if key
+            not in {
+                "secondary_run_id",
+                "secondary_node_id",
+                "secondary_artifact_id",
+                "source_artifact_fingerprint",
+                "source",
+            }
+        }
+        typed_spec = DataTransformSpecV1(
+            source_run_id=source_run_id,
+            source_node_id=source_node_id,
+            source_artifact_id=source_artifact_id,
+            operation=operation,
+            parameters=parameters,
+            secondary_run_id=step.spec.get("secondary_run_id"),
+            secondary_node_id=step.spec.get("secondary_node_id"),
+            secondary_artifact_id=step.spec.get("secondary_artifact_id"),
+        )
+        preview = preview_data_transform(root, typed_spec)
+        effect = apply_data_transform(
+            root, typed_spec, preview, execution_key_value=execution_key
+        )
+        output_columns = list(preview.output_columns)
+        row_count_before = preview.row_count_before
+        row_count_after = preview.row_count_after
+        fingerprint = preview.fingerprint
+
+    data_path = run_root / effect.artifact_path
+    if not data_path.is_file():
+        raise WorkflowExecutionError(
+            f"{operation_id} service returned a missing persisted dataset: {effect.artifact_path}"
+        )
+    content_sha256 = sha256_file(data_path)
+    return WorkflowStepResult(
+        artifact_ids=[effect.artifact_id, effect.recipe_artifact_id],
+        row_counts={"source": int(row_count_before), "output": int(row_count_after)},
+        result_fingerprint=fingerprint,
+        payload={
+            "operation_id": operation_id,
+            "output_columns": output_columns,
+            "produced_dataset": {
+                "schema_version": _PRODUCED_DATASET_SCHEMA,
+                "run_id": source_run_id,
+                "node_ref": effect.child_node_id,
+                "artifact_id": effect.artifact_id,
+                "content_sha256": content_sha256,
+                "result_fingerprint": fingerprint,
+            },
+        },
+    )
 def build_workflow_step_executor(
     project_root: Path | str,
     draft: WorkflowDraft,
@@ -849,6 +959,13 @@ def build_workflow_step_executor(
         # deliberately not forwarded past this point: every branch below
         # receives `lineage` and nothing else that could name the target.
         lineage = _lineage_source(draft, step, source_context, previous)
+        if dispatcher_key == "workbench.agent.workflow_runtime.data_operation":
+            return _persist_data_management_step(
+                root=root,
+                draft=draft,
+                lineage=lineage,
+                step=step,
+            )
         if dispatcher_key == "workbench.agent.workflow_runtime.statistical_explore" and "plots" not in step.spec:
             return _exploration_step(
                 root=root,
