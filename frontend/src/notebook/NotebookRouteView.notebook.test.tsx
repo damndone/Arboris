@@ -1149,6 +1149,11 @@ describe("NotebookRouteView", () => {
         "NOTEBOOK_PLANNING_UNAVAILABLE",
       ),
     );
+    expect(
+      screen.getByTestId("notebook-planning-recovery-actions"),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry planning" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Exit planning" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Exit planning" }));
 
     await waitFor(() =>

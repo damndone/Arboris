@@ -10,14 +10,14 @@ STARTED
 
 ## Metrics
 
-- Failure frequency: 6/12 (50.0%; 50.0 per 100 events)
+- Failure frequency: 6/13 (46.2%; 46.2 per 100 events)
 - Repeat rate: 0/6 (0.0%)
 - Recurrence rate: 0/6 (0.0%)
 - MTTR: median=0 ms (sample=5; unresolved=1)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/4 (0.0%)
+- Gate waste rate: 0/5 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -89,3 +89,4 @@ STARTED
 - #10: `e3fd3d6f-0f8c-4b27-a29a-5de9bf6e08f4` | 2026-08-10T15:15:00.000Z | GAP/p7_batch_witness_boundary | incident=`dcf7f30b-23d9-4a43-a8a5-4e27b584b66c` | lesson_key=`external-witness-provider-boundary` | event_sha256=`2c43e176ff31ac1f9a1d15b7cae57aaba4c351c6e3cdc8f5cbb2f6d687e8e21e`
 - #11: `9e11989e-8a8d-4f4f-a9e1-7b3fd7f6e5e5` | 2026-08-10T15:13:00.000Z | WASTE/p7_runner_parallel_admission | incident=`e401c3dd-7cc9-4f49-94a2-9e0c4e6030c7` | lesson_key=`runner-family-lifecycle-serial` | event_sha256=`42e545bd2899cfef7942845a7ff12cbd14f3ac96489453ff49b2f98b51f721d7`
 - #12: `b8c1162b-50a9-4e11-a4bf-1e8f29fbe72d` | 2026-08-10T15:27:00.000Z | GATE/host_full_gate_final_tree | incident=`17c6cf12-36e9-4e0e-8e20-5d0cc6de36d4` | lesson_key=`final-host-gate-evidence` | event_sha256=`df6aefaa85c9d221184cc70bd2718c84d061f79cb7de2779b82a419fdd8c0f6f`
+- #13: `b2eb7b27-f74b-4c34-a11d-67d6cf8fbbe5` | 2026-08-10T20:56:06.000Z | GATE/notebook_planning_recovery_actions | incident=`31c6b1f7-b6e5-44be-9c64-73a5f2de0e4d` | lesson_key=`notebook-planning-recovery-surface` | event_sha256=`bca44f2c15f0d699d9c6c83ddc5fbc235e23cc52af73c8a97ee6984e07663ca2`

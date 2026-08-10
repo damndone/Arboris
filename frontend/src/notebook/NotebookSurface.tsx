@@ -168,6 +168,50 @@ function NotebookPlanningProgress({
   );
 }
 
+function PlanningRecoveryActions({
+  onReplan,
+  onExitPlanning,
+  replanLabel,
+  replanTestId,
+}: {
+  onReplan?: () => void;
+  onExitPlanning?: () => void;
+  replanLabel: string;
+  replanTestId: string;
+}) {
+  if (!onReplan && !onExitPlanning) return null;
+
+  return (
+    <div
+      className="nb-option-actions nb-planning-recovery-actions"
+      data-testid="notebook-planning-recovery-actions"
+      role="group"
+      aria-label="Notebook planning recovery actions"
+    >
+      {onReplan ? (
+        <button
+          type="button"
+          className="nb-button nb-button-primary"
+          data-testid={replanTestId}
+          onClick={onReplan}
+        >
+          {replanLabel}
+        </button>
+      ) : null}
+      {onExitPlanning ? (
+        <button
+          type="button"
+          className="nb-button"
+          data-testid="notebook-exit-planning"
+          onClick={onExitPlanning}
+        >
+          Exit planning
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function NotebookSurface(props: NotebookSurfaceProps) {
   const { view } = props;
   const interactionMode = props.interactionMode ?? "plan";
@@ -258,34 +302,16 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
         <div className="nb-error" data-testid="notebook-error" role="alert">
           <span className="nb-error-code">{view.error.code}</span>
           <p className="nb-error-message">{view.error.message}</p>
-          {canReplan || canExitPlanning ? (
-            <div className="nb-option-actions">
-              {canReplan ? (
-                <button
-                  type="button"
-                  className="nb-button nb-button-primary"
-                  data-testid="notebook-replan-options"
-                  onClick={props.onReplan}
-                >
-                  {view.error.code === "NOTEBOOK_PLANNING_UNAVAILABLE"
-                    ? "Retry planning"
-                    : actionMode
-                      ? "Recheck request"
-                      : "Replan with current evidence"}
-                </button>
-              ) : null}
-              {canExitPlanning ? (
-                <button
-                  type="button"
-                  className="nb-button"
-                  data-testid="notebook-exit-planning"
-                  onClick={props.onExitPlanning}
-                >
-                  Exit planning
-                </button>
-              ) : null}
-            </div>
-          ) : null}
+          <PlanningRecoveryActions
+            onReplan={canReplan ? props.onReplan : undefined}
+            onExitPlanning={canExitPlanning ? props.onExitPlanning : undefined}
+            replanLabel={view.error.code === "NOTEBOOK_PLANNING_UNAVAILABLE"
+              ? "Retry planning"
+              : actionMode
+                ? "Recheck request"
+                : "Replan with current evidence"}
+            replanTestId="notebook-replan-options"
+          />
         </div>
       </div>
     );
@@ -473,28 +499,14 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
         >
           <span className="nb-error-code">{props.planningError.code}</span>
           <span>{props.planningError.message}</span>
-          <div className="nb-option-actions">
-            {props.onReplan ? (
-              <button
-                type="button"
-                className="nb-button nb-button-primary"
-                data-testid="notebook-retry-planning"
-                onClick={props.onReplan}
-              >
-                Retry planning
-              </button>
-            ) : null}
-            {props.onExitPlanning && props.planningError.code.startsWith("NOTEBOOK_PLANNING_") ? (
-              <button
-                type="button"
-                className="nb-button"
-                data-testid="notebook-exit-planning"
-                onClick={props.onExitPlanning}
-              >
-                Exit planning
-              </button>
-            ) : null}
-          </div>
+          <PlanningRecoveryActions
+            onReplan={props.onReplan}
+            onExitPlanning={props.onExitPlanning && props.planningError.code.startsWith("NOTEBOOK_PLANNING_")
+              ? props.onExitPlanning
+              : undefined}
+            replanLabel="Retry planning"
+            replanTestId="notebook-retry-planning"
+          />
         </div>
       ) : null}
 
