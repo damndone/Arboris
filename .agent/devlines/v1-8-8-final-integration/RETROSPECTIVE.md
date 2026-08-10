@@ -6,11 +6,11 @@
 
 ## Final status
 
-BROWSER_TAB_ONLY
+FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 6/16 (37.5%; 37.5 per 100 events)
+- Failure frequency: 6/17 (35.3%; 35.3 per 100 events)
 - Repeat rate: 0/6 (0.0%)
 - Recurrence rate: 0/6 (0.0%)
 - MTTR: median=0 ms (sample=5; unresolved=1)
@@ -93,3 +93,4 @@ BROWSER_TAB_ONLY
 - #14: `d1ce71f2-32ad-4ee6-9ce0-1b9075f9b2db` | 2026-08-10T22:10:00.000Z | GATE/p7_generic_batch_execution | incident=`4a40b8d7-b9cf-43fd-b52a-f5cbca8cc6db` | lesson_key=`p7-generic-batch-execution` | event_sha256=`9302f5fcbcbaf37c5985aa2ae06afece90a448542410cf665f05b6ace89a409e`
 - #15: `c7dc1b83-976f-4c4e-91a1-f4b2ac6cb1b0` | 2026-08-10T22:30:36.000Z | GATE/persistent_dev_services | incident=`2f2ff52a-d1b7-4cb7-a04a-c0b40e1a8c44` | lesson_key=`persistent-dev-services` | event_sha256=`71674c761dffbc6366d04af3decd4b41c58c47f126d2cedc4c574d69c29803ca`
 - #16: `f1bfa58c-c7ae-4cf8-9b22-d91dd938bf65` | 2026-08-10T22:35:24.000Z | STATE_CHANGE/browser_tab_only_scope | incident=`6d309ab3-2ae0-4e96-9cf0-3a0c6c5c7521` | lesson_key=`browser-tab-only-scope` | event_sha256=`3ae889b9c5e4644e8d593693774cc46ba54d3997e9e02de81fe516ffd3dd20ce`
+- #17: `f4d6415f-3b9d-43b0-aa0c-ec5d59c682e4` | 2026-08-10T22:44:35.000Z | STATE_CHANGE/full_gate_interrupted | incident=`2ae4af47-f999-4a0b-a1a9-d86feb8d9d25` | lesson_key=`full-gate-after-browser-checkpoint` | event_sha256=`dca94bb860c84a50e07da2a41f43e27cec1fcc7ed48471aab08ca08c760d9d92`
