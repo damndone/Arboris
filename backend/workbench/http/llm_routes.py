@@ -34,7 +34,7 @@ from ..llm import (
     chat_completion,
     load_llm_config,
 )
-from ..llm.client import fetch_models
+from ..llm.client import deepseek_v4_request_config, fetch_models
 from ..llm.config import validate_provider_url as _validate_provider_url
 from ..llm.provider_store import (
     DEFAULT_TIMEOUT_S,
@@ -877,11 +877,15 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
         {"role": "user", "content": _build_user_content(request)},
     ]
     report_retry_budget = _ReportRetryBudget() if report_contract is not None else None
+    report_model_config = (
+        deepseek_v4_request_config(config) if report_contract is not None else None
+    )
     result = _chat_or_api_error(
         messages,
         config,
         report_retry_budget=report_retry_budget,
         report_phase="initial_generation",
+        model_config=report_model_config,
     )
     text = result["text"]
     report_quality: ReportQualityResult | None = None
@@ -915,6 +919,7 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
                 config,
                 report_retry_budget=report_retry_budget,
                 report_phase="contract_correction",
+                model_config=report_model_config,
             )
             final_retry_succeeded = False
             try:
@@ -949,6 +954,7 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
                         config,
                         report_retry_budget=report_retry_budget,
                         report_phase="final_correction",
+                        model_config=report_model_config,
                     )
                     try:
                         text, report_quality = _validate_report_text(
@@ -1041,6 +1047,7 @@ def _chat_or_api_error(
     *,
     report_retry_budget: _ReportRetryBudget | None = None,
     report_phase: str = "provider_call",
+    model_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     call_config = _report_call_config(
         config,
@@ -1050,7 +1057,7 @@ def _chat_or_api_error(
     if report_retry_budget is not None:
         report_retry_budget.provider_call_count += 1
     try:
-        result = chat_completion(messages, call_config)
+        result = chat_completion(messages, call_config, model_config=model_config)
         _ensure_report_deadline(report_retry_budget, phase=report_phase)
         return result
     except LLMNotConfiguredError as exc:
@@ -1073,7 +1080,11 @@ def _chat_or_api_error(
             )
             report_retry_budget.provider_call_count += 1
             try:
-                result = chat_completion(messages, retry_config)
+                result = chat_completion(
+                    messages,
+                    retry_config,
+                    model_config=model_config,
+                )
                 _ensure_report_deadline(
                     report_retry_budget,
                     phase=report_phase,

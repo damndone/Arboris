@@ -33,7 +33,11 @@ from ..agent.workflow_contracts import (
 from ..agent.p7_pack_registry import p7_pack_registry
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
 from ..agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
-from ..agent.notebook.errors import NotebookOptionError, OptionRevisionStale
+from ..agent.notebook.errors import (
+    NotebookOptionError,
+    OptionRevisionStale,
+    OptionValidationFailed,
+)
 from ..agent.model import CancellableOpenAICompatibleModelAdapter
 from ..agent.notebook.planning_agent import (
     NotebookNoEligibleCapability,
@@ -1154,6 +1158,10 @@ def _planning_agent(
                         source_reference=f"upload:{source_hash}",
                     )
                 bind_new_model_options(model_type, payload)
+            try:
+                service.validate_dataset_recipe_preflight(notebook_id, proposal)
+            except OptionValidationFailed as error:
+                raise NotebookPlanningContractError(str(error)) from error
 
     notebook_config = (
         config

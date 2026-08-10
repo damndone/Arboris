@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Mapping
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import httpx
 
@@ -45,6 +46,24 @@ class LLMUpstreamError(Exception):
 
 class LLMToolCallArgumentsError(LLMUpstreamError):
     """Provider completed a tool call whose arguments are not a JSON object."""
+
+
+def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
+    """Return bounded, provider-owned controls for DeepSeek V4 requests.
+
+    DeepSeek V4 enables high-effort private reasoning by default. Workbench's
+    typed Notebook planner and evidence-bound Report writer both need bounded
+    public responses, so they share this adapter policy instead of each caller
+    guessing provider controls independently.
+    """
+
+    provider = (config.provider_name or "").casefold()
+    host = (urlparse(config.base_url).hostname or "").casefold()
+    model = config.model.casefold()
+    is_deepseek = "deepseek" in provider or host == "api.deepseek.com"
+    if is_deepseek and model.startswith("deepseek-v4"):
+        return {"thinking": {"type": "disabled"}, "max_tokens": 8192}
+    return {}
 
 
 def fetch_models(config: LLMConfig) -> list[dict[str, str]]:

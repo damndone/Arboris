@@ -1461,6 +1461,16 @@ class NotebookPlanningAgent:
                 "its omissions may be described only as a limitation. Do not request "
                 "the same bounded inspection again merely to remove a declared cap."
             )
+        elif "RECIPE_INPUT_PREFLIGHT_FAILED" in message:
+            remediation = (
+                "The selected Recipe is not executable on the verified source. "
+                "Do not resubmit that same Recipe as feasible and do not lower or "
+                "guess its data requirement. Choose another server-published method "
+                "whose input contract the completed evidence supports, or submit a "
+                "domain-language option that explicitly says the current data are "
+                "insufficient for a reliable analysis. Preserve the exact evidence "
+                "refs and source-bound proposal shape."
+            )
         elif message.startswith("RECIPE_MODEL_OPTIONS_REQUIRED:"):
             recipe_id = message.partition(":")[2].partition(" requires")[0].strip()
             recipe_contract = recipe_contract_for_model_type(recipe_id)
@@ -1497,6 +1507,15 @@ class NotebookPlanningAgent:
                 "a model_family from model.genesis or a P7 operation_id from a P7-only "
                 "workflow. Do not use operation.multi_step itself. "
                 f"Eligible published capabilities include {eligible}."
+            )
+        elif message.startswith("operation.multi_step has no contractible"):
+            remediation = (
+                "The current Notebook is upload-only and has no server-pinned workflow "
+                "source for operation.multi_step. Do not submit operation.multi_step. "
+                "Submit exactly one ordinary model.genesis option using a registered "
+                "model whose typed input contract the completed evidence supports, "
+                "or state that the data are insufficient; never invent a workflow "
+                "source or a P7 result artifact."
             )
         elif "model.genesis preconditions missing" in message:
             pins = NotebookPlanningAgent._execution_pins(context)["genesis_preconditions"]

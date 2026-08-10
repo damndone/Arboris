@@ -76,6 +76,63 @@ class NotebookOptionMaterializer:
     def __init__(self, service: "NotebookService") -> None:
         self.service = service
 
+    def validate_dataset_recipe_preflight(
+        self,
+        notebook: Any,
+        proposal: Mapping[str, Any],
+    ) -> None:
+        """Run the owner Recipe input gate without creating a Draft.
+
+        Planning and materialization must share the same complete-source
+        preflight.  This read-only seam deliberately stops at the Recipe
+        contract; it does not infer a model, write a draft, or accept a
+        partial source scan as evidence of executability.
+        """
+
+        source = getattr(notebook, "projection_source", None)
+        if (
+            source is None
+            or getattr(source, "kind", None) != "dataset"
+            or proposal.get("operation_id") != "model.genesis"
+        ):
+            return
+        changes = proposal.get("changes") or {}
+        if not isinstance(changes, Mapping):
+            return
+        raw_model_params = changes.get("model_params") or {}
+        if not isinstance(raw_model_params, Mapping):
+            return
+        model_params = dict(raw_model_params)
+        model_type = model_params.get("model_type")
+        recipe_contract = recipe_contract_for_model_type(model_type)
+        if recipe_contract is None:
+            return
+        model_options = model_params.get("model_options")
+        if model_options is None:
+            model_options = changes.get("model_options")
+        try:
+            model_params["model_options"] = recipe_contract.bind_server_owned_options(
+                model_options,
+                source_reference=f"upload:{source.upload_sha256}",
+            )
+            profile = self.service._dataset_header_profile(source)
+            columns = tuple(
+                item["name"]
+                for item in profile.get("columns", [])
+                if item.get("name")
+            )
+            recipe_contract.validate_genesis_params(model_params, columns=columns)
+            recipe_contract.validate_input_preflight(
+                model_params,
+                source=self._read_recipe_preflight_source(
+                    source, recipe_contract, model_params
+                ),
+            )
+        except RecipeValidationError as exc:
+            raise _fail(
+                f"RECIPE_INPUT_PREFLIGHT_FAILED: {exc}"
+            ) from exc
+
     def materialize(
         self,
         notebook_id: str,

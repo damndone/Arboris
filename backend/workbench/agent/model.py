@@ -14,6 +14,7 @@ from workbench.llm.client import (
     LLMToolCallArgumentsError,
     LLMUpstreamError,
     async_stream_chat_completion,
+    deepseek_v4_request_config,
 )
 from workbench.llm.config import LLMConfig
 
@@ -246,13 +247,7 @@ class OpenAICompatibleModelAdapter:
         adapter leaves other providers unchanged.
         """
 
-        provider = self.config.provider_name.casefold()
-        host = (urlparse(self.config.base_url).hostname or "").casefold()
-        model = self.config.model.casefold()
-        is_deepseek = "deepseek" in provider or host == "api.deepseek.com"
-        if is_deepseek and model.startswith("deepseek-v4"):
-            return {"thinking": {"type": "disabled"}, "max_tokens": 8192}
-        return {}
+        return deepseek_v4_request_config(self.config)
 
     async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         abort_event = request.abort_event

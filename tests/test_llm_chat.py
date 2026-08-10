@@ -467,6 +467,26 @@ class TestReportMode:
         assert response.json()["text"] == "# Report [[c:c1]]\n\n[[fig:coef_plot]]"
         assert attempts == 2
 
+    def test_report_mode_bounds_deepseek_v4_reasoning_and_output(
+        self, api, monkeypatch
+    ):
+        """Report prose must not spend the whole deadline in hidden reasoning."""
+
+        monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://api.deepseek.com/v1")
+        monkeypatch.setenv("WORKBENCH_LLM_API_KEY", API_KEY)
+        monkeypatch.setenv("WORKBENCH_LLM_MODEL", "deepseek-v4-pro")
+        seen = _install_upstream(
+            monkeypatch,
+            lambda request: _ok_upstream("# Report [[c:c1]]", model="deepseek-v4-pro"),
+        )
+
+        response = api.post("/llm/chat", json=self._report_body())
+
+        assert response.status_code == 200, response.text
+        payload = json.loads(seen[0].content)
+        assert payload["thinking"] == {"type": "disabled"}
+        assert payload["max_tokens"] == 8192
+
     def test_report_mode_exhausts_one_transient_transport_retry(
         self, api, configured_env, monkeypatch
     ):

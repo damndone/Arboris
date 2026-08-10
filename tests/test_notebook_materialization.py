@@ -1105,6 +1105,85 @@ def test_dataset_recipe_preflight_blocks_invalid_ets_before_draft_write(
     assert not (project / "pipeline_drafts").exists()
 
 
+def test_dataset_recipe_preflight_rejects_invalid_ets_before_option_revision(
+    tmp_path: Path,
+) -> None:
+    """Planner admission must use the same owner preflight as materialization."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(
+        project,
+        b"time,value\n"
+        b"2020-01-01,1\n2020-01-02,2\n2020-01-03,3\n"
+        b"2020-01-04,4\n2020-01-05,5\n2020-01-06,6\n",
+        filename="short-series.csv",
+    )
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "short-series.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+    context = service.compile_context(notebook.notebook_id)
+    proposal = TypedProposal(
+        proposal_id="prop_short_ets",
+        operation_id="model.genesis",
+        target={"dataset_source_id": upload_sha},
+        preconditions={
+            "context_version": "notebook-planning-context/v1",
+            "context_fingerprint": context.context_id,
+            "owner_resolution": "dataset_projection",
+        },
+        changes={
+            "model_params": {
+                "model_type": "time_series.ets",
+                "model_options": {
+                    "time_column": "time",
+                    "value_column": "value",
+                    "time_index_semantics": "regular_calendar",
+                    "error": "add",
+                    "trend": None,
+                    "seasonal": None,
+                    "damped_trend": False,
+                },
+            }
+        },
+    )
+
+    with pytest.raises(
+        OptionValidationFailed,
+        match="RECIPE_INPUT_PREFLIGHT_FAILED.*ETS_INSUFFICIENT_OBSERVATIONS",
+    ):
+        service.propose_batch(
+            notebook.notebook_id,
+            context=context,
+            drafts=[
+                OptionDraft(
+                    rank=1,
+                    rationale="The series is too short for a reliable forecast.",
+                    proposal=proposal,
+                    expected_artifacts=(
+                        ExpectedArtifact(
+                            artifact_id="ets_1",
+                            artifact_type="model_result",
+                            required=True,
+                            count=1,
+                        ),
+                    ),
+                    capability_id="time_series.ets",
+                    option_id="opt_short_ets",
+                )
+            ],
+        )
+
+    assert service.store.option_ids(notebook.notebook_id) == []
+    assert not (project / "pipeline_drafts").exists()
+
+
 def test_dataset_recipe_preflight_blocks_ineligible_arma_transform_before_draft_write(
     tmp_path: Path,
 ) -> None:

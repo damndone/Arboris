@@ -116,6 +116,7 @@ from .errors import (
     OptionExecutionGatewayUnavailable,
     OptionLegacyUnverified,
     OptionLifecycleTransitionInvalid,
+    OptionMaterializationFailed,
     OptionMaterializationRequired,
     OptionNotFound,
     OptionRevisionStale,
@@ -757,6 +758,41 @@ class NotebookService:
             run_family_id=notebook.run_family_id,
             requested_run_family_id=run_family_id,
         )
+
+    def validate_dataset_recipe_preflight(
+        self,
+        notebook_id: str,
+        proposal: TypedProposal,
+    ) -> None:
+        """Validate a dataset Recipe against its complete source without writing.
+
+        The Recipe owner remains the only authority for input eligibility.  The
+        service exposes this read-only bridge so both Agent planning and Option
+        admission reject a source before a supposedly executable option is
+        persisted.
+        """
+
+        notebook = self.get_notebook(notebook_id)
+        payload = proposal.to_dict() if isinstance(proposal, TypedProposal) else proposal
+        if not isinstance(payload, Mapping):
+            return
+        from .materialization import NotebookOptionMaterializer
+
+        try:
+            NotebookOptionMaterializer(self).validate_dataset_recipe_preflight(
+                notebook, payload
+            )
+        except OptionMaterializationFailed as error:
+            raise OptionValidationFailed(
+                f"option dataset Recipe input preflight failed: {error}",
+                operation_id=payload.get("operation_id"),
+                validation_issues=[
+                    {
+                        "code": "RECIPE_INPUT_PREFLIGHT_FAILED",
+                        "detail": str(error),
+                    }
+                ],
+            ) from error
 
     def set_focus(
         self, notebook_id: str, *, user_focus: Mapping[str, Any]
@@ -3749,6 +3785,7 @@ class NotebookService:
                 operation_id=proposal.operation_id,
                 validation_issues=[{"code": code, "detail": str(error)}],
             ) from error
+        self.validate_dataset_recipe_preflight(notebook.notebook_id, proposal)
         try:
             self._assert_capability_model_identity(notebook, draft, proposal)
         except Exception as error:

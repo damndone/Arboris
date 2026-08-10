@@ -10,20 +10,23 @@ STARTED
 
 ## Metrics
 
-- Failure frequency: N/A (sample=0)
-- Repeat rate: N/A (sample=0)
-- Recurrence rate: N/A (sample=0)
-- MTTR: N/A (sample=0; unresolved=0)
+- Failure frequency: 6/12 (50.0%; 50.0 per 100 events)
+- Repeat rate: 0/6 (0.0%)
+- Recurrence rate: 0/6 (0.0%)
+- MTTR: median=0 ms (sample=5; unresolved=1)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/4 (0.0%)
 - Same-state retry rate: N/A (sample=0)
-- Token waste: N/A (sample=0)
+- Token waste: N/A (sample=0; coverage=0/1)
 
 ## All failures
 
-- None recorded.
+- #2 2026-08-10T13:48:49.000Z `integration_boundary_failure`; cause_status: `known`; cause: The P6 merge exposed two real generic-workflow boundary defects: an ARMA-GARCH temporary run lacked its artifact index and optional P7 options were not projected as nullable in the closed workflow schema.; resolution: `resolved`; lesson: A generic adapter must initialize every pack-owned durable boundary and project optional-value semantics identically into runtime validation and published closed schemas.
+- #4 2026-08-10T14:57:00.000Z `report_deadline_real_qa`; cause_status: `known`; cause: The first real browser Report attempt used DeepSeek V4 without the shared bounded request policy and returned LLM_REPORT_DEADLINE_EXCEEDED after the shared 300-second deadline.; resolution: `resolved`; lesson: Provider-specific reasoning and output controls must be centralized at the wire adapter and reused by every long-form consumer.
+- #5 2026-08-10T15:01:00.000Z `report_contract_real_qa`; cause_status: `known`; cause: A second real browser Report attempt reached the provider but all correction rounds returned prose missing the required Limitations section, so the evidence contract rejected it with LLM_RESPONSE_CONTRACT_INVALID.; resolution: `resolved`; lesson: Real-provider report QA must exercise both transport latency and contract correction paths; a green unit contract test is not sufficient evidence of provider completion.
+- #6 2026-08-10T14:42:00.000Z `notebook_recipe_preflight_real_qa`; cause_status: `known`; cause: The real upload-only Notebook path reached confirmation with a short ETS proposal before the shared Recipe input gate was wired into admission; the server correctly exposed ETS_INSUFFICIENT_OBSERVATIONS instead of executing it.; resolution: `resolved`; lesson: The owner Recipe input contract must run read-only during both planning admission and option materialization, before any draft or execution record is written.
 
 ## All errors
 
@@ -31,15 +34,22 @@ STARTED
 
 ## All gaps
 
-- None recorded.
+- #7 2026-08-10T14:46:00.000Z `notebook_upload_workflow_planner_gap`; cause_status: `known`; cause: After the first Notebook correction, upload-only planning had no server-pinned workflow source for operation.multi_step and the planner surfaced that boundary instead of inventing one.; resolution: `resolved`; lesson: Planner correction must distinguish an unavailable workflow source from an unavailable capability and offer a contractible alternative without fabricating a result.
+- #10 2026-08-10T15:15:00.000Z `p7_batch_witness_boundary`; cause_status: `external`; cause: The final-tree registry-derived runner covered all 64 P7 operations across 18 families, but no external browser witness provider was configured, so the runner correctly stopped every admission before provider or browser confirmation.; resolution: `accepted`; lesson: A coordinator ledger can prove registry coverage and fail-closed witness admission, but only an external witness provider can add a browser confirmation trust level.
 
 ## All waste
 
-- None recorded.
+- #11 2026-08-10T15:13:00.000Z `p7_runner_parallel_admission`; cause_status: `known`; cause: Starting family batches concurrently caused the runner's single active browser-attempt guard to reject 17 starts while one family was awaiting terminal confirmation.; resolution: `resolved`; lesson: Batch runner family submissions must be serialized at the ledger boundary even when independent operation execution could later be parallelized behind a witness provider.
 
 ## Root causes and solutions
 
-- None recorded.
+- `external-witness-provider-boundary`: occurrences=1; cause_status: `external`; root cause: The final-tree registry-derived runner covered all 64 P7 operations across 18 families, but no external browser witness provider was configured, so the runner correctly stopped every admission before provider or browser confirmation.; solution: `accepted`
+- `generic-adapter-boundary-contract`: occurrences=1; cause_status: `known`; root cause: The P6 merge exposed two real generic-workflow boundary defects: an ARMA-GARCH temporary run lacked its artifact index and optional P7 options were not projected as nullable in the closed workflow schema.; solution: `resolved`
+- `real-provider-report-contract-qa`: occurrences=1; cause_status: `known`; root cause: A second real browser Report attempt reached the provider but all correction rounds returned prose missing the required Limitations section, so the evidence contract rejected it with LLM_RESPONSE_CONTRACT_INVALID.; solution: `resolved`
+- `runner-family-lifecycle-serial`: occurrences=1; cause_status: `known`; root cause: Starting family batches concurrently caused the runner's single active browser-attempt guard to reject 17 starts while one family was awaiting terminal confirmation.; solution: `resolved`
+- `shared-provider-controls-for-report`: occurrences=1; cause_status: `known`; root cause: The first real browser Report attempt used DeepSeek V4 without the shared bounded request policy and returned LLM_REPORT_DEADLINE_EXCEEDED after the shared 300-second deadline.; solution: `resolved`
+- `shared-recipe-input-preflight`: occurrences=1; cause_status: `known`; root cause: The real upload-only Notebook path reached confirmation with a short ETS proposal before the shared Recipe input gate was wired into admission; the server correctly exposed ETS_INSUFFICIENT_OBSERVATIONS instead of executing it.; solution: `resolved`
+- `upload-only-workflow-source-boundary`: occurrences=1; cause_status: `known`; root cause: After the first Notebook correction, upload-only planning had no server-pinned workflow source for operation.multi_step and the planner surfaced that boundary instead of inventing one.; solution: `resolved`
 
 ## Added tests
 
@@ -47,12 +57,35 @@ STARTED
 
 ## New rules
 
-- No rule candidate recorded.
+- `external-witness-provider-boundary`: line experience occurrence(s)=1
+- `generic-adapter-boundary-contract`: line experience occurrence(s)=1
+- `real-provider-report-contract-qa`: line experience occurrence(s)=1
+- `runner-family-lifecycle-serial`: line experience occurrence(s)=1
+- `shared-provider-controls-for-report`: line experience occurrence(s)=1
+- `shared-recipe-input-preflight`: line experience occurrence(s)=1
+- `upload-only-workflow-source-boundary`: line experience occurrence(s)=1
 
 ## Future guidance
 
-- No guidance recorded.
+- A coordinator ledger can prove registry coverage and fail-closed witness admission, but only an external witness provider can add a browser confirmation trust level.
+- A generic adapter must initialize every pack-owned durable boundary and project optional-value semantics identically into runtime validation and published closed schemas.
+- Batch runner family submissions must be serialized at the ledger boundary even when independent operation execution could later be parallelized behind a witness provider.
+- Planner correction must distinguish an unavailable workflow source from an unavailable capability and offer a contractible alternative without fabricating a result.
+- Provider-specific reasoning and output controls must be centralized at the wire adapter and reused by every long-form consumer.
+- Real-provider report QA must exercise both transport latency and contract correction paths; a green unit contract test is not sufficient evidence of provider completion.
+- The owner Recipe input contract must run read-only during both planning admission and option materialization, before any draft or execution record is written.
 
 ## Event index
 
 - #1: `fc52b844-2ebd-4239-8916-5e3f5dc04310` | 2026-08-10T13:23:11.416Z | STATE_CHANGE/line_started | incident=`3d8d6e19-da07-47e2-a5a6-64c4722dc91d` | lesson_key=`frozen-context-before-start` | event_sha256=`2963a4258a617eb730140b5dbb45bed30d64c1c0c461157b21cd9a4d9bdae876`
+- #2: `c9b1f2d1-3c79-4c73-9a8c-2d0f9f0bb2c4` | 2026-08-10T13:48:49.000Z | FAILURE/integration_boundary_failure | incident=`a6d2d0e4-4b64-4a80-9342-6f013a63f7a8` | lesson_key=`generic-adapter-boundary-contract` | event_sha256=`c7256440c54ee64289f13b46beb3d917aa4dd5cc8898c2b32b724aca05cdb83b`
+- #3: `d73d9ebc-5ea9-4bca-a4d6-9a0b6d153ba8` | 2026-08-10T14:35:38.000Z | GATE/host_full_gate_passed | incident=`2e4dcff4-9f85-4c3d-8516-6f04f2fbc9d9` | lesson_key=`host-final-gate-evidence` | event_sha256=`8b1af3fe31aa5e9e10308c994d7d04177c7b7497a89c0bf41a5fc3f0cbd452b5`
+- #4: `11b7d3d7-6b9d-4b8f-a117-ccf2b9f6c81f` | 2026-08-10T14:57:00.000Z | FAILURE/report_deadline_real_qa | incident=`5fd6e02f-c857-450b-b51d-2eb2f56bd9de` | lesson_key=`shared-provider-controls-for-report` | event_sha256=`87aca2dda0857e86ac278d34531589880231733b19f0e0654626b0565f0b35c7`
+- #5: `f36b8a5e-0c7e-44c8-80a0-f6e0fd9c2e61` | 2026-08-10T15:01:00.000Z | FAILURE/report_contract_real_qa | incident=`92a31c57-8ed7-4bad-a4b5-cf82726f02f2` | lesson_key=`real-provider-report-contract-qa` | event_sha256=`a7d80b7a82b6cd59a01273dd411383278e2d8dee178131c6c356e9e8ac4fbdd8`
+- #6: `6f45d6a3-4db5-4c4a-8729-2b1f72d1d9f4` | 2026-08-10T14:42:00.000Z | FAILURE/notebook_recipe_preflight_real_qa | incident=`fe7eac89-1f90-4f3c-a3fb-fd5eb3d0d0f8` | lesson_key=`shared-recipe-input-preflight` | event_sha256=`bb0af9ceab5fc8f712a992ad39d35ea15189b377f24aaaa20543b2f6ba608e92`
+- #7: `4af4dd4a-a27a-46cd-81b8-4ee95d95b2a0` | 2026-08-10T14:46:00.000Z | GAP/notebook_upload_workflow_planner_gap | incident=`a7807d2a-6c88-4b41-9b1b-091bf50d868d` | lesson_key=`upload-only-workflow-source-boundary` | event_sha256=`b01513727c6ee5f5b63aef9dbaf4ce8587f09ade4ea691088cb536ccadcbaa65`
+- #8: `f9d18716-dfc0-4f67-a7ed-c1f7fd1a1c5f` | 2026-08-10T15:10:00.000Z | GATE/notebook_real_chain_passed | incident=`6bb76347-6530-466b-9fef-9f8813573ba4` | lesson_key=`notebook-receipt-artifact-gate` | event_sha256=`4e1a559a036c6f7890b49aba4914c3cae44cf0a3e979d01a482ae3d5c55134b5`
+- #9: `a1b8c780-7e2b-4a9a-87fb-09d6dd6fe3ad` | 2026-08-10T15:11:00.000Z | GATE/report_real_chain_passed | incident=`a0c05c65-0f89-4cc7-aa72-75d9e2c53d19` | lesson_key=`report-browser-contract-save-gate` | event_sha256=`5008fa1519ed2328da339b3daaf542a88664ef6d481fc8583a22f727d45e98f4`
+- #10: `e3fd3d6f-0f8c-4b27-a29a-5de9bf6e08f4` | 2026-08-10T15:15:00.000Z | GAP/p7_batch_witness_boundary | incident=`dcf7f30b-23d9-4a43-a8a5-4e27b584b66c` | lesson_key=`external-witness-provider-boundary` | event_sha256=`2c43e176ff31ac1f9a1d15b7cae57aaba4c351c6e3cdc8f5cbb2f6d687e8e21e`
+- #11: `9e11989e-8a8d-4f4f-a9e1-7b3fd7f6e5e5` | 2026-08-10T15:13:00.000Z | WASTE/p7_runner_parallel_admission | incident=`e401c3dd-7cc9-4f49-94a2-9e0c4e6030c7` | lesson_key=`runner-family-lifecycle-serial` | event_sha256=`42e545bd2899cfef7942845a7ff12cbd14f3ac96489453ff49b2f98b51f721d7`
+- #12: `b8c1162b-50a9-4e11-a4bf-1e8f29fbe72d` | 2026-08-10T15:27:00.000Z | GATE/host_full_gate_final_tree | incident=`17c6cf12-36e9-4e0e-8e20-5d0cc6de36d4` | lesson_key=`final-host-gate-evidence` | event_sha256=`df6aefaa85c9d221184cc70bd2718c84d061f79cb7de2779b82a419fdd8c0f6f`
