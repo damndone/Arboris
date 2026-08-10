@@ -6,11 +6,11 @@
 
 ## Final status
 
-STARTED
+BROWSER_TAB_ONLY
 
 ## Metrics
 
-- Failure frequency: 6/15 (40.0%; 40.0 per 100 events)
+- Failure frequency: 6/16 (37.5%; 37.5 per 100 events)
 - Repeat rate: 0/6 (0.0%)
 - Recurrence rate: 0/6 (0.0%)
 - MTTR: median=0 ms (sample=5; unresolved=1)
@@ -92,3 +92,4 @@ STARTED
 - #13: `b2eb7b27-f74b-4c34-a11d-67d6cf8fbbe5` | 2026-08-10T20:56:06.000Z | GATE/notebook_planning_recovery_actions | incident=`31c6b1f7-b6e5-44be-9c64-73a5f2de0e4d` | lesson_key=`notebook-planning-recovery-surface` | event_sha256=`bca44f2c15f0d699d9c6c83ddc5fbc235e23cc52af73c8a97ee6984e07663ca2`
 - #14: `d1ce71f2-32ad-4ee6-9ce0-1b9075f9b2db` | 2026-08-10T22:10:00.000Z | GATE/p7_generic_batch_execution | incident=`4a40b8d7-b9cf-43fd-b52a-f5cbca8cc6db` | lesson_key=`p7-generic-batch-execution` | event_sha256=`9302f5fcbcbaf37c5985aa2ae06afece90a448542410cf665f05b6ace89a409e`
 - #15: `c7dc1b83-976f-4c4e-91a1-f4b2ac6cb1b0` | 2026-08-10T22:30:36.000Z | GATE/persistent_dev_services | incident=`2f2ff52a-d1b7-4cb7-a04a-c0b40e1a8c44` | lesson_key=`persistent-dev-services` | event_sha256=`71674c761dffbc6366d04af3decd4b41c58c47f126d2cedc4c574d69c29803ca`
+- #16: `f1bfa58c-c7ae-4cf8-9b22-d91dd938bf65` | 2026-08-10T22:35:24.000Z | STATE_CHANGE/browser_tab_only_scope | incident=`6d309ab3-2ae0-4e96-9cf0-3a0c6c5c7521` | lesson_key=`browser-tab-only-scope` | event_sha256=`3ae889b9c5e4644e8d593693774cc46ba54d3997e9e02de81fe516ffd3dd20ce`
