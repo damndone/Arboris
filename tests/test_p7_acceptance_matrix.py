@@ -1301,6 +1301,139 @@ def test_persisted_progress_cannot_outlive_or_bypass_its_run_control(
         ledger.next_admission(now=100.1)
 
 
+def test_legacy_ledger_requires_explicit_migration_and_preserves_history(
+    tmp_path,
+) -> None:
+    """Legacy progress gets new control authority without rewriting old bytes."""
+
+    from workbench.qa.p7_acceptance import AttemptLedger, AttemptLedgerError
+
+    path = tmp_path / "attempts.jsonl"
+    ledger = AttemptLedger(path, _ready_manifest(tmp_path))
+    ledger.start_attempt("missingness.profile", occurred_at=100.0)
+    legacy_bytes = path.read_bytes()
+    ledger.control_path.unlink()
+
+    with pytest.raises(AttemptLedgerError, match="run control is missing"):
+        ledger.next_admission(now=100.1)
+
+    migration = ledger.migrate_legacy(migrated_at=200.0)
+    assert path.read_bytes() == legacy_bytes
+    assert ledger.control_path.exists()
+    assert ledger.legacy_migration_path.exists()
+    assert migration.mode == "operation"
+    assert migration.event_count == 1
+    assert ledger.events()[0].sequence_no == 1
+
+    migration_bytes = ledger.legacy_migration_path.read_bytes()
+    assert ledger.migrate_legacy(migrated_at=999.0) == migration
+    assert ledger.legacy_migration_path.read_bytes() == migration_bytes
+
+
+def test_legacy_migration_rejects_corrupted_history_without_creating_control(
+    tmp_path,
+) -> None:
+    """Migration cannot turn a broken old ledger into trusted progress."""
+
+    from workbench.qa.p7_acceptance import AttemptLedger, AttemptLedgerError
+
+    path = tmp_path / "attempts.jsonl"
+    ledger = AttemptLedger(path, _ready_manifest(tmp_path))
+    ledger.start_attempt("missingness.profile", occurred_at=100.0)
+    ledger.control_path.unlink()
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["status"] = "running"
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    with pytest.raises(AttemptLedgerError, match="hash"):
+        ledger.migrate_legacy(migrated_at=200.0)
+    assert not ledger.control_path.exists()
+    assert not ledger.legacy_migration_path.exists()
+
+
+def test_legacy_migration_rejects_invalid_timestamp_before_writing_any_sidecar(
+    tmp_path,
+) -> None:
+    """Invalid migration metadata cannot leave a misleading partial recovery."""
+
+    from workbench.qa.p7_acceptance import AttemptLedger, AttemptLedgerError
+
+    ledger = AttemptLedger(tmp_path / "attempts.jsonl", _ready_manifest(tmp_path))
+    ledger.start_attempt("missingness.profile", occurred_at=100.0)
+    ledger.control_path.unlink()
+
+    with pytest.raises(AttemptLedgerError, match="timestamp"):
+        ledger.migrate_legacy(migrated_at=-1.0)
+    assert not ledger.control_path.exists()
+    assert not ledger.legacy_migration_path.exists()
+
+
+def test_legacy_migration_rejects_non_finite_persisted_timestamp(tmp_path) -> None:
+    """A tampered NaN migration timestamp cannot escape strict recovery validation."""
+
+    from workbench.qa.p7_acceptance import AttemptLedger, AttemptLedgerError
+
+    ledger = AttemptLedger(tmp_path / "attempts.jsonl", _ready_manifest(tmp_path))
+    ledger.start_attempt("missingness.profile", occurred_at=100.0)
+    ledger.control_path.unlink()
+    ledger.migrate_legacy(migrated_at=200.0)
+    ledger.control_path.unlink()
+
+    migration = json.loads(ledger.legacy_migration_path.read_text(encoding="utf-8"))
+    migration["migrated_at"] = float("nan")
+    ledger.legacy_migration_path.write_text(
+        json.dumps(migration, allow_nan=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AttemptLedgerError, match="timestamp"):
+        ledger.migrate_legacy()
+
+
+def test_legacy_completed_history_is_not_promoted_to_witness_acceptance(
+    tmp_path,
+) -> None:
+    """An old coordinator-only completion remains visible but unverified."""
+
+    from workbench.qa.p7_acceptance import AttemptLedger
+
+    path = tmp_path / "attempts.jsonl"
+    ledger = AttemptLedger(path, _ready_manifest(tmp_path))
+    ledger.start_attempt("missingness.profile", occurred_at=100.0)
+    authority = ledger.completion_authority("missingness.profile")
+    ledger.record_status(
+        "missingness.profile",
+        1,
+        "completed",
+        occurred_at=101.0,
+        evidence=_completion_evidence(
+            "missingness.profile",
+            authority=authority,
+        ),
+    )
+    ledger.control_path.unlink()
+
+    ledger.migrate_legacy(migrated_at=200.0)
+    state = ledger.states()["missingness.profile"]
+    assert state.status == "completed"
+    assert state.trust_level == "coordinator_only"
+    assert state.verification_status == "NOT VERIFIED"
+
+
+def test_explicit_migration_does_not_reinterpret_an_already_controlled_run(
+    tmp_path,
+) -> None:
+    """A current run is never relabeled as legacy by the migration command."""
+
+    from workbench.qa.p7_acceptance import AttemptLedger, AttemptLedgerError
+
+    ledger = AttemptLedger(tmp_path / "attempts.jsonl", _ready_manifest(tmp_path))
+    ledger.start_attempt("missingness.profile", occurred_at=100.0)
+
+    with pytest.raises(AttemptLedgerError, match="already has control"):
+        ledger.migrate_legacy(migrated_at=200.0)
+
+
 def test_run_control_mode_must_match_the_first_durable_record_shape(tmp_path) -> None:
     """A self-consistent replacement control cannot reinterpret prior progress."""
 
@@ -1972,6 +2105,112 @@ def test_completed_evidence_requires_exact_parent_child_confirmation_and_provena
     )
     with pytest.raises(CompletionEvidenceError, match="identity"):
         validate_completion_evidence(row, jointly_empty_ids)
+
+
+def test_witness_attested_completion_requires_provider_verification_and_is_labeled(
+    tmp_path,
+) -> None:
+    """A signed provider envelope upgrades trust only through the verifier seam."""
+
+    from workbench.qa.p7_acceptance import AttemptLedger
+    from workbench.qa.witness import (
+        BrowserWitnessAttestation,
+        WitnessChallenge,
+    )
+
+    class TestVerifier:
+        def verify(self, *, key_id: str, payload: bytes, signature: str) -> bool:
+            expected = hashlib.sha256(
+                b"test-only-secret:"
+                + key_id.encode("utf-8")
+                + b":"
+                + payload
+            ).hexdigest()
+            return signature == expected
+
+    ledger = AttemptLedger(
+        tmp_path / "attempts.jsonl",
+        _ready_manifest(tmp_path),
+        witness_verifier=TestVerifier(),
+    )
+    ledger.start_attempt("missingness.profile", occurred_at=100.0)
+    authority = ledger.completion_authority("missingness.profile")
+    challenge = WitnessChallenge.create(
+        manifest_digest=authority.manifest_digest,
+        submission_id=authority.submission_id,
+        attempt_no=authority.attempt_no,
+        operation_ids_digest=authority.operation_ids_digest,
+        notebook_id="nb_acceptance",
+        option_id="opt_acceptance",
+        option_revision=1,
+        attempt_started_at=authority.attempt_started_at,
+        issued_at=authority.attempt_started_at,
+        expires_at=authority.attempt_started_at + 86400.0,
+    )
+    placeholder = BrowserWitnessAttestation.create(
+        challenge=challenge,
+        browser_session_id="browser_session_acceptance",
+        confirmation_recorded_at="1970-01-01T00:01:40.200000+00:00",
+        observed_url="http://127.0.0.1:5189/notebook?project_root=%2Ftmp%2Fproject",
+        confirmation_control_name="Confirm workflow",
+        dom_snapshot_sha256="d" * 64,
+        durable_chain_sha256="e" * 64,
+        key_id="test-witness-key",
+        signature="placeholder",
+    )
+    signature = hashlib.sha256(
+        b"test-only-secret:test-witness-key:" + placeholder.signing_payload()
+    ).hexdigest()
+    attestation = BrowserWitnessAttestation.create(
+        challenge=challenge,
+        browser_session_id=placeholder.browser_session_id,
+        confirmation_recorded_at=placeholder.confirmation_recorded_at,
+        observed_url=placeholder.observed_url,
+        confirmation_control_name=placeholder.confirmation_control_name,
+        dom_snapshot_sha256=placeholder.dom_snapshot_sha256,
+        durable_chain_sha256=placeholder.durable_chain_sha256,
+        key_id=placeholder.key_id,
+        signature=signature,
+    )
+    evidence = replace(
+        _completion_evidence("missingness.profile", authority=authority),
+        evidence_kind="browser_witness_attested",
+        confirmation_id=attestation.attestation_digest,
+        witness_attestation=attestation.to_dict(),
+    )
+
+    ledger.record_status(
+        "missingness.profile",
+        1,
+        "completed",
+        occurred_at=101.0,
+        evidence=evidence,
+    )
+    state = ledger.states()["missingness.profile"]
+    assert state.trust_level == "witness_attested"
+    assert state.verification_status == "VERIFIED"
+
+
+def test_witness_challenge_is_derived_from_the_active_submission(tmp_path) -> None:
+    """The external witness receives a challenge bound to one active option."""
+
+    from workbench.qa.p7_acceptance import AttemptLedger
+
+    ledger = AttemptLedger(tmp_path / "attempts.jsonl", _ready_manifest(tmp_path))
+    ledger.start_attempt("missingness.profile", occurred_at=100.0)
+
+    challenge = ledger.witness_challenge(
+        "missingness.profile",
+        notebook_id="nb_acceptance",
+        option_id="opt_acceptance",
+        option_revision=1,
+    )
+
+    assert challenge.manifest_digest == ledger.manifest.manifest_digest
+    assert challenge.option_id == "opt_acceptance"
+    assert challenge.submission_id == ledger.completion_authority(
+        "missingness.profile"
+    ).submission_id
 
 
 def test_notebook_evidence_collector_verifies_the_durable_browser_chain(
@@ -2878,6 +3117,122 @@ def test_cli_collects_every_family_child_from_one_durable_notebook_chain(
     assert {event["status"] for event in completed["attempts"]} == {"completed"}
 
 
+def test_cli_migrates_legacy_ledger_only_when_explicitly_requested(tmp_path) -> None:
+    """The runner exposes migration as a visible recovery action, not a fallback."""
+
+    root = Path(__file__).resolve().parents[1]
+    python = root / ".venv" / "bin" / "python"
+    runner = root / "scripts" / "p7_acceptance_runner.py"
+    manifest = tmp_path / "manifest.json"
+    attempts = tmp_path / "attempts.jsonl"
+    fixtures = tmp_path / "fixtures.json"
+    fixtures.write_text(
+        json.dumps(
+            {
+                "missingness.profile": {
+                    "status": "ready",
+                    "fixture_id": "browser_fixture_v1",
+                    "source": "generated_example",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def execute(*arguments: str, check: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [str(python), str(runner), *arguments],
+            cwd=root,
+            check=check,
+            text=True,
+            capture_output=True,
+        )
+
+    execute(
+        "init",
+        "--manifest",
+        str(manifest),
+        "--fixture-catalog",
+        str(fixtures),
+        "--provider",
+        "deepseek",
+        "--model",
+        "deepseek-v4",
+        "--capacity",
+        "1",
+        "--refill-per-second",
+        "1",
+        "--created-at",
+        "2026-08-10T12:00:00Z",
+    )
+    execute(
+        "start-attempt",
+        "--manifest",
+        str(manifest),
+        "--attempts",
+        str(attempts),
+        "--operation-id",
+        "missingness.profile",
+    )
+    challenge = execute(
+        "witness-challenge",
+        "--manifest",
+        str(manifest),
+        "--attempts",
+        str(attempts),
+        "--operation-id",
+        "missingness.profile",
+        "--notebook-id",
+        "nb_acceptance",
+        "--option-id",
+        "opt_acceptance",
+        "--option-revision",
+        "1",
+    )
+    challenge_payload = json.loads(challenge.stdout)
+    assert challenge_payload["challenge"]["option_id"] == "opt_acceptance"
+    assert challenge_payload["trust_level"] == "none"
+    assert challenge_payload["verification_status"] == "NOT VERIFIED"
+    assert challenge_payload["human_identity_verified"] is False
+    control = attempts.with_name(attempts.name + ".control.json")
+    control.unlink()
+
+    implicit = execute(
+        "status",
+        "--manifest",
+        str(manifest),
+        "--attempts",
+        str(attempts),
+        check=False,
+    )
+    assert implicit.returncode == 2
+    assert "run control is missing" in implicit.stderr
+
+    migrated = execute(
+        "migrate",
+        "--manifest",
+        str(manifest),
+        "--attempts",
+        str(attempts),
+        "--migrated-at",
+        "200.0",
+    )
+    payload = json.loads(migrated.stdout)
+    assert payload["command"] == "migrate"
+    assert payload["mode"] == "operation"
+    assert payload["event_count"] == 1
+    assert payload["history_preserved"] is True
+
+    status = execute(
+        "status",
+        "--manifest",
+        str(manifest),
+        "--attempts",
+        str(attempts),
+    )
+    assert json.loads(status.stdout)["event_count"] == 1
+
+
 def test_cli_completed_state_is_collected_from_the_durable_notebook_chain(
     tmp_path,
 ) -> None:
@@ -2999,5 +3354,7 @@ def test_cli_completed_state_is_collected_from_the_durable_notebook_chain(
     )
     payload = json.loads(completed.stdout)
     assert payload["attempt"]["status"] == "completed"
+    assert payload["trust_level"] == "coordinator_only"
+    assert payload["verification_status"] == "NOT VERIFIED"
     assert payload["attempt"]["evidence"]["child_operation_id"] == "missingness.profile"
     assert payload["evidence_collected"] is True

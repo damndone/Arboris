@@ -24,6 +24,14 @@ from urllib.parse import parse_qs, urlparse
 from workbench.agent.operations import OperationValidationError
 from workbench.agent.workflow_contracts import validate_workflow_steps
 from workbench.qa.p7_acceptance import CompletionAuthority, CompletionEvidence
+from workbench.qa.witness import (
+    BrowserWitnessAttestation,
+    WitnessChallenge,
+    WitnessError,
+    WitnessVerifier,
+    WITNESS_CHALLENGE_TTL_SECONDS,
+    verify_witness_attestation,
+)
 
 
 _ID = re.compile(r"[A-Za-z0-9_.:-]+")
@@ -492,9 +500,13 @@ def collect_notebook_completion_evidence(
     notebook_id: str,
     option_id: str,
     option_revision: int,
-    observation: BrowserConfirmationObservation | Mapping[str, object],
+    observation: BrowserConfirmationObservation | Mapping[str, object] | None,
     browser_snapshot: str | os.PathLike[str],
     authority: CompletionAuthority,
+    witness_attestation: BrowserWitnessAttestation
+    | Mapping[str, object]
+    | None = None,
+    witness_verifier: WitnessVerifier | None = None,
 ) -> CompletionEvidence:
     """Cross-check one completed P7 child against its real Notebook chain."""
 
@@ -522,7 +534,35 @@ def collect_notebook_completion_evidence(
         raise NotebookAcceptanceEvidenceError(
             "option_revision must be a positive integer"
         )
-    if isinstance(observation, Mapping):
+    parsed_witness: BrowserWitnessAttestation | None = None
+    if witness_attestation is not None:
+        try:
+            parsed_witness = (
+                BrowserWitnessAttestation.from_mapping(witness_attestation)
+                if isinstance(witness_attestation, Mapping)
+                else witness_attestation
+            )
+        except WitnessError as error:
+            raise NotebookAcceptanceEvidenceError(str(error)) from error
+        if not isinstance(parsed_witness, BrowserWitnessAttestation):
+            raise NotebookAcceptanceEvidenceError(
+                "witness_attestation must be a browser witness envelope"
+            )
+        if observation is not None:
+            raise NotebookAcceptanceEvidenceError(
+                "witness-attested collection cannot mix caller observation metadata"
+            )
+        observation = BrowserConfirmationObservation.create(
+            browser_session_id=parsed_witness.browser_session_id,
+            notebook_id=parsed_witness.notebook_id,
+            option_id=parsed_witness.option_id,
+            option_revision=parsed_witness.option_revision,
+            confirmation_recorded_at=parsed_witness.confirmation_recorded_at,
+            observed_url=parsed_witness.observed_url,
+            confirmation_control_name=parsed_witness.confirmation_control_name,
+            dom_snapshot_sha256=parsed_witness.dom_snapshot_sha256,
+        )
+    elif isinstance(observation, Mapping):
         observation = BrowserConfirmationObservation.from_mapping(observation)
     if not isinstance(observation, BrowserConfirmationObservation):
         raise NotebookAcceptanceEvidenceError(
@@ -970,6 +1010,7 @@ def collect_notebook_completion_evidence(
     _exactly_one(valid_receipts, label="completed workflow receipt")
 
     matching_traces: list[str] = []
+    matching_trace_records: dict[str, tuple[Mapping[str, Any], ...]] = {}
     for trace_id in dict.fromkeys(trace_ids):
         trace_records = _parse_jsonl(
             root / "agent-events" / f"{trace_id}.jsonl",
@@ -981,15 +1022,59 @@ def collect_notebook_completion_evidence(
             option_revision=option_revision,
         ):
             matching_traces.append(trace_id)
+            matching_trace_records[trace_id] = trace_records
     if len(matching_traces) != 1:
         raise NotebookAcceptanceEvidenceError(
             "Agent trace does not uniquely prove selection, execution, and artifact validation"
         )
     trace_id = matching_traces[0]
+    durable_chain_sha256 = _digest(
+        {
+            "notebook_records": notebook_records,
+            "option_records": option_records,
+            "workflow_records": workflow_records,
+            "artifact_index": index,
+            "workflow_receipts": valid_receipts,
+            "matching_trace_records": matching_trace_records,
+            "source_artifact_sha256": source_sha,
+            "p7_artifact_sha256": artifact_sha,
+            "expected_outputs": expected_outputs,
+        }
+    )
+    if parsed_witness is not None:
+        try:
+            witness_challenge = WitnessChallenge.create(
+                manifest_digest=authority.manifest_digest,
+                submission_id=authority.submission_id,
+                attempt_no=authority.attempt_no,
+                operation_ids_digest=authority.operation_ids_digest,
+                notebook_id=parsed_witness.notebook_id,
+                option_id=parsed_witness.option_id,
+                option_revision=parsed_witness.option_revision,
+                attempt_started_at=authority.attempt_started_at,
+                issued_at=authority.attempt_started_at,
+                expires_at=(
+                    authority.attempt_started_at
+                    + WITNESS_CHALLENGE_TTL_SECONDS
+                ),
+            )
+            verify_witness_attestation(
+                witness_challenge,
+                parsed_witness,
+                verifier=witness_verifier,
+                now=_timestamp(confirmation_at, "confirmation recorded_at"),
+                expected_durable_chain_sha256=durable_chain_sha256,
+            )
+        except WitnessError as error:
+            raise NotebookAcceptanceEvidenceError(str(error)) from error
     parent_record_id = f"option:{notebook_id}:{option_id}:{option_revision}"
     child_record_id = f"workflow:{workflow_id}:{step_id}"
     return CompletionEvidence(
-        evidence_kind="browser_visible_agent",
+        evidence_kind=(
+            "browser_witness_attested"
+            if parsed_witness is not None
+            else "browser_visible_agent"
+        ),
         manifest_digest=authority.manifest_digest,
         submission_id=authority.submission_id,
         attempt_no=authority.attempt_no,
@@ -1017,7 +1102,11 @@ def collect_notebook_completion_evidence(
         child_parent_record_id=parent_record_id,
         child_record_status="completed",
         child_record_durable=True,
-        confirmation_id=observation.observation_digest,
+        confirmation_id=(
+            parsed_witness.attestation_digest
+            if parsed_witness is not None
+            else observation.observation_digest
+        ),
         confirmation_surface="browser",
         confirmation_actor="user",
         confirmation_session_id=trace_id,
@@ -1030,6 +1119,9 @@ def collect_notebook_completion_evidence(
         artifact_sha256=artifact_sha,
         artifact_provenance_id=provenance_id,
         artifact_producer_record_id=child_record_id,
+        witness_attestation=(
+            parsed_witness.to_dict() if parsed_witness is not None else None
+        ),
     )
 
 

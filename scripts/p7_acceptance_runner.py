@@ -29,11 +29,13 @@ from workbench.qa.p7_acceptance import (  # noqa: E402
     RatePolicy,
     build_acceptance_batches,
     build_acceptance_manifest,
+    build_witness_challenge,
     load_acceptance_manifest,
     resolve_fixture_catalog,
     workspace_dirty_digest,
     write_once_manifest,
 )
+from workbench.qa.witness import load_witness_verifier  # noqa: E402
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -99,6 +101,14 @@ def _counts(states: Mapping[str, object]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _counts_by(states: Mapping[str, object], attribute: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for state in states.values():
+        value = str(getattr(state, attribute))
+        counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _load_ledger(args: argparse.Namespace) -> AttemptLedger:
     git_head, dirty_digest = _verified_git_context(args)
     manifest = load_acceptance_manifest(
@@ -107,7 +117,14 @@ def _load_ledger(args: argparse.Namespace) -> AttemptLedger:
         expected_git_head=git_head,
         expected_dirty_digest=dirty_digest,
     )
-    return AttemptLedger(args.attempts, manifest, registry=p7_pack_registry)
+    return AttemptLedger(
+        args.attempts,
+        manifest,
+        registry=p7_pack_registry,
+        witness_verifier=load_witness_verifier(
+            getattr(args, "witness_verifier", None)
+        ),
+    )
 
 
 def _work_packet(
@@ -180,9 +197,20 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--attempts", type=Path, required=True)
         command.add_argument("--git-head")
         command.add_argument("--dirty-digest")
+        command.add_argument(
+            "--witness-verifier",
+            help="trusted module:factory adapter; omitted means witness completion fails closed",
+        )
 
     status = commands.add_parser("status", help="verify and summarize every row")
     add_ledger_paths(status)
+
+    migrate = commands.add_parser(
+        "migrate",
+        help="explicitly attach control authority to a valid legacy ledger",
+    )
+    add_ledger_paths(migrate)
+    migrate.add_argument("--migrated-at", type=float)
 
     next_command = commands.add_parser(
         "next", help="show the next browser work packet without submitting it"
@@ -206,6 +234,16 @@ def _parser() -> argparse.ArgumentParser:
     add_ledger_paths(start_batch)
     start_batch.add_argument("--pack-family", required=True)
 
+    witness_challenge = commands.add_parser(
+        "witness-challenge",
+        help="derive the one-option challenge for an external browser witness",
+    )
+    add_ledger_paths(witness_challenge)
+    witness_challenge.add_argument("--operation-id", required=True)
+    witness_challenge.add_argument("--notebook-id", required=True)
+    witness_challenge.add_argument("--option-id", required=True)
+    witness_challenge.add_argument("--option-revision", type=int, required=True)
+
     record = commands.add_parser(
         "record", help="append a visible lifecycle result to the current attempt"
     )
@@ -225,6 +263,7 @@ def _parser() -> argparse.ArgumentParser:
     record.add_argument("--option-revision", type=int)
     record.add_argument("--browser-observation", type=Path)
     record.add_argument("--browser-snapshot", type=Path)
+    record.add_argument("--witness-attestation", type=Path)
 
     record_batch = commands.add_parser(
         "record-batch", help="atomically record one visible family lifecycle result"
@@ -244,6 +283,7 @@ def _parser() -> argparse.ArgumentParser:
     record_batch.add_argument("--option-revision", type=int)
     record_batch.add_argument("--browser-observation", type=Path)
     record_batch.add_argument("--browser-snapshot", type=Path)
+    record_batch.add_argument("--witness-attestation", type=Path)
 
     retry = commands.add_parser(
         "retry", help="append a new numbered attempt after a terminal failure"
@@ -314,10 +354,30 @@ def main(argv: list[str] | None = None) -> int:
                     "manifest_digest": ledger.manifest.manifest_digest,
                     "event_count": len(ledger.events()),
                     "counts": _counts(states),
+                    "verification_counts": _counts_by(
+                        states,
+                        "verification_status",
+                    ),
+                    "trust_levels": _counts_by(states, "trust_level"),
                     "states": {
                         operation_id: asdict(state)
                         for operation_id, state in states.items()
                     },
+                }
+            )
+        elif args.command == "migrate":
+            ledger = _load_ledger(args)
+            before = ledger.path.read_bytes()
+            migration = ledger.migrate_legacy(migrated_at=args.migrated_at)
+            after = ledger.path.read_bytes()
+            _emit(
+                {
+                    "command": "migrate",
+                    "migration": migration.to_dict(),
+                    "mode": migration.mode,
+                    "event_count": migration.event_count,
+                    "history_preserved": before == after,
+                    "legacy_completion_trust": "NOT VERIFIED",
                 }
             )
         elif args.command == "next":
@@ -393,6 +453,25 @@ def main(argv: list[str] | None = None) -> int:
                     "confirmation_performed": False,
                 }
             )
+        elif args.command == "witness-challenge":
+            ledger = _load_ledger(args)
+            authority = ledger.completion_authority(args.operation_id)
+            challenge = build_witness_challenge(
+                authority,
+                notebook_id=args.notebook_id,
+                option_id=args.option_id,
+                option_revision=args.option_revision,
+            )
+            _emit(
+                {
+                    "command": "witness-challenge",
+                    "challenge": challenge.to_dict(),
+                    "trust_level": "none",
+                    "verification_status": "NOT VERIFIED",
+                    "human_identity_verified": False,
+                    "provider_called": False,
+                }
+            )
         elif args.command == "record":
             ledger = _load_ledger(args)
             evidence = None
@@ -403,19 +482,42 @@ def main(argv: list[str] | None = None) -> int:
                 args.option_revision,
                 args.browser_observation,
                 args.browser_snapshot,
+                args.witness_attestation,
             )
             if args.status == "completed":
-                if any(value is None for value in evidence_arguments):
+                if any(value is None for value in evidence_arguments[:4]):
                     raise ValueError(
                         "completed status requires project_root, notebook_id, "
-                        "option_id, option_revision, and browser_observation"
+                        "option_id, and option_revision"
                     )
-                observation = BrowserConfirmationObservation.from_mapping(
-                    _read_json_object(
-                        args.browser_observation,
-                        "browser confirmation observation",
+                if args.browser_snapshot is None:
+                    raise ValueError(
+                        "completed status requires browser_snapshot bytes"
                     )
-                )
+                if args.witness_attestation is not None:
+                    if args.browser_observation is not None:
+                        raise ValueError(
+                            "witness-attested completion cannot also provide "
+                            "caller browser observation metadata"
+                        )
+                    observation = None
+                    witness_attestation = _read_json_object(
+                        args.witness_attestation,
+                        "browser witness attestation",
+                    )
+                else:
+                    if args.browser_observation is None or args.browser_snapshot is None:
+                        raise ValueError(
+                            "coordinator-only completion requires "
+                            "browser_observation and browser_snapshot"
+                        )
+                    observation = BrowserConfirmationObservation.from_mapping(
+                        _read_json_object(
+                            args.browser_observation,
+                            "browser confirmation observation",
+                        )
+                    )
+                    witness_attestation = None
                 authority = ledger.completion_authority(args.operation_id)
                 evidence = collect_notebook_completion_evidence(
                     project_root=args.project_root,
@@ -426,6 +528,8 @@ def main(argv: list[str] | None = None) -> int:
                     observation=observation,
                     browser_snapshot=args.browser_snapshot,
                     authority=authority,
+                    witness_attestation=witness_attestation,
+                    witness_verifier=ledger.witness_verifier,
                 )
             elif any(value is not None for value in evidence_arguments):
                 raise ValueError(
@@ -445,6 +549,10 @@ def main(argv: list[str] | None = None) -> int:
                     "command": "record",
                     "attempt": event.to_dict(),
                     "evidence_collected": evidence is not None,
+                    "trust_level": ledger.states()[args.operation_id].trust_level,
+                    "verification_status": ledger.states()[
+                        args.operation_id
+                    ].verification_status,
                 }
             )
         elif args.command == "record-batch":
@@ -458,19 +566,42 @@ def main(argv: list[str] | None = None) -> int:
                 args.option_revision,
                 args.browser_observation,
                 args.browser_snapshot,
+                args.witness_attestation,
             )
             if args.status == "completed":
-                if any(value is None for value in evidence_arguments):
+                if any(value is None for value in evidence_arguments[:4]):
                     raise ValueError(
                         "completed batch status requires project_root, notebook_id, "
-                        "option_id, option_revision, and browser_observation"
+                        "option_id, and option_revision"
                     )
-                observation = BrowserConfirmationObservation.from_mapping(
-                    _read_json_object(
-                        args.browser_observation,
-                        "browser confirmation observation",
+                if args.browser_snapshot is None:
+                    raise ValueError(
+                        "completed batch status requires browser_snapshot bytes"
                     )
-                )
+                if args.witness_attestation is not None:
+                    if args.browser_observation is not None:
+                        raise ValueError(
+                            "witness-attested batch completion cannot also provide "
+                            "caller browser observation metadata"
+                        )
+                    observation = None
+                    witness_attestation = _read_json_object(
+                        args.witness_attestation,
+                        "browser witness attestation",
+                    )
+                else:
+                    if args.browser_observation is None or args.browser_snapshot is None:
+                        raise ValueError(
+                            "coordinator-only batch completion requires "
+                            "browser_observation and browser_snapshot"
+                        )
+                    observation = BrowserConfirmationObservation.from_mapping(
+                        _read_json_object(
+                            args.browser_observation,
+                            "browser confirmation observation",
+                        )
+                    )
+                    witness_attestation = None
                 authority = ledger.completion_authority(batch.operation_ids[0])
                 evidence_by_operation = {
                     operation_id: collect_notebook_completion_evidence(
@@ -482,6 +613,8 @@ def main(argv: list[str] | None = None) -> int:
                         observation=observation,
                         browser_snapshot=args.browser_snapshot,
                         authority=authority,
+                        witness_attestation=witness_attestation,
+                        witness_verifier=ledger.witness_verifier,
                     )
                     for operation_id in batch.operation_ids
                 }
@@ -506,6 +639,20 @@ def main(argv: list[str] | None = None) -> int:
                         if evidence_by_operation is not None
                         else 0
                     ),
+                    "trust_level": (
+                        "witness_attested"
+                        if args.witness_attestation is not None
+                        else "coordinator_only"
+                    )
+                    if args.status == "completed"
+                    else "none",
+                    "verification_status": (
+                        "VERIFIED"
+                        if args.witness_attestation is not None
+                        else "NOT VERIFIED"
+                    )
+                    if args.status == "completed"
+                    else "NOT VERIFIED",
                 }
             )
         elif args.command == "retry":

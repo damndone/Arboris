@@ -22,6 +22,14 @@ import subprocess
 from typing import Any, Literal, Mapping, Protocol
 
 from workbench.agent.p7_pack_registry import p7_pack_registry
+from workbench.qa.witness import (
+    BrowserWitnessAttestation,
+    WitnessChallenge,
+    WitnessError,
+    WitnessVerifier,
+    WITNESS_CHALLENGE_TTL_SECONDS,
+    verify_witness_attestation,
+)
 
 
 FixtureStatus = Literal["ready", "blocked"]
@@ -220,6 +228,34 @@ class AcceptanceRunControl:
 
 
 @dataclass(frozen=True)
+class LegacyLedgerMigration:
+    """Immutable provenance for one explicit import of a legacy ledger."""
+
+    schema_version: int
+    manifest_digest: str
+    ledger_sha256: str
+    event_count: int
+    mode: AcceptanceRunMode
+    control_digest: str
+    migrated_at: float
+    migration_digest: str
+
+    def _unsigned_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "manifest_digest": self.manifest_digest,
+            "ledger_sha256": self.ledger_sha256,
+            "event_count": self.event_count,
+            "mode": self.mode,
+            "control_digest": self.control_digest,
+            "migrated_at": float(self.migrated_at),
+        }
+
+    def to_dict(self) -> dict[str, object]:
+        return {**self._unsigned_dict(), "migration_digest": self.migration_digest}
+
+
+@dataclass(frozen=True)
 class CompletionEvidence:
     """Identities required to prove one real, user-confirmed Agent chain."""
 
@@ -264,6 +300,7 @@ class CompletionEvidence:
     artifact_sha256: str
     artifact_provenance_id: str
     artifact_producer_record_id: str
+    witness_attestation: Mapping[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -314,6 +351,7 @@ _COMPLETION_EVIDENCE_FIELDS = (
     "artifact_sha256",
     "artifact_provenance_id",
     "artifact_producer_record_id",
+    "witness_attestation",
 )
 
 
@@ -399,6 +437,8 @@ class OperationAcceptanceState:
     submission_id: str | None = None
     reason_code: str | None = None
     reason_detail: str | None = None
+    trust_level: str = "none"
+    verification_status: str = "NOT VERIFIED"
 
 
 @dataclass(frozen=True)
@@ -772,13 +812,17 @@ def _optional_text(value: object, label: str) -> str | None:
 
 
 def _completion_evidence_from_mapping(value: Mapping[str, object]) -> CompletionEvidence:
-    if value.get("evidence_kind") != "browser_visible_agent":
+    if value.get("evidence_kind") not in {
+        "browser_visible_agent",
+        "browser_witness_attested",
+    }:
         raise CompletionEvidenceError(
             "completed evidence must come from a browser-visible Agent session"
         )
     actual = set(value)
     expected = set(_COMPLETION_EVIDENCE_FIELDS)
-    if actual != expected:
+    legacy_expected = expected - {"witness_attestation"}
+    if actual != expected and actual != legacy_expected:
         missing = expected - actual
         extra = actual - expected
         detail: list[str] = []
@@ -789,7 +833,13 @@ def _completion_evidence_from_mapping(value: Mapping[str, object]) -> Completion
         raise CompletionEvidenceError(
             "completed evidence fields are incomplete: " + "; ".join(detail)
         )
-    return CompletionEvidence(**{key: value[key] for key in _COMPLETION_EVIDENCE_FIELDS})
+    normalized = {
+        key: value[key]
+        for key in _COMPLETION_EVIDENCE_FIELDS
+        if key in value
+    }
+    normalized.setdefault("witness_attestation", None)
+    return CompletionEvidence(**normalized)
 
 
 def validate_completion_evidence(
@@ -802,9 +852,25 @@ def validate_completion_evidence(
         evidence = _completion_evidence_from_mapping(evidence)
     if not isinstance(evidence, CompletionEvidence):
         raise CompletionEvidenceError("completed evidence has an unsupported shape")
-    if evidence.evidence_kind != "browser_visible_agent":
+    if evidence.evidence_kind not in {
+        "browser_visible_agent",
+        "browser_witness_attested",
+    }:
         raise CompletionEvidenceError(
             "completed evidence must come from a browser-visible Agent session"
+        )
+    if evidence.evidence_kind == "browser_witness_attested":
+        if not isinstance(evidence.witness_attestation, Mapping):
+            raise CompletionEvidenceError(
+                "witness-attested evidence requires a signed witness envelope"
+            )
+        try:
+            BrowserWitnessAttestation.from_mapping(evidence.witness_attestation)
+        except WitnessError as error:
+            raise CompletionEvidenceError(str(error)) from error
+    elif evidence.witness_attestation is not None:
+        raise CompletionEvidenceError(
+            "coordinator-only evidence cannot carry a witness envelope"
         )
     for field_name in _COMPLETION_EVIDENCE_FIELDS:
         if field_name in {
@@ -812,6 +878,7 @@ def validate_completion_evidence(
             "child_record_durable",
             "attempt_no",
             "attempt_started_at",
+            "witness_attestation",
         }:
             continue
         value = getattr(evidence, field_name)
@@ -963,6 +1030,73 @@ def validate_completion_authority(
             "completed evidence does not match the active submission authority"
         )
     return evidence
+
+
+def _witness_challenge_for(
+    authority: CompletionAuthority,
+    attestation: BrowserWitnessAttestation,
+) -> WitnessChallenge:
+    """Rebuild the coordinator challenge from durable submission authority."""
+
+    return build_witness_challenge(
+        authority,
+        notebook_id=attestation.notebook_id,
+        option_id=attestation.option_id,
+        option_revision=attestation.option_revision,
+    )
+
+
+def build_witness_challenge(
+    authority: CompletionAuthority,
+    *,
+    notebook_id: str,
+    option_id: str,
+    option_revision: int,
+) -> WitnessChallenge:
+    """Create the challenge an external witness must sign for one option."""
+
+    if not isinstance(authority, CompletionAuthority):
+        raise CompletionEvidenceError("completion authority is required")
+    return WitnessChallenge.create(
+        manifest_digest=authority.manifest_digest,
+        submission_id=authority.submission_id,
+        attempt_no=authority.attempt_no,
+        operation_ids_digest=authority.operation_ids_digest,
+        notebook_id=notebook_id,
+        option_id=option_id,
+        option_revision=option_revision,
+        attempt_started_at=authority.attempt_started_at,
+        issued_at=authority.attempt_started_at,
+        expires_at=authority.attempt_started_at + WITNESS_CHALLENGE_TTL_SECONDS,
+    )
+
+
+def _validate_witness_completion(
+    evidence: CompletionEvidence,
+    authority: CompletionAuthority,
+    *,
+    verifier: WitnessVerifier | None,
+    occurred_at: float,
+) -> None:
+    if evidence.evidence_kind != "browser_witness_attested":
+        return
+    if not isinstance(evidence.witness_attestation, Mapping):
+        raise CompletionEvidenceError(
+            "witness-attested evidence requires a signed witness envelope"
+        )
+    try:
+        attestation = BrowserWitnessAttestation.from_mapping(
+            evidence.witness_attestation
+        )
+        verify_witness_attestation(
+            _witness_challenge_for(authority, attestation),
+            attestation,
+            verifier=verifier,
+            now=occurred_at,
+            expected_durable_chain_sha256=attestation.durable_chain_sha256,
+        )
+    except WitnessError as error:
+        raise CompletionEvidenceError(str(error)) from error
 
 
 def token_bucket_admission(
@@ -1633,6 +1767,7 @@ class AttemptLedger:
         manifest: AcceptanceManifest,
         *,
         registry: RegistryLike = p7_pack_registry,
+        witness_verifier: WitnessVerifier | None = None,
     ) -> None:
         if not isinstance(manifest, AcceptanceManifest):
             raise AttemptLedgerError("attempt ledger requires an acceptance manifest")
@@ -1648,8 +1783,12 @@ class AttemptLedger:
             )
         self.path = Path(path)
         self.control_path = self.path.with_name(self.path.name + ".control.json")
+        self.legacy_migration_path = self.path.with_name(
+            self.path.name + ".legacy-migration.json"
+        )
         self.lock_path = self.path.with_name(self.path.name + ".lock")
         self.manifest = manifest
+        self.witness_verifier = witness_verifier
         self._rows = {row.operation_id: row for row in manifest.rows}
         self._batches = {
             batch.pack_family: batch
@@ -1769,6 +1908,204 @@ class AttemptLedger:
         )
         return self._load_run_control()
 
+    def _load_legacy_migration(self) -> LegacyLedgerMigration:
+        try:
+            raw = _read_regular_bytes(self.legacy_migration_path)
+            parsed = json.loads(
+                raw.decode("utf-8"),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+            data = _exact_mapping(
+                parsed,
+                "legacy ledger migration",
+                {
+                    "schema_version",
+                    "manifest_digest",
+                    "ledger_sha256",
+                    "event_count",
+                    "mode",
+                    "control_digest",
+                    "migrated_at",
+                    "migration_digest",
+                },
+            )
+            if data["schema_version"] != MANIFEST_SCHEMA_VERSION:
+                raise AttemptLedgerError("legacy ledger migration schema drifted")
+            if data["mode"] not in {"operation", "family_batch"}:
+                raise AttemptLedgerError("legacy ledger migration mode is invalid")
+            if type(data["event_count"]) is not int or data["event_count"] <= 0:
+                raise AttemptLedgerError(
+                    "legacy ledger migration event_count is invalid"
+                )
+            if (
+                type(data["migrated_at"]) not in {int, float}
+                or not math.isfinite(float(data["migrated_at"]))
+                or float(data["migrated_at"]) < 0
+            ):
+                raise AttemptLedgerError("legacy ledger migration timestamp is invalid")
+            migration = LegacyLedgerMigration(
+                schema_version=MANIFEST_SCHEMA_VERSION,
+                manifest_digest=_required_text(
+                    data["manifest_digest"], "migration manifest_digest"
+                ),
+                ledger_sha256=_required_text(
+                    data["ledger_sha256"], "migration ledger_sha256"
+                ),
+                event_count=data["event_count"],
+                mode=data["mode"],
+                control_digest=_required_text(
+                    data["control_digest"], "migration control_digest"
+                ),
+                migrated_at=float(data["migrated_at"]),
+                migration_digest=_required_text(
+                    data["migration_digest"], "migration_digest"
+                ),
+            )
+            if _sha256(migration._unsigned_dict()) != migration.migration_digest:
+                raise AttemptLedgerError("legacy ledger migration digest is invalid")
+            return migration
+        except (UnicodeDecodeError, json.JSONDecodeError, ManifestDriftError) as error:
+            raise AttemptLedgerError(
+                f"legacy ledger migration is invalid: {error}"
+            ) from error
+
+    @staticmethod
+    def _legacy_mode_from_raw(raw: bytes) -> AcceptanceRunMode:
+        try:
+            first_line = raw.splitlines()[0]
+            parsed = json.loads(
+                first_line.decode("utf-8"),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+        except (IndexError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise AttemptLedgerError(
+                "legacy ledger cannot determine its execution mode"
+            ) from error
+        return (
+            "family_batch"
+            if isinstance(parsed, Mapping)
+            and parsed.get("record_type") == "batch_transaction"
+            else "operation"
+        )
+
+    def _validate_legacy_migration(
+        self,
+        migration: LegacyLedgerMigration,
+        *,
+        raw: bytes,
+        event_count: int,
+        expected_control: AcceptanceRunControl,
+    ) -> None:
+        if migration.manifest_digest != self.manifest.manifest_digest:
+            raise AttemptLedgerError("legacy migration names another manifest")
+        if migration.ledger_sha256 != hashlib.sha256(raw).hexdigest():
+            raise AttemptLedgerError("legacy ledger changed after migration")
+        if migration.event_count != event_count:
+            raise AttemptLedgerError("legacy migration event count drifted")
+        if migration.mode != expected_control.mode:
+            raise AttemptLedgerError("legacy migration execution mode drifted")
+        if migration.control_digest != expected_control.control_digest:
+            raise AttemptLedgerError("legacy migration control digest drifted")
+
+    def migrate_legacy(
+        self,
+        *,
+        migrated_at: float | None = None,
+    ) -> LegacyLedgerMigration:
+        """Explicitly attach control authority to a valid legacy ledger.
+
+        The original ledger is never rewritten.  This method is deliberately
+        not called by ``events``, ``states``, ``next`` or ``resume`` paths.
+        """
+
+        if migrated_at is not None and (
+            type(migrated_at) not in {int, float}
+            or not math.isfinite(float(migrated_at))
+            or float(migrated_at) < 0
+        ):
+            raise AttemptLedgerError("legacy migration timestamp is invalid")
+        with self._locked_file(exclusive=True) as descriptor:
+            raw = self._read_all(descriptor)
+            if not raw:
+                raise AttemptLedgerError(
+                    "legacy migration requires persisted attempt progress"
+                )
+            if self.control_path.exists():
+                if not self.legacy_migration_path.exists():
+                    raise AttemptLedgerError(
+                        "acceptance run already has control; it is not a legacy ledger"
+                    )
+                migration = self._load_legacy_migration()
+                expected_control = self._expected_run_control(migration.mode)
+                actual_control = self._load_run_control()
+                if actual_control != expected_control:
+                    raise AttemptLedgerError(
+                        "legacy migration control does not match the frozen manifest"
+                    )
+                events = self._events_from_descriptor(descriptor)
+                self._validate_legacy_migration(
+                    migration,
+                    raw=raw,
+                    event_count=len(events),
+                    expected_control=expected_control,
+                )
+                return migration
+
+            events = self._events_from_descriptor(
+                descriptor,
+                require_control=False,
+            )
+            if not events:
+                raise AttemptLedgerError(
+                    "legacy migration requires at least one valid event"
+                )
+            mode = self._legacy_mode_from_raw(raw)
+            expected_control = self._expected_run_control(mode)
+            if self.legacy_migration_path.exists():
+                migration = self._load_legacy_migration()
+                self._validate_legacy_migration(
+                    migration,
+                    raw=raw,
+                    event_count=len(events),
+                    expected_control=expected_control,
+                )
+            else:
+                unsigned = {
+                    "schema_version": MANIFEST_SCHEMA_VERSION,
+                    "manifest_digest": self.manifest.manifest_digest,
+                    "ledger_sha256": hashlib.sha256(raw).hexdigest(),
+                    "event_count": len(events),
+                    "mode": mode,
+                    "control_digest": expected_control.control_digest,
+                    "migrated_at": (
+                        float(migrated_at)
+                        if migrated_at is not None
+                        else datetime.now(timezone.utc).timestamp()
+                    ),
+                }
+                migration = LegacyLedgerMigration(
+                    **unsigned,
+                    migration_digest=_sha256(unsigned),
+                )
+                _publish_write_once_bytes(
+                    self.legacy_migration_path,
+                    _canonical_json(migration.to_dict()),
+                    label="legacy ledger migration",
+                    error_type=AttemptLedgerError,
+                )
+            _publish_write_once_bytes(
+                self.control_path,
+                _canonical_json(expected_control.to_dict()),
+                label="acceptance run control",
+                error_type=AttemptLedgerError,
+            )
+            actual_control = self._load_run_control()
+            if actual_control != expected_control:
+                raise AttemptLedgerError(
+                    "migrated acceptance run control does not match the manifest"
+                )
+            return self._load_legacy_migration()
+
     def run_control(self) -> AcceptanceRunControl:
         """Load the immutable execution mode and scope frozen by the first start."""
 
@@ -1844,18 +2181,26 @@ class AttemptLedger:
                 return b"".join(chunks)
             chunks.append(chunk)
 
-    def _events_from_descriptor(self, descriptor: int) -> tuple[AttemptEvent, ...]:
+    def _events_from_descriptor(
+        self,
+        descriptor: int,
+        *,
+        require_control: bool = True,
+    ) -> tuple[AttemptEvent, ...]:
         raw = self._read_all(descriptor)
         if not raw:
             return ()
-        if not self.control_path.exists():
+        control: AcceptanceRunControl | None = None
+        if self.control_path.exists():
+            control = self._load_run_control()
+        elif require_control:
             raise AttemptLedgerError(
                 "acceptance run control is missing for persisted progress"
             )
-        control = self._load_run_control()
         if not raw.endswith(b"\n"):
             raise AttemptLedgerError("attempt ledger has a truncated final record")
         events: list[AttemptEvent] = []
+        physical_mode: AcceptanceRunMode | None = None
         for line_no, raw_line in enumerate(raw.splitlines(), start=1):
             if not raw_line:
                 raise AttemptLedgerError(
@@ -1866,13 +2211,19 @@ class AttemptLedger:
                     raw_line.decode("utf-8"),
                     object_pairs_hook=_reject_duplicate_json_keys,
                 )
-                physical_mode: AcceptanceRunMode = (
+                line_mode: AcceptanceRunMode = (
                     "family_batch"
                     if isinstance(parsed, Mapping)
                     and parsed.get("record_type") == "batch_transaction"
                     else "operation"
                 )
-                if line_no == 1 and control.mode != physical_mode:
+                if physical_mode is None:
+                    physical_mode = line_mode
+                elif line_mode != physical_mode:
+                    raise AttemptLedgerError(
+                        "attempt ledger mixes operation and family-batch records"
+                    )
+                if line_no == 1 and control is not None and control.mode != line_mode:
                     raise AttemptLedgerError(
                         "acceptance run control mode disagrees with the first durable "
                         "record"
@@ -2001,12 +2352,16 @@ class AttemptLedger:
                         normalized = validate_completion_evidence(
                             self._rows[event.operation_id], event.evidence
                         )
-                        validate_completion_authority(
-                            normalized,
-                            self._authority_for_event(events, event),
-                        )
+                        authority = self._authority_for_event(events, event)
+                        validate_completion_authority(normalized, authority)
                         _validate_completion_event_time(
                             normalized,
+                            occurred_at=event.occurred_at,
+                        )
+                        _validate_witness_completion(
+                            normalized,
+                            authority,
+                            verifier=self.witness_verifier,
                             occurred_at=event.occurred_at,
                         )
                     except CompletionEvidenceError as error:
@@ -2244,6 +2599,23 @@ class AttemptLedger:
                 "completion authority requires one active operation attempt"
             )
         return self._authority_for_event(events, latest)
+
+    def witness_challenge(
+        self,
+        operation_id: str,
+        *,
+        notebook_id: str,
+        option_id: str,
+        option_revision: int,
+    ) -> WitnessChallenge:
+        """Return the exact challenge an external browser witness must attest."""
+
+        return build_witness_challenge(
+            self.completion_authority(operation_id),
+            notebook_id=notebook_id,
+            option_id=option_id,
+            option_revision=option_revision,
+        )
 
     def start_attempt(self, operation_id: str, *, occurred_at: float) -> AttemptEvent:
         row = self._row(operation_id)
@@ -2704,6 +3076,14 @@ class AttemptLedger:
         for row in self.manifest.rows:
             event = latest.get(row.operation_id)
             if event is not None:
+                trust_level = "none"
+                verification_status = "NOT VERIFIED"
+                if event.status == "completed" and event.evidence is not None:
+                    if event.evidence.evidence_kind == "browser_witness_attested":
+                        trust_level = "witness_attested"
+                        verification_status = "VERIFIED"
+                    else:
+                        trust_level = "coordinator_only"
                 states[row.operation_id] = OperationAcceptanceState(
                     operation_id=row.operation_id,
                     status=event.status,
@@ -2712,6 +3092,8 @@ class AttemptLedger:
                     submission_id=event.submission_id,
                     reason_code=event.reason_code,
                     reason_detail=event.reason_detail,
+                    trust_level=trust_level,
+                    verification_status=verification_status,
                 )
             elif row.fixture_profile.status == "blocked":
                 states[row.operation_id] = OperationAcceptanceState(
@@ -2872,6 +3254,7 @@ __all__ = [
     "CompletionEvidenceError",
     "ExpectedParentChildContract",
     "FixtureProfile",
+    "LegacyLedgerMigration",
     "ManifestConflictError",
     "ManifestDriftError",
     "NextBatchAdmission",
@@ -2885,6 +3268,7 @@ __all__ = [
     "build_acceptance_manifest",
     "build_acceptance_batches",
     "build_acceptance_matrix",
+    "build_witness_challenge",
     "load_acceptance_manifest",
     "registry_digest",
     "resolve_fixture_catalog",
