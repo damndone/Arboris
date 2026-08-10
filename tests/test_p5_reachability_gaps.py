@@ -268,7 +268,11 @@ def test_p5_contract_builders_follow_live_registry_injection(monkeypatch) -> Non
             {"key": "sampling_injected", "label": "Injected sampler"},
         ],
     }
-    monkeypatch.setattr(engine_capabilities, "build_capabilities", lambda: injected_manifest)
+    monkeypatch.setattr(
+        engine_capabilities,
+        "build_capabilities",
+        lambda **_kwargs: injected_manifest,
+    )
     assert "prediction.prediction_injected" in prediction_workflow_step_contracts()
     preparation = data_preparation_workflow_step_contracts()
     assert "imputation.imputation_injected" in preparation
