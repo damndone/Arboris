@@ -464,6 +464,8 @@ export interface NotebookRouteViewProps {
   activeRunId?: string | null;
   onMaterializedDraft?: (response: NotebookMaterializationResponse) => void;
   onOpenMemorySettings?: () => void;
+  /** Optional host hook used by embedded callers to observe a requested replan. */
+  onReplan?: () => void;
 }
 
 export function NotebookRouteView({
@@ -471,6 +473,7 @@ export function NotebookRouteView({
   activeRunId = null,
   onMaterializedDraft,
   onOpenMemorySettings,
+  onReplan: onExternalReplan,
 }: NotebookRouteViewProps) {
   const agent = useAgentSurfaceOptional();
   const workbench = useWorkbenchOptional();
@@ -1282,6 +1285,10 @@ export function NotebookRouteView({
         onStartNewAnalysis={activeRunId ? () => void startFromSourceRun() : undefined}
         newAnalysisDisabled={uploadBusy}
         onReplan={() => {
+          if (onExternalReplan) {
+            onExternalReplan();
+            return;
+          }
           if (notebookIntent.trim()) setRefreshToken((token) => token + 1);
           else setActionError({ code: "NOTEBOOK_GOAL_REQUIRED", message: "Describe what you want to find out before planning options." });
         }}

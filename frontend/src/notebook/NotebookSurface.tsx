@@ -518,6 +518,15 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
         >
           <span className="nb-error-code">{props.actionError.code}</span>
           <span>{props.actionError.message}</span>
+          {props.onReplan &&
+          (props.actionError.code === "OPTION_MATERIALIZATION_FAILED" ||
+            props.actionError.code === "OPTION_VALIDATION_FAILED") ? (
+            <PlanningRecoveryActions
+              onReplan={props.onReplan}
+              replanLabel="Replan with current evidence"
+              replanTestId="notebook-replan-after-action-error"
+            />
+          ) : null}
         </div>
       ) : null}
 

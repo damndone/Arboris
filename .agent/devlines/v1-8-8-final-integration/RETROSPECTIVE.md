@@ -10,10 +10,10 @@ FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 6/17 (35.3%; 35.3 per 100 events)
-- Repeat rate: 0/6 (0.0%)
-- Recurrence rate: 0/6 (0.0%)
-- MTTR: median=0 ms (sample=5; unresolved=1)
+- Failure frequency: 7/18 (38.9%; 38.9 per 100 events)
+- Repeat rate: 0/7 (0.0%)
+- Recurrence rate: 0/7 (0.0%)
+- MTTR: median=0 ms (sample=6; unresolved=1)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -36,6 +36,7 @@ FULL_GATE_INTERRUPTED
 
 - #7 2026-08-10T14:46:00.000Z `notebook_upload_workflow_planner_gap`; cause_status: `known`; cause: After the first Notebook correction, upload-only planning had no server-pinned workflow source for operation.multi_step and the planner surfaced that boundary instead of inventing one.; resolution: `resolved`; lesson: Planner correction must distinguish an unavailable workflow source from an unavailable capability and offer a contractible alternative without fabricating a result.
 - #10 2026-08-10T15:15:00.000Z `p7_batch_witness_boundary`; cause_status: `external`; cause: The final-tree registry-derived runner covered all 64 P7 operations across 18 families, but no external browser witness provider was configured, so the runner correctly stopped every admission before provider or browser confirmation.; resolution: `accepted`; lesson: A coordinator ledger can prove registry coverage and fail-closed witness admission, but only an external witness provider can add a browser confirmation trust level.
+- #18 2026-08-10T22:59:15.000Z `notebook_confirm_recovery_action`; cause_status: `known`; cause: A Notebook option persisted before the shared Recipe preflight change reached the confirmation boundary; the current server correctly rejected materialization with ETS_INSUFFICIENT_OBSERVATIONS, but the UI exposed no recovery action after the fail-closed response.; resolution: `resolved`; lesson: Fail-closed materialization errors need a tested, explicit recovery action that asks the agent to replan; the UI must not hide or downgrade the owner Recipe rejection.
 
 ## All waste
 
@@ -45,6 +46,7 @@ FULL_GATE_INTERRUPTED
 
 - `external-witness-provider-boundary`: occurrences=1; cause_status: `external`; root cause: The final-tree registry-derived runner covered all 64 P7 operations across 18 families, but no external browser witness provider was configured, so the runner correctly stopped every admission before provider or browser confirmation.; solution: `accepted`
 - `generic-adapter-boundary-contract`: occurrences=1; cause_status: `known`; root cause: The P6 merge exposed two real generic-workflow boundary defects: an ARMA-GARCH temporary run lacked its artifact index and optional P7 options were not projected as nullable in the closed workflow schema.; solution: `resolved`
+- `notebook-confirm-replan-recovery`: occurrences=1; cause_status: `known`; root cause: A Notebook option persisted before the shared Recipe preflight change reached the confirmation boundary; the current server correctly rejected materialization with ETS_INSUFFICIENT_OBSERVATIONS, but the UI exposed no recovery action after the fail-closed response.; solution: `resolved`
 - `real-provider-report-contract-qa`: occurrences=1; cause_status: `known`; root cause: A second real browser Report attempt reached the provider but all correction rounds returned prose missing the required Limitations section, so the evidence contract rejected it with LLM_RESPONSE_CONTRACT_INVALID.; solution: `resolved`
 - `runner-family-lifecycle-serial`: occurrences=1; cause_status: `known`; root cause: Starting family batches concurrently caused the runner's single active browser-attempt guard to reject 17 starts while one family was awaiting terminal confirmation.; solution: `resolved`
 - `shared-provider-controls-for-report`: occurrences=1; cause_status: `known`; root cause: The first real browser Report attempt used DeepSeek V4 without the shared bounded request policy and returned LLM_REPORT_DEADLINE_EXCEEDED after the shared 300-second deadline.; solution: `resolved`
@@ -59,6 +61,7 @@ FULL_GATE_INTERRUPTED
 
 - `external-witness-provider-boundary`: line experience occurrence(s)=1
 - `generic-adapter-boundary-contract`: line experience occurrence(s)=1
+- `notebook-confirm-replan-recovery`: line experience occurrence(s)=1
 - `real-provider-report-contract-qa`: line experience occurrence(s)=1
 - `runner-family-lifecycle-serial`: line experience occurrence(s)=1
 - `shared-provider-controls-for-report`: line experience occurrence(s)=1
@@ -70,6 +73,7 @@ FULL_GATE_INTERRUPTED
 - A coordinator ledger can prove registry coverage and fail-closed witness admission, but only an external witness provider can add a browser confirmation trust level.
 - A generic adapter must initialize every pack-owned durable boundary and project optional-value semantics identically into runtime validation and published closed schemas.
 - Batch runner family submissions must be serialized at the ledger boundary even when independent operation execution could later be parallelized behind a witness provider.
+- Fail-closed materialization errors need a tested, explicit recovery action that asks the agent to replan; the UI must not hide or downgrade the owner Recipe rejection.
 - Planner correction must distinguish an unavailable workflow source from an unavailable capability and offer a contractible alternative without fabricating a result.
 - Provider-specific reasoning and output controls must be centralized at the wire adapter and reused by every long-form consumer.
 - Real-provider report QA must exercise both transport latency and contract correction paths; a green unit contract test is not sufficient evidence of provider completion.
@@ -94,3 +98,4 @@ FULL_GATE_INTERRUPTED
 - #15: `c7dc1b83-976f-4c4e-91a1-f4b2ac6cb1b0` | 2026-08-10T22:30:36.000Z | GATE/persistent_dev_services | incident=`2f2ff52a-d1b7-4cb7-a04a-c0b40e1a8c44` | lesson_key=`persistent-dev-services` | event_sha256=`71674c761dffbc6366d04af3decd4b41c58c47f126d2cedc4c574d69c29803ca`
 - #16: `f1bfa58c-c7ae-4cf8-9b22-d91dd938bf65` | 2026-08-10T22:35:24.000Z | STATE_CHANGE/browser_tab_only_scope | incident=`6d309ab3-2ae0-4e96-9cf0-3a0c6c5c7521` | lesson_key=`browser-tab-only-scope` | event_sha256=`3ae889b9c5e4644e8d593693774cc46ba54d3997e9e02de81fe516ffd3dd20ce`
 - #17: `f4d6415f-3b9d-43b0-aa0c-ec5d59c682e4` | 2026-08-10T22:44:35.000Z | STATE_CHANGE/full_gate_interrupted | incident=`2ae4af47-f999-4a0b-a1a9-d86feb8d9d25` | lesson_key=`full-gate-after-browser-checkpoint` | event_sha256=`dca94bb860c84a50e07da2a41f43e27cec1fcc7ed48471aab08ca08c760d9d92`
+- #18: `f2e97bb3-63c7-47c2-b0cc-6a1d9a1ad5b8` | 2026-08-10T22:59:15.000Z | GAP/notebook_confirm_recovery_action | incident=`e35d8c1d-bc35-44fd-9b18-2c319b1abf17` | lesson_key=`notebook-confirm-replan-recovery` | event_sha256=`c9dbb1d131690fef0ca22a501d73279f4667b3b2763ffa498cefc77cdb920cfc`

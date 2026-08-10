@@ -923,9 +923,10 @@ describe("NotebookRouteView", () => {
       }),
     );
 
+    const replan = vi.fn();
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <NotebookRouteView projectRoot="/tmp/project" onReplan={replan} />
       </MemoryRouter>,
     );
 
@@ -949,6 +950,8 @@ describe("NotebookRouteView", () => {
     );
     expect(screen.getByTestId(`option-card-${selected.option_id}`)).toBeInTheDocument();
     expect(screen.getByTestId("notebook-confirmation")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("notebook-replan-after-action-error"));
+    expect(replan).toHaveBeenCalledOnce();
   });
 
   it("replans persisted options only after an explicit user action", async () => {
