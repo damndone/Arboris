@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal, Mapping
 
 from pydantic import BaseModel, Field
 
@@ -372,13 +372,112 @@ class PipelineDraftStore:
                 raise DraftNodeNotFound(f"node {node_id}")
             if node.get("node_type") not in self._PATCHABLE:
                 raise DraftNodePatchConflict("NODE_NOT_PATCHABLE")
-            node["params"] = {**node.get("params", {}), **params}
-            if node["node_type"] == "model" and "model_type" in params:
-                # Mirror into the top-level field so list() summaries show it.
-                node["model_type"] = params["model_type"]
             if columns is not None and node["node_type"] == "table":
-                node["columns"] = columns
-            node["status"] = "configured"
+                if any(not isinstance(column, str) or not column for column in columns):
+                    raise DraftValidationFailure("GENESIS_COLUMNS_INVALID")
+                node["columns"] = list(dict.fromkeys(columns))
+            selection_only = False
+            if node["node_type"] != "model":
+                node["params"] = {**node.get("params", {}), **params}
+            if node["node_type"] == "model":
+                current_type = str(
+                    node.get("params", {}).get("model_type")
+                    or node.get("model_type")
+                    or "auto"
+                )
+                next_type = str(params.get("model_type") or current_type)
+                selection_only = next_type != current_type and set(params) == {"model_type"}
+                if next_type != current_type:
+                    # Selecting a new family is an explicit semantic reset: old
+                    # family-only fields must not leak into the new closed
+                    # schema, and the server never silently filters them.
+                    node["params"] = dict(params)
+                else:
+                    node["params"] = {**node.get("params", {}), **params}
+                node["model_type"] = next_type
+                from ..services.draft_materialization import _genesis_model_editor_schema
+
+                source_upload = next(
+                    (
+                        n.get("upload", {})
+                        for n in draft["graph"]["nodes"]
+                        if n.get("node_type") == "input.upload"
+                    ),
+                    {},
+                )
+                upload_sha256 = source_upload.get("sha256")
+                if not selection_only and "model_options" in node["params"]:
+                    from ..services.draft_materialization import (
+                        bind_genesis_recipe_server_owned_options,
+                    )
+
+                    try:
+                        node["params"]["model_options"] = bind_genesis_recipe_server_owned_options(
+                            next_type,
+                            node["params"]["model_options"],
+                            upload_sha256=upload_sha256,
+                        )
+                    except ValueError as exc:
+                        raise DraftValidationFailure(str(exc)) from exc
+
+                table = next(
+                    (n for n in draft["graph"]["nodes"] if n.get("node_id") == "table_1"),
+                    {},
+                )
+                table_columns = tuple(
+                    str(column)
+                    for column in (table.get("columns") or [])
+                    if isinstance(column, str) and column
+                )
+                schema_id, editable_schema = _genesis_model_editor_schema(
+                    next_type,
+                    table_columns,
+                )
+                node["schema_id"] = schema_id
+                node["editable_schema"] = editable_schema
+                node["editable_schema_hash"] = schema_hash(editable_schema)
+                checks = (
+                    []
+                    if selection_only
+                    else _validate_genesis_model_params(
+                        node,
+                        table_columns,
+                        server_owned_values=_genesis_server_owned_values(draft),
+                    )
+                )
+                if checks:
+                    codes = ", ".join(item["code"] for item in checks)
+                    raise DraftValidationFailure(codes)
+            node["status"] = "pending" if node["node_type"] == "model" and selection_only else "configured"
+            if node["node_type"] == "table":
+                model = next(
+                    (n for n in draft["graph"]["nodes"] if n.get("node_id") == "model_1"),
+                    None,
+                )
+                if model is not None:
+                    current_type = str(
+                        model.get("params", {}).get("model_type")
+                        or model.get("model_type")
+                        or "auto"
+                    )
+                    from ..services.draft_materialization import _genesis_model_editor_schema
+
+                    schema_id, editable_schema = _genesis_model_editor_schema(
+                        current_type if model.get("params") else None,
+                        tuple(node.get("columns") or []),
+                    )
+                    model["schema_id"] = schema_id
+                    model["editable_schema"] = editable_schema
+                    model["editable_schema_hash"] = schema_hash(editable_schema)
+                    if model.get("params") and set(model.get("params", {})) != {"model_type"}:
+                        checks = _validate_genesis_model_params(
+                            model,
+                            tuple(node.get("columns") or []),
+                            server_owned_values=_genesis_server_owned_values(draft),
+                        )
+                        if checks:
+                            codes = ", ".join(item["code"] for item in checks)
+                            raise DraftValidationFailure(codes)
             draft["updated_at"] = utc_now()
             draft["status"] = "draft"  # any edit returns to draft state; must re-validate
             PipelineDraftV1(**draft)
@@ -670,6 +769,315 @@ def _validate_control_value(
     return checks
 
 
+def _validate_genesis_object_value(
+    key: str,
+    value: Any,
+    control: Mapping[str, Any],
+    *,
+    node_id: str,
+    server_owned_values: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Validate a recursively declared Genesis object without coercion."""
+
+    candidate = value
+    if isinstance(candidate, str):
+        try:
+            candidate = json.loads(candidate)
+        except (TypeError, json.JSONDecodeError):
+            candidate = None
+    if not isinstance(candidate, dict):
+        return [
+            check(
+                "INVALID_PARAM_TYPE",
+                f"Param {key!r} must be an object.",
+                node_id=node_id,
+            )
+        ]
+    schema = control.get("schema") or {}
+    checks: list[dict[str, Any]] = []
+
+    def nullable(schema_node: Mapping[str, Any]) -> bool:
+        return bool(schema_node.get("nullable")) or (
+            isinstance(schema_node.get("enum"), list)
+            and None in schema_node.get("enum", [])
+        )
+
+    def missing(value_node: Any, schema_node: Mapping[str, Any]) -> bool:
+        return value_node in ("", []) or (value_node is None and not nullable(schema_node))
+
+    def validate_node(
+        path: str,
+        value_node: Any,
+        schema_node: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        local: list[dict[str, Any]] = []
+        if value_node is None and nullable(schema_node):
+            return local
+        declared_type = schema_node.get("type")
+        if declared_type == "object":
+            if not isinstance(value_node, dict):
+                return [
+                    check(
+                        "INVALID_PARAM_TYPE",
+                        f"Param {path} must be an object.",
+                        node_id=node_id,
+                    )
+                ]
+            return validate_object(path, value_node, schema_node)
+        type_valid = (
+            declared_type is None
+            or (declared_type == "string" and isinstance(value_node, str))
+            or (declared_type == "integer" and isinstance(value_node, int) and not isinstance(value_node, bool))
+            or (declared_type == "number" and isinstance(value_node, (int, float)) and not isinstance(value_node, bool))
+            or (declared_type == "boolean" and isinstance(value_node, bool))
+            or (declared_type == "array" and isinstance(value_node, list))
+        )
+        if not type_valid:
+            local.append(
+                check(
+                    "INVALID_PARAM_TYPE",
+                    f"Param {path} has the wrong type.",
+                    node_id=node_id,
+                )
+            )
+            return local
+        allowed_values = schema_node.get("enum")
+        if isinstance(allowed_values, list) and value_node not in allowed_values:
+            local.append(
+                check(
+                    "INVALID_PARAM_OPTION",
+                    f"Param {path} is outside the server-owned options.",
+                    node_id=node_id,
+                )
+            )
+        column_options = schema_node.get("column_options")
+        if isinstance(column_options, list):
+            values = value_node if isinstance(value_node, list) else [value_node]
+            invalid = [item for item in values if item not in column_options]
+            if invalid:
+                local.append(
+                    check(
+                        "INVALID_PARAM_OPTION",
+                        f"Param {path} is not a column in the bound table.",
+                        node_id=node_id,
+                    )
+                )
+        for bound, error_code, comparison in (
+            ("minimum", "PARAM_BELOW_MIN", lambda value, bound: value < bound),
+            ("maximum", "PARAM_ABOVE_MAX", lambda value, bound: value > bound),
+        ):
+            limit = schema_node.get(bound)
+            if (
+                isinstance(limit, (int, float))
+                and not isinstance(limit, bool)
+                and isinstance(value_node, (int, float))
+                and not isinstance(value_node, bool)
+                and comparison(value_node, limit)
+            ):
+                local.append(
+                    check(
+                        error_code,
+                        f"Param {path} is outside the declared {bound}.",
+                        node_id=node_id,
+                    )
+                )
+        item_schema = schema_node.get("items")
+        if isinstance(item_schema, Mapping) and isinstance(value_node, list):
+            for index, item in enumerate(value_node):
+                local.extend(validate_node(f"{path}[{index}]", item, item_schema))
+        return local
+
+    def validate_object(
+        path: str,
+        value_node: Mapping[str, Any],
+        schema_node: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        local: list[dict[str, Any]] = []
+        properties = schema_node.get("properties")
+        properties = properties if isinstance(properties, Mapping) else {}
+        unknown = set(value_node) - set(properties)
+        if unknown:
+            local.append(
+                check(
+                    "INVALID_PARAM_FIELD",
+                    f"Param {path!r} contains undeclared nested field(s): "
+                    + ", ".join(sorted(str(item) for item in unknown)),
+                    node_id=node_id,
+                )
+            )
+        required = schema_node.get("required")
+        if isinstance(required, list):
+            missing_fields = [
+                str(name)
+                for name in required
+                if name not in value_node
+                or missing(value_node.get(name), properties.get(name, {}))
+            ]
+            if missing_fields:
+                local.append(
+                    check(
+                        "MISSING_EDITABLE_PARAM",
+                        f"Param {path!r} is missing nested field(s): "
+                        + ", ".join(sorted(missing_fields)),
+                        node_id=node_id,
+                    )
+                )
+        for name, nested in properties.items():
+            if name not in value_node or not isinstance(nested, Mapping):
+                continue
+            nested_path = f"{path}.{name}"
+            expected_server_value = (
+                server_owned_values.get(name)
+                if path == key and isinstance(server_owned_values, Mapping)
+                else None
+            )
+            if nested.get("server_owned") and expected_server_value is not None:
+                if value_node[name] != expected_server_value:
+                    local.append(
+                        check(
+                            "SERVER_OWNED_PARAM_MISMATCH",
+                            f"Param {nested_path} does not match the server-owned source binding.",
+                            node_id=node_id,
+                        )
+                    )
+            local.extend(validate_node(nested_path, value_node[name], nested))
+        return local
+
+    if not isinstance(schema, Mapping):
+        return checks
+    return validate_object(key, candidate, schema)
+
+
+def _genesis_server_owned_values(draft: Mapping[str, Any]) -> dict[str, str]:
+    """Derive immutable Recipe bindings from the Genesis source node."""
+
+    nodes = (draft.get("graph") or {}).get("nodes") or []
+    source = next(
+        (
+            node
+            for node in nodes
+            if isinstance(node, Mapping) and node.get("node_type") == "input.upload"
+        ),
+        {},
+    )
+    upload = source.get("upload") if isinstance(source, Mapping) else None
+    sha256 = upload.get("sha256") if isinstance(upload, Mapping) else None
+    if isinstance(sha256, str) and sha256:
+        return {"dataset_ref": f"upload:{sha256}"}
+    return {}
+
+
+def _validate_genesis_model_params(
+    model: Mapping[str, Any],
+    table_columns: tuple[str, ...],
+    *,
+    server_owned_values: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Validate Genesis params against the current server-owned schema."""
+
+    node_id = str(model.get("node_id") or "model_1")
+    schema = model.get("editable_schema") or []
+    controls = {
+        str(item["key"]): item
+        for item in schema
+        if isinstance(item, Mapping) and item.get("key")
+    }
+    checks: list[dict[str, Any]] = []
+    if model.get("editable_schema_hash") != schema_hash(list(schema)):
+        checks.append(
+            check(
+                "EDITABLE_SCHEMA_HASH_MISMATCH",
+                "editable_schema_hash must match editable_schema.",
+                node_id=node_id,
+            )
+        )
+    params = model.get("params") or {}
+    if not isinstance(params, Mapping):
+        return checks + [
+            check("INVALID_PARAM_TYPE", "Genesis model params must be an object.", node_id=node_id)
+        ]
+    unknown = set(params) - set(controls)
+    if unknown:
+        checks.append(
+            check(
+                "NON_EDITABLE_PARAM",
+                "Params are not declared in the server-owned Genesis schema: "
+                + ", ".join(sorted(str(item) for item in unknown)),
+                node_id=node_id,
+            )
+        )
+    for key, control in controls.items():
+        if key not in params:
+            if control.get("required") is True:
+                satisfied_by = control.get("satisfied_by")
+                if isinstance(satisfied_by, list) and any(
+                    alias in params for alias in satisfied_by
+                ):
+                    continue
+                checks.append(
+                    check(
+                        "GENESIS_MODEL_INCOMPLETE",
+                        f"Genesis model node is missing {key!r} (configure the wizard model step).",
+                        node_id=node_id,
+                    )
+                )
+            continue
+        value = params.get(key)
+        if key == "model_options" and isinstance(control, Mapping):
+            checks.extend(
+                _validate_genesis_object_value(
+                    key,
+                    value,
+                    control,
+                    node_id=node_id,
+                    server_owned_values=server_owned_values,
+                )
+            )
+            continue
+        kind = str(control.get("kind") or "")
+        options = control.get("options")
+        if kind == "column":
+            if not isinstance(value, str):
+                checks.append(
+                    check(
+                        "INVALID_PARAM_TYPE",
+                        f"Param {key!r} must be one column name.",
+                        node_id=node_id,
+                    )
+                )
+            elif value and isinstance(options, list) and value not in options:
+                checks.append(
+                    check(
+                        "INVALID_PARAM_OPTION",
+                        f"Param {key!r} is not a column in the bound table.",
+                        node_id=node_id,
+                    )
+                )
+            continue
+        if kind == "columns":
+            if not isinstance(value, list):
+                checks.append(
+                    check(
+                        "INVALID_PARAM_TYPE",
+                        f"Param {key!r} must be a list of column names.",
+                        node_id=node_id,
+                    )
+                )
+            elif isinstance(options, list):
+                invalid = [item for item in value if item not in options]
+                if invalid:
+                    checks.append(
+                        check(
+                            "INVALID_PARAM_OPTION",
+                            f"Param {key!r} contains columns outside the bound table.",
+                            node_id=node_id,
+                        )
+                    )
+            continue
+        checks.extend(_validate_control_value(key, value, dict(control), node_id=node_id))
+    return checks
+
+
 def _validate_params(model: dict[str, Any]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     controls = _editable_controls(model)
@@ -842,6 +1250,19 @@ def _validate_genesis_for_execution(
             )
         )
     model_params = model.get("params") or {}
+    if model.get("editable_schema"):
+        table_columns_for_schema = tuple(
+            str(column)
+            for column in (table.get("columns") or [])
+            if isinstance(column, str) and column
+        )
+        checks.extend(
+            _validate_genesis_model_params(
+                model,
+                table_columns_for_schema,
+                server_owned_values=_genesis_server_owned_values(draft),
+            )
+        )
     if "model_options_binding" in model_params:
         checks.append(
             check(

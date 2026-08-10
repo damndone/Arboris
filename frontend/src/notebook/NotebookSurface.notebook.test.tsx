@@ -262,6 +262,52 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(onReplan).toHaveBeenCalledOnce();
   });
 
+  it("planning provider failure offers both retry and a safe exit", () => {
+    const onReplan = vi.fn();
+    const onExitPlanning = vi.fn();
+    render(
+      <NotebookSurface
+        view={{
+          status: "error",
+          error: {
+            code: "NOTEBOOK_PLANNING_UNAVAILABLE",
+            message: "LLMUpstreamError",
+          },
+        }}
+        onReplan={onReplan}
+        onExitPlanning={onExitPlanning}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry planning" }));
+    fireEvent.click(screen.getByRole("button", { name: "Exit planning" }));
+
+    expect(onReplan).toHaveBeenCalledOnce();
+    expect(onExitPlanning).toHaveBeenCalledOnce();
+  });
+
+  it("planning provider failure over a preserved Notebook offers retry and exit", () => {
+    const onReplan = vi.fn();
+    const onExitPlanning = vi.fn();
+    render(
+      <NotebookSurface
+        view={ready()}
+        planningError={{
+          code: "NOTEBOOK_PLANNING_UNAVAILABLE",
+          message: "LLMUpstreamError",
+        }}
+        onReplan={onReplan}
+        onExitPlanning={onExitPlanning}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry planning" }));
+    fireEvent.click(screen.getByRole("button", { name: "Exit planning" }));
+
+    expect(onReplan).toHaveBeenCalledOnce();
+    expect(onExitPlanning).toHaveBeenCalledOnce();
+  });
+
   it("empty: says no options were proposed rather than rendering an empty list", () => {
     render(<NotebookSurface view={ready({ options: [] })} />);
     expect(screen.getByTestId("notebook-empty")).toHaveTextContent(
@@ -384,9 +430,67 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.getByTestId("notebook-execution-summary")).toHaveTextContent(
       "no single active head",
     );
+    expect(screen.getByTestId("notebook-execution-summary")).toHaveTextContent(
+      "1 analysis artifact",
+    );
     expect(screen.getByTestId("notebook-execution-summary")).not.toHaveTextContent(
       "run unassigned",
     );
+  });
+
+  it("shows a failed workflow root cause exactly once without raw exception prose", () => {
+    render(
+      <NotebookSurface
+        view={ready({
+          executionResults: {
+            opt_hurdle_failure: {
+              option_id: "opt_hurdle_failure",
+              option_revision: 1,
+              run_id: null,
+              execution_status: "failed",
+              committed: false,
+              artifact_validation: {
+                contract_profile: "artifact-identity-type-count/v1",
+                validation_status: "failed",
+                checked_dimensions: ["artifact_id"],
+                not_evaluated_dimensions: ["payload_schema"],
+                issues: [
+                  {
+                    code: "ARTIFACT_REQUIRED_MISSING",
+                    severity: "blocking",
+                    artifact_id: "notebook_workflow_result_1",
+                    detail: "required artifact was not registered",
+                    observed_count: 0,
+                  },
+                ],
+              },
+              workflow_execution: {
+                workflow_id: "workflow_hurdle_failure",
+                plan_fingerprint: "plan_failure",
+                status: "failed",
+                branch_runs: [],
+                post_estimation_artifact_ids: [],
+                failed_steps: [
+                  {
+                    step_id: "hurdle_nb",
+                    operation_id: "glm.hurdle_negative_binomial",
+                    status: "failed",
+                    error_code: "GLM_NONCONVERGENCE",
+                  },
+                ],
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    const summary = screen.getByTestId("notebook-execution-summary");
+    expect(summary).toHaveTextContent(
+      "glm.hurdle_negative_binomial · GLM_NONCONVERGENCE",
+    );
+    expect(summary.textContent?.match(/GLM_NONCONVERGENCE/g)).toHaveLength(1);
+    expect(summary).not.toHaveTextContent("zero gate optimizer");
   });
 
   it("renders a bounded model-neutral execution summary for non-ETS results", () => {

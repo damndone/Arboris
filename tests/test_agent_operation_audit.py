@@ -4,13 +4,40 @@ import asyncio
 
 from workbench.agent.core import AgentCore
 from workbench.agent.events import AgentEventStream
-from workbench.agent.orchestrator import WorkbenchOrchestrator
+from workbench.agent.orchestrator import WorkbenchOrchestrator, _workflow_failure_message
 from workbench.agent.workflow_contracts import workflow_authorization
 from workbench.agent.operations import OperationRecordStore
 from workbench.agent.proposals import ProposalConfirmation
 from workbench.agent.session import JsonlSessionRepository
 from tests.workflow_fixtures import composed_plan, compile_fixture_workflow
 from workbench.agent.workflow import WorkflowExecutionState, WorkflowStepState
+
+
+def test_failed_workflow_error_preserves_step_diagnostics() -> None:
+    """A failed workflow must tell the Agent which step and guard fired."""
+
+    state = WorkflowExecutionState(
+        workflow_id="wf-failed",
+        plan_fingerprint="sha256:plan",
+        status="failed",
+        steps={
+            "vif": WorkflowStepState(
+                step_id="vif",
+                fingerprint="sha256:step",
+                status="failed",
+                error=(
+                    "P7 pack diagnostics.vif failed closed: "
+                    "DIAGNOSTICS_INVALID_INPUT: missing model_metadata"
+                ),
+            )
+        },
+    )
+
+    assert _workflow_failure_message(state) == (
+        "workflow did not complete; failed steps: vif: "
+        "P7 pack diagnostics.vif failed closed: "
+        "DIAGNOSTICS_INVALID_INPUT: missing model_metadata"
+    )
 
 
 def test_workflow_authorization_is_explicit_and_auditable() -> None:

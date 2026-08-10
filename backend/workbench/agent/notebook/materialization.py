@@ -959,6 +959,7 @@ class NotebookOptionMaterializer:
                 filename=source.filename or "dataset.csv",
                 sheet_names=tuple(source.sheet_names),
                 columns=columns,
+                model_family="custom",
                 model_params=model_params,
                 notebook_provenance=provenance,
                 draft_id=draft_id,

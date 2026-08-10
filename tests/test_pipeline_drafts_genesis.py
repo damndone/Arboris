@@ -1,14 +1,17 @@
 """v1.6.8 Task 2: POST /pipeline-drafts/genesis — parentless genesis draft chain."""
 import json
 import time
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from workbench.api import app
 from workbench.contracts.model.linear_mixed_effects import (
     LMM_MODEL_TYPE,
 )
+from workbench.engine.capabilities import build_capabilities
 from workbench.lineage.pipeline_drafts import _validate_graph_shape
 from tests.fixtures.models.ets.known_truth import short_stable_series
 
@@ -60,6 +63,354 @@ def test_genesis_draft_created_and_persisted(tmp_path):
     assert draft["default_execution_mode"] == "genesis"
     listed = client.get(f"/pipeline-drafts?project_root={root}").json()["drafts"]
     assert any(d["draft_id"] == draft["draft_id"] for d in listed)
+
+
+def test_genesis_draft_publishes_initial_server_owned_editor_schema(tmp_path):
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)["draft"]
+    model = next(node for node in draft["graph"]["nodes"] if node["node_id"] == "model_1")
+    controls = {item["key"]: item for item in model["editable_schema"]}
+    declared_model_types = {
+        entry["key"] for entry in build_capabilities()["model_types"]
+    }
+
+    assert model["schema_id"] == "genesis.selector@v1"
+    assert model["editable_schema_hash"]
+    assert controls["model_type"]["options"] == sorted(declared_model_types)
+    assert controls["y"]["options"] == ["y", "x"]
+    assert controls["x"]["options"] == ["y", "x"]
+
+
+def test_genesis_model_selector_derives_injected_manifest_entry(monkeypatch):
+    """A newly declared model family must appear without a second value list."""
+    import workbench.engine.capabilities as capabilities
+    from workbench.services.draft_materialization import _genesis_model_editor_schema
+
+    live_manifest = capabilities.build_capabilities()
+
+    def manifest_with_future_family():
+        return {
+            **live_manifest,
+            "model_types": [
+                *live_manifest["model_types"],
+                {"key": "zz_future_model", "description": "Future model family"},
+            ],
+        }
+
+    monkeypatch.setattr(capabilities, "build_capabilities", manifest_with_future_family)
+    _schema_id, controls = _genesis_model_editor_schema(None, ("y", "x"))
+
+    model_selector = next(control for control in controls if control["key"] == "model_type")
+    assert "zz_future_model" in model_selector["options"]
+
+
+def test_declared_family_editor_never_falls_back_when_contract_lookup_breaks(
+    monkeypatch,
+):
+    """A broken live family contract must stay visible instead of yielding an empty schema."""
+    import workbench.agent.workflow_contracts as workflow_contracts
+    from workbench.services.draft_materialization import _genesis_model_editor_schema
+
+    def broken_contract_lookup(_model_type):
+        raise RuntimeError("contract registry unavailable")
+
+    monkeypatch.setattr(
+        workflow_contracts,
+        "model_family_contract",
+        broken_contract_lookup,
+    )
+
+    with pytest.raises(RuntimeError, match="contract registry unavailable"):
+        _genesis_model_editor_schema("ols", ("y", "x"))
+
+
+def test_declared_family_editor_never_discards_a_broken_wire_projection():
+    """A family builder failure must not silently erase its projected controls."""
+    from workbench.agent.workflow_contracts import model_family_contract
+    from workbench.services.draft_materialization import _family_wire_projection
+
+    def broken_builder(*_args, **_kwargs):
+        raise ValueError("builder contract changed")
+
+    broken_family = replace(
+        model_family_contract("cs_did"),
+        build_model_params=broken_builder,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="MODEL_FAMILY_SCHEMA_PROJECTION_FAILED: cs_did",
+    ):
+        _family_wire_projection("cs_did", broken_family)
+
+
+def test_native_family_projection_preserves_non_family_execution_params():
+    """Native family projection must not silently discard shared run controls."""
+    from workbench.services.draft_service import (
+        _project_native_family_params_for_execution,
+    )
+
+    projected = _project_native_family_params_for_execution(
+        {
+            "model_type": "dcdh",
+            "editable_schema": [
+                {"key": "entity_col"},
+                {"key": "time_col"},
+                {"key": "treatment_path_col", "satisfied_by": ["did_treatment_path"]},
+            ],
+        },
+        {
+            "model_type": "dcdh",
+            "y": "outcome",
+            "x": [],
+            "entity_col": "unit",
+            "time_col": "period",
+            "treatment_path_col": "path",
+            "prediction_model_type": "prediction_ridge",
+            "prediction_cv_folds": 3,
+        },
+    )
+
+    assert projected["prediction_model_type"] == "prediction_ridge"
+    assert projected["prediction_cv_folds"] == 3
+    assert projected["did_treatment_path"] == "path"
+    assert "treatment_path_col" not in projected
+
+
+def test_genesis_column_kind_follows_the_declared_wire_kind():
+    """A newly declared multi-column field must not require a second key list."""
+    from workbench.services.draft_materialization import _genesis_column_kind
+
+    assert _genesis_column_kind("future_many", "columns") == "columns"
+    assert _genesis_column_kind("future_one", "column") == "column"
+
+
+def test_family_context_schema_derives_scalar_or_list_wire_kind():
+    """Family context controls must follow the builder's persisted value shape."""
+    from workbench.services.draft_materialization import _genesis_model_editor_schema
+
+    _schema_id, panel_controls = _genesis_model_editor_schema(
+        "panel_ols", ("outcome", "predictor", "entity", "period")
+    )
+    panel = {item["key"]: item for item in panel_controls}
+    assert panel["entity_col"]["kind"] == "column"
+    assert panel["time_col"]["kind"] == "column"
+
+    _schema_id, iv_controls = _genesis_model_editor_schema(
+        "iv_2sls", ("outcome", "predictor", "endogenous", "instrument")
+    )
+    iv = {item["key"]: item for item in iv_controls}
+    assert iv["iv_endog"]["kind"] == "columns"
+    assert iv["iv_instruments"]["kind"] == "columns"
+
+
+def test_quantile_model_options_accept_declared_list_values(tmp_path):
+    """Family validators, not a false string schema, own quantile option types."""
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)["draft"]
+    draft_id = draft["draft_id"]
+    table = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": "", "transpose": False}, "columns": ["y", "x"]},
+    )
+    assert table.status_code == 200, table.text
+
+    response = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={
+            "params": {
+                "model_type": "quantile_regression",
+                "y": "y",
+                "x": ["x"],
+                "model_options": {
+                    "quantiles": [0.25, 0.5, 0.75],
+                    "bootstrap_reps": 0,
+                    "random_state": 7,
+                },
+            }
+        },
+    )
+
+    assert response.status_code == 200, response.text
+
+
+def test_model_type_patch_refreshes_schema_and_rejects_undeclared_field(tmp_path):
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)["draft"]
+    draft_id = draft["draft_id"]
+    table = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": "", "transpose": False}, "columns": ["y", "x"]},
+    )
+    assert table.status_code == 200, table.text
+
+    selected = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={"params": {"model_type": "ols", "y": "y", "x": ["x"]}},
+    )
+    assert selected.status_code == 200, selected.text
+    model = next(node for node in selected.json()["draft"]["graph"]["nodes"] if node["node_id"] == "model_1")
+    controls = {item["key"]: item for item in model["editable_schema"]}
+    assert model["schema_id"] == "ols@v1"
+    assert controls["x"]["options"] == ["y", "x"]
+    assert controls["y"]["options"] == ["y", "x"]
+
+    forged = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={
+            "params": {
+                "model_type": "ols",
+                "y": "y",
+                "x": ["x"],
+                "forged_execution_switch": True,
+            }
+        },
+    )
+    assert forged.status_code == 422
+    assert "NON_EDITABLE_PARAM" in forged.json()["detail"]
+
+
+def test_model_type_selection_refreshes_schema_before_family_params_are_complete(tmp_path):
+    """Selecting a family is a server round-trip, not a client schema guess."""
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)["draft"]
+    draft_id = draft["draft_id"]
+    table = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": "", "transpose": False}, "columns": ["y", "x"]},
+    )
+    assert table.status_code == 200, table.text
+
+    selected = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={"params": {"model_type": "time_series.ets"}},
+    )
+
+    assert selected.status_code == 200, selected.text
+    model = next(node for node in selected.json()["draft"]["graph"]["nodes"] if node["node_id"] == "model_1")
+    assert model["schema_id"] == "time_series.ets@v1"
+    assert model["status"] == "pending"
+    assert model["params"] == {"model_type": "time_series.ets"}
+    model_options = next(item for item in model["editable_schema"] if item["key"] == "model_options")
+    assert model_options["schema"]["required"] == [
+        "time_column",
+        "value_column",
+        "error",
+        "trend",
+        "seasonal",
+        "damped_trend",
+    ]
+
+
+def test_recipe_schema_projects_declared_dotted_paths_and_server_owned_fields(tmp_path):
+    """The Recipe vocabulary's nested wire shape is preserved in the Draft schema."""
+    root = _mkproject(tmp_path)
+    draft = _genesis(
+        root,
+        data=b"when,value\n2020-01-01,1\n2020-01-02,2\n",
+        columns=["when", "value"],
+    )["draft"]
+    selected = client.patch(
+        f"/pipeline-drafts/{draft['draft_id']}/nodes/model_1?project_root={root}",
+        json={"params": {"model_type": "time_series.arma_garch"}},
+    )
+
+    assert selected.status_code == 200, selected.text
+    model = next(node for node in selected.json()["draft"]["graph"]["nodes"] if node["node_id"] == "model_1")
+    control = next(item for item in model["editable_schema"] if item["key"] == "model_options")
+    schema = control["schema"]
+
+    assert "arma" in schema["properties"]
+    assert "p" in schema["properties"]["arma"]["properties"]
+    assert "arma.p" not in schema["properties"]
+    assert schema["properties"]["dataset_ref"]["server_owned"] is True
+    assert "dataset_ref" in schema["required"]
+
+
+def test_recipe_server_owned_source_binding_is_derived_and_forgery_is_rejected(tmp_path):
+    """Recipe source identity is bound from the upload, never accepted as a free client field."""
+    root = _mkproject(tmp_path)
+    uploaded = _upload(
+        root,
+        name="series.csv",
+        data=b"when,value\n2020-01-01,1\n2020-01-02,2\n",
+    )
+    draft = _genesis(root, data=b"when,value\n2020-01-01,1\n2020-01-02,2\n", columns=["when", "value"])["draft"]
+    draft_id = draft["draft_id"]
+    assert uploaded["sha256"] == draft["created_from"]["source_input_fingerprint"]
+    client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": "", "transpose": False}, "columns": ["when", "value"]},
+    )
+    options = {
+        "time_column": "when",
+        "value_column": "value",
+        "time_index_semantics": "observation_order",
+        "transform": "level",
+        "transform_confirmed": True,
+    }
+    selected = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={"params": {"model_type": "time_series.arma_garch", "model_options": options}},
+    )
+    assert selected.status_code == 200, selected.text
+    model = next(node for node in selected.json()["draft"]["graph"]["nodes"] if node["node_id"] == "model_1")
+    assert model["params"]["model_options"]["dataset_ref"] == f"upload:{uploaded['sha256']}"
+
+    forged = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={
+            "params": {
+                "model_type": "time_series.arma_garch",
+                "model_options": {**options, "dataset_ref": "upload:attacker.csv"},
+            }
+        },
+    )
+    assert forged.status_code == 422
+    assert "RECIPE_SERVER_OWNED_OPTION_MISMATCH" in forged.json()["detail"]
+
+
+def test_table_patch_refreshes_model_column_options_and_hash_atomically(tmp_path):
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)["draft"]
+    draft_id = draft["draft_id"]
+    first = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": "", "transpose": False}, "columns": ["y", "x"]},
+    )
+    assert first.status_code == 200, first.text
+    first_model = next(node for node in first.json()["draft"]["graph"]["nodes"] if node["node_id"] == "model_1")
+
+    second = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": "", "transpose": False}, "columns": ["y", "z"]},
+    )
+    assert second.status_code == 200, second.text
+    second_model = next(node for node in second.json()["draft"]["graph"]["nodes"] if node["node_id"] == "model_1")
+    controls = {item["key"]: item for item in second_model["editable_schema"]}
+
+    assert controls["x"]["options"] == ["y", "z"]
+    assert controls["y"]["options"] == ["y", "z"]
+    assert second_model["editable_schema_hash"] != first_model["editable_schema_hash"]
+    assert second_model["editable_schema_hash"]
+
+
+def test_model_patch_rejects_column_not_in_bound_table(tmp_path):
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)["draft"]
+    draft_id = draft["draft_id"]
+    table = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": "", "transpose": False}, "columns": ["y", "x"]},
+    )
+    assert table.status_code == 200, table.text
+
+    forged = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={"params": {"model_type": "ols", "y": "y", "x": ["not_a_column"]}},
+    )
+    assert forged.status_code == 422
+    assert "INVALID_PARAM_OPTION" in forged.json()["detail"]
 
 
 def test_genesis_rejects_unknown_upload(tmp_path):
@@ -372,26 +723,28 @@ def test_validate_genesis_rejects_nonobject_model_options_before_execution(tmp_p
     root = _mkproject(tmp_path)
     draft = _genesis(root)
     draft_id = draft["draft"]["draft_id"]
-    _configure_chain(
-        root,
-        draft_id,
-        model_params={
-            "model_type": "ols",
-            "y": "y",
-            "x": ["x"],
-            "model_options": ["not", "an", "object"],
+    table = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": "", "transpose": False}, "columns": ["y", "x"]},
+    )
+    assert table.status_code == 200, table.text
+    response = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={
+            "params": {
+                "model_type": "ols",
+                "y": "y",
+                "x": ["x"],
+                "model_options": ["not", "an", "object"],
+            }
         },
     )
 
-    response = _validate(root, draft_id)
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["executable"] is False
-    assert any(
-        item["code"] == "INVALID_PARAM_TYPE" and item["node_id"] == "model_1"
-        for item in body["checks"]
-    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "INVALID_PARAM_TYPE"
+    current = client.get(f"/pipeline-drafts/{draft_id}?project_root={root}").json()
+    model = next(node for node in current["draft"]["graph"]["nodes"] if node["node_id"] == "model_1")
+    assert model["params"] == {}
 
 
 def test_genesis_draft_rejects_client_owned_model_options_binding(tmp_path):
@@ -541,21 +894,28 @@ def test_validate_genesis_rejects_regression_shaped_arma_garch_recipe(tmp_path):
     root = _mkproject(tmp_path)
     draft = _genesis(root)
     draft_id = draft["draft"]["draft_id"]
-    _configure_chain(
-        root,
-        draft_id,
-        model_params={
-            "model_type": "time_series.arma_garch",
-            "y": "y",
-            "x": [],
-            "model_options": {},
+    table = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": "", "transpose": False}, "columns": ["y", "x"]},
+    )
+    assert table.status_code == 200, table.text
+    response = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={
+            "params": {
+                "model_type": "time_series.arma_garch",
+                "y": "y",
+                "x": [],
+                "model_options": {},
+            }
         },
     )
 
-    body = _validate(root, draft_id).json()
-
-    assert body["executable"] is False
-    assert any(c["code"] == "GENESIS_RECIPE_INVALID" for c in body["checks"])
+    assert response.status_code == 422
+    assert response.json()["detail"] == "NON_EDITABLE_PARAM, MISSING_EDITABLE_PARAM"
+    current = client.get(f"/pipeline-drafts/{draft_id}?project_root={root}").json()
+    model = next(node for node in current["draft"]["graph"]["nodes"] if node["node_id"] == "model_1")
+    assert model["params"] == {}
 
 
 def test_validate_genesis_multisheet_requires_sheet_choice(tmp_path):
@@ -970,6 +1330,7 @@ def test_execute_genesis_snapshot_carries_server_owned_model_options_binding(
                 "random_slope": True,
             },
         },
+        columns=["y", "x", "participant_id", "week", "arm"],
     )
     validated = _validate(root, draft_id).json()
     response = client.post(

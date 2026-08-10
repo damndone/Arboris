@@ -57,7 +57,6 @@ describe("notebookApi", () => {
       proposal_revision: 1,
     });
     await completeNotebookOptionExecution("/tmp/project", "nb/1", "opt_1", {
-      execution_status: "succeeded",
       run_id: "run_1",
     });
 

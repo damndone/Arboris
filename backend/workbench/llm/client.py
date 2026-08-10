@@ -29,11 +29,22 @@ class LLMNotConfiguredError(Exception):
 
 
 class LLMUpstreamError(Exception):
-    """Provider returned non-2xx, timed out, or sent an unusable body."""
+    """Provider returned non-2xx, failed in transport, or sent a bad body."""
 
-    def __init__(self, message: str, upstream_status: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        upstream_status: int | None = None,
+        *,
+        retryable: bool = False,
+    ) -> None:
         super().__init__(message)
         self.upstream_status = upstream_status
+        self.retryable = retryable
+
+
+class LLMToolCallArgumentsError(LLMUpstreamError):
+    """Provider completed a tool call whose arguments are not a JSON object."""
 
 
 def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
@@ -47,6 +58,11 @@ def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
                 headers={"Authorization": f"Bearer {config.api_key}"},
                 timeout=config.timeout_s,
             )
+    except httpx.TransportError as exc:
+        raise LLMUpstreamError(
+            f"LLM provider request failed: {type(exc).__name__}",
+            retryable=True,
+        ) from exc
     except (httpx.HTTPError, ValueError) as exc:
         raise LLMUpstreamError(
             f"LLM provider request failed: {type(exc).__name__}"
@@ -108,6 +124,11 @@ def chat_completion(
                 json=request_payload,
                 timeout=config.timeout_s,
             )
+    except httpx.TransportError as exc:
+        raise LLMUpstreamError(
+            f"LLM provider request failed: {type(exc).__name__}",
+            retryable=True,
+        ) from exc
     except (httpx.HTTPError, ValueError) as exc:
         raise LLMUpstreamError(f"LLM provider request failed: {type(exc).__name__}") from exc
 
@@ -137,6 +158,11 @@ async def async_chat_completion(
                 json=request_payload,
                 timeout=config.timeout_s,
             )
+    except httpx.TransportError as exc:
+        raise LLMUpstreamError(
+            f"LLM provider request failed: {type(exc).__name__}",
+            retryable=True,
+        ) from exc
     except (httpx.HTTPError, ValueError) as exc:
         raise LLMUpstreamError(f"LLM provider request failed: {type(exc).__name__}") from exc
 
@@ -349,11 +375,13 @@ def _complete_stream_tool_calls(
         try:
             arguments = json.loads(raw_arguments or "{}")
         except ValueError as exc:
-            raise LLMUpstreamError(
-                "LLM provider returned an unexpected streaming response shape"
+            raise LLMToolCallArgumentsError(
+                "LLM provider returned invalid tool-call arguments"
             ) from exc
         if not isinstance(arguments, dict):
-            raise LLMUpstreamError("LLM provider returned an unexpected streaming response shape")
+            raise LLMToolCallArgumentsError(
+                "LLM provider returned non-object tool-call arguments"
+            )
         completed.append(
             {
                 "tool_call_id": tool_call_id,

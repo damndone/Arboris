@@ -4,7 +4,9 @@ import pytest
 
 from workbench.report_contract import (
     ReportContractError,
+    bind_report_figures,
     validate_report_packet,
+    validate_report_narrative_response,
     validate_report_response,
 )
 
@@ -45,6 +47,38 @@ def test_response_normalizes_only_existing_numeric_fact_shorthand() -> None:
     )
 
 
+def test_narrative_phase_accepts_citations_without_provider_figures() -> None:
+    packet = validate_report_packet(_packet())
+
+    normalized = validate_report_narrative_response(
+        "estimate 2.0 [[c:1]]; p 0.01 [[c:5]]",
+        packet,
+    )
+
+    assert normalized == "estimate 2.0 [[c:c1]]; p 0.01 [[c:c5]]"
+
+
+def test_narrative_phase_rejects_any_provider_figure_marker() -> None:
+    packet = validate_report_packet(_packet())
+
+    with pytest.raises(ReportContractError, match="provider figure marker"):
+        validate_report_narrative_response(
+            "estimate 2.0 [[c:c1]]\n[[fig:coef_plot]]",
+            packet,
+        )
+
+
+def test_server_figure_binding_uses_packet_order_and_validates_exact_once() -> None:
+    packet = validate_report_packet(_packet())
+
+    bound = bind_report_figures("estimate 2.0 [[c:c1]]", packet)
+
+    assert bound == (
+        "estimate 2.0 [[c:c1]]\n\n"
+        "[[fig:coef_plot]]\n[[fig:event_study]]"
+    )
+
+
 @pytest.mark.parametrize(
     "text, message",
     [
@@ -70,6 +104,16 @@ def test_packet_preserves_optional_journal_quality_metadata() -> None:
         {
             "report_standard": "journal_full_v1",
             "required_capabilities": ["regression", "diagnostics.robustness"],
+            "capability_manifest": [
+                {
+                    "capability_id": "regression",
+                    "provider_id": "evidence.regression.v1",
+                },
+                {
+                    "capability_id": "diagnostics.robustness",
+                    "provider_id": "evidence.diagnostics.v1",
+                },
+            ],
             "excluded_fact_ids": ["c5"],
         }
     )
@@ -82,6 +126,22 @@ def test_packet_preserves_optional_journal_quality_metadata() -> None:
         "diagnostics.robustness",
     )
     assert contract.excluded_fact_ids == frozenset({"c5"})
+
+
+def test_packet_rejects_required_capability_without_a_provider_manifest() -> None:
+    packet = _packet()
+    packet.update(
+        {
+            "report_standard": "journal_full_v1",
+            "required_capabilities": ["regression"],
+        }
+    )
+
+    with pytest.raises(
+        ReportContractError,
+        match="capability manifest is missing required capabilities: regression",
+    ):
+        validate_report_packet(packet)
 
 
 def test_report_packet_preserves_capability_provider_manifest() -> None:

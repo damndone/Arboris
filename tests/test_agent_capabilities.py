@@ -39,6 +39,8 @@ def test_registered_operation_exposes_capability_metadata(
 
 
 def test_capability_projection_is_sorted_json_safe_and_secret_free() -> None:
+    """The projection stays sorted as live workflow declarations grow."""
+
     capabilities = OperationRegistry().capabilities()
 
     assert [item["operation_id"] for item in capabilities] == sorted(

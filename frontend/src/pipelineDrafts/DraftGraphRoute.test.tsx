@@ -488,6 +488,6 @@ test("reconciles a materialized Notebook option after the Draft run reaches term
     "/tmp/project",
     "nb_1",
     "opt_1",
-    { execution_status: "succeeded", run_id: "run_genesis" },
+    { run_id: "run_genesis" },
   ));
 });

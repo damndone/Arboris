@@ -15,7 +15,18 @@ vi.mock("../../capabilities/useCapabilities", () => ({
         { key: "linear_mixed_effects", label: "Linear Mixed Effects", group: "Panel" },
         { key: "iv_2sls", label: "IV / 2SLS", group: "IV" },
         { key: "dcdh", label: "DCDH DID", group: "DID" },
-        { key: "time_series.arma_garch", label: "ARMA-GARCH", group: "Time series" },
+        {
+          key: "time_series.arma_garch",
+          label: "ARMA-GARCH",
+          group: "Time series",
+          params: [{ key: "model_options", kind: "json", required: true }],
+        },
+        {
+          key: "time_series.ets",
+          label: "ETS",
+          group: "Time series",
+          params: [{ key: "model_options", kind: "json", required: true }],
+        },
         { key: "ordinal_logit", label: "Ordinal logit", group: "Ordinal" },
         { key: "multinomial_logit", label: "Multinomial logit", group: "Nominal" },
         { key: "survival_cox", label: "Survival / Cox", group: "Survival" },
@@ -120,7 +131,121 @@ function draftResponse(
   };
 }
 
+function etsSchemaResponse(
+  draftHash: string,
+  status: "pending" | "configured",
+  params: Record<string, unknown>,
+): api.PipelineDraftResponse {
+  const response = draftResponse(draftHash, "configured", status);
+  response.draft.graph.nodes = response.draft.graph.nodes.map((node) =>
+    node.node_type === "model"
+      ? {
+          ...node,
+          model_type: "time_series.ets",
+          params,
+          schema_id: "time_series.ets@v1",
+          editable_schema_hash: "ets-schema-hash",
+          editable_schema: [
+            {
+              key: "model_type",
+              kind: "select",
+              label: "Model",
+              required: true,
+              options: ["time_series.ets"],
+            },
+            {
+              key: "model_options",
+              kind: "object",
+              label: "ETS specification",
+              required: true,
+              schema: {
+                type: "object",
+                required: [
+                  "time_column",
+                  "value_column",
+                  "error",
+                  "trend",
+                  "seasonal",
+                  "damped_trend",
+                ],
+                properties: {
+                  time_column: { type: "string", column_options: ["y", "x"] },
+                  value_column: { type: "string", column_options: ["y", "x"] },
+                  error: { enum: ["add", "mul"] },
+                  trend: { enum: ["add", "mul", null] },
+                  seasonal: { enum: ["add", "mul", null] },
+                  damped_trend: { type: "boolean" },
+                },
+                additionalProperties: false,
+              },
+            },
+          ],
+        }
+      : node,
+  );
+  return response;
+}
+
 describe("GenesisWizard", () => {
+  it("uses the returned schema to edit a recipe without a recipe-specific form branch", async () => {
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+    vi.spyOn(api, "previewFile").mockResolvedValue(preview());
+    vi.spyOn(api, "uploadDataset").mockResolvedValue({ sha256: sha, filename: "data.csv" });
+    vi.spyOn(api, "createGenesisDraft").mockResolvedValue(draftResponse("h1"));
+    const patch = vi.spyOn(api, "patchDraftNode")
+      .mockResolvedValueOnce(draftResponse("h2", "configured", "pending"))
+      .mockResolvedValueOnce(
+        etsSchemaResponse("h3", "pending", { model_type: "time_series.ets" }),
+      )
+      .mockResolvedValueOnce(
+        etsSchemaResponse("h4", "configured", {
+          model_type: "time_series.ets",
+          model_options: {
+            time_column: "y",
+            value_column: "x",
+            error: "add",
+            trend: "add",
+            seasonal: null,
+            damped_trend: true,
+          },
+        }),
+      );
+
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Dataset file"), {
+      target: { files: [new File(["y,x\n1,2"], "data.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(await screen.findByTestId("genesis-save-table"));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "time_series.ets" },
+    });
+    await waitFor(() => expect(screen.getByTestId("server-owned-model-options")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("time_column"), { target: { value: "y" } });
+    fireEvent.change(screen.getByLabelText("value_column"), { target: { value: "x" } });
+    fireEvent.change(screen.getByLabelText("error"), { target: { value: JSON.stringify("add") } });
+    fireEvent.change(screen.getByLabelText("trend"), { target: { value: JSON.stringify("add") } });
+    fireEvent.change(screen.getByLabelText("seasonal"), { target: { value: "__server_null__" } });
+    fireEvent.click(screen.getByLabelText("damped_trend"));
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(3));
+    expect(patch.mock.calls[2]?.[3]).toMatchObject({
+      params: {
+        model_type: "time_series.ets",
+        model_options: {
+          time_column: "y",
+          value_column: "x",
+          error: "add",
+          trend: "add",
+          seasonal: null,
+          damped_trend: true,
+        },
+      },
+    });
+  });
+
   it("saves a univariate ARMA-GARCH genesis model with the shared contract controls", async () => {
     const timePreview: api.FilePreview = {
       ...preview(),
@@ -184,10 +309,7 @@ describe("GenesisWizard", () => {
     expect(patch.mock.calls[1]?.[3]).toMatchObject({
       params: {
         model_type: "time_series.arma_garch",
-        y: "vix",
-        x: [],
         model_options: {
-          dataset_ref: "upload:vix.csv",
           time_column: "date",
           value_column: "vix",
           missing_value_policy: "drop_missing_confirmed",
@@ -195,6 +317,9 @@ describe("GenesisWizard", () => {
         },
       },
     });
+    expect(patch.mock.calls[1]?.[3]?.params?.model_options).not.toHaveProperty("dataset_ref");
+    expect(patch.mock.calls[1]?.[3]?.params).not.toHaveProperty("y");
+    expect(patch.mock.calls[1]?.[3]?.params).not.toHaveProperty("x");
   });
 
   it("creates a genesis draft, patches table/model nodes, then validates and executes as genesis", async () => {
@@ -947,7 +1072,7 @@ describe("GenesisWizard", () => {
           x: ["price", "market"],
           entity_col: "firm",
           time_col: "year",
-          did_treatment_path: "treated",
+          treatment_path_col: "treated",
           cs_cluster_var: "market",
           frequency_weight: "price",
           analysis_weight: "treated",

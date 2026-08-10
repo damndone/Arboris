@@ -28,7 +28,9 @@ from ..agent.recipe_contracts import RECIPE_CONTRACTS
 from ..agent.workflow_contracts import (
     MODEL_FAMILY_CONTRACTS,
     notebook_workflow_capability_ids,
+    workflow_step_vocabulary,
 )
+from ..agent.p7_pack_registry import p7_pack_registry
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
 from ..agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
 from ..agent.notebook.errors import NotebookOptionError, OptionRevisionStale
@@ -196,7 +198,7 @@ class DecisionRequest(_StrictModel):
 
 
 class ExecuteOptionRequest(_StrictModel):
-    execution_status: str = Field(min_length=1, max_length=100)
+    execution_status: str | None = Field(default=None, min_length=1, max_length=100)
     run_id: str | None = Field(default=None, min_length=1, max_length=200)
     produced_artifacts: list[dict[str, Any]] | None = None
     error_code: str | None = Field(default=None, min_length=1, max_length=200)
@@ -859,6 +861,11 @@ def _execution_results_packet(
             "committed": raw.get("committed") is True,
             "artifact_validation": validation_packet,
             **(
+                {"artifact_validation_scope": dict(raw["artifact_validation_scope"])}
+                if isinstance(raw.get("artifact_validation_scope"), Mapping)
+                else {}
+            ),
+            **(
                 {"workflow_execution": dict(raw["workflow_execution"])}
                 if isinstance(raw.get("workflow_execution"), Mapping)
                 else {}
@@ -953,6 +960,23 @@ def _notebook_planner_manifest_entry(entry: Mapping[str, Any]) -> dict[str, Any]
                 "submission_rule": "omit_model_options",
             }
     return projected
+
+
+def _notebook_p7_capability_catalog() -> dict[str, dict[str, Any]]:
+    """Project every live P7 declaration as a composable Notebook choice."""
+
+    step_operations = workflow_step_vocabulary()["step_operations"]
+    return {
+        operation_id: {
+            "key": operation_id,
+            "label": operation_id,
+            "capability_kind": "pack",
+            "ui_description": step_operations[operation_id]["ui_description"],
+            "workflow_step_contract": dict(step_operations[operation_id]),
+            "notebook_proposal_adapters": ["operation.multi_step"],
+        }
+        for operation_id in p7_pack_registry.operation_ids()
+    }
 
 
 def _planning_agent(
@@ -1059,6 +1083,10 @@ def _planning_agent(
             or _supports_rerun_model_options(manifest[capability])
         )
     }
+    if "operation.multi_step" in NotebookPlanningAgent._typed_operation_contracts(
+        context
+    ):
+        catalog.update(_notebook_p7_capability_catalog())
     if not catalog:
         raise NotebookNoEligibleCapability(
             _no_eligible_capability_message(
@@ -1388,12 +1416,16 @@ def set_notebook_focus_endpoint(
     _root, service = _service(request, project_root)
     try:
         notebook = service.get_notebook(notebook_id)
-        if body.goal is None and body.interaction_mode is None:
+        supplied = body.model_fields_set
+        if not ({"goal", "interaction_mode"} & supplied):
             raise ValueError("provide a goal or interaction_mode")
         focus = dict(notebook.user_focus)
-        if body.goal is not None:
-            focus["goal"] = body.goal.strip()
-        if body.interaction_mode is not None:
+        if "goal" in supplied:
+            if body.goal is None:
+                focus.pop("goal", None)
+            else:
+                focus["goal"] = body.goal.strip()
+        if "interaction_mode" in supplied and body.interaction_mode is not None:
             focus["interaction_mode"] = body.interaction_mode
         return service.set_focus(notebook_id, user_focus=focus).to_dict()
     except NotebookOptionError as exc:
@@ -1970,15 +2002,32 @@ def complete_option_execution_endpoint(
 ) -> dict[str, Any]:
     root, service = _service(request, project_root)
     try:
+        if (
+            body.execution_status is not None
+            or body.produced_artifacts is not None
+            or body.error_code is not None
+        ):
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="NOTEBOOK_CLIENT_EXECUTION_FACTS_FORBIDDEN",
+                message=(
+                    "Notebook execution completion accepts only a server-owned "
+                    "terminal run reference; status and artifact facts are not client-authored."
+                ),
+                details={"required_field": "run_id"},
+            )
+        if body.run_id is None:
+            raise WorkbenchAPIError(
+                status_code=422,
+                code="NOTEBOOK_SERVER_RUN_REQUIRED",
+                message="Notebook execution completion requires a server-owned run_id.",
+            )
         notebook = service.get_notebook(notebook_id)
         trace = _notebook_trace(root, service, notebook.notebook_id)
-        outcome = service.complete_execution(
+        outcome = service.complete_execution_from_server_run(
             notebook_id,
             option_id,
-            execution_status=body.execution_status,
             run_id=body.run_id,
-            produced_artifacts=body.produced_artifacts,
-            error_code=body.error_code,
             trace=trace,
         )
         return {**outcome.to_dict(), "trace_id": trace.trace_id}

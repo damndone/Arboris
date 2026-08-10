@@ -116,6 +116,18 @@ describe("ReportView", () => {
     expect(mockGenerate.current).not.toHaveBeenCalled();
   });
 
+  it("blocks report generation when server-owned result evidence cannot load", async () => {
+    mockRunDetail.current = vi.fn().mockRejectedValue(new Error("server evidence unavailable"));
+
+    render(<ReportView projectRoot="/tmp/project" />);
+
+    await waitFor(() => expect(screen.getByTestId("report-post-estimation-load-error")).toHaveTextContent(
+      "server evidence unavailable",
+    ));
+    expect(screen.getByRole("button", { name: /generate report/i })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Report instruction" })).not.toBeDisabled();
+  });
+
   it("loads bounded time-series artifacts into the citable fact table", async () => {
     mockFigureArtifacts.groups = [{
       artifact_type: "time_series_json",

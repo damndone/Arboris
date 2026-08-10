@@ -74,6 +74,7 @@ export function createDefaultArmaGarchValue(): ArmaGarchControlValue {
 export function buildArmaGarchModelOptions(
   value: ArmaGarchControlValue,
   datasetRef: string,
+  includeServerOwnedSourceRef = true,
 ): Record<string, unknown> {
   const variance = value.selectionMode === "auto"
     ? {
@@ -104,7 +105,7 @@ export function buildArmaGarchModelOptions(
         constant_mode: value.constantMode,
       };
   return {
-    dataset_ref: datasetRef,
+    ...(includeServerOwnedSourceRef ? { dataset_ref: datasetRef } : {}),
     time_column: value.timeColumn,
     value_column: value.valueColumn,
     time_index_semantics: value.timeIndexSemantics,

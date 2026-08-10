@@ -258,6 +258,7 @@ def test_a_dataset_producing_step_publishes_a_resolvable_binding(tmp_path: Path)
         "node_ref",
         "artifact_id",
         "content_sha256",
+        "dataset_kind",
         "result_fingerprint",
     }
     assert produced["schema_version"] == "workflow-produced-dataset.v1"
@@ -830,6 +831,14 @@ def _sourced(step: dict, from_step: str = "first") -> dict:
     return step
 
 
+def _generic_spec(bindings: dict, options: dict | None = None) -> dict:
+    return {
+        "input_mode": "frame",
+        "column_bindings": bindings,
+        "options": {} if options is None else options,
+    }
+
+
 def _meta_plan(*, secondary_run_id: str, secondary_artifact_id: str) -> list[dict]:
     """One plan whose every consuming step reads `first`'s output.
 
@@ -970,106 +979,102 @@ def _meta_plan(*, secondary_run_id: str, secondary_artifact_id: str) -> list[dic
             {
                 "step_id": "named_correlations",
                 "operation_id": "test.correlations",
-                "spec": {"analysis_columns": ["size", "rate_a"]},
+                "spec": _generic_spec({"columns": ["size", "rate_a"]}),
             }
         ),
         _sourced(
             {
                 "step_id": "named_rank_correlations",
                 "operation_id": "test.rank_correlations",
-                "spec": {"analysis_columns": ["size", "rate_a"]},
+                "spec": _generic_spec({"columns": ["size", "rate_a"]}),
             }
         ),
         _sourced(
             {
                 "step_id": "named_t_tests",
                 "operation_id": "test.t_tests",
-                "spec": {"analysis_columns": ["outcome", "group"]},
+                "spec": _generic_spec({"columns": ["outcome", "group"]}),
             }
         ),
         _sourced(
             {
                 "step_id": "named_anova",
                 "operation_id": "test.anova",
-                "spec": {"analysis_columns": ["outcome", "category"]},
+                "spec": _generic_spec({"columns": ["outcome", "category"]}),
             }
         ),
         _sourced(
             {
                 "step_id": "named_nonparametric",
                 "operation_id": "test.nonparametric",
-                "spec": {"analysis_columns": ["outcome", "group"]},
+                "spec": _generic_spec({"columns": ["outcome", "group"]}),
             }
         ),
         _sourced(
             {
                 "step_id": "named_chi_square",
                 "operation_id": "test.chi_square",
-                "spec": {"analysis_columns": ["group", "category"]},
+                "spec": _generic_spec({"columns": ["group", "category"]}),
             }
         ),
         _sourced(
             {
                 "step_id": "named_fisher_exact",
                 "operation_id": "test.fisher_exact",
-                "spec": {"analysis_columns": ["group", "binary_category"]},
+                "spec": _generic_spec({"columns": ["group", "binary_category"]}),
             }
         ),
         _sourced(
             {
                 "step_id": "named_evidence",
                 "operation_id": "test.evidence",
-                "spec": {
-                    "analysis_columns": ["outcome", "rate_a", "rate_b"],
-                    "reference_means": {"outcome": 20.0},
-                    "paired_columns": [["rate_a", "rate_b"]],
-                },
+                "spec": _generic_spec(
+                    {"columns": ["outcome", "rate_a", "rate_b"]},
+                    {
+                        "reference_means": {"outcome": 20.0},
+                        "paired_columns": [["rate_a", "rate_b"]],
+                    },
+                ),
             }
         ),
         _sourced(
             {
                 "step_id": "mice",
                 "operation_id": "imputation.mice",
-                "spec": {
-                    "columns": ["missing_a", "missing_b"],
-                    "m": 1,
-                    "max_iter": 2,
-                    "random_seed": 7,
-                    "max_missing_rate": 0.4,
-                },
+                "spec": _generic_spec(
+                    {"columns": ["missing_a", "missing_b"]},
+                    {"max_iter": 2, "random_seed": 7, "max_missing_rate": 0.4},
+                ),
             }
         ),
         _sourced(
             {
                 "step_id": "resample_smote",
                 "operation_id": "resample.smote",
-                "spec": {
-                    "target_column": "binary_category",
-                    "feature_columns": ["size", "rate_a"],
-                    "random_seed": 7,
-                },
+                "spec": _generic_spec(
+                    {"outcome": "wave", "features": ["size", "rate_a"]},
+                    {"random_seed": 7},
+                ),
             }
         ),
         _sourced(
             {
                 "step_id": "resample_oversample",
                 "operation_id": "resample.oversample",
-                "spec": {
-                    "target_column": "binary_category",
-                    "feature_columns": ["size", "rate_a"],
-                    "random_seed": 7,
-                },
+                "spec": _generic_spec(
+                    {"outcome": "wave", "features": ["size", "rate_a"]},
+                    {"random_seed": 7},
+                ),
             }
         ),
         _sourced(
             {
                 "step_id": "resample_undersample",
                 "operation_id": "resample.undersample",
-                "spec": {
-                    "target_column": "binary_category",
-                    "feature_columns": ["size", "rate_a"],
-                    "random_seed": 7,
-                },
+                "spec": _generic_spec(
+                    {"outcome": "wave", "features": ["size", "rate_a"]},
+                    {"random_seed": 7},
+                ),
             }
         ),
         *[
@@ -1077,15 +1082,16 @@ def _meta_plan(*, secondary_run_id: str, secondary_artifact_id: str) -> list[dic
                 {
                     "step_id": model_type,
                     "operation_id": f"prediction.{model_type}",
-                    "spec": {
-                        "y": "outcome",
-                        "x": ["size", "rate_a"],
-                        "final_holdout_fraction": 0.2,
-                        "cv_folds": 3,
-                        "shuffle": True,
-                        "random_seed": 7,
-                        "data_structure": "iid",
-                    },
+                    "spec": _generic_spec(
+                        {"outcome": "outcome", "features": ["size", "rate_a"]},
+                        {
+                            "final_holdout_fraction": 0.2,
+                            "cv_folds": 3,
+                            "shuffle": True,
+                            "random_seed": 7,
+                            "data_structure": "iid",
+                        },
+                    ),
                 }
             )
             for model_type in (
@@ -1098,27 +1104,25 @@ def _meta_plan(*, secondary_run_id: str, secondary_artifact_id: str) -> list[dic
             {
                 "step_id": "ets",
                 "operation_id": "model.time_series.ets",
-                "spec": {
-                    "model_options": {
-                        "time_column": "date",
-                        "value_column": "outcome",
+                "spec": _generic_spec(
+                    {"time": "date", "value": "outcome"},
+                    {
                         "time_index_semantics": "regular_calendar",
                         "error": "add",
                         "trend": "add",
                         "seasonal": None,
                         "damped_trend": False,
-                    }
-                },
+                    },
+                ),
             }
         ),
         _sourced(
             {
                 "step_id": "arma",
                 "operation_id": "model.time_series.arma_garch",
-                "spec": {
-                    "model_options": {
-                        "time_column": "date",
-                        "value_column": "outcome",
+                "spec": _generic_spec(
+                    {"time": "date", "value": "outcome"},
+                    {
                         "time_index_semantics": "business_or_trading_observations",
                         "transform": "level",
                         "transform_confirmed": True,
@@ -1129,27 +1133,20 @@ def _meta_plan(*, secondary_run_id: str, secondary_artifact_id: str) -> list[dic
                         "innovation_distribution": "normal",
                         "validation": {"validation_n": 4, "refit_every": 2},
                         "random_seed": 7,
-                    }
-                },
+                    },
+                ),
             }
         ),
         _sourced(
             {
                 "step_id": "auto",
                 "operation_id": "model.auto",
-                "spec": {
-                    "covariance": "unadjusted",
-                    "branches": [
-                        {
-                            "branch_id": "auto_branch",
-                            "outcome": "outcome",
-                            "predictors": ["scaled", "rate_b"],
-                            "polynomials": [],
-                        }
-                    ],
-                },
+                "spec": _generic_spec(
+                    {"outcome": "outcome", "features": ["scaled", "rate_b"]}
+                ),
             }
-        ),        _sourced(
+        ),
+        _sourced(
             {
                 "step_id": "data_merge",
                 "operation_id": "data.merge",
@@ -1559,7 +1556,7 @@ _LINEAGE_META_READERS = {
     "prediction.prediction_random_forest": _p5_lineage_claims,
     "model.time_series.arma_garch": _p5_lineage_claims,
     "model.time_series.ets": _p5_lineage_claims,
-    "model.auto": _genesis_claims,
+    "model.auto": _p5_lineage_claims,
 }
 
 
@@ -1572,7 +1569,31 @@ def test_the_lineage_case_registry_covers_every_consuming_operation() -> None:
     write down why it records no source at all.
     """
 
-    covered = set(_LINEAGE_META_STEPS) | set(_LINEAGE_META_UNRECORDED)
+    # P7 is declaration-driven and has a separate all-operation workflow
+    # provenance guard in test_p7_workflow_integration.py. Keep it in this
+    # coverage equation without pretending its 64 heterogeneous fixtures fit
+    # the legacy model-shaped plan below.
+    from workbench.agent.p7_pack_registry import p7_pack_registry
+    from workbench.agent.workflow_capability_registry import (
+        declared_workflow_capability_ids,
+    )
+
+    # Generic capability steps use one common persistence function. That
+    # function records the resolved source for every declaration; the
+    # declaration-derived runtime test below is the coverage guard for this
+    # family, while the table above remains the explicit guard for legacy
+    # operation-specific branches.
+    generic_consumers = set(declared_workflow_capability_ids()) & set(
+        workflow_contracts.STEP_CONSUMES_INPUT_FRAME
+    )
+    assert generic_consumers
+
+    covered = (
+        set(_LINEAGE_META_STEPS)
+        | set(_LINEAGE_META_UNRECORDED)
+        | (set(p7_pack_registry.operation_ids()) & set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME))
+        | generic_consumers
+    )
 
     assert covered == set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME)
     assert not (set(_LINEAGE_META_STEPS) & set(_LINEAGE_META_UNRECORDED))

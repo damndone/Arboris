@@ -30,6 +30,7 @@ class ReportContractError(ValueError):
 class ReportPacketContract:
     fact_ids: frozenset[str]
     figure_ids: frozenset[str]
+    figure_order: tuple[str, ...] = ()
     report_standard: str | None = None
     required_capabilities: tuple[str, ...] = ()
     excluded_fact_ids: frozenset[str] = frozenset()
@@ -93,6 +94,7 @@ def validate_report_packet(packet: dict[str, Any]) -> ReportPacketContract:
     return ReportPacketContract(
         fact_ids=frozenset(fact_ids),
         figure_ids=frozenset(figure_ids),
+        figure_order=tuple(figure_ids),
         report_standard=report_standard,
         required_capabilities=required_capabilities,
         excluded_fact_ids=frozenset(excluded_fact_ids),
@@ -103,12 +105,17 @@ def validate_report_packet(packet: dict[str, Any]) -> ReportPacketContract:
 def validate_report_response(
     text: str,
     contract: ReportPacketContract,
+    *,
+    require_figure_markers: bool = True,
 ) -> str:
     """Return a safe response or raise instead of silently repairing it.
 
     Numeric shorthand such as ``[[c:5]]`` is accepted only when the packet
-    contains the unambiguous fact id ``c5``. Figure markers must contain every
-    supplied artifact exactly once.
+    contains the unambiguous fact id ``c5``. In the normal final-response
+    phase, figure markers must contain every supplied artifact exactly once.
+    The provider narrative phase sets ``require_figure_markers=False``: any
+    provider-emitted figure marker is then rejected, and the server can bind
+    the packet-owned markers deterministically afterward.
     """
 
     if not isinstance(text, str) or not text.strip():
@@ -123,10 +130,38 @@ def validate_report_response(
             contract.excluded_fact_ids,
         )
     )
-    violations.extend(_figure_violations(normalized, contract.figure_ids))
+    if require_figure_markers:
+        violations.extend(_figure_violations(normalized, contract.figure_ids))
+    else:
+        violations.extend(_provider_figure_violations(normalized))
     if violations:
         raise ReportContractError("; ".join(violations), violations=violations)
     return normalized
+
+
+def validate_report_narrative_response(
+    text: str,
+    contract: ReportPacketContract,
+) -> str:
+    """Validate provider prose before Workbench binds packet-owned figures."""
+
+    return validate_report_response(
+        text,
+        contract,
+        require_figure_markers=False,
+    )
+
+
+def bind_report_figures(text: str, contract: ReportPacketContract) -> str:
+    """Append packet-owned figure markers in declaration order and revalidate."""
+
+    normalized = validate_report_narrative_response(text, contract).rstrip()
+    figure_order = contract.figure_order or tuple(sorted(contract.figure_ids))
+    if figure_order:
+        normalized = normalized + "\n\n" + "\n".join(
+            f"[[fig:{artifact_id}]]" for artifact_id in figure_order
+        )
+    return validate_report_response(normalized, contract)
 
 
 def _normalize_numeric_citations(text: str, fact_ids: frozenset[str]) -> str:
@@ -213,7 +248,7 @@ def _validate_capability_manifest(
             }
         )
     missing = sorted(set(required_capabilities) - set(capability_ids))
-    if value and missing:
+    if missing:
         raise ReportContractError(
             "capability manifest is missing required capabilities: " + ", ".join(missing)
         )
@@ -272,6 +307,21 @@ def _figure_violations(text: str, figure_ids: frozenset[str]) -> list[str]:
     return _unique(violations)
 
 
+def _provider_figure_violations(text: str) -> list[str]:
+    """Reject all provider figure markers before server-owned binding."""
+
+    if "[[fig:" not in text:
+        return []
+    marker_ids = [match.group(1) for match in _FIGURE_MARKER.finditer(text)]
+    violations = [
+        f"provider figure marker {artifact_id} is not allowed"
+        for artifact_id in marker_ids
+    ]
+    if not marker_ids:
+        violations.append("malformed figure marker")
+    return _unique(violations)
+
+
 def _unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
@@ -280,6 +330,8 @@ __all__ = [
     "JOURNAL_FULL_REPORT_STANDARD",
     "ReportContractError",
     "ReportPacketContract",
+    "bind_report_figures",
     "validate_report_packet",
+    "validate_report_narrative_response",
     "validate_report_response",
 ]

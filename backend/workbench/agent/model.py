@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from workbench.llm.client import (
+    LLMToolCallArgumentsError,
     LLMUpstreamError,
     async_stream_chat_completion,
 )
@@ -260,7 +261,13 @@ class OpenAICompatibleModelAdapter:
             return
         wire_messages = _to_openai_wire_messages(request.messages)
         wire_tools = _to_openai_tool_descriptors(request.tools)
-        for attempt in range(2):
+        # A typed request can create a proposal or another durable side effect
+        # after the provider accepts it but before this process sees public
+        # progress. Replaying it would hide the first-attempt truth and can
+        # duplicate work. Untyped prose retains the existing one bounded retry
+        # before any public progress; Report owns its separate retry policy.
+        attempt_budget = 1 if request.tools or request.response_schema is not None else 2
+        for attempt in range(attempt_budget):
             received_event = False
             public_progress = False
             try:
@@ -324,13 +331,22 @@ class OpenAICompatibleModelAdapter:
                         )
                         return
                 raise LLMUpstreamError("LLM provider ended the stream without a completion")
+            except LLMToolCallArgumentsError:
+                # The provider completed a typed call, but the arguments are
+                # not executable JSON. Preserve the failed first turn and let
+                # a contract-owning caller decide whether to request one
+                # bounded correction; the generic adapter never replays it.
+                yield ModelStreamEvent.from_error(
+                    request.request_id, "provider_tool_arguments_invalid"
+                )
+                return
             except LLMUpstreamError as exc:
                 # A malformed 2xx body, transient network error, or explicitly
                 # transient upstream status may recover on one immediate retry.
                 # Never retry a provider-auth/request rejection such as 401/422,
                 # and never replay a request after public stream content began.
                 if (
-                    attempt == 0
+                    attempt + 1 < attempt_budget
                     and not public_progress
                     and (
                         exc.upstream_status is None

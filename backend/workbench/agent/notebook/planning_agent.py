@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 from uuid import uuid4
@@ -31,6 +32,11 @@ from .vocabulary import (
     CAPABILITY_ARTIFACT_VOCABULARY_VERSION,
     DECLARED_ARTIFACT_TYPES,
     capability_artifact_types,
+)
+from .workflow_artifacts import (
+    WORKFLOW_RESULT_ARTIFACT_TYPE,
+    p7_capability_ids_from_steps,
+    workflow_result_artifact_id,
 )
 from ..workflow_contracts import (
     MODEL_FAMILY_SPEC_FIELDS,
@@ -93,6 +99,15 @@ InspectionExecutor = Callable[
     DataEvidencePackV1 | Awaitable[DataEvidencePackV1],
 ]
 ProposalValidator = Callable[[NotebookPlanningContextV1, AgentOptionSubmission], None]
+
+
+def _provider_workflow_steps_schema() -> dict[str, Any]:
+    """Project the executable step list into the provider's closed schema."""
+
+    changes = OperationRegistry().require(
+        "operation.multi_step"
+    ).proposal_schema["properties"]["changes"]
+    return deepcopy(changes["properties"]["steps"])
 
 
 _INSPECTION_REQUEST_SCHEMA: dict[str, Any] = {
@@ -167,6 +182,7 @@ _TYPED_PROPOSAL_SCHEMA: dict[str, Any] = {
                     "type": "array",
                     "items": {"type": "string", "minLength": 1},
                 },
+                "steps": _provider_workflow_steps_schema(),
             },
             "additionalProperties": False,
         },
@@ -669,7 +685,7 @@ class NotebookPlanningAgent:
         steps: Any,
         catalog: Mapping[str, Any],
     ) -> tuple[dict[str, str], dict[str, int], frozenset[str]]:
-        """Derive a composed option's primary results from its model steps."""
+        """Derive any model-primary results from a composed option's steps."""
 
         artifact_types: dict[str, str] = {}
         counts: dict[str, int] = {}
@@ -713,10 +729,6 @@ class NotebookPlanningAgent:
                         + artifact_id
                     )
                 counts[artifact_id] = counts.get(artifact_id, 0) + branch_count
-        if not families:
-            raise NotebookPlanningContractError(
-                "operation.multi_step has no model.genesis branch outputs to contract"
-            )
         return artifact_types, counts, frozenset(families)
 
     def plan(
@@ -831,9 +843,10 @@ class NotebookPlanningAgent:
                     "fitted_vs_<predictor> diagnostic figures for its declared predictor columns. When the user "
                     "requests residuals versus a declared predictor, include that predictor in the branch and describe "
                     "the persisted diagnostic figure; do not claim that a separate scatter step is required. "
-                    "capability_id always identifies a server-published model capability, never the "
-                    "operation id. For an operation.multi_step comparison it must name one model_family "
-                    "declared by that workflow, not operation.multi_step. Every model.genesis step must "
+                    "capability_id identifies the primary server-published analytical capability, never "
+                    "the operation.multi_step envelope. For a workflow with model.genesis it may name one "
+                    "declared model_family; for a P7-only workflow it must name one P7 operation_id that "
+                    "is actually present in changes.steps. Every model.genesis step must "
                     "use a server-published model_family; panel_ols requires entity_col or time_col, and "
                     "clustered panel_ols requires entity_col. "
                     "For OLS, the server-owned Agent envelope is model_options.covariance and its only "
@@ -912,17 +925,31 @@ class NotebookPlanningAgent:
                 remaining_s is not None and remaining_s < self.model_timeout_s
             )
             baseline_complete = _has_complete_baseline_evidence(evidence)
-            events = await self._call_model(
-                messages,
-                timeout_s=(
-                    self.model_timeout_s
-                    if remaining_s is None
-                    else min(self.model_timeout_s, remaining_s)
-                ),
-                total_budget_limited=total_budget_limited,
-                max_options=max_options,
-                submit_only=baseline_complete,
-            )
+            try:
+                events = await self._call_model(
+                    messages,
+                    timeout_s=(
+                        self.model_timeout_s
+                        if remaining_s is None
+                        else min(self.model_timeout_s, remaining_s)
+                    ),
+                    total_budget_limited=total_budget_limited,
+                    max_options=max_options,
+                    submit_only=baseline_complete,
+                )
+            except NotebookPlanningContractError as error:
+                if contract_corrections >= self.max_contract_corrections:
+                    raise
+                contract_corrections += 1
+                self._append_contract_correction(
+                    messages,
+                    call={},
+                    error=error,
+                    context=context,
+                    evidence=evidence,
+                    correction_number=contract_corrections,
+                )
+                continue
             calls = [event.tool_call for event in events if event.type == "tool_call_delta" and event.tool_call]
             if len(calls) != 1:
                 error = NotebookPlanningContractError(
@@ -1333,7 +1360,14 @@ class NotebookPlanningAgent:
             for record in evidence.records
             if record.status == "failed" and record.failure_code
         }
-        if "TARGET_REF_INVALID" in failed_targets:
+        if message == "provider tool-call arguments were not valid JSON":
+            remediation = (
+                "The previous typed tool-call arguments were not valid JSON and were "
+                "not executed. Submit exactly one Notebook tool call again with one "
+                "complete JSON object matching the published schema; do not continue "
+                "the truncated fragment or treat it as evidence."
+            )
+        elif "TARGET_REF_INVALID" in failed_targets:
             expected_target = (
                 "run:active"
                 if context.projection_source
@@ -1392,6 +1426,13 @@ class NotebookPlanningAgent:
                 "proposal, evidence_refs, comparative_claims, capability_id, and option_id; "
                 "assumptions and expected_artifacts are optional. Do not add reasoning, "
                 "explanation, evidence, metadata, or other provider fields to an option."
+            )
+        elif message == "user-visible option text contains internal protocol vocabulary":
+            remediation = (
+                "Resubmit the same typed proposal, evidence refs, and option identity, but "
+                "rewrite rationale, assumptions, and comparative_claims in domain language "
+                "for a non-developer. Do not mention operation or capability ids, typed "
+                "adapters/workflows/proposals, server-owned pins, or JSON field names."
             )
         elif message == "option evidence ref is missing, changed, or incomplete":
             completed = [
@@ -1452,8 +1493,9 @@ class NotebookPlanningAgent:
             eligible = sorted(str(item) for item in context.available_capabilities)
             remediation = (
                 "Resubmit the same source-pinned operation.multi_step proposal, but set "
-                "capability_id to one server-published model_family declared by its "
-                "model.genesis steps. capability_id is not an operation id. "
+                "capability_id to one primary capability actually declared by its steps: "
+                "a model_family from model.genesis or a P7 operation_id from a P7-only "
+                "workflow. Do not use operation.multi_step itself. "
                 f"Eligible published capabilities include {eligible}."
             )
         elif "model.genesis preconditions missing" in message:
@@ -1714,6 +1756,10 @@ class NotebookPlanningAgent:
         try:
             async for event in self.adapter.stream(request):
                 if event.type == "error":
+                    if event.error == "provider_tool_arguments_invalid":
+                        raise NotebookPlanningContractError(
+                            "provider tool-call arguments were not valid JSON"
+                        )
                     raise NotebookPlanningUnavailable(event.error or "model provider failed")
                 events.append(event)
         except NotebookPlanningUnavailable:
@@ -1898,6 +1944,7 @@ class NotebookPlanningAgent:
             raise NotebookPlanningContractError("option ranks must be unique")
         normalized_submissions: list[AgentOptionSubmission] = []
         for submission in submissions:
+            self._assert_user_visible_domain_language(submission)
             submission = self._canonicalize_server_owned_pins(context, submission)
             submission = self._canonicalize_provider_capability_id(submission, catalog)
             submission = self._strip_unsupported_model_options(submission, catalog)
@@ -1993,6 +2040,7 @@ class NotebookPlanningAgent:
             workflow_artifact_types: dict[str, str] = {}
             workflow_artifact_counts: dict[str, int] = {}
             workflow_families: frozenset[str] = frozenset()
+            workflow_p7_capabilities: frozenset[str] = frozenset()
             evidence_columns = {
                 str(column.get("name"))
                 for record in evidence.records
@@ -2179,11 +2227,29 @@ class NotebookPlanningAgent:
                     workflow_artifact_counts,
                     workflow_families,
                 ) = self._workflow_primary_artifacts(changes.get("steps"), catalog)
-                if submission.capability_id not in workflow_families:
+                workflow_p7_capabilities = p7_capability_ids_from_steps(
+                    changes.get("steps")
+                )
+                workflow_capabilities = workflow_families | workflow_p7_capabilities
+                if not workflow_capabilities:
+                    raise NotebookPlanningContractError(
+                        "operation.multi_step has no contractible model or P7 result"
+                    )
+                if submission.capability_id not in workflow_capabilities:
                     raise NotebookPlanningContractError(
                         "operation.multi_step capability_id must name one declared "
-                        "model.genesis model_family"
+                        "model_family or P7 operation"
                     )
+                if workflow_p7_capabilities:
+                    result_artifact_id = workflow_result_artifact_id(
+                        notebook_id=context.notebook_id,
+                        option_id=submission.option_id or "",
+                        proposal_hash=submission.proposal.canonical_hash(),
+                    )
+                    workflow_artifact_types[result_artifact_id] = (
+                        WORKFLOW_RESULT_ARTIFACT_TYPE
+                    )
+                    workflow_artifact_counts[result_artifact_id] = 1
             elif operation_id == "model.custom":
                 unknown_changes = set(changes) - {
                     "operation",
@@ -2371,6 +2437,64 @@ class NotebookPlanningAgent:
                 "option batch contains duplicate executable proposals"
             )
         return tuple(normalized_submissions)
+
+    @staticmethod
+    def _assert_user_visible_domain_language(
+        submission: AgentOptionSubmission,
+    ) -> None:
+        """Reject executable protocol vocabulary from human-facing option prose."""
+
+        from ..p7_pack_registry import P7PackRegistryError, p7_pack_registry
+
+        protocol_markers = {
+            "capability_id",
+            "operation_id",
+            "proposal_id",
+            "server default",
+            "the pack",
+            "by the pack",
+            "typed adapter",
+            "typed workflow",
+            "typed proposal",
+            "server-owned pin",
+            submission.proposal.operation_id.casefold(),
+        }
+        if any(separator in submission.capability_id for separator in (".", "_", ":", "/")):
+            protocol_markers.add(submission.capability_id.casefold())
+        raw_steps = submission.proposal.changes.get("steps")
+        if isinstance(raw_steps, list):
+            for step in raw_steps:
+                if not isinstance(step, Mapping):
+                    continue
+                operation_id = step.get("operation_id")
+                if not isinstance(operation_id, str):
+                    continue
+                protocol_markers.add(operation_id.casefold())
+                try:
+                    request_schema = p7_pack_registry.get(operation_id).request_schema
+                except P7PackRegistryError:
+                    continue
+                protocol_markers.update(
+                    name.casefold()
+                    for name in (
+                        *request_schema.binding_shapes,
+                        *request_schema.option_shapes,
+                    )
+                    if "_" in name
+                )
+        visible_text = (
+            submission.rationale,
+            *submission.assumptions,
+            *submission.comparative_claims,
+        )
+        if any(
+            marker and marker in text.casefold()
+            for text in visible_text
+            for marker in protocol_markers
+        ):
+            raise NotebookPlanningContractError(
+                "user-visible option text contains internal protocol vocabulary"
+            )
 
     @staticmethod
     def _canonicalize_server_owned_pins(

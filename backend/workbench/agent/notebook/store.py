@@ -147,11 +147,16 @@ class WorkflowSource:
     node_ref: str
     artifact_id: str
     source_sha256: str
+    source_kind: str = "run_artifact"
 
     def __post_init__(self) -> None:
         _require_pathless_string(self.run_id, label="workflow_source.run_id")
         _require_pathless_string(self.node_ref, label="workflow_source.node_ref")
         _require_pathless_string(self.artifact_id, label="workflow_source.artifact_id")
+        if self.source_kind not in {"run_artifact", "dataset_upload"}:
+            raise ValueError(
+                "workflow_source.source_kind must be 'run_artifact' or 'dataset_upload'"
+            )
         if (
             not isinstance(self.source_sha256, str)
             or len(self.source_sha256) != 64
@@ -161,11 +166,18 @@ class WorkflowSource:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "WorkflowSource":
-        if not isinstance(value, Mapping) or set(value) != {
+        legacy_fields = {
             "run_id",
             "node_ref",
             "artifact_id",
             "source_sha256",
+        }
+        if not isinstance(value, Mapping):
+            raise ValueError("workflow_source has invalid fields")
+        fields = frozenset(value)
+        if fields not in {
+            frozenset(legacy_fields),
+            frozenset({*legacy_fields, "source_kind"}),
         }:
             raise ValueError("workflow_source has invalid fields")
         return cls(
@@ -173,15 +185,19 @@ class WorkflowSource:
             node_ref=value["node_ref"],
             artifact_id=value["artifact_id"],
             source_sha256=value["source_sha256"],
+            source_kind=value.get("source_kind", "run_artifact"),
         )
 
     def to_dict(self) -> dict[str, str]:
-        return {
+        payload = {
             "run_id": self.run_id,
             "node_ref": self.node_ref,
             "artifact_id": self.artifact_id,
             "source_sha256": self.source_sha256,
         }
+        if self.source_kind != "run_artifact":
+            payload["source_kind"] = self.source_kind
+        return payload
 
 
 @dataclass(frozen=True)
@@ -309,6 +325,32 @@ def dataset_workflow_source_pin(source: ProjectionSource) -> dict[str, dict[str,
             "owner_resolution": "dataset_projection_source",
         },
     }
+
+
+def reserve_dataset_upload_workflow_source(source: ProjectionSource) -> ProjectionSource:
+    """Bind an upload projection to a future server-owned raw-source identity."""
+
+    if source.kind != "dataset":
+        raise ValueError("only a dataset projection may reserve an upload source")
+    if source.workflow_source is not None:
+        return source
+    identity = {
+        "schema_version": "notebook-upload-workflow-source/v1",
+        "upload_sha256": source.upload_sha256,
+        "filename": source.filename,
+        "sheet_names": list(source.sheet_names),
+    }
+    run_id = "notebook_source_" + sha256_canonical(identity)[:24]
+    return replace(
+        source,
+        workflow_source=WorkflowSource(
+            run_id=run_id,
+            node_ref="stage:raw",
+            artifact_id=f"raw_{source.filename}",
+            source_sha256=str(source.upload_sha256),
+            source_kind="dataset_upload",
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -1063,4 +1105,7 @@ __all__ = [
     "RECORD_OPTION",
     "RECORD_REVISION",
     "StoredRevision",
+    "WorkflowSource",
+    "dataset_workflow_source_pin",
+    "reserve_dataset_upload_workflow_source",
 ]

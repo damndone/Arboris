@@ -495,9 +495,10 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         expected = (
             16384
             if descriptor["tool_id"] == "list_project_datasets"
+            else 262144
+            if descriptor["tool_id"] == "inspect_operation_contract"
             else 12288
-            if descriptor["tool_id"]
-            in {"inspect_operation_contract", "inspect_time_series_summary"}
+            if descriptor["tool_id"] == "inspect_time_series_summary"
             else 8192
         )
         assert descriptor["max_output_budget"] == expected
@@ -1008,7 +1009,7 @@ def test_global_numeric_summary_and_linear_interaction_effect_are_bounded(
     }
 
 
-def test_workflow_step_contract_request_redirects_to_the_parent_workflow(
+def test_workflow_step_contract_is_rejected_before_direct_inspection(
     tmp_path: Path,
 ) -> None:
     project_root = tmp_path / "project"
@@ -1044,10 +1045,92 @@ def test_workflow_step_contract_request_redirects_to_the_parent_workflow(
     )
 
     assert result.ok is False
-    assert result.error == "OperationContractUnavailableError"
+    assert result.error == "invalid_tool_arguments"
     assert result.error_details is not None
-    assert "workflow step" in result.error_details[0]["message"]
-    assert "operation.multi_step@v1" in result.error_details[0]["message"]
+    assert any(
+        "model.joint_f_test" in detail["message"]
+        and "is not one of" in detail["message"]
+        for detail in result.error_details
+    )
+
+
+def test_operation_contract_tool_only_advertises_top_level_operations(
+    tmp_path: Path,
+) -> None:
+    """The direct contract tool must not advertise workflow-only child IDs."""
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    provider = _load_provider_type()(project_root)
+    from workbench.agent.operations import OperationRegistry
+
+    definition = next(
+        definition
+        for definition in provider.tool_definitions(
+            chain_id="chain-a",
+            session_id="chain-session",
+            operation_registry=OperationRegistry(),
+        )
+        if definition.tool_id == "inspect_operation_contract"
+    )
+    operation_ids = set(
+        definition.input_schema["properties"]["operation_id"]["enum"]
+    )
+
+    assert "diagnostics.vif" not in operation_ids
+    assert "multivariate.pca" not in operation_ids
+    assert "model.rerun" in operation_ids
+    assert "operation.multi_step" in operation_ids
+
+
+def test_multi_step_contract_publishes_live_step_vocabulary_on_model_nodes(
+    tmp_path: Path,
+) -> None:
+    """The parent workflow contract must not be shadowed by a model pack."""
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    provider = _load_provider_type()(project_root)
+    registry = ToolRegistry()
+    from workbench.agent.operations import OperationRegistry
+
+    operation_registry = OperationRegistry()
+    for definition in provider.tool_definitions(
+        chain_id="chain-a",
+        session_id="chain-session",
+        operation_registry=operation_registry,
+    ):
+        registry.register(definition)
+
+    result = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-multi-step-contract",
+                "tool_id": "inspect_operation_contract",
+                "arguments": {
+                    "request_id": "inspect-multi-step-contract",
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                    "operation_id": "operation.multi_step",
+                    "operation_version": "v1",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    contract = result.output["contract"]
+    assert contract["contract_owner"] == "operation_registry"
+    vocabulary = contract["step_vocabulary"]
+    diagnostics_vif = vocabulary["step_operations"]["diagnostics.vif"]
+    assert diagnostics_vif["required"] == [
+        "input_mode",
+        "column_bindings",
+        "options",
+    ]
+    assert diagnostics_vif["field_enums"]["input_mode"] == ["typed"]
 
 
 def test_completed_workflow_result_is_discoverable_as_bounded_evidence(

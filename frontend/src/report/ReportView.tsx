@@ -136,6 +136,7 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
           || workspace.figureInventoryError !== null
           || workspace.includedFacts.length === 0
         }
+        submitDisabled={workspace.postEstimationLoadError !== null}
       />
 
       <ReportActionBar />
@@ -220,6 +221,16 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
       {workspace.figureInventoryError && (
         <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}>
           {workspace.figureInventoryError}
+        </div>
+      )}
+
+      {workspace.postEstimationLoadError && (
+        <div
+          data-testid="report-post-estimation-load-error"
+          role="alert"
+          style={{ fontSize: 13, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}
+        >
+          {workspace.postEstimationLoadError}
         </div>
       )}
 

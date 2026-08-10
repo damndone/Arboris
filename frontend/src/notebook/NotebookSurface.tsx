@@ -52,6 +52,7 @@ export interface NotebookSurfaceProps {
   onRejectOption?: (option: NotebookOptionRevision) => void;
   onRevalidateOption?: (option: NotebookOptionRevision) => void;
   onReplan?: () => void;
+  onExitPlanning?: () => void;
   onStartNewAnalysis?: () => void;
   newAnalysisDisabled?: boolean;
   interactionMode?: NotebookInteractionMode;
@@ -247,23 +248,43 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       view.error.code === "GENESIS_MODEL_INCOMPLETE" ||
       view.error.code === "GENESIS_MODEL_EVIDENCE_REQUIRED" ||
       view.error.code === "NOTEBOOK_PLANNING_CONTRACT_INVALID" ||
+      view.error.code === "NOTEBOOK_PLANNING_UNAVAILABLE" ||
       view.error.code === "NOTEBOOK_PLANNING_TIMEOUT" ||
       view.error.code === "NOTEBOOK_PLANNING_CANCELLED"
     );
+    const canExitPlanning = props.onExitPlanning && view.error.code.startsWith("NOTEBOOK_PLANNING_");
     return (
       <div className="nb-surface" data-testid="notebook-surface" data-state="error">
         <div className="nb-error" data-testid="notebook-error" role="alert">
           <span className="nb-error-code">{view.error.code}</span>
           <p className="nb-error-message">{view.error.message}</p>
-          {canReplan ? (
-            <button
-              type="button"
-            className="nb-button nb-button-primary"
-              data-testid="notebook-replan-options"
-              onClick={props.onReplan}
-            >
-              {actionMode ? "Recheck request" : "Replan with current evidence"}
-            </button>
+          {canReplan || canExitPlanning ? (
+            <div className="nb-option-actions">
+              {canReplan ? (
+                <button
+                  type="button"
+                  className="nb-button nb-button-primary"
+                  data-testid="notebook-replan-options"
+                  onClick={props.onReplan}
+                >
+                  {view.error.code === "NOTEBOOK_PLANNING_UNAVAILABLE"
+                    ? "Retry planning"
+                    : actionMode
+                      ? "Recheck request"
+                      : "Replan with current evidence"}
+                </button>
+              ) : null}
+              {canExitPlanning ? (
+                <button
+                  type="button"
+                  className="nb-button"
+                  data-testid="notebook-exit-planning"
+                  onClick={props.onExitPlanning}
+                >
+                  Exit planning
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
@@ -452,16 +473,28 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
         >
           <span className="nb-error-code">{props.planningError.code}</span>
           <span>{props.planningError.message}</span>
-          {props.onReplan ? (
-            <button
-              type="button"
-              className="nb-button"
-              data-testid="notebook-retry-planning"
-              onClick={props.onReplan}
-            >
-              Retry
-            </button>
-          ) : null}
+          <div className="nb-option-actions">
+            {props.onReplan ? (
+              <button
+                type="button"
+                className="nb-button nb-button-primary"
+                data-testid="notebook-retry-planning"
+                onClick={props.onReplan}
+              >
+                Retry planning
+              </button>
+            ) : null}
+            {props.onExitPlanning && props.planningError.code.startsWith("NOTEBOOK_PLANNING_") ? (
+              <button
+                type="button"
+                className="nb-button"
+                data-testid="notebook-exit-planning"
+                onClick={props.onExitPlanning}
+              >
+                Exit planning
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -598,7 +631,18 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
               </p>
               <p>{`execution ${result.execution_status} · output contract ${result.artifact_validation.validation_status}`}</p>
               {result.workflow_execution ? (
-                <p>{`workflow ${result.workflow_execution.status} · ${result.workflow_execution.post_estimation_artifact_ids.length} post-estimation artifact${result.workflow_execution.post_estimation_artifact_ids.length === 1 ? "" : "s"}`}</p>
+                <>
+                  <p>{`workflow ${result.workflow_execution.status} · ${result.workflow_execution.post_estimation_artifact_ids.length} analysis artifact${result.workflow_execution.post_estimation_artifact_ids.length === 1 ? "" : "s"}`}</p>
+                  {(result.workflow_execution.failed_steps ?? []).length > 0 ? (
+                    <ul aria-label="Workflow failures">
+                      {(result.workflow_execution.failed_steps ?? []).map((failure) => (
+                        <li key={`${failure.step_id}:${failure.error_code}`}>
+                          {`${failure.operation_id} · ${failure.error_code}`}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </>
               ) : null}
               <p>{`Committed ${result.committed ? "yes" : "no"}. Checked: ${result.artifact_validation.checked_dimensions.join(
                 ", ",

@@ -208,7 +208,7 @@ def _approved_memory_store(
             ),
         ),
         "independently_reviewed",
-        "2026-08-10T00:00:00Z",
+        (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
         None,
         (),
         "user-memory",

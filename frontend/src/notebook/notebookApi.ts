@@ -21,7 +21,7 @@ export interface NotebookRecord {
 export type NotebookInteractionMode = "plan" | "action";
 
 export interface NotebookFocusInput {
-  goal?: string;
+  goal?: string | null;
   interaction_mode?: NotebookInteractionMode;
 }
 
@@ -342,9 +342,7 @@ export function completeNotebookOptionExecution(
   notebookId: string,
   optionId: string,
   body: {
-    execution_status: string;
-    run_id?: string;
-    error_code?: string;
+    run_id: string;
   },
 ): Promise<Record<string, unknown>> {
   return readNotebookResponse<Record<string, unknown>>(

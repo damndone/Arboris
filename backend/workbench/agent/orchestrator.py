@@ -84,6 +84,19 @@ _DATA_CHILD_NODE_OPERATIONS = frozenset(
 )
 
 
+def _workflow_failure_message(state: WorkflowExecutionState) -> str:
+    """Keep the failed step's server-owned error visible to the Agent."""
+
+    failures = [
+        f"{step_id}: {step.error or 'no step error was recorded'}"
+        for step_id, step in state.steps.items()
+        if step.status in {"failed", "blocked"}
+    ]
+    if not failures:
+        return "workflow did not complete"
+    return "workflow did not complete; failed steps: " + "; ".join(failures)
+
+
 @dataclass(frozen=True)
 class AgentCommand:
     """A durable Main Agent to Chain Agent dispatch envelope."""
@@ -313,7 +326,7 @@ class _OrchestratorOperationHandler:
             )
             self.orchestrator._persist_workflow_step_audit(record, draft, state)
             if state.status != "completed":
-                raise ValueError("workflow did not complete")
+                raise ValueError(_workflow_failure_message(state))
             return OperationEffect(
                 outputs={
                     "status": "completed",
@@ -384,7 +397,7 @@ class _OrchestratorOperationHandler:
             )
             self.orchestrator._persist_workflow_step_audit(record, draft, state)
             if state.status != "completed":
-                raise ValueError("workflow did not complete")
+                raise ValueError(_workflow_failure_message(state))
             return OperationEffect(
                 outputs={
                     "workflow_state": state.to_dict(),

@@ -20,6 +20,7 @@ from .report_contract import (
     _CITE_MARKER,
     _FIGURE_MARKER,
     _SAFE_ID,
+    _validate_capability_manifest,
     validate_report_response,
 )
 
@@ -209,6 +210,7 @@ def validate_report_quality(
     report_standard: str | None = None,
     required_capabilities: tuple[str, ...] = (),
     capability_manifest: tuple[dict[str, object], ...] = (),
+    require_figure_markers: bool = True,
 ) -> ReportQualityResult:
     """Validate a report against the selected quality profile.
 
@@ -239,6 +241,16 @@ def validate_report_quality(
         required_capabilities,
         field_name="required capability",
     )
+    try:
+        normalized_capability_manifest = _validate_capability_manifest(
+            list(capability_manifest),
+            normalized_capabilities,
+        )
+    except ReportContractError as exc:
+        _raise_quality_input(
+            str(exc),
+            code="invalid_capability_manifest",
+        )
 
     contract = ReportPacketContract(
         fact_ids=normalized_fact_ids,
@@ -246,12 +258,16 @@ def validate_report_quality(
         report_standard=report_standard,
         required_capabilities=normalized_capabilities,
         excluded_fact_ids=normalized_excluded_ids,
-        capability_manifest=tuple(capability_manifest),
+        capability_manifest=normalized_capability_manifest,
     )
     normalized_text = text
     violations: list[ReportQualityViolation] = []
     try:
-        normalized_text = validate_report_response(text, contract)
+        normalized_text = validate_report_response(
+            text,
+            contract,
+            require_figure_markers=require_figure_markers,
+        )
     except ReportContractError as error:
         violations.extend(_contract_violations(error.violations))
 
@@ -418,7 +434,7 @@ def validate_report_quality(
 
         unavailable_capabilities = tuple(
             str(entry.get("capability_id"))
-            for entry in capability_manifest
+            for entry in normalized_capability_manifest
             if entry.get("capability_id") in normalized_capabilities
             and entry.get("availability") != "available"
         )
@@ -489,6 +505,8 @@ def validate_report_quality(
 def validate_report_response_quality(
     text: str,
     contract: ReportPacketContract,
+    *,
+    require_figure_markers: bool = True,
 ) -> ReportQualityResult:
     """Quality-validator adapter for a validated packet contract."""
 
@@ -505,6 +523,7 @@ def validate_report_response_quality(
         report_standard=contract.report_standard,
         required_capabilities=contract.required_capabilities,
         capability_manifest=contract.capability_manifest,
+        require_figure_markers=require_figure_markers,
     )
 
 

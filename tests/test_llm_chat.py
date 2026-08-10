@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import httpx
 import pytest
@@ -309,6 +310,24 @@ class TestUpstreamFailures:
         error = response.json()["error"]
         assert error["code"] == "LLM_UPSTREAM_ERROR"
         assert error["details"]["upstream_status"] == status
+        assert error["details"]["transport_retry_attempted"] is False
+
+    def test_non_report_transient_transport_failure_is_not_retried(
+        self, api: TestClient, configured_env, monkeypatch
+    ):
+        seen = _install_upstream(
+            monkeypatch,
+            lambda request: (_ for _ in ()).throw(httpx.ReadError("connection reset")),
+        )
+
+        response = api.post("/llm/chat", json=_chat_body())
+
+        assert response.status_code == 502
+        details = response.json()["error"]["details"]
+        assert details["transport_retry_attempted"] is False
+        assert details["transport_retry_count"] == 0
+        assert details["retryable"] is True
+        assert len(seen) == 1
 
     def test_api_key_never_leaks_into_error(
         self, api: TestClient, configured_env, monkeypatch
@@ -400,13 +419,11 @@ class TestReportMode:
     def test_report_mode_accepted(self, api: TestClient, configured_env, monkeypatch):
         _install_upstream(
             monkeypatch,
-            lambda request: _ok_upstream(
-                "# Report [[c:c1]]\n[[fig:coef_plot]]"
-            ),
+            lambda request: _ok_upstream("# Report [[c:c1]]"),
         )
         response = api.post("/llm/chat", json=self._report_body())
         assert response.status_code == 200
-        assert response.json()["text"].startswith("# Report")
+        assert response.json()["text"] == "# Report [[c:c1]]\n\n[[fig:coef_plot]]"
 
     def test_invalid_report_is_retried_once_with_contract_correction(
         self, api: TestClient, configured_env, monkeypatch
@@ -414,7 +431,7 @@ class TestReportMode:
         responses = iter(
             [
                 _ok_upstream("# Report [[c:source:coef_plot]]"),
-                _ok_upstream("# Report [[c:c1]]\n[[fig:coef_plot]]"),
+                _ok_upstream("# Report [[c:c1]]"),
             ]
         )
         seen = _install_upstream(monkeypatch, lambda request: next(responses))
@@ -422,20 +439,106 @@ class TestReportMode:
         response = api.post("/llm/chat", json=self._report_body())
 
         assert response.status_code == 200, response.text
-        assert response.json()["text"] == "# Report [[c:c1]]\n[[fig:coef_plot]]"
+        assert response.json()["text"] == "# Report [[c:c1]]\n\n[[fig:coef_plot]]"
         assert len(seen) == 2
         retry_messages = json.loads(seen[1].content)["messages"]
         assert "contract" in retry_messages[-1]["content"].lower()
-        assert "do not repeat any figure marker" in retry_messages[-1]["content"].lower()
+        assert "do not emit or repeat any figure marker" in retry_messages[-1]["content"].lower()
         assert "delete the entire sentence" in retry_messages[-1]["content"].lower()
         assert "evidence boundary" in retry_messages[-1]["content"].lower()
+
+    def test_report_mode_retries_one_transient_transport_failure(
+        self, api, configured_env, monkeypatch
+    ):
+        attempts = 0
+
+        def handler(request: httpx.Request):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise httpx.ReadError("connection reset")
+            return _ok_upstream("# Report [[c:c1]]")
+
+        _install_upstream(monkeypatch, handler)
+
+        response = api.post("/llm/chat", json=self._report_body())
+
+        assert response.status_code == 200, response.text
+        assert response.json()["text"] == "# Report [[c:c1]]\n\n[[fig:coef_plot]]"
+        assert attempts == 2
+
+    def test_report_mode_exhausts_one_transient_transport_retry(
+        self, api, configured_env, monkeypatch
+    ):
+        seen = _install_upstream(
+            monkeypatch,
+            lambda request: (_ for _ in ()).throw(httpx.ReadError("connection reset")),
+        )
+
+        response = api.post("/llm/chat", json=self._report_body())
+
+        assert response.status_code == 502
+        details = response.json()["error"]["details"]
+        assert details["transport_retry_attempted"] is True
+        assert details["transport_retry_count"] == 1
+        assert details["retryable"] is True
+        assert len(seen) == 2
+
+    def test_report_mode_uses_one_deadline_across_all_corrective_calls(
+        self, api: TestClient, configured_env, monkeypatch
+    ) -> None:
+        """Corrective rounds consume one wall-clock budget instead of resetting it."""
+
+        monkeypatch.setattr(
+            "workbench.http.llm_routes.REPORT_MODE_TIMEOUT_S",
+            0.05,
+        )
+        body = self._report_body()
+        body["packet"].update(
+            {
+                "report_standard": "journal_full_v1",
+                "required_capabilities": ["regression", "diagnostics.robustness"],
+                "excluded_fact_ids": [],
+                "capability_manifest": [
+                    {
+                        "capability_id": "regression",
+                        "provider_id": "evidence.regression.v1",
+                    },
+                    {
+                        "capability_id": "diagnostics.robustness",
+                        "provider_id": "evidence.diagnostics.v1",
+                    },
+                ],
+            }
+        )
+
+        def slow_invalid(_request: httpx.Request) -> httpx.Response:
+            time.sleep(0.03)
+            return _ok_upstream(
+                "# Title\n\n## Results\nThe estimate is 240 and lacks a citation."
+            )
+
+        seen = _install_upstream(monkeypatch, slow_invalid)
+
+        response = api.post("/llm/chat", json=body)
+
+        assert response.status_code == 504
+        error = response.json()["error"]
+        assert error["code"] == "LLM_REPORT_DEADLINE_EXCEEDED"
+        assert error["details"]["provider_call_count"] == len(seen)
+        assert error["details"]["deadline_seconds"] == pytest.approx(0.05)
+        assert error["details"]["phase"] in {
+            "contract_correction",
+            "final_correction",
+        }
+        assert len(seen) < 3
 
     def test_invalid_report_after_retry_fails_closed(
         self, api: TestClient, configured_env, monkeypatch
     ):
         seen = _install_upstream(
             monkeypatch,
-            lambda request: _ok_upstream("# Report [[c:c1]]"),
+            lambda request: _ok_upstream("# Report [[c:c99]]"),
         )
 
         response = api.post("/llm/chat", json=self._report_body())
@@ -462,35 +565,26 @@ class TestReportMode:
 
         response = api.post("/llm/chat", json=body)
 
-        assert response.status_code == 502
-        details = response.json()["error"]["details"]
-        assert details["retry_attempted"] is True
-        assert details["retry_count"] == 2
-        assert details["report_quality"]["status"] == "needs_revision"
-        assert details["report_quality"]["violations"]
-        retry_prompt = json.loads(seen[1].content)["messages"][-1]["content"].lower()
-        assert "forbidden numeric tokens" in retry_prompt
-        assert "240" in retry_prompt
-        assert len(seen) == 3
-        final_prompt = json.loads(seen[2].content)["messages"][-1]["content"].lower()
-        assert "no numeric tokens" in final_prompt
-        assert "delete every unsupported numeric statement" in final_prompt
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "LLM_REPORT_PACKET_INVALID"
+        assert "capability manifest" in response.json()["error"]["message"]
+        assert seen == []
 
     def test_report_prompt_carries_cite_rule_and_fact_table(
         self, api: TestClient, configured_env, monkeypatch
     ):
         seen = _install_upstream(
             monkeypatch,
-            lambda request: _ok_upstream(
-                "# Report [[c:c1]]\n[[fig:coef_plot]]"
-            ),
+            lambda request: _ok_upstream("# Report [[c:c1]]"),
         )
         api.post("/llm/chat", json=self._report_body())
         system_prompt = json.loads(seen[0].content)["messages"][0]["content"]
         assert "[[c:ID]]" in system_prompt
         assert "fact_table" in system_prompt
         assert "\"c1\"" in system_prompt and "0.86" in system_prompt
-        assert "[[fig:artifact_id]]" in system_prompt
+        assert "do not emit any figure marker" in system_prompt.lower()
+        assert "workbench appends each supplied figure marker" in system_prompt.lower()
+        assert "[[fig:artifact_id]]" not in system_prompt
         assert "coef_plot" in system_prompt
         assert "numeric source summary" in system_prompt
         # the node-context header must NOT leak into report mode
@@ -505,6 +599,16 @@ class TestReportMode:
                 "report_standard": "journal_full_v1",
                 "required_capabilities": ["regression", "diagnostics.robustness"],
                 "excluded_fact_ids": [],
+                "capability_manifest": [
+                    {
+                        "capability_id": "regression",
+                        "provider_id": "evidence.regression.v1",
+                    },
+                    {
+                        "capability_id": "diagnostics.robustness",
+                        "provider_id": "evidence.diagnostics.v1",
+                    },
+                ],
             }
         )
         journal_filler = " ".join(
@@ -541,7 +645,6 @@ Regression estimate 0.86 [[c:c1]] and covariance HC1 [[c:c2]]. The positive asso
 
 ### Interpretation and implications
 The findings indicate an empirical association, not a causal effect, and the implication is limited to the supplied evidence.
-[[fig:coef_plot]]
 
 ## Diagnostics and robustness
 Diagnostics and robustness are discussed.
@@ -574,6 +677,93 @@ The conclusion remains conditional on the supplied evidence.
         assert "literal phrases" in prompt.lower()
         assert "never round" in prompt.lower()
         assert "evidence boundary" in prompt.lower()
+
+    def test_final_journal_correction_names_valid_citations_and_exempts_marker_ids(
+        self, api: TestClient, configured_env, monkeypatch
+    ) -> None:
+        """The conservative retry must still make a cited Results section possible."""
+
+        from workbench import report_quality
+
+        monkeypatch.setattr(report_quality, "JOURNAL_MIN_LATIN_WORDS", 1)
+        body = self._report_body()
+        body["packet"].update(
+            {
+                "report_standard": "journal_full_v1",
+                "required_capabilities": ["regression", "diagnostics.robustness"],
+                "excluded_fact_ids": [],
+                "capability_manifest": [
+                    {
+                        "capability_id": "regression",
+                        "provider_id": "evidence.regression.v1",
+                    },
+                    {
+                        "capability_id": "diagnostics.robustness",
+                        "provider_id": "evidence.diagnostics.v1",
+                    },
+                ],
+            }
+        )
+        valid_report = """# Evidence-bounded report
+
+## Abstract
+The research question uses the supplied data and regression method. The principal result is an association grounded in evidence [[c:c1]], and the limitation is the bounded design.
+
+## Research question and scope
+The research question concerns a conditional association within the supplied run and no broader population claim.
+
+## Data
+The data description is restricted to the server-supplied evidence packet and its recorded lineage.
+
+## Variables and transformations
+Variables and transformations are described only where the supplied evidence establishes their meaning.
+
+## Methods
+The regression method is interpreted as an associational model under the recorded specification and covariance evidence.
+
+## Results
+The regression finding indicates a positive conditional association supported by the supplied result [[c:c1]].
+
+## Diagnostics and robustness
+Diagnostics and robustness are discussed only to the extent represented in the supplied evidence packet.
+
+## Limitations
+The evidence boundary limits interpretation, and the report does not establish causal effects or unsupported generalization.
+
+## Conclusion
+The conclusion remains conditional on the supplied evidence, model specification, and recorded diagnostic scope.
+"""
+        calls = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            if calls < 3:
+                return _ok_upstream(
+                    "# Title\n\n## Results\nThe estimate is 240 and lacks a citation."
+                )
+            final_prompt = json.loads(request.content)["messages"][-1]["content"]
+            if (
+                "[[c:c1]]" in final_prompt
+                and "citation marker" in final_prompt.lower()
+                and "exempt" in final_prompt.lower()
+            ):
+                return _ok_upstream(valid_report)
+            return _ok_upstream(
+                valid_report.replace(" [[c:c1]]", "").replace(" [[c:c1]]", "")
+            )
+
+        seen = _install_upstream(monkeypatch, handler)
+
+        response = api.post("/llm/chat", json=body)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["report_quality"]["status"] == "exportable"
+        assert len(seen) == 3
+        final_prompt = json.loads(seen[-1].content)["messages"][-1]["content"]
+        assert "[[c:c1]]" in final_prompt
+        assert "citation marker" in final_prompt.lower()
+        assert "exempt" in final_prompt.lower()
 
     def test_invalid_report_packet_is_rejected_before_provider_call(
         self, api: TestClient, configured_env, monkeypatch

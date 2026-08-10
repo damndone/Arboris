@@ -13,7 +13,12 @@ import pytest
 from workbench.agent.notebook import NotebookService
 from workbench.agent.notebook import service as notebook_service
 from workbench.agent.notebook import store as notebook_store
-from workbench.agent.notebook.store import Notebook, NotebookStore
+from workbench.agent.notebook.store import (
+    Notebook,
+    NotebookStore,
+    ProjectionSource,
+    reserve_dataset_upload_workflow_source,
+)
 from workbench.lineage.run_family import (
     RunFamilyStore,
     bind_run_to_family,
@@ -122,7 +127,10 @@ def test_verified_dataset_projection_creates_one_persisted_prerun_family(tmp_pat
     assert repeated.notebook_id == projection.notebook_id
     assert projection.projection_key == f"default-projection:{projection.run_family_id}"
     assert projection.projection_source is not None
-    assert projection.projection_source.to_dict() == _dataset_ref(sha256)
+    expected_source = reserve_dataset_upload_workflow_source(
+        ProjectionSource.from_dict(_dataset_ref(sha256))
+    )
+    assert projection.projection_source == expected_source
     assert projection.active_head_run_id is None
     assert projection.focused_run_id is None
     assert list((project / "runs").iterdir()) == []

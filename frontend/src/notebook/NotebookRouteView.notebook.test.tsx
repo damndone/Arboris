@@ -1118,6 +1118,51 @@ describe("NotebookRouteView", () => {
     expect(screen.getByTestId("notebook-retry-planning")).toHaveTextContent("Retry");
   });
 
+  it("exits an initial provider failure without deleting the Notebook or retrying", async () => {
+    const focused = {
+      notebook_id: "nb_1",
+      run_family_id: "family_1",
+      title: "Analysis",
+      created_by: "user",
+      active_head_run_id: null,
+      user_focus: { goal: "Estimate the intervention effect." },
+    };
+    const idle = { ...focused, user_focus: {} };
+    vi.mocked(getNotebook)
+      .mockResolvedValueOnce(focused)
+      .mockResolvedValue(idle);
+    vi.mocked(updateNotebookFocus).mockResolvedValue(idle);
+    vi.mocked(proposeNotebookOptions).mockRejectedValue(
+      Object.assign(new Error("LLMUpstreamError"), {
+        code: "NOTEBOOK_PLANNING_UNAVAILABLE",
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
+        <NotebookRouteView projectRoot="/tmp/project" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("notebook-error")).toHaveTextContent(
+        "NOTEBOOK_PLANNING_UNAVAILABLE",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Exit planning" }));
+
+    await waitFor(() =>
+      expect(updateNotebookFocus).toHaveBeenCalledWith("/tmp/project", "nb_1", {
+        goal: null,
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("notebook-surface")).toHaveAttribute("data-state", "empty"),
+    );
+    expect(proposeNotebookOptions).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("nb_1 · family_1")).toBeInTheDocument();
+  });
+
   it("preserves a locally rejected option when a later replan fails", async () => {
     const proposed = readCanonicalFixture("notebook_option_revision_v11");
     proposed.lifecycle_status = "proposed";

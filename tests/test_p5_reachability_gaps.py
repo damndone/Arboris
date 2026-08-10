@@ -53,10 +53,10 @@ def test_all_p5_gaps_are_one_live_composable_workflow_identity() -> None:
 def test_p2_guard_is_green_after_p5_closes_all_live_gaps() -> None:
     """Pin the post-P4/P5 reachability snapshot as an intentional record.
 
-    P4 contributes the data-management capabilities to the same live
-    inventory, so the final integration tree has a larger denominator than
-    the P5-only branch. A later route change should update this assertion and
-    its gap set deliberately, not treat the red test as stale noise.
+    P4 contributes data-management capabilities and P6/P7 contributes the
+    declaration-driven pack capabilities to the same live inventory. A later
+    route change should update this assertion and its gap set deliberately,
+    not treat the red test as stale noise.
     """
 
     from workbench.agent.capability_contract import capability_reachability_guard
@@ -70,7 +70,7 @@ def test_p2_guard_is_green_after_p5_closes_all_live_gaps() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (65, 9, 59, 63, 2, 0)
+    ) == (129, 9, 123, 127, 2, 0)
     assert {item.capability_id for item in report.gaps} == set()
     assert {item.capability_id for item in report.exempt} == {
         "code.execute",
@@ -214,6 +214,13 @@ def test_nullable_workflow_field_is_validated_as_nullable_string() -> None:
     _validate_declared_field_types("test.nullable", {"value": "column"}, contract)
     with pytest.raises(Exception):
         _validate_declared_field_types("test.nullable", {"value": 3}, contract)
+
+
+def test_closed_schema_honors_explicit_nullable_marker() -> None:
+    from workbench.agent.workflow_contracts import _schema_value_matches
+
+    assert _schema_value_matches(None, {"type": "string", "nullable": True})
+    assert not _schema_value_matches(None, {"type": "string"})
 
 
 def test_p5_contract_builders_follow_live_registry_injection(monkeypatch) -> None:

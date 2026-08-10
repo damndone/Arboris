@@ -115,8 +115,14 @@ def test_every_model_family_appears_in_the_inventory() -> None:
     assert {f"model.{name}" for name in MODEL_FAMILY_CONTRACTS} <= families
 
 
-def test_time_series_selector_entries_have_typed_composition_contracts() -> None:
-    """Recipe selectors remain separate from regression family admission."""
+def test_a_pack_capability_can_be_composable_without_model_genesis_admission() -> None:
+    """A pack's generic workflow adapter is distinct from model.genesis.
+
+    The two time-series packs are not regression families and therefore remain
+    outside `MODEL_FAMILY_CONTRACTS`. Their own generic workflow operations are
+    still real composition routes and must not be mistaken for model.genesis
+    branches.
+    """
 
     from workbench.agent.capability_contract import capability_inventory
     from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
@@ -129,6 +135,7 @@ def test_time_series_selector_entries_have_typed_composition_contracts() -> None
         assert item.kind == "model_family"
         assert item.proposed_by == ()
         assert item.composable_as == (f"model.{key}",)
+        assert item.top_level_exposure_note
         assert item.is_reachable
 
 
@@ -168,6 +175,7 @@ def test_the_auto_selector_is_listed_as_a_selector_not_a_family() -> None:
     assert auto.kind == "selector"
     assert auto.proposed_by == ()
     assert auto.composable_as == ("model.auto",)
+    assert auto.top_level_exposure_note
     assert auto.is_reachable
 
 
@@ -242,10 +250,10 @@ def test_the_two_closed_operations_are_explicitly_exempt() -> None:
 def test_natural_language_reachability_guard_pins_current_truth() -> None:
     """Pin today's reachability facts as an intentional change record.
 
-    P4 and P5 intentionally update this snapshot after wiring the live data
-    and statistical workflow identities. This is not a stale test: the counts
-    and gap IDs must be updated in the same deliberate change that closes a
-    route, rather than silently weakening this record.
+    P4/P5 and P6/P7 intentionally update this snapshot after wiring the live
+    data, statistical, and declaration-driven pack workflow identities. This
+    is not a stale test: the counts and gap IDs must be updated in the same
+    deliberate change that closes a route, rather than silently weakening it.
     """
 
     from workbench.agent.capability_contract import capability_reachability_guard
@@ -259,7 +267,7 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (65, 9, 59, 63, 2, 0)
+    ) == (129, 9, 123, 127, 2, 0)
     assert {item.capability_id for item in report.gaps} == set()
     assert {item.capability_id for item in report.exempt} == {
         "code.execute",
@@ -291,23 +299,23 @@ def test_reachability_guard_derives_its_denominator_from_the_supplied_inventory(
     )
 
 
-def test_time_series_and_auto_are_no_longer_unwired_gaps() -> None:
-    """The three selector-family gaps are closed by typed workflow steps."""
+def test_time_series_and_auto_capabilities_have_generic_workflow_routes() -> None:
+    """Selectable capabilities are reachable through their typed workflow steps."""
 
     from workbench.agent.capability_contract import unreachable_capabilities
 
     _exempt, gaps = unreachable_capabilities()
 
-    assert {item.capability_id for item in gaps}.isdisjoint(
-        {"model.time_series.arma_garch", "model.time_series.ets", "model.auto"}
-    )
+    assert not {"model.time_series.arma_garch", "model.time_series.ets", "model.auto"} & {
+        item.capability_id for item in gaps
+    }
 
 
 def test_a_step_identity_is_one_capability_carrying_two_paths() -> None:
     """An operation that is also a step is not two capabilities.
 
-    Ten operation ids appear both as a top-level proposal surface and as a
-    workflow step. Counting them twice would inflate the denominator of any
+        Operation ids appear both as a top-level proposal surface and as a
+        workflow step. Counting them twice would inflate the denominator of any
     "how much is reachable" claim; that is what `proposed_by` and
     `composable_as` are two tuples for.
     """
@@ -493,15 +501,11 @@ def test_every_imputation_and_resampling_method_is_in_the_inventory() -> None:
     assert {"imputation.mice", "resample.smote"} <= listed
 
 
-def test_prediction_and_preparation_capabilities_can_be_asked_for_by_nobody() -> None:
-    """The finding this task exists to surface, asserted rather than narrated.
+def test_prediction_and_preparation_capabilities_have_typed_workflow_routes() -> None:
+    """Prediction and preparation methods are reachable without run-form guessing.
 
-    `prediction_model_type`, `imputation_method` and `prediction_sampling_method`
-    are run-config fields carried only by the HTTP run form and the CLI. No
-    registered operation names any of them, so a Lasso prediction, a MICE
-    imputation and a SMOTE rebalance are all unreachable from natural language
-    today. They are listed as unreachable, not exempt: this is a gap to close,
-    not a door deliberately shut.
+    The generic operation declarations now own these bindings and their
+    execution contracts. The live manifest still owns the denominator.
     """
 
     from workbench.agent.capability_contract import capability_inventory
@@ -560,7 +564,8 @@ def test_p5_leaves_no_unresolved_reachability_gaps() -> None:
         "code.execute",
         "data.column.cast",
     }
-    assert gaps == ()
+    assert {item.kind for item in gaps} == set()
+    assert len(gaps) == 0
 
 
 def test_the_partition_covers_every_unreachable_capability_and_nothing_else() -> None:

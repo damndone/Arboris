@@ -2,6 +2,33 @@ import { describe, expect, it, vi } from "vitest";
 import { generateReport, ReportGenerationError, saveAiReport } from "./reportClient";
 
 describe("generateReport error boundary", () => {
+  it("aborts a network request that outlives the server Report deadline", async () => {
+    const fetchMock = vi.fn((_url: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const fallback = globalThis.setTimeout(() => reject(new Error("fetch was never aborted")), 50);
+      init?.signal?.addEventListener("abort", () => {
+        globalThis.clearTimeout(fallback);
+        reject(new DOMException("aborted", "AbortError"));
+      }, { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const rejection = generateReport({
+      facts: [],
+      scope: { run_id: "run-1", node_count: 1, node_keys: [] },
+      fingerprints: [],
+      figures: [],
+      instruction: "Write a report",
+      clientTimeoutMs: 5,
+    } as Parameters<typeof generateReport>[0] & { clientTimeoutMs: number });
+
+    await expect(rejection).rejects.toMatchObject({
+      name: "ReportGenerationError",
+      code: "LLM_REPORT_CLIENT_TIMEOUT",
+    } satisfies Partial<ReportGenerationError>);
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    vi.unstubAllGlobals();
+  });
+
   it("preserves structured contract violations in the user-visible error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,

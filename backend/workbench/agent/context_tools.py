@@ -245,6 +245,19 @@ class NodeOperationContextProvider:
         """Expose the provider's read-only tools without coupling the registry."""
 
         registry = operation_registry or OperationRegistry()
+        from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+        # Workflow children are executable only inside the parent
+        # operation.multi_step proposal. Publishing them as direct inspection
+        # choices invites the Agent to ask for a model-node contract that the
+        # provider must reject. Keep this enum declaration-derived while
+        # leaving the runtime guard in inspect_operation_contract as defense in
+        # depth.
+        top_level_operation_ids = [
+            operation_id
+            for operation_id in registry.operation_ids()
+            if operation_id not in WORKFLOW_STEP_SPEC_CONTRACTS
+        ]
 
         def inspect_node_context(
             arguments: dict[str, Any],
@@ -802,7 +815,7 @@ class NodeOperationContextProvider:
                         # the live DeepSeek smoke) and fail closed repeatedly.
                         "operation_id": {
                             "type": "string",
-                            "enum": registry.operation_ids(),
+                            "enum": top_level_operation_ids,
                         },
                         "operation_version": {"type": "string"},
                     },
@@ -810,13 +823,15 @@ class NodeOperationContextProvider:
                 },
                 side_effect="none",
                 scope_requirements=("project", "chain"),
-                # Schema, not data. The 8192 shared by the other inspect tools
-                # bounds row dumps; this one returns a pack's field vocabulary,
-                # and a pack with 28 editable fields legitimately needs more
-                # room. Truncating it does not protect context -- the Agent gets
-                # `tool_output_budget_exceeded` and then guesses at field names,
-                # which is how a live turn died before this was raised.
-                max_output_budget=12288,
+                # Schema, not data. This tool returns the live workflow-step
+                # vocabulary, including every registered P7 operation. A bounded
+                # 12K projection kept only the first step entries and
+                # made the rest unreachable in a real Agent turn. Nested P7
+                # request schemas are now part of the declaration-derived
+                # contract, so the live 74-step vocabulary is larger; keep a
+                # generous explicit cap below the model context window while
+                # ensuring the contract remains whole.
+                max_output_budget=262144,
                 handler=inspect_operation_contract,
             ),
             ToolDefinition(
@@ -1451,22 +1466,7 @@ class NodeOperationContextProvider:
             op_node_id=request.op_node_id,
             active_head_run_id=request.active_head_run_id,
         )
-        contract = resolve_operation_contract(stage=node.get("stage"), manifest=manifest)
-        if contract is not None:
-            contract_payload = {
-                "op_type": contract.op_type,
-                "schema_id": contract.schema_id,
-                "editable_schema": contract.editable_schema,
-            }
-            # A pack whose whole option surface is a single `model_options` JSON
-            # control tells the Agent nothing about what may go inside it. Where
-            # the pack publishes a vocabulary, attach it so a proposal can be
-            # written against real field names, closed value sets, and server
-            # caps instead of guesses.
-            vocabulary = build_option_vocabulary(contract.op_type)
-            if vocabulary is not None:
-                contract_payload["option_vocabulary"] = vocabulary
-        elif operation.contract_owner == "operation_registry" and operation.editable_schema:
+        if operation.contract_owner == "operation_registry" and operation.editable_schema:
             # The operation does not act on one node's editable surface, so no
             # lineage pack can answer for it — this definition is the contract.
             # Without this an Agent asked to compose a workflow could not read
@@ -1480,27 +1480,43 @@ class NodeOperationContextProvider:
             }
             if operation.vocabulary_builder is not None:
                 contract_payload["step_vocabulary"] = operation.vocabulary_builder()
-        elif "data_node" in operation.scope_requirements and operation.editable_schema:
-            # Data operations have no per-node lineage contract: `resolve_
-            # operation_contract` answers for model nodes only, and a cast's
-            # editable shape is identical on every dataset node. The registry is
-            # the contract owner here, so say so rather than raising — an Agent
-            # allowed to propose an operation must be able to read its contract.
-            #
-            # Narrow on purpose: model.rerun's registry schema is a permissive
-            # `additionalProperties` passthrough, so falling back to it when the
-            # lineage contract is missing would claim "anything goes", which is
-            # worse than failing closed.
-            contract_payload = {
-                "op_type": operation.operation_id,
-                "schema_id": f"{operation.operation_id}@{operation.operation_version}",
-                "editable_schema": operation.editable_schema,
-                "contract_owner": "operation_registry",
-            }
         else:
-            raise OperationContractUnavailableError(
-                f"no contract for {request.operation_id}@{request.operation_version}"
-            )
+            contract = resolve_operation_contract(stage=node.get("stage"), manifest=manifest)
+            if contract is not None:
+                contract_payload = {
+                    "op_type": contract.op_type,
+                    "schema_id": contract.schema_id,
+                    "editable_schema": contract.editable_schema,
+                }
+                # A pack whose whole option surface is a single `model_options` JSON
+                # control tells the Agent nothing about what may go inside it. Where
+                # the pack publishes a vocabulary, attach it so a proposal can be
+                # written against real field names, closed value sets, and server
+                # caps instead of guesses.
+                vocabulary = build_option_vocabulary(contract.op_type)
+                if vocabulary is not None:
+                    contract_payload["option_vocabulary"] = vocabulary
+            elif "data_node" in operation.scope_requirements and operation.editable_schema:
+                # Data operations have no per-node lineage contract: `resolve_
+                # operation_contract` answers for model nodes only, and a cast's
+                # editable shape is identical on every dataset node. The registry is
+                # the contract owner here, so say so rather than raising — an Agent
+                # allowed to propose an operation must be able to read its contract.
+                #
+                # Narrow on purpose: model.rerun's registry schema is a permissive
+                # `additionalProperties` passthrough, so falling back to it when the
+                # lineage contract is missing would claim "anything goes", which is
+                # worse than failing closed.
+                contract_payload = {
+                    "op_type": operation.operation_id,
+                    "schema_id": f"{operation.operation_id}@{operation.operation_version}",
+                    "editable_schema": operation.editable_schema,
+                    "contract_owner": "operation_registry",
+                }
+            else:
+                raise OperationContractUnavailableError(
+                    f"no contract for {request.operation_id}@{request.operation_version}"
+                )
 
         return {
             **canonical,

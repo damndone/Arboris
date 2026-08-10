@@ -199,6 +199,7 @@ export interface ReportWorkspaceContextValue {
   editorText: string;
   error: string | null;
   reportLoadError: string | null;
+  postEstimationLoadError: string | null;
   generating: boolean;
   generatingRunId: string | null;
   exporting: boolean;
@@ -289,6 +290,7 @@ export function ReportWorkspaceProvider({
   const [excludedFigureIds, setExcludedFigureIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [reportLoadError, setReportLoadError] = useState<string | null>(null);
+  const [postEstimationLoadError, setPostEstimationLoadError] = useState<string | null>(null);
   const [generatingRunId, setGeneratingRunId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [resultTableExporting, setResultTableExporting] = useState(false);
@@ -308,22 +310,29 @@ export function ReportWorkspaceProvider({
       setPostEstimation([]);
       setPredictionEvidence(null);
       setModelResults([]);
+      setPostEstimationLoadError(null);
       return;
     }
     let cancelled = false;
+    setPostEstimationLoadError(null);
     void fetchRunDetail(projectRoot, runId)
       .then((detail) => {
         if (!cancelled) {
           setPostEstimation(detail.post_estimation_results ?? []);
           setPredictionEvidence(detail.prediction_evidence ?? null);
           setModelResults(detail.model_results ?? []);
+          setPostEstimationLoadError(null);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (!cancelled) {
           setPostEstimation([]);
           setPredictionEvidence(null);
           setModelResults([]);
+          const message = err instanceof Error ? err.message : "server-owned result evidence is unavailable";
+          setPostEstimationLoadError(
+            `Unable to load server-owned result evidence; report generation is disabled: ${message}`,
+          );
         }
       });
     return () => {
@@ -917,6 +926,7 @@ export function ReportWorkspaceProvider({
     editorText,
     error,
     reportLoadError,
+    postEstimationLoadError,
     generating: generatingRunId === activeRunId,
     generatingRunId,
     exporting,

@@ -6,6 +6,7 @@ import {
   buildPostEstimationFacts,
   buildTimeSeriesFacts,
 } from "./factTable";
+import { reportCapabilityManifestForFacts } from "./reportEvidence";
 
 function fixtureWithValues() {
   const seed = makeOwnerResolutionSeedFixture();
@@ -179,18 +180,52 @@ describe("buildFigureFacts", () => {
     expect(facts[0].node_key).toBe("figure:event_study");
   });
 
-  it("records truncation without inventing values and ignores malformed source", () => {
+  it("records truncation and malformed previews without inventing values", () => {
     const facts = buildFigureFacts([
       {
         artifact_id: "time_trend",
         chart_type: "time trend",
         source: { preview_json: "{not-json", preview_truncated: true },
       },
+      {
+        artifact_id: "bad_preview",
+        chart_type: "bad preview",
+        source: { preview_json: "{also-not-json", preview_truncated: false },
+      },
     ]);
 
-    expect(facts).toHaveLength(1);
-    expect(facts[0].field).toBe("figure:time_trend:preview_truncated");
-    expect(facts[0].value).toBe(true);
+    expect(facts).toHaveLength(2);
+    expect(facts[0]).toMatchObject({
+      field: "figure:time_trend:preview_truncated",
+      value: true,
+    });
+    expect(facts[1]).toMatchObject({
+      field: "figure:bad_preview:preview_invalid",
+      value: true,
+    });
+  });
+
+  it("publishes a marker when the local numeric leaf bound drops later values", () => {
+    const facts = buildFigureFacts([
+      {
+        artifact_id: "large_preview",
+        chart_type: "large preview",
+        source: {
+          preview_json: JSON.stringify(
+            Object.fromEntries(
+              Array.from({ length: 81 }, (_, index) => [`metric_${index}`, index]),
+            ),
+          ),
+          preview_truncated: false,
+        },
+      },
+    ]);
+
+    expect(facts).toHaveLength(81);
+    expect(facts[facts.length - 1]).toMatchObject({
+      field: "figure:large_preview:preview_truncated",
+      value: true,
+    });
   });
 });
 
@@ -233,6 +268,84 @@ describe("buildPostEstimationFacts", () => {
 
     expect(facts.map((fact) => fact.id)).toEqual(["c4", "c5", "c6", "c7"]);
     expect(facts.some((fact) => fact.field.includes("schema_version"))).toBe(false);
+  });
+
+  it("preserves workflow provider identity and artifact provenance for P7 results", () => {
+    const facts = buildPostEstimationFacts([
+      {
+        ...result,
+        artifact_id: "workflow_p7_matching_att_abc",
+        artifact_type: "p7_analysis",
+        operation_id: "matching.att",
+        pack_family: "matching",
+        source_sha256: "sha256:source",
+        result: {
+          contract: "matching.result",
+          contract_version: "1.0",
+          operation_id: "matching.att",
+          result: {
+            effect_estimate: 0.42,
+            balance: { standardized_mean_difference: 0.08 },
+          },
+        },
+      },
+    ]);
+
+    const fact = facts.find((item) => item.field.endsWith("effect_estimate"));
+    expect(fact).toBeDefined();
+    expect(fact?.provider_id).toBe("evidence.workflow.p7.v1");
+    expect(fact?.artifact_ids).toEqual(["workflow_p7_matching_att_abc"]);
+    expect(fact?.value).toBe(0.42);
+    expect(fact?.qualifiers).toMatchObject({
+      artifact_type: "p7_analysis",
+      operation_id: "matching.att",
+      pack_family: "matching",
+      source_sha256: "sha256:source",
+    });
+    expect(reportCapabilityManifestForFacts(facts)).toEqual([
+      expect.objectContaining({
+        capability_id: "post_estimation",
+        provider_id: "evidence.workflow.p7.v1",
+      }),
+    ]);
+  });
+
+  it("uses the generic workflow provider for non-P7 capability results", () => {
+    const facts = buildPostEstimationFacts([
+      {
+        ...result,
+        artifact_id: "workflow_capability_test_correlations_abc",
+        artifact_type: "workflow_capability_result",
+        operation_id: "test.correlations",
+        result: {
+          operation_id: "test.correlations",
+          assumptions: ["declared columns"],
+          result: { p_value: 0.04 },
+        },
+      },
+    ]);
+
+    const fact = facts.find((item) => item.field.endsWith("p_value"));
+    expect(fact?.provider_id).toBe("evidence.workflow.capability.v1");
+    expect(fact?.artifact_ids).toEqual(["workflow_capability_test_correlations_abc"]);
+  });
+
+  it("publishes an explicit truncation fact for oversized workflow results", () => {
+    const resultFields = Object.fromEntries(
+      Array.from({ length: 81 }, (_, index) => [`metric_${index}`, index]),
+    );
+    const facts = buildPostEstimationFacts([
+      {
+        ...result,
+        result: resultFields,
+      },
+    ]);
+
+    expect(facts).toHaveLength(80);
+    expect(facts[facts.length - 1]).toMatchObject({
+      field: "post_estimation:stationary_point:facts_truncated",
+      value: true,
+    });
   });
 
   it("returns nothing when no post-estimation step was declared", () => {
