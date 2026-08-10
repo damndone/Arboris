@@ -70,6 +70,12 @@ def write_json(path: Path, payload: Any) -> None:
     write_text_durable(path, text)
 
 
+def initialize_artifact_index(run_root: Path) -> None:
+    """Create the empty artifact index for a newly-owned run boundary."""
+
+    write_json(run_root / "artifacts_index.json", {"schema_version": 1, "artifacts": []})
+
+
 def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 

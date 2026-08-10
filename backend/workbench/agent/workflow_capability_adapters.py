@@ -811,7 +811,7 @@ def _execute_arma_garch(frame: pd.DataFrame, request: Mapping[str, Any]) -> Work
         **dict(request["options"]),
     }
     from ..contracts.model.arma_garch import ArmaGarchAnalysisContract
-    from ..artifacts import write_json
+    from ..artifacts import initialize_artifact_index
     from ..engine.context import DataHandle, ModelingContext, RunEnv
     from ..engine.packs.arma_garch.runner import fit_from_context
     from ..graph_recorder import GraphRecorder
@@ -827,7 +827,7 @@ def _execute_arma_garch(frame: pd.DataFrame, request: Mapping[str, Any]) -> Work
         # The pack owns its artifact index, but the generic adapter owns the
         # temporary run boundary. Initialize that boundary before the pack
         # starts registering its durable outputs.
-        write_json(run_root / "artifacts_index.json", {"artifacts": []})
+        initialize_artifact_index(run_root)
         ctx = ModelingContext(
             data=DataHandle.of(frame.copy(), artifact_id="workflow_input", provenance=("workflow_input",)),
             y_col=value_column,

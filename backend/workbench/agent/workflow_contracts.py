@@ -1735,7 +1735,7 @@ def prediction_workflow_step_contracts() -> dict[str, StepSpecContract]:
             capability_kind="prediction_model",
             top_level_exposure_note=_p5_exposure_note(f"prediction.{entry['key']}"),
         )
-        for entry in build_capabilities()["prediction_models"]
+        for entry in build_capabilities(bootstrap_packs=False)["prediction_models"]
     }
 
 
@@ -1744,7 +1744,7 @@ def data_preparation_workflow_step_contracts() -> dict[str, StepSpecContract]:
 
     from workbench.engine.capabilities import build_capabilities
 
-    manifest = build_capabilities()
+    manifest = build_capabilities(bootstrap_packs=False)
     contracts: dict[str, StepSpecContract] = {}
     for entry in manifest["imputation_methods"]:
         capability_id = f"imputation.{entry['key']}"

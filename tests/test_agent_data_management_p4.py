@@ -186,6 +186,7 @@ def test_declaration_injection_updates_every_projection_and_is_not_a_hardcoded_s
         ui_description="P4 declaration-injection test operation.",
         capability_kind="data_operation",
         produces_dataset=True,
+        produced_dataset_kind="derived_data",
         consumes_input_frame=True,
         replayable_by_recipe=False,
     )
