@@ -10,14 +10,14 @@ FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 7/18 (38.9%; 38.9 per 100 events)
+- Failure frequency: 7/21 (33.3%; 33.3 per 100 events)
 - Repeat rate: 0/7 (0.0%)
 - Recurrence rate: 0/7 (0.0%)
 - MTTR: median=0 ms (sample=6; unresolved=1)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/7 (0.0%)
+- Gate waste rate: 0/10 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -99,3 +99,6 @@ FULL_GATE_INTERRUPTED
 - #16: `f1bfa58c-c7ae-4cf8-9b22-d91dd938bf65` | 2026-08-10T22:35:24.000Z | STATE_CHANGE/browser_tab_only_scope | incident=`6d309ab3-2ae0-4e96-9cf0-3a0c6c5c7521` | lesson_key=`browser-tab-only-scope` | event_sha256=`3ae889b9c5e4644e8d593693774cc46ba54d3997e9e02de81fe516ffd3dd20ce`
 - #17: `f4d6415f-3b9d-43b0-aa0c-ec5d59c682e4` | 2026-08-10T22:44:35.000Z | STATE_CHANGE/full_gate_interrupted | incident=`2ae4af47-f999-4a0b-a1a9-d86feb8d9d25` | lesson_key=`full-gate-after-browser-checkpoint` | event_sha256=`dca94bb860c84a50e07da2a41f43e27cec1fcc7ed48471aab08ca08c760d9d92`
 - #18: `f2e97bb3-63c7-47c2-b0cc-6a1d9a1ad5b8` | 2026-08-10T22:59:15.000Z | GAP/notebook_confirm_recovery_action | incident=`e35d8c1d-bc35-44fd-9b18-2c319b1abf17` | lesson_key=`notebook-confirm-replan-recovery` | event_sha256=`c9dbb1d131690fef0ca22a501d73279f4667b3b2763ffa498cefc77cdb920cfc`
+- #19: `58c1a05a-c6a6-4b80-bb19-6e3116a8f142` | 2026-08-10T23:28:14.000Z | GATE/notebook_confirmed_natural_language_chain | incident=`b3e5a1e3-1bf0-46fd-9b21-5ca2fe64fcf5` | lesson_key=`notebook-confirmed-natural-language-chain` | event_sha256=`6b481be10ece34a2ee94897a635a05be52c6ba041eaae05091c0a789fb2fee15`
+- #20: `d6bd0990-c5f1-4f09-97ea-7699e5f5f870` | 2026-08-10T23:28:15.000Z | GATE/p7_current_head_batch_execution | incident=`927a6e8f-ecfd-4c1e-95b9-e48a25785ead` | lesson_key=`p7-current-head-batch-execution` | event_sha256=`08347f574d1178747e653fda5994cf81bf1b094e014b44e126610245bab17617`
+- #21: `9fd4fbbb-b75c-4cef-bf8d-5476b50c3158` | 2026-08-10T23:28:16.000Z | GATE/full_gate_completed_after_browser_checkpoint | incident=`a0e18062-f5aa-48a6-83c1-00479dc9f79d` | lesson_key=`full-gate-completed-after-browser-checkpoint` | event_sha256=`f6969cd1b1061eb9f5f1375c5dda6f6a6f1608f56a0bbcf13b5aabc72ab400c9`
