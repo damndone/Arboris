@@ -217,6 +217,30 @@ class TextOnlyAdapter:
         yield ModelStreamEvent.done(request.request_id)
 
 
+class InvalidArgumentsThenSubmitAdapter:
+    def __init__(self, submit_args: dict) -> None:
+        self.submit_args = submit_args
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            yield ModelStreamEvent.from_error(
+                request.request_id,
+                "provider_tool_arguments_invalid",
+            )
+            return
+        yield ModelStreamEvent.tool_call_delta(
+            request.request_id,
+            {
+                "tool_call_id": "submit-corrected",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": self.submit_args,
+            },
+        )
+        yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+
+
 def test_provider_plan_runs_registered_inspection_then_submits_batch(tmp_path: Path) -> None:
     project = make_project(tmp_path)
     evidence = _evidence()
@@ -259,6 +283,27 @@ def test_provider_plan_runs_registered_inspection_then_submits_batch(tmp_path: P
     assert "completed evidence refs" in adapter.requests[0].messages[0]["content"]
     assert "dataset_source_id" in adapter.requests[0].messages[0]["content"]
     assert "execution_pins" in adapter.requests[0].messages[0]["content"]
+
+
+def test_provider_invalid_tool_json_gets_one_bounded_contract_correction(
+    tmp_path: Path,
+) -> None:
+    """A complete malformed tool payload is corrected, never executed or hidden."""
+
+    project = make_project(tmp_path)
+    adapter = InvalidArgumentsThenSubmitAdapter(_submit_call())
+    agent = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+    )
+
+    result = agent.plan(context=_context(project), initial_evidence=_evidence())
+
+    assert len(result.option_drafts) == 1
+    assert len(adapter.requests) == 2
+    assert "tool-call arguments were not valid JSON" in adapter.requests[1].messages[-1][
+        "content"
+    ]
     assert "automatically materializes residuals_vs_<predictor>" in adapter.requests[0].messages[0]["content"]
     assert "do not claim that a separate scatter step is required" in adapter.requests[0].messages[0]["content"]
     assert "only when the current context includes an eligible approved memory default" in (
@@ -617,8 +662,270 @@ def test_composed_workflow_derives_artifacts_from_each_declared_model_family(
     )
 
 
-def test_workflow_capability_id_must_name_its_model_capability(tmp_path: Path) -> None:
-    """The workflow tool is an operation; ``capability_id`` stays a model pack."""
+def test_pure_p7_workflow_needs_no_synthetic_model_root(tmp_path: Path) -> None:
+    """An ordinary analysis request may compile to one real P7 step directly."""
+
+    source = ProjectionSource(
+        kind="dataset",
+        upload_sha256="a" * 64,
+        filename="synthetic_control.csv",
+        workflow_source=WorkflowSource(
+            run_id="run_source",
+            node_ref="stage:raw",
+            artifact_id="raw_synthetic_control.csv",
+            source_sha256="b" * 64,
+        ),
+    )
+    context = replace(
+        _context(make_project(tmp_path), projection_source=source.to_dict()),
+        user_focus={
+            "goal": (
+                "Estimate the treatment effect for treated_sc after period 3 "
+                "using d1, d2, and d3 as the comparison units."
+            )
+        },
+    )
+    workflow = NotebookPlanningAgent._typed_operation_contracts(context)[
+        "operation.multi_step"
+    ]
+    evidence = DataEvidencePackV1(
+        source_id="dataset:synthetic-control",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:synthetic-control",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={
+                    "columns": [
+                        {"name": "treated_sc"},
+                        {"name": "d1"},
+                        {"name": "d2"},
+                        {"name": "d3"},
+                    ]
+                },
+                result_hash="sha256:synthetic-control-profile",
+            ),
+        ),
+    )
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "Estimate the requested counterfactual from the three comparison units.",
+            "assumptions": ["Periods 0 through 2 define the pre-treatment interval."],
+            "capability_id": "synthetic_control.fit",
+            "option_id": "opt_synthetic_control",
+            "proposal": {
+                "proposal_id": "prop_synthetic_control",
+                "proposal_revision": 1,
+                "operation_id": "operation.multi_step",
+                "operation_version": "v1",
+                "target": workflow["target_exact"],
+                "preconditions": workflow["preconditions_exact"],
+                "changes": {
+                    "steps": [
+                        {
+                            "step_id": "estimate_counterfactual",
+                            "operation_id": "synthetic_control.fit",
+                            "spec": {
+                                "input_mode": "typed",
+                                "column_bindings": {
+                                    "outcomes": ["treated_sc", "d1", "d2", "d3"]
+                                },
+                                "options": {
+                                    "treated_unit": "treated_sc",
+                                    "donor_pool": ["d1", "d2", "d3"],
+                                    "periods": [0, 1, 2, 3, 4, 5],
+                                    "pre_periods": [0, 1, 2],
+                                    "post_periods": [3, 4, 5],
+                                    "solver_policy": {
+                                        "solver": "scipy_slsqp",
+                                        "max_iter": 500,
+                                        "tolerance": 1e-10,
+                                        "constraint_tolerance": 1e-8,
+                                    },
+                                    "tolerance_policy": {
+                                        "weight_sum": 1e-8,
+                                        "constraint": 1e-8,
+                                        "finite": 0.0,
+                                    },
+                                },
+                            },
+                        }
+                    ]
+                },
+            },
+            "expected_artifacts": [],
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:profile",
+                    "result_hash": "sha256:synthetic-control-profile",
+                    "source_refs": ["profile:synthetic-control"],
+                }
+            ],
+            "comparative_claims": [],
+        }
+    )
+    catalog = {
+        "synthetic_control.fit": {
+            "capability_kind": "pack",
+            "notebook_proposal_adapters": ["operation.multi_step"],
+        }
+    }
+    agent = NotebookPlanningAgent(adapter=TextOnlyAdapter(), capability_catalog=catalog)
+
+    normalized = agent._validate_submissions(context, evidence, (submission,), catalog)
+
+    assert all(
+        step["operation_id"] != "model.genesis"
+        for step in normalized[0].proposal.changes["steps"]
+    )
+    assert normalized[0].expected_artifacts[0].artifact_type == "notebook_workflow_result"
+
+    placebo_proposal = replace(
+        submission.proposal,
+        changes={
+            "steps": [
+                {
+                    **submission.proposal.changes["steps"][0],
+                    "operation_id": "synthetic_control.placebo",
+                }
+            ]
+        },
+    )
+    leaked_schema_field = replace(
+        submission,
+        capability_id="synthetic_control.placebo",
+        proposal=placebo_proposal,
+        assumptions=("The placebo_policy remains unchanged.",),
+    )
+    with pytest.raises(
+        NotebookPlanningContractError,
+        match="user-visible option text contains internal protocol vocabulary",
+    ):
+        agent._assert_user_visible_domain_language(leaked_schema_field)
+
+
+def test_ordinary_user_goal_reaches_a_typed_p7_plan_without_protocol_language(
+    tmp_path: Path,
+) -> None:
+    """The user supplies an analysis goal; the provider supplies protocol fields."""
+
+    source = ProjectionSource(
+        kind="dataset",
+        upload_sha256="a" * 64,
+        filename="survey.csv",
+        workflow_source=WorkflowSource(
+            run_id="run_source",
+            node_ref="stage:raw",
+            artifact_id="raw_survey.csv",
+            source_sha256="b" * 64,
+        ),
+    )
+    ordinary_goal = "请帮我看看这份问卷数据里哪些变量缺失得最严重。"
+    context = replace(
+        _context(make_project(tmp_path), projection_source=source.to_dict()),
+        user_focus={"goal": ordinary_goal, "interaction_mode": "action"},
+    )
+    pin = NotebookPlanningAgent._typed_operation_contracts(context)[
+        "operation.multi_step"
+    ]
+    evidence = DataEvidencePackV1(
+        source_id="dataset:survey",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:survey",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={"columns": [{"name": "age"}, {"name": "income"}]},
+                result_hash="sha256:survey-profile",
+            ),
+        ),
+    )
+    adapter = ScriptedAdapter(
+        [
+            {
+                "tool_call_id": "submit-p7",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": {
+                    "options": [
+                        {
+                            "rank": 1,
+                            "rationale": "Summarize missing values for every column.",
+                            "assumptions": [],
+                            "capability_id": "missingness.profile",
+                            "option_id": "opt_missingness",
+                            "proposal": {
+                                "proposal_id": "prop_missingness",
+                                "proposal_revision": 1,
+                                "operation_id": "operation.multi_step",
+                                "operation_version": "v1",
+                                "target": pin["target_exact"],
+                                "preconditions": pin["preconditions_exact"],
+                                "changes": {
+                                    "steps": [
+                                        {
+                                            "step_id": "profile_missingness",
+                                            "operation_id": "missingness.profile",
+                                            "spec": {
+                                                "input_mode": "frame",
+                                                "column_bindings": {},
+                                                "options": {},
+                                            },
+                                        }
+                                    ]
+                                },
+                            },
+                            "expected_artifacts": [],
+                            "evidence_refs": [
+                                {
+                                    "evidence_id": "evidence:profile",
+                                    "result_hash": "sha256:survey-profile",
+                                    "source_refs": ["profile:survey"],
+                                }
+                            ],
+                            "comparative_claims": [],
+                        }
+                    ]
+                },
+            }
+        ]
+    )
+
+    result = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={
+            "missingness.profile": {
+                "capability_kind": "pack",
+                "notebook_proposal_adapters": ["operation.multi_step"],
+            }
+        },
+    ).plan(context=context, initial_evidence=evidence)
+    provider_context = json.loads(adapter.requests[0].messages[1]["content"])[
+        "context"
+    ]
+
+    assert (
+        provider_context["content"]["user_focus"]["goal"] == ordinary_goal
+        and all(
+            token not in ordinary_goal
+            for token in ("operation.multi_step", "model.genesis", "capability_id")
+        )
+        and [
+            step["operation_id"]
+            for step in result.submissions[0].proposal.changes["steps"]
+        ]
+        == ["missingness.profile"]
+        and result.submissions[0].expected_artifacts[0].artifact_type
+        == "notebook_workflow_result"
+    )
+
+
+def test_workflow_capability_id_must_not_name_the_multi_step_envelope(tmp_path: Path) -> None:
+    """The workflow envelope is not itself the requested analytical capability."""
 
     source = ProjectionSource(
         kind="dataset",
@@ -675,7 +982,7 @@ def test_workflow_capability_id_must_name_its_model_capability(tmp_path: Path) -
         evidence=DataEvidencePackV1("dataset:source", ()),
         correction_number=1,
     )
-    assert "not an operation id" in correction
+    assert "Do not use operation.multi_step itself" in correction
     assert "time_series.ets" in correction
 
 
@@ -1607,6 +1914,65 @@ def test_provider_gets_bounded_correction_for_invalid_submission(tmp_path: Path)
     assert any(message.get("role") == "tool" and "rejected" in message["content"] for message in correction_messages)
     assert "option evidence ref is missing, changed, or incomplete" in correction_messages[-1]["content"]
     assert "sha256:time-result" in correction_messages[-1]["content"]
+
+
+def test_provider_rewrites_internal_protocol_vocabulary_before_user_visibility(
+    tmp_path: Path,
+) -> None:
+    """Typed execution details must not leak into visible rationale or assumptions."""
+
+    invalid = _submit_call()
+    invalid["options"][0]["assumptions"] = [
+        "The server-side typed adapter contract supplies the remaining fields."
+    ]
+    adapter = ScriptedAdapter(
+        [
+            {
+                "tool_call_id": "inspect-valid",
+                "tool_id": "request_notebook_inspections",
+                "arguments": {
+                    "requests": [
+                        {
+                            "inspection_id": "time_index.v1",
+                            "target_ref": "run:active",
+                            "arguments": {},
+                        }
+                    ]
+                },
+            },
+            {
+                "tool_call_id": "submit-protocol-leak",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": invalid,
+            },
+            {
+                "tool_call_id": "submit-domain-language",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": _submit_call(),
+            },
+        ]
+    )
+    agent = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {}},
+        inspection_executor=lambda requests, current: _evidence(),
+    )
+
+    result = agent.plan(
+        context=_context(make_project(tmp_path)),
+        initial_evidence=DataEvidencePackV1("run:run_001", ()),
+    )
+
+    assert len(result.option_drafts) == 1
+    assert len(adapter.requests) == 3
+    correction = adapter.requests[2].messages[-1]["content"]
+    assert "user-visible option text contains internal protocol vocabulary" in correction
+    assert "domain language" in correction
+    assert all(
+        "typed adapter" not in text.casefold()
+        for draft in result.option_drafts
+        for text in (draft.rationale, *draft.assumptions)
+    )
 
 
 def test_provider_corrects_a_server_recommendation_validation_error(tmp_path: Path) -> None:
@@ -3800,6 +4166,21 @@ def test_notebook_provider_tools_describe_typed_payloads() -> None:
     }.issubset(submission_item["required"])
     assert submission_item["properties"]["proposal"]["properties"]["changes"]["additionalProperties"] is False
     assert "proposal_revision" in submission_item["properties"]["proposal"]["required"]
+
+
+def test_provider_multi_step_schema_uses_the_live_registry_step_shape() -> None:
+    """The provider schema must not drift from the executable workflow vocabulary."""
+
+    provider_changes = NOTEBOOK_TOOLS[1]["input_schema"]["properties"]["options"][
+        "items"
+    ]["properties"]["proposal"]["properties"]["changes"]
+    registry_changes = OperationRegistry().require(
+        "operation.multi_step"
+    ).proposal_schema["properties"]["changes"]
+
+    assert provider_changes["properties"]["steps"] == registry_changes["properties"][
+        "steps"
+    ]
 
 
 def test_provider_failure_is_not_replaced_by_fixed_model_paths(tmp_path: Path) -> None:

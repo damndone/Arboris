@@ -22,6 +22,12 @@ def _journal_packet(*, excluded_fact_ids: list[str] | None = None) -> dict:
         ],
         "figures": [{"artifact_id": "coef_plot", "chart_type": "coefficient"}],
         "excluded_fact_ids": excluded_fact_ids or [],
+        "capability_manifest": [
+            {
+                "capability_id": "regression",
+                "provider_id": "evidence.regression.v1",
+            }
+        ],
     }
 
 
@@ -232,6 +238,7 @@ Limited.
         excluded_fact_ids=contract.excluded_fact_ids,
         report_standard=contract.report_standard,
         required_capabilities=contract.required_capabilities,
+        capability_manifest=contract.capability_manifest,
     )
 
     assert result.status == "needs_revision"
@@ -251,6 +258,16 @@ def test_journal_full_accepts_english_estimation_and_diagnostics_terms() -> None
         excluded_fact_ids=contract.excluded_fact_ids,
         report_standard=contract.report_standard,
         required_capabilities=("model.estimation", "diagnostics.robustness"),
+        capability_manifest=(
+            {
+                "capability_id": "model.estimation",
+                "provider_id": "evidence.estimation.v1",
+            },
+            {
+                "capability_id": "diagnostics.robustness",
+                "provider_id": "evidence.diagnostics.v1",
+            },
+        ),
     )
 
     assert result.status == "exportable"

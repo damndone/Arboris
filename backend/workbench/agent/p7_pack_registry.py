@@ -24,7 +24,9 @@ from workbench.contracts.model.glm_extensions import (
 from workbench.contracts.model.iv_gmm import IV_GMM_CONTRACT, IV_GMM_OPERATION_IDS
 from workbench.contracts.model.matching import MATCHING_CONTRACT, MATCHING_OPERATION_IDS
 from workbench.contracts.model.meta_analysis import (
+    META_ANALYSIS_COMBINE_METHODS,
     META_ANALYSIS_CONTRACT,
+    META_ANALYSIS_EFFECT_MEASURES,
     META_ANALYSIS_OPERATION_IDS,
 )
 from workbench.contracts.model.missing_data import (
@@ -90,6 +92,14 @@ RequestValidator: TypeAlias = Callable[[Request], Request]
 ColumnExtractor: TypeAlias = Callable[[Request], tuple[str, ...]]
 Executor: TypeAlias = Callable[[pd.DataFrame | None, Request], Result]
 ResultValidator: TypeAlias = Callable[[Result], None]
+FrameRequestValidator: TypeAlias = Callable[[pd.DataFrame | None, Request], None]
+
+
+def _no_frame_preflight(
+    _frame: pd.DataFrame | None,
+    _request: Request,
+) -> None:
+    """Default for declarations whose safety contract is frame-independent."""
 
 
 class P7PackRegistryError(ValueError):
@@ -304,6 +314,7 @@ class P7PackOperation:
     extract_columns: ColumnExtractor
     execute: Executor
     validate_result: ResultValidator
+    validate_frame_request: FrameRequestValidator = _no_frame_preflight
     request_schema: P7RequestSchema = field(
         default_factory=lambda: P7RequestSchema((), {})
     )
@@ -322,6 +333,7 @@ class P7PackOperation:
             "extract_columns",
             "execute",
             "validate_result",
+            "validate_frame_request",
         ):
             if not callable(getattr(self, field_name)):
                 raise P7PackRegistryError(
@@ -349,6 +361,13 @@ class P7PackOperation:
         # another required policy option is absent.
         validated = self.validate_request(request)
         self.request_schema.validate(validated)
+        return validated
+
+    def preflight(self, frame: pd.DataFrame | None, request: Request) -> Request:
+        """Validate request semantics that depend on the resolved source frame."""
+
+        validated = self.validate(request)
+        self.validate_frame_request(frame, validated)
         return validated
 
 
@@ -597,6 +616,7 @@ _register_request_schema(
             "balance_threshold": "number",
             "missing_policy": "string",
         },
+        option_enums={"missing_policy": ("reject",)},
     ),
 )
 _register_request_schema(
@@ -614,12 +634,14 @@ _register_request_schema(
             "missing_policy": "string",
             "matched_pairs": "array",
         },
+        option_enums={"missing_policy": ("reject",)},
     ),
 )
 _register_request_schema(
     ("meta.combine",),
     _request_schema(
         ("study_id", "effect", "variance"),
+        required_options=("effect_measure", "method"),
         option_shapes={
             "effect_measure": "string",
             "method": "string",
@@ -631,17 +653,25 @@ _register_request_schema(
             "continuity_correction": "number",
             "zero_correction": "number",
         },
+        option_enums={
+            "effect_measure": tuple(sorted(META_ANALYSIS_EFFECT_MEASURES)),
+            "method": tuple(sorted(META_ANALYSIS_COMBINE_METHODS)),
+        },
     ),
 )
 _register_request_schema(
     ("meta.effect_size",),
     _request_schema(
         ("study_id", "effect", "variance"),
+        required_options=("effect_measure",),
         option_shapes={
             "effect_measure": "string",
             "alpha": "number",
             "continuity_correction": "number",
             "zero_correction": "number",
+        },
+        option_enums={
+            "effect_measure": tuple(sorted(META_ANALYSIS_EFFECT_MEASURES)),
         },
     ),
 )
@@ -1362,6 +1392,7 @@ def _build_initial_operations() -> tuple[P7PackOperation, ...]:
                 extract_columns=adapter.extract_columns,
                 execute=adapter.execute,
                 validate_result=adapter.validate_result,
+                validate_frame_request=adapter.validate_frame_request,
                 request_schema=p7_request_schema(operation_id),
             )
             for operation_id in declaration.operation_ids
@@ -1409,6 +1440,7 @@ def p7_workflow_step_contracts() -> dict[str, object]:
                 dispatcher_key="workbench.agent.workflow_runtime.p7_pack",
                 output_schema_ref=declaration.result_contract,
                 consumes_input_frame=declaration.consumes_input_frame,
+                accepted_dataset_kinds=("derived_data", "prepared_data"),
                 top_level_exposure_note=(
                     f"Composable {declaration.pack_family} step; it is not a standalone "
                     "natural-language proposal until a separate top-level declaration exists."

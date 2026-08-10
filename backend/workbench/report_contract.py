@@ -248,7 +248,7 @@ def _validate_capability_manifest(
             }
         )
     missing = sorted(set(required_capabilities) - set(capability_ids))
-    if value and missing:
+    if missing:
         raise ReportContractError(
             "capability manifest is missing required capabilities: " + ", ".join(missing)
         )

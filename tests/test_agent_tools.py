@@ -753,10 +753,10 @@ def test_existing_openai_compatible_client_wires_and_normalizes_tool_calls(
     ]
 
 
-def test_openai_compatible_adapter_retries_one_malformed_tool_json_response(
+def test_openai_compatible_adapter_keeps_first_malformed_typed_tool_response(
     monkeypatch,
 ) -> None:
-    """A transient provider JSON defect gets one bounded retry, never repair."""
+    """A malformed typed call is first-attempt evidence, never retried or repaired."""
 
     config = LLMConfig(
         base_url="https://api.example.test",
@@ -765,8 +765,8 @@ def test_openai_compatible_adapter_retries_one_malformed_tool_json_response(
     )
     seen: list[httpx.Request] = []
     # A tool-call fragment whose assembled arguments are not valid JSON. The
-    # defect only becomes visible at the end of the stream, so the retry has to
-    # survive a well-formed SSE envelope carrying a malformed payload.
+    # defect only becomes visible at the end of the stream and must remain the
+    # terminal outcome of this exact typed request.
     responses = iter(
         [
             httpx.Response(
@@ -775,18 +775,6 @@ def test_openai_compatible_adapter_retries_one_malformed_tool_json_response(
                     b'data: {"model":"deepseek-chat","choices":[{"delta":{"tool_calls":'
                     b'[{"index":0,"id":"call-bad","type":"function","function":'
                     b'{"name":"inspect_node_context","arguments":"{not-json"}}]},'
-                    b'"finish_reason":null}]}\n\n'
-                    b'data: {"model":"deepseek-chat","choices":[{"delta":{},'
-                    b'"finish_reason":"tool_calls"}]}\n\n'
-                    b"data: [DONE]\n\n"
-                ),
-            ),
-            httpx.Response(
-                200,
-                content=(
-                    b'data: {"model":"deepseek-chat","choices":[{"delta":{"tool_calls":'
-                    b'[{"index":0,"id":"call-good","type":"function","function":'
-                    b'{"name":"inspect_node_context","arguments":"{\\"node_ref\\":\\"model-ols\\"}"}}]},'
                     b'"finish_reason":null}]}\n\n'
                     b'data: {"model":"deepseek-chat","choices":[{"delta":{},'
                     b'"finish_reason":"tool_calls"}]}\n\n'
@@ -826,11 +814,11 @@ def test_openai_compatible_adapter_retries_one_malformed_tool_json_response(
                 )
             )
         ]
-        assert [event.type for event in events] == ["tool_call_delta", "done"]
-        assert events[0].tool_call["tool_call_id"] == "call-good"
+        assert [event.type for event in events] == ["error"]
+        assert events[0].error == "provider_tool_arguments_invalid"
 
     asyncio.run(scenario())
-    assert len(seen) == 2
+    assert len(seen) == 1
 
 
 def test_openai_wire_format_converts_internal_tool_messages(monkeypatch) -> None:

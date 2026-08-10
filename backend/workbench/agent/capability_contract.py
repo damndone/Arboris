@@ -319,9 +319,12 @@ def _model_capabilities() -> list[CapabilityContract]:
     selectable = {
         str(entry["key"]): entry for entry in build_capabilities()["model_types"]
     }
+    workflow_ids = _live_workflow_step_ids()
 
     capabilities: list[CapabilityContract] = []
     for key in sorted({*selectable, *MODEL_FAMILY_CONTRACTS}):
+        if f"model.{key}" in workflow_ids:
+            continue
         entry = selectable.get(key)
         admitted = key in MODEL_FAMILY_CONTRACTS
         if entry is not None:
@@ -411,16 +414,11 @@ def _operation_capabilities() -> list[CapabilityContract]:
 
 
 def _statistical_test_capabilities() -> list[CapabilityContract]:
-    """Every statistical test family, with the reach it actually has: none.
-
-    These run as a pipeline stage inside every model run and are selected by
-    column types, so no operation can name one. They are listed as unreachable
-    rather than omitted, because "cannot be asked for by name" is a finding the
-    inventory exists to make visible, not a reason to leave them out.
-    """
+    """Project legacy test families not already admitted as workflow steps."""
 
     from ..statistical_tests import TEST_FAMILIES
 
+    workflow_ids = _live_workflow_step_ids()
     return [
         CapabilityContract(
             capability_id=f"test.{family}",
@@ -428,22 +426,16 @@ def _statistical_test_capabilities() -> list[CapabilityContract]:
             summary=contract.summary,
         )
         for family, contract in sorted(TEST_FAMILIES.items())
+        if f"test.{family}" not in workflow_ids
     ]
 
 
 def _prediction_capabilities() -> list[CapabilityContract]:
-    """Every prediction model, with the reach it actually has: none.
-
-    A prediction run is requested through the `prediction_model_type` field of
-    the run config, which only the HTTP run form and the CLI populate. No
-    registered operation carries that field -- `model.rerun`'s override set is
-    derived from a family's published params, and `prediction_model_type` is
-    not one of them -- so no Agent can ask for a Lasso prediction at all. That
-    is a finding, so these are listed as unreachable rather than left out.
-    """
+    """Project prediction models not already admitted as workflow steps."""
 
     from workbench.engine.capabilities import build_capabilities
 
+    workflow_ids = _live_workflow_step_ids()
     return [
         CapabilityContract(
             # Prefix plus the registry key verbatim, so the wire value a caller
@@ -464,22 +456,17 @@ def _prediction_capabilities() -> list[CapabilityContract]:
             ),
         )
         for entry in build_capabilities()["prediction_models"]
+        if f"prediction.{entry['key']}" not in workflow_ids
     ]
 
 
 def _data_preparation_capabilities() -> list[CapabilityContract]:
-    """Imputation and class-imbalance resampling, both equally out of reach.
-
-    `imputation_method` and `prediction_sampling_method` are run-config fields
-    on the same footing as `prediction_model_type`: reachable from the run form
-    and the CLI, named by no operation. MICE is the sharper case of the two --
-    it decides whether rows with missing values are dropped or filled, so an
-    Agent driving an analysis cannot influence the sample it estimates on.
-    """
+    """Project preparation methods not already admitted as workflow steps."""
 
     from workbench.engine.capabilities import build_capabilities
 
     manifest = build_capabilities()
+    workflow_ids = _live_workflow_step_ids()
     capabilities = [
         CapabilityContract(
             capability_id=f"imputation.{entry['key']}",
@@ -487,6 +474,7 @@ def _data_preparation_capabilities() -> list[CapabilityContract]:
             summary=str(entry["description"]),
         )
         for entry in manifest["imputation_methods"]
+        if f"imputation.{entry['key']}" not in workflow_ids
     ]
     capabilities.extend(
         CapabilityContract(
@@ -503,6 +491,7 @@ def _data_preparation_capabilities() -> list[CapabilityContract]:
             ),
         )
         for entry in manifest["sampling_methods"]
+        if f"resample.{entry['key']}" not in workflow_ids
     )
     return capabilities
 

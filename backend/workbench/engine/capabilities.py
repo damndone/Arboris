@@ -132,7 +132,7 @@ def register_capability_declaration(declaration: CapabilityDeclaration) -> None:
     _DECLARED_CAPABILITIES[declaration.model_type] = declaration
 
 
-def registered_declared_model_types() -> tuple[str, ...]:
+def registered_declared_model_types(*, bootstrap_packs: bool = True) -> tuple[str, ...]:
     """Return future model types that have both declaration and handler.
 
     This is intentionally narrower than ``MODEL_REGISTRY``: core-only aliases
@@ -140,9 +140,10 @@ def registered_declared_model_types() -> tuple[str, ...]:
     metadata for them.
     """
 
-    from .packs.loader import bootstrap_builtin_packs
+    if bootstrap_packs:
+        from .packs.loader import bootstrap_builtin_packs
 
-    bootstrap_builtin_packs()
+        bootstrap_builtin_packs()
     return tuple(
         key for key in sorted(_DECLARED_CAPABILITIES) if key in MODEL_REGISTRY
     )
@@ -368,14 +369,15 @@ _MODEL_PARAMS: dict[str, list[dict]] = {
 }
 
 
-def build_capabilities() -> dict:
+def build_capabilities(*, bootstrap_packs: bool = True) -> dict:
     """Build the UI capability manifest from registered backend handlers."""
     # A process can query /capabilities before the first estimation. Future
     # declarations must therefore get the same idempotent pack bootstrap as
     # estimation itself rather than depend on a prior run having imported it.
-    from .packs.loader import bootstrap_builtin_packs
+    if bootstrap_packs:
+        from .packs.loader import bootstrap_builtin_packs
 
-    bootstrap_builtin_packs()
+        bootstrap_builtin_packs()
     model_types = [{
         "key": "auto",
         "label": "Auto (infer from y)",
@@ -400,7 +402,7 @@ def build_capabilities() -> dict:
     # New model packs contribute metadata declaratively. A declaration alone is
     # never enough to expose a selectable model: the real handler must be
     # present, otherwise the UI could offer a model the engine cannot resolve.
-    for key in registered_declared_model_types():
+    for key in registered_declared_model_types(bootstrap_packs=bootstrap_packs):
         declaration = _DECLARED_CAPABILITIES[key]
         metadata = V186_MODEL_CAPABILITY_METADATA.get(key)
         if metadata is not None:

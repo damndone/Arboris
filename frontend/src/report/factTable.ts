@@ -43,6 +43,7 @@ export interface FigureFactInput {
 }
 
 const MAX_FIGURE_FACTS = 80;
+const MAX_POST_ESTIMATION_FACTS = 80;
 
 /** Extract only bounded numeric leaves from the serve-time figure source. */
 export function buildFigureFacts(
@@ -55,7 +56,8 @@ export function buildFigureFacts(
 
   for (const figure of figures) {
     const source = figure.source;
-    if (source?.preview_truncated) {
+    const previewWasTruncated = source?.preview_truncated === true;
+    if (previewWasTruncated) {
       facts.push({
         id: nextId(),
         node_key: `figure:${figure.artifact_id}`,
@@ -70,10 +72,25 @@ export function buildFigureFacts(
     try {
       parsed = JSON.parse(source.preview_json) as unknown;
     } catch {
+      if (!previewWasTruncated) {
+        facts.push({
+          id: nextId(),
+          node_key: `figure:${figure.artifact_id}`,
+          node_label: figure.chart_type,
+          field: `figure:${figure.artifact_id}:preview_invalid`,
+          label: `${figure.chart_type} numeric preview unavailable`,
+          value: true,
+        });
+      }
       continue;
     }
     const leaves: Array<{ path: string; value: number }> = [];
-    collectNumericLeaves(parsed, "source", leaves, MAX_FIGURE_FACTS);
+    const locallyTruncated = collectNumericLeaves(
+      parsed,
+      "source",
+      leaves,
+      MAX_FIGURE_FACTS,
+    );
     for (const leaf of leaves) {
       facts.push({
         id: nextId(),
@@ -82,6 +99,16 @@ export function buildFigureFacts(
         field: `figure:${figure.artifact_id}:${leaf.path}`,
         label: `${figure.chart_type} · ${leaf.path}`,
         value: leaf.value,
+      });
+    }
+    if (locallyTruncated && !previewWasTruncated) {
+      facts.push({
+        id: nextId(),
+        node_key: `figure:${figure.artifact_id}`,
+        node_label: figure.chart_type,
+        field: `figure:${figure.artifact_id}:preview_truncated`,
+        label: `${figure.chart_type} numeric preview truncated`,
+        value: true,
       });
     }
   }
@@ -123,6 +150,65 @@ const POST_ESTIMATION_FACT_LABELS: Record<string, string> = {
   "model.white_test": "White test",
 };
 
+function workflowProviderId(entry: PostEstimationResult): string | undefined {
+  if (entry.artifact_type === "p7_analysis") return "evidence.workflow.p7.v1";
+  if (entry.artifact_type === "workflow_capability_result") {
+    return "evidence.workflow.capability.v1";
+  }
+  return undefined;
+}
+
+function workflowProvenance(entry: PostEstimationResult): Record<string, unknown> {
+  const provenance: Record<string, unknown> = {
+    artifact_type: entry.artifact_type,
+    operation_id: entry.operation_id,
+    workflow_id: entry.workflow_id,
+    workflow_step_id: entry.workflow_step_id,
+  };
+  for (const key of [
+    "pack_family",
+    "source_sha256",
+    "request_fingerprint",
+    "result_sha256",
+    "result_schema",
+  ] as const) {
+    const value = entry[key];
+    if (value !== undefined && value !== "") provenance[key] = value;
+  }
+  return provenance;
+}
+
+const POST_ESTIMATION_ENVELOPE_FIELDS = new Set([
+  "schema_version",
+  "contract",
+  "contract_version",
+  "operation_id",
+]);
+
+function collectPostEstimationAtomicValues(
+  value: unknown,
+  path: string[],
+  emit: (path: string[], value: string | number | boolean) => boolean,
+): boolean {
+  if (isAtomicFact(value)) {
+    return path.length > 0 ? emit(path, value) : true;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      if (!collectPostEstimationAtomicValues(item, [...path, `[${index}]`], emit)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (!value || typeof value !== "object") return true;
+  for (const [key, item] of Object.entries(value)) {
+    if (POST_ESTIMATION_ENVELOPE_FIELDS.has(key)) continue;
+    if (!collectPostEstimationAtomicValues(item, [...path, key], emit)) return false;
+  }
+  return true;
+}
+
 /** Make declared post-estimation results citable in a generated report.
  *
  * These are server-computed scalars with artifact provenance, so they belong
@@ -141,9 +227,16 @@ export function buildPostEstimationFacts(
   for (const entry of results) {
     const label =
       POST_ESTIMATION_FACT_LABELS[entry.operation_id] ?? entry.operation_id;
-    for (const [key, value] of Object.entries(entry.result)) {
-      if (key === "schema_version" || !isAtomicFact(value)) continue;
-      if (facts.length >= 80) return facts;
+    const providerId = workflowProviderId(entry);
+    let truncated = false;
+    collectPostEstimationAtomicValues(entry.result, [], (path, value) => {
+      // Reserve one slot for a visible truncation marker. Without it, a large
+      // result could look complete while later atomic evidence was discarded.
+      if (facts.length >= MAX_POST_ESTIMATION_FACTS - 1) {
+        truncated = true;
+        return false;
+      }
+      const key = path.join(":");
       facts.push({
         id: `c${++counter}`,
         node_key: `post_estimation:${entry.workflow_step_id}`,
@@ -151,7 +244,25 @@ export function buildPostEstimationFacts(
         field: `post_estimation:${entry.workflow_step_id}:${key}`,
         label: `${label} — ${key.replace(/_/g, " ")}`,
         value,
+        ...(providerId ? { provider_id: providerId } : {}),
+        artifact_ids: [entry.artifact_id],
+        qualifiers: workflowProvenance(entry),
       });
+      return true;
+    });
+    if (truncated) {
+      facts.push({
+        id: `c${++counter}`,
+        node_key: `post_estimation:${entry.workflow_step_id}`,
+        node_label: label,
+        field: `post_estimation:${entry.workflow_step_id}:facts_truncated`,
+        label: `${label} — evidence truncated at ${MAX_POST_ESTIMATION_FACTS - 1} facts`,
+        value: true,
+        ...(providerId ? { provider_id: providerId } : {}),
+        artifact_ids: [entry.artifact_id],
+        qualifiers: workflowProvenance(entry),
+      });
+      return facts;
     }
   }
   return facts;
@@ -299,24 +410,28 @@ function collectNumericLeaves(
   path: string,
   leaves: Array<{ path: string; value: number }>,
   limit: number,
-): void {
-  if (leaves.length >= limit) return;
+): boolean {
   if (typeof value === "number" && Number.isFinite(value)) {
+    if (leaves.length >= limit) return true;
     leaves.push({ path, value });
-    return;
+    return false;
   }
   if (Array.isArray(value)) {
-    value.forEach((item, index) => {
-      collectNumericLeaves(item, `${path}[${index}]`, leaves, limit);
-    });
-    return;
+    for (const [index, item] of value.entries()) {
+      if (collectNumericLeaves(item, `${path}[${index}]`, leaves, limit)) {
+        return true;
+      }
+    }
+    return false;
   }
   if (value && typeof value === "object") {
     for (const [key, item] of Object.entries(value)) {
-      collectNumericLeaves(item, `${path}.${key}`, leaves, limit);
-      if (leaves.length >= limit) return;
+      if (collectNumericLeaves(item, `${path}.${key}`, leaves, limit)) {
+        return true;
+      }
     }
   }
+  return false;
 }
 
 export function buildFactTable(

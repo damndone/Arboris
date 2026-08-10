@@ -58,6 +58,13 @@ import {
   normalizeV186ModelOptions,
   type V186ModelOptionsByType,
 } from "../../runForm/V186ModelControls";
+import {
+  ServerOwnedModelOptions,
+  isServerOwnedObjectComplete,
+  type ServerOwnedObjectControl,
+  type ServerOwnedSchemaProperty,
+} from "./ServerOwnedModelOptions";
+import type { Capabilities } from "../../capabilities/types";
 
 type BusyState =
   | "resume"
@@ -121,6 +128,58 @@ function firstNumber(value: unknown): number | null {
   return null;
 }
 
+type GenesisServerControl = {
+  key: string;
+  kind: string;
+  label?: string;
+  required?: boolean;
+  value?: unknown;
+  options?: unknown[];
+  role?: string;
+  schema?: {
+    type: "object";
+    required?: string[];
+    properties?: Record<string, ServerOwnedSchemaProperty>;
+    additionalProperties?: boolean;
+  };
+};
+
+function serverControls(node: PipelineDraftNode | null): GenesisServerControl[] {
+  if (!node || node.node_type !== "model" || !Array.isArray(node.editable_schema)) {
+    return [];
+  }
+  return node.editable_schema.filter(
+    (item): item is GenesisServerControl =>
+      Boolean(item && typeof item === "object" && "key" in item && typeof item.key === "string"),
+  );
+}
+
+function capabilityEntry(capabilities: Capabilities | null | undefined, modelType: string) {
+  return capabilities?.model_types?.find((entry) => entry.key === modelType);
+}
+
+function capabilityUsesObjectOnlyInput(
+  capabilities: Capabilities | null | undefined,
+  modelType: string,
+): boolean {
+  const params = capabilityEntry(capabilities, modelType)?.params ?? [];
+  return (
+    params.some((param) => param.key === "model_options") &&
+    !params.some((param) => param.key === "y" || param.key === "x")
+  );
+}
+
+function schemaUsesObjectOnlyInput(controls: GenesisServerControl[]): boolean {
+  return (
+    controls.some((control) => control.key === "model_options" && control.kind === "object") &&
+    !controls.some((control) => control.key === "y" || control.key === "x")
+  );
+}
+
+function hasSpecializedModelOptionsEditor(modelType: string): boolean {
+  return modelType === "time_series.arma_garch" || modelType === "anova";
+}
+
 export function GenesisWizard({
   projectRoot,
   onClose,
@@ -144,6 +203,9 @@ export function GenesisWizard({
   const [tableConfigured, setTableConfigured] = useState(false);
   const [modelConfigured, setModelConfigured] = useState(false);
   const [modelType, setModelType] = useState("auto");
+  const [serverModelSchemaId, setServerModelSchemaId] = useState("");
+  const [serverModelControls, setServerModelControls] = useState<GenesisServerControl[]>([]);
+  const [serverModelOptions, setServerModelOptions] = useState<Record<string, unknown>>({});
   const [imputationMethod, setImputationMethod] = useState<string | null>(null);
   const [entityCol, setEntityCol] = useState("");
   const [timeCol, setTimeCol] = useState("");
@@ -223,6 +285,15 @@ export function GenesisWizard({
     return findNode(draft, "table")?.columns ?? [];
   }, [draft, preview]);
 
+  const serverModelOptionsControl = serverModelControls.find(
+    (control) => control.key === "model_options" && control.kind === "object",
+  );
+  const isRecipeModel =
+    capabilityUsesObjectOnlyInput(capabilities, modelType) ||
+    schemaUsesObjectOnlyInput(serverModelControls);
+  const usesGenericRecipeEditor =
+    isRecipeModel && !hasSpecializedModelOptionsEditor(modelType);
+
   useEffect(() => {
     let cancelled = false;
     listPipelineDrafts(projectRoot)
@@ -265,6 +336,17 @@ export function GenesisWizard({
     const model = findNode(response.draft, "model");
     const tableParams = table?.params ?? {};
     const modelParams = model?.params ?? {};
+    const nextServerControls = serverControls(model);
+    if (nextServerControls.length > 0) setServerModelControls(nextServerControls);
+    if (model?.schema_id) setServerModelSchemaId(model.schema_id);
+    const savedModelOptions = modelParams.model_options;
+    if (
+      savedModelOptions &&
+      typeof savedModelOptions === "object" &&
+      !Array.isArray(savedModelOptions)
+    ) {
+      setServerModelOptions(savedModelOptions as Record<string, unknown>);
+    }
     setSheetName(
       (current) =>
         firstString(tableParams.sheet_name) || current || source?.sheet_names[0] || "",
@@ -290,7 +372,7 @@ export function GenesisWizard({
     const savedCovariance = firstString(modelParams.covariance);
     if (savedCovariance) setCovariance(savedCovariance);
     if (savedType === "linear_mixed_effects") {
-      const savedOptions = modelParams.model_options;
+      const savedOptions = savedModelOptions;
       if (savedOptions && typeof savedOptions === "object" && !Array.isArray(savedOptions)) {
         const options = savedOptions as Record<string, unknown>;
         setLmmValue((current) => ({
@@ -309,7 +391,7 @@ export function GenesisWizard({
       }
     }
     if (savedType === "time_series.arma_garch") {
-      const savedOptions = modelParams.model_options;
+      const savedOptions = savedModelOptions;
       if (savedOptions && typeof savedOptions === "object" && !Array.isArray(savedOptions)) {
         setArmaGarchValue((current) =>
           armaGarchValueFromModelOptions(savedOptions as Record<string, unknown>, current),
@@ -319,7 +401,7 @@ export function GenesisWizard({
     if (isV186ModelType(savedType)) {
       setV186ModelOptionsByType((current) => ({
         ...current,
-        [savedType]: normalizeV186ModelOptions(savedType, modelParams.model_options),
+        [savedType]: normalizeV186ModelOptions(savedType, savedModelOptions),
       }));
     }
     const savedImputation = firstString(modelParams.imputation);
@@ -360,7 +442,10 @@ export function GenesisWizard({
           current.mode,
         entity: savedEntity || current.entity,
         time: savedTime || current.time,
-        cohort: firstString(modelParams.did_cohort_col) || current.cohort,
+        cohort:
+          firstString(modelParams.cohort_col)
+          || firstString(modelParams.did_cohort_col)
+          || current.cohort,
         treat: firstString(modelParams.did_treat_col) || current.treat,
         post: firstString(modelParams.did_post_col) || current.post,
         status: firstString(modelParams.did_status_col) || current.status,
@@ -370,7 +455,9 @@ export function GenesisWizard({
         entity: savedEntity || current.entity,
         time: savedTime || current.time,
         treatmentPath:
-          firstString(modelParams.did_treatment_path) || current.treatmentPath,
+          firstString(modelParams.treatment_path_col)
+          || firstString(modelParams.did_treatment_path)
+          || current.treatmentPath,
         clusterVar: firstString(modelParams.cs_cluster_var) || current.clusterVar,
       }));
     } else {
@@ -594,24 +681,26 @@ export function GenesisWizard({
         )
       : usesDidRoles
         ? xColumns.filter((col) => !didRoleCols.includes(col))
-        : isDcdh
-          ? xColumns.filter((col) => !dcdhRoleCols.includes(col))
-          : xColumns;
+          : isDcdh
+            ? xColumns.filter((col) => !dcdhRoleCols.includes(col))
+            : xColumns;
     const defaultCovariance = covariance || covarianceDefault(capabilities);
-    const params: Record<string, unknown> = {
-      model_type: modelType,
-      y: modelType === "time_series.arma_garch" ? armaGarchValue.valueColumn : y.trim(),
-      x: modelType === "time_series.arma_garch" ? [] : exogColumns,
-    };
-    if (imputationMethod) params.imputation = JSON.stringify({ method: imputationMethod });
-    if (!isDID && !usesCsParams && !isDcdh && defaultCovariance) {
+    const params: Record<string, unknown> = { model_type: modelType };
+    if (!isRecipeModel) {
+      params.y = y.trim();
+      params.x = exogColumns;
+    }
+    if (!isRecipeModel && imputationMethod) {
+      params.imputation = JSON.stringify({ method: imputationMethod });
+    }
+    if (!isRecipeModel && !isDID && !usesCsParams && !isDcdh && defaultCovariance) {
       params.covariance = defaultCovariance;
     }
-    if (modelType === "panel_ols") {
+    if (!isRecipeModel && modelType === "panel_ols") {
       if (entityCol) params.entity_col = entityCol;
       if (timeCol) params.time_col = timeCol;
     }
-    if (modelType === "linear_mixed_effects") {
+    if (!isRecipeModel && modelType === "linear_mixed_effects") {
       params.model_options = lmmValue;
     }
     if (modelType === "time_series.arma_garch") {
@@ -621,26 +710,32 @@ export function GenesisWizard({
       params.model_options = buildArmaGarchModelOptions(
         armaGarchValue,
         `upload:${sourceFilename}`,
+        false,
       );
     }
-    if (isV186ModelType(modelType)) {
+    if (usesGenericRecipeEditor) {
+      params.model_options = serverModelOptions;
+    }
+    if (!isRecipeModel && isV186ModelType(modelType)) {
       params.model_options =
         v186ModelOptionsByType[modelType] ?? defaultV186ModelOptions(modelType);
     }
-    if (isIV) {
+    if (!isRecipeModel && isIV) {
       if (ivRole.endog.length > 0) params.iv_endog = ivRole.endog;
       if (ivRole.instruments.length > 0) params.iv_instruments = ivRole.instruments;
     }
-    if (usesDidRoles) {
+    if (!isRecipeModel && usesDidRoles) {
       if (didRole.entity) params.entity_col = didRole.entity;
       if (didRole.time) params.time_col = didRole.time;
       params.did_mode = didRole.mode;
-      if (didRole.cohort) params.did_cohort_col = didRole.cohort;
+      if (didRole.cohort) {
+        params[isCsDid || isSaDid ? "cohort_col" : "did_cohort_col"] = didRole.cohort;
+      }
       if (didRole.treat) params.did_treat_col = didRole.treat;
       if (didRole.post) params.did_post_col = didRole.post;
       if (didRole.status) params.did_status_col = didRole.status;
     }
-    if (usesCsParams) {
+    if (!isRecipeModel && usesCsParams) {
       params.cs_control_group = csValue.controlGroup;
       params.cs_est_method = csValue.estMethod;
       params.cs_base_period = csValue.basePeriod;
@@ -648,13 +743,13 @@ export function GenesisWizard({
       if (csValue.clusterVar) params.cs_cluster_var = csValue.clusterVar;
       if (csValue.honestDid) params.honest_did = true;
     }
-    if (isDcdh) {
+    if (!isRecipeModel && isDcdh) {
       if (dcdhValue.entity) params.entity_col = dcdhValue.entity;
       if (dcdhValue.time) params.time_col = dcdhValue.time;
-      if (dcdhValue.treatmentPath) params.did_treatment_path = dcdhValue.treatmentPath;
+      if (dcdhValue.treatmentPath) params.treatment_path_col = dcdhValue.treatmentPath;
       if (dcdhValue.clusterVar) params.cs_cluster_var = dcdhValue.clusterVar;
     }
-    if (predictionEnabled) {
+    if (!isRecipeModel && predictionEnabled) {
       if (predictionModelType) params.prediction_model_type = predictionModelType;
       params.prediction_cv_folds = predictionCvFolds;
       if (predictionSampling) params.prediction_sampling_method = predictionSampling;
@@ -665,22 +760,22 @@ export function GenesisWizard({
       params.prediction_final_holdout_fraction = predictionFinalHoldoutFraction;
       params.prediction_shuffle = predictionShuffle;
     }
-    if (frequencyWeight || weightParamsPresent.frequency) {
+    if (!isRecipeModel && (frequencyWeight || weightParamsPresent.frequency)) {
       params.frequency_weight = frequencyWeight;
     }
-    if (analysisWeight || weightParamsPresent.analysis) {
+    if (!isRecipeModel && (analysisWeight || weightParamsPresent.analysis)) {
       params.analysis_weight = analysisWeight;
     }
-    if (samplingWeight || weightParamsPresent.sampling) {
+    if (!isRecipeModel && (samplingWeight || weightParamsPresent.sampling)) {
       params.sampling_weight = samplingWeight;
     }
-    if (!isIV && !usesDidRoles && !isDcdh && focal.length > 0) {
+    if (!isRecipeModel && !isIV && !usesDidRoles && !isDcdh && focal.length > 0) {
       params.focal_x = focal.filter((col) => exogColumns.includes(col));
     }
     // Sent only when a design was actually declared: the backend keys its
     // refusal of a sampling weight on whether one is present, so an empty
     // field must not read as a declaration.
-    if (hasSurveyDesign(surveyDesign)) {
+    if (!isRecipeModel && hasSurveyDesign(surveyDesign)) {
       params.survey_strata_col = surveyDesign.survey_strata_col;
       params.survey_psu_col = surveyDesign.survey_psu_col;
       params.survey_fpc_col = surveyDesign.survey_fpc_col;
@@ -698,6 +793,40 @@ export function GenesisWizard({
       params.model_options = JSON.stringify(toAnovaModelOptions(anovaOptions));
     }
     return params;
+  }
+
+  async function handleModelTypeChange(nextType: string) {
+    const currentModel = findNode(draft, "model");
+    const currentType =
+      firstString(currentModel?.params.model_type) || currentModel?.model_type || "auto";
+    setModelType(nextType);
+    setValidation(null);
+    setError(null);
+    if (
+      !draft ||
+      !tableConfigured ||
+      nextType === currentType ||
+      !capabilityUsesObjectOnlyInput(capabilities, nextType) ||
+      hasSpecializedModelOptionsEditor(nextType)
+    ) {
+      return;
+    }
+
+    setBusy("model");
+    try {
+      const response = await patchDraftNode(projectRoot, draft.draft_id, "model_1", {
+        params: { model_type: nextType },
+      });
+      // The selection-only response is the authoritative family schema. It is
+      // intentionally pending until the generic editor submits all required
+      // values; no client-side schema is invented in the meantime.
+      adoptDraft(response);
+    } catch (err) {
+      setModelType(currentType);
+      setError(err instanceof Error ? err.message : "Could not select the model family");
+    } finally {
+      setBusy(null);
+    }
   }
 
   function setXSelection(column: string, checked: boolean) {
@@ -720,6 +849,17 @@ export function GenesisWizard({
       const issues = armaGarchValidationErrors(armaGarchValue);
       if (issues.length > 0) {
         setError(issues[0]);
+        return;
+      }
+    } else if (usesGenericRecipeEditor) {
+      if (
+        !serverModelOptionsControl ||
+        !isServerOwnedObjectComplete(
+          serverModelOptionsControl as ServerOwnedObjectControl,
+          serverModelOptions,
+        )
+      ) {
+        setError("Complete the required fields in the server-owned model schema.");
         return;
       }
     } else if (!y.trim() || (modelType !== "linear_mixed_effects" && xColumns.length === 0)) {
@@ -832,11 +972,20 @@ export function GenesisWizard({
   const canSaveTable = Boolean(draftId && (sheetName || sourceSheetNames.length === 0));
   const lmmRolesConfigured = Boolean(lmmValue.subject_id && lmmValue.time && lmmValue.group);
   const armaGarchConfigured = armaGarchValidationErrors(armaGarchValue).length === 0;
+  const genericRecipeConfigured = Boolean(
+    serverModelOptionsControl &&
+      isServerOwnedObjectComplete(
+        serverModelOptionsControl as ServerOwnedObjectControl,
+        serverModelOptions,
+      ),
+  );
   const canSaveModel = Boolean(
     draftId &&
       tableConfigured &&
       (modelType === "time_series.arma_garch"
         ? armaGarchConfigured
+        : usesGenericRecipeEditor
+          ? genericRecipeConfigured
         : y.trim() &&
           (modelType === "linear_mixed_effects" ? lmmRolesConfigured : xColumns.length > 0)),
   );
@@ -947,7 +1096,7 @@ export function GenesisWizard({
             <ModelTypeSelect
               capabilities={capabilities}
               value={modelType}
-              onChange={setModelType}
+              onChange={handleModelTypeChange}
             />
           </label>
           {modelType === "anova" && (
@@ -1009,6 +1158,16 @@ export function GenesisWizard({
                   ...current,
                   [modelType]: options,
                 }));
+              }}
+            />
+          )}
+          {usesGenericRecipeEditor && serverModelOptionsControl && (
+            <ServerOwnedModelOptions
+              control={serverModelOptionsControl as ServerOwnedObjectControl}
+              value={serverModelOptions}
+              disabled={busy !== null}
+              onChange={(key, value) => {
+                setServerModelOptions((current) => ({ ...current, [key]: value }));
               }}
             />
           )}
@@ -1169,6 +1328,11 @@ export function GenesisWizard({
               onY={setY}
               onX={setXSelection}
             />
+          )}
+          {serverModelSchemaId && modelType !== "auto" && (
+            <p className="ios-hint" data-testid="genesis-server-schema">
+              Server schema: <span className="mono">{serverModelSchemaId}</span>
+            </p>
           )}
           <button
             type="button"

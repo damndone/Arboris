@@ -93,6 +93,13 @@ class OptionExecutionReceiptRequired(NotebookOptionError):
     status_code = 409
 
 
+class OptionClientExecutionFactsForbidden(NotebookOptionError):
+    """The public completion route cannot accept caller-authored run facts."""
+
+    code = "NOTEBOOK_CLIENT_EXECUTION_FACTS_FORBIDDEN"
+    status_code = 409
+
+
 class OptionExecutionGatewayUnavailable(NotebookOptionError):
     """Explicit execution confirmation has no trusted gateway on this host."""
 
@@ -141,6 +148,7 @@ __all__ = [
     "NotebookOptionError",
     "NotebookRunFamilyImmutable",
     "OptionBatchInvalid",
+    "OptionClientExecutionFactsForbidden",
     "OptionExecutionReceiptRequired",
     "OptionExecutionGatewayUnavailable",
     "OptionLifecycleTransitionInvalid",

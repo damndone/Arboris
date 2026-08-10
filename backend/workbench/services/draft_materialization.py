@@ -37,6 +37,564 @@ _TERMINAL_RUN_STATUSES = {
     "completed", "failed", "cancelled", "interrupted", "partial", "blocked",
 }
 
+GENESIS_SELECTOR_SCHEMA_ID = "genesis.selector@v1"
+
+
+def _genesis_column_kind(key: str, raw_kind: str | None) -> str:
+    """Return the wire shape used by the Genesis model-parameter editor."""
+
+    if raw_kind in {"columns", "multiselect"}:
+        return "columns"
+    return "column"
+
+
+def _recipe_leaf_schema(
+    field: Mapping[str, Any],
+    columns: tuple[str, ...],
+    *,
+    server_owned: bool = False,
+) -> dict[str, Any]:
+    """Project one declared Recipe field without flattening its wire path."""
+
+    property_schema: dict[str, Any] = {}
+    kind = field.get("kind")
+    declared_type = field.get("type")
+    if kind in {"column", "column_name"}:
+        property_schema["type"] = "string"
+        property_schema["column_options"] = list(columns)
+    elif kind == "positive_integer":
+        property_schema["type"] = "integer"
+        property_schema["minimum"] = 1
+    elif kind == "integer":
+        property_schema["type"] = "integer"
+    elif kind == "boolean":
+        property_schema["type"] = "boolean"
+    elif declared_type in {"string", "integer", "number", "boolean", "array", "object"}:
+        property_schema["type"] = declared_type
+
+    allowed_values = field.get("allowed_values")
+    enum_values = field.get("enum", allowed_values)
+    if isinstance(enum_values, list) and enum_values:
+        property_schema["enum"] = list(enum_values)
+    for bound in ("minimum", "maximum"):
+        value = field.get(bound)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            property_schema[bound] = value
+    if field.get("nullable") is True:
+        property_schema["nullable"] = True
+    if server_owned or field.get("agent_editable") is False:
+        property_schema["server_owned"] = True
+    return property_schema
+
+
+def _insert_recipe_field(
+    schema: dict[str, Any],
+    path: str,
+    field: Mapping[str, Any],
+    columns: tuple[str, ...],
+    *,
+    server_owned: bool = False,
+) -> None:
+    """Insert a dotted declaration into a nested object schema."""
+
+    segments = [segment for segment in path.split(".") if segment]
+    if not segments:
+        return
+    cursor = schema
+    for segment in segments[:-1]:
+        properties = cursor.setdefault("properties", {})
+        existing = properties.get(segment)
+        if existing is None:
+            existing = {
+                "type": "object",
+                "required": [],
+                "properties": {},
+                "additionalProperties": False,
+            }
+            properties[segment] = existing
+        elif existing.get("type") != "object":
+            raise ValueError(f"Recipe field path conflicts at {segment!r}")
+        cursor = existing
+    leaf_name = segments[-1]
+    properties = cursor.setdefault("properties", {})
+    properties[leaf_name] = _recipe_leaf_schema(
+        field,
+        columns,
+        server_owned=server_owned,
+    )
+    if field.get("required") is True:
+        required = cursor.setdefault("required", [])
+        if leaf_name not in required:
+            required.append(leaf_name)
+
+
+def _recipe_option_schema(model_type: str, columns: tuple[str, ...]) -> dict[str, Any]:
+    from ..agent.recipe_contracts import recipe_contract_for_model_type
+
+    contract = recipe_contract_for_model_type(model_type)
+    if contract is None:
+        return {}
+    raw_fields = (contract.parameter_vocabulary or {}).get("fields", {})
+    if isinstance(raw_fields, list):
+        fields = {
+            str(item.get("path")): item
+            for item in raw_fields
+            if isinstance(item, Mapping) and item.get("path")
+        }
+    elif isinstance(raw_fields, Mapping):
+        fields = {
+            str(name): value
+            for name, value in raw_fields.items()
+            if isinstance(value, Mapping)
+        }
+    else:
+        fields = {}
+    schema: dict[str, Any] = {
+        "type": "object",
+        "required": [],
+        "properties": {},
+        "additionalProperties": False,
+    }
+    for name, field in fields.items():
+        _insert_recipe_field(schema, name, field, columns)
+    for name in contract.source_option_fields:
+        if name not in schema["properties"]:
+            _insert_recipe_field(
+                schema,
+                name,
+                {"kind": "column", "required": True},
+                columns,
+            )
+        required = schema.setdefault("required", [])
+        if name not in required:
+            required.append(name)
+    for name in contract.server_owned_option_fields:
+        _insert_recipe_field(
+            schema,
+            name,
+            {"type": "string", "required": True},
+            columns,
+            server_owned=True,
+        )
+    return schema
+
+
+def _family_option_schema(
+    model_type: str,
+    columns: tuple[str, ...],
+    *,
+    covariance_options: tuple[str, ...] = (),
+    exposes_covariance: bool = False,
+) -> dict[str, Any]:
+    from ..agent.workflow_contracts import model_family_contract
+
+    contract = model_family_contract(model_type)
+    properties: dict[str, dict[str, Any]] = {}
+    for name in contract.model_options_fields:
+        # Do not invent a scalar type for a family option whose contract
+        # validator has not declared one.  The family validator remains the
+        # source of truth; an invented string type would reject valid arrays
+        # and numbers before that validator can inspect them.
+        property_schema: dict[str, Any] = {}
+        if name in contract.model_options_column_fields:
+            property_schema = {"type": "string", "column_options": list(columns)}
+        elif name == "random_slope":
+            property_schema = {"type": "boolean"}
+        elif name in {"maxiter", "bootstrap_reps", "random_state"}:
+            property_schema = {"type": "integer"}
+        properties[name] = property_schema
+    if exposes_covariance and covariance_options:
+        # OLS keeps the human-facing top-level covariance control for legacy
+        # runs, while the typed Agent envelope stores the same declaration
+        # under model_options. The live capability manifest owns the values.
+        properties.setdefault(
+            "covariance",
+            {"type": "string", "enum": list(covariance_options)},
+        )
+    return {
+        "type": "object",
+        "required": list(contract.model_options_required_fields),
+        "properties": properties,
+        "additionalProperties": False,
+    }
+
+
+def _family_wire_projection(
+    model_type: str,
+    family: Any,
+) -> tuple[dict[str, Any], dict[str, list[str]]]:
+    """Probe the declared family builder to discover its persisted wire keys."""
+
+    if not family.builds_native_params:
+        return {}, {}
+    family_spec: dict[str, Any] = {
+        "model_family": model_type,
+        "branches": [{"branch_id": "schema_probe", "outcome": "__outcome__", "predictors": []}],
+    }
+    for field_name in family.context_spec_fields:
+        if field_name in {"iv_endog", "iv_instruments"}:
+            family_spec[field_name] = [f"__{field_name}__"]
+        elif field_name == "did_mode":
+            family_spec[field_name] = "cohort"
+        else:
+            family_spec[field_name] = f"__{field_name}__"
+    try:
+        projected = family.build_model_params(
+            family_spec,
+            {"outcome": "__outcome__"},
+            [],
+            "unadjusted",
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            f"MODEL_FAMILY_SCHEMA_PROJECTION_FAILED: {model_type}"
+        ) from exc
+    if not isinstance(projected, Mapping):
+        raise ValueError(f"MODEL_FAMILY_SCHEMA_PROJECTION_FAILED: {model_type}")
+    aliases: dict[str, list[str]] = {}
+    for field_name in family.context_spec_fields:
+        source_value = family_spec[field_name]
+        matching = [
+            str(key)
+            for key, value in projected.items()
+            if str(key) != field_name and value == source_value
+        ]
+        if matching:
+            aliases[field_name] = sorted(matching)
+    return dict(projected), aliases
+
+
+def _family_context_wire_kind(
+    field_name: str,
+    family: Any,
+    projected_params: Mapping[str, Any],
+    projected_aliases: Mapping[str, list[str]],
+) -> str:
+    """Derive a context control's scalar/list shape from its family builder."""
+
+    if field_name not in family.column_spec_fields:
+        return "column"
+    candidate_keys = [field_name, *projected_aliases.get(field_name, [])]
+    if any(isinstance(projected_params.get(key), list) for key in candidate_keys):
+        return "columns"
+    return "column"
+
+
+def _genesis_model_editor_schema(
+    model_type: str | None,
+    columns: tuple[str, ...],
+) -> tuple[str, list[dict[str, Any]]]:
+    """Build the server-owned two-phase Genesis editor schema.
+
+    The model selector and field vocabulary come from the live capability
+    manifest. Family and Recipe contracts add roles that the generic manifest
+    intentionally does not own. Column options are projected from the current
+    table node, so a schema hash always identifies both the selected family and
+    the source columns it is allowed to read.
+    """
+
+    from ..agent.recipe_contracts import recipe_contract_for_model_type
+    from ..agent.workflow_contracts import (
+        DID_MODE_VALUES,
+        WORKFLOW_SPLIT_KINDS,
+        model_family_contract,
+    )
+    from ..engine.cs_attgt import (
+        CS_BASE_PERIOD_VALUES,
+        CS_CONTROL_GROUP_VALUES,
+        CS_EST_METHOD_VALUES,
+    )
+    from ..engine.capabilities import build_capabilities
+
+    manifest = build_capabilities()
+    model_entries = {
+        str(entry["key"]): entry
+        for entry in manifest.get("model_types", [])
+        if isinstance(entry, Mapping) and entry.get("key")
+    }
+    model_options = sorted(model_entries)
+    selected = model_type or "auto"
+    if selected not in model_options:
+        raise ValueError(f"MODEL_TYPE_UNSUPPORTED: {selected}")
+    if model_type is None:
+        return GENESIS_SELECTOR_SCHEMA_ID, [
+            {
+                "key": "model_type",
+                "kind": "select",
+                "label": "Model",
+                "required": True,
+                "options": model_options,
+            },
+            {
+                "key": "y",
+                "kind": "column",
+                "label": "Dependent variable (y)",
+                "required": True,
+                "options": list(columns),
+            },
+            {
+                "key": "x",
+                "kind": "columns",
+                "label": "Regressors (X)",
+                "required": True,
+                "options": list(columns),
+            },
+        ]
+
+    entry = model_entries[selected]
+    recipe = recipe_contract_for_model_type(selected)
+    family = None if recipe is not None else model_family_contract(selected)
+    projected_params, projected_aliases = (
+        _family_wire_projection(selected, family)
+        if family is not None
+        else ({}, {})
+    )
+    controls: dict[str, dict[str, Any]] = {}
+
+    def add(control: Mapping[str, Any]) -> None:
+        key = str(control.get("key") or "")
+        if not key:
+            return
+        current = controls.get(key)
+        if current is None:
+            controls[key] = dict(control)
+        else:
+            merged = {**current, **dict(control)}
+            if current.get("required") is True or control.get("required") is True:
+                merged["required"] = True
+            controls[key] = merged
+
+    for raw in entry.get("params") or ():
+        if not isinstance(raw, Mapping):
+            continue
+        control = dict(raw)
+        key = str(control.get("key") or "")
+        if key == "model_type":
+            control.update(required=True, options=model_options)
+        elif key == "model_options":
+            control["kind"] = "object"
+            control.pop("options", None)
+            control["schema"] = (
+                _recipe_option_schema(selected, columns)
+                if recipe is not None
+                else _family_option_schema(
+                    selected,
+                    columns,
+                    covariance_options=tuple(
+                        str(item.get("key"))
+                        for item in manifest.get("covariance_options", [])
+                        if isinstance(item, Mapping) and item.get("key")
+                    ),
+                    exposes_covariance=bool(
+                        family is not None
+                        and family.allows_covariance
+                        and any(
+                            isinstance(item, Mapping)
+                            and item.get("key") == "covariance"
+                            for item in (entry.get("params") or ())
+                        )
+                    ),
+                )
+            )
+        elif key == "x" and family is not None:
+            control["required"] = bool(family.requires_nonempty_predictors)
+        elif family is not None and key in family.column_spec_fields:
+            control["options"] = list(columns)
+            control["kind"] = _family_context_wire_kind(
+                key,
+                family,
+                projected_params,
+                projected_aliases,
+            )
+        elif key in {"x", "focal_x"} or control.get("kind") == "columns":
+            control["options"] = list(columns)
+            control["kind"] = _genesis_column_kind(key, str(control.get("kind") or ""))
+        elif key.endswith("_weight") or key.endswith("_col"):
+            control["options"] = list(columns)
+            control["kind"] = "column"
+        add(control)
+
+    if recipe is None:
+        add(
+            {
+                "key": "y",
+                "kind": "column",
+                "label": "Dependent variable (y)",
+                "required": True,
+                "options": list(columns),
+            }
+        )
+        add(
+            {
+                "key": "x",
+                "kind": "columns",
+                "label": "Regressors (X)",
+                "required": bool(family is None or family.requires_nonempty_predictors),
+                "options": list(columns),
+            }
+        )
+
+    if family is not None:
+        for field_name in family.context_spec_fields:
+            # Native family contracts own the persisted wire names. Legacy DID
+            # aliases are only a UI compatibility surface for the non-native
+            # TWFE family; projecting them onto CS/SA/DCDH made a valid
+            # Notebook materialization look incomplete to the Draft schema.
+            key = field_name
+            add(
+                {
+                    "key": key,
+                    "kind": (
+                        "select"
+                        if key == "did_mode"
+                        else _family_context_wire_kind(
+                            field_name,
+                            family,
+                            projected_params,
+                            projected_aliases,
+                        )
+                    ),
+                    "label": key,
+                    "required": field_name in family.required_spec_fields,
+                    "options": (
+                        list(DID_MODE_VALUES)
+                        if key == "did_mode"
+                        else list(columns)
+                    ),
+                }
+            )
+        for field_name in family.model_options_column_fields:
+            # The nested model_options schema owns these values. Do not expose
+            # a duplicate flat control that could be mistaken for an override.
+            continue
+
+        for source_field, aliases in projected_aliases.items():
+            if source_field in controls:
+                controls[source_field]["satisfied_by"] = aliases
+            for alias in aliases:
+                if alias in controls:
+                    controls[alias]["server_projection_of"] = source_field
+                    continue
+                projected_value = projected_params.get(alias)
+                if alias == "did_mode":
+                    alias_control = {
+                        "key": alias,
+                        "kind": "select",
+                        "label": alias,
+                        "required": False,
+                        "options": list(DID_MODE_VALUES),
+                        "server_projection_of": source_field,
+                    }
+                elif isinstance(projected_value, list):
+                    alias_control = {
+                        "key": alias,
+                        "kind": "columns",
+                        "label": alias,
+                        "required": False,
+                        "options": list(columns),
+                        "server_projection_of": source_field,
+                    }
+                else:
+                    alias_control = {
+                        "key": alias,
+                        "kind": "column",
+                        "label": alias,
+                        "required": False,
+                        "options": list(columns),
+                        "server_projection_of": source_field,
+                    }
+                add(alias_control)
+
+        # A builder may emit a fixed declaration (for example CS/SA's
+        # ``did_mode=cohort``) that has no corresponding input field. It is
+        # still part of the persisted Draft and therefore must be declared.
+        for projected_key, projected_value in projected_params.items():
+            if projected_key in controls or projected_key == "model_type":
+                continue
+            if projected_key == "did_mode":
+                add(
+                    {
+                        "key": projected_key,
+                        "kind": "select",
+                        "label": projected_key,
+                        "required": False,
+                        "options": list(DID_MODE_VALUES),
+                        "server_projection": True,
+                    }
+                )
+
+    for key, kind, label, options in (
+        ("focal_x", "columns", "Focal explanatory variable(s)", list(columns)),
+        ("prediction_entity_column", "column", "Prediction entity column", list(columns)),
+        ("prediction_group_column", "column", "Prediction group column", list(columns)),
+        ("prediction_time_column", "column", "Prediction time column", list(columns)),
+        ("imputation", "json", "Imputation request", None),
+    ):
+        control = {"key": key, "kind": kind, "label": label, "required": False}
+        if options is not None:
+            control["options"] = options
+        add(control)
+
+    prediction_models = {
+        str(entry["key"]): entry
+        for entry in manifest.get("prediction_models", [])
+        if isinstance(entry, Mapping) and entry.get("key")
+    }
+    sampling_methods = {
+        str(entry["key"]): entry
+        for entry in manifest.get("sampling_methods", [])
+        if isinstance(entry, Mapping) and entry.get("key")
+    }
+    for key, options in (
+        ("prediction_model_type", sorted(prediction_models)),
+        ("prediction_sampling_method", sorted(sampling_methods)),
+        ("prediction_data_structure", list(WORKFLOW_SPLIT_KINDS)),
+        ("cs_control_group", list(CS_CONTROL_GROUP_VALUES)),
+        ("cs_est_method", list(CS_EST_METHOD_VALUES)),
+        ("cs_base_period", list(CS_BASE_PERIOD_VALUES)),
+    ):
+        add({"key": key, "kind": "select", "label": key, "required": False, "options": options})
+    for key, kind in (
+        ("prediction_cv_folds", "integer"),
+        ("prediction_final_holdout_fraction", "number"),
+        ("cs_anticipation", "integer"),
+        ("prediction_shuffle", "toggle"),
+        ("honest_did", "toggle"),
+    ):
+        add({"key": key, "kind": kind, "label": key, "required": False})
+
+    schema_id = str(entry.get("schema_id") or f"{selected}@v1")
+    return schema_id, list(controls.values())
+
+
+def bind_genesis_recipe_server_owned_options(
+    model_type: str,
+    value: object,
+    *,
+    upload_sha256: str,
+) -> object:
+    """Bind Recipe-owned source identity while rejecting a forged replacement."""
+
+    from ..agent.recipe_contracts import recipe_contract_for_model_type
+
+    contract = recipe_contract_for_model_type(model_type)
+    if contract is None or not contract.server_owned_option_fields:
+        return value
+    if not isinstance(value, Mapping):
+        return value
+    if not isinstance(upload_sha256, str) or not upload_sha256:
+        raise ValueError("RECIPE_SOURCE_BINDING_INVALID")
+    source_reference = f"upload:{upload_sha256}"
+    bound = dict(value)
+    for field_name in contract.server_owned_option_fields:
+        if field_name in bound and bound[field_name] != source_reference:
+            raise ValueError(
+                "RECIPE_SERVER_OWNED_OPTION_MISMATCH: "
+                f"{model_type}.{field_name} must match the pinned upload"
+            )
+        bound[field_name] = source_reference
+    return bound
+
 
 def _backfill_schema_values(editable_schema: list[dict[str, Any]], form: Mapping[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
@@ -328,10 +886,29 @@ def create_genesis_draft(
         "node_id": "model_1",
         "node_type": "model",
         "model_family": model_family,
-        "model_type": requested_model_type if isinstance(requested_model_type, str) else None,
+        "model_type": requested_model_type if isinstance(requested_model_type, str) else "auto",
         "params": dict(model_params or {}),
         "status": "pending",
     }
+    schema_model_type = requested_model_type if isinstance(requested_model_type, str) else None
+    if schema_model_type == "custom" and model_family == "custom":
+        # Custom capability drafts are gateway-owned provenance envelopes. They
+        # are not built-in model families and must not be made executable by
+        # pretending that a factory binding is part of the static capability
+        # manifest or by inventing an editable model schema.
+        schema_id, editable_schema = "custom.gateway@v1", []
+    else:
+        schema_id, editable_schema = _genesis_model_editor_schema(
+            schema_model_type,
+            safe_columns,
+        )
+    model_node.update(
+        {
+            "schema_id": schema_id,
+            "editable_schema": editable_schema,
+            "editable_schema_hash": schema_hash(editable_schema),
+        }
+    )
     draft: dict[str, Any] = {
         "draft_id": resolved_draft_id,
         "schema_version": "pipeline_draft.v1",

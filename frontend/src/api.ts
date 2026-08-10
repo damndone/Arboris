@@ -182,6 +182,11 @@ export type PostEstimationResult = {
   model_run_id: string;
   workflow_id: string;
   workflow_step_id: string;
+  pack_family?: string;
+  source_sha256?: string;
+  request_fingerprint?: string;
+  result_sha256?: string;
+  result_schema?: string;
   result: Record<string, unknown>;
 };
 

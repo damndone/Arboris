@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time
 import json
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -66,7 +67,6 @@ from ...lineage.run_family import (
     migrate_project_families,
     resolve_run_family,
 )
-from ...repository.run_repository import _read_artifact_records
 from ...data_operations import resolve_data_column_cast_context
 from ..context_compiler import (
     NotebookPlanningContextV1,
@@ -75,8 +75,33 @@ from ..context_compiler import (
     generation_context_hash,
 )
 from ...lineage.upload_store import verify_upload
+from ...services.server_run_artifacts import (
+    ServerOwnedArtifactManifestError,
+    read_server_owned_run_artifacts,
+)
+from ...services.notebook_source_materialization import (
+    materialize_notebook_upload_source,
+    read_notebook_upload_frame,
+)
 from ..operations import OperationRegistry, OperationValidationError
 from ..trace import TraceWriter
+
+
+_TYPED_WORKFLOW_ERROR_CODE = re.compile(
+    r"(?:^|[\s(])([A-Z][A-Z0-9_]{2,63}):"
+)
+
+
+def _bounded_workflow_error_code(*, status: str, error: object) -> str:
+    """Return a stable error code without projecting arbitrary exception prose."""
+
+    if status == "blocked":
+        return "WORKFLOW_STEP_BLOCKED"
+    if isinstance(error, str):
+        match = _TYPED_WORKFLOW_ERROR_CODE.search(error)
+        if match is not None:
+            return match.group(1)
+    return "WORKFLOW_STEP_FAILED"
 from ..workflow import compile_workflow, execute_workflow
 from .artifact_contract import (
     COMMITTABLE_VALIDATION_STATUSES,
@@ -86,6 +111,7 @@ from .artifact_contract import (
 from .errors import (
     NotebookRunFamilyImmutable,
     OptionBatchInvalid,
+    OptionClientExecutionFactsForbidden,
     OptionExecutionReceiptRequired,
     OptionExecutionGatewayUnavailable,
     OptionLegacyUnverified,
@@ -127,6 +153,7 @@ from .store import (
     StoredRevision,
     WorkflowSource,
     dataset_workflow_source_pin,
+    reserve_dataset_upload_workflow_source,
 )
 from .evidence import (
     DatasetSource,
@@ -136,6 +163,12 @@ from .evidence import (
     compile_evidence_pack,
 )
 from .vocabulary import capability_artifact_types
+from .workflow_artifacts import (
+    WORKFLOW_RESULT_ARTIFACT_TYPE,
+    p7_capability_ids_from_steps,
+    persist_workflow_result_manifest,
+    workflow_result_artifact_id,
+)
 
 MAX_OPTIONS_PER_BATCH = 3
 
@@ -395,6 +428,7 @@ class NotebookService:
         if source.kind != "dataset":
             raise ValueError("projection_source must be a dataset source")
         verify_upload(self.project_root, source.upload_sha256)
+        source = reserve_dataset_upload_workflow_source(source)
 
         def create_dataset_notebook() -> Notebook:
             family = RunFamilyStore(self.project_root).create_family(
@@ -2545,14 +2579,25 @@ class NotebookService:
                 current_revision=current.option_revision,
                 reason="workflow_source_changed",
             )
-        self._assert_dataset_workflow_source_current(notebook)
-
         if view.lifecycle_status not in {"proposed", "deferred", "selected"}:
             raise OptionLifecycleTransitionInvalid(
                 f"option {option_id} is {view.lifecycle_status}; it cannot start a workflow",
                 option_id=option_id,
                 lifecycle_status=view.lifecycle_status,
             )
+        projection_source = notebook.projection_source
+        if (
+            projection_source is not None
+            and projection_source.kind == "dataset"
+            and projection_source.workflow_source is not None
+            and projection_source.workflow_source.source_kind == "dataset_upload"
+        ):
+            materialize_notebook_upload_source(
+                self.project_root,
+                source=projection_source,
+                run_family_id=notebook.run_family_id,
+            )
+        self._assert_dataset_workflow_source_current(notebook)
         if view.lifecycle_status != "selected":
             self._transition(
                 notebook_id,
@@ -2661,16 +2706,39 @@ class NotebookService:
             state = execute_workflow(self.project_root, workflow)
             receipt = self._workflow_execution_receipt(workflow, state)
             produced = self._workflow_produced_artifacts(workflow, state)
+            if (
+                state.status == "completed"
+                and p7_capability_ids_from_steps(workflow.steps)
+            ):
+                produced.append(
+                    persist_workflow_result_manifest(
+                        self.project_root,
+                        artifact_id=workflow_result_artifact_id(
+                            notebook_id=notebook_id,
+                            option_id=option_id,
+                            proposal_hash=proposal.canonical_hash(),
+                        ),
+                        workflow=workflow,
+                        state=state,
+                        produced_artifacts=produced,
+                    )
+                )
+            projected = self._contract_artifact_projection(
+                current.artifact_contract,
+                produced,
+            )
             succeeded = state.status == "completed"
             outcome = self.complete_execution(
                 notebook_id,
                 option_id,
                 execution_status="succeeded" if succeeded else "failed",
-                produced_artifacts=produced,
+                produced_artifacts=projected,
                 error_code=None if succeeded else "WORKFLOW_EXECUTION_FAILED",
                 trace=trace,
                 server_workflow_execution=True,
                 workflow_execution=receipt,
+                ambient_artifacts=produced,
+                artifact_validation_scope_mode="server_owned_workflow_projection",
             )
         except Exception:
             # Compilation and runtime are both server-owned.  Preserve the
@@ -2715,6 +2783,8 @@ class NotebookService:
         trace: TraceWriter | None = None,
         server_workflow_execution: bool = False,
         workflow_execution: Mapping[str, Any] | None = None,
+        artifact_validation_scope_mode: str | None = None,
+        ambient_artifacts: Sequence[Mapping[str, Any]] | None = None,
     ) -> ExecutionOutcome:
         """Close the loop: validate the contract, then decide about the head.
 
@@ -2786,7 +2856,11 @@ class NotebookService:
                     option_id=option_id,
                     lifecycle_status=view.lifecycle_status,
                 )
-        ambient_records = self._read_run_artifacts(run_id)
+        ambient_records = (
+            [dict(record) for record in ambient_artifacts]
+            if ambient_artifacts is not None
+            else self._read_run_artifacts(run_id)
+        )
         if produced_artifacts is None:
             artifacts = self._contract_artifact_projection(
                 current.artifact_contract, ambient_records
@@ -2797,7 +2871,13 @@ class NotebookService:
         else:
             artifacts = [dict(record) for record in produced_artifacts]
             artifact_validation_scope = self._artifact_validation_scope(
-                "explicit_produced_artifacts", ambient_records
+                artifact_validation_scope_mode
+                or (
+                    "server_owned_artifact_manifest"
+                    if server_workflow_execution
+                    else "explicit_produced_artifacts"
+                ),
+                ambient_records,
             )
         validation = validate_produced_artifacts(current.artifact_contract, artifacts)
 
@@ -2921,6 +3001,100 @@ class NotebookService:
             lifecycle_status=self.store.read_option(notebook_id, option_id).lifecycle_status,
         )
 
+    def complete_execution_from_server_run(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        run_id: str,
+        trace: TraceWriter | None = None,
+    ) -> ExecutionOutcome:
+        """Complete from a run manifest and index owned by Workbench.
+
+        ``run_id`` is a reference supplied by the client; status and artifact
+        records are reconstructed from the bound run. A caller cannot turn a
+        plausible artifact id/type/count tuple into a committed Notebook
+        result by posting it to the completion endpoint.
+        """
+
+        if not isinstance(run_id, str) or not run_id:
+            raise OptionExecutionReceiptRequired(
+                "server-owned completion requires a non-empty run_id"
+            )
+        if Path(run_id).name != run_id or run_id in {".", ".."}:
+            raise OptionExecutionReceiptRequired(
+                "server-owned completion run_id is not path-safe",
+                run_id=run_id,
+            )
+        notebook = self.get_notebook(notebook_id)
+        try:
+            assert_run_in_family(
+                self.project_root,
+                run_family_id=notebook.run_family_id,
+                run_id=run_id,
+            )
+        except (OSError, ValueError, KeyError) as exc:
+            raise OptionExecutionReceiptRequired(
+                "server-owned completion run is not bound to this notebook family",
+                run_id=run_id,
+            ) from exc
+        run_root = (self.project_root / "runs" / run_id).resolve()
+        runs_root = (self.project_root / "runs").resolve()
+        try:
+            run_root.relative_to(runs_root)
+        except ValueError as exc:
+            raise OptionExecutionReceiptRequired(
+                "server-owned completion run is outside the project runs root",
+                run_id=run_id,
+            ) from exc
+        manifest_path = run_root / "run_manifest.json"
+        if not manifest_path.is_file():
+            raise OptionExecutionReceiptRequired(
+                "server-owned completion run has no run manifest",
+                run_id=run_id,
+            )
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise OptionExecutionReceiptRequired(
+                "server-owned completion run manifest is unreadable",
+                run_id=run_id,
+            ) from exc
+        if not isinstance(manifest, Mapping):
+            raise OptionExecutionReceiptRequired(
+                "server-owned completion run manifest must be an object",
+                run_id=run_id,
+            )
+        if manifest.get("run_id") not in (None, run_id):
+            raise OptionExecutionReceiptRequired(
+                "server-owned completion run manifest identity does not match run_id",
+                run_id=run_id,
+            )
+        terminal_status = manifest.get("status")
+        if terminal_status not in {"completed", "failed"}:
+            raise OptionExecutionReceiptRequired(
+                "server-owned completion requires a terminal run status",
+                run_id=run_id,
+                status=terminal_status,
+            )
+        ambient_records = self._read_run_artifacts(run_id, required=True)
+        current = self.store.read_option(notebook_id, option_id).current_revision
+        projected_records = self._contract_artifact_projection(
+            current.artifact_contract,
+            ambient_records,
+        )
+        return self.complete_execution(
+            notebook_id,
+            option_id,
+            execution_status=("succeeded" if terminal_status == "completed" else "failed"),
+            run_id=run_id,
+            produced_artifacts=projected_records,
+            error_code=(None if terminal_status == "completed" else "RUN_EXECUTION_FAILED"),
+            trace=trace,
+            server_workflow_execution=True,
+            artifact_validation_scope_mode="server_owned_contract_projection",
+        )
+
     def _workflow_source_pin(
         self, notebook: Notebook, context: NotebookPlanningContextV1
     ) -> dict[str, dict[str, str]]:
@@ -2985,6 +3159,7 @@ class NotebookService:
         """Project durable workflow outputs without exposing model payloads."""
 
         from ...lineage.pipeline_drafts import PipelineDraftStore
+        from ..p7_pack_registry import p7_pack_registry
 
         branches: list[dict[str, Any]] = []
         store = PipelineDraftStore(self.project_root)
@@ -3020,20 +3195,51 @@ class NotebookService:
         branches.sort(key=lambda item: (item["branch_id"], item["run_id"]))
 
         post_estimation_ids: list[str] = []
+        p7_operation_ids = set(p7_pack_registry.operation_ids())
         steps_by_id = {step.step_id: step for step in workflow.steps}
         for step_id, step_state in state.steps.items():
             step = steps_by_id.get(step_id)
-            if step is None or not str(step.operation_id).startswith("model."):
+            if step is None:
                 continue
-            if step.operation_id == "model.genesis" or step_state.status != "completed":
+            operation_id = str(step.operation_id)
+            projects_analysis_artifact = (
+                operation_id in p7_operation_ids
+                or (
+                    operation_id.startswith("model.")
+                    and operation_id != "model.genesis"
+                )
+            )
+            if not projects_analysis_artifact or step_state.status != "completed":
                 continue
             post_estimation_ids.extend(str(value) for value in step_state.artifact_ids)
+
+        failed_steps: list[dict[str, str]] = []
+        for step_id, step_state in sorted(state.steps.items()):
+            if step_state.status not in {"failed", "blocked"}:
+                continue
+            step = steps_by_id.get(step_id)
+            if step is None:
+                raise ValueError(
+                    f"workflow state references undeclared step {step_id!r}"
+                )
+            failed_steps.append(
+                {
+                    "step_id": str(step_id),
+                    "operation_id": str(step.operation_id),
+                    "status": str(step_state.status),
+                    "error_code": _bounded_workflow_error_code(
+                        status=str(step_state.status),
+                        error=step_state.error,
+                    ),
+                }
+            )
         return {
             "workflow_id": workflow.workflow_id,
             "plan_fingerprint": workflow.plan_fingerprint,
             "status": str(state.status),
             "branch_runs": branches,
             "post_estimation_artifact_ids": sorted(set(post_estimation_ids)),
+            "failed_steps": failed_steps,
         }
 
     def _workflow_produced_artifacts(self, workflow: Any, state: Any) -> list[dict[str, Any]]:
@@ -3352,6 +3558,85 @@ class NotebookService:
                 reason="capability_binding_not_current",
             ) from error
 
+    def _assert_p7_source_preflight(
+        self,
+        notebook: Notebook,
+        proposal: TypedProposal,
+    ) -> None:
+        """Run declaration-owned, read-only P7 checks before an option is stored."""
+
+        if proposal.operation_id != "operation.multi_step":
+            return
+        raw_steps = proposal.changes.get("steps")
+        p7_ids = set(p7_capability_ids_from_steps(raw_steps))
+        if not p7_ids or not isinstance(raw_steps, list):
+            return
+        from ...statistical_exploration import (
+            StatisticalExplorationValidationError,
+            resolve_statistical_source,
+        )
+        from ..p7_pack_adapters import P7PackAdapterError
+        from ..p7_pack_registry import P7PackRegistryError, p7_pack_registry
+
+        try:
+            projection = notebook.projection_source
+            deferred_upload = (
+                projection is not None
+                and projection.kind == "dataset"
+                and projection.workflow_source is not None
+                and projection.workflow_source.source_kind == "dataset_upload"
+            )
+            if deferred_upload:
+                assert projection is not None
+                expected_pin = dataset_workflow_source_pin(projection)
+                if expected_pin is None or (
+                    proposal.target != expected_pin["target"]
+                    or proposal.preconditions != expected_pin["preconditions"]
+                ):
+                    raise ValueError("WORKFLOW_SOURCE_PIN_MISMATCH")
+                source_frame = read_notebook_upload_frame(self.project_root, projection)
+            else:
+                _source_context, source_frame = resolve_statistical_source(
+                    self.project_root,
+                    source_run_id=str(proposal.target["run_id"]),
+                    source_node_id=str(proposal.target["node_ref"]),
+                    source_artifact_id=str(proposal.target["artifact_id"]),
+                )
+            for raw_step in raw_steps:
+                if not isinstance(raw_step, Mapping):
+                    continue
+                operation_id = raw_step.get("operation_id")
+                if operation_id not in p7_ids:
+                    continue
+                spec = raw_step.get("spec")
+                if not isinstance(spec, Mapping):
+                    continue
+                # A derived source does not exist until its producer executes.
+                # Runtime invokes the same declaration preflight on the resolved
+                # step frame, so this is deferred explicitly rather than guessed.
+                if "source" in spec:
+                    continue
+                operation = p7_pack_registry.get(str(operation_id))
+                operation.preflight(
+                    source_frame,
+                    {
+                        "operation_id": operation_id,
+                        "input_mode": spec.get("input_mode"),
+                        "column_bindings": spec.get("column_bindings"),
+                        "options": spec.get("options"),
+                    },
+                )
+        except (
+            P7PackAdapterError,
+            P7PackRegistryError,
+            StatisticalExplorationValidationError,
+            OSError,
+            ValueError,
+        ) as error:
+            match = _TYPED_WORKFLOW_ERROR_CODE.search(str(error))
+            code = match.group(1) if match is not None else "P7_SOURCE_PREFLIGHT_FAILED"
+            raise OperationValidationError(f"{code}: {error}") from error
+
     def _prepare(
         self,
         notebook: Notebook,
@@ -3441,6 +3726,7 @@ class NotebookService:
                 preconditions=proposal.preconditions,
                 changes=proposal.changes,
             )
+            self._assert_p7_source_preflight(notebook, proposal)
         except OperationValidationError as error:
             # spec §7: refusing here is cheaper than apologising at click time.
             raise OptionValidationFailed(
@@ -3478,15 +3764,46 @@ class NotebookService:
                 ],
             ) from error
 
-        contract = build_artifact_contract(
-            draft.expected_artifacts,
-            additional_artifact_types=self._published_artifact_types(
+        additional_artifact_types = dict(
+            self._published_artifact_types(
                 draft.capability_id or "",
                 scope_candidates=(
                     ("project", notebook.project_id),
                     ("run_family", notebook.run_family_id),
                 ),
-            ),
+            )
+        )
+        if proposal.operation_id == "operation.multi_step" and p7_capability_ids_from_steps(
+            proposal.changes.get("steps")
+        ):
+            result_artifact_id = workflow_result_artifact_id(
+                notebook_id=notebook.notebook_id,
+                option_id=draft.option_id or "",
+                proposal_hash=proposal.canonical_hash(),
+            )
+            additional_artifact_types[result_artifact_id] = (
+                WORKFLOW_RESULT_ARTIFACT_TYPE
+            )
+            required_results = {
+                artifact.artifact_id
+                for artifact in draft.expected_artifacts
+                if artifact.required
+            }
+            if result_artifact_id not in required_results:
+                raise OptionValidationFailed(
+                    "a P7 workflow must require its server-owned result manifest",
+                    option_id=draft.option_id,
+                    operation_id=proposal.operation_id,
+                    validation_issues=[
+                        {
+                            "code": "WORKFLOW_RESULT_ARTIFACT_REQUIRED",
+                            "detail": result_artifact_id,
+                        }
+                    ],
+                )
+        contract = build_artifact_contract(
+            draft.expected_artifacts,
+            additional_artifact_types=additional_artifact_types,
         )
         risk_level = _REGISTRY_RISK_TO_OPTION_RISK.get(definition.risk_level)
         if risk_level is None:
@@ -3753,14 +4070,17 @@ class NotebookService:
                 payload=lifecycle_trace_payload,
             )
 
-    def _read_run_artifacts(self, run_id: str | None) -> list[dict[str, Any]]:
-        if not run_id:
-            return []
+    def _read_run_artifacts(
+        self, run_id: str | None, *, required: bool = False
+    ) -> list[dict[str, Any]]:
         try:
-            records = _read_artifact_records(self.project_root / "runs" / run_id)
-        except (FileNotFoundError, OSError, ValueError):
-            return []
-        return [dict(item) for item in records if isinstance(item, Mapping)]
+            return read_server_owned_run_artifacts(
+                self.project_root,
+                run_id,
+                required=required,
+            )
+        except ServerOwnedArtifactManifestError as exc:
+            raise OptionExecutionReceiptRequired(str(exc), **exc.details) from exc
 
 
 __all__ = ["ExecutionOutcome", "MAX_OPTIONS_PER_BATCH", "NotebookService"]

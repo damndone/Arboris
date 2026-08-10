@@ -192,21 +192,12 @@ export function DraftGraphRoute() {
                   // merely-dispatched or still-running run.
                   void waitForRunTerminal(projectRoot, result.run_id).then((detail) => {
                     if (!detail) return;
-                    const succeeded = detail.status === "completed";
                     return completeNotebookOptionExecution(
                       projectRoot,
                       provenance.notebook_id,
                       provenance.option_id,
                       {
-                        execution_status: succeeded ? "succeeded" : "failed",
                         run_id: result.run_id,
-                        ...(succeeded
-                          ? {}
-                          : {
-                              error_code:
-                                detail.errors?.issues?.[0]?.code ??
-                                "WORKFLOW_NOT_COMPLETED",
-                            }),
                       },
                     );
                   }).catch(() => {

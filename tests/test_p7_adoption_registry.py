@@ -224,6 +224,79 @@ def test_p7_request_rejects_unknown_options_instead_of_dropping_them() -> None:
         )
 
 
+def test_matching_missing_policy_is_declared_before_runtime_execution() -> None:
+    """Matching's single supported missing-data policy reaches the Agent contract."""
+
+    from workbench.agent.p7_pack_registry import p7_pack_registry
+
+    operation = p7_pack_registry.get("matching.balance")
+    assert operation.request_schema.option_enums["missing_policy"] == ("reject",)
+
+
+def test_matching_request_rejects_unsupported_missing_policy_before_runtime() -> None:
+    """A matching step must reject unsupported missing-data semantics at admission."""
+
+    from workbench.agent.p7_pack_registry import P7PackRegistryError, p7_pack_registry
+
+    operation = p7_pack_registry.get("matching.balance")
+    with pytest.raises(P7PackRegistryError, match="must be one of: reject"):
+        operation.validate(
+            {
+                "operation_id": "matching.balance",
+                "input_mode": "frame",
+                "column_bindings": {
+                    "treatment": "treated",
+                    "id": "id",
+                    "covariates": ["x", "z"],
+                },
+                "options": {
+                    "balance_threshold": 0.1,
+                    "missing_policy": "complete_case",
+                },
+            }
+        )
+
+
+def test_meta_analysis_required_semantics_are_published_to_the_agent() -> None:
+    """Meta-analysis scale and pooling method are declaration-owned choices."""
+
+    from workbench.contracts.model.meta_analysis import (
+        META_ANALYSIS_COMBINE_METHODS,
+        META_ANALYSIS_EFFECT_MEASURES,
+    )
+    from workbench.agent.p7_pack_registry import p7_pack_registry
+
+    combine = p7_pack_registry.get("meta.combine").request_schema
+    effect_size = p7_pack_registry.get("meta.effect_size").request_schema
+    assert {"effect_measure", "method"} <= set(combine.required_options)
+    assert "effect_measure" in effect_size.required_options
+    assert combine.option_enums["effect_measure"] == tuple(
+        sorted(META_ANALYSIS_EFFECT_MEASURES)
+    )
+    assert combine.option_enums["method"] == tuple(sorted(META_ANALYSIS_COMBINE_METHODS))
+
+
+def test_meta_combine_rejects_missing_effect_measure_before_runtime() -> None:
+    """A meta-analysis step must not reach the kernel without its scale."""
+
+    from workbench.agent.p7_pack_registry import P7PackRegistryError, p7_pack_registry
+
+    operation = p7_pack_registry.get("meta.combine")
+    with pytest.raises(P7PackRegistryError, match="missing: effect_measure"):
+        operation.validate(
+            {
+                "operation_id": "meta.combine",
+                "input_mode": "typed",
+                "column_bindings": {
+                    "study_id": "study",
+                    "effect": "effect",
+                    "variance": "variance",
+                },
+                "options": {"method": "fixed_effect"},
+            }
+        )
+
+
 def test_diagnostics_schema_does_not_advertise_an_unused_time_binding() -> None:
     """A binding that the adapter never reads must not be accepted or published."""
 

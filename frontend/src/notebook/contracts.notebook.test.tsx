@@ -104,6 +104,76 @@ describe("contracts — the canonical v1.8.1 mocks parse into the locked shape",
         artifact_ids: ["model_result"],
       },
     ]);
+    expect(result.workflow_execution?.failed_steps).toEqual([]);
+  });
+
+  it("reads bounded workflow failure codes without accepting provider error prose", () => {
+    const result = parseNotebookExecutionResult({
+      option_id: "opt_failed_workflow",
+      option_revision: 1,
+      run_id: null,
+      execution_status: "failed",
+      committed: false,
+      artifact_validation: {
+        contract_profile: "artifact-identity-type-count/v1",
+        validation_status: "failed",
+        checked_dimensions: ["artifact_id"],
+        not_evaluated_dimensions: ["payload_schema"],
+        issues: [],
+      },
+      workflow_execution: {
+        workflow_id: "workflow_failed",
+        plan_fingerprint: "plan_failed",
+        status: "failed",
+        branch_runs: [],
+        post_estimation_artifact_ids: [],
+        failed_steps: [
+          {
+            step_id: "hurdle_nb",
+            operation_id: "glm.hurdle_negative_binomial",
+            status: "failed",
+            error_code: "GLM_NONCONVERGENCE",
+          },
+        ],
+      },
+    });
+
+    expect(result.workflow_execution?.failed_steps).toEqual([
+      {
+        step_id: "hurdle_nb",
+        operation_id: "glm.hurdle_negative_binomial",
+        status: "failed",
+        error_code: "GLM_NONCONVERGENCE",
+      },
+    ]);
+  });
+
+  it("reads the server-owned artifact validation scope without treating ambient records as contract issues", () => {
+    const result = parseNotebookExecutionResult({
+      option_id: "opt_projection",
+      option_revision: 1,
+      run_id: "run_projection",
+      execution_status: "succeeded",
+      committed: true,
+      artifact_validation: {
+        contract_profile: "artifact-identity-type-count/v1",
+        validation_status: "passed",
+        checked_dimensions: ["artifact_id", "artifact_type", "count", "step"],
+        not_evaluated_dimensions: ["payload_schema"],
+        issues: [],
+      },
+      artifact_validation_scope: {
+        mode: "server_owned_contract_projection",
+        ambient_artifact_ids: ["cleaned_dataset", "ols_1"],
+        ambient_artifact_count: 2,
+      },
+    });
+
+    expect(result.artifact_validation_scope).toEqual({
+      mode: "server_owned_contract_projection",
+      ambient_artifact_ids: ["cleaned_dataset", "ols_1"],
+      ambient_artifact_count: 2,
+    });
   });
 
   it("projects a v1.0 option as legacy-unverified and not materializable", () => {

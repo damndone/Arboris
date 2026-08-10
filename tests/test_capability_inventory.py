@@ -115,14 +115,13 @@ def test_every_model_family_appears_in_the_inventory() -> None:
     assert {f"model.{name}" for name in MODEL_FAMILY_CONTRACTS} <= families
 
 
-def test_a_selectable_family_without_an_admission_contract_is_not_composable() -> None:
-    """The asymmetry this inventory exists to expose, stated as an invariant.
+def test_a_pack_capability_can_be_composable_without_model_genesis_admission() -> None:
+    """A pack's generic workflow adapter is distinct from model.genesis.
 
-    `time_series.arma_garch` and `time_series.ets` can be picked in the model
-    selector and run by hand, but neither has a `ModelFamilyContract`, so
-    `model_family_contract()` refuses them inside a workflow step. They have
-    no natural-language proposal or composition route and therefore remain
-    real gaps instead of being counted as reachable by a form-only surface.
+    The two time-series packs are not regression families and therefore remain
+    outside `MODEL_FAMILY_CONTRACTS`. Their own generic workflow operations are
+    still real composition routes and must not be mistaken for model.genesis
+    branches.
     """
 
     from workbench.agent.capability_contract import capability_inventory
@@ -135,8 +134,9 @@ def test_a_selectable_family_without_an_admission_contract_is_not_composable() -
         item = by_id[f"model.{key}"]
         assert item.kind == "model_family"
         assert item.proposed_by == ()
-        assert item.composable_as == ()
-        assert not item.is_reachable
+        assert item.composable_as == (f"model.{key}",)
+        assert item.top_level_exposure_note
+        assert item.is_reachable
 
 
 def test_every_selectable_model_type_is_accounted_for() -> None:
@@ -174,8 +174,9 @@ def test_the_auto_selector_is_listed_as_a_selector_not_a_family() -> None:
 
     assert auto.kind == "selector"
     assert auto.proposed_by == ()
-    assert auto.composable_as == ()
-    assert not auto.is_reachable
+    assert auto.composable_as == ("model.auto",)
+    assert auto.top_level_exposure_note
+    assert auto.is_reachable
 
 
 def test_the_standalone_operation_surfaces_are_in_the_inventory() -> None:
@@ -247,7 +248,7 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         This test is expected to go red when P5 or P7 wires a currently missing
         route. P7's declaration-driven adoption deliberately changed the pinned
         truth from ``(54, 4, 30, 34, 2, 18)`` to
-        ``(118, 4, 94, 98, 2, 18)``. That is not a stale test: the counts and
+        ``(118, 4, 112, 116, 2, 0)``. That is not a stale test: the counts and
         gap IDs must be updated in the same deliberate change that closes a gap,
         rather than silently weakening this record.
     """
@@ -263,27 +264,8 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (118, 4, 94, 98, 2, 18)
-    assert {item.capability_id for item in report.gaps} == {
-        "model.time_series.arma_garch",
-        "model.time_series.ets",
-        "model.auto",
-        "test.anova",
-        "test.chi_square",
-        "test.correlations",
-        "test.evidence",
-        "test.fisher_exact",
-        "test.nonparametric",
-        "test.rank_correlations",
-        "test.t_tests",
-        "prediction.prediction_lasso",
-        "prediction.prediction_ridge",
-        "prediction.prediction_random_forest",
-        "imputation.mice",
-        "resample.smote",
-        "resample.oversample",
-        "resample.undersample",
-    }
+    ) == (118, 4, 112, 116, 2, 0)
+    assert {item.capability_id for item in report.gaps} == set()
     assert {item.capability_id for item in report.exempt} == {
         "code.execute",
         "data.column.cast",
@@ -310,38 +292,18 @@ def test_reachability_guard_derives_its_denominator_from_the_supplied_inventory(
         {item.capability_id for item in report.gaps},
     ) == (
         len(inventory),
-        {
-            "pack.injected_for_guard",
-            "model.time_series.arma_garch",
-            "model.time_series.ets",
-            "model.auto",
-            "test.anova",
-            "test.chi_square",
-            "test.correlations",
-            "test.evidence",
-            "test.fisher_exact",
-            "test.nonparametric",
-            "test.rank_correlations",
-            "test.t_tests",
-            "prediction.prediction_lasso",
-            "prediction.prediction_ridge",
-            "prediction.prediction_random_forest",
-            "imputation.mice",
-            "resample.smote",
-            "resample.oversample",
-            "resample.undersample",
-        },
+        {"pack.injected_for_guard"},
     )
 
 
-def test_unwired_model_selector_and_model_families_remain_real_gaps() -> None:
-    """A form capability without a NL or step route remains a real gap."""
+def test_time_series_and_auto_capabilities_have_generic_workflow_routes() -> None:
+    """Selectable capabilities are reachable through their typed workflow steps."""
 
     from workbench.agent.capability_contract import unreachable_capabilities
 
     _exempt, gaps = unreachable_capabilities()
 
-    assert {"model.time_series.arma_garch", "model.time_series.ets", "model.auto"} <= {
+    assert not {"model.time_series.arma_garch", "model.time_series.ets", "model.auto"} & {
         item.capability_id for item in gaps
     }
 
@@ -359,12 +321,10 @@ def test_a_step_identity_is_one_capability_carrying_two_paths() -> None:
     from workbench.agent.operations import OperationRegistry
     from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
 
-    operations = [
-        item
-        for item in capability_inventory()
-        if item.kind in {"data_operation", "pack"}
-    ]
     operation_ids = set(OperationRegistry().operation_ids())
+    operations = [
+        item for item in capability_inventory() if item.capability_id in operation_ids
+    ]
 
     assert len(operations) == len(operation_ids)
     assert {item.capability_id for item in operations} == operation_ids
@@ -538,15 +498,11 @@ def test_every_imputation_and_resampling_method_is_in_the_inventory() -> None:
     assert {"imputation.mice", "resample.smote"} <= listed
 
 
-def test_prediction_and_preparation_capabilities_can_be_asked_for_by_nobody() -> None:
-    """The finding this task exists to surface, asserted rather than narrated.
+def test_prediction_and_preparation_capabilities_have_typed_workflow_routes() -> None:
+    """Prediction and preparation methods are reachable without run-form guessing.
 
-    `prediction_model_type`, `imputation_method` and `prediction_sampling_method`
-    are run-config fields carried only by the HTTP run form and the CLI. No
-    registered operation names any of them, so a Lasso prediction, a MICE
-    imputation and a SMOTE rebalance are all unreachable from natural language
-    today. They are listed as unreachable, not exempt: this is a gap to close,
-    not a door deliberately shut.
+    The generic operation declarations now own these bindings and their
+    execution contracts. The live manifest still owns the denominator.
     """
 
     from workbench.agent.capability_contract import capability_inventory
@@ -570,7 +526,7 @@ def test_prediction_and_preparation_capabilities_can_be_asked_for_by_nobody() ->
     assert len(subject) == expected
 
     for item in subject:
-        assert not item.is_reachable, item.capability_id
+        assert item.is_reachable, item.capability_id
         assert item.reachability_exempt_reason is None, item.capability_id
 
 
@@ -612,14 +568,8 @@ def test_todays_unreachable_capabilities_are_all_gaps() -> None:
         "code.execute",
         "data.column.cast",
     }
-    assert {item.kind for item in gaps} == {
-        "model_family",
-        "selector",
-        "statistical_test",
-        "prediction_model",
-        "data_preparation",
-    }
-    assert len(gaps) == 18
+    assert {item.kind for item in gaps} == set()
+    assert len(gaps) == 0
 
 
 def test_the_partition_covers_every_unreachable_capability_and_nothing_else() -> None:

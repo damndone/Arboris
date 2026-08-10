@@ -16,6 +16,9 @@ class CSSpecError(ValueError):
 # point estimate and the influence function. Treated units use a 1.01 cutoff
 # (i.e. never trimmed). Keep this as the single trim threshold for the whole cell.
 CS_PS_TRIM = 0.995
+CS_CONTROL_GROUP_VALUES = ("never", "not_yet")
+CS_EST_METHOD_VALUES = ("dr", "ipw", "reg")
+CS_BASE_PERIOD_VALUES = ("varying", "universal")
 
 
 @dataclass
@@ -55,9 +58,9 @@ def comparison_mask(cohort: pd.Series, *, g: float, t: float, base_t: float,
     # `.replace(0, np.inf)`. `~np.isfinite(...)` catches BOTH NaN and inf, so the
     # mask is robust to either convention — do not "fix" this to an == check.
     never = ~np.isfinite(cohort)
-    if control_group == "never":
+    if control_group == CS_CONTROL_GROUP_VALUES[0]:
         return never
-    if control_group == "not_yet":
+    if control_group == CS_CONTROL_GROUP_VALUES[1]:
         return never | (cohort > safe_until + anticipation)
     raise CSSpecError(f"CS_BAD_CONTROL_GROUP: '{control_group}'")
 
@@ -79,9 +82,9 @@ def base_period_for(*, g: float, t: float, base_period: str, anticipation: int) 
     ref = reference_period(g=g, anticipation=anticipation)
     if t >= effective_treatment_start(g=g, anticipation=anticipation):
         return ref
-    if base_period == "universal":
+    if base_period == CS_BASE_PERIOD_VALUES[1]:
         return ref
-    if base_period == "varying":
+    if base_period == CS_BASE_PERIOD_VALUES[0]:
         return t - 1
     raise CSSpecError(f"CS_BAD_BASE_PERIOD: '{base_period}'")
 
@@ -113,7 +116,7 @@ def cell_influence_function(cell: dict, *, est_method: str) -> np.ndarray:
         raise CSSpecError("CS_MISSING_TRIM: intermediates predate the trim contract")
     trim_ps = np.asarray(cell["_trim"], dtype=float)
 
-    if est_method == "reg":
+    if est_method == CS_EST_METHOD_VALUES[2]:
         # reg_did_panel: no trimming, w.treat = w.cont = i.weights * D
         w_treat = iw * D
         w_cont = iw * D
@@ -148,7 +151,7 @@ def cell_influence_function(cell: dict, *, est_method: str) -> np.ndarray:
     Hessian_ps = np.linalg.solve(XtWX_ps, np.eye(XtWX_ps.shape[0])) * n
     asy_lin_rep_ps = score_ps @ Hessian_ps
 
-    if est_method == "ipw":
+    if est_method == CS_EST_METHOD_VALUES[1]:
         att_treat = w_treat * dY
         att_cont = w_cont * dY
         eta_treat = np.mean(att_treat) / mw_treat
@@ -161,7 +164,7 @@ def cell_influence_function(cell: dict, *, est_method: str) -> np.ndarray:
         inf_control = (inf_cont_1 + inf_cont_2) / mw_cont
         return inf_treat - inf_control
 
-    if est_method == "dr":
+    if est_method == CS_EST_METHOD_VALUES[0]:
         dr_att_treat = w_treat * (dY - out_delta)
         dr_att_cont = w_cont * (dY - out_delta)
         eta_treat = np.mean(dr_att_treat) / mw_treat
@@ -294,11 +297,11 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
     w1 = raw1 / raw1.mean()
     raw0 = trim * ps * (1 - D) / (1 - ps)
     w0 = raw0 / raw0.mean()
-    if est_method == "dr":
+    if est_method == CS_EST_METHOD_VALUES[0]:
         att = float(np.mean((w1 - w0) * (dY - mhat)))
-    elif est_method == "ipw":
+    elif est_method == CS_EST_METHOD_VALUES[1]:
         att = float(np.mean((w1 - w0) * dY))
-    elif est_method == "reg":
+    elif est_method == CS_EST_METHOD_VALUES[2]:
         att = float(np.mean(w1 * (dY - mhat)))
     else:
         raise CSSpecError(f"CS_BAD_EST_METHOD: '{est_method}'")

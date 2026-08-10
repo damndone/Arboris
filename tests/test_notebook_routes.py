@@ -31,6 +31,8 @@ from workbench.contracts.agent.notebook_option import (
     RecommendationDecision,
     RecommendationDecisionV11,
 )
+from workbench.artifacts import register_artifact
+from workbench.lineage.run_family import bind_run_to_family
 from workbench.lineage.upload_store import store_upload_bytes
 from workbench.http import notebook_routes
 from workbench.http.notebook_routes import (
@@ -204,6 +206,34 @@ def test_notebook_focus_route_persists_an_explicit_action_mode(
     assert response.json()["user_focus"] == {
         "selected_text_hash": "sha256:seed",
         "interaction_mode": "action",
+    }
+
+
+def test_notebook_focus_route_explicit_null_clears_goal_without_dropping_other_focus(
+    tmp_path: Path,
+) -> None:
+    """Exiting failed planning clears only the durable goal, so reload stays idle."""
+
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    notebook = _create(client, project)
+    notebook_id = notebook["notebook_id"]
+    seeded = client.put(
+        f"/notebooks/{notebook_id}/focus",
+        params={"project_root": str(project)},
+        json={"goal": "Estimate the intervention effect."},
+    )
+    assert seeded.status_code == 200, seeded.text
+
+    response = client.put(
+        f"/notebooks/{notebook_id}/focus",
+        params={"project_root": str(project)},
+        json={"goal": None},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["user_focus"] == {
+        "selected_text_hash": "sha256:seed",
     }
 
 
@@ -457,7 +487,398 @@ def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflo
     assert result["committed"] is True
     assert result["run_id"] is None
     assert result["workflow_execution"]["branch_runs"] == workflow["branch_runs"]
+    assert result["artifact_validation"]["issues"] == []
+    assert result["artifact_validation_scope"]["mode"] == (
+        "server_owned_workflow_projection"
+    )
+    assert result["artifact_validation_scope"]["ambient_artifact_count"] > 0
+    assert "ols_1" in result["artifact_validation_scope"]["ambient_artifact_ids"]
     assert service.get_notebook(notebook_id).active_head_run_id is None
+
+
+def test_confirmed_p7_only_notebook_workflow_persists_one_contract_result(
+    tmp_path: Path,
+) -> None:
+    """A confirmed P7 analysis needs no dummy model and leaves no artifact warning."""
+
+    from tests.test_data_column_cast import _source_project
+    from workbench.agent.notebook.planning_agent import NotebookPlanningAgent
+    from workbench.agent.notebook.proposal import TypedProposal
+    from workbench.agent.notebook.workflow_artifacts import (
+        WORKFLOW_RESULT_ARTIFACT_TYPE,
+        workflow_result_artifact_id,
+    )
+    from workbench.lineage.run_inputs import write_run_inputs
+
+    frame = pd.DataFrame(
+        {
+            "outcome": [1.0, None, 3.0, 4.0],
+            "group": ["a", "a", None, "b"],
+        }
+    )
+    project, source_run_id, _source_artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project,
+        frame.to_csv(index=False).encode("utf-8"),
+        filename="missingness.csv",
+    )
+    write_run_inputs(
+        project / "runs" / source_run_id,
+        form={},
+        upload={"sha256": upload_sha, "filename": "missingness.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="missingness-source-fixture",
+    )
+    client = TestClient(app)
+    params = {"project_root": str(project)}
+    created = client.post(
+        "/notebooks/projection/from-run-dataset",
+        params=params,
+        json={"from_run_id": source_run_id, "created_by": "ui"},
+    ).json()
+    notebook_id = created["notebook_id"]
+    service = NotebookService(project)
+    workflow_source = NotebookPlanningAgent._execution_pins(
+        service.compile_context(notebook_id)
+    )["workflow_source"]
+    proposal = {
+        "proposal_id": "proposal_missingness_profile",
+        "proposal_revision": 1,
+        "operation_id": "operation.multi_step",
+        "operation_version": "v1",
+        "target": workflow_source["target"],
+        "preconditions": workflow_source["preconditions"],
+        "changes": {
+            "steps": [
+                {
+                    "step_id": "profile_missingness",
+                    "operation_id": "missingness.profile",
+                    "spec": {
+                        "input_mode": "frame",
+                        "column_bindings": {},
+                        "options": {},
+                    },
+                }
+            ]
+        },
+    }
+    option_id = "opt_missingness_profile"
+    result_artifact_id = workflow_result_artifact_id(
+        notebook_id=notebook_id,
+        option_id=option_id,
+        proposal_hash=TypedProposal.from_dict(proposal).canonical_hash(),
+    )
+    proposed = client.post(
+        f"/notebooks/{notebook_id}/options/propose",
+        params=params,
+        json={
+            "drafts": [
+                {
+                    "rank": 1,
+                    "rationale": "Describe missing values in the uploaded data.",
+                    "proposal": proposal,
+                    "expected_artifacts": [
+                        {
+                            "artifact_id": result_artifact_id,
+                            "artifact_type": WORKFLOW_RESULT_ARTIFACT_TYPE,
+                            "required": True,
+                            "count": 1,
+                            "step": None,
+                        }
+                    ],
+                    "option_id": option_id,
+                    "capability_id": "missingness.profile",
+                }
+            ]
+        },
+    )
+    assert proposed.status_code == 200, proposed.text
+    option = proposed.json()["options"][0]
+    client.post(
+        f"/notebooks/{notebook_id}/options/{option_id}/decision",
+        params=params,
+        json={"decision": "selected", "actor": "ui"},
+    )
+    confirmed = client.post(
+        f"/notebooks/{notebook_id}/options/{option_id}/confirm",
+        params=params,
+        json={
+            "option_revision": option["option_revision"],
+            "proposal_id": option["typed_proposal_id"],
+            "proposal_revision": option["typed_proposal_revision"],
+        },
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["workflow_execution"]["status"] == "completed"
+    listed = client.get(f"/notebooks/{notebook_id}/options", params=params).json()
+    result = listed["execution_results"][option_id]
+    assert result["artifact_validation"]["issues"] == []
+    index = json.loads(
+        (project / "runs" / source_run_id / "artifacts_index.json").read_text()
+    )
+    assert any(
+        item.get("artifact_id") == result_artifact_id
+        and item.get("artifact_type") == WORKFLOW_RESULT_ARTIFACT_TYPE
+        for item in index["artifacts"]
+    )
+
+
+def test_p7_option_is_refused_before_persistence_when_periods_do_not_match_source(
+    tmp_path: Path,
+) -> None:
+    """A dimensionally impossible P7 plan is not presented as a valid option."""
+
+    from workbench.agent.notebook.planning_agent import NotebookPlanningAgent
+    from workbench.agent.notebook.proposal import TypedProposal
+    from workbench.agent.notebook.workflow_artifacts import (
+        WORKFLOW_RESULT_ARTIFACT_TYPE,
+        workflow_result_artifact_id,
+    )
+
+    frame = pd.DataFrame(
+        {
+            "treated_sc": [1.0 + index / 10 for index in range(10)],
+            "d1": [1.1 + index / 10 for index in range(10)],
+            "d2": [0.9 + index / 10 for index in range(10)],
+            "d3": [1.2 + index / 10 for index in range(10)],
+        }
+    )
+    project = make_project(tmp_path)
+    upload_sha = store_upload_bytes(
+        project,
+        frame.to_csv(index=False).encode("utf-8"),
+        filename="synthetic-control.csv",
+    )
+    service = NotebookService(project)
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "synthetic-control.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+    workflow_source = NotebookPlanningAgent._execution_pins(
+        service.compile_context(notebook.notebook_id)
+    )["workflow_source"]
+    assert not (project / "runs" / workflow_source["target"]["run_id"]).exists()
+    proposal = {
+        "proposal_id": "proposal_bad_synthetic_periods",
+        "proposal_revision": 1,
+        "operation_id": "operation.multi_step",
+        "operation_version": "v1",
+        "target": workflow_source["target"],
+        "preconditions": workflow_source["preconditions"],
+        "changes": {
+            "steps": [
+                {
+                    "step_id": "fit_counterfactual",
+                    "operation_id": "synthetic_control.fit",
+                    "spec": {
+                        "input_mode": "typed",
+                        "column_bindings": {
+                            "outcomes": ["treated_sc", "d1", "d2", "d3"]
+                        },
+                        "options": {
+                            "treated_unit": "treated_sc",
+                            "donor_pool": ["d1", "d2", "d3"],
+                            "periods": [0, 1, 2, 3, 4, 5],
+                            "pre_periods": [0, 1, 2],
+                            "post_periods": [3, 4, 5],
+                        },
+                    },
+                }
+            ]
+        },
+    }
+    option_id = "opt_bad_synthetic_periods"
+    result_artifact_id = workflow_result_artifact_id(
+        notebook_id=notebook.notebook_id,
+        option_id=option_id,
+        proposal_hash=TypedProposal.from_dict(proposal).canonical_hash(),
+    )
+    response = TestClient(app).post(
+        f"/notebooks/{notebook.notebook_id}/options/propose",
+        params={"project_root": str(project)},
+        json={
+            "drafts": [
+                {
+                    "rank": 1,
+                    "rationale": "Fit the requested synthetic control.",
+                    "proposal": proposal,
+                    "expected_artifacts": [
+                        {
+                            "artifact_id": result_artifact_id,
+                            "artifact_type": WORKFLOW_RESULT_ARTIFACT_TYPE,
+                            "required": True,
+                            "count": 1,
+                            "step": None,
+                        }
+                    ],
+                    "option_id": option_id,
+                    "capability_id": "synthetic_control.fit",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert "SYNTHETIC_CONTROL_PERIOD_COUNT_MISMATCH" in response.text
+    assert service.store.option_ids(notebook.notebook_id) == []
+
+
+def test_p7_option_is_refused_before_persistence_when_placebo_policy_is_open(
+    tmp_path: Path,
+) -> None:
+    """An incomplete placebo policy fails during planning, not after confirmation."""
+
+    from workbench.agent.notebook.planning_agent import NotebookPlanningAgent
+    from workbench.agent.notebook.proposal import TypedProposal
+    from workbench.agent.notebook.workflow_artifacts import (
+        WORKFLOW_RESULT_ARTIFACT_TYPE,
+        workflow_result_artifact_id,
+    )
+
+    frame = pd.DataFrame(
+        {
+            "treated_sc": [1.0, 1.4, 1.8, 3.0, 3.4, 3.9],
+            "d1": [1.0, 1.3, 1.6, 1.9, 2.2, 2.5],
+            "d2": [0.9, 1.2, 1.5, 1.8, 2.1, 2.4],
+            "d3": [1.1, 1.4, 1.7, 2.0, 2.3, 2.6],
+        }
+    )
+    project = make_project(tmp_path)
+    upload_sha = store_upload_bytes(
+        project,
+        frame.to_csv(index=False).encode("utf-8"),
+        filename="synthetic-control.csv",
+    )
+    service = NotebookService(project)
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "synthetic-control.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+    workflow_source = NotebookPlanningAgent._execution_pins(
+        service.compile_context(notebook.notebook_id)
+    )["workflow_source"]
+    proposal = {
+        "proposal_id": "proposal_bad_placebo_policy",
+        "proposal_revision": 1,
+        "operation_id": "operation.multi_step",
+        "operation_version": "v1",
+        "target": workflow_source["target"],
+        "preconditions": workflow_source["preconditions"],
+        "changes": {
+            "steps": [
+                {
+                    "step_id": "placebo_counterfactual",
+                    "operation_id": "synthetic_control.placebo",
+                    "spec": {
+                        "input_mode": "typed",
+                        "column_bindings": {
+                            "outcomes": ["treated_sc", "d1", "d2", "d3"]
+                        },
+                        "options": {
+                            "treated_unit": "treated_sc",
+                            "donor_pool": ["d1", "d2", "d3"],
+                            "periods": [0, 1, 2, 3, 4, 5],
+                            "pre_periods": [0, 1, 2],
+                            "post_periods": [3, 4, 5],
+                            "placebo_policy": {},
+                        },
+                    },
+                }
+            ]
+        },
+    }
+    option_id = "opt_bad_placebo_policy"
+    result_artifact_id = workflow_result_artifact_id(
+        notebook_id=notebook.notebook_id,
+        option_id=option_id,
+        proposal_hash=TypedProposal.from_dict(proposal).canonical_hash(),
+    )
+
+    response = TestClient(app).post(
+        f"/notebooks/{notebook.notebook_id}/options/propose",
+        params={"project_root": str(project)},
+        json={
+            "drafts": [
+                {
+                    "rank": 1,
+                    "rationale": "Compare the treated effect with donor placebos.",
+                    "proposal": proposal,
+                    "expected_artifacts": [
+                        {
+                            "artifact_id": result_artifact_id,
+                            "artifact_type": WORKFLOW_RESULT_ARTIFACT_TYPE,
+                            "required": True,
+                            "count": 1,
+                            "step": None,
+                        }
+                    ],
+                    "option_id": option_id,
+                    "capability_id": "synthetic_control.placebo",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert "SYNTHETIC_CONTROL_INVALID_PLACEBO_POLICY" in response.text
+    assert service.store.option_ids(notebook.notebook_id) == []
+
+
+def test_workflow_receipt_projects_one_bounded_root_failure_code(tmp_path: Path) -> None:
+    """A failed workflow exposes its typed cause without leaking raw exceptions."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    workflow = SimpleNamespace(
+        workflow_id="workflow_hurdle_failure",
+        plan_fingerprint="sha256:plan",
+        steps=(
+            SimpleNamespace(
+                step_id="hurdle_nb",
+                operation_id="glm.hurdle_negative_binomial",
+            ),
+        ),
+    )
+    state = SimpleNamespace(
+        status="failed",
+        steps={
+            "hurdle_nb": SimpleNamespace(
+                status="failed",
+                artifact_ids=(),
+                error=(
+                    "P7 pack glm.hurdle_negative_binomial returned non-completed "
+                    "result status 'failed' (GLM_NONCONVERGENCE: zero gate "
+                    "optimizer did not converge)"
+                ),
+            )
+        },
+    )
+
+    receipt = service._workflow_execution_receipt(workflow, state)
+
+    assert receipt["failed_steps"] == [
+        {
+            "step_id": "hurdle_nb",
+            "operation_id": "glm.hurdle_negative_binomial",
+            "status": "failed",
+            "error_code": "GLM_NONCONVERGENCE",
+        }
+    ]
+    assert "zero gate optimizer" not in json.dumps(receipt)
 
 
 def test_run_notebook_catalog_only_advertises_model_packs_with_options_owner() -> None:
@@ -465,6 +886,68 @@ def test_run_notebook_catalog_only_advertises_model_packs_with_options_owner() -
     assert not _supports_rerun_model_options(
         {"params": [{"key": "x"}, {"key": "covariance"}]}
     )
+
+
+def test_real_planner_catalog_projects_every_live_p7_workflow_capability(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The Notebook planner derives P7 choices from the live registry."""
+
+    from tests.test_data_column_cast import _source_project
+    from workbench.agent.p7_pack_registry import p7_pack_registry
+    from workbench.lineage.run_inputs import write_run_inputs
+    from workbench.llm.config import LLMConfig
+
+    frame = pd.DataFrame({"value": [1.0, 2.0, 3.0]})
+    project, source_run_id, _source_artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project,
+        frame.to_csv(index=False).encode("utf-8"),
+        filename="source.csv",
+    )
+    write_run_inputs(
+        project / "runs" / source_run_id,
+        form={},
+        upload={"sha256": upload_sha, "filename": "source.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="p7-catalog-source",
+    )
+    service = NotebookService(project)
+    notebook = service.ensure_dataset_projection_from_run(
+        from_run_id=source_run_id,
+        created_by="test",
+        available_capabilities=[],
+    )
+    context = service.compile_context(notebook.notebook_id)
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes.load_llm_config",
+        lambda: LLMConfig(
+            base_url="https://provider.invalid",
+            api_key="test-key",
+            model="test-model",
+        ),
+    )
+
+    planner = _planning_agent(
+        project,
+        service,
+        notebook.notebook_id,
+        context,
+        _trace(project, notebook.notebook_id, notebook.run_family_id),
+    )
+
+    assert {
+        operation_id: planner.capability_catalog[operation_id][
+            "notebook_proposal_adapters"
+        ]
+        for operation_id in p7_pack_registry.operation_ids()
+    } == {
+        operation_id: ["operation.multi_step"]
+        for operation_id in p7_pack_registry.operation_ids()
+    }
 
 
 def test_real_planner_reads_current_server_owned_custom_projection(
@@ -928,7 +1411,7 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     assert after_confirm.status_code == 200, after_confirm.text
     assert after_confirm.json()["options"][0]["lifecycle_status"] == "executing"
 
-    completed = client.post(
+    client_owned = client.post(
         f"/notebooks/{notebook_id}/options/opt_route_1/execute",
         params=params,
         json={
@@ -938,10 +1421,46 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
                     "artifact_id": "ts.parameters",
                     "artifact_type": "time_series_json",
                     "count": 1,
-                    "step": None,
                 }
             ],
         },
+    )
+    assert client_owned.status_code == 409, client_owned.text
+    assert client_owned.json()["error"]["code"] == (
+        "NOTEBOOK_CLIENT_EXECUTION_FACTS_FORBIDDEN"
+    )
+
+    server_run = make_run(project, "run_001")
+    bind_run_to_family(
+        server_run,
+        run_family_id=notebook["run_family_id"],
+        bound_by="server-test",
+    )
+    artifact_path = server_run / "ts.parameters.json"
+    artifact_path.write_text("{\"status\": \"completed\"}", encoding="utf-8")
+    register_artifact(
+        server_run,
+        "ts.parameters",
+        artifact_path,
+        "time_series_json",
+        "estimation",
+        [],
+    )
+    ambient_path = server_run / "ts.diagnostics.json"
+    ambient_path.write_text("{\"status\": \"completed\"}", encoding="utf-8")
+    register_artifact(
+        server_run,
+        "ts.diagnostics",
+        ambient_path,
+        "time_series_json",
+        "diagnostics",
+        [],
+    )
+
+    completed = client.post(
+        f"/notebooks/{notebook_id}/options/opt_route_1/execute",
+        params=params,
+        json={"run_id": "run_001"},
     )
     assert completed.status_code == 200, completed.text
     assert completed.json()["execution_status"] == "succeeded"
@@ -957,7 +1476,7 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     assert persisted_result == {
         "option_id": "opt_route_1",
         "option_revision": 1,
-        "run_id": None,
+        "run_id": "run_001",
         "execution_status": "succeeded",
         "committed": True,
         "artifact_validation": {
@@ -968,9 +1487,9 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
             "issues": [],
         },
         "artifact_validation_scope": {
-            "mode": "explicit_produced_artifacts",
-            "ambient_artifact_ids": [],
-            "ambient_artifact_count": 0,
+            "mode": "server_owned_contract_projection",
+            "ambient_artifact_ids": ["ts.diagnostics", "ts.parameters"],
+            "ambient_artifact_count": 2,
         },
     }
 
@@ -1279,12 +1798,24 @@ def test_projection_route_can_restart_from_a_runs_verified_dataset_source(
 
     assert projection.status_code == 200, projection.text
     notebook = projection.json()
-    assert notebook["projection_source"] == {
+    projection_source = notebook["projection_source"]
+    assert {
+        key: projection_source[key]
+        for key in ("kind", "upload_sha256", "filename", "sheet_names")
+    } == {
         "kind": "dataset",
         "upload_sha256": upload_sha,
         "filename": "source.csv",
         "sheet_names": [],
     }
+    assert (
+        projection_source["workflow_source"]["source_kind"] == "dataset_upload"
+        and not (
+            project
+            / "runs"
+            / projection_source["workflow_source"]["run_id"]
+        ).exists()
+    )
     assert notebook["active_head_run_id"] is None
     assert notebook["run_family_id"] != "run_001"
 

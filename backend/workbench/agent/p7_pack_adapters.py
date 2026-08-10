@@ -46,6 +46,7 @@ ColumnExtractor: TypeAlias = Callable[[Request], tuple[str, ...]]
 RequestValidator: TypeAlias = Callable[[Request], Request]
 Executor: TypeAlias = Callable[[pd.DataFrame | None, Request], Result]
 ResultValidator: TypeAlias = Callable[[Result], None]
+FrameRequestValidator: TypeAlias = Callable[[pd.DataFrame | None, Request], None]
 
 _MISSING: Final = object()
 _COMMON_REQUEST_FIELDS = frozenset(
@@ -113,6 +114,13 @@ def _reject_raw_fields(value: object, path: str = "request") -> None:
     elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         for index, nested in enumerate(value):
             _reject_raw_fields(nested, f"{path}[{index}]")
+
+
+def validate_frame_request_passthrough(
+    _frame: pd.DataFrame | None,
+    _request: Request,
+) -> None:
+    """Default declaration for operations with no extra frame-shape preflight."""
 
 
 def _validate_bindings(
@@ -1119,10 +1127,62 @@ def validate_synthetic_request(request: Request) -> Request:
     for name in ("treated_unit", "donor_pool", "periods", "pre_periods", "post_periods"):
         _option(options, name)
     if operation_id == "synthetic_control.placebo":
-        _option(options, "placebo_policy")
+        policy = _mapping_options(options, "placebo_policy")
+        required_policy_fields = {
+            "unit_policy",
+            "placebo_units",
+            "max_placebos",
+            "donor_policy",
+            "failure_policy",
+        }
+        placebo_units = policy.get("placebo_units")
+        donor_pool = options.get("donor_pool")
+        treated_unit = options.get("treated_unit")
+        max_placebos = policy.get("max_placebos")
+        if (
+            set(policy) != required_policy_fields
+            or policy.get("unit_policy") != "explicit"
+            or policy.get("donor_policy") != "exclude_original_treated"
+            or policy.get("failure_policy") != "reject"
+            or not isinstance(placebo_units, Sequence)
+            or isinstance(placebo_units, (str, bytes))
+            or not isinstance(donor_pool, Sequence)
+            or isinstance(donor_pool, (str, bytes))
+            or type(max_placebos) is not int
+            or max_placebos < len(placebo_units)
+            or any(type(unit) is not str or not unit for unit in placebo_units)
+            or any(type(unit) is not str or not unit for unit in donor_pool)
+            or treated_unit in placebo_units
+            or len(set(placebo_units)) != len(placebo_units)
+            or any(unit not in donor_pool for unit in placebo_units)
+        ):
+            raise P7PackAdapterError(
+                "SYNTHETIC_CONTROL_INVALID_PLACEBO_POLICY: "
+                "placebo_policy must be explicit, closed, and bounded to unique donors"
+            )
     elif operation_id != "synthetic_control.fit":
         raise P7PackAdapterError(f"synthetic-control adapter received unsupported operation: {operation_id}")
     return request
+
+
+def validate_synthetic_frame_request(
+    frame: pd.DataFrame | None,
+    request: Request,
+) -> None:
+    """Reject a period vector that cannot index the immutable source rows."""
+
+    source = _frame(frame)
+    _operation_id, _bindings, options = _request_parts(request)
+    periods = _option(options, "periods")
+    if not isinstance(periods, Sequence) or isinstance(periods, (str, bytes)):
+        raise P7PackAdapterError(
+            "SYNTHETIC_CONTROL_INVALID_PERIODS: periods must be an array"
+        )
+    if len(periods) != len(source):
+        raise P7PackAdapterError(
+            "SYNTHETIC_CONTROL_PERIOD_COUNT_MISMATCH: "
+            f"periods has {len(periods)} values but the source has {len(source)} rows"
+        )
 
 
 def execute_synthetic(frame: pd.DataFrame | None, request: Request) -> Result:
@@ -1540,6 +1600,7 @@ class P7FamilyAdapter:
     extract_columns: ColumnExtractor
     execute: Executor
     validate_result: ResultValidator
+    validate_frame_request: FrameRequestValidator = validate_frame_request_passthrough
 
 
 P7_FAMILY_ADAPTERS: Mapping[str, P7FamilyAdapter] = {
@@ -1559,7 +1620,13 @@ P7_FAMILY_ADAPTERS: Mapping[str, P7FamilyAdapter] = {
     "roc_diagnostics": P7FamilyAdapter(validate_roc_request, _generic_columns, execute_roc, _validate_roc_result),
     "spatial_statistics": P7FamilyAdapter(validate_spatial_request, _generic_columns, execute_spatial, _validate_spatial_result),
     "survival_analysis": P7FamilyAdapter(validate_survival_request, _generic_columns, execute_survival, _validate_survival_result),
-    "synthetic_control": P7FamilyAdapter(validate_synthetic_request, _generic_columns, execute_synthetic, _validate_synthetic_result),
+    "synthetic_control": P7FamilyAdapter(
+        validate_synthetic_request,
+        _generic_columns,
+        execute_synthetic,
+        _validate_synthetic_result,
+        validate_synthetic_frame_request,
+    ),
     "time_series": P7FamilyAdapter(validate_time_series_request, _generic_columns, execute_time_series, _validate_time_series_result),
 }
 

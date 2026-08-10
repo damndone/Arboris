@@ -9,7 +9,7 @@ inspectable AI-operation record targeted for the report slice and v1.7.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 import json
 import math
@@ -881,6 +881,7 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
         messages,
         config,
         report_retry_budget=report_retry_budget,
+        report_phase="initial_generation",
     )
     text = result["text"]
     report_quality: ReportQualityResult | None = None
@@ -889,7 +890,8 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
             text, report_quality = _validate_report_text(text, report_contract)
         except ReportContractError as first_error:
             report_quality = getattr(first_error, "quality", None)
-            correction_prompt = _REPORT_CORRECTION_PROMPT
+            citation_hint = _report_citation_hint(report_contract)
+            correction_prompt = _REPORT_CORRECTION_PROMPT + citation_hint
             forbidden_numeric_tokens = _forbidden_numeric_tokens(
                 first_error.violations
             )
@@ -912,6 +914,7 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
                 retry_messages,
                 config,
                 report_retry_budget=report_retry_budget,
+                report_phase="contract_correction",
             )
             final_retry_succeeded = False
             try:
@@ -936,6 +939,7 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
                             "role": "user",
                             "content": (
                                 _REPORT_NUMERIC_FREE_CORRECTION_PROMPT
+                                + citation_hint
                                 + "; ".join(second_error.violations)[:1_000]
                             ),
                         },
@@ -944,6 +948,7 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
                         final_retry_messages,
                         config,
                         report_retry_budget=report_retry_budget,
+                        report_phase="final_correction",
                     )
                     try:
                         text, report_quality = _validate_report_text(
@@ -998,23 +1003,30 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
     return response
 
 
-# A whole-report request is structurally the largest call this endpoint makes:
-# hundreds of facts and every figure in one prompt, and on a contract violation
-# it runs corrective round trips. A 214-fact report came in at ~55s and
-# the previous attempt returned 502 at the 60s provider default -- the model was
-# working, the clock simply ran out. Report mode gets its own ceiling instead of
-# raising the default, which would make every small Ask AI call hang far longer
-# against a dead provider.
+# A whole-report request is structurally the largest call this endpoint makes.
+# The ceiling is shared by initial generation, corrective rounds, and the one
+# transport retry; no individual round may reset the user's wall-clock budget.
 REPORT_MODE_TIMEOUT_S = 300.0
 REPORT_TRANSPORT_RETRY_BACKOFF_S = 0.05
 
 
 @dataclass
 class _ReportRetryBudget:
-    """One idempotent transport retry shared by all Report provider calls."""
+    """One wall-clock deadline and idempotent retry budget per Report request."""
 
     remaining: int = 1
     attempts: int = 0
+    deadline_seconds: float = field(
+        default_factory=lambda: float(REPORT_MODE_TIMEOUT_S)
+    )
+    started_at: float = field(default_factory=time.monotonic)
+    provider_call_count: int = 0
+
+    def elapsed_seconds(self) -> float:
+        return max(0.0, time.monotonic() - self.started_at)
+
+    def remaining_seconds(self) -> float:
+        return self.deadline_seconds - self.elapsed_seconds()
 
 
 def _timeout_for_mode(mode: str, config):
@@ -1028,9 +1040,19 @@ def _chat_or_api_error(
     config,
     *,
     report_retry_budget: _ReportRetryBudget | None = None,
+    report_phase: str = "provider_call",
 ) -> dict[str, Any]:
+    call_config = _report_call_config(
+        config,
+        report_retry_budget,
+        phase=report_phase,
+    )
+    if report_retry_budget is not None:
+        report_retry_budget.provider_call_count += 1
     try:
-        return chat_completion(messages, config)
+        result = chat_completion(messages, call_config)
+        _ensure_report_deadline(report_retry_budget, phase=report_phase)
+        return result
     except LLMNotConfiguredError as exc:
         raise WorkbenchAPIError(
             status_code=503, code="LLM_NOT_CONFIGURED", message=str(exc)
@@ -1044,8 +1066,19 @@ def _chat_or_api_error(
             report_retry_budget.remaining -= 1
             report_retry_budget.attempts += 1
             time.sleep(REPORT_TRANSPORT_RETRY_BACKOFF_S)
+            retry_config = _report_call_config(
+                config,
+                report_retry_budget,
+                phase=report_phase,
+            )
+            report_retry_budget.provider_call_count += 1
             try:
-                return chat_completion(messages, config)
+                result = chat_completion(messages, retry_config)
+                _ensure_report_deadline(
+                    report_retry_budget,
+                    phase=report_phase,
+                )
+                return result
             except LLMNotConfiguredError as retry_error:
                 raise WorkbenchAPIError(
                     status_code=503,
@@ -1081,6 +1114,43 @@ def _chat_or_api_error(
                 ),
             },
         ) from exc
+
+
+def _report_deadline_error(
+    budget: _ReportRetryBudget,
+    *,
+    phase: str,
+) -> WorkbenchAPIError:
+    return WorkbenchAPIError(
+        status_code=504,
+        code="LLM_REPORT_DEADLINE_EXCEEDED",
+        message="Report generation exceeded its shared wall-clock deadline.",
+        details={
+            "phase": phase,
+            "deadline_seconds": budget.deadline_seconds,
+            "elapsed_seconds": round(budget.elapsed_seconds(), 6),
+            "provider_call_count": budget.provider_call_count,
+            "transport_retry_count": budget.attempts,
+        },
+    )
+
+
+def _ensure_report_deadline(
+    budget: _ReportRetryBudget | None,
+    *,
+    phase: str,
+) -> None:
+    if budget is not None and budget.remaining_seconds() <= 0:
+        raise _report_deadline_error(budget, phase=phase)
+
+
+def _report_call_config(config, budget: _ReportRetryBudget | None, *, phase: str):
+    if budget is None:
+        return config
+    remaining = budget.remaining_seconds()
+    if remaining <= 0:
+        raise _report_deadline_error(budget, phase=phase)
+    return replace(config, timeout_s=min(float(config.timeout_s), remaining))
 
 
 def _validate_image_optin(request: AskAIChatRequest, config) -> None:
@@ -1206,4 +1276,21 @@ def _forbidden_numeric_tokens(violations: tuple[str, ...]) -> tuple[str, ...]:
             if violation.startswith(prefix)
             and violation.removeprefix(prefix).strip()
         )
+    )
+
+
+def _report_citation_hint(contract: ReportPacketContract) -> str:
+    """Give corrective calls copy-safe markers without weakening validation."""
+
+    usable_ids = sorted(contract.fact_ids - contract.excluded_fact_ids)
+    if not usable_ids:
+        return ""
+    markers = ", ".join(f"[[c:{fact_id}]]" for fact_id in usable_ids)
+    return (
+        "Results must include at least one valid supplied fact citation. "
+        "Valid citation markers for this packet are: "
+        + markers
+        + ". Digits inside these citation marker IDs are exempt from the "
+        "no-numeric-prose rule; keep the marker exact and attach it to the "
+        "claim supported by that fact. "
     )

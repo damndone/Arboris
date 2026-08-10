@@ -62,6 +62,11 @@ export const DEFAULT_REPORT_INSTRUCTION =
 export const REPORT_PROMPT_PLACEHOLDER =
   "Tell the agent what you want to explore or change…";
 
+// The server owns a 300-second whole-request deadline. The client watchdog is
+// deliberately later so the typed server error wins unless the network or
+// reverse proxy itself stops making progress.
+export const REPORT_CLIENT_TIMEOUT_MS = 315_000;
+
 export async function generateReport(input: {
   facts: CitableFact[];
   scope: ReportScope;
@@ -72,32 +77,57 @@ export async function generateReport(input: {
   requiredCapabilities?: string[];
   capabilityManifest?: ReportCapabilityManifestEntry[];
   excludedFactIds?: string[];
+  clientTimeoutMs?: number;
 }): Promise<ReportResponse> {
-  const response = await fetch(apiUrl("/llm/chat"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      mode: "workbench_report_v1",
-      question: input.instruction?.trim() || DEFAULT_REPORT_INSTRUCTION,
-      packet: {
-        packet_version: "workbench-report/v1",
-        report_scope: input.scope,
-        fact_table: input.facts,
-        context_fingerprints: input.fingerprints,
-        figures: input.figures ?? [],
-        report_standard: input.reportStandard,
-        required_capabilities: input.requiredCapabilities ?? [],
-        capability_manifest: input.capabilityManifest ?? [],
-        excluded_fact_ids: input.excludedFactIds ?? [],
-      },
-      response_guardrails: {
-        advisory_text_only: true,
-        executable_actions_allowed: false,
-        citations_required: true,
-        cite_marker_format: "[[c:ID]]",
-      },
-    }),
-  });
+  const timeoutMs = input.clientTimeoutMs ?? REPORT_CLIENT_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new ReportGenerationError(
+      "LLM_REPORT_CLIENT_TIMEOUT_INVALID",
+      "Report client timeout must be a positive finite duration.",
+    );
+  }
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(apiUrl("/llm/chat"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        mode: "workbench_report_v1",
+        question: input.instruction?.trim() || DEFAULT_REPORT_INSTRUCTION,
+        packet: {
+          packet_version: "workbench-report/v1",
+          report_scope: input.scope,
+          fact_table: input.facts,
+          context_fingerprints: input.fingerprints,
+          figures: input.figures ?? [],
+          report_standard: input.reportStandard,
+          required_capabilities: input.requiredCapabilities ?? [],
+          capability_manifest: input.capabilityManifest ?? [],
+          excluded_fact_ids: input.excludedFactIds ?? [],
+        },
+        response_guardrails: {
+          advisory_text_only: true,
+          executable_actions_allowed: false,
+          citations_required: true,
+          cite_marker_format: "[[c:ID]]",
+        },
+      }),
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new ReportGenerationError(
+        "LLM_REPORT_CLIENT_TIMEOUT",
+        "Report generation exceeded the client network watchdog.",
+        { timeout_ms: timeoutMs },
+      );
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
   if (!response.ok) {
     throw await extractErrorMessage(response);
   }

@@ -1215,6 +1215,23 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.getByTestId("genesis-wizard")).toBeInTheDocument();
     });
 
+    it("existing projects expose a visible New analysis action after the drawer closes", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(forestResponse());
+      vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+      mountHome(undefined, "/p/slug/graph?open_genesis=1");
+
+      expect(await screen.findByTestId("genesis-wizard-drawer")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() =>
+        expect(screen.queryByTestId("genesis-wizard-drawer")).toBeNull(),
+      );
+
+      const reopen = screen.getByRole("button", { name: "New analysis" });
+      fireEvent.click(reopen);
+
+      expect(screen.getByTestId("genesis-wizard-drawer")).toBeInTheDocument();
+    });
+
     it("consumes ?genesis=1 when the wizard closes so it does not reopen", async () => {
       vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
       vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
@@ -1684,7 +1701,6 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
       "nb_1",
       "opt_1",
       {
-        execution_status: "succeeded",
         run_id: "run_child",
       },
     );

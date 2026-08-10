@@ -100,4 +100,30 @@ describe("report evidence grouping", () => {
       }),
     ]);
   });
+
+  it("does not collapse mixed post-estimation providers into the first fact", () => {
+    const manifest = reportCapabilityManifestForFacts([
+      fact({ field: "post_estimation:legacy:value" }),
+      fact({
+        id: "c2",
+        field: "post_estimation:p7:value",
+        provider_id: "evidence.workflow.p7.v1",
+      }),
+      fact({
+        id: "c3",
+        field: "post_estimation:generic:value",
+        provider_id: "evidence.workflow.capability.v1",
+      }),
+    ]);
+
+    expect(manifest).toEqual([
+      expect.objectContaining({
+        capability_id: "post_estimation",
+        provider_id: "evidence.post_estimation.aggregate.v1",
+        limitations: [
+          "Facts include multiple registered evidence providers; inspect fact-level provider_id metadata.",
+        ],
+      }),
+    ]);
+  });
 });

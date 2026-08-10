@@ -87,6 +87,78 @@ def _draft_run_family_id(draft: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _project_native_family_params_for_execution(
+    model: dict[str, Any],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Project canonical family controls through the declared wire builder."""
+
+    from ..agent.workflow_contracts import (
+        OperationValidationError,
+        model_family_contract,
+        validate_model_genesis_spec,
+    )
+
+    model_type = params.get("model_type") or model.get("model_type")
+    try:
+        family = model_family_contract(model_type)
+    except OperationValidationError:
+        return params
+    if not family.builds_native_params:
+        return params
+
+    projected = dict(params)
+    for control in model.get("editable_schema") or ():
+        if not isinstance(control, dict):
+            continue
+        canonical = control.get("key")
+        aliases = control.get("satisfied_by")
+        if (
+            isinstance(canonical, str)
+            and canonical not in projected
+            and isinstance(aliases, list)
+        ):
+            for alias in aliases:
+                if alias in projected:
+                    projected[canonical] = projected[alias]
+                    break
+
+    family_spec: dict[str, Any] = {
+        "model_family": model_type,
+        "branches": [
+            {
+                "branch_id": "genesis",
+                "outcome": projected.get("y"),
+                "predictors": list(projected.get("x") or []),
+            }
+        ],
+    }
+    # The global Genesis vocabulary also contains compatibility aliases for
+    # other families. Native builders must receive only their declared context
+    # fields; passing a CS/SA alias such as ``did_mode`` turns a valid native
+    # family into a rejected TWFE-shaped request.
+    for field_name in family.context_spec_fields:
+        if field_name in projected:
+            family_spec[field_name] = projected[field_name]
+    if "covariance" in projected:
+        family_spec["covariance"] = projected["covariance"]
+    try:
+        validate_model_genesis_spec(family_spec)
+        built = family.build_model_params(
+            family_spec,
+            {"outcome": projected.get("y"), "predictors": list(projected.get("x") or [])},
+            list(projected.get("x") or []),
+            str(projected.get("covariance", "unadjusted")),
+        )
+        execution_params = dict(params)
+        for field_name in family.context_spec_fields:
+            execution_params.pop(field_name, None)
+        execution_params.update(built)
+        return execution_params
+    except OperationValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def execute_genesis_draft(
     draft_id: str,
     root: Path,
@@ -171,7 +243,8 @@ def execute_genesis_draft(
             ) from exc
 
         tp = nodes["table_1"].get("params") or {}
-        mp = dict(nodes["model_1"].get("params") or {})
+        model = nodes["model_1"]
+        mp = dict(model.get("params") or {})
         try:
             # Compatibility adapter for already-materialized Notebook drafts;
             # it preserves the server-owned nested OLS options while projecting
@@ -185,6 +258,7 @@ def execute_genesis_draft(
                 detail="MODEL_OPTIONS_BINDING_CLIENT_MANAGED",
             )
         model_type = str(mp.get("model_type", "") or "auto")
+        mp = _project_native_family_params_for_execution(model, mp)
         from ..agent.recipe_contracts import RecipeValidationError, recipe_contract_for_model_type
 
         recipe_contract = recipe_contract_for_model_type(model_type)

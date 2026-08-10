@@ -911,6 +911,24 @@ export function NotebookRouteView({
     }
   }
 
+  async function exitPlanning() {
+    if (!notebookId) return;
+    setActionError(null);
+    try {
+      const notebook = await updateNotebookFocus(projectRoot, notebookId, {
+        goal: null,
+      });
+      setNotebookIntent("");
+      setNotebookInteractionMode(persistedInteractionMode(notebook));
+      setPlanningError(null);
+      lastReadyViewRef.current = null;
+      setView({ status: "loading" });
+      setReloadToken((token) => token + 1);
+    } catch (error: unknown) {
+      setView({ status: "error", error: failurePacket(error) });
+    }
+  }
+
   async function changeNotebookInteractionMode(mode: NotebookInteractionMode) {
     if (!notebookId || mode === notebookInteractionMode) return;
     setActionError(null);
@@ -1267,6 +1285,7 @@ export function NotebookRouteView({
           if (notebookIntent.trim()) setRefreshToken((token) => token + 1);
           else setActionError({ code: "NOTEBOOK_GOAL_REQUIRED", message: "Describe what you want to find out before planning options." });
         }}
+        onExitPlanning={() => void exitPlanning()}
         interactionMode={notebookInteractionMode}
         onInteractionModeChange={(mode) => void changeNotebookInteractionMode(mode)}
         userIntent={notebookIntent}

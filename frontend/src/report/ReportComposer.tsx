@@ -17,6 +17,7 @@ export interface ReportComposerProps {
   allowEmptySubmit?: boolean;
   busy?: boolean;
   disabled?: boolean;
+  submitDisabled?: boolean;
   ariaLabel?: string;
   modelLabel?: string;
   contextButtonLabel?: string;
@@ -41,6 +42,7 @@ export function ReportComposer({
   allowEmptySubmit = false,
   busy = false,
   disabled = false,
+  submitDisabled = false,
   ariaLabel = "Report instruction",
   modelLabel = "Report model",
   contextButtonLabel = "View report context",
@@ -61,6 +63,7 @@ export function ReportComposer({
   const remaining = total === null ? 0 : Math.max(0, total - contextUsedTokens);
   const canSubmit = !busy
     && !disabled
+    && !submitDisabled
     && !modelSwitching
     && (allowEmptySubmit || value.trim().length > 0);
 
@@ -142,7 +145,7 @@ export function ReportComposer({
               role="listbox"
               aria-label={modelLabel}
               value={model}
-              disabled={busy || disabled || modelSwitching || modelOptions.length === 0 || !agent}
+              disabled={busy || disabled || submitDisabled || modelSwitching || modelOptions.length === 0 || !agent}
               onChange={(event) => {
                 if (agent) {
                   setModelSwitching(true);

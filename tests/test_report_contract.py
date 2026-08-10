@@ -104,6 +104,16 @@ def test_packet_preserves_optional_journal_quality_metadata() -> None:
         {
             "report_standard": "journal_full_v1",
             "required_capabilities": ["regression", "diagnostics.robustness"],
+            "capability_manifest": [
+                {
+                    "capability_id": "regression",
+                    "provider_id": "evidence.regression.v1",
+                },
+                {
+                    "capability_id": "diagnostics.robustness",
+                    "provider_id": "evidence.diagnostics.v1",
+                },
+            ],
             "excluded_fact_ids": ["c5"],
         }
     )
@@ -116,6 +126,22 @@ def test_packet_preserves_optional_journal_quality_metadata() -> None:
         "diagnostics.robustness",
     )
     assert contract.excluded_fact_ids == frozenset({"c5"})
+
+
+def test_packet_rejects_required_capability_without_a_provider_manifest() -> None:
+    packet = _packet()
+    packet.update(
+        {
+            "report_standard": "journal_full_v1",
+            "required_capabilities": ["regression"],
+        }
+    )
+
+    with pytest.raises(
+        ReportContractError,
+        match="capability manifest is missing required capabilities: regression",
+    ):
+        validate_report_packet(packet)
 
 
 def test_report_packet_preserves_capability_provider_manifest() -> None:

@@ -434,6 +434,19 @@ function ForestWorkbench({
     setGenesisWizardOpen(true);
   }, [genesisHandoffConsumed, openGenesis, searchParams]);
 
+  useEffect(() => {
+    const queryGenesis =
+      searchParams.get("genesis") === "1" ||
+      searchParams.get("open_genesis") === "1";
+    if (!queryGenesis && !openGenesis && !genesisWizardOpen) {
+      genesisHandoffConsumed.current = false;
+    }
+  }, [genesisWizardOpen, openGenesis, searchParams]);
+
+  const openGenesisWizard = useCallback(() => {
+    setGenesisWizardOpen(true);
+  }, []);
+
   const closeGenesisWizard = useCallback(() => {
     setGenesisWizardOpen(false);
     if (
@@ -585,7 +598,7 @@ function ForestWorkbench({
         dispatchDraft({ type: "remove", draftId: pendingGenesisRun.draftId });
       }
       setPendingGenesisRun(null);
-      setGenesisWizardOpen(false);
+      closeGenesisWizard();
       setRailRefreshToken((t) => t + 1);
     },
     onFailed: (draftId) => {
@@ -743,20 +756,12 @@ function ForestWorkbench({
         // Notebook could advance its active head on a merely-dispatched run.
         void waitForRunTerminal(projectRoot, result.run_id).then((detail) => {
           if (!detail) return;
-          const succeeded = detail.status === "completed";
           return completeNotebookOptionExecution(
             projectRoot,
             provenance.notebook_id,
             provenance.option_id,
             {
-              execution_status: succeeded ? "succeeded" : "failed",
               run_id: result.run_id,
-              ...(succeeded
-                ? {}
-                : {
-                    error_code:
-                      detail.errors?.issues?.[0]?.code ?? "WORKFLOW_NOT_COMPLETED",
-                  }),
             },
           );
         }).catch(() => {
@@ -812,12 +817,15 @@ function ForestWorkbench({
   const genesisWizardDrawer = genesisWizardOpen ? (
     <aside
       data-testid="genesis-wizard-drawer"
+      role="dialog"
+      aria-label="New analysis"
       style={{
         position: "absolute",
         top: 0,
         right: 0,
         bottom: 0,
-        width: 460,
+        width: "min(460px, 100%)",
+        boxSizing: "border-box",
         borderLeft: "1px solid var(--separator)",
         padding: 22,
         overflowY: "auto",
@@ -870,7 +878,7 @@ function ForestWorkbench({
       projectRoot={projectRoot}
       legacyFamilyCount={forest.familyCount}
       legacyRunCount={forest.familyRunCount}
-      onOpenWizard={() => setGenesisWizardOpen(true)}
+      onOpenWizard={openGenesisWizard}
     />
   ) : (
     <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={handleRerun}>
@@ -904,9 +912,8 @@ function ForestWorkbench({
                     <WorkbenchShell
                       runId={shellRunId}
                       projectRoot={projectRoot}
-                      onResumeGenesisDraft={
-                        draftOnlyRunId ? () => setGenesisWizardOpen(true) : undefined
-                      }
+                      onOpenGenesisWizard={openGenesisWizard}
+                      hasGenesisDraft={Boolean(draftOnlyRunId)}
                       pendingFocusTarget={pendingFocusTarget}
                       onPendingFocusConsumed={() => setPendingFocusTarget(null)}
                       onPendingFocusRetry={() => {
@@ -1310,7 +1317,8 @@ function isHeadSetNode(node: GraphViewNode): node is HeadSetNode {
 function WorkbenchShell({
   runId,
   projectRoot,
-  onResumeGenesisDraft,
+  onOpenGenesisWizard,
+  hasGenesisDraft = false,
   pendingFocusTarget = null,
   onPendingFocusConsumed,
   onPendingFocusRetry,
@@ -1318,7 +1326,8 @@ function WorkbenchShell({
 }: {
   runId: string;
   projectRoot: string;
-  onResumeGenesisDraft?: () => void;
+  onOpenGenesisWizard?: () => void;
+  hasGenesisDraft?: boolean;
   pendingFocusTarget?: PendingFocusTarget | null;
   onPendingFocusConsumed?: () => void;
   onPendingFocusRetry?: () => void;
@@ -1979,11 +1988,12 @@ function WorkbenchShell({
           ) : null
         }
         extraActions={
-          onResumeGenesisDraft ? (
+          onOpenGenesisWizard ? (
             <button
               type="button"
-              data-testid="genesis-resume-cta"
-              onClick={onResumeGenesisDraft}
+              data-testid={hasGenesisDraft ? "genesis-resume-cta" : "genesis-open-cta"}
+              aria-label={hasGenesisDraft ? "Resume new analysis" : "New analysis"}
+              onClick={onOpenGenesisWizard}
               style={{
                 padding: "4px 10px",
                 borderRadius: 6,
@@ -1994,7 +2004,7 @@ function WorkbenchShell({
                 fontSize: 12,
               }}
             >
-              Resume new analysis
+              {hasGenesisDraft ? "Resume new analysis" : "New analysis"}
             </button>
           ) : null
         }

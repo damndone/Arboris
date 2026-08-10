@@ -23,6 +23,10 @@ interface EvidenceGroupDefinition {
   provider_id?: string;
 }
 
+const AGGREGATE_PROVIDER_ID = "evidence.post_estimation.aggregate.v1";
+const MULTI_PROVIDER_LIMITATION =
+  "Facts include multiple registered evidence providers; inspect fact-level provider_id metadata.";
+
 export interface ReportCapabilityManifestEntry {
   capability_id: string;
   provider_id: string;
@@ -105,16 +109,25 @@ export function reportCapabilityManifestForFacts(
     if (!definition.capability) return [];
     const group = groups.find((candidate) => candidate.id === definition.id);
     if (!group) return [];
-    const providerId = group.facts.find((fact) => fact.provider_id)?.provider_id
-      ?? definition.provider_id
-      ?? `evidence.${definition.id}.v1`;
+    const providerIds = new Set(
+      group.facts
+        .map((fact) => fact.provider_id)
+        .filter((providerId): providerId is string => Boolean(providerId)),
+    );
+    if (group.facts.some((fact) => !fact.provider_id) && definition.provider_id) {
+      providerIds.add(definition.provider_id);
+    }
+    const sortedProviderIds = [...providerIds].sort();
+    const providerId = sortedProviderIds.length > 1
+      ? AGGREGATE_PROVIDER_ID
+      : sortedProviderIds[0] ?? definition.provider_id ?? `evidence.${definition.id}.v1`;
     return [{
       capability_id: definition.capability,
       provider_id: providerId,
       availability: "available" as const,
       validation_level: "internal_only" as const,
       report_modules: [definition.id],
-      limitations: [],
+      limitations: sortedProviderIds.length > 1 ? [MULTI_PROVIDER_LIMITATION] : [],
     }];
   });
 }

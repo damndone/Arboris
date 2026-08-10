@@ -22,6 +22,10 @@ from workbench.agent.notebook import (
 from workbench.agent.trace import TraceWriter
 from workbench.contracts.agent.notebook_option import ExpectedArtifact
 from workbench.lineage.run_family import bind_run_to_family
+from workbench.services.server_run_artifacts import (
+    ServerOwnedArtifactManifestError,
+    read_server_owned_run_artifacts,
+)
 
 from tests.test_notebook_support import (
     make_project,
@@ -44,6 +48,17 @@ def test_an_empty_artifact_contract_is_refused_before_persistence() -> None:
 
 def _artifact(artifact_id: str, artifact_type: str = "time_series_json", step: str = "arma_garch"):
     return {"artifact_id": artifact_id, "artifact_type": artifact_type, "step": step}
+
+
+def test_server_owned_reader_rejects_a_non_object_artifact_index(tmp_path: Path) -> None:
+    """Malformed compiler-owned state must become a typed completion refusal."""
+
+    run_root = tmp_path / "runs" / "run_malformed"
+    run_root.mkdir(parents=True)
+    (run_root / "artifacts_index.json").write_text("[]", encoding="utf-8")
+
+    with pytest.raises(ServerOwnedArtifactManifestError, match="unreadable"):
+        read_server_owned_run_artifacts(tmp_path, "run_malformed", required=True)
 
 
 # ----------------------------------------------------------------------

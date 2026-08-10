@@ -32,10 +32,6 @@ from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..events import get_event_manager
 from ..exports import export_xlsx
-from ..contracts.model.arma_garch import ArmaGarchAnalysisContract
-from ..engine.packs.arma_garch.errors import ArmaGarchInputError
-from ..engine.packs.arma_garch.input import audit_time_value_input
-from ..engine.packs.arma_garch.transforms import build_transform_profiles
 from ..ingestion import _read_frame
 from ..model_options import ModelOptionsError, parse_model_options
 from ..orchestrator import run_batch_y_workflow
@@ -163,6 +159,14 @@ async def arma_garch_transform_preflight(
     transpose: str = Form("false"),
 ) -> dict[str, Any]:
     """Profile all supported transforms on the same full analysis view as a run."""
+
+    # ARMA/GARCH imports transitively load the optional ``arch`` plotting stack.
+    # Keep that pack behind its route so importing the general runs router does
+    # not block legacy graph startup on Matplotlib font-cache initialization.
+    from ..contracts.model.arma_garch import ArmaGarchAnalysisContract
+    from ..engine.packs.arma_garch.errors import ArmaGarchInputError
+    from ..engine.packs.arma_garch.input import audit_time_value_input
+    from ..engine.packs.arma_garch.transforms import build_transform_profiles
 
     _resolve_project_runs_dir(project_root)
     config = load_config(Path(project_root) / "config.yml")

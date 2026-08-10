@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -90,6 +91,151 @@ def test_p7_step_uses_generic_runtime_and_persists_provenance(tmp_path) -> None:
     assert projected[0]["result"] == payload["result"]
 
 
+def test_p7_failed_result_fails_workflow_instead_of_false_success(
+    tmp_path, monkeypatch
+) -> None:
+    """A typed P7 failure must not be rendered as a successful workflow."""
+
+    import workbench.agent.p7_pack_registry as registry_module
+
+    operation_id = "categorical.cramers_v"
+    real_operation = registry_module.p7_pack_registry.get(operation_id)
+    failed_result = {
+        "contract": "categorical_count.result",
+        "contract_version": "1.0",
+        "operation_id": operation_id,
+        "result": {
+            "status": "failed",
+            "reason_code": "CATEGORICAL_FAILED",
+            "error_code": "CATEGORICAL_FAILED",
+            "message": "CATEGORICAL_FAILED: fixture failure",
+        },
+    }
+    fake_operation = SimpleNamespace(
+        operation_id=operation_id,
+        pack_family=real_operation.pack_family,
+        validate=lambda request: request,
+        preflight=lambda _frame, request: request,
+        extract_columns=real_operation.extract_columns,
+        execute=lambda _frame, _request: failed_result,
+        validate_result=lambda _result: None,
+    )
+    monkeypatch.setattr(
+        registry_module.p7_pack_registry,
+        "get",
+        lambda requested_operation_id: fake_operation,
+    )
+
+    frame = pd.DataFrame(
+        {
+            "row": ["a"] * 12 + ["b"] * 12,
+            "column": ["x"] * 10 + ["y"] * 2 + ["x"] * 3 + ["y"] * 9,
+        }
+    )
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = _compile_p7((run_id, artifact_id), frame, workflow_id="wf-p7-failed-result")
+
+    state = WorkflowExecutor(project).execute(
+        draft,
+        build_workflow_step_executor(project, draft),
+    )
+
+    assert state.status == "failed"
+    step_state = state.steps["categorical_association"]
+    assert step_state.status == "failed"
+    assert "status 'failed'" in (step_state.error or "")
+    assert "CATEGORICAL_FAILED: fixture failure" in (step_state.error or "")
+    assert "CATEGORICAL_FAILED: CATEGORICAL_FAILED" not in (step_state.error or "")
+    assert collect_post_estimation_results(project, run_id) == []
+
+
+def test_runtime_preflight_refuses_an_impossible_p7_request_before_execution(
+    tmp_path, monkeypatch
+) -> None:
+    """The runtime independently rechecks frame-dependent declarations."""
+
+    import workbench.agent.p7_pack_registry as registry_module
+
+    operation_id = "synthetic_control.fit"
+    real_operation = registry_module.p7_pack_registry.get(operation_id)
+    execute_calls: list[str] = []
+
+    def execute(frame, request):
+        execute_calls.append(operation_id)
+        return real_operation.execute(frame, request)
+
+    guarded_operation = SimpleNamespace(
+        operation_id=operation_id,
+        pack_family=real_operation.pack_family,
+        validate=real_operation.validate,
+        preflight=real_operation.preflight,
+        extract_columns=real_operation.extract_columns,
+        execute=execute,
+        validate_result=real_operation.validate_result,
+    )
+    monkeypatch.setattr(
+        registry_module.p7_pack_registry,
+        "get",
+        lambda requested_operation_id: guarded_operation,
+    )
+    frame = pd.DataFrame(
+        {
+            "treated_sc": [1.0 + index / 10 for index in range(10)],
+            "d1": [1.1 + index / 10 for index in range(10)],
+            "d2": [0.9 + index / 10 for index in range(10)],
+            "d3": [1.2 + index / 10 for index in range(10)],
+        }
+    )
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    step_id = "fit_counterfactual"
+    draft = compile_workflow(
+        workflow_id="wf-p7-runtime-preflight",
+        target={
+            "run_id": run_id,
+            "node_ref": "stage:source",
+            "artifact_id": artifact_id,
+        },
+        preconditions={
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": "sha256:p7-runtime-preflight",
+            "active_head_run_id": run_id,
+            "owner_resolution": "single_candidate",
+        },
+        steps=[
+            {
+                "step_id": step_id,
+                "operation_id": operation_id,
+                "spec": {
+                    "input_mode": "typed",
+                    "column_bindings": {
+                        "outcomes": ["treated_sc", "d1", "d2", "d3"]
+                    },
+                    "options": {
+                        "treated_unit": "treated_sc",
+                        "donor_pool": ["d1", "d2", "d3"],
+                        "periods": [0, 1, 2, 3, 4, 5],
+                        "pre_periods": [0, 1, 2],
+                        "post_periods": [3, 4, 5],
+                    },
+                },
+            }
+        ],
+        available_columns=list(frame.columns),
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft,
+        build_workflow_step_executor(project, draft),
+    )
+
+    assert state.status == "failed"
+    assert "SYNTHETIC_CONTROL_PERIOD_COUNT_MISMATCH" in (
+        state.steps[step_id].error or ""
+    )
+    assert execute_calls == []
+    assert collect_post_estimation_results(project, run_id) == []
+
+
 def test_repeating_a_p7_step_on_one_source_run_creates_distinct_artifacts(tmp_path) -> None:
     """A second confirmed workflow must not collide with the first result path."""
 
@@ -124,13 +270,21 @@ def test_repeating_a_p7_step_on_one_source_run_creates_distinct_artifacts(tmp_pa
 
 
 def test_every_registered_p7_operation_completes_through_compiled_workflow(tmp_path) -> None:
-    """Every registered operation reaches the same generic Workbench runtime."""
+    """Every registered operation reaches the runtime without false success.
+
+    The Hurdle negative-binomial fixture is intentionally non-convergent.  Its
+    expected outcome is a failed workflow with no committed P7 artifact; the
+    matrix treats that explicit failure as a successful safety result.
+    """
 
     from workbench.agent.p7_pack_registry import p7_pack_registry
 
     cases = _cases()
     operation_ids = set(p7_pack_registry.operation_ids())
     assert {key for key in cases if ":" not in key} == operation_ids
+    expected_fixture_failures = {
+        "glm.hurdle_negative_binomial": "GLM_NONCONVERGENCE",
+    }
     failures: list[str] = []
     for operation_id in sorted(operation_ids):
         frame, request = cases[operation_id]
@@ -169,6 +323,14 @@ def test_every_registered_p7_operation_completes_through_compiled_workflow(tmp_p
                 build_workflow_step_executor(project, draft),
             )
             step_state = state.steps[step_id]
+            expected_reason = expected_fixture_failures.get(operation_id)
+            if expected_reason is not None:
+                assert state.status == "failed", step_state.error
+                assert step_state.status == "failed"
+                assert expected_reason in (step_state.error or "")
+                assert not step_state.artifact_ids
+                assert collect_post_estimation_results(project, run_id) == []
+                continue
             assert state.status == "completed", step_state.error
             assert step_state.artifact_ids
             index = json.loads(

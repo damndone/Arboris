@@ -258,6 +258,7 @@ def test_a_dataset_producing_step_publishes_a_resolvable_binding(tmp_path: Path)
         "node_ref",
         "artifact_id",
         "content_sha256",
+        "dataset_kind",
         "result_fingerprint",
     }
     assert produced["schema_version"] == "workflow-produced-dataset.v1"
@@ -1114,11 +1115,25 @@ def test_the_lineage_case_registry_covers_every_consuming_operation() -> None:
     # coverage equation without pretending its 64 heterogeneous fixtures fit
     # the legacy model-shaped plan below.
     from workbench.agent.p7_pack_registry import p7_pack_registry
+    from workbench.agent.workflow_capability_registry import (
+        declared_workflow_capability_ids,
+    )
+
+    # Generic capability steps use one common persistence function. That
+    # function records the resolved source for every declaration; the
+    # declaration-derived runtime test below is the coverage guard for this
+    # family, while the table above remains the explicit guard for legacy
+    # operation-specific branches.
+    generic_consumers = set(declared_workflow_capability_ids()) & set(
+        workflow_contracts.STEP_CONSUMES_INPUT_FRAME
+    )
+    assert generic_consumers
 
     covered = (
         set(_LINEAGE_META_STEPS)
         | set(_LINEAGE_META_UNRECORDED)
         | (set(p7_pack_registry.operation_ids()) & set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME))
+        | generic_consumers
     )
 
     assert covered == set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME)

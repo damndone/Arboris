@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from ..api_errors import WorkbenchAPIError
 from ..artifacts import read_json, register_artifact, sha256_file, write_json, write_text_durable
 from ..econometrics.runner import apply_ols_covariance, run_ols
 from ..exports import export_pdf, export_xlsx
@@ -49,6 +50,7 @@ from ..services.draft_service import execute_genesis_draft
 from .workflow import WorkflowDraft, WorkflowExecutionError, WorkflowStepResult
 from .workflow_contracts import (
     STEP_REPLAYABLE_BY_RECIPE,
+    WORKFLOW_STEP_SPEC_CONTRACTS,
     family_context_columns,
     genesis_run_params,
     model_family_contract,
@@ -63,11 +65,58 @@ _PRODUCED_DATASET_SCHEMA = "workflow-produced-dataset.v1"
 
 # The artifact types a declared workflow-analysis step can persist. All are
 # registered evidence; this is the read side of the same contract.
-POST_ESTIMATION_ARTIFACT_TYPES = ("post_estimation", "statistical_test", "p7_analysis")
+POST_ESTIMATION_ARTIFACT_TYPES = (
+    "post_estimation",
+    "statistical_test",
+    "p7_analysis",
+    "workflow_capability_result",
+)
 
 # A product surface renders these inline, so the projection stays bounded
 # rather than growing with a project's workflow history.
 MAX_PROJECTED_POST_ESTIMATION_RESULTS = 20
+
+
+def _p7_result_status(
+    result: Mapping[str, Any],
+) -> tuple[object, Mapping[str, Any]]:
+    """Read the status from either supported P7 result-envelope shape."""
+
+    status = result.get("status")
+    details: Mapping[str, Any] = result
+    nested = result.get("result")
+    if status is None and isinstance(nested, Mapping) and "status" in nested:
+        status = nested.get("status")
+        details = nested
+    return status, details
+
+
+def _read_post_estimation_artifact_records(run_dir: Path) -> list[Any]:
+    """Read the registry shape needed by the post-estimation projection."""
+
+    try:
+        index = _read_artifacts_index(run_dir)
+    except (
+        AttributeError,
+        FileNotFoundError,
+        OSError,
+        TypeError,
+        ValueError,
+        WorkbenchAPIError,
+    ) as exc:
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact index cannot be read"
+        ) from exc
+    if not isinstance(index, Mapping):
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact index must be an object"
+        )
+    records = index.get("artifacts", [])
+    if not isinstance(records, list):
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact index must contain an artifacts list"
+        )
+    return records
 
 
 def collect_post_estimation_results(
@@ -104,48 +153,89 @@ def collect_post_estimation_results(
     for run_dir in sorted(runs_root.iterdir()):
         if not run_dir.is_dir():
             continue
-        for record in _read_artifacts_index(run_dir).get("artifacts", []):
-            if record.get("artifact_type") not in POST_ESTIMATION_ARTIFACT_TYPES:
+        for record in _read_post_estimation_artifact_records(run_dir):
+            if not isinstance(record, Mapping):
+                raise WorkflowExecutionError(
+                    "registered post-estimation artifact record must be an object"
+                )
+            artifact_type = record.get("artifact_type")
+            if artifact_type not in POST_ESTIMATION_ARTIFACT_TYPES:
+                continue
+            # The ordinary statistical-tests stage uses the historical
+            # artifact type but has no workflow source/result envelope. It is
+            # consumed by the run's statistical-evidence projection, not by
+            # this post-estimation result list. Model post-estimation tests
+            # use the same type with their operation step and remain included.
+            if artifact_type == "statistical_test" and record.get("step") == "statistical_tests":
                 continue
             entry = _read_post_estimation_entry(run_dir, record)
-            if entry is None:
-                continue
             if entry["run_id"] != run_id and entry["model_run_id"] != run_id:
                 continue
             collected.append(entry)
 
     collected.sort(key=lambda item: (item["run_id"], item["artifact_id"]))
+    if len(collected) > limit:
+        raise WorkflowExecutionError(
+            f"post-estimation evidence count {len(collected)} exceeds projection limit {limit}; "
+            "request a narrower evidence scope"
+        )
     return collected[:limit]
 
 
 def _read_post_estimation_entry(
     run_dir: Path, record: Mapping[str, Any]
-) -> dict[str, Any] | None:
-    """Read one registered post-estimation artifact, or None when unusable.
+) -> dict[str, Any]:
+    """Read one registered post-estimation artifact and fail closed on damage.
 
-    A malformed or missing artifact is skipped rather than raised: this is a
-    read-only projection for display, and one damaged record must not make a
-    run unreadable.
+    The artifacts index is the admission record.  Once an evidence artifact is
+    registered, omitting it from a public projection would turn corruption into
+    a false-looking successful analysis.  Loose, unregistered files remain
+    ignored by the caller.
     """
 
     relative = str(record.get("path", ""))
     if not relative:
-        return None
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact has no path"
+        )
     path = (run_dir / relative).resolve()
     # The index stores repository-relative paths; a traversal escape means the
     # record is not describing this run's own evidence.
     if not path.is_file() or run_dir.resolve() not in path.parents:
-        return None
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact is missing or escapes its run"
+        )
+    expected_sha256 = record.get("sha256")
+    if not isinstance(expected_sha256, str) or not expected_sha256:
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact has no file fingerprint"
+        )
+    try:
+        actual_sha256 = sha256_file(path)
+    except OSError as exc:
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact fingerprint cannot be read"
+        ) from exc
+    if actual_sha256 != expected_sha256:
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact fingerprint changed"
+        )
     try:
         payload = read_json(path)
-    except (OSError, ValueError):
-        return None
+    except (OSError, ValueError) as exc:
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact cannot be read"
+        ) from exc
     if not isinstance(payload, Mapping):
-        return None
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact payload must be an object"
+        )
     source = payload.get("source")
     result = payload.get("result")
     if not isinstance(source, Mapping) or not isinstance(result, Mapping):
-        return None
+        raise WorkflowExecutionError(
+            "registered post-estimation artifact must contain source and result objects"
+        )
     artifact_type = str(record.get("artifact_type", ""))
     if artifact_type == "p7_analysis":
         required_source = {
@@ -167,6 +257,30 @@ def _read_post_estimation_entry(
             raise WorkflowExecutionError("registered P7 analysis artifact has invalid provenance")
         if result.get("operation_id") != source.get("operation_id"):
             raise WorkflowExecutionError("registered P7 analysis artifact operation identity is inconsistent")
+    if artifact_type == "workflow_capability_result":
+        required_source = {
+            "run_id",
+            "node_ref",
+            "artifact_id",
+            "sha256",
+            "workflow_id",
+            "workflow_step_id",
+            "workflow_step_fingerprint",
+            "operation_id",
+        }
+        if payload.get("schema_version") != "workbench.workflow.capability/v1":
+            raise WorkflowExecutionError("registered workflow capability artifact has an invalid schema")
+        if set(required_source) - set(source):
+            raise WorkflowExecutionError("registered workflow capability artifact has incomplete provenance")
+        if not isinstance(payload.get("request"), Mapping) or not payload.get("request_fingerprint"):
+            raise WorkflowExecutionError("registered workflow capability artifact has no replayable request")
+        if result.get("operation_id") != source.get("operation_id"):
+            raise WorkflowExecutionError("registered workflow capability artifact operation identity is inconsistent")
+        expected_result_digest = hashlib.sha256(
+            json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        ).hexdigest()
+        if payload.get("result_sha256") != expected_result_digest:
+            raise WorkflowExecutionError("registered workflow capability artifact result digest is inconsistent")
     return {
         "artifact_id": str(record.get("artifact_id", "")),
         "artifact_type": artifact_type,
@@ -178,7 +292,16 @@ def _read_post_estimation_entry(
         **(
             {"pack_family": str(source["pack_family"]), "source_sha256": str(source["sha256"])}
             if artifact_type == "p7_analysis"
-            else {}
+            else (
+                {
+                    "source_sha256": str(source["sha256"]),
+                    "request_fingerprint": str(payload["request_fingerprint"]),
+                    "result_sha256": str(payload["result_sha256"]),
+                    "result_schema": str(payload["result_schema"]),
+                }
+                if artifact_type == "workflow_capability_result"
+                else {}
+            )
         ),
         "result": dict(result),
     }
@@ -347,6 +470,19 @@ def _require_binding_shape(
             f"{workflow_run_id}; consuming it would give this step a parent node "
             "that the mutated graph does not contain"
         )
+    contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(step.operation_id)
+    accepted_roles = contract.accepted_dataset_kinds if contract is not None else ()
+    if accepted_roles:
+        dataset_kind = produced.get("dataset_kind")
+        if not isinstance(dataset_kind, str) or not dataset_kind:
+            raise WorkflowExecutionError(
+                f"workflow step {step.step_id} source {from_step} published an incomplete binding, missing: dataset_kind"
+            )
+        if dataset_kind not in accepted_roles:
+            raise WorkflowExecutionError(
+                f"workflow step {step.step_id} source {from_step} published dataset role "
+                f"{dataset_kind!r}; accepted roles: " + ", ".join(accepted_roles)
+            )
 
 
 def _committed_source_binding(
@@ -649,6 +785,7 @@ def _persist_numeric_derivation(
                 # step record is comparing a value against itself, which no input
                 # can falsify. Verify with content_sha256, attribute with this.
                 "content_sha256": data_sha256,
+                "dataset_kind": "derived_data",
                 "result_fingerprint": fingerprint,
             },
         },
@@ -888,9 +1025,28 @@ def build_workflow_step_executor(
                 "options": step.spec.get("options"),
             }
             try:
-                operation.validate(request)
+                operation.preflight(step_frame, request)
                 result = operation.execute(step_frame, request)
                 operation.validate_result(result)
+                result_status, result_details = _p7_result_status(result)
+                if result_status is not None and result_status != "completed":
+                    reason_code = result_details.get("reason_code")
+                    message = result_details.get("message")
+                    detail_parts = [
+                        str(value)
+                        for value in (reason_code, message)
+                        if value is not None
+                    ]
+                    if len(detail_parts) == 2 and detail_parts[1].startswith(
+                        detail_parts[0] + ": "
+                    ):
+                        detail_parts[1] = detail_parts[1][len(detail_parts[0]) + 2 :]
+                    detail = ": ".join(detail_parts)
+                    raise WorkflowExecutionError(
+                        f"P7 pack {operation_id} returned non-completed result "
+                        f"status {result_status!r}"
+                        + (f" ({detail})" if detail else "")
+                    )
             except Exception as exc:
                 raise WorkflowExecutionError(
                     f"P7 pack {operation_id} failed closed: {exc}"
@@ -902,6 +1058,38 @@ def build_workflow_step_executor(
                 result=result,
                 lineage=lineage,
                 pack_family=operation.pack_family,
+            )
+        if dispatcher_key == "workbench.agent.workflow_runtime.workflow_capability":
+            from .workflow_capability_registry import workflow_capability_registry
+
+            operation = workflow_capability_registry().require(operation_id)
+            request = {
+                "operation_id": operation_id,
+                "input_mode": step.spec.get("input_mode"),
+                "column_bindings": step.spec.get("column_bindings"),
+                "options": step.spec.get("options"),
+            }
+            try:
+                normalized_request = operation.validate(request)
+                execution = operation.execute_with_context(step_frame, normalized_request)
+                operation.validate_result(execution.payload)
+            except Exception as exc:
+                from ..econometrics.optional_deps import OptionalDependencyNotInstalled
+
+                if isinstance(exc, OptionalDependencyNotInstalled):
+                    raise WorkflowExecutionError(
+                        f"workflow capability {operation_id} blocked/optional_dependency: {exc}"
+                    ) from exc
+                raise WorkflowExecutionError(
+                    f"workflow capability {operation_id} failed closed: {exc}"
+                ) from exc
+            return _persist_workflow_capability_result(
+                root,
+                draft,
+                step,
+                lineage=lineage,
+                request=normalized_request,
+                execution=execution,
             )
         if dispatcher_key == "workbench.agent.workflow_runtime.statistical_explore" and "plots" not in step.spec:
             return _exploration_step(
@@ -1688,6 +1876,259 @@ def _persist_p7_pack_result(
         row_counts=row_counts,
         result_fingerprint=str(step.fingerprint),
         payload={"result": dict(result)},
+    )
+
+
+def _workflow_request_fingerprint(request: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        request, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _persist_workflow_capability_result(
+    root: Path,
+    draft: WorkflowDraft,
+    step: Any,
+    *,
+    lineage: Mapping[str, str],
+    request: Mapping[str, Any],
+    execution: Any,
+) -> WorkflowStepResult:
+    """Persist one generic capability result or one typed dataset child.
+
+    The adapter decides whether it produced a dataset.  This function owns the
+    common durability boundary: normalized request, source binding, result
+    digest, registered artifact, and (for datasets) a graph/node binding that a
+    later step can resolve without reopening the original target.
+    """
+
+    run_id = str(draft.target["run_id"])
+    run_root = root / "runs" / run_id
+    token = str(step.fingerprint).removeprefix("sha256:")[:24]
+    operation_token = str(step.operation_id).replace(".", "_")
+    request_fingerprint = _workflow_request_fingerprint(request)
+    result_payload = dict(execution.payload)
+    if execution.output_frame is None:
+        artifact_id = f"workflow_capability_{operation_token}_{token}"
+        artifact_path = run_root / "artifacts" / "workflow_capability" / f"{artifact_id}.json"
+        result_digest = hashlib.sha256(
+            json.dumps(result_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        ).hexdigest()
+        envelope = {
+            "schema_version": "workbench.workflow.capability/v1",
+            "contract_version": "v1",
+            "source": {
+                "run_id": run_id,
+                "node_ref": str(lineage["node_ref"]),
+                "artifact_id": str(lineage["artifact_id"]),
+                "sha256": str(lineage["sha256"]),
+                "workflow_id": draft.workflow_id,
+                "workflow_step_id": str(step.step_id),
+                "workflow_step_fingerprint": str(step.fingerprint),
+                "operation_id": str(step.operation_id),
+            },
+            "request": dict(request),
+            "request_fingerprint": request_fingerprint,
+            "result_schema": str(step.contract.output_schema_ref) if hasattr(step, "contract") else str(
+                WORKFLOW_STEP_SPEC_CONTRACTS[step.operation_id].output_schema_ref
+            ),
+            "result_sha256": result_digest,
+            "result": result_payload,
+        }
+        if artifact_path.exists():
+            if read_json(artifact_path) != envelope:
+                raise WorkflowExecutionError("workflow capability artifact path is occupied")
+        else:
+            write_json(artifact_path, envelope)
+        index = _read_artifacts_index(run_root)
+        existing = [item for item in index.get("artifacts", []) if item.get("artifact_id") == artifact_id]
+        if len(existing) > 1:
+            raise WorkflowExecutionError("workflow capability artifact identity is duplicated")
+        if not existing:
+            register_artifact(
+                run_root,
+                artifact_id,
+                artifact_path,
+                "workflow_capability_result",
+                str(step.operation_id),
+                [str(lineage["artifact_id"])],
+            )
+        elif existing[0].get("path") != artifact_path.relative_to(run_root).as_posix():
+            raise WorkflowExecutionError("workflow capability artifact identity is inconsistent")
+        row_counts = {
+            key: int(result_payload[key])
+            for key in ("n_observations", "n_rows", "input_rows", "output_rows", "row_count")
+            if type(result_payload.get(key)) is int and result_payload[key] >= 0
+        }
+        return WorkflowStepResult(
+            artifact_ids=[artifact_id],
+            row_counts=row_counts,
+            result_fingerprint=str(step.fingerprint),
+            payload={"result": result_payload, "record": envelope},
+        )
+
+    output_frame = execution.output_frame
+    if not isinstance(output_frame, pd.DataFrame) or output_frame.empty:
+        raise WorkflowExecutionError(
+            f"workflow capability {step.operation_id} declared a dataset but returned no non-empty frame"
+        )
+    dataset_kind = execution.dataset_kind
+    if not isinstance(dataset_kind, str) or not dataset_kind:
+        raise WorkflowExecutionError(
+            f"workflow capability {step.operation_id} returned a dataset without a server-owned dataset role"
+        )
+    capability_dir = Path("derived") / "workflow_capability" / token
+    data_rel = (capability_dir / "data.csv").as_posix()
+    data_path = run_root / data_rel
+    schema_path = data_path.with_name(data_path.stem + ".schema.json")
+    data_path.parent.mkdir(parents=True, exist_ok=True)
+    if data_path.exists():
+        try:
+            existing_frame = pd.read_csv(data_path)
+            pd.testing.assert_frame_equal(existing_frame, output_frame.reset_index(drop=True), check_dtype=False)
+        except (AssertionError, OSError, ValueError) as exc:
+            raise WorkflowExecutionError("workflow capability dataset path is occupied") from exc
+    else:
+        write_text_durable(data_path, output_frame.to_csv(index=False))
+    schema = {"dtypes": {str(column): str(output_frame[column].dtype) for column in output_frame.columns}}
+    if schema_path.exists():
+        try:
+            existing_schema = read_json(schema_path)
+        except (OSError, ValueError) as exc:
+            raise WorkflowExecutionError(
+                "workflow capability dataset schema path is unreadable"
+            ) from exc
+        if existing_schema != schema:
+            raise WorkflowExecutionError(
+                "workflow capability dataset schema path is occupied"
+            )
+    else:
+        write_json(schema_path, schema)
+    data_sha256 = sha256_file(data_path)
+    data_artifact_id = f"workflow_capability_dataset_{operation_token}_{token}"
+    metadata_artifact_id = f"workflow_capability_dataset_metadata_{operation_token}_{token}"
+    metadata_rel = (capability_dir / "metadata.json").as_posix()
+    metadata_path = run_root / metadata_rel
+    metadata = {
+        "schema_version": "workbench.workflow.capability-dataset/v1",
+        "operation_id": str(step.operation_id),
+        "dataset_kind": dataset_kind,
+        "source": {
+            "run_id": run_id,
+            "node_ref": str(lineage["node_ref"]),
+            "artifact_id": str(lineage["artifact_id"]),
+            "sha256": str(lineage["sha256"]),
+        },
+        "request": dict(request),
+        "request_fingerprint": request_fingerprint,
+        "result": result_payload,
+        "data_sha256": data_sha256,
+    }
+    if metadata_path.exists() and read_json(metadata_path) != metadata:
+        raise WorkflowExecutionError("workflow capability dataset metadata path is occupied")
+    if not metadata_path.exists():
+        write_json(metadata_path, metadata)
+    _ensure_runtime_artifact(
+        run_root,
+        artifact_id=data_artifact_id,
+        path=data_path,
+        artifact_type=str(execution.artifact_type),
+        step=str(step.operation_id),
+        inputs=[str(lineage["artifact_id"])],
+    )
+    _ensure_runtime_artifact(
+        run_root,
+        artifact_id=metadata_artifact_id,
+        path=metadata_path,
+        artifact_type="workflow_capability_metadata",
+        step=str(step.operation_id),
+        inputs=[str(lineage["artifact_id"]), data_artifact_id],
+    )
+    child_node_id = f"workflow-capability:{operation_token}:{token}"
+    branch_id = f"workflow-capability:{token[:20]}"
+
+    def add_child(graph: Graph) -> Graph:
+        if child_node_id in graph.nodes:
+            return graph
+        child = Node(
+            id=child_node_id,
+            kind=NodeKind.DATASET_STAGE,
+            display_label=f"{step.operation_id} dataset",
+            created_at=datetime.now(timezone.utc).isoformat(),
+            parent_stage_id=str(lineage["node_ref"]),
+            branch_id=branch_id,
+            trust=Trust.OK,
+            payload_ref=data_rel,
+            summary=f"{dataset_kind}; {len(output_frame)} rows",
+            annotations=({
+                "type": "workflow_capability_dataset",
+                "operation_id": str(step.operation_id),
+                "workflow_id": draft.workflow_id,
+                "workflow_step_id": str(step.step_id),
+                "dataset_kind": dataset_kind,
+                "metadata_path": metadata_rel,
+            },),
+            stage=Stage.TRANSFORM,
+        )
+        return Graph(
+            schema_version=graph.schema_version,
+            run_id=graph.run_id,
+            nodes={**graph.nodes, child_node_id: child},
+            edges={
+                **graph.edges,
+                f"edge:{child_node_id}": Edge(
+                    id=f"edge:{child_node_id}",
+                    source_id=str(lineage["node_ref"]),
+                    target_id=child_node_id,
+                    op=str(step.operation_id),
+                    params={"workflow_step_id": str(step.step_id)},
+                ),
+            },
+            branches={
+                **graph.branches,
+                branch_id: BranchRef(
+                    id=branch_id,
+                    forked_from_node_id=str(lineage["node_ref"]),
+                    head_node_ids=(child_node_id,),
+                ),
+            },
+            legacy=graph.legacy,
+        )
+
+    GraphStore(root / "runs").mutate(run_id, add_child)
+    node_index_path = run_root / "node_index.json"
+    node_index = read_json(node_index_path) if node_index_path.is_file() else {}
+    node_entry = {
+        "node_hash": data_sha256,
+        "producing_stage": str(step.operation_id),
+        "cas_ref": {"node_hash": data_sha256, "artifact": data_rel},
+    }
+    existing_node = node_index.get(child_node_id)
+    if existing_node is not None and existing_node != node_entry:
+        raise WorkflowExecutionError("workflow capability dataset node identity is not deterministic")
+    if existing_node is None:
+        write_json(node_index_path, {**node_index, child_node_id: node_entry})
+    result_payload = {
+        **result_payload,
+        "produced_dataset": {
+            "schema_version": _PRODUCED_DATASET_SCHEMA,
+            "run_id": run_id,
+            "node_ref": child_node_id,
+            "artifact_id": data_artifact_id,
+            "content_sha256": data_sha256,
+            "dataset_kind": dataset_kind,
+            "result_fingerprint": str(step.fingerprint),
+        },
+    }
+    return WorkflowStepResult(
+        artifact_ids=[data_artifact_id, metadata_artifact_id],
+        row_counts={
+            "input_rows": int(result_payload.get("input_rows", 0) or 0),
+            "output_rows": int(len(output_frame)),
+        },
+        result_fingerprint=str(step.fingerprint),
+        payload={"result": result_payload, "produced_dataset": result_payload["produced_dataset"]},
     )
 
 

@@ -19,6 +19,12 @@ WORKFLOW_OPERATION_ID = "operation.multi_step"
 WORKFLOW_OPERATION_VERSION = "v1"
 WORKFLOW_TEMPLATE = "agent-composed-v1"
 
+# Closed values are declarations owned by the workflow contract. Consumers
+# (schema projection, validation, and Agent vocabulary) must derive from these
+# tuples instead of maintaining another list of accepted strings.
+WORKFLOW_SPLIT_KINDS = ("iid", "grouped", "temporal", "panel")
+DID_MODE_VALUES = ("cohort", "two_by_two", "status")
+
 
 def workflow_authorization(
     *,
@@ -212,6 +218,11 @@ class StepSpecContract:
     #: its `source`. A per-operation fact, so it is declared here with the rest
     #: of them rather than in a set maintained alongside the registry.
     produces_dataset: bool = False
+    #: Server-owned semantic role published by a dataset producer.
+    produced_dataset_kind: str | None = None
+    #: Closed input roles accepted by a consumer. An empty tuple means this
+    #: operation has no role-specific restriction.
+    accepted_dataset_kinds: tuple[str, ...] = ()
     #: Whether the runtime hands this step the resolved input frame at all.
     #: A step that never receives one cannot honour a `source`: the resolution
     #: would succeed, every check would pass, and the frame would be dropped
@@ -285,6 +296,18 @@ class StepSpecContract:
             )
         if self.top_level_exposure_note is not None and not self.top_level_exposure_note.strip():
             raise ValueError("workflow step top-level exposure note must not be blank")
+        if self.produces_dataset != (self.produced_dataset_kind is not None):
+            raise ValueError(
+                "workflow step dataset producer must declare exactly one produced_dataset_kind"
+            )
+        if self.produced_dataset_kind is not None and (
+            type(self.produced_dataset_kind) is not str or not self.produced_dataset_kind.strip()
+        ):
+            raise ValueError("workflow step produced_dataset_kind must be a non-empty string")
+        if any(type(item) is not str or not item for item in self.accepted_dataset_kinds):
+            raise ValueError("workflow step accepted_dataset_kinds must contain non-empty strings")
+        if len(set(self.accepted_dataset_kinds)) != len(self.accepted_dataset_kinds):
+            raise ValueError("workflow step accepted_dataset_kinds contains duplicates")
 
     @property
     def allowed(self) -> frozenset[str]:
@@ -322,6 +345,8 @@ class StepSpecContract:
             "example_prompts": list(self.example_prompts),
             "natural_language_enabled": self.natural_language_enabled,
             "produces_dataset": self.produces_dataset,
+            "produced_dataset_kind": self.produced_dataset_kind,
+            "accepted_dataset_kinds": list(self.accepted_dataset_kinds),
             "consumes_input_frame": self.consumes_input_frame,
             "replayable_by_recipe": self.replayable_by_recipe,
             "capability_kind": self.capability_kind,
@@ -368,6 +393,7 @@ def pack_step_contract(
     field_enums: Mapping[str, tuple[str, ...]] | None = None,
     field_schemas: Mapping[str, Mapping[str, Any]] | None = None,
     consumes_input_frame: bool = True,
+    accepted_dataset_kinds: tuple[str, ...] = ("derived_data", "prepared_data"),
     top_level_exposure_note: str | None = None,
 ) -> StepSpecContract:
     """Build a non-top-level pack declaration for workflow composition."""
@@ -387,6 +413,7 @@ def pack_step_contract(
         capability_kind="pack",
         natural_language_enabled=False,
         produces_dataset=False,
+        accepted_dataset_kinds=accepted_dataset_kinds,
         consumes_input_frame=consumes_input_frame,
         replayable_by_recipe=False,
         top_level_exposure_note=top_level_exposure_note,
@@ -471,7 +498,7 @@ class ModelFamilyContract:
             raise ValueError("ModelFamilyContract allows_weights contains an unknown weight kind")
         if len(set(self.allows_weights)) != len(self.allows_weights):
             raise ValueError("ModelFamilyContract allows_weights must not contain duplicates")
-        allowed_split_kinds = {"iid", "grouped", "temporal", "panel"}
+        allowed_split_kinds = set(WORKFLOW_SPLIT_KINDS)
         if any(split not in allowed_split_kinds for split in self.supported_split_kinds):
             raise ValueError("ModelFamilyContract supported_split_kinds contains an unknown split kind")
         if len(set(self.supported_split_kinds)) != len(self.supported_split_kinds):
@@ -843,9 +870,9 @@ def _require_column(spec: Mapping[str, Any], field_name: str, family: str) -> st
 
 def _validate_did_spec(spec: Mapping[str, Any]) -> None:
     mode = spec.get("did_mode")
-    if mode not in {"cohort", "two_by_two", "status"}:
+    if mode not in DID_MODE_VALUES:
         raise OperationValidationError(
-            "model.genesis did requires did_mode: cohort, two_by_two, or status"
+            "model.genesis did requires did_mode: " + ", ".join(DID_MODE_VALUES)
         )
     if mode == "cohort":
         _require_column(spec, "did_cohort_col", "did")
@@ -1354,9 +1381,9 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
             )
     split_kind = spec.get("split_kind")
     if split_kind is not None:
-        if split_kind not in {"iid", "grouped", "temporal", "panel"}:
+        if split_kind not in WORKFLOW_SPLIT_KINDS:
             raise OperationValidationError(
-                "model.genesis split_kind must be iid, grouped, temporal, or panel"
+                "model.genesis split_kind must be " + ", ".join(WORKFLOW_SPLIT_KINDS)
             )
         if split_kind not in contract.supported_split_kinds:
             raise OperationValidationError(
@@ -1663,6 +1690,7 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
         # workflow_runtime's `_persist_numeric_derivation` writes a dataset
         # child; the data transforms join it in P3.
         produces_dataset=True,
+        produced_dataset_kind="derived_data",
         # `_upstream_numeric_steps` reconstructs exactly this operation by
         # re-applying its recipes to the workflow target. It is the only one it
         # can, which is why the replay path is a whitelist and not a default.
@@ -1791,6 +1819,7 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
         diff_builder_key="genesis.diff.v1",
         verification_builder_key="genesis.verification.v1",
         ui_description="Estimate one or more models from the source table.",
+        accepted_dataset_kinds=("derived_data", "prepared_data"),
     ),
     "model.joint_f_test": StepSpecContract(
         summary=(
@@ -1953,9 +1982,11 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
 })
 
 from .p7_pack_registry import p7_workflow_step_contracts  # noqa: E402
+from .workflow_capability_registry import workflow_capability_step_contracts  # noqa: E402
 
 
 WORKFLOW_STEP_SPEC_CONTRACTS.update(p7_workflow_step_contracts())
+WORKFLOW_STEP_SPEC_CONTRACTS.update(workflow_capability_step_contracts())
 _refresh_workflow_contract_views()
 
 
@@ -2116,6 +2147,25 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
                 }
             )
         )
+    elif extractor_key == "workflow_capability":
+        from .workflow_capability_registry import workflow_capability_registry
+
+        operation = workflow_capability_registry().require(operation_id)
+        request = operation.validate(
+            {
+                "operation_id": operation_id,
+                "input_mode": spec.get("input_mode"),
+                "column_bindings": spec.get("column_bindings"),
+                "options": spec.get("options"),
+            }
+        )
+        for value in request["column_bindings"].values():
+            if isinstance(value, str) and value:
+                columns.add(value)
+            elif isinstance(value, list):
+                columns.update(
+                    str(item) for item in value if isinstance(item, str) and item
+                )
     return columns
 
 
@@ -2173,6 +2223,24 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
         except Exception as exc:
             raise OperationValidationError(
                 f"invalid {operation_id} P7 pack spec: {exc}"
+            ) from exc
+        return
+    if validator_key == "workflow_capability":
+        from .workflow_capability_registry import workflow_capability_registry
+
+        try:
+            operation = workflow_capability_registry().require(operation_id)
+            operation.validate(
+                {
+                    "operation_id": operation_id,
+                    "input_mode": spec.get("input_mode"),
+                    "column_bindings": spec.get("column_bindings"),
+                    "options": spec.get("options"),
+                }
+            )
+        except Exception as exc:
+            raise OperationValidationError(
+                f"invalid workflow capability {operation_id} spec: {exc}"
             ) from exc
         return
     if validator_key == "statistical.exploration":
@@ -2486,6 +2554,16 @@ def validate_workflow_steps(
                 f"workflow step {step['step_id']} source refers to {from_step}, which "
                 f"does not produce a dataset: {producer['operation_id']}. Steps that "
                 "produce a dataset: " + ", ".join(sorted(STEP_PRODUCES_DATASET))
+            )
+        producer_contract = WORKFLOW_STEP_SPEC_CONTRACTS[producer["operation_id"]]
+        consumer_contract = WORKFLOW_STEP_SPEC_CONTRACTS[step["operation_id"]]
+        accepted_roles = consumer_contract.accepted_dataset_kinds
+        produced_role = producer_contract.produced_dataset_kind
+        if accepted_roles and produced_role not in accepted_roles:
+            raise OperationValidationError(
+                f"workflow step {step['step_id']} cannot consume dataset role "
+                f"{produced_role!r} from {from_step}; accepted roles: "
+                + ", ".join(accepted_roles)
             )
         # Consuming a step's output is an ordering constraint, so the reference
         # becomes a real dependency. Reusing depends_on means the existing

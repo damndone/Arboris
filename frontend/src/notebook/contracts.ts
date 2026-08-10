@@ -1043,6 +1043,13 @@ export interface NotebookExecutionIssue {
   observed_count: number | null;
 }
 
+/** Server-owned view used to validate a contract without hiding ambient run artifacts. */
+export interface NotebookArtifactValidationScope {
+  mode: string;
+  ambient_artifact_ids: string[];
+  ambient_artifact_count: number;
+}
+
 export interface NotebookExecutionResult {
   option_id: string;
   option_revision: number;
@@ -1057,6 +1064,8 @@ export interface NotebookExecutionResult {
     issues: NotebookExecutionIssue[];
     omitted_issue_count?: number;
   };
+  /** Optional for compatibility with execution records written before v1.8.8. */
+  artifact_validation_scope?: NotebookArtifactValidationScope;
   /** Server-produced receipt for a multi-branch workflow, never an inferred head. */
   workflow_execution?: WorkflowExecutionReceipt;
 }
@@ -1067,17 +1076,26 @@ export interface WorkflowExecutionBranchRun {
   artifact_ids: string[];
 }
 
+export interface WorkflowExecutionFailure {
+  step_id: string;
+  operation_id: string;
+  status: "failed" | "blocked";
+  error_code: string;
+}
+
 export interface WorkflowExecutionReceipt {
   workflow_id: string;
   plan_fingerprint: string;
   status: "completed" | "failed";
   branch_runs: WorkflowExecutionBranchRun[];
   post_estimation_artifact_ids: string[];
+  /** Absent only on execution records persisted before this projection existed. */
+  failed_steps?: WorkflowExecutionFailure[];
 }
 
 function parseWorkflowExecutionReceipt(value: unknown, path: string): WorkflowExecutionReceipt {
   const raw = asRecord(value, path);
-  requireExactKeys(
+  requireKnownKeys(
     raw,
     [
       "workflow_id",
@@ -1086,6 +1104,7 @@ function parseWorkflowExecutionReceipt(value: unknown, path: string): WorkflowEx
       "branch_runs",
       "post_estimation_artifact_ids",
     ],
+    ["failed_steps"],
     path,
   );
   if (!Array.isArray(raw.branch_runs)) {
@@ -1110,6 +1129,51 @@ function parseWorkflowExecutionReceipt(value: unknown, path: string): WorkflowEx
       "post_estimation_artifact_ids",
       path,
     ),
+    failed_steps:
+      "failed_steps" in raw
+        ? (() => {
+            if (!Array.isArray(raw.failed_steps)) {
+              throw new NotebookContractError(`${path}.failed_steps must be an array`);
+            }
+            return raw.failed_steps.map((item, index) => {
+              const failurePath = `${path}.failed_steps[${index}]`;
+              const failure = asRecord(item, failurePath);
+              requireExactKeys(
+                failure,
+                ["step_id", "operation_id", "status", "error_code"],
+                failurePath,
+              );
+              return {
+                step_id: requireString(failure, "step_id", failurePath),
+                operation_id: requireString(failure, "operation_id", failurePath),
+                status: requireChoice(
+                  failure,
+                  "status",
+                  ["failed", "blocked"],
+                  failurePath,
+                ),
+                error_code: requireString(failure, "error_code", failurePath),
+              };
+            });
+          })()
+        : [],
+  };
+}
+
+function parseArtifactValidationScope(
+  value: unknown,
+  path: string,
+): NotebookArtifactValidationScope {
+  const raw = asRecord(value, path);
+  requireExactKeys(raw, ["mode", "ambient_artifact_ids", "ambient_artifact_count"], path);
+  const ambientArtifactCount = requireInt(raw, "ambient_artifact_count", path);
+  if (ambientArtifactCount < 0) {
+    throw new NotebookContractError(`${path}.ambient_artifact_count must be >= 0`);
+  }
+  return {
+    mode: requireString(raw, "mode", path),
+    ambient_artifact_ids: requireStringArray(raw, "ambient_artifact_ids", path),
+    ambient_artifact_count: ambientArtifactCount,
   };
 }
 
@@ -1126,7 +1190,7 @@ export function parseNotebookExecutionResult(value: unknown): NotebookExecutionR
       "committed",
       "artifact_validation",
     ],
-    ["workflow_execution"],
+    ["artifact_validation_scope", "workflow_execution"],
     path,
   );
   const validation = asRecord(raw.artifact_validation, `${path}.artifact_validation`);
@@ -1205,6 +1269,13 @@ export function parseNotebookExecutionResult(value: unknown): NotebookExecutionR
       omitted_issue_count:
         optionalInt(validation, "omitted_issue_count", `${path}.artifact_validation`) ?? 0,
     },
+    artifact_validation_scope:
+      "artifact_validation_scope" in raw
+        ? parseArtifactValidationScope(
+            raw.artifact_validation_scope,
+            `${path}.artifact_validation_scope`,
+          )
+        : undefined,
     workflow_execution:
       "workflow_execution" in raw
         ? parseWorkflowExecutionReceipt(raw.workflow_execution, `${path}.workflow_execution`)

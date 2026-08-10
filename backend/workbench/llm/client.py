@@ -43,6 +43,10 @@ class LLMUpstreamError(Exception):
         self.retryable = retryable
 
 
+class LLMToolCallArgumentsError(LLMUpstreamError):
+    """Provider completed a tool call whose arguments are not a JSON object."""
+
+
 def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
     """GET {base_url}/models and return the provider's model summaries."""
     if not config.is_configured():
@@ -371,11 +375,13 @@ def _complete_stream_tool_calls(
         try:
             arguments = json.loads(raw_arguments or "{}")
         except ValueError as exc:
-            raise LLMUpstreamError(
-                "LLM provider returned an unexpected streaming response shape"
+            raise LLMToolCallArgumentsError(
+                "LLM provider returned invalid tool-call arguments"
             ) from exc
         if not isinstance(arguments, dict):
-            raise LLMUpstreamError("LLM provider returned an unexpected streaming response shape")
+            raise LLMToolCallArgumentsError(
+                "LLM provider returned non-object tool-call arguments"
+            )
         completed.append(
             {
                 "tool_call_id": tool_call_id,
