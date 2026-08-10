@@ -2119,6 +2119,8 @@ def test_witness_attested_completion_requires_provider_verification_and_is_label
     )
 
     class TestVerifier:
+        human_identity_verified = True
+
         def verify(self, *, key_id: str, payload: bytes, signature: str) -> bool:
             expected = hashlib.sha256(
                 b"test-only-secret:"
@@ -2187,7 +2189,8 @@ def test_witness_attested_completion_requires_provider_verification_and_is_label
         evidence=evidence,
     )
     state = ledger.states()["missingness.profile"]
-    assert state.trust_level == "witness_attested"
+    assert ledger.events()[-1].evidence.witness_trust_level == "human_identity_verified"
+    assert state.trust_level == "human_identity_verified"
     assert state.verification_status == "VERIFIED"
 
 

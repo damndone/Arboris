@@ -8,7 +8,7 @@ validates evidence collected from that path.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -26,6 +26,7 @@ from workbench.qa.witness import (
     BrowserWitnessAttestation,
     WitnessChallenge,
     WitnessError,
+    WitnessVerification,
     WitnessVerifier,
     WITNESS_CHALLENGE_TTL_SECONDS,
     verify_witness_attestation,
@@ -301,6 +302,7 @@ class CompletionEvidence:
     artifact_provenance_id: str
     artifact_producer_record_id: str
     witness_attestation: Mapping[str, object] | None = None
+    witness_trust_level: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -352,6 +354,7 @@ _COMPLETION_EVIDENCE_FIELDS = (
     "artifact_provenance_id",
     "artifact_producer_record_id",
     "witness_attestation",
+    "witness_trust_level",
 )
 
 
@@ -821,8 +824,13 @@ def _completion_evidence_from_mapping(value: Mapping[str, object]) -> Completion
         )
     actual = set(value)
     expected = set(_COMPLETION_EVIDENCE_FIELDS)
-    legacy_expected = expected - {"witness_attestation"}
-    if actual != expected and actual != legacy_expected:
+    accepted_fields = (
+        expected,
+        expected - {"witness_attestation"},
+        expected - {"witness_trust_level"},
+        expected - {"witness_attestation", "witness_trust_level"},
+    )
+    if actual not in accepted_fields:
         missing = expected - actual
         extra = actual - expected
         detail: list[str] = []
@@ -839,6 +847,7 @@ def _completion_evidence_from_mapping(value: Mapping[str, object]) -> Completion
         if key in value
     }
     normalized.setdefault("witness_attestation", None)
+    normalized.setdefault("witness_trust_level", None)
     return CompletionEvidence(**normalized)
 
 
@@ -868,9 +877,21 @@ def validate_completion_evidence(
             BrowserWitnessAttestation.from_mapping(evidence.witness_attestation)
         except WitnessError as error:
             raise CompletionEvidenceError(str(error)) from error
+        if evidence.witness_trust_level not in {
+            None,
+            "witness_attested",
+            "human_identity_verified",
+        }:
+            raise CompletionEvidenceError(
+                "witness trust level is not a supported provider claim"
+            )
     elif evidence.witness_attestation is not None:
         raise CompletionEvidenceError(
             "coordinator-only evidence cannot carry a witness envelope"
+        )
+    elif evidence.witness_trust_level is not None:
+        raise CompletionEvidenceError(
+            "coordinator-only evidence cannot carry a witness trust level"
         )
     for field_name in _COMPLETION_EVIDENCE_FIELDS:
         if field_name in {
@@ -879,6 +900,7 @@ def validate_completion_evidence(
             "attempt_no",
             "attempt_started_at",
             "witness_attestation",
+            "witness_trust_level",
         }:
             continue
         value = getattr(evidence, field_name)
@@ -1077,9 +1099,9 @@ def _validate_witness_completion(
     *,
     verifier: WitnessVerifier | None,
     occurred_at: float,
-) -> None:
+) -> WitnessVerification | None:
     if evidence.evidence_kind != "browser_witness_attested":
-        return
+        return None
     if not isinstance(evidence.witness_attestation, Mapping):
         raise CompletionEvidenceError(
             "witness-attested evidence requires a signed witness envelope"
@@ -1088,7 +1110,7 @@ def _validate_witness_completion(
         attestation = BrowserWitnessAttestation.from_mapping(
             evidence.witness_attestation
         )
-        verify_witness_attestation(
+        return verify_witness_attestation(
             _witness_challenge_for(authority, attestation),
             attestation,
             verifier=verifier,
@@ -1097,6 +1119,33 @@ def _validate_witness_completion(
         )
     except WitnessError as error:
         raise CompletionEvidenceError(str(error)) from error
+
+
+def _normalize_witness_trust(
+    evidence: CompletionEvidence,
+    authority: CompletionAuthority,
+    *,
+    verifier: WitnessVerifier | None,
+    occurred_at: float,
+) -> CompletionEvidence:
+    """Verify a new witness claim once and persist its provider trust level."""
+
+    verification = _validate_witness_completion(
+        evidence,
+        authority,
+        verifier=verifier,
+        occurred_at=occurred_at,
+    )
+    if verification is None:
+        return evidence
+    if (
+        evidence.witness_trust_level is not None
+        and evidence.witness_trust_level != verification.trust_level
+    ):
+        raise CompletionEvidenceError(
+            "witness trust level does not match the provider verification"
+        )
+    return replace(evidence, witness_trust_level=verification.trust_level)
 
 
 def token_bucket_admission(
@@ -2358,12 +2407,20 @@ class AttemptLedger:
                             normalized,
                             occurred_at=event.occurred_at,
                         )
-                        _validate_witness_completion(
-                            normalized,
-                            authority,
-                            verifier=self.witness_verifier,
-                            occurred_at=event.occurred_at,
-                        )
+                        if normalized.witness_trust_level is None:
+                            _validate_witness_completion(
+                                normalized,
+                                authority,
+                                verifier=self.witness_verifier,
+                                occurred_at=event.occurred_at,
+                            )
+                        elif normalized.witness_trust_level not in {
+                            "witness_attested",
+                            "human_identity_verified",
+                        }:
+                            raise CompletionEvidenceError(
+                                "witness trust level is not a supported provider claim"
+                            )
                     except CompletionEvidenceError as error:
                         raise AttemptLedgerError(str(error)) from error
                 elif event.status in TERMINAL_ATTEMPT_STATUSES:
@@ -2771,12 +2828,19 @@ class AttemptLedger:
             if latest.attempt_no != attempt_no:
                 raise AttemptLedgerError("attempt number is not the current attempt")
             if normalized_evidence is not None:
+                authority = self._authority_for_event(events, latest)
                 validate_completion_authority(
                     normalized_evidence,
-                    self._authority_for_event(events, latest),
+                    authority,
                 )
                 _validate_completion_event_time(
                     normalized_evidence,
+                    occurred_at=occurred_at,
+                )
+                normalized_evidence = _normalize_witness_trust(
+                    normalized_evidence,
+                    authority,
+                    verifier=self.witness_verifier,
                     occurred_at=occurred_at,
                 )
             submission_members = {
@@ -2889,10 +2953,16 @@ class AttemptLedger:
                 )
             if normalized:
                 authority = self._authority_for_event(events, current[0])
-                for evidence in normalized.values():
+                for operation_id, evidence in tuple(normalized.items()):
                     validate_completion_authority(evidence, authority)
                     _validate_completion_event_time(
                         evidence,
+                        occurred_at=occurred_at,
+                    )
+                    normalized[operation_id] = _normalize_witness_trust(
+                        evidence,
+                        authority,
+                        verifier=self.witness_verifier,
                         occurred_at=occurred_at,
                     )
 
@@ -3080,7 +3150,10 @@ class AttemptLedger:
                 verification_status = "NOT VERIFIED"
                 if event.status == "completed" and event.evidence is not None:
                     if event.evidence.evidence_kind == "browser_witness_attested":
-                        trust_level = "witness_attested"
+                        trust_level = (
+                            event.evidence.witness_trust_level
+                            or "witness_attested"
+                        )
                         verification_status = "VERIFIED"
                     else:
                         trust_level = "coordinator_only"

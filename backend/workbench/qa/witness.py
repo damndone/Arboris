@@ -15,6 +15,7 @@ import hashlib
 import importlib
 import json
 import math
+import os
 import re
 from typing import Any, Literal, Mapping, Protocol
 
@@ -548,11 +549,18 @@ def verify_witness_attestation(
         raise WitnessUnavailable("independent witness verifier failed") from error
     if valid is not True:
         raise WitnessVerificationError("witness signature is invalid")
+    identity_verified = getattr(verifier, "human_identity_verified", False)
+    if type(identity_verified) is not bool:
+        raise WitnessUnavailable("witness provider identity decision is invalid")
     return WitnessVerification(
         attestation_digest=attestation.attestation_digest,
         key_id=attestation.key_id,
-        trust_level="witness_attested",
-        human_identity_verified=False,
+        trust_level=(
+            "human_identity_verified"
+            if identity_verified
+            else "witness_attested"
+        ),
+        human_identity_verified=identity_verified,
     )
 
 
@@ -560,12 +568,27 @@ def load_witness_verifier(spec: str | None) -> WitnessVerifier | None:
     """Load an explicitly selected trusted provider adapter.
 
     The default is no provider, which is intentionally unusable for
-    witness-attested completion.  The adapter spec is an operator-controlled
-    ``module:factory`` reference; it is a provider integration seam, not a
-    claim that local module loading establishes human identity.
+    witness-attested completion.  When the complete remote provider
+    configuration is present, it is selected explicitly by that configuration
+    even if the CLI spec is omitted.  The adapter spec is an
+    operator-controlled ``module:factory`` reference; it is a provider
+    integration seam, not a claim that local module loading establishes human
+    identity.
     """
 
     if spec is None:
+        if any(
+            os.environ.get(name) is not None
+            for name in (
+                "WORKBENCH_WITNESS_PROVIDER_URL",
+                "WORKBENCH_WITNESS_PROVIDER_ID",
+                "WORKBENCH_WITNESS_PROVIDER_TOKEN",
+                "WORKBENCH_WITNESS_PROVIDER_TIMEOUT_SECONDS",
+            )
+        ):
+            from workbench.qa.remote_witness import from_environment
+
+            return from_environment()
         return None
     if not isinstance(spec, str) or spec.count(":") != 1:
         raise WitnessUnavailable(

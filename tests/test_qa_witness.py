@@ -227,9 +227,51 @@ def test_local_witness_protocol_never_escalates_to_human_identity_proof() -> Non
     assert result.human_identity_verified is False
 
 
+class _IdentityAssuringWitnessVerifier(_TestWitnessVerifier):
+    human_identity_verified = True
+
+
+def test_explicit_provider_identity_assurance_is_propagated() -> None:
+    from workbench.qa.witness import verify_witness_attestation
+
+    challenge = _challenge()
+    result = verify_witness_attestation(
+        challenge,
+        _attestation(challenge),
+        verifier=_IdentityAssuringWitnessVerifier(),
+        now=150.0,
+        expected_durable_chain_sha256="d" * 64,
+    )
+
+    assert result.trust_level == "human_identity_verified"
+    assert result.human_identity_verified is True
+
+
 def test_witness_verifier_provider_is_optional_but_invalid_specs_fail_closed() -> None:
     from workbench.qa.witness import WitnessUnavailable, load_witness_verifier
 
     assert load_witness_verifier(None) is None
     with pytest.raises(WitnessUnavailable, match="provider"):
         load_witness_verifier("not-a-provider-spec")
+
+
+def test_configured_remote_provider_is_selected_without_a_cli_spec(monkeypatch) -> None:
+    from workbench.qa.remote_witness import RemoteWitnessVerifier
+    from workbench.qa.witness import load_witness_verifier
+
+    monkeypatch.setenv("WORKBENCH_WITNESS_PROVIDER_URL", "https://witness.example/v1/verify")
+    monkeypatch.setenv("WORKBENCH_WITNESS_PROVIDER_ID", "witness.example")
+
+    verifier = load_witness_verifier(None)
+
+    assert isinstance(verifier, RemoteWitnessVerifier)
+
+
+def test_partial_remote_provider_configuration_fails_closed(monkeypatch) -> None:
+    from workbench.qa.witness import WitnessUnavailable, load_witness_verifier
+
+    monkeypatch.setenv("WORKBENCH_WITNESS_PROVIDER_URL", "https://witness.example/v1/verify")
+    monkeypatch.delenv("WORKBENCH_WITNESS_PROVIDER_ID", raising=False)
+
+    with pytest.raises(WitnessUnavailable, match="URL and provider ID"):
+        load_witness_verifier(None)
