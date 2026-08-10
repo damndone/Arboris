@@ -3358,3 +3358,87 @@ def test_cli_completed_state_is_collected_from_the_durable_notebook_chain(
     assert payload["verification_status"] == "NOT VERIFIED"
     assert payload["attempt"]["evidence"]["child_operation_id"] == "missingness.profile"
     assert payload["evidence_collected"] is True
+
+
+def test_cli_executes_every_live_p7_operation_through_generic_workflow(tmp_path) -> None:
+    """The batch executor records every live operation without browser evidence."""
+
+    from workbench.agent.p7_pack_registry import p7_pack_registry
+
+    root = Path(__file__).resolve().parents[1]
+    python = root / ".venv" / "bin" / "python"
+    runner = root / "scripts" / "p7_acceptance_runner.py"
+    manifest = tmp_path / "manifest.json"
+    results = tmp_path / "execution-results.json"
+    work_root = tmp_path / "execution-work"
+    fixtures = tmp_path / "fixtures.json"
+    families = {
+        p7_pack_registry.get(operation_id).pack_family
+        for operation_id in p7_pack_registry.operation_ids()
+    }
+    fixtures.write_text(
+        json.dumps(
+            {
+                "families": {
+                    family: {
+                        "status": "ready",
+                        "fixture_id": "p7_generated_example_v1",
+                        "source": "generated_example",
+                    }
+                    for family in sorted(families)
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def execute(*arguments: str) -> dict[str, object]:
+        completed = subprocess.run(
+            [str(python), str(runner), *arguments],
+            cwd=root,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            raise AssertionError(completed.stderr)
+        return json.loads(completed.stdout)
+
+    execute(
+        "init",
+        "--manifest",
+        str(manifest),
+        "--fixture-catalog",
+        str(fixtures),
+        "--provider",
+        "deepseek",
+        "--model",
+        "deepseek-v4",
+        "--capacity",
+        "64",
+        "--refill-per-second",
+        "64",
+        "--created-at",
+        "2026-08-10T12:00:00Z",
+    )
+    payload = execute(
+        "execute-batch",
+        "--manifest",
+        str(manifest),
+        "--results",
+        str(results),
+        "--work-root",
+        str(work_root),
+        "--expected-failure",
+        "glm.hurdle_negative_binomial=GLM_NONCONVERGENCE",
+    )
+
+    operation_ids = set(p7_pack_registry.operation_ids())
+    assert payload["total_rows"] == len(operation_ids) == 64
+    assert payload["terminal_outcomes"] == 64
+    assert payload["counts"] == {"completed": 63, "expected_failure": 1}
+    assert payload["browser_confirmation_performed"] is False
+    assert payload["verification_status"] == "NOT VERIFIED"
+    persisted = json.loads(results.read_text(encoding="utf-8"))
+    assert {item["operation_id"] for item in persisted["operations"]} == operation_ids
+    assert persisted["manifest_digest"] == payload["manifest_digest"]

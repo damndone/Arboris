@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Manage registry-derived P7 browser acceptance without calling a provider."""
+"""Manage registry-derived P7 browser acceptance and generic execution QA."""
 
 from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
 from datetime import datetime, timezone
+import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -15,6 +17,7 @@ from typing import Any, Mapping
 
 
 _ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "backend"))
 
 from workbench.agent.p7_pack_registry import p7_pack_registry  # noqa: E402
@@ -91,6 +94,269 @@ def _created_at() -> str:
 
 def _emit(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=True))
+
+
+def _canonical_digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _write_execution_snapshot(path: Path, payload: Mapping[str, object]) -> None:
+    """Atomically persist a durable execution snapshot for audit/recovery."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _execution_cases() -> Mapping[str, tuple[object | None, Mapping[str, object]]]:
+    """Load the reviewed generated fixture factory used by the adapter matrix.
+
+    The runner is deliberately a repository QA tool, not a production feature.
+    Reusing the reviewed fixture factory keeps the generated data and typed
+    requests in one place while the live registry still owns the denominator.
+    """
+
+    from tests.test_p7_adoption_calls import _cases
+
+    cases = _cases()
+    if not isinstance(cases, Mapping):  # pragma: no cover - defensive boundary
+        raise ValueError("P7 execution fixture factory must return an object")
+    return cases
+
+
+def _parse_expected_failures(values: list[str]) -> dict[str, str]:
+    expected: dict[str, str] = {}
+    for value in values:
+        operation_id, separator, reason = value.partition("=")
+        if not separator or not operation_id or not reason:
+            raise ValueError(
+                "--expected-failure must be OPERATION_ID=ERROR_TOKEN"
+            )
+        if operation_id in expected:
+            raise ValueError(f"duplicate expected failure: {operation_id}")
+        expected[operation_id] = reason
+    return expected
+
+
+def _execute_p7_batch(args: argparse.Namespace) -> tuple[dict[str, object], int]:
+    """Execute every live P7 row through the compiled generic workflow seam.
+
+    This is intentionally separate from ``AttemptLedger``.  It proves that a
+    typed operation can execute and persist its result, but it never creates a
+    browser confirmation or witness claim.
+    """
+
+    git_head, dirty_digest = _verified_git_context(args)
+    manifest = load_acceptance_manifest(
+        args.manifest,
+        registry=p7_pack_registry,
+        expected_git_head=git_head,
+        expected_dirty_digest=dirty_digest,
+    )
+    if args.results.exists():
+        raise ValueError(
+            "execution results path already exists; choose a new path for a new manifest"
+        )
+    work_root = args.work_root
+    if work_root.exists() and any(work_root.iterdir()):
+        raise ValueError("execution work-root must be empty for a new batch")
+    work_root.mkdir(parents=True, exist_ok=True)
+
+    expected_failures = _parse_expected_failures(args.expected_failure)
+    live_ids = set(p7_pack_registry.operation_ids())
+    unknown_expected = set(expected_failures) - live_ids
+    if unknown_expected:
+        raise ValueError(
+            "expected failure names unregistered operation(s): "
+            + ", ".join(sorted(unknown_expected))
+        )
+    manifest_ids = {row.operation_id for row in manifest.rows}
+    if manifest_ids != live_ids:
+        raise ValueError("frozen manifest does not cover the live P7 registry")
+
+    cases = _execution_cases()
+    case_ids = {operation_id for operation_id in cases if ":" not in operation_id}
+    if case_ids != live_ids:
+        missing = sorted(live_ids - case_ids)
+        extra = sorted(case_ids - live_ids)
+        raise ValueError(
+            "execution fixture factory does not exactly cover the live registry"
+            + (f"; missing: {', '.join(missing)}" if missing else "")
+            + (f"; extra: {', '.join(extra)}" if extra else "")
+        )
+
+    from workbench.agent.workflow import WorkflowExecutor, compile_workflow
+    from workbench.agent.workflow_runtime import build_workflow_step_executor
+    from tests.test_data_column_cast import _source_project
+    import pandas as pd
+
+    execution: dict[str, object] = {
+        "schema_version": 1,
+        "status": "running",
+        "execution_mode": "generic_compiled_workflow",
+        "manifest_digest": manifest.manifest_digest,
+        "git_head": git_head,
+        "dirty_digest": dirty_digest,
+        "registry_digest": manifest.registry_digest,
+        "provider": manifest.provider,
+        "model": manifest.model,
+        "browser_confirmation_performed": False,
+        "verification_status": "NOT VERIFIED",
+        "expected_failures": expected_failures,
+        "operations": [],
+    }
+    _write_execution_snapshot(args.results, execution)
+    operation_results: list[dict[str, object]] = []
+
+    for row in manifest.rows:
+        operation_id = row.operation_id
+        operation_result: dict[str, object] = {
+            "operation_id": operation_id,
+            "pack_family": row.pack_family,
+            "fixture_id": row.fixture_profile.fixture_id,
+            "status": "blocked",
+            "outcome": "blocked",
+            "accepted": False,
+            "browser_confirmation_performed": False,
+            "verification_status": "NOT VERIFIED",
+        }
+        if row.fixture_profile.status == "blocked":
+            operation_result["reason_code"] = row.fixture_profile.blocker_code
+            operation_result["reason_detail"] = row.fixture_profile.blocker_detail
+            operation_results.append(operation_result)
+            execution["operations"] = operation_results
+            _write_execution_snapshot(args.results, execution)
+            continue
+
+        frame, request = cases[operation_id]
+        source_frame = (
+            pd.DataFrame({"fixture_placeholder": [0]})
+            if frame is None
+            else frame.copy(deep=True)
+        )
+        operation_root = work_root / operation_id.replace(".", "_")
+        workflow_id = "p7_acceptance_" + operation_id.replace(".", "_")
+        try:
+            project, run_id, artifact_id = _source_project(operation_root, source_frame)
+            spec = {
+                "input_mode": request["input_mode"],
+                "column_bindings": request["column_bindings"],
+                "options": request["options"],
+            }
+            draft = compile_workflow(
+                workflow_id=workflow_id,
+                target={
+                    "run_id": run_id,
+                    "node_ref": "stage:source",
+                    "artifact_id": artifact_id,
+                },
+                preconditions={
+                    "context_version": "node-operation-context/v1",
+                    "context_fingerprint": _canonical_digest(
+                        {"manifest": manifest.manifest_digest, "operation": operation_id}
+                    ),
+                    "active_head_run_id": run_id,
+                    "owner_resolution": "single_candidate",
+                },
+                steps=[
+                    {
+                        "step_id": "p7_" + operation_id.replace(".", "_"),
+                        "operation_id": operation_id,
+                        "spec": spec,
+                    }
+                ],
+                available_columns=list(source_frame.columns),
+            )
+            state = WorkflowExecutor(project).execute(
+                draft,
+                build_workflow_step_executor(project, draft),
+            )
+            step_state = state.steps[draft.steps[0].step_id]
+            expected_token = expected_failures.get(operation_id)
+            operation_result.update(
+                {
+                    "status": step_state.status,
+                    "workflow_id": workflow_id,
+                    "project_root": str(project),
+                    "artifact_ids": list(step_state.artifact_ids),
+                    "error": step_state.error,
+                }
+            )
+            if state.status == "completed" and step_state.status == "completed":
+                if expected_token is not None:
+                    operation_result.update(
+                        {
+                            "outcome": "failed",
+                            "accepted": False,
+                            "error": (
+                                "expected failure did not occur: " + expected_token
+                            ),
+                        }
+                    )
+                else:
+                    operation_result["outcome"] = "completed"
+                    operation_result["accepted"] = True
+                if not step_state.artifact_ids and operation_result["accepted"] is True:
+                    raise ValueError(
+                        "generic workflow completed without a durable artifact"
+                    )
+            else:
+                error_text = str(step_state.error or state.status)
+                if expected_token is not None and expected_token in error_text:
+                    operation_result["outcome"] = "expected_failure"
+                    operation_result["accepted"] = True
+                    operation_result["expected_failure_token"] = expected_token
+                else:
+                    operation_result["outcome"] = "failed"
+                    operation_result["accepted"] = False
+        except Exception as error:  # record this row and continue the matrix
+            error_text = f"{type(error).__name__}: {error}"
+            operation_result.update(
+                {
+                    "status": "failed",
+                    "outcome": "failed",
+                    "accepted": False,
+                    "error": error_text,
+                }
+            )
+        operation_results.append(operation_result)
+        execution["operations"] = operation_results
+        _write_execution_snapshot(args.results, execution)
+
+    counts: dict[str, int] = {}
+    for item in operation_results:
+        outcome = str(item["outcome"])
+        counts[outcome] = counts.get(outcome, 0) + 1
+    failed = [item for item in operation_results if item["accepted"] is not True]
+    execution.update(
+        {
+            "status": "completed" if not failed else "failed",
+            "total_rows": len(manifest.rows),
+            "terminal_outcomes": len(operation_results),
+            "counts": dict(sorted(counts.items())),
+            "failed_operation_ids": [item["operation_id"] for item in failed],
+        }
+    )
+    _write_execution_snapshot(args.results, execution)
+    return (
+        {
+            key: value
+            for key, value in execution.items()
+            if key != "operations"
+        },
+        0 if not failed else 2,
+    )
 
 
 def _counts(states: Mapping[str, object]) -> dict[str, int]:
@@ -191,6 +457,21 @@ def _parser() -> argparse.ArgumentParser:
     init.add_argument("--refill-per-second", type=float, required=True)
     init.add_argument("--cost-per-attempt", type=float, default=1.0)
     init.add_argument("--created-at")
+
+    execute_batch = commands.add_parser(
+        "execute-batch",
+        help="execute every live P7 operation through the generic workflow seam",
+    )
+    execute_batch.add_argument("--manifest", type=Path, required=True)
+    execute_batch.add_argument("--results", type=Path, required=True)
+    execute_batch.add_argument("--work-root", type=Path, required=True)
+    execute_batch.add_argument(
+        "--expected-failure",
+        action="append",
+        default=[],
+        metavar="OPERATION_ID=ERROR_TOKEN",
+        help="explicitly accept one expected typed fail-closed outcome",
+    )
 
     def add_ledger_paths(command: argparse.ArgumentParser) -> None:
         command.add_argument("--manifest", type=Path, required=True)
@@ -345,6 +626,10 @@ def main(argv: list[str] | None = None) -> int:
                     "confirmation_performed": False,
                 }
             )
+        elif args.command == "execute-batch":
+            payload, return_code = _execute_p7_batch(args)
+            _emit(payload)
+            return return_code
         elif args.command == "status":
             ledger = _load_ledger(args)
             states = ledger.states()
