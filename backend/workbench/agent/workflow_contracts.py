@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from collections.abc import Mapping
@@ -337,6 +338,9 @@ class StepSpecContract:
             "list": "array",
             "object": "object",
             "nullable_string": ["string", "null"],
+            "number": "number",
+            "integer": "integer",
+            "boolean": "boolean",
         }
         properties: dict[str, dict[str, Any]] = {}
         for name, description in self.fields.items():
@@ -1562,6 +1566,372 @@ def _refresh_workflow_contract_views() -> None:
     )
 
 
+def _p5_exposure_note(capability_id: str) -> str:
+    return (
+        f"{capability_id} is composable through operation.multi_step; it is "
+        "not a standalone natural-language proposal."
+    )
+
+
+def statistical_workflow_step_contracts() -> dict[str, StepSpecContract]:
+    """Derive one named-test step from every live statistical family."""
+
+    from ..statistical_tests import TEST_FAMILIES
+
+    return {
+        f"test.{family}": StepSpecContract(
+            summary=contract.summary,
+            fields={
+                "analysis_columns": (
+                    "Explicit source columns for this named statistical family; "
+                    "columns are never inferred or silently dropped."
+                ),
+                "reference_means": (
+                    "Optional column-to-population-mean declarations for the "
+                    "evidence family."
+                ),
+                "paired_columns": (
+                    "Optional list of explicit two-column before/after pairs for "
+                    "the evidence family."
+                ),
+            },
+            required=("analysis_columns",),
+            field_types={
+                "analysis_columns": "list",
+                "reference_means": "object",
+                "paired_columns": "list",
+            },
+            semantic_validator_key="statistical.named_test",
+            reference_resolver_key="workflow.source_columns",
+            column_extractor_key="statistical.named_test",
+            risk_class="low",
+            confirmation_policy="proposal_confirmation",
+            output_schema_ref=f"workbench.statistical_tests.{family}/v1",
+            dispatcher_key="workbench.agent.workflow_runtime.statistical_named_test",
+            effect_level="read_only",
+            scope="named statistical evidence",
+            risk_level="none",
+            reconciler_key="statistical.named_test",
+            diff_builder_key="statistical.named_test.diff.v1",
+            verification_builder_key="statistical.named_test.verification.v1",
+            ui_description=f"Run the named {family} statistical evidence family.",
+            example_prompts=(
+                f"Run the {family} test family on the declared analysis columns.",
+            ),
+            capability_kind="statistical_test",
+            top_level_exposure_note=_p5_exposure_note(f"test.{family}"),
+        )
+        for family, contract in sorted(TEST_FAMILIES.items())
+    }
+
+
+def prediction_workflow_step_contracts() -> dict[str, StepSpecContract]:
+    """Derive prediction steps from the live prediction manifest."""
+
+    from workbench.engine.capabilities import build_capabilities
+
+    fields = {
+        "y": "Target column for the out-of-sample prediction protocol.",
+        "x": "Feature columns passed to the prediction estimator.",
+        "final_holdout_fraction": "Final holdout fraction used by the split plan.",
+        "cv_folds": "Number of cross-validation folds.",
+        "shuffle": "Whether the IID split is shuffled.",
+        "random_seed": "Deterministic control seed for the split and estimator.",
+        "data_structure": "Confirmed structure kind for the prediction split.",
+        "entity_column": "Optional entity column for a declared structure.",
+        "group_column": "Optional group column for a grouped split.",
+        "time_column": "Optional time column for a declared structure.",
+        "sampling": "Typed sampling-weight declaration for the prediction protocol.",
+        "imputation_method": "Optional fold-local imputation method.",
+        "imputation_max_iter": "Maximum fold-local imputation iterations.",
+        "imputation_max_missing_rate": "Maximum accepted missing-rate threshold.",
+    }
+    field_types = {
+        "y": "string",
+        "x": "list",
+        "final_holdout_fraction": "number",
+        "cv_folds": "integer",
+        "shuffle": "boolean",
+        "random_seed": "integer",
+        "data_structure": "string",
+        "entity_column": "nullable_string",
+        "group_column": "nullable_string",
+        "time_column": "nullable_string",
+        "sampling": "object",
+        "imputation_method": "nullable_string",
+        "imputation_max_iter": "integer",
+        "imputation_max_missing_rate": "number",
+    }
+    structure_kinds = ("unknown", "iid", "grouped", "temporal", "panel")
+    return {
+        f"prediction.{entry['key']}": StepSpecContract(
+            summary=(
+                f"{str(entry.get('description') or entry['key']).rstrip('.')}. "
+                "Run the typed out-of-sample prediction protocol."
+            ),
+            fields=dict(fields),
+            required=(
+                "y",
+                "x",
+                "final_holdout_fraction",
+                "cv_folds",
+                "shuffle",
+                "random_seed",
+                "data_structure",
+            ),
+            field_types=dict(field_types),
+            field_enums={"data_structure": structure_kinds},
+            semantic_validator_key="prediction.model",
+            reference_resolver_key="workflow.source_columns",
+            column_extractor_key="prediction.model",
+            risk_class="high",
+            confirmation_policy="proposal_authorization",
+            output_schema_ref="workbench.prediction.protocol/v1",
+            dispatcher_key="workbench.agent.workflow_runtime.prediction_model",
+            scope="out-of-sample prediction",
+            risk_level="high",
+            reconciler_key="prediction.model",
+            diff_builder_key="prediction.model.diff.v1",
+            verification_builder_key="prediction.model.verification.v1",
+            ui_description=f"Run {entry['key']} through the typed prediction protocol.",
+            example_prompts=(
+                f"Run {entry['key']} with an explicit holdout and cross-validation plan.",
+            ),
+            capability_kind="prediction_model",
+            top_level_exposure_note=_p5_exposure_note(f"prediction.{entry['key']}"),
+        )
+        for entry in build_capabilities()["prediction_models"]
+    }
+
+
+def data_preparation_workflow_step_contracts() -> dict[str, StepSpecContract]:
+    """Derive dataset-producing preparation steps from live registries."""
+
+    from workbench.engine.capabilities import build_capabilities
+
+    manifest = build_capabilities()
+    contracts: dict[str, StepSpecContract] = {}
+    for entry in manifest["imputation_methods"]:
+        capability_id = f"imputation.{entry['key']}"
+        contracts[capability_id] = StepSpecContract(
+            summary=str(entry["description"]),
+            fields={
+                "columns": "Numeric columns selected for the imputation method.",
+                "m": "Number of imputed datasets requested by the method.",
+                "max_iter": "Maximum imputation iterations.",
+                "random_seed": "Deterministic imputation seed.",
+                "max_missing_rate": "Maximum accepted missing-rate threshold.",
+            },
+            required=("columns",),
+            field_types={
+                "columns": "list",
+                "m": "integer",
+                "max_iter": "integer",
+                "random_seed": "integer",
+                "max_missing_rate": "number",
+            },
+            semantic_validator_key="data_preparation.imputation",
+            reference_resolver_key="workflow.source_columns",
+            column_extractor_key="data_preparation.imputation",
+            risk_class="high",
+            confirmation_policy="proposal_authorization",
+            output_schema_ref="workbench.data_preparation.imputation/v1",
+            dispatcher_key="workbench.agent.workflow_runtime.imputation",
+            scope="dataset imputation",
+            risk_level="high",
+            reconciler_key="data_preparation.imputation",
+            diff_builder_key="data_preparation.imputation.diff.v1",
+            verification_builder_key="data_preparation.imputation.verification.v1",
+            ui_description=f"Run {capability_id} on the resolved input dataset.",
+            capability_kind="data_preparation",
+            top_level_exposure_note=_p5_exposure_note(capability_id),
+            produces_dataset=True,
+            consumes_input_frame=True,
+            replayable_by_recipe=False,
+        )
+    for entry in manifest["sampling_methods"]:
+        capability_id = f"resample.{entry['key']}"
+        label = str(entry.get("label") or entry["key"])
+        contracts[capability_id] = StepSpecContract(
+            summary=(
+                f"{label} class-imbalance resampling on the training split before "
+                "a prediction model is fit."
+            ),
+            fields={
+                "target_column": "Target column used to determine class balance.",
+                "feature_columns": "Feature columns passed to the sampler.",
+                "random_seed": "Deterministic sampler seed.",
+            },
+            required=("target_column", "feature_columns"),
+            field_types={
+                "target_column": "string",
+                "feature_columns": "list",
+                "random_seed": "integer",
+            },
+            semantic_validator_key="data_preparation.resampling",
+            reference_resolver_key="workflow.source_columns",
+            column_extractor_key="data_preparation.resampling",
+            risk_class="high",
+            confirmation_policy="proposal_authorization",
+            output_schema_ref="workbench.data_preparation.resampling/v1",
+            dispatcher_key="workbench.agent.workflow_runtime.resampling",
+            scope="prediction training resampling",
+            risk_level="high",
+            reconciler_key="data_preparation.resampling",
+            diff_builder_key="data_preparation.resampling.diff.v1",
+            verification_builder_key="data_preparation.resampling.verification.v1",
+            ui_description=f"Run {capability_id} on a prediction training frame.",
+            capability_kind="data_preparation",
+            top_level_exposure_note=_p5_exposure_note(capability_id),
+            produces_dataset=True,
+            consumes_input_frame=True,
+            replayable_by_recipe=False,
+        )
+    return contracts
+
+
+def recipe_workflow_step_contracts() -> dict[str, StepSpecContract]:
+    """Derive time-series workflow steps from live RecipeContracts."""
+
+    from .recipe_contracts import RECIPE_CONTRACTS
+
+    contracts: dict[str, StepSpecContract] = {}
+    for recipe_id, recipe in sorted(RECIPE_CONTRACTS.items()):
+        vocabulary = recipe.parameter_vocabulary
+        vocabulary_fields = vocabulary.get("fields", []) if isinstance(vocabulary, Mapping) else []
+        field_descriptions: dict[str, str] = {
+            "model_options": (
+                "Recipe-owned options. Use the published parameter vocabulary; "
+                "the source reference and source columns remain server-verified."
+            )
+        }
+        field_types: dict[str, str] = {"model_options": "object"}
+        for source_field in recipe.source_option_fields:
+            field_descriptions[source_field] = f"Recipe source column: {source_field}."
+            field_types[source_field] = "string"
+        for planning_field in recipe.planning_required_option_fields:
+            field_descriptions.setdefault(
+                planning_field, f"Required planning declaration: {planning_field}."
+            )
+            field_types.setdefault(planning_field, "string")
+        field_enums: dict[str, tuple[str, ...]] = {}
+        if isinstance(vocabulary_fields, Mapping):
+            vocabulary_fields = [
+                {"path": path, **(dict(value) if isinstance(value, Mapping) else {})}
+                for path, value in vocabulary_fields.items()
+            ]
+        if isinstance(vocabulary_fields, list):
+            for item in vocabulary_fields:
+                if not isinstance(item, Mapping):
+                    continue
+                path = item.get("path")
+                if not isinstance(path, str) or "." in path:
+                    continue
+                field_descriptions.setdefault(
+                    path, str(item.get("description") or f"Recipe option: {path}.")
+                )
+                declared_type = str(item.get("type") or item.get("kind") or "string")
+                declared_type = {
+                    "column": "string",
+                    "positive_integer": "integer",
+                }.get(declared_type, declared_type)
+                field_types.setdefault(path, declared_type)
+                values = item.get("enum") or item.get("allowed_values")
+                if values and all(type(value) is str and value for value in values):
+                    field_enums[path] = tuple(values)
+        operation_id = f"model.{recipe_id}"
+        contracts[operation_id] = StepSpecContract(
+            summary=(
+                f"Run the {recipe_id} Recipe with its owner contract and published "
+                "time-index semantics."
+            ),
+            fields=field_descriptions,
+            required=("model_options",),
+            field_types=field_types,
+            field_enums=field_enums,
+            semantic_validator_key="model.time_series.recipe",
+            reference_resolver_key="workflow.source_columns",
+            column_extractor_key="model.time_series.recipe",
+            risk_class="high",
+            confirmation_policy="proposal_authorization",
+            output_schema_ref=f"workbench.recipe.{recipe_id}/v1",
+            dispatcher_key="workbench.agent.workflow_runtime.time_series_recipe",
+            scope="time-series Recipe workflow",
+            risk_level="high",
+            reconciler_key="model.time_series.recipe",
+            diff_builder_key="time_series.recipe.diff.v1",
+            verification_builder_key="time_series.recipe.verification.v1",
+            ui_description=f"Run the typed {recipe_id} Recipe workflow step.",
+            capability_kind="model_family",
+            top_level_exposure_note=_p5_exposure_note(operation_id),
+        )
+    return contracts
+
+
+def selector_workflow_step_contracts() -> dict[str, StepSpecContract]:
+    """Derive selector steps from the live model selector registry."""
+
+    from .capability_contract import MODEL_TYPE_SELECTORS
+
+    genesis = WORKFLOW_STEP_SPEC_CONTRACTS["model.genesis"]
+    fields = {
+        name: description
+        for name, description in genesis.fields.items()
+        if name != "model_family"
+    }
+    field_types = {
+        name: type_name
+        for name, type_name in genesis.field_types.items()
+        if name != "model_family"
+    }
+    return {
+        f"model.{selector}": StepSpecContract(
+            summary=(
+                f"Resolve the live {selector} model selector against the declared "
+                "branches and target structure."
+            ),
+            fields=fields,
+            required=("branches",),
+            field_types=field_types,
+            semantic_validator_key="model.auto",
+            reference_resolver_key="workflow.source_columns",
+            column_extractor_key="model.auto",
+            risk_class="high",
+            confirmation_policy="proposal_authorization",
+            output_schema_ref="workbench.model.auto/v1",
+            dispatcher_key="workbench.agent.workflow_runtime.model_auto",
+            scope="automatic model selector",
+            risk_level="high",
+            reconciler_key="model.auto",
+            diff_builder_key="model.auto.diff.v1",
+            verification_builder_key="model.auto.verification.v1",
+            ui_description=f"Resolve and run the live {selector} model selector.",
+            capability_kind="selector",
+            top_level_exposure_note=_p5_exposure_note(f"model.{selector}"),
+        )
+        for selector in sorted(MODEL_TYPE_SELECTORS)
+    }
+
+
+def _p5_workflow_step_contracts() -> dict[str, StepSpecContract]:
+    contracts: dict[str, StepSpecContract] = {}
+    for derived in (
+        statistical_workflow_step_contracts(),
+        prediction_workflow_step_contracts(),
+        data_preparation_workflow_step_contracts(),
+        recipe_workflow_step_contracts(),
+        selector_workflow_step_contracts(),
+    ):
+        overlap = set(contracts) & set(derived)
+        if overlap:
+            raise ValueError(
+                "P5 workflow contract identity collision: "
+                + ", ".join(sorted(overlap))
+            )
+        contracts.update(derived)
+    return contracts
+
+
 WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContractRegistry({
     "statistical.explore": StepSpecContract(
         summary=(
@@ -1948,6 +2318,7 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
     ),
 })
 
+WORKFLOW_STEP_SPEC_CONTRACTS.update(_p5_workflow_step_contracts())
 _refresh_workflow_contract_views()
 
 
@@ -2577,6 +2948,46 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
                     columns.add(str(spec[key]))
         elif operation == "lag":
             columns.update(str(item) for item in spec.get("columns", []) or [])
+    elif extractor_key == "statistical.named_test":
+        columns.update(str(item) for item in spec.get("analysis_columns", []) or [])
+        for column in (spec.get("reference_means") or {}):
+            columns.add(str(column))
+        for pair in spec.get("paired_columns", []) or []:
+            if isinstance(pair, (list, tuple)):
+                columns.update(str(item) for item in pair if item)
+    elif extractor_key == "prediction.model":
+        if spec.get("y"):
+            columns.add(str(spec["y"]))
+        columns.update(str(item) for item in spec.get("x", []) or [])
+        for field_name in ("entity_column", "group_column", "time_column"):
+            if spec.get(field_name):
+                columns.add(str(spec[field_name]))
+    elif extractor_key == "data_preparation.imputation":
+        columns.update(str(item) for item in spec.get("columns", []) or [])
+    elif extractor_key == "data_preparation.resampling":
+        if spec.get("target_column"):
+            columns.add(str(spec["target_column"]))
+        columns.update(str(item) for item in spec.get("feature_columns", []) or [])
+    elif extractor_key == "model.time_series.recipe":
+        options = spec.get("model_options") or {}
+        if isinstance(options, Mapping):
+            for field_name in ("time_column", "value_column"):
+                if options.get(field_name):
+                    columns.add(str(options[field_name]))
+        for field_name in ("time_column", "value_column"):
+            if spec.get(field_name):
+                columns.add(str(spec[field_name]))
+    elif extractor_key == "model.auto":
+        for branch in spec.get("branches", []) or []:
+            if isinstance(branch, Mapping):
+                if branch.get("outcome"):
+                    columns.add(str(branch["outcome"]))
+                columns.update(str(item) for item in branch.get("predictors", []) or [])
+                columns.update(str(item) for item in branch.get("categorical", []) or [])
+                for entry in branch.get("polynomials", []) or []:
+                    if isinstance(entry, Mapping) and entry.get("column"):
+                        columns.add(str(entry["column"]))
+        columns.update(str(item) for item in spec.get("context_columns", []) or [])
     return columns
 
 
@@ -2791,6 +3202,250 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
         if not isinstance(branch_id, str) or not branch_id:
             raise OperationValidationError(
                 "model.white_test branch_id must be a non-empty string"
+            )
+    elif validator_key == "statistical.named_test":
+        analysis_columns = spec.get("analysis_columns")
+        if not isinstance(analysis_columns, list) or not analysis_columns:
+            raise OperationValidationError(
+                f"{operation_id} requires a non-empty analysis_columns list"
+            )
+        if any(not isinstance(column, str) or not column for column in analysis_columns):
+            raise OperationValidationError(
+                f"{operation_id} analysis_columns must contain non-empty strings"
+            )
+        if len(set(analysis_columns)) != len(analysis_columns):
+            raise OperationValidationError(
+                f"{operation_id} analysis_columns must not contain duplicates"
+            )
+        reference_means = spec.get("reference_means")
+        if reference_means is not None:
+            if not isinstance(reference_means, Mapping):
+                raise OperationValidationError(
+                    f"{operation_id} reference_means must be an object"
+                )
+            if any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(float(value))
+                for value in reference_means.values()
+            ):
+                raise OperationValidationError(
+                    f"{operation_id} reference_means values must be finite numbers"
+                )
+        paired_columns = spec.get("paired_columns")
+        if paired_columns is not None:
+            if not isinstance(paired_columns, list):
+                raise OperationValidationError(
+                    f"{operation_id} paired_columns must be a list"
+                )
+            for pair in paired_columns:
+                if (
+                    not isinstance(pair, list)
+                    or len(pair) != 2
+                    or any(not isinstance(column, str) or not column for column in pair)
+                    or pair[0] == pair[1]
+                ):
+                    raise OperationValidationError(
+                        f"{operation_id} paired_columns must contain distinct two-column lists"
+                    )
+    elif validator_key == "prediction.model":
+        x_columns = spec.get("x")
+        if not isinstance(spec.get("y"), str) or not spec["y"]:
+            raise OperationValidationError(f"{operation_id} y must be a non-empty string")
+        if not isinstance(x_columns, list) or not x_columns:
+            raise OperationValidationError(f"{operation_id} x must be a non-empty list")
+        if any(not isinstance(column, str) or not column for column in x_columns):
+            raise OperationValidationError(
+                f"{operation_id} x must contain non-empty column names"
+            )
+        if len(set(x_columns)) != len(x_columns):
+            raise OperationValidationError(f"{operation_id} x must not contain duplicates")
+        fraction = spec.get("final_holdout_fraction")
+        if fraction is not None and not 0 < float(fraction) < 1:
+            raise OperationValidationError(
+                f"{operation_id} final_holdout_fraction must be strictly between 0 and 1"
+            )
+        folds = spec.get("cv_folds")
+        if folds is not None and int(folds) < 2:
+            raise OperationValidationError(f"{operation_id} cv_folds must be at least 2")
+        structure = spec.get("data_structure")
+        if structure == "unknown":
+            raise OperationValidationError(
+                f"{operation_id} data_structure must be explicitly declared"
+            )
+        sampling = spec.get("sampling")
+        if sampling is not None and not isinstance(sampling, Mapping):
+            raise OperationValidationError(f"{operation_id} sampling must be an object")
+    elif validator_key == "data_preparation.imputation":
+        columns = spec.get("columns")
+        if not isinstance(columns, list) or not columns:
+            raise OperationValidationError(f"{operation_id} columns must be a non-empty list")
+        if any(not isinstance(column, str) or not column for column in columns):
+            raise OperationValidationError(
+                f"{operation_id} columns must contain non-empty column names"
+            )
+        if len(set(columns)) != len(columns):
+            raise OperationValidationError(f"{operation_id} columns must not contain duplicates")
+        _validate_positive_integer_field(operation_id, spec, "m")
+        _validate_positive_integer_field(operation_id, spec, "max_iter")
+        _validate_nonnegative_integer_field(operation_id, spec, "random_seed")
+        _validate_fraction_field(operation_id, spec, "max_missing_rate", inclusive=True)
+    elif validator_key == "data_preparation.resampling":
+        target = spec.get("target_column")
+        features = spec.get("feature_columns")
+        if not isinstance(target, str) or not target:
+            raise OperationValidationError(
+                f"{operation_id} target_column must be a non-empty string"
+            )
+        if not isinstance(features, list) or not features:
+            raise OperationValidationError(
+                f"{operation_id} feature_columns must be a non-empty list"
+            )
+        if any(not isinstance(column, str) or not column for column in features):
+            raise OperationValidationError(
+                f"{operation_id} feature_columns must contain non-empty column names"
+            )
+        if target in features or len(set(features)) != len(features):
+            raise OperationValidationError(
+                f"{operation_id} target_column and feature_columns must be disjoint"
+            )
+        _validate_nonnegative_integer_field(operation_id, spec, "random_seed")
+    elif validator_key == "model.time_series.recipe":
+        _validate_recipe_workflow_spec(operation_id, spec)
+    elif validator_key in {"model.auto"}:
+        _validate_auto_workflow_spec(operation_id, spec)
+
+
+def _validate_positive_integer_field(
+    operation_id: str, spec: Mapping[str, Any], field_name: str
+) -> None:
+    value = spec.get(field_name)
+    if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 1):
+        raise OperationValidationError(
+            f"{operation_id} {field_name} must be a positive integer"
+        )
+
+
+def _validate_nonnegative_integer_field(
+    operation_id: str, spec: Mapping[str, Any], field_name: str
+) -> None:
+    value = spec.get(field_name)
+    if value is not None and (
+        not isinstance(value, int) or isinstance(value, bool) or value < 0
+    ):
+        raise OperationValidationError(
+            f"{operation_id} {field_name} must be a non-negative integer"
+        )
+
+
+def _validate_fraction_field(
+    operation_id: str,
+    spec: Mapping[str, Any],
+    field_name: str,
+    *,
+    inclusive: bool = False,
+) -> None:
+    value = spec.get(field_name)
+    if value is None:
+        return
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not math.isfinite(float(value))
+        or (not 0 <= float(value) <= 1 if inclusive else not 0 < float(value) < 1)
+    ):
+        raise OperationValidationError(
+            f"{operation_id} {field_name} must be a valid fraction"
+        )
+
+
+def _recipe_option_mapping(
+    operation_id: str, spec: Mapping[str, Any]
+) -> tuple[Any, Mapping[str, Any]]:
+    recipe_id = operation_id.removeprefix("model.")
+    from .recipe_contracts import recipe_contract
+
+    contract = recipe_contract(recipe_id)
+    options = spec.get("model_options")
+    if not isinstance(options, Mapping):
+        raise OperationValidationError(
+            f"{operation_id} model_options must be an object owned by {recipe_id}"
+        )
+    if any(field in options for field in contract.server_owned_option_fields):
+        raise OperationValidationError(
+            f"{operation_id} model_options contains server-owned field(s): "
+            + ", ".join(contract.server_owned_option_fields)
+        )
+    vocabulary = contract.parameter_vocabulary
+    raw_fields = vocabulary.get("fields", []) if isinstance(vocabulary, Mapping) else []
+    allowed_roots: set[str] = set(contract.source_option_fields)
+    if isinstance(raw_fields, Mapping):
+        allowed_roots.update(str(name) for name in raw_fields)
+    elif isinstance(raw_fields, list):
+        for item in raw_fields:
+            if isinstance(item, Mapping) and isinstance(item.get("path"), str):
+                allowed_roots.add(str(item["path"]).split(".", 1)[0])
+    unknown = sorted(set(options) - allowed_roots)
+    if unknown:
+        raise OperationValidationError(
+            f"{operation_id} model_options contains fields not owned by {recipe_id}: "
+            + ", ".join(unknown)
+        )
+    for field_name in contract.source_option_fields:
+        if not isinstance(options.get(field_name), str) or not options[field_name]:
+            raise OperationValidationError(
+                f"{operation_id} model_options.{field_name} is required"
+            )
+    missing_planning = [
+        field_name
+        for field_name in contract.planning_required_option_fields
+        if not isinstance(options.get(field_name), str) or not options[field_name]
+    ]
+    if missing_planning:
+        raise OperationValidationError(
+            f"{operation_id} model_options requires planning field(s): "
+            + ", ".join(missing_planning)
+        )
+    return contract, options
+
+
+def _validate_recipe_workflow_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
+    _recipe_option_mapping(operation_id, spec)
+
+
+def _validate_auto_workflow_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
+    branches = spec.get("branches")
+    if not isinstance(branches, list) or not branches:
+        raise OperationValidationError(f"{operation_id} requires a non-empty branches list")
+    seen_branch_ids: set[str] = set()
+    for branch in branches:
+        if not isinstance(branch, Mapping):
+            raise OperationValidationError(f"{operation_id} branches must contain objects")
+        missing = [
+            field_name
+            for field_name in ("branch_id", "outcome", "predictors")
+            if not branch.get(field_name)
+        ]
+        if missing:
+            raise OperationValidationError(
+                f"{operation_id} branch is missing: " + ", ".join(missing)
+            )
+        branch_id = branch["branch_id"]
+        if not isinstance(branch_id, str) or branch_id in seen_branch_ids:
+            raise OperationValidationError(
+                f"{operation_id} branch_id must be unique and non-empty"
+            )
+        seen_branch_ids.add(branch_id)
+        if not isinstance(branch["outcome"], str):
+            raise OperationValidationError(f"{operation_id} branch outcome must be a string")
+        predictors = branch["predictors"]
+        if not isinstance(predictors, list) or not predictors:
+            raise OperationValidationError(
+                f"{operation_id} branch predictors must be a non-empty list"
+            )
+        if any(not isinstance(column, str) or not column for column in predictors):
+            raise OperationValidationError(
+                f"{operation_id} branch predictors must contain non-empty strings"
             )
 
 
@@ -3162,12 +3817,19 @@ def _validate_declared_field_types(
         value = spec[field_name]
         valid = {
             "string": isinstance(value, str) and not isinstance(value, bool),
+            "nullable_string": (
+                value is None
+                or (isinstance(value, str) and not isinstance(value, bool))
+            ),
             "list": isinstance(value, list),
             "object": isinstance(value, Mapping),
-            "boolean": type(value) is bool,
-            "integer": type(value) is int,
-            "number": isinstance(value, (int, float)) and not isinstance(value, bool),
-            "nullable_string": value is None or (isinstance(value, str) and not isinstance(value, bool)),
+            "number": (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+            ),
+            "integer": isinstance(value, int) and not isinstance(value, bool),
+            "boolean": isinstance(value, bool),
         }.get(type_name)
         if valid is None:
             raise OperationValidationError(
@@ -3583,8 +4245,13 @@ __all__ = [
     "WORKFLOW_TEMPLATE",
     "StepSpecContract",
     "WorkflowStepContractRegistry",
+    "data_preparation_workflow_step_contracts",
     "pack_step_contract",
+    "prediction_workflow_step_contracts",
+    "recipe_workflow_step_contracts",
     "register_workflow_step",
+    "selector_workflow_step_contracts",
+    "statistical_workflow_step_contracts",
     "validate_workflow_operation",
     "validate_workflow_steps",
     "workflow_authorization",

@@ -507,6 +507,63 @@ def _data_preparation_capabilities() -> list[CapabilityContract]:
     return capabilities
 
 
+def _merge_capability_sources(
+    *sources: Iterable[CapabilityContract],
+) -> tuple[CapabilityContract, ...]:
+    """Merge live registry projections without duplicating capability identity."""
+
+    merged: dict[str, CapabilityContract] = {}
+    for source in sources:
+        for item in source:
+            current = merged.get(item.capability_id)
+            if current is None:
+                merged[item.capability_id] = item
+                continue
+            if current.kind != item.kind:
+                raise ValueError(
+                    f"capability {item.capability_id} has conflicting kinds: "
+                    f"{current.kind} and {item.kind}"
+                )
+            exemptions = {
+                value
+                for value in (
+                    current.reachability_exempt_reason,
+                    item.reachability_exempt_reason,
+                )
+                if value is not None
+            }
+            if len(exemptions) > 1:
+                raise ValueError(
+                    f"capability {item.capability_id} has conflicting reachability exemptions"
+                )
+            notes = {
+                value
+                for value in (
+                    current.top_level_exposure_note,
+                    item.top_level_exposure_note,
+                )
+                if value is not None
+            }
+            if len(notes) > 1:
+                raise ValueError(
+                    f"capability {item.capability_id} has conflicting exposure notes"
+                )
+            merged[item.capability_id] = CapabilityContract(
+                capability_id=item.capability_id,
+                kind=current.kind,
+                summary=current.summary,
+                proposed_by=tuple(
+                    dict.fromkeys((*current.proposed_by, *item.proposed_by))
+                ),
+                composable_as=tuple(
+                    dict.fromkeys((*current.composable_as, *item.composable_as))
+                ),
+                reachability_exempt_reason=next(iter(exemptions), None),
+                top_level_exposure_note=next(iter(notes), None),
+            )
+    return tuple(merged.values())
+
+
 def capability_inventory() -> tuple[CapabilityContract, ...]:
     """The enumerable set of things this product can be asked to do.
 
@@ -516,12 +573,12 @@ def capability_inventory() -> tuple[CapabilityContract, ...]:
     entire operation family was unreachable.
     """
 
-    return (
-        *_model_capabilities(),
-        *_operation_capabilities(),
-        *_statistical_test_capabilities(),
-        *_prediction_capabilities(),
-        *_data_preparation_capabilities(),
+    return _merge_capability_sources(
+        _model_capabilities(),
+        _operation_capabilities(),
+        _statistical_test_capabilities(),
+        _prediction_capabilities(),
+        _data_preparation_capabilities(),
     )
 
 

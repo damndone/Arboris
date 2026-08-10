@@ -792,14 +792,35 @@ def test_a_sourceless_step_still_claims_the_original_table(tmp_path: Path) -> No
 def _meta_frame() -> pd.DataFrame:
     """A frame big enough to estimate on, with a column worth deriving."""
 
+    from tests.fixtures.models.ets.known_truth import short_stable_series
+
+    stable = short_stable_series().frame(
+        time_column="date", value_column="outcome"
+    ).iloc[:48]
     return pd.DataFrame(
         {
             "wave": [1, 2, 3, 4] * 12,
             "time": pd.date_range("2020-01-01", periods=48, freq="D"),
-            "outcome": [100.0 + index * 2.5 for index in range(48)],
+            "date": stable["date"].tolist(),
+            "outcome": stable["outcome"].tolist(),
             "rate_a": [float(index % 17) for index in range(48)],
             "rate_b": [float((index * 7) % 13) for index in range(48)],
             "size": [200.0 + index * 7 for index in range(48)],
+            "group": ["a" if index % 2 == 0 else "b" for index in range(48)],
+            "category": [
+                "a" if index % 3 == 0 else "b" if index % 3 == 1 else "c"
+                for index in range(48)
+            ],
+            "binary_category": [
+                "majority" if index < 42 else "minority" for index in range(48)
+            ],
+            "missing_a": [
+                None if index in {4, 17} else float(index) for index in range(48)
+            ],
+            "missing_b": [
+                None if index in {3, 20} else float(index * 2)
+                for index in range(48)
+            ],
         }
     )
 
@@ -947,6 +968,189 @@ def _meta_plan(*, secondary_run_id: str, secondary_artifact_id: str) -> list[dic
         ),
         _sourced(
             {
+                "step_id": "named_correlations",
+                "operation_id": "test.correlations",
+                "spec": {"analysis_columns": ["size", "rate_a"]},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "named_rank_correlations",
+                "operation_id": "test.rank_correlations",
+                "spec": {"analysis_columns": ["size", "rate_a"]},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "named_t_tests",
+                "operation_id": "test.t_tests",
+                "spec": {"analysis_columns": ["outcome", "group"]},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "named_anova",
+                "operation_id": "test.anova",
+                "spec": {"analysis_columns": ["outcome", "category"]},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "named_nonparametric",
+                "operation_id": "test.nonparametric",
+                "spec": {"analysis_columns": ["outcome", "group"]},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "named_chi_square",
+                "operation_id": "test.chi_square",
+                "spec": {"analysis_columns": ["group", "category"]},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "named_fisher_exact",
+                "operation_id": "test.fisher_exact",
+                "spec": {"analysis_columns": ["group", "binary_category"]},
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "named_evidence",
+                "operation_id": "test.evidence",
+                "spec": {
+                    "analysis_columns": ["outcome", "rate_a", "rate_b"],
+                    "reference_means": {"outcome": 20.0},
+                    "paired_columns": [["rate_a", "rate_b"]],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "mice",
+                "operation_id": "imputation.mice",
+                "spec": {
+                    "columns": ["missing_a", "missing_b"],
+                    "m": 1,
+                    "max_iter": 2,
+                    "random_seed": 7,
+                    "max_missing_rate": 0.4,
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "resample_smote",
+                "operation_id": "resample.smote",
+                "spec": {
+                    "target_column": "binary_category",
+                    "feature_columns": ["size", "rate_a"],
+                    "random_seed": 7,
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "resample_oversample",
+                "operation_id": "resample.oversample",
+                "spec": {
+                    "target_column": "binary_category",
+                    "feature_columns": ["size", "rate_a"],
+                    "random_seed": 7,
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "resample_undersample",
+                "operation_id": "resample.undersample",
+                "spec": {
+                    "target_column": "binary_category",
+                    "feature_columns": ["size", "rate_a"],
+                    "random_seed": 7,
+                },
+            }
+        ),
+        *[
+            _sourced(
+                {
+                    "step_id": model_type,
+                    "operation_id": f"prediction.{model_type}",
+                    "spec": {
+                        "y": "outcome",
+                        "x": ["size", "rate_a"],
+                        "final_holdout_fraction": 0.2,
+                        "cv_folds": 3,
+                        "shuffle": True,
+                        "random_seed": 7,
+                        "data_structure": "iid",
+                    },
+                }
+            )
+            for model_type in (
+                "prediction_lasso",
+                "prediction_ridge",
+                "prediction_random_forest",
+            )
+        ],
+        _sourced(
+            {
+                "step_id": "ets",
+                "operation_id": "model.time_series.ets",
+                "spec": {
+                    "model_options": {
+                        "time_column": "date",
+                        "value_column": "outcome",
+                        "time_index_semantics": "regular_calendar",
+                        "error": "add",
+                        "trend": "add",
+                        "seasonal": None,
+                        "damped_trend": False,
+                    }
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "arma",
+                "operation_id": "model.time_series.arma_garch",
+                "spec": {
+                    "model_options": {
+                        "time_column": "date",
+                        "value_column": "outcome",
+                        "time_index_semantics": "business_or_trading_observations",
+                        "transform": "level",
+                        "transform_confirmed": True,
+                        "selection_mode": "manual",
+                        "arma": {"p": 1, "q": 0, "constant_mode": "include"},
+                        "variance": {"model": "garch", "garch_p": 1, "garch_q": 1},
+                        "estimation_strategy": "joint",
+                        "innovation_distribution": "normal",
+                        "validation": {"validation_n": 4, "refit_every": 2},
+                        "random_seed": 7,
+                    }
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "auto",
+                "operation_id": "model.auto",
+                "spec": {
+                    "covariance": "unadjusted",
+                    "branches": [
+                        {
+                            "branch_id": "auto_branch",
+                            "outcome": "outcome",
+                            "predictors": ["scaled", "rate_b"],
+                            "polynomials": [],
+                        }
+                    ],
+                },
+            }
+        ),        _sourced(
+            {
                 "step_id": "data_merge",
                 "operation_id": "data.merge",
                 "spec": {
@@ -1083,6 +1287,24 @@ _LINEAGE_META_STEPS: dict[str, tuple[str, ...]] = {
     "data.fill_missing": ("data_fill_missing",),
     "data.tsset": ("data_tsset",),
     "data.lag": ("data_lag",),
+    "test.anova": ("named_anova",),
+    "test.chi_square": ("named_chi_square",),
+    "test.correlations": ("named_correlations",),
+    "test.evidence": ("named_evidence",),
+    "test.fisher_exact": ("named_fisher_exact",),
+    "test.nonparametric": ("named_nonparametric",),
+    "test.rank_correlations": ("named_rank_correlations",),
+    "test.t_tests": ("named_t_tests",),
+    "imputation.mice": ("mice",),
+    "resample.smote": ("resample_smote",),
+    "resample.oversample": ("resample_oversample",),
+    "resample.undersample": ("resample_undersample",),
+    "prediction.prediction_lasso": ("prediction_lasso",),
+    "prediction.prediction_ridge": ("prediction_ridge",),
+    "prediction.prediction_random_forest": ("prediction_random_forest",),
+    "model.time_series.arma_garch": ("arma",),
+    "model.time_series.ets": ("ets",),
+    "model.auto": ("auto",),
 }
 
 # Operations that write no source reference at all, and so cannot be checked
@@ -1247,6 +1469,59 @@ def _data_management_claims(
     }
 
 
+def _p5_lineage_claims(project: Path, draft, step_id: str, result) -> dict[str, dict[str, str]]:
+    """Read P5 source claims from the persisted artifact envelopes/index."""
+
+    run_id = str(draft.target["run_id"])
+    run_root = project / "runs" / run_id
+    index = read_json(run_root / "artifacts_index.json")
+    records = {
+        str(item["artifact_id"]): item
+        for item in index["artifacts"]
+        if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
+    }
+    claims: dict[str, dict[str, str]] = {}
+
+    def add_claim(where: str, source: object) -> None:
+        if not isinstance(source, dict):
+            return
+        artifact_id = source.get("artifact_id")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            return
+        claim = {"artifact_id": artifact_id}
+        for field in ("node_ref", "sha256"):
+            value = source.get(field)
+            if isinstance(value, str) and value:
+                claim[field] = value
+        claims[where] = claim
+
+    for artifact_id in result.artifact_ids:
+        record = records.get(str(artifact_id))
+        if record is None:
+            continue
+        path = run_root / str(record["path"])
+        if path.is_file() and path.suffix == ".json":
+            payload = read_json(path)
+            if isinstance(payload, dict):
+                add_claim(f"{step_id}:{artifact_id}:source", payload.get("source"))
+                metadata = payload.get("metadata")
+                if isinstance(metadata, dict):
+                    add_claim(f"{step_id}:{artifact_id}:metadata", metadata)
+                    dataset_ref = metadata.get("dataset_ref")
+                    if isinstance(dataset_ref, str) and dataset_ref:
+                        claims[f"{step_id}:{artifact_id}:dataset_ref"] = {
+                            "artifact_id": dataset_ref
+                        }
+        if record.get("artifact_type") == "prediction_packet":
+            inputs = record.get("inputs")
+            if isinstance(inputs, list):
+                for index, source_artifact in enumerate(inputs):
+                    if isinstance(source_artifact, str) and source_artifact:
+                        claims[f"{step_id}:{artifact_id}:input:{index}"] = {
+                            "artifact_id": source_artifact
+                        }
+    return claims
+
 _LINEAGE_META_READERS = {
     "statistical.derive_numeric": _numeric_recipe_claims,
     "statistical.explore": _exploration_claims,
@@ -1267,6 +1542,24 @@ _LINEAGE_META_READERS = {
     "data.fill_missing": _data_management_claims,
     "data.tsset": _data_management_claims,
     "data.lag": _data_management_claims,
+    "test.anova": _p5_lineage_claims,
+    "test.chi_square": _p5_lineage_claims,
+    "test.correlations": _p5_lineage_claims,
+    "test.evidence": _p5_lineage_claims,
+    "test.fisher_exact": _p5_lineage_claims,
+    "test.nonparametric": _p5_lineage_claims,
+    "test.rank_correlations": _p5_lineage_claims,
+    "test.t_tests": _p5_lineage_claims,
+    "imputation.mice": _p5_lineage_claims,
+    "resample.smote": _p5_lineage_claims,
+    "resample.oversample": _p5_lineage_claims,
+    "resample.undersample": _p5_lineage_claims,
+    "prediction.prediction_lasso": _p5_lineage_claims,
+    "prediction.prediction_ridge": _p5_lineage_claims,
+    "prediction.prediction_random_forest": _p5_lineage_claims,
+    "model.time_series.arma_garch": _p5_lineage_claims,
+    "model.time_series.ets": _p5_lineage_claims,
+    "model.auto": _genesis_claims,
 }
 
 
@@ -1288,6 +1581,7 @@ def test_the_lineage_case_registry_covers_every_consuming_operation() -> None:
 
 def test_every_consuming_operation_records_the_dataset_it_actually_read(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One chain per consuming operation, checked against what reached the disk.
 
@@ -1296,6 +1590,25 @@ def test_every_consuming_operation_records_the_dataset_it_actually_read(
     and visible only here: the artifact, the recipe, the graph edge and the
     Genesis context all have to name the binding that was actually read.
     """
+
+    # The lineage guard is about the source binding, not imbalanced-learn's
+    # optional estimator. Keep the real sampler path when the extra is
+    # installed; on the minimal backend environment, inject an explicit test
+    # sampler so the P5 resampling steps still execute and publish metadata.
+    import importlib.util
+
+    if importlib.util.find_spec("imblearn") is None:
+        import workbench.prediction as prediction
+
+        class _LineageSampler:
+            def fit_resample(self, features, target):
+                return features.reset_index(drop=True), target.reset_index(drop=True)
+
+        monkeypatch.setattr(
+            prediction,
+            "build_sampler",
+            lambda *args, **kwargs: _LineageSampler(),
+        )
 
     project, draft = _meta_project(tmp_path)
     executor = build_workflow_step_executor(project, draft)
