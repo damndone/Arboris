@@ -10,14 +10,14 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 12/46 (26.1%; 26.1 per 100 events)
+- Failure frequency: 12/49 (24.5%; 24.5 per 100 events)
 - Repeat rate: 0/12 (0.0%)
 - Recurrence rate: 0/12 (0.0%)
 - MTTR: median=0 ms (sample=10; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/27 (0.0%)
+- Gate waste rate: 0/30 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/2)
 
@@ -151,3 +151,6 @@ CONTEXT_RESCOPED
 - #44: `4a8f1c6d-2e7b-49b0-a5d3-1f9c6e2a7b84` | 2026-08-11T02:53:06.000Z | GATE/p7_current_head_batch_execution_after_exact_payload_gate | incident=`8c1e5a3f-7b2d-46a0-9e4f-1c6b3d7a5f82` | lesson_key=`p7-current-head-batch-after-exact-payload-gate` | event_sha256=`9f4b17dbfe4c2575b9f2ab925f4fc838f5af32dc03c23c18735dd97264542c74`
 - #45: `8f0a1b2c-3d4e-4567-89ab-cdef01234567` | 2026-08-11T03:20:00.000Z | FAILURE/report_export_curated_snapshot_mismatch | incident=`8f0a1b2c-3d4e-4567-89ab-cdef01234567` | lesson_key=`report-export-reuses-curated-snapshot` | event_sha256=`a10a6e3a1b9f1c72815abc0d36c04e03be37abc67fc9285f4d3e023e2b6c1301`
 - #46: `9a1b2c3d-4e5f-4678-90ab-cdef12345678` | 2026-08-11T03:30:00.000Z | GATE/report_export_browser_acceptance_after_curated_snapshot_fix | incident=`9a1b2c3d-4e5f-4678-90ab-cdef12345678` | lesson_key=`report-browser-export-curated-snapshot` | event_sha256=`373b16b625fa8146afd0b31837d363af09ec1bfe5d070c2b13bd33886b61be29`
+- #47: `bc3d4e5f-6071-489a-b2c3-def34567890a` | 2026-08-11T03:46:00.000Z | GATE/p7_final_batch_execution_after_report_export_fix | incident=`bc3d4e5f-6071-489a-b2c3-def34567890a` | lesson_key=`final-commit-p7-batch-after-report-export-fix` | event_sha256=`bd8576f3e16ed87a6ec72a77428aaae0d211cd64dc6d0260037434647ff9a7ba`
+- #48: `cd4e5f60-7182-49ab-c3d4-ef4567890ab1` | 2026-08-11T03:49:30.000Z | GATE/final_host_full_gate_after_report_export_fix | incident=`cd4e5f60-7182-49ab-c3d4-ef4567890ab1` | lesson_key=`final-host-full-gate-after-report-export-fix` | event_sha256=`75094e795d48d58386594f6e090bc606c785c005f33a2cb81dd10ebf7da01817`
+- #49: `ab2c3d4e-5f60-4789-a1b2-cdef23456789` | 2026-08-11T03:51:41.000Z | GATE/final_commit_report_export_browser_acceptance | incident=`ab2c3d4e-5f60-4789-a1b2-cdef23456789` | lesson_key=`final-commit-report-browser-export` | event_sha256=`53e81a3e398e4ec41e06cd0aeb511e3c7404b8e0054ff429aec15a81ad4b10ef`
