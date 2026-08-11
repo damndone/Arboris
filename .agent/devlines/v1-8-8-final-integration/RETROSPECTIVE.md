@@ -10,14 +10,14 @@ FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 9/27 (33.3%; 33.3 per 100 events)
-- Repeat rate: 0/9 (0.0%)
-- Recurrence rate: 0/9 (0.0%)
-- MTTR: median=0 ms (sample=7; unresolved=2)
+- Failure frequency: 10/29 (34.5%; 34.5 per 100 events)
+- Repeat rate: 0/10 (0.0%)
+- Recurrence rate: 0/10 (0.0%)
+- MTTR: median=0 ms (sample=8; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/14 (0.0%)
+- Gate waste rate: 0/15 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -28,6 +28,7 @@ FULL_GATE_INTERRUPTED
 - #5 2026-08-10T15:01:00.000Z `report_contract_real_qa`; cause_status: `known`; cause: A second real browser Report attempt reached the provider but all correction rounds returned prose missing the required Limitations section, so the evidence contract rejected it with LLM_RESPONSE_CONTRACT_INVALID.; resolution: `resolved`; lesson: Real-provider report QA must exercise both transport latency and contract correction paths; a green unit contract test is not sufficient evidence of provider completion.
 - #6 2026-08-10T14:42:00.000Z `notebook_recipe_preflight_real_qa`; cause_status: `known`; cause: The real upload-only Notebook path reached confirmation with a short ETS proposal before the shared Recipe input gate was wired into admission; the server correctly exposed ETS_INSUFFICIENT_OBSERVATIONS instead of executing it.; resolution: `resolved`; lesson: The owner Recipe input contract must run read-only during both planning admission and option materialization, before any draft or execution record is written.
 - #26 2026-08-11T00:36:00.000Z `synthetic_control_schema_real_qa`; cause_status: `known`; cause: The live Notebook planner consumed a registry schema that advertised predictors for synthetic_control.fit, while the v1 pre_outcome runtime intentionally rejects predictor_matrix.; resolution: `resolved`; lesson: Published workflow schemas must describe the runtime policy exactly; unsupported fields must be rejected at declaration time rather than invited into Agent-generated requests.
+- #28 2026-08-11T00:40:00.000Z `witness_result_chain_binding`; cause_status: `known`; cause: P7 ledger witness verification previously compared the provider attestation's durable-chain digest with itself, so a direct witness completion could pass without an independently collected result chain.; resolution: `resolved`; lesson: Witness signatures authenticate the provider statement, but the coordinator must independently derive and bind the durable result chain before upgrading trust.
 
 ## All errors
 
@@ -56,6 +57,7 @@ FULL_GATE_INTERRUPTED
 - `shared-provider-controls-for-report`: occurrences=1; cause_status: `known`; root cause: The first real browser Report attempt used DeepSeek V4 without the shared bounded request policy and returned LLM_REPORT_DEADLINE_EXCEEDED after the shared 300-second deadline.; solution: `resolved`
 - `shared-recipe-input-preflight`: occurrences=1; cause_status: `known`; root cause: The real upload-only Notebook path reached confirmation with a short ETS proposal before the shared Recipe input gate was wired into admission; the server correctly exposed ETS_INSUFFICIENT_OBSERVATIONS instead of executing it.; solution: `resolved`
 - `upload-only-workflow-source-boundary`: occurrences=1; cause_status: `known`; root cause: After the first Notebook correction, upload-only planning had no server-pinned workflow source for operation.multi_step and the planner surfaced that boundary instead of inventing one.; solution: `resolved`
+- `witness-independent-result-chain`: occurrences=1; cause_status: `known`; root cause: P7 ledger witness verification previously compared the provider attestation's durable-chain digest with itself, so a direct witness completion could pass without an independently collected result chain.; solution: `resolved`
 
 ## Added tests
 
@@ -73,6 +75,7 @@ FULL_GATE_INTERRUPTED
 - `shared-provider-controls-for-report`: line experience occurrence(s)=1
 - `shared-recipe-input-preflight`: line experience occurrence(s)=1
 - `upload-only-workflow-source-boundary`: line experience occurrence(s)=1
+- `witness-independent-result-chain`: line experience occurrence(s)=1
 
 ## Future guidance
 
@@ -86,6 +89,7 @@ FULL_GATE_INTERRUPTED
 - Published workflow schemas must describe the runtime policy exactly; unsupported fields must be rejected at declaration time rather than invited into Agent-generated requests.
 - Real-provider report QA must exercise both transport latency and contract correction paths; a green unit contract test is not sufficient evidence of provider completion.
 - The owner Recipe input contract must run read-only during both planning admission and option materialization, before any draft or execution record is written.
+- Witness signatures authenticate the provider statement, but the coordinator must independently derive and bind the durable result chain before upgrading trust.
 
 ## Event index
 
@@ -116,3 +120,5 @@ FULL_GATE_INTERRUPTED
 - #25: `a7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d01` | 2026-08-11T00:21:23.000Z | GAP/external_witness_provider_not_deployed | incident=`b8c9d0e1-f2a3-4b5c-8d6e-7f8a9b0c1d23` | lesson_key=`external-witness-provider-deployment` | event_sha256=`aa9c22c8239d5905b69c74040bca5848057a508eec6dafd09d193e879e24bcdf`
 - #26: `d2a5c7e1-4b6f-4d8a-9c10-2e3f5a7b9d11` | 2026-08-11T00:36:00.000Z | FAILURE/synthetic_control_schema_real_qa | incident=`d2a5c7e1-4b6f-4d8a-9c10-2e3f5a7b9d11` | lesson_key=`registry-runtime-policy-alignment` | event_sha256=`4c7f1ecf4808b30a687a212ecad589395cc9e8e118fe7c4259ad4a0a5ec72927`
 - #27: `e4b6d8f0-2a4c-4e6f-8b10-1c3d5e7a9f22` | 2026-08-11T00:37:41.000Z | GATE/synthetic_control_natural_language_browser_pass | incident=`e4b6d8f0-2a4c-4e6f-8b10-1c3d5e7a9f22` | lesson_key=`synthetic-control-natural-language-browser-pass` | event_sha256=`cf82069cb9573e792f785834ca51335a3deeefce054103881869f55d1844aefe`
+- #28: `f5c7e9a1-3b5d-4f7a-9c11-2d4e6f8a0b33` | 2026-08-11T00:40:00.000Z | FAILURE/witness_result_chain_binding | incident=`f5c7e9a1-3b5d-4f7a-9c11-2d4e6f8a0b33` | lesson_key=`witness-independent-result-chain` | event_sha256=`82ef07202a7699852427f44c2d2a7e7f9eaf144da47e6601bf41ae159b9c866c`
+- #29: `a6c8e0f2-4b6d-4f8a-9c12-2e4f6a8b0c44` | 2026-08-11T03:20:00.000Z | GATE/host_full_gate_after_witness_hardening | incident=`a6c8e0f2-4b6d-4f8a-9c12-2e4f6a8b0c44` | lesson_key=`final-gate-after-witness-hardening` | event_sha256=`86c125a56343beee3ef31636c87a3d72f169c6167257bf77382c07a435e1e361`
