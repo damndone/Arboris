@@ -6,11 +6,11 @@ provider, its ``signature`` field contains an exact IDKit result encoded as
 World's official verification endpoint; Workbench never creates or rewrites a
 proof.
 
-The IDKit action is derived from the frozen Workbench challenge digest.  A
-successful result must therefore prove the same challenge, use the production
-environment, identify a proof-of-human credential, and report completed user
-presence.  Staging/simulator results remain unavailable rather than being
-promoted to a human-identity claim.
+The IDKit action is derived from the exact detached witness payload.  A
+successful result must therefore bind every observation field to the proof,
+use the production environment, identify a proof-of-human credential, and
+report completed user presence.  Staging/simulator results remain unavailable
+rather than being promoted to a human-identity claim.
 
 Configuration:
 
@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import os
 import re
@@ -169,8 +170,13 @@ def _idkit_result(signature: str) -> tuple[bytes, Mapping[str, Any]]:
     return raw, _json_object(raw, "IDKit result")
 
 
-def _expected_action(prefix: str, challenge_digest: str) -> str:
-    action = f"{prefix}{challenge_digest}"
+def _payload_digest(payload: bytes) -> str:
+    _challenge_digest(payload)
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _expected_action(prefix: str, payload_digest: str) -> str:
+    action = f"{prefix}{payload_digest}"
     if not _SAFE_ID.fullmatch(action):
         raise WitnessUnavailable("World ID action prefix produces an invalid action")
     return action
@@ -182,7 +188,9 @@ def _validate_idkit_request(
     if result.get("protocol_version") != _PROVIDER_PROTOCOL_VERSION:
         raise WitnessUnavailable("World ID proof must use protocol version 4.0")
     if result.get("action") != expected_action:
-        raise WitnessUnavailable("World ID proof action is not bound to the challenge")
+        raise WitnessUnavailable(
+            "World ID proof action is not bound to the exact witness payload"
+        )
     if result.get("environment") != "production":
         raise WitnessUnavailable("World ID staging proof is not human identity evidence")
     if result.get("user_presence_completed") is not True:
@@ -235,7 +243,7 @@ def _validate_verification_response(
 
 @dataclass
 class WorldIdWitnessVerifier:
-    """Verify one challenge-bound IDKit proof through World Developer Portal."""
+    """Verify one exact-payload-bound IDKit proof through World Portal."""
 
     rp_id: str
     endpoint_url: str | None = None
@@ -269,8 +277,8 @@ class WorldIdWitnessVerifier:
             raise WitnessUnavailable("World ID witness key ID drifted")
         if not isinstance(payload, bytes):
             raise WitnessUnavailable("World ID witness payload must be bytes")
-        challenge_digest = _challenge_digest(payload)
-        expected_action = _expected_action(self.action_prefix, challenge_digest)
+        payload_digest = _payload_digest(payload)
+        expected_action = _expected_action(self.action_prefix, payload_digest)
         raw_result, result = _idkit_result(signature)
         _validate_idkit_request(result, expected_action=expected_action)
         request = Request(

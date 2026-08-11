@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 
 import pytest
@@ -53,10 +54,15 @@ def _idkit_result(*, action: str, environment: str = "production") -> dict[str, 
     }
 
 
-def _payload(challenge_digest: str = "a" * 64) -> bytes:
+def _payload(
+    challenge_digest: str = "a" * 64,
+    *,
+    observation_marker: str = "visible-confirm",
+) -> bytes:
     return json.dumps(
         {
             "challenge_digest": challenge_digest,
+            "observation_marker": observation_marker,
             "protocol": "workbench.qa.browser-witness/v1",
         },
         sort_keys=True,
@@ -67,6 +73,10 @@ def _payload(challenge_digest: str = "a" * 64) -> bytes:
 def _encoded_result(result: dict[str, object]) -> str:
     raw = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return "world-id-json-base64:" + base64.b64encode(raw).decode("ascii")
+
+
+def _payload_action(payload: bytes) -> str:
+    return "workbench-confirm-v1-" + hashlib.sha256(payload).hexdigest()
 
 
 def _verify_response(*, action: str, environment: str = "production") -> dict[str, object]:
@@ -99,7 +109,8 @@ def test_world_id_provider_requires_an_rp_id(monkeypatch) -> None:
 def test_world_id_provider_forwards_the_raw_idkit_result_and_binds_action() -> None:
     WorldIdWitnessVerifier, _ = _world_module()
     challenge_digest = "a" * 64
-    action = f"workbench-confirm-v1-{challenge_digest}"
+    payload = _payload(challenge_digest)
+    action = _payload_action(payload)
     result = _idkit_result(action=action)
     raw_result = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode(
         "utf-8"
@@ -113,7 +124,7 @@ def test_world_id_provider_forwards_the_raw_idkit_result_and_binds_action() -> N
     assert (
         verifier.verify(
             key_id="world-id:rp_workbench",
-            payload=_payload(challenge_digest),
+            payload=payload,
             signature=_encoded_result(result),
         )
         is True
@@ -128,13 +139,14 @@ def test_world_id_provider_forwards_the_raw_idkit_result_and_binds_action() -> N
 
 def test_world_id_provider_rejects_an_action_not_bound_to_the_challenge() -> None:
     WorldIdWitnessVerifier, _ = _world_module()
+    payload = _payload("a" * 64)
     transport = _Transport(body=_verify_response(action="other-action"))
     verifier = WorldIdWitnessVerifier(rp_id="rp_workbench", transport=transport)
 
     with pytest.raises(WitnessUnavailable, match="action"):
         verifier.verify(
             key_id="world-id:rp_workbench",
-            payload=_payload("a" * 64),
+            payload=payload,
             signature=_encoded_result(_idkit_result(action="other-action")),
         )
     assert transport.calls == []
@@ -148,7 +160,8 @@ def test_world_id_provider_never_escalates_nonproduction_or_missing_presence(
     environment: str, user_presence: bool
 ) -> None:
     WorldIdWitnessVerifier, _ = _world_module()
-    action = f"workbench-confirm-v1-{'a' * 64}"
+    payload = _payload()
+    action = _payload_action(payload)
     result = _idkit_result(action=action, environment=environment)
     result["user_presence_completed"] = user_presence
     transport = _Transport(
@@ -159,7 +172,7 @@ def test_world_id_provider_never_escalates_nonproduction_or_missing_presence(
     with pytest.raises(WitnessUnavailable, match="human|presence|staging"):
         verifier.verify(
             key_id="world-id:rp_workbench",
-            payload=_payload(),
+            payload=payload,
             signature=_encoded_result(result),
         )
     assert verifier.human_identity_verified is False
@@ -167,7 +180,8 @@ def test_world_id_provider_never_escalates_nonproduction_or_missing_presence(
 
 def test_world_id_provider_rejects_invalid_remote_response() -> None:
     WorldIdWitnessVerifier, _ = _world_module()
-    action = f"workbench-confirm-v1-{'a' * 64}"
+    payload = _payload()
+    action = _payload_action(payload)
     verifier = WorldIdWitnessVerifier(
         rp_id="rp_workbench",
         transport=_Transport(body={"success": True}),
@@ -176,14 +190,15 @@ def test_world_id_provider_rejects_invalid_remote_response() -> None:
     with pytest.raises(WitnessUnavailable, match="response"):
         verifier.verify(
             key_id="world-id:rp_workbench",
-            payload=_payload(),
+            payload=payload,
             signature=_encoded_result(_idkit_result(action=action)),
         )
 
 
 def test_world_id_provider_accepts_verification_response_without_optional_environment() -> None:
     WorldIdWitnessVerifier, _ = _world_module()
-    action = f"workbench-confirm-v1-{'a' * 64}"
+    payload = _payload()
+    action = _payload_action(payload)
     response = _verify_response(action=action)
     response.pop("environment")
     verifier = WorldIdWitnessVerifier(
@@ -193,6 +208,29 @@ def test_world_id_provider_accepts_verification_response_without_optional_enviro
 
     assert verifier.verify(
         key_id="world-id:rp_workbench",
-        payload=_payload(),
+        payload=payload,
         signature=_encoded_result(_idkit_result(action=action)),
     ) is True
+
+
+def test_world_id_provider_binds_the_exact_attestation_payload() -> None:
+    WorldIdWitnessVerifier, _ = _world_module()
+    bound_payload = _payload()
+    action = _payload_action(bound_payload)
+    verifier = WorldIdWitnessVerifier(
+        rp_id="rp_workbench",
+        transport=_Transport(body=_verify_response(action=action)),
+    )
+
+    assert verifier.verify(
+        key_id="world-id:rp_workbench",
+        payload=bound_payload,
+        signature=_encoded_result(_idkit_result(action=action)),
+    ) is True
+
+    with pytest.raises(WitnessUnavailable, match="action"):
+        verifier.verify(
+            key_id="world-id:rp_workbench",
+            payload=_payload(observation_marker="forged-observation"),
+            signature=_encoded_result(_idkit_result(action=action)),
+        )

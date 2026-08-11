@@ -10,10 +10,10 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 10/41 (24.4%; 24.4 per 100 events)
-- Repeat rate: 0/10 (0.0%)
-- Recurrence rate: 0/10 (0.0%)
-- MTTR: median=0 ms (sample=8; unresolved=2)
+- Failure frequency: 11/42 (26.2%; 26.2 per 100 events)
+- Repeat rate: 0/11 (0.0%)
+- Recurrence rate: 0/11 (0.0%)
+- MTTR: median=0 ms (sample=9; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -29,6 +29,7 @@ CONTEXT_RESCOPED
 - #6 2026-08-10T14:42:00.000Z `notebook_recipe_preflight_real_qa`; cause_status: `known`; cause: The real upload-only Notebook path reached confirmation with a short ETS proposal before the shared Recipe input gate was wired into admission; the server correctly exposed ETS_INSUFFICIENT_OBSERVATIONS instead of executing it.; resolution: `resolved`; lesson: The owner Recipe input contract must run read-only during both planning admission and option materialization, before any draft or execution record is written.
 - #26 2026-08-11T00:36:00.000Z `synthetic_control_schema_real_qa`; cause_status: `known`; cause: The live Notebook planner consumed a registry schema that advertised predictors for synthetic_control.fit, while the v1 pre_outcome runtime intentionally rejects predictor_matrix.; resolution: `resolved`; lesson: Published workflow schemas must describe the runtime policy exactly; unsupported fields must be rejected at declaration time rather than invited into Agent-generated requests.
 - #28 2026-08-11T00:40:00.000Z `witness_result_chain_binding`; cause_status: `known`; cause: P7 ledger witness verification previously compared the provider attestation's durable-chain digest with itself, so a direct witness completion could pass without an independently collected result chain.; resolution: `resolved`; lesson: Witness signatures authenticate the provider statement, but the coordinator must independently derive and bind the durable result chain before upgrading trust.
+- #42 2026-08-11T02:34:58.000Z `world_id_exact_payload_binding`; cause_status: `known`; cause: The World ID adapter derived the proof action from challenge_digest only, so a valid proof could be reused with altered observation fields in the detached browser witness payload.; resolution: `resolved`; lesson: External human identity evidence must bind to the complete immutable browser observation payload, not only to its challenge field.
 
 ## All errors
 
@@ -60,6 +61,7 @@ CONTEXT_RESCOPED
 - `shared-recipe-input-preflight`: occurrences=1; cause_status: `known`; root cause: The real upload-only Notebook path reached confirmation with a short ETS proposal before the shared Recipe input gate was wired into admission; the server correctly exposed ETS_INSUFFICIENT_OBSERVATIONS instead of executing it.; solution: `resolved`
 - `upload-only-workflow-source-boundary`: occurrences=1; cause_status: `known`; root cause: After the first Notebook correction, upload-only planning had no server-pinned workflow source for operation.multi_step and the planner surfaced that boundary instead of inventing one.; solution: `resolved`
 - `witness-independent-result-chain`: occurrences=1; cause_status: `known`; root cause: P7 ledger witness verification previously compared the provider attestation's durable-chain digest with itself, so a direct witness completion could pass without an independently collected result chain.; solution: `resolved`
+- `world-id-exact-payload-binding`: occurrences=1; cause_status: `known`; root cause: The World ID adapter derived the proof action from challenge_digest only, so a valid proof could be reused with altered observation fields in the detached browser witness payload.; solution: `resolved`
 
 ## Added tests
 
@@ -79,6 +81,7 @@ CONTEXT_RESCOPED
 - `shared-recipe-input-preflight`: line experience occurrence(s)=1
 - `upload-only-workflow-source-boundary`: line experience occurrence(s)=1
 - `witness-independent-result-chain`: line experience occurrence(s)=1
+- `world-id-exact-payload-binding`: line experience occurrence(s)=1
 
 ## Future guidance
 
@@ -86,6 +89,7 @@ CONTEXT_RESCOPED
 - A generic adapter must initialize every pack-owned durable boundary and project optional-value semantics identically into runtime validation and published closed schemas.
 - An adapter and green fake-provider tests are not a deployed witness. The external trust root and browser collection path must exist before any human-identity claim is accepted.
 - Batch runner family submissions must be serialized at the ledger boundary even when independent operation execution could later be parallelized behind a witness provider.
+- External human identity evidence must bind to the complete immutable browser observation payload, not only to its challenge field.
 - Fail-closed materialization errors need a tested, explicit recovery action that asks the agent to replan; the UI must not hide or downgrade the owner Recipe rejection.
 - Planner correction must distinguish an unavailable workflow source from an unavailable capability and offer a contractible alternative without fabricating a result.
 - Provider-specific reasoning and output controls must be centralized at the wire adapter and reused by every long-form consumer.
@@ -138,3 +142,4 @@ CONTEXT_RESCOPED
 - #39: `3b6a8f1d-2c47-4e90-a5d1-7f8b9c0e2d34` | 2026-08-11T02:08:20.000Z | GATE/world_id_witness_adapter | incident=`7c1e9a3d-5b8f-4d20-a6c2-9e0f1b3d7a54` | lesson_key=`world-id-witness-adapter` | event_sha256=`df781819a382e592933d19f477e7f4cc383e821e3074534f2693bab39029e7c3`
 - #40: `5d8f1a3c-7b2e-4c90-a6f1-9e0d3b5c7a82` | 2026-08-11T02:22:58.000Z | GATE/host_full_gate_after_world_id_adapter | incident=`8a1f3c5e-7b2d-4f90-a6c1-9e0d3b5f7a82` | lesson_key=`host-full-gate-after-provider` | event_sha256=`a5ee9561bd14d4164342dace06663fa862a3fcdc2665f5b168362e82576c27fa`
 - #41: `6e1a3c5f-7b9d-4f20-a8c2-0e1d3b5f7a96` | 2026-08-11T02:24:21.000Z | GATE/final_head_p7_batch_execution_after_host_gate | incident=`9f2c5e7a-1b3d-4f80-a6c2-0e1d3b5f7a94` | lesson_key=`final-head-p7-batch-after-host-gate` | event_sha256=`cb64a4f4a270735b44905d726f2742d4c4cfba96dbcf6a6bc54fb19a1c336615`
+- #42: `7c4e1a9b-2d6f-4a80-b3c5-9e1f7a2d6c84` | 2026-08-11T02:34:58.000Z | FAILURE/world_id_exact_payload_binding | incident=`1a6d3f8c-5b2e-47f9-a0c4-8e1d6b3f7a92` | lesson_key=`world-id-exact-payload-binding` | event_sha256=`d0d1163e8431101807630dd872a7877ed641c0ee5af7e73c7b42f49ce8d40416`
