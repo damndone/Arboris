@@ -10,14 +10,14 @@ FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 7/21 (33.3%; 33.3 per 100 events)
+- Failure frequency: 7/24 (29.2%; 29.2 per 100 events)
 - Repeat rate: 0/7 (0.0%)
 - Recurrence rate: 0/7 (0.0%)
 - MTTR: median=0 ms (sample=6; unresolved=1)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/10 (0.0%)
+- Gate waste rate: 0/13 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -102,3 +102,6 @@ FULL_GATE_INTERRUPTED
 - #19: `58c1a05a-c6a6-4b80-bb19-6e3116a8f142` | 2026-08-10T23:28:14.000Z | GATE/notebook_confirmed_natural_language_chain | incident=`b3e5a1e3-1bf0-46fd-9b21-5ca2fe64fcf5` | lesson_key=`notebook-confirmed-natural-language-chain` | event_sha256=`6b481be10ece34a2ee94897a635a05be52c6ba041eaae05091c0a789fb2fee15`
 - #20: `d6bd0990-c5f1-4f09-97ea-7699e5f5f870` | 2026-08-10T23:28:15.000Z | GATE/p7_current_head_batch_execution | incident=`927a6e8f-ecfd-4c1e-95b9-e48a25785ead` | lesson_key=`p7-current-head-batch-execution` | event_sha256=`08347f574d1178747e653fda5994cf81bf1b094e014b44e126610245bab17617`
 - #21: `9fd4fbbb-b75c-4cef-bf8d-5476b50c3158` | 2026-08-10T23:28:16.000Z | GATE/full_gate_completed_after_browser_checkpoint | incident=`a0e18062-f5aa-48a6-83c1-00479dc9f79d` | lesson_key=`full-gate-completed-after-browser-checkpoint` | event_sha256=`f6969cd1b1061eb9f5f1375c5dda6f6a6f1608f56a0bbcf13b5aabc72ab400c9`
+- #22: `c2f4b7d1-4a2e-4b91-8f61-4e1e7d38d6aa` | 2026-08-11T00:11:20.000Z | GATE/remote_witness_provider_adapter | incident=`a0f75dd9-4c06-4af8-8a25-21cfde1ddf3f` | lesson_key=`remote-witness-provider-boundary` | event_sha256=`7906bc5cd7c2a8b8f201cc3a43e2bd93f3d8a1e7da078f98824546bc38cb60ca`
+- #23: `d3a1cc84-b5ab-48b3-a6f9-9ab0a57aa7f1` | 2026-08-11T00:11:21.000Z | GATE/p7_current_head_batch_execution_v2 | incident=`e54bdb1f-3124-4d38-a18d-4be1a0ce78d0` | lesson_key=`p7-current-head-batch-execution` | event_sha256=`90bc6904accfbd28f6172fd092be572a0f7fc83c3fef35a7d13039cbc0a39469`
+- #24: `e1c3f2b9-9f8d-4d61-bf8d-2f34a0e1b2c7` | 2026-08-11T00:11:22.000Z | GATE/host_full_gate_current_head | incident=`f4bd7c52-5e1a-46d2-8f3c-6a9e0b1d2c44` | lesson_key=`final-host-gate-current-head` | event_sha256=`1353c1352e65acca074539a17c645e8adf8ea2dfb1518dd13de4f27fdddaf8ba`
