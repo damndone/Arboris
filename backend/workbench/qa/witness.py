@@ -570,14 +570,16 @@ def load_witness_verifier(spec: str | None) -> WitnessVerifier | None:
     The default is no provider, which is intentionally unusable for
     witness-attested completion.  When the complete remote provider
     configuration is present, it is selected explicitly by that configuration
-    even if the CLI spec is omitted.  The adapter spec is an
+    even if the CLI spec is omitted.  World ID configuration selects the
+    official World Developer Portal verifier when no generic provider is set;
+    mixing the two configurations fails closed.  The adapter spec is an
     operator-controlled ``module:factory`` reference; it is a provider
     integration seam, not a claim that local module loading establishes human
     identity.
     """
 
     if spec is None:
-        if any(
+        generic_configured = any(
             os.environ.get(name) is not None
             for name in (
                 "WORKBENCH_WITNESS_PROVIDER_URL",
@@ -585,8 +587,26 @@ def load_witness_verifier(spec: str | None) -> WitnessVerifier | None:
                 "WORKBENCH_WITNESS_PROVIDER_TOKEN",
                 "WORKBENCH_WITNESS_PROVIDER_TIMEOUT_SECONDS",
             )
-        ):
+        )
+        world_id_configured = any(
+            os.environ.get(name) is not None
+            for name in (
+                "WORKBENCH_WORLD_ID_RP_ID",
+                "WORKBENCH_WORLD_ID_VERIFY_URL",
+                "WORKBENCH_WORLD_ID_ACTION_PREFIX",
+                "WORKBENCH_WORLD_ID_TIMEOUT_SECONDS",
+            )
+        )
+        if generic_configured and world_id_configured:
+            raise WitnessUnavailable(
+                "multiple witness providers are configured; select exactly one"
+            )
+        if generic_configured:
             from workbench.qa.remote_witness import from_environment
+
+            return from_environment()
+        if world_id_configured:
+            from workbench.qa.world_id_witness import from_environment
 
             return from_environment()
         return None

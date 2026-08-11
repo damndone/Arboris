@@ -6,18 +6,18 @@
 
 ## Final status
 
-FULL_GATE_INTERRUPTED
+CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 10/36 (27.8%; 27.8 per 100 events)
+- Failure frequency: 10/39 (25.6%; 25.6 per 100 events)
 - Repeat rate: 0/10 (0.0%)
 - Recurrence rate: 0/10 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/21 (0.0%)
+- Gate waste rate: 0/22 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/2)
 
@@ -133,3 +133,6 @@ FULL_GATE_INTERRUPTED
 - #34: `a4b5c6d7-e8f9-4012-3a4b-5c6d7e8f9012` | 2026-08-11T01:22:29.000Z | GATE/final_head_p7_batch_refresh | incident=`b5c6d7e8-f9a0-4123-4b5c-6d7e8f901234` | lesson_key=`final-head-batch-refresh` | event_sha256=`76d600f3d3c91840104a1e2166ed25883365dfe357a70023e40babedb1b04491`
 - #35: `b6c7d8e9-f0a1-4234-5b6c-7d8e9f012345` | 2026-08-11T01:33:27.000Z | GATE/upload_only_browser_refusal_fail_closed | incident=`c7d8e9f0-a1b2-4345-6c7d-8e9f01234567` | lesson_key=`upload-only-browser-refusal-boundary` | event_sha256=`fdbe1ea3342960d8d6796ebaa9c27c631d576033efb0020c36658a7e5b48d3b7`
 - #36: `d8e9f0a1-b2c3-4456-7d8e-9f0123456789` | 2026-08-11T01:48:44.000Z | GATE/host_full_gate_final_integration | incident=`e9f0a1b2-c3d4-4567-8e9f-0123456789ab` | lesson_key=`final-host-full-gate` | event_sha256=`bb4725d9b62e06f217cc99bf3896d75cb286b0fa0f44a2416f3ff370320e7d2a`
+- #37: `64fb4a45-483a-4859-8dd7-2be5e3d2e265` | 2026-08-11T02:08:04.546Z | STATE_CHANGE/context_rescope_required | incident=`257d0ee8-a9c6-4c5c-8a01-fe33ea02f99b` | lesson_key=`context-pack-rescope` | event_sha256=`a59a4b619112713dd7e4546ec26c52579e3d6aeaaa813b77618d84028e9c77d9`
+- #38: `e4e824a7-bb0c-4dc8-b9ff-bccdf37f3146` | 2026-08-11T02:08:04.572Z | STATE_CHANGE/context_rescoped | incident=`a27fa28e-7d5b-4a83-b350-1456e111df84` | lesson_key=`context-pack-rescope` | event_sha256=`8324107f6d6fa63de5faffbaa4bbfa9135d507317e1e565f1dfb0a120c8b81af`
+- #39: `3b6a8f1d-2c47-4e90-a5d1-7f8b9c0e2d34` | 2026-08-11T02:08:20.000Z | GATE/world_id_witness_adapter | incident=`7c1e9a3d-5b8f-4d20-a6c2-9e0f1b3d7a54` | lesson_key=`world-id-witness-adapter` | event_sha256=`df781819a382e592933d19f477e7f4cc383e821e3074534f2693bab39029e7c3`
