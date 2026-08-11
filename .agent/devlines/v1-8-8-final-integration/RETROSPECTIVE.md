@@ -10,16 +10,16 @@ FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 10/32 (31.2%; 31.2 per 100 events)
+- Failure frequency: 10/34 (29.4%; 29.4 per 100 events)
 - Repeat rate: 0/10 (0.0%)
 - Recurrence rate: 0/10 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/18 (0.0%)
+- Gate waste rate: 0/19 (0.0%)
 - Same-state retry rate: N/A (sample=0)
-- Token waste: N/A (sample=0; coverage=0/1)
+- Token waste: N/A (sample=0; coverage=0/2)
 
 ## All failures
 
@@ -44,6 +44,7 @@ FULL_GATE_INTERRUPTED
 ## All waste
 
 - #11 2026-08-10T15:13:00.000Z `p7_runner_parallel_admission`; cause_status: `known`; cause: Starting family batches concurrently caused the runner's single active browser-attempt guard to reject 17 starts while one family was awaiting terminal confirmation.; resolution: `resolved`; lesson: Batch runner family submissions must be serialized at the ledger boundary even when independent operation execution could later be parallelized behind a witness provider.
+- #33 2026-08-11T01:20:00.000Z `pytest_path_misaddressed`; cause_status: `known`; cause: The focused pytest command followed the backend working-directory rule but omitted the parent-relative path for tests stored at repository root.; resolution: `resolved`; lesson: The Python interpreter must be selected from backend while test paths must still be resolved relative to the repository root; a file-not-found result is a command error, not a red product test.
 
 ## Root causes and solutions
 
@@ -51,6 +52,7 @@ FULL_GATE_INTERRUPTED
 - `external-witness-provider-deployment`: occurrences=1; cause_status: `external`; root cause: The final tree contains the fail-closed provider adapter, but no independent HTTPS provider endpoint, trusted provider enrollment, or browser-side witness collection is configured in the current environment.; solution: `open`
 - `generic-adapter-boundary-contract`: occurrences=1; cause_status: `known`; root cause: The P6 merge exposed two real generic-workflow boundary defects: an ARMA-GARCH temporary run lacked its artifact index and optional P7 options were not projected as nullable in the closed workflow schema.; solution: `resolved`
 - `notebook-confirm-replan-recovery`: occurrences=1; cause_status: `known`; root cause: A Notebook option persisted before the shared Recipe preflight change reached the confirmation boundary; the current server correctly rejected materialization with ETS_INSUFFICIENT_OBSERVATIONS, but the UI exposed no recovery action after the fail-closed response.; solution: `resolved`
+- `path-aware-pytest-command`: occurrences=1; cause_status: `known`; root cause: The focused pytest command followed the backend working-directory rule but omitted the parent-relative path for tests stored at repository root.; solution: `resolved`
 - `real-provider-report-contract-qa`: occurrences=1; cause_status: `known`; root cause: A second real browser Report attempt reached the provider but all correction rounds returned prose missing the required Limitations section, so the evidence contract rejected it with LLM_RESPONSE_CONTRACT_INVALID.; solution: `resolved`
 - `registry-runtime-policy-alignment`: occurrences=1; cause_status: `known`; root cause: The live Notebook planner consumed a registry schema that advertised predictors for synthetic_control.fit, while the v1 pre_outcome runtime intentionally rejects predictor_matrix.; solution: `resolved`
 - `runner-family-lifecycle-serial`: occurrences=1; cause_status: `known`; root cause: Starting family batches concurrently caused the runner's single active browser-attempt guard to reject 17 starts while one family was awaiting terminal confirmation.; solution: `resolved`
@@ -69,6 +71,7 @@ FULL_GATE_INTERRUPTED
 - `external-witness-provider-deployment`: line experience occurrence(s)=1
 - `generic-adapter-boundary-contract`: line experience occurrence(s)=1
 - `notebook-confirm-replan-recovery`: line experience occurrence(s)=1
+- `path-aware-pytest-command`: line experience occurrence(s)=1
 - `real-provider-report-contract-qa`: line experience occurrence(s)=1
 - `registry-runtime-policy-alignment`: line experience occurrence(s)=1
 - `runner-family-lifecycle-serial`: line experience occurrence(s)=1
@@ -88,6 +91,7 @@ FULL_GATE_INTERRUPTED
 - Provider-specific reasoning and output controls must be centralized at the wire adapter and reused by every long-form consumer.
 - Published workflow schemas must describe the runtime policy exactly; unsupported fields must be rejected at declaration time rather than invited into Agent-generated requests.
 - Real-provider report QA must exercise both transport latency and contract correction paths; a green unit contract test is not sufficient evidence of provider completion.
+- The Python interpreter must be selected from backend while test paths must still be resolved relative to the repository root; a file-not-found result is a command error, not a red product test.
 - The owner Recipe input contract must run read-only during both planning admission and option materialization, before any draft or execution record is written.
 - Witness signatures authenticate the provider statement, but the coordinator must independently derive and bind the durable result chain before upgrading trust.
 
@@ -125,3 +129,5 @@ FULL_GATE_INTERRUPTED
 - #30: `b7d9f1a3-5c7e-4f9a-1b23-3d5f7a9c0e55` | 2026-08-11T03:30:00.000Z | GATE/final_head_p7_batch_execution | incident=`b7d9f1a3-5c7e-4f9a-1b23-3d5f7a9c0e55` | lesson_key=`final-head-batch-reconciliation` | event_sha256=`90d9be64b7ef0a81ec722d1fb24e161f5ac3646348062f2d392b34da4e056928`
 - #31: `c8d7e6f5-a4b3-4c2d-9e1f-0a1b2c3d4e5f` | 2026-08-11T01:14:59.417Z | GATE/report_browser_real_chain_pass | incident=`d9e8f7a6-b5c4-4d3e-8f2a-1b0c9d8e7f6a` | lesson_key=`report-browser-real-chain` | event_sha256=`0b2ad27a4be41a8e600b73150f1e768193753cc9ec285c89d3cc13b48e81a233`
 - #32: `e7f6a5b4-c3d2-4e1f-9a0b-1c2d3e4f5a6b` | 2026-08-11T01:18:32.000Z | GATE/hurdle_browser_fail_closed | incident=`f6e5d4c3-b2a1-4f0e-9d8c-7b6a5e4d3c2b` | lesson_key=`hurdle-browser-fail-closed` | event_sha256=`57e83e0d8de0e96e84c9c8d78dd1aa0e9170f6f7fbd671608c4d9ef17da21762`
+- #33: `f1e2d3c4-b5a6-4789-0d1e-2f3a4b5c6d7e` | 2026-08-11T01:20:00.000Z | WASTE/pytest_path_misaddressed | incident=`a1b2c3d4-e5f6-4789-0a1b-2c3d4e5f6a7b` | lesson_key=`path-aware-pytest-command` | event_sha256=`ad9fd25b6c73ef09bb527eb7b9ea206570c4ae98d23cb00509a7715b4758ea03`
+- #34: `a4b5c6d7-e8f9-4012-3a4b-5c6d7e8f9012` | 2026-08-11T01:22:29.000Z | GATE/final_head_p7_batch_refresh | incident=`b5c6d7e8-f9a0-4123-4b5c-6d7e8f901234` | lesson_key=`final-head-batch-refresh` | event_sha256=`76d600f3d3c91840104a1e2166ed25883365dfe357a70023e40babedb1b04491`
