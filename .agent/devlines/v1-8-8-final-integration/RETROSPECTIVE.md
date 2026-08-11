@@ -10,14 +10,14 @@ FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 10/29 (34.5%; 34.5 per 100 events)
+- Failure frequency: 10/30 (33.3%; 33.3 per 100 events)
 - Repeat rate: 0/10 (0.0%)
 - Recurrence rate: 0/10 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/15 (0.0%)
+- Gate waste rate: 0/16 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -122,3 +122,4 @@ FULL_GATE_INTERRUPTED
 - #27: `e4b6d8f0-2a4c-4e6f-8b10-1c3d5e7a9f22` | 2026-08-11T00:37:41.000Z | GATE/synthetic_control_natural_language_browser_pass | incident=`e4b6d8f0-2a4c-4e6f-8b10-1c3d5e7a9f22` | lesson_key=`synthetic-control-natural-language-browser-pass` | event_sha256=`cf82069cb9573e792f785834ca51335a3deeefce054103881869f55d1844aefe`
 - #28: `f5c7e9a1-3b5d-4f7a-9c11-2d4e6f8a0b33` | 2026-08-11T00:40:00.000Z | FAILURE/witness_result_chain_binding | incident=`f5c7e9a1-3b5d-4f7a-9c11-2d4e6f8a0b33` | lesson_key=`witness-independent-result-chain` | event_sha256=`82ef07202a7699852427f44c2d2a7e7f9eaf144da47e6601bf41ae159b9c866c`
 - #29: `a6c8e0f2-4b6d-4f8a-9c12-2e4f6a8b0c44` | 2026-08-11T03:20:00.000Z | GATE/host_full_gate_after_witness_hardening | incident=`a6c8e0f2-4b6d-4f8a-9c12-2e4f6a8b0c44` | lesson_key=`final-gate-after-witness-hardening` | event_sha256=`86c125a56343beee3ef31636c87a3d72f169c6167257bf77382c07a435e1e361`
+- #30: `b7d9f1a3-5c7e-4f9a-1b23-3d5f7a9c0e55` | 2026-08-11T03:30:00.000Z | GATE/final_head_p7_batch_execution | incident=`b7d9f1a3-5c7e-4f9a-1b23-3d5f7a9c0e55` | lesson_key=`final-head-batch-reconciliation` | event_sha256=`90d9be64b7ef0a81ec722d1fb24e161f5ac3646348062f2d392b34da4e056928`
