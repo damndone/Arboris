@@ -646,7 +646,14 @@ def export_report_endpoint(
                 message="The selected report revision is not stored for this run.",
                 details={"report_id": request.report_id, "run_id": run_id},
             )
+        stored_facts = stored.get("facts") or []
         stored_figures = stored.get("figures") or []
+        included_facts, included_figures = _included_report_snapshot(
+            facts=stored_facts,
+            figures=stored_figures,
+            excluded_fact_ids=stored.get("excluded_fact_ids") or [],
+            excluded_figure_ids=stored.get("excluded_figure_ids") or [],
+        )
         requested_figure_identity = [
             {"artifact_id": figure.get("artifact_id"), "chart_type": figure.get("chart_type")}
             for figure in figures
@@ -670,8 +677,8 @@ def export_report_endpoint(
         try:
             contract = validate_report_packet(
                 {
-                    "fact_table": stored.get("facts"),
-                    "figures": stored.get("figures") or [],
+                    "fact_table": included_facts,
+                    "figures": included_figures,
                     "report_standard": stored.get("report_standard"),
                     "required_capabilities": stored.get("required_capabilities") or [],
                     "capability_manifest": stored.get("capability_manifest") or [],
@@ -696,7 +703,7 @@ def export_report_endpoint(
                 details={"report_id": request.report_id, "quality": details},
             )
         markdown = str(stored["text"])
-        figures = list(stored_figures)
+        figures = list(included_figures)
     try:
         payload, media_type, filename = export_report(
             run_root,
@@ -901,20 +908,24 @@ def _figure_ids_for_report_fact(fact: dict[str, Any]) -> set[str]:
 
 
 def _included_report_snapshot(
-    request: AiReportRecordRequest,
+    *,
+    facts: list[dict[str, Any]],
+    figures: list[dict[str, Any]],
+    excluded_fact_ids: list[str] | tuple[str, ...],
+    excluded_figure_ids: list[str] | tuple[str, ...],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Apply the writer's curation boundary to a full persisted snapshot."""
 
-    excluded_figures = set(request.excluded_figure_ids)
-    excluded_facts = set(request.excluded_fact_ids)
+    excluded_figures = set(excluded_figure_ids)
+    excluded_facts = set(excluded_fact_ids)
     figures = [
         figure
-        for figure in request.figures
+        for figure in figures
         if figure.get("artifact_id") not in excluded_figures
     ]
     facts = [
         fact
-        for fact in request.facts
+        for fact in facts
         if fact.get("id") not in excluded_facts
         and not (_figure_ids_for_report_fact(fact) & excluded_figures)
     ]
@@ -936,7 +947,12 @@ def save_ai_report_endpoint(
             details={"scope_run_id": request.scope.get("run_id"), "run_id": run_id},
         )
     try:
-        validation_facts, validation_figures = _included_report_snapshot(request)
+        validation_facts, validation_figures = _included_report_snapshot(
+            facts=request.facts,
+            figures=request.figures,
+            excluded_fact_ids=request.excluded_fact_ids,
+            excluded_figure_ids=request.excluded_figure_ids,
+        )
         contract = validate_report_packet(
             {
                 "fact_table": validation_facts,

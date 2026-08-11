@@ -178,6 +178,55 @@ def test_persisted_report_export_is_bound_to_the_stored_revision(tmp_path: Path)
     assert missing.json()["error"]["code"] == "AI_REPORT_NOT_FOUND"
 
 
+def test_persisted_curated_report_export_reuses_the_included_snapshot(tmp_path: Path) -> None:
+    """Export must reuse the persisted writer curation boundary before rendering."""
+    project_root, run_id = _fixture(tmp_path)
+    client = TestClient(app)
+    markdown = "# Stored curated report\n\nThe result is [[c:c1]].\n\n[[fig:coef_plot]]"
+    saved = client.post(
+        f"/runs/{run_id}/ai-reports",
+        params={"project_root": str(project_root)},
+        json={
+            "id": "rpt_curated_export1",
+            "generatedAt": "2026-07-21T22:17:30Z",
+            "instruction": "Write curated report",
+            "text": markdown,
+            "scope": {"run_id": run_id, "node_count": 1, "node_keys": ["model:ols"]},
+            "facts": [
+                {"id": "c1", "value": 1.25},
+                {
+                    "id": "c2",
+                    "field": "figure:histograms:source:value",
+                    "value": 2.0,
+                },
+            ],
+            "excluded_fact_ids": [],
+            "figures": [
+                {"artifact_id": "coef_plot", "chart_type": "Coefficient plot"},
+                {"artifact_id": "histograms", "chart_type": "Histogram"},
+            ],
+            "excluded_figure_ids": ["histograms"],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    exported = client.post(
+        f"/runs/{run_id}/report/export",
+        params={"project_root": str(project_root), "format": "html"},
+        json={
+            "report_id": "rpt_curated_export1",
+            "markdown": markdown,
+            "figures": [
+                {"artifact_id": "coef_plot", "chart_type": "Coefficient plot"},
+                {"artifact_id": "histograms", "chart_type": "Histogram"},
+            ],
+        },
+    )
+
+    assert exported.status_code == 200, exported.text
+    assert b"Stored curated report" in exported.content
+
+
 def test_result_table_export_route_reads_authoritative_run_evidence(tmp_path: Path) -> None:
     project_root, run_id = _fixture(tmp_path)
     run_root = project_root / "runs" / run_id
