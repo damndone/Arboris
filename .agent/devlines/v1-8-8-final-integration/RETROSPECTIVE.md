@@ -10,14 +10,14 @@ FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 10/34 (29.4%; 29.4 per 100 events)
+- Failure frequency: 10/35 (28.6%; 28.6 per 100 events)
 - Repeat rate: 0/10 (0.0%)
 - Recurrence rate: 0/10 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/19 (0.0%)
+- Gate waste rate: 0/20 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/2)
 
@@ -131,3 +131,4 @@ FULL_GATE_INTERRUPTED
 - #32: `e7f6a5b4-c3d2-4e1f-9a0b-1c2d3e4f5a6b` | 2026-08-11T01:18:32.000Z | GATE/hurdle_browser_fail_closed | incident=`f6e5d4c3-b2a1-4f0e-9d8c-7b6a5e4d3c2b` | lesson_key=`hurdle-browser-fail-closed` | event_sha256=`57e83e0d8de0e96e84c9c8d78dd1aa0e9170f6f7fbd671608c4d9ef17da21762`
 - #33: `f1e2d3c4-b5a6-4789-0d1e-2f3a4b5c6d7e` | 2026-08-11T01:20:00.000Z | WASTE/pytest_path_misaddressed | incident=`a1b2c3d4-e5f6-4789-0a1b-2c3d4e5f6a7b` | lesson_key=`path-aware-pytest-command` | event_sha256=`ad9fd25b6c73ef09bb527eb7b9ea206570c4ae98d23cb00509a7715b4758ea03`
 - #34: `a4b5c6d7-e8f9-4012-3a4b-5c6d7e8f9012` | 2026-08-11T01:22:29.000Z | GATE/final_head_p7_batch_refresh | incident=`b5c6d7e8-f9a0-4123-4b5c-6d7e8f901234` | lesson_key=`final-head-batch-refresh` | event_sha256=`76d600f3d3c91840104a1e2166ed25883365dfe357a70023e40babedb1b04491`
+- #35: `b6c7d8e9-f0a1-4234-5b6c-7d8e9f012345` | 2026-08-11T01:33:27.000Z | GATE/upload_only_browser_refusal_fail_closed | incident=`c7d8e9f0-a1b2-4345-6c7d-8e9f01234567` | lesson_key=`upload-only-browser-refusal-boundary` | event_sha256=`fdbe1ea3342960d8d6796ebaa9c27c631d576033efb0020c36658a7e5b48d3b7`
