@@ -10,10 +10,10 @@ FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 7/24 (29.2%; 29.2 per 100 events)
-- Repeat rate: 0/7 (0.0%)
-- Recurrence rate: 0/7 (0.0%)
-- MTTR: median=0 ms (sample=6; unresolved=1)
+- Failure frequency: 8/25 (32.0%; 32.0 per 100 events)
+- Repeat rate: 0/8 (0.0%)
+- Recurrence rate: 0/8 (0.0%)
+- MTTR: median=0 ms (sample=6; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -37,6 +37,7 @@ FULL_GATE_INTERRUPTED
 - #7 2026-08-10T14:46:00.000Z `notebook_upload_workflow_planner_gap`; cause_status: `known`; cause: After the first Notebook correction, upload-only planning had no server-pinned workflow source for operation.multi_step and the planner surfaced that boundary instead of inventing one.; resolution: `resolved`; lesson: Planner correction must distinguish an unavailable workflow source from an unavailable capability and offer a contractible alternative without fabricating a result.
 - #10 2026-08-10T15:15:00.000Z `p7_batch_witness_boundary`; cause_status: `external`; cause: The final-tree registry-derived runner covered all 64 P7 operations across 18 families, but no external browser witness provider was configured, so the runner correctly stopped every admission before provider or browser confirmation.; resolution: `accepted`; lesson: A coordinator ledger can prove registry coverage and fail-closed witness admission, but only an external witness provider can add a browser confirmation trust level.
 - #18 2026-08-10T22:59:15.000Z `notebook_confirm_recovery_action`; cause_status: `known`; cause: A Notebook option persisted before the shared Recipe preflight change reached the confirmation boundary; the current server correctly rejected materialization with ETS_INSUFFICIENT_OBSERVATIONS, but the UI exposed no recovery action after the fail-closed response.; resolution: `resolved`; lesson: Fail-closed materialization errors need a tested, explicit recovery action that asks the agent to replan; the UI must not hide or downgrade the owner Recipe rejection.
+- #25 2026-08-11T00:21:23.000Z `external_witness_provider_not_deployed`; cause_status: `external`; cause: The final tree contains the fail-closed provider adapter, but no independent HTTPS provider endpoint, trusted provider enrollment, or browser-side witness collection is configured in the current environment.; resolution: `open`; lesson: An adapter and green fake-provider tests are not a deployed witness. The external trust root and browser collection path must exist before any human-identity claim is accepted.
 
 ## All waste
 
@@ -45,6 +46,7 @@ FULL_GATE_INTERRUPTED
 ## Root causes and solutions
 
 - `external-witness-provider-boundary`: occurrences=1; cause_status: `external`; root cause: The final-tree registry-derived runner covered all 64 P7 operations across 18 families, but no external browser witness provider was configured, so the runner correctly stopped every admission before provider or browser confirmation.; solution: `accepted`
+- `external-witness-provider-deployment`: occurrences=1; cause_status: `external`; root cause: The final tree contains the fail-closed provider adapter, but no independent HTTPS provider endpoint, trusted provider enrollment, or browser-side witness collection is configured in the current environment.; solution: `open`
 - `generic-adapter-boundary-contract`: occurrences=1; cause_status: `known`; root cause: The P6 merge exposed two real generic-workflow boundary defects: an ARMA-GARCH temporary run lacked its artifact index and optional P7 options were not projected as nullable in the closed workflow schema.; solution: `resolved`
 - `notebook-confirm-replan-recovery`: occurrences=1; cause_status: `known`; root cause: A Notebook option persisted before the shared Recipe preflight change reached the confirmation boundary; the current server correctly rejected materialization with ETS_INSUFFICIENT_OBSERVATIONS, but the UI exposed no recovery action after the fail-closed response.; solution: `resolved`
 - `real-provider-report-contract-qa`: occurrences=1; cause_status: `known`; root cause: A second real browser Report attempt reached the provider but all correction rounds returned prose missing the required Limitations section, so the evidence contract rejected it with LLM_RESPONSE_CONTRACT_INVALID.; solution: `resolved`
@@ -60,6 +62,7 @@ FULL_GATE_INTERRUPTED
 ## New rules
 
 - `external-witness-provider-boundary`: line experience occurrence(s)=1
+- `external-witness-provider-deployment`: line experience occurrence(s)=1
 - `generic-adapter-boundary-contract`: line experience occurrence(s)=1
 - `notebook-confirm-replan-recovery`: line experience occurrence(s)=1
 - `real-provider-report-contract-qa`: line experience occurrence(s)=1
@@ -72,6 +75,7 @@ FULL_GATE_INTERRUPTED
 
 - A coordinator ledger can prove registry coverage and fail-closed witness admission, but only an external witness provider can add a browser confirmation trust level.
 - A generic adapter must initialize every pack-owned durable boundary and project optional-value semantics identically into runtime validation and published closed schemas.
+- An adapter and green fake-provider tests are not a deployed witness. The external trust root and browser collection path must exist before any human-identity claim is accepted.
 - Batch runner family submissions must be serialized at the ledger boundary even when independent operation execution could later be parallelized behind a witness provider.
 - Fail-closed materialization errors need a tested, explicit recovery action that asks the agent to replan; the UI must not hide or downgrade the owner Recipe rejection.
 - Planner correction must distinguish an unavailable workflow source from an unavailable capability and offer a contractible alternative without fabricating a result.
@@ -105,3 +109,4 @@ FULL_GATE_INTERRUPTED
 - #22: `c2f4b7d1-4a2e-4b91-8f61-4e1e7d38d6aa` | 2026-08-11T00:11:20.000Z | GATE/remote_witness_provider_adapter | incident=`a0f75dd9-4c06-4af8-8a25-21cfde1ddf3f` | lesson_key=`remote-witness-provider-boundary` | event_sha256=`7906bc5cd7c2a8b8f201cc3a43e2bd93f3d8a1e7da078f98824546bc38cb60ca`
 - #23: `d3a1cc84-b5ab-48b3-a6f9-9ab0a57aa7f1` | 2026-08-11T00:11:21.000Z | GATE/p7_current_head_batch_execution_v2 | incident=`e54bdb1f-3124-4d38-a18d-4be1a0ce78d0` | lesson_key=`p7-current-head-batch-execution` | event_sha256=`90bc6904accfbd28f6172fd092be572a0f7fc83c3fef35a7d13039cbc0a39469`
 - #24: `e1c3f2b9-9f8d-4d61-bf8d-2f34a0e1b2c7` | 2026-08-11T00:11:22.000Z | GATE/host_full_gate_current_head | incident=`f4bd7c52-5e1a-46d2-8f3c-6a9e0b1d2c44` | lesson_key=`final-host-gate-current-head` | event_sha256=`1353c1352e65acca074539a17c645e8adf8ea2dfb1518dd13de4f27fdddaf8ba`
+- #25: `a7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d01` | 2026-08-11T00:21:23.000Z | GAP/external_witness_provider_not_deployed | incident=`b8c9d0e1-f2a3-4b5c-8d6e-7f8a9b0c1d23` | lesson_key=`external-witness-provider-deployment` | event_sha256=`aa9c22c8239d5905b69c74040bca5848057a508eec6dafd09d193e879e24bcdf`
