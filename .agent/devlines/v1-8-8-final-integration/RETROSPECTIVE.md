@@ -10,14 +10,14 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 11/43 (25.6%; 25.6 per 100 events)
+- Failure frequency: 11/44 (25.0%; 25.0 per 100 events)
 - Repeat rate: 0/11 (0.0%)
 - Recurrence rate: 0/11 (0.0%)
 - MTTR: median=0 ms (sample=9; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/25 (0.0%)
+- Gate waste rate: 0/26 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/2)
 
@@ -144,3 +144,4 @@ CONTEXT_RESCOPED
 - #41: `6e1a3c5f-7b9d-4f20-a8c2-0e1d3b5f7a96` | 2026-08-11T02:24:21.000Z | GATE/final_head_p7_batch_execution_after_host_gate | incident=`9f2c5e7a-1b3d-4f80-a6c2-0e1d3b5f7a94` | lesson_key=`final-head-p7-batch-after-host-gate` | event_sha256=`cb64a4f4a270735b44905d726f2742d4c4cfba96dbcf6a6bc54fb19a1c336615`
 - #42: `7c4e1a9b-2d6f-4a80-b3c5-9e1f7a2d6c84` | 2026-08-11T02:34:58.000Z | FAILURE/world_id_exact_payload_binding | incident=`1a6d3f8c-5b2e-47f9-a0c4-8e1d6b3f7a92` | lesson_key=`world-id-exact-payload-binding` | event_sha256=`d0d1163e8431101807630dd872a7877ed641c0ee5af7e73c7b42f49ce8d40416`
 - #43: `9b2e6f1a-4c7d-48a0-b5e3-1f9c6a2d7e84` | 2026-08-11T02:50:08.000Z | GATE/host_full_gate_after_exact_payload_binding | incident=`2f7a1c9e-5b3d-46a0-8c1e-9d4f2b6a7e53` | lesson_key=`host-full-gate-after-exact-payload-binding` | event_sha256=`10d78ef9173a4a59b976456016845da2b94de5310814031daeb06f43b2a0ae9b`
+- #44: `4a8f1c6d-2e7b-49b0-a5d3-1f9c6e2a7b84` | 2026-08-11T02:53:06.000Z | GATE/p7_current_head_batch_execution_after_exact_payload_gate | incident=`8c1e5a3f-7b2d-46a0-9e4f-1c6b3d7a5f82` | lesson_key=`p7-current-head-batch-after-exact-payload-gate` | event_sha256=`9f4b17dbfe4c2575b9f2ab925f4fc838f5af32dc03c23c18735dd97264542c74`
