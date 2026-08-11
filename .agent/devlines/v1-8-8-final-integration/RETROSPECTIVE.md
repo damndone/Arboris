@@ -10,14 +10,14 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 12/49 (24.5%; 24.5 per 100 events)
-- Repeat rate: 0/12 (0.0%)
-- Recurrence rate: 0/12 (0.0%)
-- MTTR: median=0 ms (sample=10; unresolved=2)
+- Failure frequency: 13/51 (25.5%; 25.5 per 100 events)
+- Repeat rate: 0/13 (0.0%)
+- Recurrence rate: 0/13 (0.0%)
+- MTTR: median=0 ms (sample=11; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/30 (0.0%)
+- Gate waste rate: 0/31 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/2)
 
@@ -31,6 +31,7 @@ CONTEXT_RESCOPED
 - #28 2026-08-11T00:40:00.000Z `witness_result_chain_binding`; cause_status: `known`; cause: P7 ledger witness verification previously compared the provider attestation's durable-chain digest with itself, so a direct witness completion could pass without an independently collected result chain.; resolution: `resolved`; lesson: Witness signatures authenticate the provider statement, but the coordinator must independently derive and bind the durable result chain before upgrading trust.
 - #42 2026-08-11T02:34:58.000Z `world_id_exact_payload_binding`; cause_status: `known`; cause: The World ID adapter derived the proof action from challenge_digest only, so a valid proof could be reused with altered observation fields in the detached browser witness payload.; resolution: `resolved`; lesson: External human identity evidence must bind to the complete immutable browser observation payload, not only to its challenge field.
 - #45 2026-08-11T03:20:00.000Z `report_export_curated_snapshot_mismatch`; cause_status: `known`; cause: The persisted Report record retained the full evidence snapshot and excluded figure list, but the export endpoint revalidated and rendered the uncurated snapshot instead of applying the same inclusion boundary used at save time.; resolution: `resolved`; lesson: Every persisted evidence snapshot must apply its curation boundary consistently during validation, identity checks, and export rendering.
+- #50 2026-08-11T03:53:20.000Z `p7_manifest_init_short_sha_rejected`; cause_status: `known`; cause: The final manifest init command supplied a short Git SHA, while the runner requires the complete current checkout SHA before it will write a manifest.; resolution: `resolved`; lesson: Always read and pass the complete current Git SHA to write-once acceptance manifest initialization.
 
 ## All errors
 
@@ -54,6 +55,7 @@ CONTEXT_RESCOPED
 - `external-witness-provider-deployment`: occurrences=1; cause_status: `external`; root cause: The final tree contains the fail-closed provider adapter, but no independent HTTPS provider endpoint, trusted provider enrollment, or browser-side witness collection is configured in the current environment.; solution: `open`
 - `generic-adapter-boundary-contract`: occurrences=1; cause_status: `known`; root cause: The P6 merge exposed two real generic-workflow boundary defects: an ARMA-GARCH temporary run lacked its artifact index and optional P7 options were not projected as nullable in the closed workflow schema.; solution: `resolved`
 - `notebook-confirm-replan-recovery`: occurrences=1; cause_status: `known`; root cause: A Notebook option persisted before the shared Recipe preflight change reached the confirmation boundary; the current server correctly rejected materialization with ETS_INSUFFICIENT_OBSERVATIONS, but the UI exposed no recovery action after the fail-closed response.; solution: `resolved`
+- `p7-manifest-requires-full-git-sha`: occurrences=1; cause_status: `known`; root cause: The final manifest init command supplied a short Git SHA, while the runner requires the complete current checkout SHA before it will write a manifest.; solution: `resolved`
 - `path-aware-pytest-command`: occurrences=1; cause_status: `known`; root cause: The focused pytest command followed the backend working-directory rule but omitted the parent-relative path for tests stored at repository root.; solution: `resolved`
 - `real-provider-report-contract-qa`: occurrences=1; cause_status: `known`; root cause: A second real browser Report attempt reached the provider but all correction rounds returned prose missing the required Limitations section, so the evidence contract rejected it with LLM_RESPONSE_CONTRACT_INVALID.; solution: `resolved`
 - `registry-runtime-policy-alignment`: occurrences=1; cause_status: `known`; root cause: The live Notebook planner consumed a registry schema that advertised predictors for synthetic_control.fit, while the v1 pre_outcome runtime intentionally rejects predictor_matrix.; solution: `resolved`
@@ -75,6 +77,7 @@ CONTEXT_RESCOPED
 - `external-witness-provider-deployment`: line experience occurrence(s)=1
 - `generic-adapter-boundary-contract`: line experience occurrence(s)=1
 - `notebook-confirm-replan-recovery`: line experience occurrence(s)=1
+- `p7-manifest-requires-full-git-sha`: line experience occurrence(s)=1
 - `path-aware-pytest-command`: line experience occurrence(s)=1
 - `real-provider-report-contract-qa`: line experience occurrence(s)=1
 - `registry-runtime-policy-alignment`: line experience occurrence(s)=1
@@ -90,6 +93,7 @@ CONTEXT_RESCOPED
 
 - A coordinator ledger can prove registry coverage and fail-closed witness admission, but only an external witness provider can add a browser confirmation trust level.
 - A generic adapter must initialize every pack-owned durable boundary and project optional-value semantics identically into runtime validation and published closed schemas.
+- Always read and pass the complete current Git SHA to write-once acceptance manifest initialization.
 - An adapter and green fake-provider tests are not a deployed witness. The external trust root and browser collection path must exist before any human-identity claim is accepted.
 - Batch runner family submissions must be serialized at the ledger boundary even when independent operation execution could later be parallelized behind a witness provider.
 - Every persisted evidence snapshot must apply its curation boundary consistently during validation, identity checks, and export rendering.
@@ -154,3 +158,5 @@ CONTEXT_RESCOPED
 - #47: `bc3d4e5f-6071-489a-b2c3-def34567890a` | 2026-08-11T03:46:00.000Z | GATE/p7_final_batch_execution_after_report_export_fix | incident=`bc3d4e5f-6071-489a-b2c3-def34567890a` | lesson_key=`final-commit-p7-batch-after-report-export-fix` | event_sha256=`bd8576f3e16ed87a6ec72a77428aaae0d211cd64dc6d0260037434647ff9a7ba`
 - #48: `cd4e5f60-7182-49ab-c3d4-ef4567890ab1` | 2026-08-11T03:49:30.000Z | GATE/final_host_full_gate_after_report_export_fix | incident=`cd4e5f60-7182-49ab-c3d4-ef4567890ab1` | lesson_key=`final-host-full-gate-after-report-export-fix` | event_sha256=`75094e795d48d58386594f6e090bc606c785c005f33a2cb81dd10ebf7da01817`
 - #49: `ab2c3d4e-5f60-4789-a1b2-cdef23456789` | 2026-08-11T03:51:41.000Z | GATE/final_commit_report_export_browser_acceptance | incident=`ab2c3d4e-5f60-4789-a1b2-cdef23456789` | lesson_key=`final-commit-report-browser-export` | event_sha256=`53e81a3e398e4ec41e06cd0aeb511e3c7404b8e0054ff429aec15a81ad4b10ef`
+- #50: `de5f6071-8293-4abc-d4e5-f567890abcde` | 2026-08-11T03:53:20.000Z | FAILURE/p7_manifest_init_short_sha_rejected | incident=`de5f6071-8293-4abc-d4e5-f567890abcde` | lesson_key=`p7-manifest-requires-full-git-sha` | event_sha256=`7e1148b2b5c0dd6f13d4166ef56e73608833844c7b79e4367592c51f7ccf516b`
+- #51: `ef607182-93a4-4bcd-e5f6-67890abcdef1` | 2026-08-11T03:53:56.000Z | GATE/p7_final_batch_execution_after_evidence_commit | incident=`ef607182-93a4-4bcd-e5f6-67890abcdef1` | lesson_key=`p7-batch-after-final-evidence-commit` | event_sha256=`9c7ae2d0cb981b7cc81c20f0a694590734d6f533b8f67f21d815a7ef6146dbb8`
