@@ -10,14 +10,14 @@ FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 10/30 (33.3%; 33.3 per 100 events)
+- Failure frequency: 10/32 (31.2%; 31.2 per 100 events)
 - Repeat rate: 0/10 (0.0%)
 - Recurrence rate: 0/10 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/16 (0.0%)
+- Gate waste rate: 0/18 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -123,3 +123,5 @@ FULL_GATE_INTERRUPTED
 - #28: `f5c7e9a1-3b5d-4f7a-9c11-2d4e6f8a0b33` | 2026-08-11T00:40:00.000Z | FAILURE/witness_result_chain_binding | incident=`f5c7e9a1-3b5d-4f7a-9c11-2d4e6f8a0b33` | lesson_key=`witness-independent-result-chain` | event_sha256=`82ef07202a7699852427f44c2d2a7e7f9eaf144da47e6601bf41ae159b9c866c`
 - #29: `a6c8e0f2-4b6d-4f8a-9c12-2e4f6a8b0c44` | 2026-08-11T03:20:00.000Z | GATE/host_full_gate_after_witness_hardening | incident=`a6c8e0f2-4b6d-4f8a-9c12-2e4f6a8b0c44` | lesson_key=`final-gate-after-witness-hardening` | event_sha256=`86c125a56343beee3ef31636c87a3d72f169c6167257bf77382c07a435e1e361`
 - #30: `b7d9f1a3-5c7e-4f9a-1b23-3d5f7a9c0e55` | 2026-08-11T03:30:00.000Z | GATE/final_head_p7_batch_execution | incident=`b7d9f1a3-5c7e-4f9a-1b23-3d5f7a9c0e55` | lesson_key=`final-head-batch-reconciliation` | event_sha256=`90d9be64b7ef0a81ec722d1fb24e161f5ac3646348062f2d392b34da4e056928`
+- #31: `c8d7e6f5-a4b3-4c2d-9e1f-0a1b2c3d4e5f` | 2026-08-11T01:14:59.417Z | GATE/report_browser_real_chain_pass | incident=`d9e8f7a6-b5c4-4d3e-8f2a-1b0c9d8e7f6a` | lesson_key=`report-browser-real-chain` | event_sha256=`0b2ad27a4be41a8e600b73150f1e768193753cc9ec285c89d3cc13b48e81a233`
+- #32: `e7f6a5b4-c3d2-4e1f-9a0b-1c2d3e4f5a6b` | 2026-08-11T01:18:32.000Z | GATE/hurdle_browser_fail_closed | incident=`f6e5d4c3-b2a1-4f0e-9d8c-7b6a5e4d3c2b` | lesson_key=`hurdle-browser-fail-closed` | event_sha256=`57e83e0d8de0e96e84c9c8d78dd1aa0e9170f6f7fbd671608c4d9ef17da21762`
