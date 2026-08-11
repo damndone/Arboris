@@ -6,11 +6,11 @@
 
 ## Final status
 
-CONTEXT_RESCOPED
+local_only_provider_deferred
 
 ## Metrics
 
-- Failure frequency: 13/51 (25.5%; 25.5 per 100 events)
+- Failure frequency: 13/52 (25.0%; 25.0 per 100 events)
 - Repeat rate: 0/13 (0.0%)
 - Recurrence rate: 0/13 (0.0%)
 - MTTR: median=0 ms (sample=11; unresolved=2)
@@ -160,3 +160,4 @@ CONTEXT_RESCOPED
 - #49: `ab2c3d4e-5f60-4789-a1b2-cdef23456789` | 2026-08-11T03:51:41.000Z | GATE/final_commit_report_export_browser_acceptance | incident=`ab2c3d4e-5f60-4789-a1b2-cdef23456789` | lesson_key=`final-commit-report-browser-export` | event_sha256=`53e81a3e398e4ec41e06cd0aeb511e3c7404b8e0054ff429aec15a81ad4b10ef`
 - #50: `de5f6071-8293-4abc-d4e5-f567890abcde` | 2026-08-11T03:53:20.000Z | FAILURE/p7_manifest_init_short_sha_rejected | incident=`de5f6071-8293-4abc-d4e5-f567890abcde` | lesson_key=`p7-manifest-requires-full-git-sha` | event_sha256=`7e1148b2b5c0dd6f13d4166ef56e73608833844c7b79e4367592c51f7ccf516b`
 - #51: `ef607182-93a4-4bcd-e5f6-67890abcdef1` | 2026-08-11T03:53:56.000Z | GATE/p7_final_batch_execution_after_evidence_commit | incident=`ef607182-93a4-4bcd-e5f6-67890abcdef1` | lesson_key=`p7-batch-after-final-evidence-commit` | event_sha256=`9c7ae2d0cb981b7cc81c20f0a694590734d6f533b8f67f21d815a7ef6146dbb8`
+- #52: `c1f2a3b4-5d6e-47f8-9012-3a4b5c6d7e8f` | 2026-08-11T06:24:40.000Z | STATE_CHANGE/world_id_provider_deferred | incident=`d2e3f4a5-b6c7-48d9-0123-4e5f6a7b8c9d` | lesson_key=`local-only-witness-scope` | event_sha256=`794d687e13100e32a4ed51cf992a24501ff4ece382d092bcb5b04e70ee4ed6f8`
