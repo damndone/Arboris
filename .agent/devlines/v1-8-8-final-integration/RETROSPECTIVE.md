@@ -10,14 +10,14 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 10/40 (25.0%; 25.0 per 100 events)
+- Failure frequency: 10/41 (24.4%; 24.4 per 100 events)
 - Repeat rate: 0/10 (0.0%)
 - Recurrence rate: 0/10 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/23 (0.0%)
+- Gate waste rate: 0/24 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/2)
 
@@ -137,3 +137,4 @@ CONTEXT_RESCOPED
 - #38: `e4e824a7-bb0c-4dc8-b9ff-bccdf37f3146` | 2026-08-11T02:08:04.572Z | STATE_CHANGE/context_rescoped | incident=`a27fa28e-7d5b-4a83-b350-1456e111df84` | lesson_key=`context-pack-rescope` | event_sha256=`8324107f6d6fa63de5faffbaa4bbfa9135d507317e1e565f1dfb0a120c8b81af`
 - #39: `3b6a8f1d-2c47-4e90-a5d1-7f8b9c0e2d34` | 2026-08-11T02:08:20.000Z | GATE/world_id_witness_adapter | incident=`7c1e9a3d-5b8f-4d20-a6c2-9e0f1b3d7a54` | lesson_key=`world-id-witness-adapter` | event_sha256=`df781819a382e592933d19f477e7f4cc383e821e3074534f2693bab39029e7c3`
 - #40: `5d8f1a3c-7b2e-4c90-a6f1-9e0d3b5c7a82` | 2026-08-11T02:22:58.000Z | GATE/host_full_gate_after_world_id_adapter | incident=`8a1f3c5e-7b2d-4f90-a6c1-9e0d3b5f7a82` | lesson_key=`host-full-gate-after-provider` | event_sha256=`a5ee9561bd14d4164342dace06663fa862a3fcdc2665f5b168362e82576c27fa`
+- #41: `6e1a3c5f-7b9d-4f20-a8c2-0e1d3b5f7a96` | 2026-08-11T02:24:21.000Z | GATE/final_head_p7_batch_execution_after_host_gate | incident=`9f2c5e7a-1b3d-4f80-a6c2-0e1d3b5f7a94` | lesson_key=`final-head-p7-batch-after-host-gate` | event_sha256=`cb64a4f4a270735b44905d726f2742d4c4cfba96dbcf6a6bc54fb19a1c336615`
