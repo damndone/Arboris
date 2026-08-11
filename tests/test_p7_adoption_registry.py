@@ -175,6 +175,19 @@ def test_p7_step_contract_publishes_nested_request_shapes_and_frame_semantics() 
     assert power.consumes_input_frame is False
 
 
+def test_synthetic_control_step_does_not_publish_unsupported_predictors() -> None:
+    """The v1 pre-outcome policy must not invite the Agent to bind donors as predictors."""
+
+    from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+    synthetic = WORKFLOW_STEP_SPEC_CONTRACTS["synthetic_control.fit"]
+    bindings = synthetic.field_schemas["column_bindings"]
+
+    assert bindings["required"] == ["outcomes"]
+    assert set(bindings["properties"]) == {"outcomes"}
+    assert "predictors" not in bindings["properties"]
+
+
 def test_power_step_rejects_a_source_commitment_it_cannot_consume() -> None:
     """A source declaration must not be accepted and then ignored by power."""
 

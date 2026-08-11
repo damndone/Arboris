@@ -301,6 +301,7 @@ class CompletionEvidence:
     artifact_sha256: str
     artifact_provenance_id: str
     artifact_producer_record_id: str
+    durable_chain_sha256: str | None = None
     witness_attestation: Mapping[str, object] | None = None
     witness_trust_level: str | None = None
 
@@ -353,6 +354,7 @@ _COMPLETION_EVIDENCE_FIELDS = (
     "artifact_sha256",
     "artifact_provenance_id",
     "artifact_producer_record_id",
+    "durable_chain_sha256",
     "witness_attestation",
     "witness_trust_level",
 )
@@ -826,9 +828,13 @@ def _completion_evidence_from_mapping(value: Mapping[str, object]) -> Completion
     expected = set(_COMPLETION_EVIDENCE_FIELDS)
     accepted_fields = (
         expected,
+        expected - {"durable_chain_sha256"},
         expected - {"witness_attestation"},
         expected - {"witness_trust_level"},
         expected - {"witness_attestation", "witness_trust_level"},
+        expected - {"durable_chain_sha256", "witness_attestation"},
+        expected - {"durable_chain_sha256", "witness_trust_level"},
+        expected - {"durable_chain_sha256", "witness_attestation", "witness_trust_level"},
     )
     if actual not in accepted_fields:
         missing = expected - actual
@@ -848,6 +854,7 @@ def _completion_evidence_from_mapping(value: Mapping[str, object]) -> Completion
     }
     normalized.setdefault("witness_attestation", None)
     normalized.setdefault("witness_trust_level", None)
+    normalized.setdefault("durable_chain_sha256", None)
     return CompletionEvidence(**normalized)
 
 
@@ -873,6 +880,20 @@ def validate_completion_evidence(
             raise CompletionEvidenceError(
                 "witness-attested evidence requires a signed witness envelope"
             )
+        if not isinstance(evidence.durable_chain_sha256, str):
+            raise CompletionEvidenceError(
+                "witness-attested evidence requires an independently collected durable result chain"
+            )
+        if (
+            len(evidence.durable_chain_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in evidence.durable_chain_sha256.casefold()
+            )
+        ):
+            raise CompletionEvidenceError(
+                "independently collected durable result chain is not a SHA-256 digest"
+            )
         try:
             BrowserWitnessAttestation.from_mapping(evidence.witness_attestation)
         except WitnessError as error:
@@ -893,12 +914,17 @@ def validate_completion_evidence(
         raise CompletionEvidenceError(
             "coordinator-only evidence cannot carry a witness trust level"
         )
+    elif evidence.durable_chain_sha256 is not None:
+        raise CompletionEvidenceError(
+            "coordinator-only evidence cannot carry a witness result chain"
+        )
     for field_name in _COMPLETION_EVIDENCE_FIELDS:
         if field_name in {
             "parent_record_durable",
             "child_record_durable",
             "attempt_no",
             "attempt_started_at",
+            "durable_chain_sha256",
             "witness_attestation",
             "witness_trust_level",
         }:
@@ -1115,7 +1141,7 @@ def _validate_witness_completion(
             attestation,
             verifier=verifier,
             now=occurred_at,
-            expected_durable_chain_sha256=attestation.durable_chain_sha256,
+            expected_durable_chain_sha256=evidence.durable_chain_sha256,
         )
     except WitnessError as error:
         raise CompletionEvidenceError(str(error)) from error

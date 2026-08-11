@@ -2110,9 +2110,9 @@ def test_completed_evidence_requires_exact_parent_child_confirmation_and_provena
 def test_witness_attested_completion_requires_provider_verification_and_is_labeled(
     tmp_path,
 ) -> None:
-    """A signed provider envelope upgrades trust only through the verifier seam."""
+    """A signed provider envelope needs an independently collected result chain."""
 
-    from workbench.qa.p7_acceptance import AttemptLedger
+    from workbench.qa.p7_acceptance import AttemptLedger, CompletionEvidenceError
     from workbench.qa.witness import (
         BrowserWitnessAttestation,
         WitnessChallenge,
@@ -2181,6 +2181,22 @@ def test_witness_attested_completion_requires_provider_verification_and_is_label
         witness_attestation=attestation.to_dict(),
     )
 
+    with pytest.raises(
+        CompletionEvidenceError,
+        match="independently collected durable result chain",
+    ):
+        ledger.record_status(
+            "missingness.profile",
+            1,
+            "completed",
+            occurred_at=101.0,
+            evidence=evidence,
+        )
+
+    evidence = replace(
+        evidence,
+        durable_chain_sha256=attestation.durable_chain_sha256,
+    )
     ledger.record_status(
         "missingness.profile",
         1,

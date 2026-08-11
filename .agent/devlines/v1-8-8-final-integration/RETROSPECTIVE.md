@@ -10,14 +10,14 @@ FULL_GATE_INTERRUPTED
 
 ## Metrics
 
-- Failure frequency: 8/25 (32.0%; 32.0 per 100 events)
-- Repeat rate: 0/8 (0.0%)
-- Recurrence rate: 0/8 (0.0%)
-- MTTR: median=0 ms (sample=6; unresolved=2)
+- Failure frequency: 9/27 (33.3%; 33.3 per 100 events)
+- Repeat rate: 0/9 (0.0%)
+- Recurrence rate: 0/9 (0.0%)
+- MTTR: median=0 ms (sample=7; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/13 (0.0%)
+- Gate waste rate: 0/14 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -27,6 +27,7 @@ FULL_GATE_INTERRUPTED
 - #4 2026-08-10T14:57:00.000Z `report_deadline_real_qa`; cause_status: `known`; cause: The first real browser Report attempt used DeepSeek V4 without the shared bounded request policy and returned LLM_REPORT_DEADLINE_EXCEEDED after the shared 300-second deadline.; resolution: `resolved`; lesson: Provider-specific reasoning and output controls must be centralized at the wire adapter and reused by every long-form consumer.
 - #5 2026-08-10T15:01:00.000Z `report_contract_real_qa`; cause_status: `known`; cause: A second real browser Report attempt reached the provider but all correction rounds returned prose missing the required Limitations section, so the evidence contract rejected it with LLM_RESPONSE_CONTRACT_INVALID.; resolution: `resolved`; lesson: Real-provider report QA must exercise both transport latency and contract correction paths; a green unit contract test is not sufficient evidence of provider completion.
 - #6 2026-08-10T14:42:00.000Z `notebook_recipe_preflight_real_qa`; cause_status: `known`; cause: The real upload-only Notebook path reached confirmation with a short ETS proposal before the shared Recipe input gate was wired into admission; the server correctly exposed ETS_INSUFFICIENT_OBSERVATIONS instead of executing it.; resolution: `resolved`; lesson: The owner Recipe input contract must run read-only during both planning admission and option materialization, before any draft or execution record is written.
+- #26 2026-08-11T00:36:00.000Z `synthetic_control_schema_real_qa`; cause_status: `known`; cause: The live Notebook planner consumed a registry schema that advertised predictors for synthetic_control.fit, while the v1 pre_outcome runtime intentionally rejects predictor_matrix.; resolution: `resolved`; lesson: Published workflow schemas must describe the runtime policy exactly; unsupported fields must be rejected at declaration time rather than invited into Agent-generated requests.
 
 ## All errors
 
@@ -50,6 +51,7 @@ FULL_GATE_INTERRUPTED
 - `generic-adapter-boundary-contract`: occurrences=1; cause_status: `known`; root cause: The P6 merge exposed two real generic-workflow boundary defects: an ARMA-GARCH temporary run lacked its artifact index and optional P7 options were not projected as nullable in the closed workflow schema.; solution: `resolved`
 - `notebook-confirm-replan-recovery`: occurrences=1; cause_status: `known`; root cause: A Notebook option persisted before the shared Recipe preflight change reached the confirmation boundary; the current server correctly rejected materialization with ETS_INSUFFICIENT_OBSERVATIONS, but the UI exposed no recovery action after the fail-closed response.; solution: `resolved`
 - `real-provider-report-contract-qa`: occurrences=1; cause_status: `known`; root cause: A second real browser Report attempt reached the provider but all correction rounds returned prose missing the required Limitations section, so the evidence contract rejected it with LLM_RESPONSE_CONTRACT_INVALID.; solution: `resolved`
+- `registry-runtime-policy-alignment`: occurrences=1; cause_status: `known`; root cause: The live Notebook planner consumed a registry schema that advertised predictors for synthetic_control.fit, while the v1 pre_outcome runtime intentionally rejects predictor_matrix.; solution: `resolved`
 - `runner-family-lifecycle-serial`: occurrences=1; cause_status: `known`; root cause: Starting family batches concurrently caused the runner's single active browser-attempt guard to reject 17 starts while one family was awaiting terminal confirmation.; solution: `resolved`
 - `shared-provider-controls-for-report`: occurrences=1; cause_status: `known`; root cause: The first real browser Report attempt used DeepSeek V4 without the shared bounded request policy and returned LLM_REPORT_DEADLINE_EXCEEDED after the shared 300-second deadline.; solution: `resolved`
 - `shared-recipe-input-preflight`: occurrences=1; cause_status: `known`; root cause: The real upload-only Notebook path reached confirmation with a short ETS proposal before the shared Recipe input gate was wired into admission; the server correctly exposed ETS_INSUFFICIENT_OBSERVATIONS instead of executing it.; solution: `resolved`
@@ -66,6 +68,7 @@ FULL_GATE_INTERRUPTED
 - `generic-adapter-boundary-contract`: line experience occurrence(s)=1
 - `notebook-confirm-replan-recovery`: line experience occurrence(s)=1
 - `real-provider-report-contract-qa`: line experience occurrence(s)=1
+- `registry-runtime-policy-alignment`: line experience occurrence(s)=1
 - `runner-family-lifecycle-serial`: line experience occurrence(s)=1
 - `shared-provider-controls-for-report`: line experience occurrence(s)=1
 - `shared-recipe-input-preflight`: line experience occurrence(s)=1
@@ -80,6 +83,7 @@ FULL_GATE_INTERRUPTED
 - Fail-closed materialization errors need a tested, explicit recovery action that asks the agent to replan; the UI must not hide or downgrade the owner Recipe rejection.
 - Planner correction must distinguish an unavailable workflow source from an unavailable capability and offer a contractible alternative without fabricating a result.
 - Provider-specific reasoning and output controls must be centralized at the wire adapter and reused by every long-form consumer.
+- Published workflow schemas must describe the runtime policy exactly; unsupported fields must be rejected at declaration time rather than invited into Agent-generated requests.
 - Real-provider report QA must exercise both transport latency and contract correction paths; a green unit contract test is not sufficient evidence of provider completion.
 - The owner Recipe input contract must run read-only during both planning admission and option materialization, before any draft or execution record is written.
 
@@ -110,3 +114,5 @@ FULL_GATE_INTERRUPTED
 - #23: `d3a1cc84-b5ab-48b3-a6f9-9ab0a57aa7f1` | 2026-08-11T00:11:21.000Z | GATE/p7_current_head_batch_execution_v2 | incident=`e54bdb1f-3124-4d38-a18d-4be1a0ce78d0` | lesson_key=`p7-current-head-batch-execution` | event_sha256=`90bc6904accfbd28f6172fd092be572a0f7fc83c3fef35a7d13039cbc0a39469`
 - #24: `e1c3f2b9-9f8d-4d61-bf8d-2f34a0e1b2c7` | 2026-08-11T00:11:22.000Z | GATE/host_full_gate_current_head | incident=`f4bd7c52-5e1a-46d2-8f3c-6a9e0b1d2c44` | lesson_key=`final-host-gate-current-head` | event_sha256=`1353c1352e65acca074539a17c645e8adf8ea2dfb1518dd13de4f27fdddaf8ba`
 - #25: `a7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d01` | 2026-08-11T00:21:23.000Z | GAP/external_witness_provider_not_deployed | incident=`b8c9d0e1-f2a3-4b5c-8d6e-7f8a9b0c1d23` | lesson_key=`external-witness-provider-deployment` | event_sha256=`aa9c22c8239d5905b69c74040bca5848057a508eec6dafd09d193e879e24bcdf`
+- #26: `d2a5c7e1-4b6f-4d8a-9c10-2e3f5a7b9d11` | 2026-08-11T00:36:00.000Z | FAILURE/synthetic_control_schema_real_qa | incident=`d2a5c7e1-4b6f-4d8a-9c10-2e3f5a7b9d11` | lesson_key=`registry-runtime-policy-alignment` | event_sha256=`4c7f1ecf4808b30a687a212ecad589395cc9e8e118fe7c4259ad4a0a5ec72927`
+- #27: `e4b6d8f0-2a4c-4e6f-8b10-1c3d5e7a9f22` | 2026-08-11T00:37:41.000Z | GATE/synthetic_control_natural_language_browser_pass | incident=`e4b6d8f0-2a4c-4e6f-8b10-1c3d5e7a9f22` | lesson_key=`synthetic-control-natural-language-browser-pass` | event_sha256=`cf82069cb9573e792f785834ca51335a3deeefce054103881869f55d1844aefe`

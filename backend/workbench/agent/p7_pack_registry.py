@@ -1135,8 +1135,7 @@ _register_request_schema(
     ("synthetic_control.fit",),
     _request_schema(
         ("outcomes",),
-        optional_bindings=("predictors",),
-        binding_shapes={"outcomes": "columns", "predictors": "columns"},
+        binding_shapes={"outcomes": "columns"},
         required_options=("treated_unit", "donor_pool", "periods", "pre_periods", "post_periods"),
         option_shapes={
             "treated_unit": "string",
@@ -1153,8 +1152,7 @@ _register_request_schema(
     ("synthetic_control.placebo",),
     _request_schema(
         ("outcomes",),
-        optional_bindings=("predictors",),
-        binding_shapes={"outcomes": "columns", "predictors": "columns"},
+        binding_shapes={"outcomes": "columns"},
         required_options=(
             "treated_unit",
             "donor_pool",

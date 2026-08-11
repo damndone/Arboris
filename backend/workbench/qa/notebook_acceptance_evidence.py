@@ -1119,6 +1119,9 @@ def collect_notebook_completion_evidence(
         artifact_sha256=artifact_sha,
         artifact_provenance_id=provenance_id,
         artifact_producer_record_id=child_record_id,
+        durable_chain_sha256=(
+            durable_chain_sha256 if parsed_witness is not None else None
+        ),
         witness_attestation=(
             parsed_witness.to_dict() if parsed_witness is not None else None
         ),
