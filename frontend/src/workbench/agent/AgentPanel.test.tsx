@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentPanel } from "./AgentPanel";
 import {
@@ -768,20 +768,30 @@ describe("AgentPanel", () => {
       </AgentSurfaceContext.Provider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Decline proposal proposal-1" }));
-    expect(declineProposal).toHaveBeenCalledWith("proposal-1");
-
-    fireEvent.click(screen.getByRole("button", { name: "Revise proposal proposal-1" }));
-    const editor = screen.getByRole("textbox", { name: "Proposal changes proposal-1" });
-    fireEvent.change(editor, {
-      target: { value: '{"covariance":{"old":"nonrobust","new":"unadjusted"}}' },
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Decline proposal proposal-1" }));
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save revision proposal-1" }));
-    expect(reviseProposal).toHaveBeenCalledWith(
-      "proposal-1",
-      1,
-      { covariance: { old: "nonrobust", new: "unadjusted" } },
-    );
+    await waitFor(() => {
+      expect(declineProposal).toHaveBeenCalledWith("proposal-1");
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Revise proposal proposal-1" }));
+    });
+    const editor = screen.getByRole("textbox", { name: "Proposal changes proposal-1" });
+    await act(async () => {
+      fireEvent.change(editor, {
+        target: { value: '{"covariance":{"old":"nonrobust","new":"unadjusted"}}' },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save revision proposal-1" }));
+    });
+    await waitFor(() => {
+      expect(reviseProposal).toHaveBeenCalledWith(
+        "proposal-1",
+        1,
+        { covariance: { old: "nonrobust", new: "unadjusted" } },
+      );
+    });
   });
 
   it("provides the single terminal composer inside the Agent panel", () => {

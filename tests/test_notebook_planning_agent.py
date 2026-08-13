@@ -336,14 +336,12 @@ def test_complete_baseline_evidence_forces_direct_typed_submission_turn(tmp_path
 
     assert len(result.option_drafts) == 1
     assert [tool["tool_id"] for tool in adapter.requests[0].tools] == [
-        "submit_notebook_option_batch"
+        "submit_notebook_option_batch",
+        "decline_notebook_plan",
     ]
-    assert adapter.requests[0].model_config == {
-        "tool_choice": {
-            "type": "function",
-            "function": {"name": "submit_notebook_option_batch"},
-        }
-    }
+    # A named submit-only choice would make it impossible for the provider to
+    # refuse an unsafe or unsupported request after baseline evidence exists.
+    assert adapter.requests[0].model_config == {}
 
 
 def test_complete_baseline_evidence_respects_provider_tool_choice_capability(tmp_path: Path) -> None:
@@ -367,7 +365,8 @@ def test_complete_baseline_evidence_respects_provider_tool_choice_capability(tmp
 
     assert len(result.option_drafts) == 1
     assert [tool["tool_id"] for tool in adapter.requests[0].tools] == [
-        "submit_notebook_option_batch"
+        "submit_notebook_option_batch",
+        "decline_notebook_plan",
     ]
     assert adapter.requests[0].model_config == {}
 

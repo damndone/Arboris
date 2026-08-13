@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from statistics import variance as sample_variance
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
@@ -541,6 +542,45 @@ def _finite_groups(
     return valid_labels, arrays
 
 
+def _welch_t_statistics(
+    left: Sequence[float], right: Sequence[float]
+) -> tuple[float | None, float | None, list[str]]:
+    """Compute Welch's statistic without asking SciPy to divide by zero.
+
+    SciPy's t-test is still the reference for ordinary inputs, but its
+    warning-producing moment path is not useful for a declared zero-variance
+    boundary. Returning a typed warning keeps that boundary visible to the
+    result contract while preserving the finite Welch calculation when only
+    one group is constant.
+    """
+    left_values = [float(value) for value in left]
+    right_values = [float(value) for value in right]
+    left_variance = sample_variance(left_values)
+    right_variance = sample_variance(right_values)
+    standard_error_squared = (
+        left_variance / len(left_values) + right_variance / len(right_values)
+    )
+    warning_codes = (
+        ["T_TEST_ZERO_VARIANCE"]
+        if left_variance == 0 or right_variance == 0
+        else []
+    )
+    if standard_error_squared <= 0:
+        return None, None, warning_codes or ["T_TEST_ZERO_VARIANCE"]
+    statistic = (
+        sum(left_values) / len(left_values) - sum(right_values) / len(right_values)
+    ) / math.sqrt(standard_error_squared)
+    denominator = (
+        (left_variance / len(left_values)) ** 2 / (len(left_values) - 1)
+        + (right_variance / len(right_values)) ** 2 / (len(right_values) - 1)
+    )
+    if denominator <= 0:
+        return None, None, warning_codes or ["T_TEST_ZERO_VARIANCE"]
+    degrees_of_freedom = standard_error_squared**2 / denominator
+    p_value = 2.0 * float(stats.t.sf(abs(statistic), degrees_of_freedom))
+    return statistic, p_value, warning_codes
+
+
 def _cohens_d_evidence(
     left: Sequence[float],
     right: Sequence[float],
@@ -549,7 +589,7 @@ def _cohens_d_evidence(
     labels: Sequence[str],
 ) -> dict[str, Any]:
     effect = cohens_d(left, right)
-    statistic, p_value = stats.ttest_ind(left, right, equal_var=False)
+    statistic, p_value, warning_codes = _welch_t_statistics(left, right)
     return _evidence_result(
         test_id=test_id,
         test_type="cohens_d",
@@ -561,6 +601,7 @@ def _cohens_d_evidence(
             "independent observations",
             f"comparison is between declared groups {labels[0]} and {labels[1]}",
         ],
+        warnings=warning_codes,
     )
 
 
@@ -678,6 +719,18 @@ def _pearson(frame: pd.DataFrame, left: str, right: str) -> dict[str, Any] | Non
     pair = _pairwise(frame, [left, right])
     if len(pair) < 3:
         return None
+    if _non_null_unique(pair[left]) < 2 or _non_null_unique(pair[right]) < 2:
+        return {
+            "test_id": f"correlation:{left}:{right}",
+            "test_type": "pearson_correlation",
+            "variables": [left, right],
+            "nobs": int(len(pair)),
+            "statistic": None,
+            "p_value": None,
+            "effect": {"r": None},
+            "warnings": ["CORRELATION_CONSTANT_INPUT"],
+            "source_id": f"statistical_tests.correlations.{left}.{right}",
+        }
     statistic, p_value = stats.pearsonr(pair[left], pair[right])
     return {
         "test_id": f"correlation:{left}:{right}",
@@ -687,6 +740,7 @@ def _pearson(frame: pd.DataFrame, left: str, right: str) -> dict[str, Any] | Non
         "statistic": _safe_float(statistic),
         "p_value": _safe_float(p_value),
         "effect": {"r": _safe_float(statistic)},
+        "warnings": [],
         "source_id": f"statistical_tests.correlations.{left}.{right}",
     }
 
@@ -696,7 +750,15 @@ def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[
     if len(pair) < 3:
         return []
     rows: list[dict[str, Any]] = []
-    statistic, p_value = stats.spearmanr(pair[left], pair[right])
+    constant_input = _non_null_unique(pair[left]) < 2 or _non_null_unique(pair[right]) < 2
+    if constant_input:
+        warning_codes = ["CORRELATION_CONSTANT_INPUT"]
+    else:
+        warning_codes = []
+    if constant_input:
+        statistic, p_value = None, None
+    else:
+        statistic, p_value = stats.spearmanr(pair[left], pair[right])
     rows.append({
         "test_id": f"spearman_correlation:{left}:{right}",
         "test_type": "spearman_correlation",
@@ -705,9 +767,13 @@ def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[
         "statistic": _safe_float(statistic),
         "p_value": _safe_float(p_value),
         "effect": {"rho": _safe_float(statistic)},
+        "warnings": warning_codes,
         "source_id": f"statistical_tests.rank_correlations.spearman.{left}.{right}",
     })
-    statistic, p_value = stats.kendalltau(pair[left], pair[right])
+    if constant_input:
+        statistic, p_value = None, None
+    else:
+        statistic, p_value = stats.kendalltau(pair[left], pair[right])
     rows.append({
         "test_id": f"kendall_correlation:{left}:{right}",
         "test_type": "kendall_correlation",
@@ -716,6 +782,7 @@ def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[
         "statistic": _safe_float(statistic),
         "p_value": _safe_float(p_value),
         "effect": {"tau": _safe_float(statistic)},
+        "warnings": warning_codes,
         "source_id": f"statistical_tests.rank_correlations.kendall.{left}.{right}",
     })
     return rows
@@ -733,7 +800,7 @@ def _welch_t_test(frame: pd.DataFrame, outcome: str, group: str) -> dict[str, An
     right = pd.to_numeric(pair.loc[group_series == group_values[1], outcome], errors="coerce").dropna()
     if len(left) < 2 or len(right) < 2:
         return None
-    statistic, p_value = stats.ttest_ind(left, right, equal_var=False)
+    statistic, p_value, warning_codes = _welch_t_statistics(left.tolist(), right.tolist())
     mean_left = float(left.mean())
     mean_right = float(right.mean())
     return {
@@ -750,6 +817,7 @@ def _welch_t_test(frame: pd.DataFrame, outcome: str, group: str) -> dict[str, An
             f"mean_{group_values[1]}": mean_right,
             "difference": mean_right - mean_left,
         },
+        "warnings": warning_codes,
         "source_id": f"statistical_tests.t_tests.{outcome}.{group}",
     }
 
@@ -1030,8 +1098,13 @@ def _evidence_result(
 def cohens_d(left: Sequence[float], right: Sequence[float]) -> dict[str, Any]:
     left_values = _finite_values(left, label="left", minimum=2)
     right_values = _finite_values(right, label="right", minimum=2)
+    # scipy.stats.tvar emits a RuntimeWarning for the constant/near-constant
+    # groups that this function is required to reject. The standard-library
+    # implementation preserves sample-variance semantics without turning a
+    # predictable typed rejection into numerical warning noise.
     pooled_variance = (
-        (len(left_values) - 1) * stats.tvar(left_values) + (len(right_values) - 1) * stats.tvar(right_values)
+        (len(left_values) - 1) * sample_variance(left_values)
+        + (len(right_values) - 1) * sample_variance(right_values)
     ) / (len(left_values) + len(right_values) - 2)
     pooled_sd = math.sqrt(pooled_variance)
     if pooled_sd == 0:
@@ -1156,15 +1229,26 @@ def paired_t_test(left: Sequence[float], right: Sequence[float]) -> dict[str, An
     right_values = _finite_values(right, label="paired_t_test")
     if len(left_values) != len(right_values):
         raise ValueError("paired_t_test requires equal-length pairs")
-    statistic, p_value = stats.ttest_rel(left_values, right_values)
+    differences = [right_values[index] - left_values[index] for index in range(len(left_values))]
+    mean_difference = math.fsum(differences) / len(differences)
+    difference_variance = sample_variance(differences)
+    if math.isclose(difference_variance, 0.0, abs_tol=1e-24):
+        statistic = None
+        p_value = 0.0 if mean_difference != 0 else None
+        warning_codes = ["PAIRED_T_ZERO_VARIANCE"]
+    else:
+        statistic = mean_difference / math.sqrt(difference_variance / len(differences))
+        p_value = 2.0 * float(stats.t.sf(abs(statistic), len(differences) - 1))
+        warning_codes = []
     return _evidence_result(
         test_id="paired_t_test",
         test_type="paired_t_test",
         nobs=len(left_values),
         statistic=statistic,
         p_value=p_value,
-        effect_size={"effect_size_name": "mean_paired_difference", "value": sum(right_values[i] - left_values[i] for i in range(len(left_values))) / len(left_values)},
+        effect_size={"effect_size_name": "mean_paired_difference", "value": mean_difference},
         assumptions=["valid one-to-one pairing", "approximately normal paired differences"],
+        warnings=warning_codes,
     )
 
 
@@ -1190,9 +1274,20 @@ def variance_and_normality_tests(groups: Mapping[str, Sequence[float]]) -> list[
     if len(arrays) < 2:
         raise ValueError("variance tests require at least two groups")
     combined = [value for values in arrays for value in values]
-    levene_stat, levene_p = stats.levene(*arrays, center="median")
-    bartlett_stat, bartlett_p = stats.bartlett(*arrays)
-    shapiro_stat, shapiro_p = stats.shapiro(combined)
+    zero_variance_group = any(sample_variance(values) == 0 for values in arrays)
+    if zero_variance_group:
+        levene_stat, levene_p = None, None
+        bartlett_stat, bartlett_p = None, None
+    else:
+        levene_stat, levene_p = stats.levene(*arrays, center="median")
+        bartlett_stat, bartlett_p = stats.bartlett(*arrays)
+    if sample_variance(combined) == 0:
+        shapiro_stat, shapiro_p = None, None
+        shapiro_warnings = ["SHAPIRO_ZERO_VARIANCE"]
+    else:
+        shapiro_stat, shapiro_p = stats.shapiro(combined)
+        shapiro_warnings = []
+    variance_warnings = ["ZERO_VARIANCE_GROUP"] if zero_variance_group else []
     return [
         _evidence_result(
             test_id="levene",
@@ -1202,6 +1297,7 @@ def variance_and_normality_tests(groups: Mapping[str, Sequence[float]]) -> list[
             p_value=levene_p,
             effect_size=None,
             assumptions=["independent observations", "groups contain at least two finite values"],
+            warnings=variance_warnings,
         ),
         _evidence_result(
             test_id="bartlett",
@@ -1211,6 +1307,7 @@ def variance_and_normality_tests(groups: Mapping[str, Sequence[float]]) -> list[
             p_value=bartlett_p,
             effect_size=None,
             assumptions=["independent observations", "approximately normal groups"],
+            warnings=variance_warnings,
         ),
         _evidence_result(
             test_id="shapiro_wilk",
@@ -1220,6 +1317,7 @@ def variance_and_normality_tests(groups: Mapping[str, Sequence[float]]) -> list[
             p_value=shapiro_p,
             effect_size=None,
             assumptions=["independent observations", "sample size is within Shapiro-Wilk operating range"],
+            warnings=shapiro_warnings,
         ),
     ]
 

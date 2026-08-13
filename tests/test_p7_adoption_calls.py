@@ -58,6 +58,21 @@ def _glm_frame() -> dict[str, pd.DataFrame]:
     }
 
 
+def _hurdle_negative_binomial_success_case() -> tuple[pd.DataFrame, dict[str, object]]:
+    """Load the frozen, well-conditioned success fixture for generic workflow QA."""
+
+    frame = pd.read_csv(
+        Path(__file__).parent
+        / "fixtures/evaluation/p7/hurdle_negative_binomial_convergent.csv"
+    )
+    return frame, _request(
+        "glm.hurdle_negative_binomial",
+        "frame",
+        {"outcome": "y", "predictors": ["x"]},
+        {"maxiter": 500},
+    )
+
+
 def _matching_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {

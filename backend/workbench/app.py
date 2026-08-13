@@ -11,6 +11,7 @@ Extracted from ``api.py`` in v1.6.10 (D1 decomposition, Phase 4).
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
@@ -48,7 +49,13 @@ from .http.rerun_routes import router as rerun_router
 from .http.runs_routes import router as runs_router
 from .http.statistical_exploration_routes import router as statistical_exploration_router
 
-app = FastAPI(title="Local Econometrics Workbench")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _validate_supported_deployment()
+    yield
+
+
+app = FastAPI(title="Local Econometrics Workbench", lifespan=_lifespan)
 register_error_handlers(app)
 app.state.notebook_capability_bindings = None
 app.state.notebook_execution_gateway = None
@@ -288,7 +295,6 @@ def configure_domain_memory_context_provider(provider: object | None) -> None:
     app.state.domain_memory_context_provider = provider
 
 
-@app.on_event("startup")
 def _validate_supported_deployment() -> None:
     validate_control_plane()
     current_execution_profile()

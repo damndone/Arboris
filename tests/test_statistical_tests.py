@@ -1,4 +1,5 @@
 import math
+import warnings
 
 import pandas as pd
 import pytest
@@ -21,6 +22,22 @@ def test_correlation_reports_pearson_p_value():
     assert row["statistic"] > 0.99
     assert row["p_value"] < 0.001
     assert row["source_id"] == "statistical_tests.correlations.y.x"
+
+
+def test_constant_correlation_is_typed_without_numeric_warning():
+    frame = pd.DataFrame({
+        "constant": [1, 1, 1, 1],
+        "varying": [2, 3, 4, 5],
+    })
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        results = run_statistical_tests(frame, analysis_columns=["constant", "varying"])
+
+    assert caught == []
+    pearson = results["correlations"]["results"][0]
+    assert pearson["statistic"] is None
+    assert pearson["warnings"] == ["CORRELATION_CONSTANT_INPUT"]
 
 
 def test_t_test_reports_group_means_and_p_value():
@@ -100,7 +117,16 @@ def test_zero_variance_welch_t_test_is_skipped():
         "treatment": ["control", "control", "control", "treated", "treated", "treated"],
     })
 
-    results = run_statistical_tests(frame, analysis_columns=["y", "treatment"])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        results = run_statistical_tests(frame, analysis_columns=["y", "treatment"])
+
+    assert caught == []
+    assert results["t_tests"]["results"][0]["warnings"] == ["T_TEST_ZERO_VARIANCE"]
+    bartlett = next(
+        row for row in results["evidence"]["results"] if row["test_type"] == "bartlett"
+    )
+    assert bartlett["warnings"] == ["ZERO_VARIANCE_GROUP"]
 
     for row in results["t_tests"]["results"]:
         for value in row.values():

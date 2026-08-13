@@ -19,6 +19,8 @@ import * as notebookApi from "../notebook/notebookApi";
 import type { GraphResponse } from "../lineage/types";
 import type { HeadSetResponse } from "../lineage/api/graphViewTypes";
 
+const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true };
+
 vi.mock("../capabilities/useCapabilities", () => ({
   useCapabilities: () => ({
     data: {
@@ -95,7 +97,10 @@ function mountAt(initialPath: string) {
   // fall back to the per-run graph (these tests exercise the shell, not the forest).
   vi.spyOn(api, "fetchProjectForest").mockResolvedValue({ legacy: true } as never);
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
+    <MemoryRouter
+      initialEntries={[initialPath]}
+      future={routerFuture}
+    >
       <Routes>
         <Route
           path="*"
@@ -311,7 +316,10 @@ function mountForestAt(initialPath: string) {
     },
   });
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
+    <MemoryRouter
+      initialEntries={[initialPath]}
+      future={routerFuture}
+    >
       <Routes>
         <Route
           path="*"
@@ -356,6 +364,7 @@ describe("WorkbenchRouteContainer", () => {
   it("keeps floating Report review above the Workbench when the view changes", async () => {
     mountForestAt("/?view=graph&tabs=hash_model&active=hash_model");
     await screen.findByTestId("detail-drawer");
+    await screen.findByTestId("analysis-loop-error");
     fireEvent.click(screen.getByTestId("view-tab-report"));
     await screen.findByTestId("report-review-panel");
 
@@ -373,6 +382,7 @@ describe("WorkbenchRouteContainer", () => {
     expect(screen.getByRole("button", { name: "Expand report review" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Expand report review" }));
     fireEvent.click(screen.getByTestId("view-tab-table"));
+    await waitFor(() => expect(screen.queryByTestId("table-view-loading")).not.toBeInTheDocument());
 
     expect(screen.getByTestId("report-review-floating")).toBeInTheDocument();
     expect(
@@ -387,6 +397,7 @@ describe("WorkbenchRouteContainer", () => {
     sessionStorage.removeItem("workbench:node-panel:/proj");
     mountForestAt("/?view=table&tabs=hash_model&active=hash_model");
     await screen.findByTestId("detail-drawer");
+    await screen.findByTestId("analysis-loop-error");
 
     expect(screen.getByRole("button", { name: "Float node panel" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pin node panel" })).toBeInTheDocument();
@@ -419,6 +430,9 @@ describe("WorkbenchRouteContainer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dock node panel" }));
     expect(screen.queryByTestId("node-panel-floating")).not.toBeInTheDocument();
     sessionStorage.removeItem("workbench:node-panel:/proj");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
   });
 
   it("provides four corner resize handles for a floating node panel", async () => {
@@ -866,7 +880,10 @@ describe("WorkbenchRouteContainer", () => {
       },
     });
     render(
-      <MemoryRouter initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}>
+      <MemoryRouter
+        initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}
+        future={routerFuture}
+      >
         <Routes>
           <Route
             path="*"
@@ -911,7 +928,10 @@ describe("WorkbenchRouteContainer", () => {
       },
     });
     render(
-      <MemoryRouter initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}>
+      <MemoryRouter
+        initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}
+        future={routerFuture}
+      >
         <Routes>
           <Route
             path="*"
@@ -971,7 +991,10 @@ describe("WorkbenchRouteContainer", () => {
       },
     });
     render(
-      <MemoryRouter initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}>
+      <MemoryRouter
+        initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}
+        future={routerFuture}
+      >
         <Routes>
           <Route
             path="*"
@@ -1008,6 +1031,7 @@ describe("WorkbenchRouteContainer", () => {
         initialEntries={[
           "/?tab=lineage&pending_source_run_id=run_a&pending_source_model_node_id=model:ols_1&pending_source_op_node_id=model:ols_1",
         ]}
+        future={routerFuture}
       >
         <Routes>
           <Route
@@ -1038,7 +1062,7 @@ describe("WorkbenchRouteContainer", () => {
     );
     vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
     render(
-      <MemoryRouter initialEntries={["/?tab=lineage"]}>
+      <MemoryRouter initialEntries={["/?tab=lineage"]} future={routerFuture}>
         <Routes>
           <Route
             path="*"
@@ -1134,7 +1158,7 @@ describe("WorkbenchRouteContainer", () => {
 
     function mountHome(focusRunId?: string, initialEntry = "/") {
       return render(
-        <MemoryRouter initialEntries={[initialEntry]}>
+        <MemoryRouter initialEntries={[initialEntry]} future={routerFuture}>
           <Routes>
             <Route
               path="*"
@@ -1241,7 +1265,10 @@ describe("WorkbenchRouteContainer", () => {
         return null;
       }
       render(
-        <MemoryRouter initialEntries={["/p/slug/graph?genesis=1"]}>
+        <MemoryRouter
+          initialEntries={["/p/slug/graph?genesis=1"]}
+          future={routerFuture}
+        >
           <Routes>
             <Route
               path="*"
@@ -1636,6 +1663,7 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
     render(
       <MemoryRouter
         initialEntries={["/?tab=lineage&tabs=draft:d1&active=draft:d1"]}
+        future={routerFuture}
       >
         <Routes>
           <Route

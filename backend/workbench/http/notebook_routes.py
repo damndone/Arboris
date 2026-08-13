@@ -44,6 +44,7 @@ from ..agent.notebook.planning_agent import (
     NotebookPlanningAgent,
     NotebookPlanningContractError,
     NotebookPlanningUnavailable,
+    PlanningRefusal,
 )
 from ..llm.config import load_llm_config
 from ..agent.trace import (
@@ -1583,6 +1584,19 @@ async def propose_options_endpoint(
                     with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
                         if _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key) is current_task:
                             _ACTIVE_PLANNING_ATTEMPTS.pop(attempt_key, None)
+            if isinstance(result, PlanningRefusal):
+                _record_planning_terminal_error(
+                    trace,
+                    code="NOTEBOOK_PLAN_REFUSED",
+                    fatal=False,
+                    detail=f"planner refused: {result.reason_code}",
+                )
+                raise WorkbenchAPIError(
+                    status_code=422,
+                    code="NOTEBOOK_PLAN_REFUSED",
+                    message=result.message,
+                    details={"reason_code": result.reason_code},
+                )
             # Each bounded inspection is persisted separately by the service.
             # Persist the planner's final append-only view as well, because the
             # recommendation decision may cite evidence from more than one

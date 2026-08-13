@@ -1,3 +1,4 @@
+import * as React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { vi } from "vitest";
@@ -7,7 +8,16 @@ import { DraftGraphRoute } from "./DraftGraphRoute";
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
-  return { ...actual, useNavigate: vi.fn() };
+  const future = { v7_startTransition: true, v7_relativeSplatPath: true };
+  return {
+    ...actual,
+    MemoryRouter: (props: React.ComponentProps<typeof actual.MemoryRouter>) =>
+      React.createElement(actual.MemoryRouter, {
+        ...props,
+        future: { ...future, ...props.future },
+      }),
+    useNavigate: vi.fn(),
+  };
 });
 
 vi.mock("../api");

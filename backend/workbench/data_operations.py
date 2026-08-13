@@ -739,7 +739,9 @@ def _execute_data_transform(
             raise DataColumnCastValidationError(
                 f"rename.mapping collides with existing columns: {collisions}"
             )
-        return left.rename(columns=dict(mapping), copy=True)
+        # pandas 3.0 keeps Copy-on-Write active and deprecates the rename
+        # ``copy`` keyword; preserve the old eager-copy contract explicitly.
+        return left.rename(columns=dict(mapping)).copy()
     if spec.operation == "aggregate":
         _reject_unknown_parameters(parameters, {"group_by", "aggregations"}, "aggregate")
         group_by = _require_string_list(parameters.get("group_by"), "aggregate.group_by")
@@ -873,7 +875,10 @@ def _execute_data_transform(
             panel_column = _require_non_empty_string(panel_column, "tsset.panel_id_column")
         required_columns = [time_column] + ([panel_column] if panel_column else [])
         _require_columns_exist(left, required_columns, "tsset")
-        converted = pd.to_datetime(left[time_column], errors="coerce")
+        # Explicitly allow heterogeneous user-supplied date spellings. This
+        # keeps pandas from falling back to the deprecated implicit parser
+        # while retaining its per-value coercion semantics.
+        converted = pd.to_datetime(left[time_column], format="mixed", errors="coerce")
         if converted.isna().any():
             raise DataColumnCastValidationError(
                 f"tsset.time_column contains missing or invalid time values: {time_column}"

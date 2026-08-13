@@ -94,6 +94,20 @@ class PlanningResult:
     rounds: int
 
 
+@dataclass(frozen=True)
+class PlanningRefusal:
+    """A typed, terminal refusal that never becomes an executable Draft."""
+
+    reason_code: str
+    message: str
+    inspection_requests: tuple[InspectionRequest, ...]
+    evidence_pack: DataEvidencePackV1
+    submissions: tuple[AgentOptionSubmission, ...] = ()
+    option_drafts: tuple[Any, ...] = ()
+    decision: Any | None = None
+    rounds: int = 0
+
+
 InspectionExecutor = Callable[
     [tuple[InspectionRequest, ...], DataEvidencePackV1],
     DataEvidencePackV1 | Awaitable[DataEvidencePackV1],
@@ -270,6 +284,33 @@ NOTEBOOK_TOOLS: tuple[dict[str, Any], ...] = (
             },
         },
     },
+    {
+        "tool_id": "decline_notebook_plan",
+        "description": (
+            "Decline to propose an executable plan when the request is ambiguous, "
+            "missing required information, asks for unsupported causal inference, "
+            "contains unsafe instructions, or has no eligible capability. This is "
+            "terminal: do not submit a Draft in the same turn."
+        ),
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["reason_code", "message"],
+            "properties": {
+                "reason_code": {
+                    "type": "string",
+                    "enum": [
+                        "ambiguous_request",
+                        "missing_required_information",
+                        "unsupported_causal_claim",
+                        "unsafe_instruction",
+                        "no_eligible_capability",
+                    ],
+                },
+                "message": {"type": "string", "minLength": 1, "maxLength": 2000},
+            },
+        },
+    },
 )
 
 
@@ -308,7 +349,10 @@ def _notebook_tools_for(
 
     if max_options not in {1, 2, 3}:
         raise ValueError("Notebook option limit must be between 1 and 3")
-    inspection_tool, submit_tool = NOTEBOOK_TOOLS
+    tools_by_id = {tool["tool_id"]: tool for tool in NOTEBOOK_TOOLS}
+    inspection_tool = tools_by_id["request_notebook_inspections"]
+    submit_tool = tools_by_id["submit_notebook_option_batch"]
+    decline_tool = tools_by_id["decline_notebook_plan"]
     options_schema = submit_tool["input_schema"]["properties"]["options"]
     bounded_submit_tool = {
         **submit_tool,
@@ -326,8 +370,8 @@ def _notebook_tools_for(
         },
     }
     if not include_inspection:
-        return (bounded_submit_tool,)
-    return (dict(inspection_tool), bounded_submit_tool)
+        return (bounded_submit_tool, dict(decline_tool))
+    return (dict(inspection_tool), bounded_submit_tool, dict(decline_tool))
 
 
 def _strict_mapping(value: Any, label: str) -> Mapping[str, Any]:
@@ -736,7 +780,7 @@ class NotebookPlanningAgent:
         *,
         context: NotebookPlanningContextV1,
         initial_evidence: DataEvidencePackV1,
-    ) -> PlanningResult:
+    ) -> PlanningResult | PlanningRefusal:
         return asyncio.run(self.plan_async(context=context, initial_evidence=initial_evidence))
 
     async def plan_async(
@@ -744,7 +788,7 @@ class NotebookPlanningAgent:
         *,
         context: NotebookPlanningContextV1,
         initial_evidence: DataEvidencePackV1,
-    ) -> PlanningResult:
+    ) -> PlanningResult | PlanningRefusal:
         if self.adapter is None:
             raise NotebookPlanningUnavailable("no model provider is configured")
         interaction_mode = _interaction_mode(context)
@@ -799,7 +843,10 @@ class NotebookPlanningAgent:
                         "requested specification; list only evidence-backed necessary assumptions "
                         "and limitations. "
                     )
-                    + "Use only the two typed Notebook tools. Never invent metrics or executable capability ids. "
+                    + "Use only the three typed Notebook tools. Never invent metrics or executable capability ids. "
+                    "When the request cannot be safely or honestly turned into a registered executable plan, "
+                    "call decline_notebook_plan with one published reason_code and a concise user-facing message; "
+                    "a refusal is terminal and must not be combined with a submission. "
                     "Inspection ids are exactly profile.v1, quality.v1, time_index.v1, sample.v1, "
                     "or forecast_rolling_origin.v1; use dataset:active for a dataset projection and "
                     "run:active for a run projection. Treat completed evidence already supplied in "
@@ -1145,6 +1192,27 @@ class NotebookPlanningAgent:
                         correction_number=contract_corrections,
                     )
                 continue
+            if tool_id == "decline_notebook_plan":
+                try:
+                    return _parse_planning_refusal(
+                        arguments,
+                        requests_seen=tuple(requests_seen),
+                        evidence=evidence,
+                        rounds=round_number,
+                    )
+                except NotebookPlanningContractError as error:
+                    if contract_corrections >= self.max_contract_corrections:
+                        raise
+                    contract_corrections += 1
+                    self._append_contract_correction(
+                        messages,
+                        call=call,
+                        error=error,
+                        context=context,
+                        evidence=evidence,
+                        correction_number=contract_corrections,
+                    )
+                    continue
             if tool_id != "submit_notebook_option_batch":
                 error = NotebookPlanningContractError(f"unknown Notebook planning tool: {tool_id}")
                 if contract_corrections >= self.max_contract_corrections:
@@ -1411,7 +1479,9 @@ class NotebookPlanningAgent:
             remediation = (
                 "Do not answer in prose. You must call exactly one declared Notebook "
                 "tool: request_notebook_inspections when more evidence is required, "
-                "or submit_notebook_option_batch when the bounded evidence is enough."
+                "submit_notebook_option_batch when the bounded evidence is enough, or "
+                "decline_notebook_plan when the request cannot be safely or honestly "
+                "become an executable plan."
             )
         elif message == "option tool arguments must contain only options":
             remediation = (
@@ -1741,16 +1811,6 @@ class NotebookPlanningAgent:
             model_config=(
                 {
                     **self._planning_request_config(),
-                    **(
-                        {
-                            "tool_choice": {
-                                "type": "function",
-                                "function": {"name": "submit_notebook_option_batch"},
-                            }
-                        }
-                        if submit_only and self._supports_named_tool_choice()
-                        else {}
-                    ),
                 }
             ),
         )
@@ -2699,6 +2759,44 @@ def _parse_submissions(
     return tuple(_submission(item) for item in payload["options"])
 
 
+def _parse_planning_refusal(
+    value: Any,
+    *,
+    requests_seen: tuple[InspectionRequest, ...],
+    evidence: DataEvidencePackV1,
+    rounds: int,
+) -> PlanningRefusal:
+    """Parse the closed refusal envelope without accepting provider metadata."""
+
+    payload = _strict_mapping(value, "planning refusal arguments")
+    if set(payload) != {"reason_code", "message"}:
+        raise NotebookPlanningContractError(
+            "planning refusal fields must contain only reason_code and message"
+        )
+    reason_code = _strict_string(payload["reason_code"], "planning refusal reason_code")
+    reason_codes = next(
+        tool["input_schema"]["properties"]["reason_code"]["enum"]
+        for tool in NOTEBOOK_TOOLS
+        if tool["tool_id"] == "decline_notebook_plan"
+    )
+    if reason_code not in reason_codes:
+        raise NotebookPlanningContractError(
+            "planning refusal reason_code is not published: " + reason_code
+        )
+    message = _strict_string(payload["message"], "planning refusal message")
+    if len(message) > 2000:
+        raise NotebookPlanningContractError(
+            "planning refusal message must be at most 2000 characters"
+        )
+    return PlanningRefusal(
+        reason_code=reason_code,
+        message=message,
+        inspection_requests=requests_seen,
+        evidence_pack=evidence,
+        rounds=rounds,
+    )
+
+
 __all__ = [
     "AgentOptionSubmission",
     "NOTEBOOK_TOOLS",
@@ -2706,5 +2804,6 @@ __all__ = [
     "NotebookPlanningContractError",
     "NotebookNoEligibleCapability",
     "NotebookPlanningUnavailable",
+    "PlanningRefusal",
     "PlanningResult",
 ]

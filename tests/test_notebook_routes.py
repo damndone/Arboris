@@ -18,6 +18,7 @@ from tests.test_notebook_support import make_project, make_run, model_rerun_prop
 from workbench.api import app
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
 from workbench.agent.notebook.evidence import DataEvidencePackV1, EvidenceRecord
+from workbench.agent.notebook.planning_agent import PlanningRefusal
 from workbench.agent.notebook.materialization import NotebookOptionMaterializer
 from workbench.agent.notebook.store import NOTEBOOK_FILENAME
 from workbench.agent.trace import TraceWriter
@@ -1520,6 +1521,60 @@ def test_notebook_route_uses_server_planner_when_drafts_are_omitted(
         "fatal": True,
         "detail": "notebook planning failed",
     }
+
+
+def test_notebook_route_returns_typed_planning_refusal_without_persisting_options(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    notebook = _create(client, project)
+    refusal = PlanningRefusal(
+        reason_code="unsafe_instruction",
+        message="I cannot turn that request into a safe executable plan.",
+        inspection_requests=(),
+        evidence_pack=DataEvidencePackV1("run:run_001", ()),
+        rounds=1,
+    )
+
+    class RefusingPlanningAgent:
+        async def plan_async(self, *, context, initial_evidence):
+            del context, initial_evidence
+            return refusal
+
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes._planning_agent",
+        lambda *args, **kwargs: RefusingPlanningAgent(),
+    )
+    response = client.post(
+        f"/notebooks/{notebook['notebook_id']}/options/propose",
+        params={"project_root": str(project)},
+        json={"count": 3},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == {
+        "code": "NOTEBOOK_PLAN_REFUSED",
+        "message": refusal.message,
+        "details": {"reason_code": "unsafe_instruction"},
+    }
+    trace_id = NotebookService(project).store.ensure_trace_id(notebook["notebook_id"])
+    terminal = [
+        event
+        for event in TraceWriter.replay(project, trace_id)
+        if event["event_type"] == "operation.error/v1"
+    ]
+    assert terminal[-1]["payload"] == {
+        "code": "NOTEBOOK_PLAN_REFUSED",
+        "fatal": False,
+        "detail": "planner refused: unsafe_instruction",
+    }
+    snapshot = client.get(
+        f"/notebooks/{notebook['notebook_id']}/options",
+        params={"project_root": str(project)},
+    )
+    assert snapshot.status_code == 200, snapshot.text
+    assert snapshot.json()["options"] == []
 
 
 def test_notebook_planning_attempt_can_be_cancelled_without_persisting_options(

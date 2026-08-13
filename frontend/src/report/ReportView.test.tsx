@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeOwnerResolutionSeedFixture } from "../lineage/api/nodeOperationContext";
 import { loadAiActivity } from "../aiActivity/aiActivityLog";
@@ -645,8 +645,9 @@ describe("ReportView", () => {
     expect(mockGenerate.current).not.toHaveBeenCalled();
   });
 
-  it("starts with a generic report prompt and separates regression from report evidence", () => {
+  it("starts with a generic report prompt and separates regression from report evidence", async () => {
     render(<ReportView projectRoot="/tmp/projA" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled());
 
     const reportView = screen.getByTestId("report-view");
     expect(reportView.style.boxSizing).toBe("border-box");
@@ -779,8 +780,9 @@ describe("ReportView curation & history (C-3)", () => {
     });
   });
 
-  it("groups evidence rows and keeps raw fields behind the evidence details disclosure", () => {
+  it("groups evidence rows and keeps raw fields behind the evidence details disclosure", async () => {
     render(<ReportView projectRoot="/tmp/projA" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled());
 
     expect(screen.getByText("Model and estimation")).toBeInTheDocument();
     expect(screen.getByText("Model and estimation").closest("details")).not.toHaveAttribute("open");
@@ -820,8 +822,9 @@ describe("ReportView curation & history (C-3)", () => {
     );
   });
 
-  it("there is no UI to edit a fact's value (omit-only curation)", () => {
+  it("there is no UI to edit a fact's value (omit-only curation)", async () => {
     render(<ReportView projectRoot="/tmp/projA" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled());
     const preview = screen.getByTestId("report-fact-preview");
     // checkboxes only — no text inputs anywhere in the fact table
     expect(preview.querySelectorAll("input[type=text], textarea").length).toBe(0);
@@ -829,11 +832,20 @@ describe("ReportView curation & history (C-3)", () => {
 
   it("generated reports persist to history and reopen from it", async () => {
     render(<ReportView projectRoot="/tmp/projA" />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled());
     fireEvent.click(screen.getByRole("checkbox", { name: "Include fact c1" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled(),
     );
-    fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     await waitFor(() => expect(screen.getByTestId("report-history")).toBeInTheDocument());
 
     // back to fact table, then reopen the historical report
@@ -850,7 +862,7 @@ describe("ReportView curation & history (C-3)", () => {
 
     // history survives a remount (localStorage)
     const again = render(<ReportView projectRoot="/tmp/projA" />);
-    expect(again.getAllByTestId("report-history").length).toBeGreaterThan(0);
+    await waitFor(() => expect(again.getAllByTestId("report-history").length).toBeGreaterThan(0));
   });
 
   it("starts a new report with all facts included", async () => {

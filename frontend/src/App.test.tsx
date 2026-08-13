@@ -764,17 +764,23 @@ test("HF3: clicking a history row navigates to /runs/:id with tab=overview", asy
   expect(screen.queryByRole("heading", { name: /run history/i })).not.toBeInTheDocument();
 });
 
-test("HF2: /runs/:id?tab=overview does NOT apply lineage dark shell", () => {
+test("HF2: /runs/:id?tab=overview does NOT apply lineage dark shell", async () => {
   stubRunDetailAndArtifacts("run-hf2");
   renderAt("/runs/run-hf2?project_root=/tmp/demo&tab=overview");
+  await waitFor(() => {
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+  });
   const shell = document.querySelector("main.workbench-shell");
   expect(shell).not.toBeNull();
   expect(shell?.classList.contains("workbench-shell--lineage")).toBe(false);
 });
 
-test("HF2: /runs/:id?tab=lineage DOES apply lineage dark shell", () => {
+test("HF2: /runs/:id?tab=lineage DOES apply lineage dark shell", async () => {
   stubRunDetailAndArtifacts("run-hf2");
   renderAt("/runs/run-hf2?project_root=/tmp/demo&tab=lineage");
+  await waitFor(() => {
+    expect(screen.getByRole("tab", { name: "Workbench" })).toBeInTheDocument();
+  });
   const shell = document.querySelector("main.workbench-shell");
   expect(shell).not.toBeNull();
   expect(shell?.classList.contains("workbench-shell--lineage")).toBe(true);
@@ -894,6 +900,16 @@ test("/p/:slug/graph on a zero-run project shows the empty canvas with the genes
 });
 
 test("project Home activates the Home tab instead of Workbench", async () => {
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+    jsonResponse({
+      schema_version: 2,
+      heads: [],
+      nodes: [],
+      edges: [],
+      families: [],
+      legacy: false,
+    }),
+  );
   const { rootToSlug } = await import("./workbench/projectSlug");
   renderAt(`/p/${rootToSlug("/tmp/p1")}/graph?view=home`);
 
@@ -908,6 +924,9 @@ test("project Home activates the Home tab instead of Workbench", async () => {
   expect(document.querySelector("main.workbench-shell")).toHaveClass(
     "workbench-shell--lineage",
   );
+  await waitFor(() => {
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
+  });
 });
 
 test("project navigation places a Settings gear immediately before the theme control and opens Settings", async () => {

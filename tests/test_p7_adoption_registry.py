@@ -28,6 +28,72 @@ def test_frozen_p7_declarations_have_one_typed_adapter_each() -> None:
         assert callable(operation.validate_result)
 
 
+def test_family_handler_maps_cover_live_operations_without_orphan_entries() -> None:
+    """Family dispatch must be inspectable and derived from the live declarations."""
+
+    from workbench.agent.p7_pack_adapters import P7_FAMILY_HANDLER_MAPS
+    from workbench.agent.p7_pack_registry import P7_FAMILY_DECLARATIONS
+
+    declared_by_family = {
+        declaration.pack_family: set(declaration.operation_ids)
+        for declaration in P7_FAMILY_DECLARATIONS
+    }
+    assert set(P7_FAMILY_HANDLER_MAPS) == set(declared_by_family)
+    for family, operation_ids in declared_by_family.items():
+        handlers = P7_FAMILY_HANDLER_MAPS[family]
+        assert set(handlers) == operation_ids
+        assert all(
+            callable(handler.validate_request)
+            and callable(handler.execute)
+            and callable(handler.validate_result)
+            for handler in handlers.values()
+        )
+
+
+def test_family_handler_map_rejects_unknown_operation_and_family() -> None:
+    from workbench.agent.p7_pack_adapters import P7PackAdapterError, p7_family_adapter
+
+    with pytest.raises(P7PackAdapterError, match="no handler"):
+        p7_family_adapter("categorical").execute(
+            None,
+            {
+                "operation_id": "categorical.not_published",
+                "input_mode": "typed",
+                "column_bindings": {},
+                "options": {},
+            },
+        )
+    with pytest.raises(P7PackAdapterError, match="no typed adapter"):
+        p7_family_adapter("family.not_published")
+
+
+def test_family_handler_maps_follow_injected_live_family_declaration(monkeypatch) -> None:
+    """Adding a declared operation expands map coverage without a second ID list."""
+
+    import workbench.agent.p7_pack_registry as registry_module
+    from workbench.agent.p7_pack_adapters import build_p7_family_handler_maps
+    from workbench.agent.p7_pack_registry import P7_FAMILY_DECLARATIONS
+
+    categorical = next(
+        declaration
+        for declaration in P7_FAMILY_DECLARATIONS
+        if declaration.pack_family == "categorical"
+    )
+    injected = replace(
+        categorical,
+        operation_ids=categorical.operation_ids | {"categorical.future_for_map_test"},
+    )
+    monkeypatch.setattr(
+        registry_module,
+        "P7_FAMILY_DECLARATIONS",
+        tuple(injected if item is categorical else item for item in P7_FAMILY_DECLARATIONS),
+    )
+
+    maps = build_p7_family_handler_maps()
+
+    assert "categorical.future_for_map_test" in maps["categorical"]
+
+
 def test_registry_rejects_duplicate_or_missing_adapter_declarations() -> None:
     """The registry must not silently overwrite or omit an operation."""
 

@@ -17,6 +17,7 @@ import { RecentProjectsPanel } from "./RecentProjectsPanel";
 export function LauncherRoute() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [modalOpen, setModalOpen] = useState(false);
   const recents = listRecents();
 
   // v1.6.12 (V10): `/` jumps straight into the last project and `?home=1`
@@ -27,7 +28,6 @@ export function LauncherRoute() {
     const view = searchParams.get("home") === "1" ? "?view=home" : "";
     return <Navigate replace to={`/p/${rootToSlug(lastProject.root)}/graph${view}`} />;
   }
-  const [modalOpen, setModalOpen] = useState(false);
 
   function goToProject(root: string, opts: { openGenesis?: boolean } = {}) {
     touchRecent(root);

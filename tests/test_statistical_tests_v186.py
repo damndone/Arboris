@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 import pandas as pd
+import warnings
 import workbench.statistical_tests as statistical_tests
 
 from workbench.statistical_tests import (
@@ -23,6 +24,15 @@ GROUPS = {
     "treatment_a": [2.0, 2.1, 1.9, 2.2, 2.0],
     "treatment_b": [3.0, 3.1, 2.9, 3.2, 3.0],
 }
+
+
+def test_cohens_d_rejects_constant_groups_without_numeric_warning() -> None:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(ValueError, match="non-constant groups"):
+            cohens_d([1.0, 1.0, 1.0], [2.0, 2.0, 2.0])
+
+    assert caught == []
 
 
 def assert_evidence_shape(result: dict[str, object]) -> None:
@@ -61,9 +71,14 @@ def test_effect_sizes_are_typed_and_nonzero_for_known_difference() -> None:
 
 
 def test_one_sample_paired_and_signed_rank_tests_share_evidence_schema() -> None:
-    one = one_sample_t_test([1.0, 1.2, 0.8, 1.1], population_mean=0.0)
-    paired = paired_t_test([1.0, 1.1, 0.9, 1.2], [1.2, 1.3, 1.1, 1.4])
-    signed = wilcoxon_signed_rank([1.0, 1.1, 0.9, 1.2], [1.2, 1.3, 1.1, 1.4])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        one = one_sample_t_test([1.0, 1.2, 0.8, 1.1], population_mean=0.0)
+        paired = paired_t_test([1.0, 1.1, 0.9, 1.2], [1.2, 1.3, 1.1, 1.4])
+        signed = wilcoxon_signed_rank([1.0, 1.1, 0.9, 1.2], [1.2, 1.3, 1.1, 1.4])
+
+    assert caught == []
+    assert paired["warnings"] == ["PAIRED_T_ZERO_VARIANCE"]
 
     for result in (one, paired, signed):
         assert_evidence_shape(result)

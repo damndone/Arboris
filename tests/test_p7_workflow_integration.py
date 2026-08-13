@@ -9,7 +9,7 @@ import pandas as pd
 
 from workbench.lineage.run_inputs import write_run_inputs
 from workbench.lineage.upload_store import store_upload_bytes
-from tests.test_p7_adoption_calls import _cases
+from tests.test_p7_adoption_calls import _cases, _hurdle_negative_binomial_success_case
 from tests.test_data_column_cast import _source_project
 from workbench.agent.workflow import WorkflowExecutor, compile_workflow
 from workbench.agent.workflow_runtime import (
@@ -355,6 +355,59 @@ def test_every_registered_p7_operation_completes_through_compiled_workflow(tmp_p
         except Exception as exc:  # report all unreachable runtime calls together
             failures.append(f"{operation_id}: {type(exc).__name__}: {exc}")
     assert not failures, "P7 compiled workflow calls failed:\n" + "\n".join(failures)
+
+
+def test_hurdle_negative_binomial_success_fixture_completes_generic_workflow(
+    tmp_path,
+) -> None:
+    """The Hurdle NB operation has a verified success path as well as its failure fixture."""
+
+    from workbench.agent.p7_pack_registry import p7_pack_registry
+
+    frame, request = _hurdle_negative_binomial_success_case()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    operation_id = request["operation_id"]
+    step_id = "hurdle_negative_binomial_success"
+    draft = compile_workflow(
+        workflow_id="wf-p7-hurdle-negative-binomial-success",
+        target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
+        preconditions={
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": "sha256:p7-hurdle-negative-binomial-success",
+            "active_head_run_id": run_id,
+            "owner_resolution": "single_candidate",
+        },
+        steps=[
+            {
+                "step_id": step_id,
+                "operation_id": operation_id,
+                "spec": {
+                    "input_mode": request["input_mode"],
+                    "column_bindings": request["column_bindings"],
+                    "options": request["options"],
+                },
+            }
+        ],
+        available_columns=list(frame.columns),
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft,
+        build_workflow_step_executor(project, draft),
+    )
+
+    assert state.status == "completed", state.steps[step_id].error
+    assert state.steps[step_id].artifact_ids
+    operation = p7_pack_registry.get(operation_id)
+    operation.validate(request)
+    result = operation.execute(frame, request)
+    operation.validate_result(result)
+    assert result["result"]["status"] == "completed"
+    assert result["result"]["inference"]["positive_count"] == {
+        "standard_error_method": "bfgs_inverse_hessian_approximation",
+        "p_value_method": "normal_wald_approximation",
+        "p_value_status": "approximate",
+    }
 
 
 def test_p7_step_composes_with_model_genesis_in_one_workflow(tmp_path) -> None:

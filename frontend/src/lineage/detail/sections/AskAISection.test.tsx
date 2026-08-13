@@ -87,12 +87,17 @@ describe("AskAISection", () => {
     vi.unstubAllEnvs();
   });
 
-  it("is visible by default when no opt-out flag is configured", () => {
+  it("is visible by default when no opt-out flag is configured", async () => {
     vi.unstubAllEnvs();
     const seed = makeOwnerResolutionSeedFixture();
     renderAskAISection(seed.activeHeadRunId);
 
     expect(screen.getByTestId("ask-ai-section")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("llm-provider-badge")).toHaveTextContent(
+        "deepseek-v4-flash",
+      );
+    });
   });
 
   it("can be explicitly disabled for deployments without Ask AI", () => {
@@ -367,7 +372,7 @@ describe("AskAISection", () => {
     expect(calls[calls.length - 1][1]).toContain('"data_profile.json"');
   });
 
-  it("collapses long artifact lists into a categorized summary", () => {
+  it("collapses long artifact lists into a categorized summary", async () => {
     const seed = makeOwnerResolutionSeedFixture();
     renderAskAISection(seed.activeHeadRunId, (node) => {
       node.artifacts = [
@@ -393,6 +398,11 @@ describe("AskAISection", () => {
     expect(screen.getByTestId("ask-ai-explain-statistical_exploration_summary.json")).toBeInTheDocument();
     expect(screen.getByTestId("ask-ai-explain-statistical_exploration_corr.xlsx")).toBeInTheDocument();
     expect(screen.getByTestId("ask-ai-explain-workflow_report.pdf")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("llm-provider-badge")).toHaveTextContent(
+        "deepseek-v4-flash",
+      );
+    });
   });
 
   it("shows the read-only LLM provider badge with the configured model (A4)", async () => {
