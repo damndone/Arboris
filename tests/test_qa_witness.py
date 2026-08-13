@@ -255,26 +255,19 @@ def test_witness_verifier_provider_is_optional_but_invalid_specs_fail_closed() -
         load_witness_verifier("not-a-provider-spec")
 
 
-def test_configured_remote_provider_is_selected_without_a_cli_spec(monkeypatch) -> None:
-    from workbench.qa.remote_witness import RemoteWitnessVerifier
+def test_deferred_remote_provider_configuration_does_not_select_a_provider(
+    monkeypatch,
+) -> None:
+    """Local-only mode ignores deferred remote configuration."""
+
     from workbench.qa.witness import load_witness_verifier
 
     monkeypatch.setenv("WORKBENCH_WITNESS_PROVIDER_URL", "https://witness.example/v1/verify")
     monkeypatch.setenv("WORKBENCH_WITNESS_PROVIDER_ID", "witness.example")
+    monkeypatch.setenv("WORKBENCH_WITNESS_PROVIDER_TOKEN", "deferred-token")
+    monkeypatch.setenv("WORKBENCH_WITNESS_PROVIDER_TIMEOUT_SECONDS", "8")
 
-    verifier = load_witness_verifier(None)
-
-    assert isinstance(verifier, RemoteWitnessVerifier)
-
-
-def test_partial_remote_provider_configuration_fails_closed(monkeypatch) -> None:
-    from workbench.qa.witness import WitnessUnavailable, load_witness_verifier
-
-    monkeypatch.setenv("WORKBENCH_WITNESS_PROVIDER_URL", "https://witness.example/v1/verify")
-    monkeypatch.delenv("WORKBENCH_WITNESS_PROVIDER_ID", raising=False)
-
-    with pytest.raises(WitnessUnavailable, match="URL and provider ID"):
-        load_witness_verifier(None)
+    assert load_witness_verifier(None) is None
 
 
 def test_deferred_world_id_configuration_does_not_select_a_provider(monkeypatch) -> None:

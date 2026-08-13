@@ -15,7 +15,6 @@ import hashlib
 import importlib
 import json
 import math
-import os
 import re
 from typing import Any, Literal, Mapping, Protocol
 
@@ -568,27 +567,15 @@ def load_witness_verifier(spec: str | None) -> WitnessVerifier | None:
     """Load an explicitly selected trusted provider adapter.
 
     The default is no provider, which is intentionally unusable for
-    witness-attested completion.  When the complete remote provider
-    configuration is present, it is selected explicitly by that configuration
-    even if the CLI spec is omitted.  The adapter spec is an operator-controlled
+    witness-attested completion.  The adapter spec is an operator-controlled
     ``module:factory`` reference; it is a provider integration seam, not a
-    claim that local module loading establishes human identity.
+    claim that local module loading establishes human identity.  Provider
+    configuration is deliberately not discovered from ambient environment
+    variables; a future deployment must select and review its adapter
+    explicitly.
     """
 
     if spec is None:
-        generic_configured = any(
-            os.environ.get(name) is not None
-            for name in (
-                "WORKBENCH_WITNESS_PROVIDER_URL",
-                "WORKBENCH_WITNESS_PROVIDER_ID",
-                "WORKBENCH_WITNESS_PROVIDER_TOKEN",
-                "WORKBENCH_WITNESS_PROVIDER_TIMEOUT_SECONDS",
-            )
-        )
-        if generic_configured:
-            from workbench.qa.remote_witness import from_environment
-
-            return from_environment()
         return None
     if not isinstance(spec, str) or spec.count(":") != 1:
         raise WitnessUnavailable(

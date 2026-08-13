@@ -6,18 +6,18 @@
 
 ## Final status
 
-local_only_provider_deferred
+local_only_core_only
 
 ## Metrics
 
-- Failure frequency: 13/52 (25.0%; 25.0 per 100 events)
-- Repeat rate: 0/13 (0.0%)
-- Recurrence rate: 0/13 (0.0%)
-- MTTR: median=0 ms (sample=11; unresolved=2)
+- Failure frequency: 14/55 (25.5%; 25.5 per 100 events)
+- Repeat rate: 0/14 (0.0%)
+- Recurrence rate: 0/14 (0.0%)
+- MTTR: median=0 ms (sample=12; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/31 (0.0%)
+- Gate waste rate: 0/32 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/2)
 
@@ -32,6 +32,7 @@ local_only_provider_deferred
 - #42 2026-08-11T02:34:58.000Z `world_id_exact_payload_binding`; cause_status: `known`; cause: The World ID adapter derived the proof action from challenge_digest only, so a valid proof could be reused with altered observation fields in the detached browser witness payload.; resolution: `resolved`; lesson: External human identity evidence must bind to the complete immutable browser observation payload, not only to its challenge field.
 - #45 2026-08-11T03:20:00.000Z `report_export_curated_snapshot_mismatch`; cause_status: `known`; cause: The persisted Report record retained the full evidence snapshot and excluded figure list, but the export endpoint revalidated and rendered the uncurated snapshot instead of applying the same inclusion boundary used at save time.; resolution: `resolved`; lesson: Every persisted evidence snapshot must apply its curation boundary consistently during validation, identity checks, and export rendering.
 - #50 2026-08-11T03:53:20.000Z `p7_manifest_init_short_sha_rejected`; cause_status: `known`; cause: The final manifest init command supplied a short Git SHA, while the runner requires the complete current checkout SHA before it will write a manifest.; resolution: `resolved`; lesson: Always read and pass the complete current Git SHA to write-once acceptance manifest initialization.
+- #53 2026-08-11T07:44:11.000Z `witness_ledger_replay_bypass`; cause_status: `known`; cause: Persisted browser witness events trusted their stored witness trust level during ledger replay instead of re-verifying the provider decision.; resolution: `resolved`; lesson: Persisted trust levels are claims to revalidate, not authority; replay must fail closed without provider verification.
 
 ## All errors
 
@@ -65,6 +66,7 @@ local_only_provider_deferred
 - `shared-recipe-input-preflight`: occurrences=1; cause_status: `known`; root cause: The real upload-only Notebook path reached confirmation with a short ETS proposal before the shared Recipe input gate was wired into admission; the server correctly exposed ETS_INSUFFICIENT_OBSERVATIONS instead of executing it.; solution: `resolved`
 - `upload-only-workflow-source-boundary`: occurrences=1; cause_status: `known`; root cause: After the first Notebook correction, upload-only planning had no server-pinned workflow source for operation.multi_step and the planner surfaced that boundary instead of inventing one.; solution: `resolved`
 - `witness-independent-result-chain`: occurrences=1; cause_status: `known`; root cause: P7 ledger witness verification previously compared the provider attestation's durable-chain digest with itself, so a direct witness completion could pass without an independently collected result chain.; solution: `resolved`
+- `witness-ledger-replay-guard`: occurrences=1; cause_status: `known`; root cause: Persisted browser witness events trusted their stored witness trust level during ledger replay instead of re-verifying the provider decision.; solution: `resolved`
 - `world-id-exact-payload-binding`: occurrences=1; cause_status: `known`; root cause: The World ID adapter derived the proof action from challenge_digest only, so a valid proof could be reused with altered observation fields in the detached browser witness payload.; solution: `resolved`
 
 ## Added tests
@@ -87,6 +89,7 @@ local_only_provider_deferred
 - `shared-recipe-input-preflight`: line experience occurrence(s)=1
 - `upload-only-workflow-source-boundary`: line experience occurrence(s)=1
 - `witness-independent-result-chain`: line experience occurrence(s)=1
+- `witness-ledger-replay-guard`: line experience occurrence(s)=1
 - `world-id-exact-payload-binding`: line experience occurrence(s)=1
 
 ## Future guidance
@@ -99,6 +102,7 @@ local_only_provider_deferred
 - Every persisted evidence snapshot must apply its curation boundary consistently during validation, identity checks, and export rendering.
 - External human identity evidence must bind to the complete immutable browser observation payload, not only to its challenge field.
 - Fail-closed materialization errors need a tested, explicit recovery action that asks the agent to replan; the UI must not hide or downgrade the owner Recipe rejection.
+- Persisted trust levels are claims to revalidate, not authority; replay must fail closed without provider verification.
 - Planner correction must distinguish an unavailable workflow source from an unavailable capability and offer a contractible alternative without fabricating a result.
 - Provider-specific reasoning and output controls must be centralized at the wire adapter and reused by every long-form consumer.
 - Published workflow schemas must describe the runtime policy exactly; unsupported fields must be rejected at declaration time rather than invited into Agent-generated requests.
@@ -161,3 +165,6 @@ local_only_provider_deferred
 - #50: `de5f6071-8293-4abc-d4e5-f567890abcde` | 2026-08-11T03:53:20.000Z | FAILURE/p7_manifest_init_short_sha_rejected | incident=`de5f6071-8293-4abc-d4e5-f567890abcde` | lesson_key=`p7-manifest-requires-full-git-sha` | event_sha256=`7e1148b2b5c0dd6f13d4166ef56e73608833844c7b79e4367592c51f7ccf516b`
 - #51: `ef607182-93a4-4bcd-e5f6-67890abcdef1` | 2026-08-11T03:53:56.000Z | GATE/p7_final_batch_execution_after_evidence_commit | incident=`ef607182-93a4-4bcd-e5f6-67890abcdef1` | lesson_key=`p7-batch-after-final-evidence-commit` | event_sha256=`9c7ae2d0cb981b7cc81c20f0a694590734d6f533b8f67f21d815a7ef6146dbb8`
 - #52: `c1f2a3b4-5d6e-47f8-9012-3a4b5c6d7e8f` | 2026-08-11T06:24:40.000Z | STATE_CHANGE/world_id_provider_deferred | incident=`d2e3f4a5-b6c7-48d9-0123-4e5f6a7b8c9d` | lesson_key=`local-only-witness-scope` | event_sha256=`794d687e13100e32a4ed51cf992a24501ff4ece382d092bcb5b04e70ee4ed6f8`
+- #53: `3d7a9c1e-5f20-4b68-8a14-2e6d0f9b3c5a` | 2026-08-11T07:44:11.000Z | FAILURE/witness_ledger_replay_bypass | incident=`4e8b1c2d-6f30-4a79-9c15-3d7e0b2f6a84` | lesson_key=`witness-ledger-replay-guard` | event_sha256=`a0d761635794cbded01b0f974315efe9a4b81759c98ba327e5162babe884668d`
+- #54: `5f9b2d6e-7a31-4c80-9e24-1b6d3f8a0c52` | 2026-08-11T07:44:11.000Z | STATE_CHANGE/local_only_witness_core_only | incident=`6a2c4e8f-1b73-4d90-9e25-7f0c3a5b8d16` | lesson_key=`local-only-witness-core-boundary` | event_sha256=`74420042c90f8f06cbf7b5f1eb3b9e2f5dd2c25da49c98ceed5983152317185f`
+- #55: `7a1b2c3d-4e5f-4678-90ab-cdef12345678` | 2026-08-11T08:02:53.000Z | GATE/full_gate_host_sandbox_limited | incident=`8b2c3d4e-5f60-4789-a1b2-cdef23456789` | lesson_key=`full-gate-host-sandbox-boundary` | event_sha256=`78ce89c2cbab3839ab51338375310acb852285e51be082a4273bce0371c75923`

@@ -2210,6 +2210,113 @@ def test_witness_attested_completion_requires_provider_verification_and_is_label
     assert state.verification_status == "VERIFIED"
 
 
+def test_replayed_witness_trust_cannot_be_promoted_by_editing_the_ledger(
+    tmp_path,
+) -> None:
+    """A local ledger rewrite cannot upgrade a provider trust decision."""
+
+    from workbench.qa.p7_acceptance import (
+        AttemptLedger,
+        AttemptLedgerError,
+        _canonical_json,
+        _sha256,
+    )
+    from workbench.qa.witness import BrowserWitnessAttestation, WitnessChallenge
+
+    class TestVerifier:
+        human_identity_verified = False
+
+        def verify(self, *, key_id: str, payload: bytes, signature: str) -> bool:
+            expected = hashlib.sha256(
+                b"test-only-secret:"
+                + key_id.encode("utf-8")
+                + b":"
+                + payload
+            ).hexdigest()
+            return signature == expected
+
+    ledger = AttemptLedger(
+        tmp_path / "attempts.jsonl",
+        _ready_manifest(tmp_path),
+        witness_verifier=TestVerifier(),
+    )
+    ledger.start_attempt("missingness.profile", occurred_at=100.0)
+    authority = ledger.completion_authority("missingness.profile")
+    challenge = WitnessChallenge.create(
+        manifest_digest=authority.manifest_digest,
+        submission_id=authority.submission_id,
+        attempt_no=authority.attempt_no,
+        operation_ids_digest=authority.operation_ids_digest,
+        notebook_id="nb_acceptance",
+        option_id="opt_acceptance",
+        option_revision=1,
+        attempt_started_at=authority.attempt_started_at,
+        issued_at=authority.attempt_started_at,
+        expires_at=authority.attempt_started_at + 86400.0,
+    )
+    placeholder = BrowserWitnessAttestation.create(
+        challenge=challenge,
+        browser_session_id="browser_session_acceptance",
+        confirmation_recorded_at="1970-01-01T00:01:40.200000+00:00",
+        observed_url="http://127.0.0.1:5189/notebook?project_root=%2Ftmp%2Fproject",
+        confirmation_control_name="Confirm workflow",
+        dom_snapshot_sha256="d" * 64,
+        durable_chain_sha256="e" * 64,
+        key_id="test-witness-key",
+        signature="placeholder",
+    )
+    signature = hashlib.sha256(
+        b"test-only-secret:test-witness-key:" + placeholder.signing_payload()
+    ).hexdigest()
+    attestation = BrowserWitnessAttestation.create(
+        challenge=challenge,
+        browser_session_id=placeholder.browser_session_id,
+        confirmation_recorded_at=placeholder.confirmation_recorded_at,
+        observed_url=placeholder.observed_url,
+        confirmation_control_name=placeholder.confirmation_control_name,
+        dom_snapshot_sha256=placeholder.dom_snapshot_sha256,
+        durable_chain_sha256=placeholder.durable_chain_sha256,
+        key_id=placeholder.key_id,
+        signature=signature,
+    )
+    evidence = replace(
+        _completion_evidence("missingness.profile", authority=authority),
+        evidence_kind="browser_witness_attested",
+        confirmation_id=attestation.attestation_digest,
+        durable_chain_sha256=attestation.durable_chain_sha256,
+        witness_attestation=attestation.to_dict(),
+    )
+    ledger.record_status(
+        "missingness.profile",
+        1,
+        "completed",
+        occurred_at=101.0,
+        evidence=evidence,
+    )
+
+    events = ledger.events()
+    persisted = replace(
+        events[-1],
+        evidence=replace(
+            events[-1].evidence,
+            witness_trust_level="human_identity_verified",
+        ),
+        record_hash="pending",
+    )
+    persisted = replace(persisted, record_hash=_sha256(persisted._unsigned_dict()))
+    ledger.path.write_bytes(
+        _canonical_json(events[0].to_dict()) + _canonical_json(persisted.to_dict())
+    )
+
+    reloaded = AttemptLedger(
+        ledger.path,
+        ledger.manifest,
+        witness_verifier=TestVerifier(),
+    )
+    with pytest.raises(AttemptLedgerError, match="trust level"):
+        reloaded.states()
+
+
 def test_witness_challenge_is_derived_from_the_active_submission(tmp_path) -> None:
     """The external witness receives a challenge bound to one active option."""
 

@@ -2361,7 +2361,14 @@ class AttemptLedger:
         self._validate_events(tuple(events))
         return tuple(events)
 
-    def _validate_events(self, events: tuple[AttemptEvent, ...]) -> None:
+    def _validate_events(
+        self,
+        events: tuple[AttemptEvent, ...],
+        *,
+        verify_witness: bool = True,
+    ) -> None:
+        """Validate the chain and reverify persisted witness claims by default."""
+
         previous_hash: str | None = None
         previous_time = -1.0
         latest: dict[str, AttemptEvent] = {}
@@ -2433,20 +2440,34 @@ class AttemptLedger:
                             normalized,
                             occurred_at=event.occurred_at,
                         )
-                        if normalized.witness_trust_level is None:
-                            _validate_witness_completion(
-                                normalized,
-                                authority,
-                                verifier=self.witness_verifier,
-                                occurred_at=event.occurred_at,
-                            )
-                        elif normalized.witness_trust_level not in {
+                        if normalized.witness_trust_level not in {
+                            None,
                             "witness_attested",
                             "human_identity_verified",
                         }:
                             raise CompletionEvidenceError(
                                 "witness trust level is not a supported provider claim"
                             )
+                        if (
+                            verify_witness
+                            and normalized.evidence_kind == "browser_witness_attested"
+                        ):
+                            verification = _validate_witness_completion(
+                                normalized,
+                                authority,
+                                verifier=self.witness_verifier,
+                                occurred_at=event.occurred_at,
+                            )
+                            if (
+                                verification is not None
+                                and normalized.witness_trust_level is not None
+                                and normalized.witness_trust_level
+                                != verification.trust_level
+                            ):
+                                raise CompletionEvidenceError(
+                                    "witness trust level does not match the provider "
+                                    "verification"
+                                )
                     except CompletionEvidenceError as error:
                         raise AttemptLedgerError(str(error)) from error
                 elif event.status in TERMINAL_ATTEMPT_STATUSES:
@@ -2473,7 +2494,7 @@ class AttemptLedger:
         events: tuple[AttemptEvent, ...],
         event: AttemptEvent,
     ) -> AttemptEvent:
-        self._validate_events((*events, event))
+        self._validate_events((*events, event), verify_witness=False)
         payload = _canonical_json(event.to_dict())
         self._replace_with_appended_bytes(descriptor, payload)
         return event
@@ -2486,7 +2507,7 @@ class AttemptLedger:
     ) -> tuple[AttemptEvent, ...]:
         if not additions:
             raise AttemptLedgerError("attempt batch cannot append zero records")
-        self._validate_events((*events, *additions))
+        self._validate_events((*events, *additions), verify_witness=False)
         submission_ids = {event.submission_id for event in additions}
         if len(submission_ids) != 1:
             raise AttemptLedgerError(
