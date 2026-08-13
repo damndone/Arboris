@@ -6,18 +6,18 @@
 
 ## Final status
 
-local_only_core_only
+external_provider_deferred
 
 ## Metrics
 
-- Failure frequency: 14/55 (25.5%; 25.5 per 100 events)
+- Failure frequency: 14/57 (24.6%; 24.6 per 100 events)
 - Repeat rate: 0/14 (0.0%)
 - Recurrence rate: 0/14 (0.0%)
 - MTTR: median=0 ms (sample=12; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/32 (0.0%)
+- Gate waste rate: 0/33 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/2)
 
@@ -168,3 +168,5 @@ local_only_core_only
 - #53: `3d7a9c1e-5f20-4b68-8a14-2e6d0f9b3c5a` | 2026-08-11T07:44:11.000Z | FAILURE/witness_ledger_replay_bypass | incident=`4e8b1c2d-6f30-4a79-9c15-3d7e0b2f6a84` | lesson_key=`witness-ledger-replay-guard` | event_sha256=`a0d761635794cbded01b0f974315efe9a4b81759c98ba327e5162babe884668d`
 - #54: `5f9b2d6e-7a31-4c80-9e24-1b6d3f8a0c52` | 2026-08-11T07:44:11.000Z | STATE_CHANGE/local_only_witness_core_only | incident=`6a2c4e8f-1b73-4d90-9e25-7f0c3a5b8d16` | lesson_key=`local-only-witness-core-boundary` | event_sha256=`74420042c90f8f06cbf7b5f1eb3b9e2f5dd2c25da49c98ceed5983152317185f`
 - #55: `7a1b2c3d-4e5f-4678-90ab-cdef12345678` | 2026-08-11T08:02:53.000Z | GATE/full_gate_host_sandbox_limited | incident=`8b2c3d4e-5f60-4789-a1b2-cdef23456789` | lesson_key=`full-gate-host-sandbox-boundary` | event_sha256=`78ce89c2cbab3839ab51338375310acb852285e51be082a4273bce0371c75923`
+- #56: `9eb3c4d5-f607-489a-bcde-f0123456789a` | 2026-08-13T09:45:03.000Z | GATE/interrupted_full_gate_superseded | incident=`2ae4af47-f999-4a0b-a1a9-d86feb8d9d25` | lesson_key=`full-gate-interruption-superseded` | event_sha256=`be048c611d11b05e9d7e39dc761e6541fcb22976f7410a002e443c294b1ae5a1`
+- #57: `afc4d5e6-0718-49ab-cdef-0123456789ab` | 2026-08-13T09:45:04.000Z | STATE_CHANGE/external_witness_deferred_by_scope | incident=`b8c9d0e1-f2a3-4b5c-8d6e-7f8a9b0c1d23` | lesson_key=`local-only-witness-scope` | event_sha256=`54c72c0443d37349b19d7f6945d10f3f77ff767dcf8a94717f1ed9ba3c5caa50`

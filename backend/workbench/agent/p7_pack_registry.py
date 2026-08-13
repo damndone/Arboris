@@ -600,7 +600,8 @@ _register_request_schema(
         },
         required_options=(
             "propensity_policy",
-            "distance_policy",
+            "matching_geometry_policy",
+            "support_distance_policy",
             "ratio",
             "caliper",
             "replacement",
@@ -612,7 +613,8 @@ _register_request_schema(
         ),
         option_shapes={
             "propensity_policy": "object",
-            "distance_policy": "string",
+            "matching_geometry_policy": "string",
+            "support_distance_policy": "string",
             "ratio": "integer",
             "caliper": "number",
             "replacement": "boolean",
@@ -622,7 +624,12 @@ _register_request_schema(
             "balance_threshold": "number",
             "missing_policy": "string",
         },
-        option_enums={"missing_policy": ("reject",)},
+        option_enums={
+            "matching_geometry_policy": ("standardized_covariate_euclidean_v1",),
+            "support_distance_policy": ("absolute_logit_difference",),
+            "common_support_policy": ("reject_disjoint_no_trim_v1",),
+            "missing_policy": ("reject",),
+        },
     ),
 )
 _register_request_schema(

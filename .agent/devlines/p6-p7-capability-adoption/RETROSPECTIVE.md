@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 12/20 (60.0%; 60.0 per 100 events)
+- Failure frequency: 12/21 (57.1%; 57.1 per 100 events)
 - Repeat rate: 0/12 (0.0%)
 - Recurrence rate: 0/12 (0.0%)
-- MTTR: median=0 ms (sample=10; unresolved=2)
+- MTTR: median=0 ms (sample=11; unresolved=1)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/1 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/3)
 
@@ -129,3 +129,4 @@ COMPLETED
 - #18: `f1c8a5d2-7e04-4b96-9a31-6d2f8c7e5049` | 2026-08-09T01:45:00.000Z | REVIEW/p7_registry_identity_gap | incident=`a2d9f6b3-8c17-4e05-9b64-1f7a3d5e2086` | lesson_key=`p7-registry-operation-identity` | event_sha256=`263082364faffca311e81e86483aaf901aabf62fb4e3fe3516e84e394394fb3d`
 - #19: `a4e9c2f7-1d63-4b08-95a2-7e6c3f1d5048` | 2026-08-09T01:50:00.000Z | WASTE/p7_wrong_test_selector | incident=`b5f1d8a3-6c27-4e09-9a74-2d8f5c1e3069` | lesson_key=`live-test-name-before-selection` | event_sha256=`0b2bb963b98ef94f5e83b6d883febdc317a7331571187f6fa6b458e4aa3b3a2a`
 - #20: `c6f3a9d1-8e24-4b07-95f2-1a7d6c4e3085` | 2026-08-09T02:05:00.000Z | STATE_CHANGE/p7_local_adoption_completed | incident=`d7a4e1f9-2c63-4b08-8d15-6f9a3e7c2041` | lesson_key=`p7-local-adoption-boundary` | event_sha256=`26cea5815ea69ef5e91ae45ae9d0436016ee0aff63d8d936d5be27578ce010f0`
+- #21: `7c91a2b3-d4e5-4678-9abc-def012345678` | 2026-08-13T09:45:01.000Z | GATE/p7_resampling_dependency_resolved | incident=`34567890-abcd-4ef0-9234-56789abcdef0` | lesson_key=`p7-transitive-dependency-scope` | event_sha256=`7cc4d41be8a54ac296a04d987742daf28fe19eca5eff46e9fb0d62f1276c8cdc`

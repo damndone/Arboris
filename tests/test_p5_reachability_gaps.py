@@ -50,32 +50,15 @@ def test_all_p5_gaps_are_one_live_composable_workflow_identity() -> None:
         assert item.reachability_exempt_reason is None
 
 
-def test_p2_guard_is_green_after_p5_closes_all_live_gaps() -> None:
-    """Pin the post-P4/P5 reachability snapshot as an intentional record.
-
-    P4 contributes data-management capabilities and P6/P7 contributes the
-    declaration-driven pack capabilities to the same live inventory. A later
-    route change should update this assertion and its gap set deliberately,
-    not treat the red test as stale noise.
-    """
+def test_p5_historical_gaps_remain_closed_in_the_live_inventory() -> None:
+    """P5 owns its 18 historical IDs; P2 owns the global reachability snapshot."""
 
     from workbench.agent.capability_contract import capability_reachability_guard
 
     report = capability_reachability_guard()
 
-    assert (
-        len(report.inventory),
-        len(report.directly_reachable),
-        len(report.composition_reachable),
-        len(report.reachable),
-        len(report.exempt),
-        len(report.gaps),
-    ) == (129, 9, 123, 127, 2, 0)
     assert {item.capability_id for item in report.gaps} == set()
-    assert {item.capability_id for item in report.exempt} == {
-        "code.execute",
-        "data.column.cast",
-    }
+    assert P5_GAP_IDS <= {item.capability_id for item in report.reachable}
 
 
 def test_named_statistical_execution_is_family_scoped_and_automatic_is_preserved() -> None:

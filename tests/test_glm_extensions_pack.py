@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -122,6 +124,64 @@ def test_beta_extension_rejects_boundaries_and_keeps_zero_probability_not_applic
 
     with pytest.raises(GLMExtensionPackError, match="GLM_BETA_BOUNDARY_RESPONSE"):
         fit_beta(np.array([0.2, 0.4, 1.0, 0.6]), pd.DataFrame({"x": [0.0, 1.0, 2.0, 3.0]}), predictor_columns=["x"])
+
+
+@pytest.mark.skipif(shutil.which("Rscript") is None, reason="base R is required for the independent hurdle oracle")
+def test_hurdle_positive_count_inference_is_labeled_and_matches_base_r(
+    tmp_path: Path,
+) -> None:
+    """Approximate inference must be explicit and numerically anchored outside Python."""
+
+    y, X = _hurdle_data(negative_binomial=False)
+    packet = fit_hurdle_poisson(y, X, predictor_columns=["x"])
+    result = packet["result"]
+    inference = result["inference"]["positive_count"]
+
+    assert inference == {
+        "standard_error_method": "bfgs_inverse_hessian_approximation",
+        "p_value_method": "normal_wald_approximation",
+        "p_value_status": "approximate",
+    }
+    assert any(
+        "approximate" in limitation.lower()
+        for limitation in result["scope"]["limitations"]
+    )
+
+    source = tmp_path / "hurdle.csv"
+    pd.DataFrame({"y": y, "x": X["x"]}).to_csv(source, index=False)
+    completed = subprocess.run(
+        [
+            "Rscript",
+            "--vanilla",
+            str(FIXTURE.with_name("generate_hurdle_oracle.R")),
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    oracle = json.loads(completed.stdout)
+    coefficients = result["coefficient_estimands"]["positive_count"]
+    assert [coefficients[name]["estimate"] for name in ("const", "x")] == pytest.approx(
+        oracle["estimate"], abs=1e-6
+    )
+    assert [coefficients[name]["standard_error"] for name in ("const", "x")] == pytest.approx(
+        oracle["standard_error"], rel=0.005
+    )
+
+
+def test_hurdle_result_contract_rejects_unlabeled_approximate_inference() -> None:
+    """Dropping the approximation label must fail at the public result boundary."""
+
+    from workbench.contracts.common.envelope import ContractError
+    from workbench.contracts.model.glm_extensions import GLMExtensionResultEnvelope
+
+    y, X = _hurdle_data(negative_binomial=False)
+    packet = fit_hurdle_poisson(y, X, predictor_columns=["x"])
+    packet["result"]["inference"]["positive_count"].pop("p_value_status")
+
+    with pytest.raises(ContractError, match="hurdle positive-count inference metadata"):
+        GLMExtensionResultEnvelope.from_dict(packet)
 
 
 def test_count_inputs_reject_non_integer_counts_and_nonfinite_values():

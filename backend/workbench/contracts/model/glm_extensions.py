@@ -199,6 +199,20 @@ def _status_reason(status: Any, reason: Any) -> None:
         raise ContractError("reason_code must match status")
 
 
+def _validate_hurdle_inference(result: Mapping[str, Any]) -> None:
+    inference = result.get("inference")
+    positive = inference.get("positive_count") if isinstance(inference, Mapping) else None
+    expected = {
+        "standard_error_method": "bfgs_inverse_hessian_approximation",
+        "p_value_method": "normal_wald_approximation",
+        "p_value_status": "approximate",
+    }
+    if not isinstance(positive, Mapping) or dict(positive) != expected:
+        raise ContractError(
+            "hurdle positive-count inference metadata must declare its approximation"
+        )
+
+
 @dataclass(frozen=True)
 class GLMExtensionResultEnvelope:
     operation_id: str
@@ -219,6 +233,8 @@ class GLMExtensionResultEnvelope:
                 if field not in frozen:
                     raise ContractError(f"completed GLM result requires {field}")
             P7ScopeMetadata.from_dict(frozen["scope"])
+            if self.operation_id.startswith("glm.hurdle_"):
+                _validate_hurdle_inference(frozen)
         object.__setattr__(self, "result", frozen)
 
     def to_dict(self) -> dict[str, Any]:

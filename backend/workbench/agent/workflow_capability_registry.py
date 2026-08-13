@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,9 +23,6 @@ class WorkflowCapabilityOperation:
     input_mode: str = "frame"
     request_schema: Mapping[str, Any] = None  # type: ignore[assignment]
     output_schema_ref: str = ""
-    validate_request: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None
-    execute: Callable[[Any, Mapping[str, Any]], Mapping[str, Any]] | None = None
-    validate_result: Callable[[Mapping[str, Any]], None] | None = None
     produces_dataset: bool = False
     dataset_kind: str | None = None
     accepted_dataset_kinds: tuple[str, ...] = ()
@@ -40,7 +37,7 @@ class WorkflowCapabilityOperation:
         from .workflow_capability_adapters import get_workflow_capability_adapter
 
         try:
-            adapter = get_workflow_capability_adapter(self.adapter_key)
+            get_workflow_capability_adapter(self.adapter_key)
         except KeyError as exc:
             raise WorkflowCapabilityRegistryError(str(exc)) from exc
         if not isinstance(self.request_schema, Mapping):
@@ -51,13 +48,22 @@ class WorkflowCapabilityOperation:
             raise WorkflowCapabilityRegistryError(
                 "workflow capability dataset producer must declare exactly one dataset_kind"
             )
-        object.__setattr__(self, "validate_request", lambda request, _adapter=adapter: _adapter.validate_request(self.operation_id, request))
-        object.__setattr__(self, "execute", lambda frame, request, _adapter=adapter: _adapter.execute(frame, request).payload)
-        object.__setattr__(self, "validate_result", lambda result, _adapter=adapter: _adapter.validate_result(self.operation_id, result))
+    def _adapter(self):
+        from .workflow_capability_adapters import get_workflow_capability_adapter
+
+        return get_workflow_capability_adapter(self.adapter_key)
+
+    def validate_request(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return self._adapter().validate_request(self.operation_id, request)
 
     def validate(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        assert self.validate_request is not None
         return self.validate_request(request)
+
+    def execute(self, frame: Any, request: Mapping[str, Any]) -> Mapping[str, Any]:
+        return self._adapter().execute(frame, request).payload
+
+    def validate_result(self, result: Mapping[str, Any]) -> None:
+        self._adapter().validate_result(self.operation_id, result)
 
     def execute_with_context(self, frame: Any, request: Mapping[str, Any]):
         from .workflow_capability_adapters import (
@@ -65,13 +71,14 @@ class WorkflowCapabilityOperation:
             get_workflow_capability_adapter,
         )
 
-        normalized = self.validate(request)
-        execution = get_workflow_capability_adapter(self.adapter_key).execute(frame, normalized)
+        adapter = get_workflow_capability_adapter(self.adapter_key)
+        normalized = adapter.validate_request(self.operation_id, request)
+        execution = adapter.execute(frame, normalized)
         if not isinstance(execution, WorkflowCapabilityExecution):
             raise WorkflowCapabilityRegistryError(
                 f"workflow capability {self.operation_id} adapter returned an invalid execution"
             )
-        self.validate_result(execution.payload)
+        adapter.validate_result(self.operation_id, execution.payload)
         if self.produces_dataset:
             if execution.output_frame is None:
                 raise WorkflowCapabilityRegistryError(
@@ -90,7 +97,7 @@ class WorkflowCapabilityOperation:
             raise WorkflowCapabilityRegistryError(
                 f"workflow capability {self.operation_id} is not a dataset producer"
             )
-        return execution
+        return normalized, execution
 
 
 class WorkflowCapabilityRegistry:

@@ -17,7 +17,8 @@ MATCHING_CONTRACT_VERSION = "1.0"
 MATCHING_OPERATION_IDS = frozenset({"matching.att", "matching.balance"})
 _INPUT_FIELDS = {
     "operation_id", "treatment_column", "outcome_column", "covariate_columns", "id_column",
-    "estimand", "propensity_policy", "distance_policy", "ratio", "caliper", "replacement",
+    "estimand", "propensity_policy", "matching_geometry_policy", "support_distance_policy",
+    "ratio", "caliper", "replacement",
     "tie_policy", "common_support_policy", "unmatched_policy", "balance_threshold", "missing_policy",
 }
 _RESULT_FIELDS = {"contract", "contract_version", "operation_id", "status", "reason_code", "n_observations", "result", "evidence_digest"}
@@ -76,7 +77,8 @@ class MatchingInput:
     id_column: str
     estimand: str
     propensity_policy: Mapping[str, Any]
-    distance_policy: str
+    matching_geometry_policy: str
+    support_distance_policy: str
     ratio: int
     caliper: float | None
     replacement: bool
@@ -103,8 +105,14 @@ class MatchingInput:
         if not isinstance(self.propensity_policy, Mapping):
             raise ContractError("propensity_policy must be explicit")
         policy = _propensity(self.propensity_policy)
-        if self.distance_policy != "logit":
-            raise ContractError("distance_policy must be logit")
+        if self.matching_geometry_policy != "standardized_covariate_euclidean_v1":
+            raise ContractError(
+                "matching_geometry_policy must be standardized_covariate_euclidean_v1"
+            )
+        if self.support_distance_policy != "absolute_logit_difference":
+            raise ContractError(
+                "support_distance_policy must be absolute_logit_difference"
+            )
         if type(self.ratio) is not int or not 1 <= self.ratio <= 10:
             raise ContractError("ratio must be a bounded positive integer")
         if self.caliper is not None:
@@ -113,8 +121,10 @@ class MatchingInput:
             raise ContractError("replacement must be boolean")
         if self.tie_policy != "stable_first":
             raise ContractError("tie_policy must be stable_first")
-        if self.common_support_policy != "trim":
-            raise ContractError("common_support_policy must be trim")
+        if self.common_support_policy != "reject_disjoint_no_trim_v1":
+            raise ContractError(
+                "common_support_policy must be reject_disjoint_no_trim_v1"
+            )
         if self.unmatched_policy != "reject":
             raise ContractError("unmatched_policy must be reject")
         if self.balance_threshold is not None:
@@ -134,7 +144,9 @@ class MatchingInput:
             operation_id=value["operation_id"], treatment_column=value["treatment_column"],
             outcome_column=value["outcome_column"], covariate_columns=tuple(value["covariate_columns"]),
             id_column=value["id_column"], estimand=value["estimand"], propensity_policy=value["propensity_policy"],
-            distance_policy=value["distance_policy"], ratio=value["ratio"], caliper=value["caliper"],
+            matching_geometry_policy=value["matching_geometry_policy"],
+            support_distance_policy=value["support_distance_policy"],
+            ratio=value["ratio"], caliper=value["caliper"],
             replacement=value["replacement"], tie_policy=value["tie_policy"],
             common_support_policy=value["common_support_policy"], unmatched_policy=value["unmatched_policy"],
             balance_threshold=value["balance_threshold"], missing_policy=value["missing_policy"],
@@ -145,7 +157,9 @@ class MatchingInput:
             "operation_id": self.operation_id, "treatment_column": self.treatment_column,
             "outcome_column": self.outcome_column, "covariate_columns": list(self.covariate_columns),
             "id_column": self.id_column, "estimand": self.estimand,
-            "propensity_policy": thaw_json(self.propensity_policy), "distance_policy": self.distance_policy,
+            "propensity_policy": thaw_json(self.propensity_policy),
+            "matching_geometry_policy": self.matching_geometry_policy,
+            "support_distance_policy": self.support_distance_policy,
             "ratio": self.ratio, "caliper": self.caliper, "replacement": self.replacement,
             "tie_policy": self.tie_policy, "common_support_policy": self.common_support_policy,
             "unmatched_policy": self.unmatched_policy, "balance_threshold": self.balance_threshold,
@@ -182,6 +196,23 @@ def validate_matching_result(value: Mapping[str, Any]) -> None:
         if "scope" not in value["result"]:
             raise ContractError("completed matching result requires scope")
         P7ScopeMetadata.from_dict(value["result"]["scope"])
+        if value["operation_id"] == "matching.att":
+            policy = value["result"].get("matching_policy")
+            if value["result"].get("trim_applied") is not False:
+                raise ContractError(
+                    "completed matching ATT result requires trim_applied=false"
+                )
+            if not isinstance(policy, Mapping) or (
+                policy.get("matching_geometry_policy")
+                != "standardized_covariate_euclidean_v1"
+                or policy.get("support_distance_policy")
+                != "absolute_logit_difference"
+                or policy.get("common_support_policy")
+                != "reject_disjoint_no_trim_v1"
+            ):
+                raise ContractError(
+                    "completed matching ATT result requires truthful matching policy metadata"
+                )
         expected_digest = sha256_canonical({"operation_id": value["operation_id"], "result": value["result"]})
         if value["evidence_digest"] != expected_digest:
             raise ContractError("matching evidence_digest does not match result")

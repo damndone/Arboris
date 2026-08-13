@@ -29,6 +29,47 @@ class IdleAdapter:
             yield request
 
 
+def test_p7_public_projection_preserves_hurdle_approximation_labels() -> None:
+    """Agent evidence must not detach an approximate p-value from its method."""
+
+    from workbench.agent.context_tools import _public_operation_artifact_result
+
+    many_coefficients = {
+        f"x_{index}": {"estimate": float(index), "standard_error": 0.1, "p_value": 0.04}
+        for index in range(120)
+    }
+    public, omitted = _public_operation_artifact_result(
+        "p7_analysis",
+        {
+            "result": {
+                "contract": "glm_extensions.result",
+                "contract_version": "1.0",
+                "operation_id": "glm.hurdle_poisson",
+                "result": {
+                    "coefficient_estimands": {
+                        "positive_count": many_coefficients
+                    },
+                    "inference": {
+                        "positive_count": {
+                            "standard_error_method": "bfgs_inverse_hessian_approximation",
+                            "p_value_method": "normal_wald_approximation",
+                            "p_value_status": "approximate",
+                        }
+                    },
+                },
+            }
+        },
+    )
+
+    assert public is not None
+    assert public["result"]["inference"]["positive_count"] == {
+        "standard_error_method": "bfgs_inverse_hessian_approximation",
+        "p_value_method": "normal_wald_approximation",
+        "p_value_status": "approximate",
+    }
+    assert omitted == ["raw_artifact_payloads", "raw_rows"]
+
+
 class CompletedResultAnswerAdapter:
     """Make the Agent consume its own completed-operation evidence before answering."""
 

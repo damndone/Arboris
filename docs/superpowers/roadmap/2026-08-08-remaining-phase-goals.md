@@ -1,5 +1,10 @@
 # v1.8.8 剩余阶段目标书（P2 起）
 
+> **历史基线，已被最终整合状态取代。** 本文保留 P2–P7 开始时的目标和验收语义，
+> 不再描述当前实现。当前权威状态见
+> `docs/superpowers/handoff/2026-08-13-v1.8.8-final-status-handoff.md`：
+> `129 total / 9 direct / 123 composable / 127 reachable / 2 exempt / 0 gaps`。
+
 > 2026-08-08。基线 `f89b55f`（P0 + P1 完成，BE 4824 / FE 1648 / tsc 0）。
 > **本文定目标，不定任务。** Codex 自己出实施计划，Claude 核验。
 > 对接方式见 `docs/superpowers/handoff/2026-08-08-codex-implementer-protocol.md`。

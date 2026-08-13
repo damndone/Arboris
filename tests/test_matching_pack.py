@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -31,12 +33,13 @@ def _policy(**overrides: object) -> dict[str, object]:
             "min_probability": 1e-6,
             "max_probability": 1.0 - 1e-6,
         },
-        "distance_policy": "logit",
+        "matching_geometry_policy": "standardized_covariate_euclidean_v1",
+        "support_distance_policy": "absolute_logit_difference",
         "ratio": 1,
         "caliper": 0.75,
         "replacement": False,
         "tie_policy": "stable_first",
-        "common_support_policy": "trim",
+        "common_support_policy": "reject_disjoint_no_trim_v1",
         "unmatched_policy": "reject",
         "balance_threshold": 0.1,
         "missing_policy": "reject",
@@ -64,9 +67,121 @@ def test_matching_att_is_reproducible_and_reports_deterministic_provenance() -> 
         {"treated_position": 1, "control_position": 4, "control_unit": "c2"},
         {"treated_position": 2, "control_position": 5, "control_unit": "c3"},
     ]
+    assert result["matching_policy"]["matching_geometry_policy"] == "standardized_covariate_euclidean_v1"
+    assert result["matching_policy"]["support_distance_policy"] == "absolute_logit_difference"
+    assert result["matching_policy"]["common_support_policy"] == "reject_disjoint_no_trim_v1"
+    assert result["trim_applied"] is False
     assert result["provenance"]["row_order"] == "input_position_stable"
     assert result["scope"]["not_claimed"]
     assert any("causal" in item.lower() for item in result["scope"]["not_claimed"])
+
+
+@pytest.mark.skipif(shutil.which("Rscript") is None, reason="base R is required for the independent matching oracle")
+def test_matching_att_agrees_with_independent_base_r_oracle() -> None:
+    """Base R independently pins propensity range, geometry, pairs, and ATT."""
+
+    from workbench.engine.packs.matching import estimate_att
+
+    completed = subprocess.run(
+        ["Rscript", "--vanilla", str(FIXTURE.with_name("generate_oracle.R"))],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    oracle = json.loads(completed.stdout)
+    result = estimate_att(_frame(), **_policy())["result"]
+    balanced = oracle["balanced"]
+
+    assert result["propensity"]["min"] == pytest.approx(balanced["propensity_min"], abs=1e-12)
+    assert result["propensity"]["max"] == pytest.approx(balanced["propensity_max"], abs=1e-12)
+    assert result["att"] == pytest.approx(balanced["att"], abs=1e-12)
+    assert [
+        [pair["treated_position"], pair["control_position"]]
+        for pair in result["matched_pairs"]
+    ] == balanced["pairs"]
+
+    discriminator = estimate_att(
+        _frame("geometry_discriminator"),
+        **_policy(caliper=None),
+    )["result"]
+    assert discriminator["att"] == pytest.approx(
+        oracle["geometry_discriminator"]["att"], abs=1e-12
+    )
+    assert [
+        [pair["treated_position"], pair["control_position"]]
+        for pair in discriminator["matched_pairs"]
+    ] == oracle["geometry_discriminator"]["pairs"]
+
+
+def test_matching_contract_rejects_the_old_misleading_policy_names() -> None:
+    """The proposal cannot claim propensity matching or trimming that runtime does not do."""
+
+    from workbench.contracts.common.envelope import ContractError
+    from workbench.contracts.model.matching import MatchingInput
+
+    value = {
+        "operation_id": "matching.att",
+        **_policy(),
+    }
+    value.update(
+        {
+            "outcome_column": value.pop("outcome_column"),
+            "estimand": "ATT",
+        }
+    )
+    value["distance_policy"] = value.pop("matching_geometry_policy")
+    value.pop("support_distance_policy")
+    value["common_support_policy"] = "trim"
+
+    with pytest.raises(ContractError, match="unknown matching input field: distance_policy"):
+        MatchingInput.from_dict(value)
+
+
+def test_matching_result_contract_requires_explicit_no_trim_metadata() -> None:
+    """A durable ATT result cannot omit whether the target population was trimmed."""
+
+    from workbench.canonical import sha256_canonical
+    from workbench.contracts.common.envelope import ContractError
+    from workbench.contracts.model.matching import validate_matching_result
+    from workbench.engine.packs.matching import estimate_att
+
+    packet = estimate_att(_frame(), **_policy())
+    packet["result"].pop("trim_applied")
+    packet["evidence_digest"] = sha256_canonical(
+        {"operation_id": packet["operation_id"], "result": packet["result"]}
+    )
+
+    with pytest.raises(ContractError, match="trim_applied=false"):
+        validate_matching_result(packet)
+
+
+@pytest.mark.parametrize(
+    ("field", "false_claim"),
+    [
+        ("matching_geometry_policy", "logit"),
+        ("support_distance_policy", "none"),
+        ("common_support_policy", "trim"),
+    ],
+)
+def test_matching_result_contract_rejects_false_policy_metadata(
+    field: str,
+    false_claim: str,
+) -> None:
+    """Persisted policy labels are checked as statistical evidence, not decoration."""
+
+    from workbench.canonical import sha256_canonical
+    from workbench.contracts.common.envelope import ContractError
+    from workbench.contracts.model.matching import validate_matching_result
+    from workbench.engine.packs.matching import estimate_att
+
+    packet = estimate_att(_frame(), **_policy())
+    packet["result"]["matching_policy"][field] = false_claim
+    packet["evidence_digest"] = sha256_canonical(
+        {"operation_id": packet["operation_id"], "result": packet["result"]}
+    )
+
+    with pytest.raises(ContractError, match="truthful matching policy metadata"):
+        validate_matching_result(packet)
 
 
 def test_matching_balance_reports_before_after_smd_and_variance_ratio_without_rows() -> None:

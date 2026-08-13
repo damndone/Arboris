@@ -486,13 +486,6 @@ def _parser() -> argparse.ArgumentParser:
     status = commands.add_parser("status", help="verify and summarize every row")
     add_ledger_paths(status)
 
-    migrate = commands.add_parser(
-        "migrate",
-        help="explicitly attach control authority to a valid legacy ledger",
-    )
-    add_ledger_paths(migrate)
-    migrate.add_argument("--migrated-at", type=float)
-
     next_command = commands.add_parser(
         "next", help="show the next browser work packet without submitting it"
     )
@@ -648,21 +641,6 @@ def main(argv: list[str] | None = None) -> int:
                         operation_id: asdict(state)
                         for operation_id, state in states.items()
                     },
-                }
-            )
-        elif args.command == "migrate":
-            ledger = _load_ledger(args)
-            before = ledger.path.read_bytes()
-            migration = ledger.migrate_legacy(migrated_at=args.migrated_at)
-            after = ledger.path.read_bytes()
-            _emit(
-                {
-                    "command": "migrate",
-                    "migration": migration.to_dict(),
-                    "mode": migration.mode,
-                    "event_count": migration.event_count,
-                    "history_preserved": before == after,
-                    "legacy_completion_trust": "NOT VERIFIED",
                 }
             )
         elif args.command == "next":

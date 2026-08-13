@@ -1731,9 +1731,9 @@ def build_workflow_step_executor(
                 "options": step.spec.get("options"),
             }
             try:
-                normalized_request = operation.validate(request)
-                execution = operation.execute_with_context(step_frame, normalized_request)
-                operation.validate_result(execution.payload)
+                normalized_request, execution = operation.execute_with_context(
+                    step_frame, request
+                )
             except Exception as exc:
                 from ..econometrics.optional_deps import OptionalDependencyNotInstalled
 

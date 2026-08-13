@@ -164,7 +164,12 @@ def _coefficient_map(params: Any, bse: Any, pvalues: Any, cov: Any, names: Seque
     return output
 
 
-def _scope(model_family: str, *, count: bool) -> dict[str, Any]:
+def _scope(
+    model_family: str,
+    *,
+    count: bool,
+    approximate_positive_count_inference: bool = False,
+) -> dict[str, Any]:
     if count:
         assumptions = [
             "the declared count and zero-process semantics match the scientific data-generating question",
@@ -174,6 +179,10 @@ def _scope(model_family: str, *, count: bool) -> dict[str, Any]:
             "zero-process and count-process parameters are conditional model quantities, not causal effects",
             "finite-sample convergence, separation, and overdispersion diagnostics remain model-dependent",
         ]
+        if approximate_positive_count_inference:
+            limitations.append(
+                "positive-count standard errors use a BFGS inverse-Hessian approximation and p-values use an approximate normal Wald reference"
+            )
         unsupported = ["automatic model selection, offsets, exposure, formula parsing, and random effects"]
     else:
         assumptions = [
@@ -195,8 +204,8 @@ def _scope(model_family: str, *, count: bool) -> dict[str, Any]:
     )
 
 
-def _base_result(request: GLMExtensionRequest, *, family: str, y: np.ndarray, fit: Mapping[str, Any], coefficients: Mapping[str, Any], mean: Mapping[str, Any], zero: Mapping[str, Any], diagnostics: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+def _base_result(request: GLMExtensionRequest, *, family: str, y: np.ndarray, fit: Mapping[str, Any], coefficients: Mapping[str, Any], mean: Mapping[str, Any], zero: Mapping[str, Any], diagnostics: Mapping[str, Any], inference: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    result = {
         "status": "completed",
         "reason_code": "ANALYSIS_COMPLETED",
         "model_family": family,
@@ -207,9 +216,16 @@ def _base_result(request: GLMExtensionRequest, *, family: str, y: np.ndarray, fi
         "coefficient_estimands": dict(coefficients),
         "mean_estimands": dict(mean),
         "zero_probability_estimands": dict(zero),
-        "scope": _scope(family, count=request.operation_id != "glm.beta"),
+        "scope": _scope(
+            family,
+            count=request.operation_id != "glm.beta",
+            approximate_positive_count_inference=inference is not None,
+        ),
         "diagnostics": dict(diagnostics),
     }
+    if inference is not None:
+        result["inference"] = dict(inference)
+    return result
 
 
 def _packet(operation_id: str, result: Mapping[str, Any]) -> dict[str, Any]:
@@ -391,6 +407,13 @@ def _fit_hurdle(y: Any, X: Any, *, operation_id: str, predictor_columns: Sequenc
             "observed_zero_probability": {"sample_mean": float(zero_probability.mean())},
         },
         diagnostics={"covariance_finite": bool(np.isfinite(np.asarray(gate_fit.cov_params(), dtype=float)).all()), "zero_design_columns": gate_names, "positive_count_design_columns": positive_names},
+        inference={
+            "positive_count": {
+                "standard_error_method": "bfgs_inverse_hessian_approximation",
+                "p_value_method": "normal_wald_approximation",
+                "p_value_status": "approximate",
+            }
+        },
     )
     return _packet(operation_id, result)
 

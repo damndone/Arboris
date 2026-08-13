@@ -44,10 +44,76 @@ def test_registry_rejects_an_entry_without_a_typed_adapter() -> None:
             summary="test",
             adapter_key="missing.adapter",
             request_schema={"required": (), "fields": {}},
-            validate_request=lambda request: request,
-            execute=lambda frame, request: {},
-            validate_result=lambda result: None,
         )
+
+
+def test_operation_constructor_does_not_accept_overwritten_callable_hooks() -> None:
+    """Adapter behavior comes only from adapter_key, not ignored constructor hooks."""
+
+    from workbench.agent.workflow_capability_registry import WorkflowCapabilityOperation
+
+    with pytest.raises(TypeError, match="validate_request"):
+        WorkflowCapabilityOperation(
+            operation_id="test.correlations",
+            kind="statistical_test",
+            summary="test",
+            adapter_key="statistical_test",
+            request_schema={"required": (), "fields": {}},
+            output_schema_ref="test/v1",
+            validate_request=lambda request: dict(request),
+        )
+
+
+def test_execute_with_context_validates_request_and_result_exactly_once(monkeypatch) -> None:
+    """The operation owns one normalization and one result-validation boundary."""
+
+    from workbench.agent import workflow_capability_adapters as adapters
+    from workbench.agent.workflow_capability_adapters import WorkflowCapabilityExecution
+    from workbench.agent.workflow_capability_registry import WorkflowCapabilityOperation
+
+    calls = {"request": 0, "execute": 0, "result": 0}
+
+    class CountingAdapter:
+        def validate_request(self, operation_id, request):
+            calls["request"] += 1
+            return dict(request)
+
+        def execute(self, frame, request):
+            calls["execute"] += 1
+            return WorkflowCapabilityExecution(
+                payload={"operation_id": "test.counted", "assumptions": ["test"]}
+            )
+
+        def validate_result(self, operation_id, result):
+            calls["result"] += 1
+
+    monkeypatch.setattr(
+        adapters,
+        "get_workflow_capability_adapter",
+        lambda adapter_key: CountingAdapter(),
+    )
+    operation = WorkflowCapabilityOperation(
+        operation_id="test.counted",
+        kind="statistical_test",
+        summary="test",
+        adapter_key="counted",
+        request_schema={"required": (), "fields": {}},
+        output_schema_ref="test/v1",
+    )
+
+    normalized, execution = operation.execute_with_context(
+        object(),
+        {
+            "operation_id": "test.counted",
+            "input_mode": "frame",
+            "column_bindings": {},
+            "options": {},
+        },
+    )
+
+    assert normalized["operation_id"] == "test.counted"
+    assert execution.payload["operation_id"] == "test.counted"
+    assert calls == {"request": 1, "execute": 1, "result": 1}
 
 
 def test_generic_registry_publishes_typed_adapter_request_schema() -> None:
@@ -79,6 +145,9 @@ def test_registry_rejects_adapter_output_that_violates_dataset_declaration(monke
     operation = workflow_capability_registry().require("resample.smote")
 
     class MissingDatasetAdapter:
+        def validate_request(self, operation_id, request):
+            return dict(request)
+
         def execute(self, frame, request):
             return WorkflowCapabilityExecution(
                 payload={
@@ -86,6 +155,9 @@ def test_registry_rejects_adapter_output_that_violates_dataset_declaration(monke
                     "assumptions": ["test"],
                 }
             )
+
+        def validate_result(self, operation_id, result):
+            return None
 
     monkeypatch.setattr(
         adapters,

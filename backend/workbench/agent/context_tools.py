@@ -4121,6 +4121,7 @@ def _public_operation_artifact_result(
         "statistical_exploration",
         "statistical_test",
         "post_estimation",
+        "p7_analysis",
     }:
         return None, ["raw_artifact_payloads"]
     result = payload.get("result")

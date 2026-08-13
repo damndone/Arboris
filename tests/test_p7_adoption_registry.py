@@ -246,6 +246,23 @@ def test_matching_missing_policy_is_declared_before_runtime_execution() -> None:
     assert operation.request_schema.option_enums["missing_policy"] == ("reject",)
 
 
+def test_matching_att_schema_advertises_the_runtime_geometry_and_support_policy() -> None:
+    """Agent proposals must name the matching geometry and no-trim support rule truthfully."""
+
+    from workbench.agent.p7_pack_registry import p7_pack_registry
+
+    schema = p7_pack_registry.get("matching.att").request_schema
+    assert schema.option_enums["matching_geometry_policy"] == (
+        "standardized_covariate_euclidean_v1",
+    )
+    assert schema.option_enums["support_distance_policy"] == (
+        "absolute_logit_difference",
+    )
+    assert schema.option_enums["common_support_policy"] == (
+        "reject_disjoint_no_trim_v1",
+    )
+
+
 def test_matching_request_rejects_unsupported_missing_policy_before_runtime() -> None:
     """A matching step must reject unsupported missing-data semantics at admission."""
 

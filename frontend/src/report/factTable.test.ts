@@ -310,6 +310,49 @@ describe("buildPostEstimationFacts", () => {
     ]);
   });
 
+  it("keeps Hurdle approximation labels beside reportable p-values", () => {
+    const manyCoefficients = Object.fromEntries(
+      Array.from({ length: 120 }, (_, index) => [
+        `x_${index}`,
+        { estimate: index, standard_error: 0.1, p_value: 0.04 },
+      ]),
+    );
+    const facts = buildPostEstimationFacts([
+      {
+        ...result,
+        artifact_id: "workflow_p7_glm_hurdle_poisson_abc",
+        artifact_type: "p7_analysis",
+        operation_id: "glm.hurdle_poisson",
+        pack_family: "glm_extensions",
+        result: {
+          contract: "glm_extensions.result",
+          contract_version: "1.0",
+          operation_id: "glm.hurdle_poisson",
+          result: {
+            coefficient_estimands: {
+              positive_count: manyCoefficients,
+            },
+            inference: {
+              positive_count: {
+                standard_error_method: "bfgs_inverse_hessian_approximation",
+                p_value_method: "normal_wald_approximation",
+                p_value_status: "approximate",
+              },
+            },
+          },
+        },
+      },
+    ]);
+
+    const byField = new Map(facts.map((fact) => [fact.field, fact.value]));
+    expect(byField.get(
+      "post_estimation:stationary_point:result:inference:positive_count:standard_error_method",
+    )).toBe("bfgs_inverse_hessian_approximation");
+    expect(byField.get(
+      "post_estimation:stationary_point:result:inference:positive_count:p_value_status",
+    )).toBe("approximate");
+  });
+
   it("uses the generic workflow provider for non-P7 capability results", () => {
     const facts = buildPostEstimationFacts([
       {

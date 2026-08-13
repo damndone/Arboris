@@ -35,7 +35,8 @@ def _policy_input(operation_id: str, *, outcome_column: str | None, **kwargs: An
         "id_column": kwargs["id_column"],
         "estimand": "ATT" if operation_id == "matching.att" else "covariate_balance",
         "propensity_policy": kwargs.get("propensity_policy"),
-        "distance_policy": kwargs.get("distance_policy"),
+        "matching_geometry_policy": kwargs.get("matching_geometry_policy"),
+        "support_distance_policy": kwargs.get("support_distance_policy"),
         "ratio": kwargs.get("ratio"),
         "caliper": kwargs.get("caliper"),
         "replacement": kwargs.get("replacement"),
@@ -122,7 +123,7 @@ def _logit(value: np.ndarray) -> np.ndarray:
 def _scope(estimand: str) -> dict[str, Any]:
     return make_p7_scope(
         estimand=estimand,
-        input_semantics="binary treatment, numeric outcome/covariates, and explicit propensity-distance matching policy",
+        input_semantics="binary treatment, numeric outcome/covariates, explicit propensity support, and standardized-covariate matching geometry",
         assumptions=[
             "conditional exchangeability within measured covariates is a substantive assumption",
             "the declared propensity model and common-support rule are adequate",
@@ -158,8 +159,11 @@ def assess_balance(frame: pd.DataFrame, *, treatment_column: str, covariate_colu
         "matching.balance", treatment_column=treatment_column, outcome_column=None,
         covariate_columns=covariate_columns, id_column=id_column,
         propensity_policy={"model": "logit", "solver": "newton", "max_iter": 200, "tolerance": 1e-10, "min_probability": 1e-6, "max_probability": 1.0 - 1e-6},
-        distance_policy="logit", ratio=1, caliper=None, replacement=False,
-        tie_policy="stable_first", common_support_policy="trim", unmatched_policy="reject",
+        matching_geometry_policy="standardized_covariate_euclidean_v1",
+        support_distance_policy="absolute_logit_difference",
+        ratio=1, caliper=None, replacement=False,
+        tie_policy="stable_first", common_support_policy="reject_disjoint_no_trim_v1",
+        unmatched_policy="reject",
         balance_threshold=balance_threshold, missing_policy=missing_policy,
     )
     value = _validate_frame(frame, request, require_outcome=False)
@@ -199,11 +203,13 @@ def assess_balance(frame: pd.DataFrame, *, treatment_column: str, covariate_colu
     return make_matching_result(operation_id="matching.balance", status="completed", reason_code="MATCHING_COMPLETED", n_observations=len(value), result=result)
 
 
-def estimate_att(frame: pd.DataFrame, *, treatment_column: str, outcome_column: str, covariate_columns: Sequence[str], id_column: str, propensity_policy: Mapping[str, Any], distance_policy: str, ratio: int, caliper: float | None, replacement: bool, tie_policy: str, common_support_policy: str, unmatched_policy: str, balance_threshold: float | None, missing_policy: str) -> dict[str, Any]:
+def estimate_att(frame: pd.DataFrame, *, treatment_column: str, outcome_column: str, covariate_columns: Sequence[str], id_column: str, propensity_policy: Mapping[str, Any], matching_geometry_policy: str, support_distance_policy: str, ratio: int, caliper: float | None, replacement: bool, tie_policy: str, common_support_policy: str, unmatched_policy: str, balance_threshold: float | None, missing_policy: str) -> dict[str, Any]:
     request = _policy_input(
         "matching.att", outcome_column=outcome_column, treatment_column=treatment_column,
         covariate_columns=covariate_columns, id_column=id_column, propensity_policy=propensity_policy,
-        distance_policy=distance_policy, ratio=ratio, caliper=caliper, replacement=replacement,
+        matching_geometry_policy=matching_geometry_policy,
+        support_distance_policy=support_distance_policy,
+        ratio=ratio, caliper=caliper, replacement=replacement,
         tie_policy=tie_policy, common_support_policy=common_support_policy,
         unmatched_policy=unmatched_policy, balance_threshold=balance_threshold, missing_policy=missing_policy,
     )
@@ -224,11 +230,8 @@ def estimate_att(frame: pd.DataFrame, *, treatment_column: str, outcome_column: 
     lower, upper = max(float(treated_prob.min()), float(control_prob.min())), min(float(treated_prob.max()), float(control_prob.max()))
     if lower > upper:
         _fail("MATCHING_NO_COMMON_SUPPORT", "treated and control propensity ranges do not overlap")
-    # The first release reports the propensity overlap bounds but does not
-    # silently delete observations solely because a small synthetic sample has
-    # fitted probabilities outside those bounds.  Disjoint declared covariate
-    # support was rejected above; later versions can add a separately typed
-    # trimming policy with its target-population estimand.
+    # This declared policy rejects disjoint support and never silently trims the
+    # target population. A future trimming policy needs its own typed estimand.
     keep = np.ones(probabilities.size, dtype=bool)
     treated = treated[keep[treated]]
     controls = controls[keep[controls]]
@@ -281,6 +284,7 @@ def estimate_att(frame: pd.DataFrame, *, treatment_column: str, outcome_column: 
         "balance": balance["result"],
         "propensity": {"model": "logit", "support_distance": "absolute_logit_difference", "match_distance": "standardized_covariate_euclidean_v1", "min": float(probabilities.min()), "max": float(probabilities.max()), "design_columns": propensity_names},
         "matching_policy": request.to_dict(),
+        "trim_applied": False,
         "provenance": {"row_order": "input_position_stable", "tie_policy": request.tie_policy},
         "causal_claim_eligible": bool(balance["result"]["causal_claim_eligible"]),
         "scope": _scope("ATT among supported treated units under declared matching design"),

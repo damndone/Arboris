@@ -1,5 +1,9 @@
 # P7 的 29 个统计能力如何接入 CapabilityContract
 
+> **历史接入设计，已被最终实现取代。** 本文的“不含实现”和“18 个 gaps”
+> 是 2026-08-08 当时的状态，不是当前事实。当前权威状态见
+> `docs/superpowers/handoff/2026-08-13-v1.8.8-final-status-handoff.md`。
+
 - 日期：2026-08-08
 - 状态：设计说明，**不含实现**（实现要等 P7 merge 进主线）；已按 P2 的可达性契约校正豁免语义
 - 相关：`docs/superpowers/plans/2026-08-07-v1.8.8-p1-capability-contract.md`（P1 Task 5）、

@@ -229,34 +229,6 @@ class AcceptanceRunControl:
 
 
 @dataclass(frozen=True)
-class LegacyLedgerMigration:
-    """Immutable provenance for one explicit import of a legacy ledger."""
-
-    schema_version: int
-    manifest_digest: str
-    ledger_sha256: str
-    event_count: int
-    mode: AcceptanceRunMode
-    control_digest: str
-    migrated_at: float
-    migration_digest: str
-
-    def _unsigned_dict(self) -> dict[str, object]:
-        return {
-            "schema_version": self.schema_version,
-            "manifest_digest": self.manifest_digest,
-            "ledger_sha256": self.ledger_sha256,
-            "event_count": self.event_count,
-            "mode": self.mode,
-            "control_digest": self.control_digest,
-            "migrated_at": float(self.migrated_at),
-        }
-
-    def to_dict(self) -> dict[str, object]:
-        return {**self._unsigned_dict(), "migration_digest": self.migration_digest}
-
-
-@dataclass(frozen=True)
 class CompletionEvidence:
     """Identities required to prove one real, user-confirmed Agent chain."""
 
@@ -1858,9 +1830,6 @@ class AttemptLedger:
             )
         self.path = Path(path)
         self.control_path = self.path.with_name(self.path.name + ".control.json")
-        self.legacy_migration_path = self.path.with_name(
-            self.path.name + ".legacy-migration.json"
-        )
         self.lock_path = self.path.with_name(self.path.name + ".lock")
         self.manifest = manifest
         self.witness_verifier = witness_verifier
@@ -1982,204 +1951,6 @@ class AttemptLedger:
             error_type=AttemptLedgerError,
         )
         return self._load_run_control()
-
-    def _load_legacy_migration(self) -> LegacyLedgerMigration:
-        try:
-            raw = _read_regular_bytes(self.legacy_migration_path)
-            parsed = json.loads(
-                raw.decode("utf-8"),
-                object_pairs_hook=_reject_duplicate_json_keys,
-            )
-            data = _exact_mapping(
-                parsed,
-                "legacy ledger migration",
-                {
-                    "schema_version",
-                    "manifest_digest",
-                    "ledger_sha256",
-                    "event_count",
-                    "mode",
-                    "control_digest",
-                    "migrated_at",
-                    "migration_digest",
-                },
-            )
-            if data["schema_version"] != MANIFEST_SCHEMA_VERSION:
-                raise AttemptLedgerError("legacy ledger migration schema drifted")
-            if data["mode"] not in {"operation", "family_batch"}:
-                raise AttemptLedgerError("legacy ledger migration mode is invalid")
-            if type(data["event_count"]) is not int or data["event_count"] <= 0:
-                raise AttemptLedgerError(
-                    "legacy ledger migration event_count is invalid"
-                )
-            if (
-                type(data["migrated_at"]) not in {int, float}
-                or not math.isfinite(float(data["migrated_at"]))
-                or float(data["migrated_at"]) < 0
-            ):
-                raise AttemptLedgerError("legacy ledger migration timestamp is invalid")
-            migration = LegacyLedgerMigration(
-                schema_version=MANIFEST_SCHEMA_VERSION,
-                manifest_digest=_required_text(
-                    data["manifest_digest"], "migration manifest_digest"
-                ),
-                ledger_sha256=_required_text(
-                    data["ledger_sha256"], "migration ledger_sha256"
-                ),
-                event_count=data["event_count"],
-                mode=data["mode"],
-                control_digest=_required_text(
-                    data["control_digest"], "migration control_digest"
-                ),
-                migrated_at=float(data["migrated_at"]),
-                migration_digest=_required_text(
-                    data["migration_digest"], "migration_digest"
-                ),
-            )
-            if _sha256(migration._unsigned_dict()) != migration.migration_digest:
-                raise AttemptLedgerError("legacy ledger migration digest is invalid")
-            return migration
-        except (UnicodeDecodeError, json.JSONDecodeError, ManifestDriftError) as error:
-            raise AttemptLedgerError(
-                f"legacy ledger migration is invalid: {error}"
-            ) from error
-
-    @staticmethod
-    def _legacy_mode_from_raw(raw: bytes) -> AcceptanceRunMode:
-        try:
-            first_line = raw.splitlines()[0]
-            parsed = json.loads(
-                first_line.decode("utf-8"),
-                object_pairs_hook=_reject_duplicate_json_keys,
-            )
-        except (IndexError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise AttemptLedgerError(
-                "legacy ledger cannot determine its execution mode"
-            ) from error
-        return (
-            "family_batch"
-            if isinstance(parsed, Mapping)
-            and parsed.get("record_type") == "batch_transaction"
-            else "operation"
-        )
-
-    def _validate_legacy_migration(
-        self,
-        migration: LegacyLedgerMigration,
-        *,
-        raw: bytes,
-        event_count: int,
-        expected_control: AcceptanceRunControl,
-    ) -> None:
-        if migration.manifest_digest != self.manifest.manifest_digest:
-            raise AttemptLedgerError("legacy migration names another manifest")
-        if migration.ledger_sha256 != hashlib.sha256(raw).hexdigest():
-            raise AttemptLedgerError("legacy ledger changed after migration")
-        if migration.event_count != event_count:
-            raise AttemptLedgerError("legacy migration event count drifted")
-        if migration.mode != expected_control.mode:
-            raise AttemptLedgerError("legacy migration execution mode drifted")
-        if migration.control_digest != expected_control.control_digest:
-            raise AttemptLedgerError("legacy migration control digest drifted")
-
-    def migrate_legacy(
-        self,
-        *,
-        migrated_at: float | None = None,
-    ) -> LegacyLedgerMigration:
-        """Explicitly attach control authority to a valid legacy ledger.
-
-        The original ledger is never rewritten.  This method is deliberately
-        not called by ``events``, ``states``, ``next`` or ``resume`` paths.
-        """
-
-        if migrated_at is not None and (
-            type(migrated_at) not in {int, float}
-            or not math.isfinite(float(migrated_at))
-            or float(migrated_at) < 0
-        ):
-            raise AttemptLedgerError("legacy migration timestamp is invalid")
-        with self._locked_file(exclusive=True) as descriptor:
-            raw = self._read_all(descriptor)
-            if not raw:
-                raise AttemptLedgerError(
-                    "legacy migration requires persisted attempt progress"
-                )
-            if self.control_path.exists():
-                if not self.legacy_migration_path.exists():
-                    raise AttemptLedgerError(
-                        "acceptance run already has control; it is not a legacy ledger"
-                    )
-                migration = self._load_legacy_migration()
-                expected_control = self._expected_run_control(migration.mode)
-                actual_control = self._load_run_control()
-                if actual_control != expected_control:
-                    raise AttemptLedgerError(
-                        "legacy migration control does not match the frozen manifest"
-                    )
-                events = self._events_from_descriptor(descriptor)
-                self._validate_legacy_migration(
-                    migration,
-                    raw=raw,
-                    event_count=len(events),
-                    expected_control=expected_control,
-                )
-                return migration
-
-            events = self._events_from_descriptor(
-                descriptor,
-                require_control=False,
-            )
-            if not events:
-                raise AttemptLedgerError(
-                    "legacy migration requires at least one valid event"
-                )
-            mode = self._legacy_mode_from_raw(raw)
-            expected_control = self._expected_run_control(mode)
-            if self.legacy_migration_path.exists():
-                migration = self._load_legacy_migration()
-                self._validate_legacy_migration(
-                    migration,
-                    raw=raw,
-                    event_count=len(events),
-                    expected_control=expected_control,
-                )
-            else:
-                unsigned = {
-                    "schema_version": MANIFEST_SCHEMA_VERSION,
-                    "manifest_digest": self.manifest.manifest_digest,
-                    "ledger_sha256": hashlib.sha256(raw).hexdigest(),
-                    "event_count": len(events),
-                    "mode": mode,
-                    "control_digest": expected_control.control_digest,
-                    "migrated_at": (
-                        float(migrated_at)
-                        if migrated_at is not None
-                        else datetime.now(timezone.utc).timestamp()
-                    ),
-                }
-                migration = LegacyLedgerMigration(
-                    **unsigned,
-                    migration_digest=_sha256(unsigned),
-                )
-                _publish_write_once_bytes(
-                    self.legacy_migration_path,
-                    _canonical_json(migration.to_dict()),
-                    label="legacy ledger migration",
-                    error_type=AttemptLedgerError,
-                )
-            _publish_write_once_bytes(
-                self.control_path,
-                _canonical_json(expected_control.to_dict()),
-                label="acceptance run control",
-                error_type=AttemptLedgerError,
-            )
-            actual_control = self._load_run_control()
-            if actual_control != expected_control:
-                raise AttemptLedgerError(
-                    "migrated acceptance run control does not match the manifest"
-                )
-            return self._load_legacy_migration()
 
     def run_control(self) -> AcceptanceRunControl:
         """Load the immutable execution mode and scope frozen by the first start."""
@@ -3374,7 +3145,6 @@ __all__ = [
     "CompletionEvidenceError",
     "ExpectedParentChildContract",
     "FixtureProfile",
-    "LegacyLedgerMigration",
     "ManifestConflictError",
     "ManifestDriftError",
     "NextBatchAdmission",

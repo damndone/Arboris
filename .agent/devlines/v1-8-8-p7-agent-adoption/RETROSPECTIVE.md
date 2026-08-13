@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 7/9 (77.8%; 77.8 per 100 events)
+- Failure frequency: 7/10 (70.0%; 70.0 per 100 events)
 - Repeat rate: 0/7 (0.0%)
 - Recurrence rate: 0/7 (0.0%)
-- MTTR: median=0 ms (sample=6; unresolved=1)
+- MTTR: median=0 ms (sample=7; unresolved=0)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/1 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -87,3 +87,4 @@ COMPLETED
 - #7: `f4c8e6b0-2d17-4a93-8f5e-1b7c9d3a6e20` | 2026-08-09T02:57:04.000Z | GAP/browser_report_not_verified | incident=`a5d9f7c1-3e28-4b60-8f2a-6c9e1d4b7a03` | lesson_key=`browser-report-remains-not-verified` | event_sha256=`175285a8ad6f6ffb1aa0f79085f99b3dd60463829dcfda266e1eadd3251d2050`
 - #8: `a6e0c4b8-2d19-4f73-9a56-1c8e0b3d7f42` | 2026-08-09T03:05:04.000Z | FAILURE/p7_repeat_artifact_collision | incident=`b7f1d5c9-3a26-4e80-9b67-2d8c0a1f5e43` | lesson_key=`p7-artifact-identity-preserves-repeatability` | event_sha256=`a3f9361e8dc7aad5466393dbd18f1578507f8664e72ed9b49ab9384b34486623`
 - #9: `c8f2a6d0-4b17-4e93-8f65-1a7c9d3b5e02` | 2026-08-09T03:20:32.000Z | STATE_CHANGE/line_completed | incident=`d9a3b7e1-5c28-4f94-8a76-2b0d1e3c6f50` | lesson_key=`close-line-after-evidence-agrees` | event_sha256=`9be7c51bb490a21e3fbc83d0f02bfdabd51515cb7bcfe328dd582b3b35ac28a9`
+- #10: `8da2b3c4-e5f6-4789-abcd-ef0123456789` | 2026-08-13T09:45:02.000Z | GATE/browser_report_verified | incident=`a5d9f7c1-3e28-4b60-8f2a-6c9e1d4b7a03` | lesson_key=`p7-report-browser-consumer` | event_sha256=`7fa051ad1c745cfbf088faf0acb85df869fc2d89309805deca965d82201afb33`

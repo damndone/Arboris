@@ -452,7 +452,8 @@ def validate_matching_request(request: Request) -> Request:
 def _matching_options(options: Mapping[str, object]) -> dict[str, object]:
     required = (
         "propensity_policy",
-        "distance_policy",
+        "matching_geometry_policy",
+        "support_distance_policy",
         "ratio",
         "caliper",
         "replacement",

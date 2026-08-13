@@ -202,7 +202,11 @@ function collectPostEstimationAtomicValues(
     return true;
   }
   if (!value || typeof value !== "object") return true;
-  for (const [key, item] of Object.entries(value)) {
+  const entries = Object.entries(value);
+  entries.sort(([left], [right]) => (
+    Number(right === "inference") - Number(left === "inference")
+  ));
+  for (const [key, item] of entries) {
     if (POST_ESTIMATION_ENVELOPE_FIELDS.has(key)) continue;
     if (!collectPostEstimationAtomicValues(item, [...path, key], emit)) return false;
   }
