@@ -6,7 +6,7 @@
 
 ## Final status
 
-STARTED
+COMPLETED
 
 ## Metrics
 
@@ -17,7 +17,7 @@ STARTED
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/2 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -51,8 +51,14 @@ STARTED
 
 ## Future guidance
 
-- No guidance recorded.
+- A changed file or green test is not mutation evidence; prove the selected fixture changes behavior and record failed mutation design separately from product failures.
 
 ## Event index
 
 - #1: `8a498c1e-77c0-4866-9dfb-9c3a36acd114` | 2026-08-13T09:15:40.172Z | STATE_CHANGE/line_started | incident=`730f3109-caad-4629-bd7a-33f234848ba1` | lesson_key=`frozen-context-before-start` | event_sha256=`baf860ebe70ceb7267e64327072c3fbf7c5244cc691120ec80c489f3380b22fa`
+- #2: `46c86a25-6190-4223-8079-5cc7c1c85efb` | 2026-08-13T09:30:00.660Z | STATE_CHANGE/context_rescope_required | incident=`d8628a09-a270-4821-920b-4dd6d937d51e` | lesson_key=`context-pack-rescope` | event_sha256=`72846f6e722950d1865fa4c9fcf9ceb285845022c673ca6009a7a9dd0ce8e913`
+- #3: `6bf62c7f-5394-42bf-b4cf-cd1426c0db19` | 2026-08-13T09:30:00.666Z | STATE_CHANGE/context_rescoped | incident=`16ffffdc-0150-4c34-8c5a-be6aeff300b6` | lesson_key=`context-pack-rescope` | event_sha256=`4231ee30bd4c1f881470df3261f571d50a5b8c583cb098abd8e8c20ca2904107`
+- #4: `b0d5e6f7-1829-4abc-def0-123456789abc` | 2026-08-13T09:48:00.000Z | REVIEW/statistical_truth_mutation_review | incident=`c1e6f708-293a-4bcd-ef01-23456789abcd` | lesson_key=`behavior-changing-mutation-evidence` | event_sha256=`da15f4bb68de5d8ba35a1fd88c989a773546cd8681d6fe8c115b2b56f656d848`
+- #5: `d3e4f5a6-b718-49ca-8d2e-3f4051627384` | 2026-08-13T10:11:22.000Z | GATE/p7_current_source_batch_execution | incident=`e4f5a6b7-c829-4adb-9e3f-405162738495` | lesson_key=`p7-exact-source-batch-evidence` | event_sha256=`9abf69f0b4c11209bae16b74cf0238c7672f5e13e08d2fbb5a10097134e3da85`
+- #6: `f5a6b7c8-d930-4bec-af40-5162738495a6` | 2026-08-13T10:11:23.000Z | GATE/host_full_gate_passed | incident=`a6b7c8d9-e041-4cfd-b051-62738495a6b7` | lesson_key=`host-full-gate-on-final-source` | event_sha256=`0e07e16f12bb13f595040e205d1db27d423440c5e9f61c6a06627695392919b9`
+- #7: `c8d9e0f1-a263-4e1f-d273-8495a6b7c8d9` | 2026-08-13T10:11:25.000Z | STATE_CHANGE/statistical_truth_cleanup_completed | incident=`d9e0f1a2-b374-4f20-e384-95a6b7c8d9e0` | lesson_key=`statistical-truth-end-to-end-closeout` | event_sha256=`12067ef219eb0a4daa3e2858c067672c5dbeab04fbadf460c2d9b2e1212f102f`
