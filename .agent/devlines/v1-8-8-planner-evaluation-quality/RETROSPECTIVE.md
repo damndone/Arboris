@@ -10,7 +10,7 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 4/38 (10.5%; 10.5 per 100 events)
+- Failure frequency: 4/40 (10.0%; 10.0 per 100 events)
 - Repeat rate: 0/4 (0.0%)
 - Recurrence rate: 0/4 (0.0%)
 - MTTR: median=0 ms (sample=3; unresolved=1)
@@ -113,3 +113,5 @@ CONTEXT_RESCOPED
 - #36: `9f2c8f7e-2b08-4b79-a1b9-2f1c1c7b8a01` | 2026-08-13T13:30:34.000Z | GATE/host_full_gate | incident=`4a0b5c8e-7f2a-4c6b-91d3-8e5f7a2b6c10` | lesson_key=`final-host-full-gate` | event_sha256=`0361a38841990801b399cf4f00b435a2b62cbec5e4f8e03a0c545c7ff7fd8956`
 - #37: `2d7e9a41-6c3b-4f80-b5a2-1e8d4c7f9023` | 2026-08-13T13:30:34.000Z | REVIEW/warning_boundary_classification | incident=`8c1f6e3a-5b7d-4a90-9e2c-7f4b1d6a8035` | lesson_key=`warning-boundary-classification` | event_sha256=`30800e59a5d2b565a71f9f15b433af694952f9a48cbd2391826101c33b1b7e0c`
 - #38: `6a4f1c8e-9b2d-47f0-a531-7e3c8d2b9046` | 2026-08-13T13:30:34.000Z | GAP/real_provider_benchmark_unverified | incident=`1e7c4a9b-3d8f-50a2-b6e1-9c4f7d2a8053` | lesson_key=`provider-backed-planner-benchmark` | event_sha256=`a0bc487dceb177787d6851ff168feb8764b6a1ee0a06d220838f5f1cbccf8645`
+- #39: `397cd999-b32d-4f56-9bfb-17149fa43ace` | 2026-08-13T19:21:44.639Z | STATE_CHANGE/context_rescope_required | incident=`71b5bf7b-696a-4317-b0aa-58731f2659a2` | lesson_key=`context-pack-rescope` | event_sha256=`db826e5049558beea59b9353a2910aab1d78a847b0784bbcd4271156f3df087b`
+- #40: `827881be-6454-4cd9-9b48-849a5e3e2d10` | 2026-08-13T19:21:44.659Z | STATE_CHANGE/context_rescoped | incident=`9ba42e07-dd49-4b9a-87ff-dc348e903339` | lesson_key=`context-pack-rescope` | event_sha256=`08c72530ed721f8beda69cb992bb71888705b31f9e7dc7773f08cd35796feaad`

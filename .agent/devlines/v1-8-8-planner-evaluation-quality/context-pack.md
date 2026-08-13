@@ -66,7 +66,7 @@ Close three adjacent v1.8.8 quality gaps in the same source tree:
   batch execution, and the host full gate pass on the final source commit.
 
 ## Boundary
-- Affected paths: `backend/workbench/data_operations.py`
+- Affected paths: `docs/superpowers/handoff/2026-08-13-v1.8.8-final-status-handoff.md`
 - Allowed paths: `backend/workbench/app.py`, `backend/workbench/agent/notebook/planning_agent.py`, `backend/workbench/agent/p7_pack_adapters.py`, `backend/workbench/http/notebook_routes.py`, `backend/workbench/agent/planner_evaluation.py`, `scripts/planner_benchmark.py`, `frontend/src/report/ReportView.test.tsx`, `frontend/src/workbench/WorkbenchRouteContainer.test.tsx`, `tests/test_notebook_planning_agent.py`, `tests/test_notebook_routes.py`, `tests/test_p7_adoption_calls.py`, `tests/test_p7_adoption_registry.py`, `tests/test_p7_workflow_integration.py`, `tests/evaluation/planner/test_case_generation.py`, `tests/evaluation/planner/test_scorer.py`, `tests/evaluation/planner/test_production_boundary.py`, `tests/evaluation/planner/test_benchmark.py`, `tests/evaluation/planner/warning_inventory.md`, `tests/fixtures/evaluation/planner/README.md`, `tests/fixtures/evaluation/p7/hurdle_negative_binomial_convergent.csv`
 - Protected paths: `backend/workbench/agent/orchestrator.py`, `backend/workbench/orchestrator.py`
 - Dependencies: `v1-8-8-statistical-truth-cleanup`, `v1-8-8-final-integration`
