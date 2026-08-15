@@ -113,6 +113,24 @@ def test_contract_ref_rejects_non_semver_and_non_sha256_digest() -> None:
         assert exc_info.value.code == CONTRACT_REF_INVALID
 
 
+def test_semantic_version_components_are_bounded() -> None:
+    max_component = 2_147_483_647
+    assert parse_semantic_version(f"{max_component}.{max_component}") == (
+        max_component,
+        max_component,
+    )
+
+    for invalid_version in (
+        f"{'9' * 5_000}.0",
+        f"0.{'9' * 5_000}",
+        f"{max_component + 1}.0",
+        f"0.{max_component + 1}",
+    ):
+        with pytest.raises(ContractRefError) as exc_info:
+            parse_semantic_version(invalid_version)
+        assert exc_info.value.code == CONTRACT_VERSION_INVALID
+
+
 def test_resolver_rejects_duplicate_and_unresolved_refs() -> None:
     available = _ref()
 

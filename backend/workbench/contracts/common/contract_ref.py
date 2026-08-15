@@ -27,6 +27,7 @@ _ERROR_MESSAGES = {
     CONTRACT_MAJOR_INCOMPATIBLE: "contract major version is incompatible",
 }
 _SEMANTIC_VERSION_PATTERN = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+_MAX_SEMANTIC_VERSION_COMPONENT = 2_147_483_647
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _REF_FIELDS = frozenset(
     {"kind", "logical_id", "semantic_version", "contract_digest"}
@@ -51,7 +52,15 @@ def parse_semantic_version(value: object) -> tuple[int, int]:
     match = _SEMANTIC_VERSION_PATTERN.fullmatch(value)
     if match is None:
         raise ContractRefError(CONTRACT_VERSION_INVALID)
-    return int(match.group(1)), int(match.group(2))
+    components = match.groups()
+    max_component = str(_MAX_SEMANTIC_VERSION_COMPONENT)
+    if any(
+        len(component) > len(max_component)
+        or (len(component) == len(max_component) and component > max_component)
+        for component in components
+    ):
+        raise ContractRefError(CONTRACT_VERSION_INVALID)
+    return int(components[0]), int(components[1])
 
 
 def canonical_contract_digest(value: Any) -> str:
