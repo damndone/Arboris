@@ -1,0 +1,6 @@
+{
+  "produced_dataset": "artifact:legacy",
+  "run_id": "run:legacy",
+  "schema_version": "workflow-execution-state.v1",
+  "workflow_id": "workflow:legacy"
+}

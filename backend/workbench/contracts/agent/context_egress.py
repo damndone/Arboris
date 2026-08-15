@@ -1,0 +1,632 @@
+"""Sensitivity-aware provider context egress contracts.
+
+Only opaque selected/redacted references and a digest of the materialized
+context cross this seam.  The gateway does not carry raw prompt, cell, secret,
+or provider response content.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Mapping
+
+from workbench.canonical import CanonicalJSONError, canonical_json_v1, sha256_canonical
+from workbench.contracts.common.contract_ref import ContractRefV1
+from workbench.contracts.common.envelope import ContractError, freeze_json, thaw_json
+
+
+EGRESS_SCHEMA_V1 = "context-egress-gateway.v1"
+EGRESS_RECEIPT_SCHEMA_V1 = "context-egress-receipt.v1"
+_MAX_JSON_SAFE_INTEGER = 9_007_199_254_740_991
+_ISSUED_RECEIPTS: dict[tuple[int, str], object] = {}
+
+
+class EgressContractError(ContractError):
+    """A provider-bound context boundary failure."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        self.code = code
+        super().__init__(message or code)
+
+
+class SensitivityClassV1(str, Enum):
+    PUBLIC = "public"
+    INTERNAL = "internal"
+    RESTRICTED = "restricted"
+    UNKNOWN = "unknown"
+
+
+def _error(code: str, message: str) -> EgressContractError:
+    return EgressContractError(code, message)
+
+
+def _text(value: object, name: str) -> str:
+    if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+        raise _error("EGRESS_TEXT_INVALID", f"{name} must be an exact non-empty string")
+    return value
+
+
+def _digest(value: object, name: str) -> str:
+    if type(value) is not str or len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+        raise _error("EGRESS_DIGEST_INVALID", f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _timestamp(value: object, name: str):
+    from datetime import UTC, datetime
+
+    if type(value) is not str or not value or value != value.strip():
+        raise _error("EGRESS_TIMESTAMP_INVALID", f"{name} must be timezone-aware")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise _error("EGRESS_TIMESTAMP_INVALID", f"{name} must be timezone-aware") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise _error("EGRESS_TIMESTAMP_INVALID", f"{name} must be timezone-aware")
+    return parsed.astimezone(UTC)
+
+
+def _policy_ref(value: object) -> ContractRefV1:
+    if type(value) is not ContractRefV1:
+        raise _error("EGRESS_POLICY_INVALID", "policy_ref must be ContractRefV1")
+    return value
+
+
+def _parse_policy_ref(value: object) -> ContractRefV1:
+    if type(value) is not dict:
+        raise _error("EGRESS_NESTED_DICT_REQUIRED", "policy ref must be a built-in dict")
+    try:
+        return ContractRefV1.from_dict(value)
+    except (ContractError, ValueError) as exc:
+        raise _error("EGRESS_POLICY_INVALID", "policy ref is invalid") from exc
+
+
+def _parse_sensitivity(value: object) -> SensitivityClassV1:
+    if type(value) is not str:
+        raise _error("EGRESS_SENSITIVITY_INVALID", "sensitivity is invalid")
+    try:
+        return SensitivityClassV1(value)
+    except ValueError as exc:
+        raise _error("EGRESS_SENSITIVITY_INVALID", "sensitivity is invalid") from exc
+
+
+def _refs(value: object, name: str) -> tuple[str, ...]:
+    if not isinstance(value, (tuple, list)):
+        raise _error("EGRESS_ARRAY_INVALID", f"{name} must be an array")
+    normalized = tuple(_text(item, f"{name}[]") for item in value)
+    if len(set(normalized)) != len(normalized):
+        raise _error("EGRESS_DUPLICATE_REF", f"{name} contains duplicate refs")
+    return normalized
+
+
+def _wire_refs(value: object, name: str) -> tuple[str, ...]:
+    if type(value) is not list:
+        raise _error("EGRESS_ARRAY_INVALID", f"{name} must be a built-in list")
+    return _refs(value, name)
+
+
+def _validate_json(value: object, name: str, active: set[int] | None = None) -> None:
+    """Validate the portable, finite JSON subset before hashing context."""
+
+    if value is None or type(value) in {str, bool}:
+        return
+    if type(value) is int:
+        if not -_MAX_JSON_SAFE_INTEGER <= value <= _MAX_JSON_SAFE_INTEGER:
+            raise _error("EGRESS_CONTEXT_INVALID", f"{name} contains a nonportable integer")
+        return
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise _error("EGRESS_CONTEXT_INVALID", f"{name} contains a non-finite number")
+        return
+    if type(value) not in {dict, list, tuple}:
+        raise _error("EGRESS_CONTEXT_INVALID", f"{name} contains an unsupported value")
+    active_ids = active if active is not None else set()
+    value_id = id(value)
+    if value_id in active_ids:
+        raise _error("EGRESS_CONTEXT_INVALID", f"{name} must be acyclic JSON")
+    active_ids.add(value_id)
+    try:
+        if type(value) is dict:
+            if any(type(key) is not str for key in value):
+                raise _error("EGRESS_CONTEXT_INVALID", f"{name} keys must be strings")
+            children = value.values()
+        else:
+            children = value
+        for child in children:
+            _validate_json(child, f"{name}[]", active_ids)
+    finally:
+        active_ids.remove(value_id)
+
+
+def _budget(value: object, name: str) -> int:
+    if type(value) is not int or not 0 < value <= _MAX_JSON_SAFE_INTEGER:
+        raise _error("EGRESS_BUDGET_INVALID", f"{name} must be a positive JSON-safe integer")
+    return value
+
+
+def _wire(value: object, required: set[str], name: str) -> dict[str, object]:
+    if type(value) is not dict:
+        raise _error("EGRESS_NESTED_DICT_REQUIRED", f"{name} must be a built-in dict")
+    if any(type(key) is not str for key in value) or set(value) != required:
+        raise _error("EGRESS_SCHEMA_INVALID", f"{name} fields are not exact")
+    return value
+
+
+def _materialized_digest(value: object, name: str) -> str:
+    """Validate a digest without retaining the materialized context itself."""
+
+    return _digest(value, name)
+
+
+@dataclass(frozen=True)
+class ContextEgressPolicyV1:
+    policy_ref: ContractRefV1
+    destination: str
+    provider_ref: str
+    allowed_sensitivity: tuple[SensitivityClassV1, ...]
+    max_token_budget: int
+    max_row_budget: int
+    max_time_budget_ms: int
+    allow_raw_rows: bool = False
+    allow_raw_secrets: bool = False
+
+    def __post_init__(self) -> None:
+        _policy_ref(self.policy_ref)
+        if self.destination not in {"local", "remote"}:
+            raise _error("EGRESS_DESTINATION_INVALID", "destination must be local or remote")
+        _text(self.provider_ref, "provider_ref")
+        if not isinstance(self.allowed_sensitivity, (tuple, list)) or not self.allowed_sensitivity:
+            raise _error("EGRESS_POLICY_INVALID", "allowed_sensitivity must not be empty")
+        sensitivity = tuple(self.allowed_sensitivity)
+        if any(type(item) is not SensitivityClassV1 for item in sensitivity):
+            raise _error("EGRESS_POLICY_INVALID", "allowed_sensitivity contains an invalid value")
+        object.__setattr__(self, "allowed_sensitivity", sensitivity)
+        for value, name in (
+            (self.max_token_budget, "max_token_budget"),
+            (self.max_row_budget, "max_row_budget"),
+            (self.max_time_budget_ms, "max_time_budget_ms"),
+        ):
+            _budget(value, name)
+        if type(self.allow_raw_rows) is not bool or type(self.allow_raw_secrets) is not bool:
+            raise _error("EGRESS_BOOLEAN_INVALID", "raw-content policy values must be exact booleans")
+        if self.destination == "remote" and (self.allow_raw_rows or self.allow_raw_secrets):
+            raise _error("EGRESS_RAW_CONTENT_FORBIDDEN", "remote C0 policy cannot allow raw rows or secrets")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "policy_ref": self.policy_ref.to_dict(),
+            "destination": self.destination,
+            "provider_ref": self.provider_ref,
+            "allowed_sensitivity": [item.value for item in self.allowed_sensitivity],
+            "max_token_budget": self.max_token_budget,
+            "max_row_budget": self.max_row_budget,
+            "max_time_budget_ms": self.max_time_budget_ms,
+            "allow_raw_rows": self.allow_raw_rows,
+            "allow_raw_secrets": self.allow_raw_secrets,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "ContextEgressPolicyV1":
+        required = {
+            "policy_ref",
+            "destination",
+            "provider_ref",
+            "allowed_sensitivity",
+            "max_token_budget",
+            "max_row_budget",
+            "max_time_budget_ms",
+            "allow_raw_rows",
+            "allow_raw_secrets",
+        }
+        value = _wire(value, required, "egress_policy")
+        raw_ref = value["policy_ref"]
+        if type(raw_ref) is not dict:
+            raise _error("EGRESS_NESTED_DICT_REQUIRED", "policy_ref must be a built-in dict")
+        raw_sensitivity = value["allowed_sensitivity"]
+        if type(raw_sensitivity) is not list:
+            raise _error("EGRESS_ARRAY_INVALID", "allowed_sensitivity must be a built-in list")
+        try:
+            sensitivity = tuple(_parse_sensitivity(item) for item in raw_sensitivity)
+        except EgressContractError as exc:
+            raise _error("EGRESS_POLICY_INVALID", "allowed_sensitivity is invalid") from exc
+        return cls(
+            policy_ref=_parse_policy_ref(raw_ref),
+            destination=value["destination"],  # type: ignore[arg-type]
+            provider_ref=value["provider_ref"],  # type: ignore[arg-type]
+            allowed_sensitivity=sensitivity,
+            max_token_budget=value["max_token_budget"],  # type: ignore[arg-type]
+            max_row_budget=value["max_row_budget"],  # type: ignore[arg-type]
+            max_time_budget_ms=value["max_time_budget_ms"],  # type: ignore[arg-type]
+            allow_raw_rows=value["allow_raw_rows"],  # type: ignore[arg-type]
+            allow_raw_secrets=value["allow_raw_secrets"],  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True)
+class ContextEgressGatewayV1:
+    request_id: str
+    destination: str
+    provider_ref: str
+    sensitivity_policy_ref: ContractRefV1
+    sensitivity: SensitivityClassV1
+    selected_refs: tuple[str, ...]
+    redacted_refs: tuple[str, ...]
+    token_budget: int
+    row_budget: int
+    time_budget_ms: int
+    purpose_ref: str
+    materialized_context_digest: str
+    requested_at: str
+    expires_at: str
+
+    def __post_init__(self) -> None:
+        _text(self.request_id, "request_id")
+        if self.destination not in {"local", "remote"}:
+            raise _error("EGRESS_DESTINATION_INVALID", "destination must be local or remote")
+        _text(self.provider_ref, "provider_ref")
+        _policy_ref(self.sensitivity_policy_ref)
+        if type(self.sensitivity) is not SensitivityClassV1:
+            raise _error("EGRESS_SENSITIVITY_INVALID", "sensitivity is invalid")
+        selected = _refs(self.selected_refs, "selected_refs")
+        redacted = _refs(self.redacted_refs, "redacted_refs")
+        forbidden_prefixes = ("raw:", "secret:", "prompt:")
+        if any(
+            any(ref.casefold().startswith(prefix) for prefix in forbidden_prefixes)
+            for ref in selected
+        ):
+            raise _error("EGRESS_RAW_CONTENT_FORBIDDEN", "raw secrets and prompts cannot be selected")
+        if set(selected).intersection(redacted):
+            raise _error("EGRESS_SELECTION_INVALID", "a ref cannot be both selected and redacted")
+        object.__setattr__(self, "selected_refs", selected)
+        object.__setattr__(self, "redacted_refs", redacted)
+        _budget(self.token_budget, "token_budget")
+        _budget(self.row_budget, "row_budget")
+        _budget(self.time_budget_ms, "time_budget_ms")
+        _text(self.purpose_ref, "purpose_ref")
+        _materialized_digest(self.materialized_context_digest, "materialized_context_digest")
+        requested = _timestamp(self.requested_at, "requested_at")
+        expires = _timestamp(self.expires_at, "expires_at")
+        if expires <= requested:
+            raise _error("EGRESS_EXPIRY_INVALID", "expires_at must be after requested_at")
+
+    @classmethod
+    def from_materialized_context(
+        cls,
+        *,
+        request_id: str,
+        destination: str,
+        provider_ref: str,
+        sensitivity_policy_ref: ContractRefV1,
+        sensitivity: SensitivityClassV1,
+        selected_refs: tuple[str, ...],
+        redacted_refs: tuple[str, ...],
+        token_budget: int,
+        row_budget: int,
+        time_budget_ms: int,
+        purpose_ref: str,
+        materialized_context: dict[str, object],
+        requested_at: str,
+        expires_at: str,
+    ) -> "ContextEgressGatewayV1":
+        if type(materialized_context) is not dict:
+            raise _error("EGRESS_NESTED_DICT_REQUIRED", "materialized_context must be a built-in dict")
+        _validate_json(materialized_context, "materialized_context")
+        try:
+            canonical_json_v1(materialized_context)
+        except (CanonicalJSONError, RecursionError, ValueError) as exc:
+            raise _error("EGRESS_CONTEXT_INVALID", "materialized_context must be canonical JSON") from exc
+        return cls(
+            request_id=request_id,
+            destination=destination,
+            provider_ref=provider_ref,
+            sensitivity_policy_ref=sensitivity_policy_ref,
+            sensitivity=sensitivity,
+            selected_refs=selected_refs,
+            redacted_refs=redacted_refs,
+            token_budget=token_budget,
+            row_budget=row_budget,
+            time_budget_ms=time_budget_ms,
+            purpose_ref=purpose_ref,
+            materialized_context_digest=sha256_canonical(materialized_context),
+            requested_at=requested_at,
+            expires_at=expires_at,
+        )
+
+    @property
+    def request_digest(self) -> str:
+        return sha256_canonical(self.to_dict(include_digest=False))
+
+    def to_dict(self, *, include_digest: bool = True) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "schema_version": EGRESS_SCHEMA_V1,
+            "request_id": self.request_id,
+            "destination": self.destination,
+            "provider_ref": self.provider_ref,
+            "sensitivity_policy_ref": self.sensitivity_policy_ref.to_dict(),
+            "sensitivity": self.sensitivity.value,
+            "selected_refs": list(self.selected_refs),
+            "redacted_refs": list(self.redacted_refs),
+            "token_budget": self.token_budget,
+            "row_budget": self.row_budget,
+            "time_budget_ms": self.time_budget_ms,
+            "purpose_ref": self.purpose_ref,
+            "materialized_context_digest": self.materialized_context_digest,
+            "requested_at": self.requested_at,
+            "expires_at": self.expires_at,
+        }
+        if include_digest:
+            payload["request_digest"] = self.request_digest
+        return payload
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "ContextEgressGatewayV1":
+        required = {
+            "schema_version",
+            "request_id",
+            "destination",
+            "provider_ref",
+            "sensitivity_policy_ref",
+            "sensitivity",
+            "selected_refs",
+            "redacted_refs",
+            "token_budget",
+            "row_budget",
+            "time_budget_ms",
+            "purpose_ref",
+            "materialized_context_digest",
+            "requested_at",
+            "expires_at",
+            "request_digest",
+        }
+        value = _wire(value, required, "egress_gateway")
+        if value["schema_version"] != EGRESS_SCHEMA_V1:
+            raise _error("EGRESS_SCHEMA_INVALID", "gateway schema_version is invalid")
+        raw_policy = value["sensitivity_policy_ref"]
+        if type(raw_policy) is not dict:
+            raise _error("EGRESS_NESTED_DICT_REQUIRED", "sensitivity_policy_ref must be a built-in dict")
+        gateway = cls(
+            request_id=value["request_id"],  # type: ignore[arg-type]
+            destination=value["destination"],  # type: ignore[arg-type]
+            provider_ref=value["provider_ref"],  # type: ignore[arg-type]
+            sensitivity_policy_ref=_parse_policy_ref(raw_policy),
+            sensitivity=_parse_sensitivity(value["sensitivity"]),
+            selected_refs=_wire_refs(value["selected_refs"], "selected_refs"),
+            redacted_refs=_wire_refs(value["redacted_refs"], "redacted_refs"),
+            token_budget=value["token_budget"],  # type: ignore[arg-type]
+            row_budget=value["row_budget"],  # type: ignore[arg-type]
+            time_budget_ms=value["time_budget_ms"],  # type: ignore[arg-type]
+            purpose_ref=value["purpose_ref"],  # type: ignore[arg-type]
+            materialized_context_digest=value["materialized_context_digest"],  # type: ignore[arg-type]
+            requested_at=value["requested_at"],  # type: ignore[arg-type]
+            expires_at=value["expires_at"],  # type: ignore[arg-type]
+        )
+        if value["request_digest"] != gateway.request_digest:
+            raise _error("EGRESS_DIGEST_MISMATCH", "request_digest does not match gateway fields")
+        return gateway
+
+
+@dataclass(frozen=True)
+class ContextEgressReceiptV1:
+    receipt_id: str
+    gateway_request_digest: str
+    destination: str
+    provider_ref: str
+    sensitivity_policy_ref: ContractRefV1
+    sensitivity: SensitivityClassV1
+    selected_refs: tuple[str, ...]
+    redacted_refs: tuple[str, ...]
+    token_budget: int
+    row_budget: int
+    time_budget_ms: int
+    purpose_ref: str
+    materialized_context_digest: str
+    issued_at: str
+    expires_at: str
+    _issuer_token: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        _text(self.receipt_id, "receipt_id")
+        _digest(self.gateway_request_digest, "gateway_request_digest")
+        if self.destination not in {"local", "remote"}:
+            raise _error("EGRESS_DESTINATION_INVALID", "destination must be local or remote")
+        _text(self.provider_ref, "provider_ref")
+        _policy_ref(self.sensitivity_policy_ref)
+        if type(self.sensitivity) is not SensitivityClassV1:
+            raise _error("EGRESS_SENSITIVITY_INVALID", "sensitivity is invalid")
+        object.__setattr__(self, "selected_refs", _refs(self.selected_refs, "selected_refs"))
+        object.__setattr__(self, "redacted_refs", _refs(self.redacted_refs, "redacted_refs"))
+        _budget(self.token_budget, "token_budget")
+        _budget(self.row_budget, "row_budget")
+        _budget(self.time_budget_ms, "time_budget_ms")
+        _text(self.purpose_ref, "purpose_ref")
+        _materialized_digest(self.materialized_context_digest, "materialized_context_digest")
+        issued = _timestamp(self.issued_at, "issued_at")
+        expires = _timestamp(self.expires_at, "expires_at")
+        if expires <= issued:
+            raise _error("EGRESS_EXPIRY_INVALID", "expires_at must be after issued_at")
+
+    def _payload(self) -> dict[str, object]:
+        return {
+            "schema_version": EGRESS_RECEIPT_SCHEMA_V1,
+            "receipt_id": self.receipt_id,
+            "gateway_request_digest": self.gateway_request_digest,
+            "destination": self.destination,
+            "provider_ref": self.provider_ref,
+            "sensitivity_policy_ref": self.sensitivity_policy_ref.to_dict(),
+            "sensitivity": self.sensitivity.value,
+            "selected_refs": list(self.selected_refs),
+            "redacted_refs": list(self.redacted_refs),
+            "token_budget": self.token_budget,
+            "row_budget": self.row_budget,
+            "time_budget_ms": self.time_budget_ms,
+            "purpose_ref": self.purpose_ref,
+            "materialized_context_digest": self.materialized_context_digest,
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
+        }
+
+    @property
+    def receipt_digest(self) -> str:
+        return sha256_canonical(self._payload())
+
+    def to_dict(self) -> dict[str, object]:
+        return {**self._payload(), "receipt_digest": self.receipt_digest}
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "ContextEgressReceiptV1":
+        required = {
+            "schema_version",
+            "receipt_id",
+            "gateway_request_digest",
+            "destination",
+            "provider_ref",
+            "sensitivity_policy_ref",
+            "sensitivity",
+            "selected_refs",
+            "redacted_refs",
+            "token_budget",
+            "row_budget",
+            "time_budget_ms",
+            "purpose_ref",
+            "materialized_context_digest",
+            "issued_at",
+            "expires_at",
+            "receipt_digest",
+        }
+        value = _wire(value, required, "egress_receipt")
+        if value["schema_version"] != EGRESS_RECEIPT_SCHEMA_V1:
+            raise _error("EGRESS_SCHEMA_INVALID", "receipt schema_version is invalid")
+        raw_policy = value["sensitivity_policy_ref"]
+        if type(raw_policy) is not dict:
+            raise _error("EGRESS_NESTED_DICT_REQUIRED", "receipt policy ref must be a built-in dict")
+        receipt = cls(
+            receipt_id=value["receipt_id"],  # type: ignore[arg-type]
+            gateway_request_digest=value["gateway_request_digest"],  # type: ignore[arg-type]
+            destination=value["destination"],  # type: ignore[arg-type]
+            provider_ref=value["provider_ref"],  # type: ignore[arg-type]
+            sensitivity_policy_ref=_parse_policy_ref(raw_policy),
+            sensitivity=_parse_sensitivity(value["sensitivity"]),
+            selected_refs=_wire_refs(value["selected_refs"], "selected_refs"),
+            redacted_refs=_wire_refs(value["redacted_refs"], "redacted_refs"),
+            token_budget=value["token_budget"],  # type: ignore[arg-type]
+            row_budget=value["row_budget"],  # type: ignore[arg-type]
+            time_budget_ms=value["time_budget_ms"],  # type: ignore[arg-type]
+            purpose_ref=value["purpose_ref"],  # type: ignore[arg-type]
+            materialized_context_digest=value["materialized_context_digest"],  # type: ignore[arg-type]
+            issued_at=value["issued_at"],  # type: ignore[arg-type]
+            expires_at=value["expires_at"],  # type: ignore[arg-type]
+        )
+        if value["receipt_digest"] != receipt.receipt_digest:
+            raise _error("EGRESS_DIGEST_MISMATCH", "receipt_digest does not match receipt fields")
+        return receipt
+
+
+class ContextEgressReceiptIssuerV1:
+    """Server policy issuer and verifier for provider-sendable receipts."""
+
+    def __init__(self, policy: ContextEgressPolicyV1) -> None:
+        if type(policy) is not ContextEgressPolicyV1:
+            raise _error("EGRESS_POLICY_REQUIRED", "a server egress policy is required")
+        self.policy = policy
+        self._issuer_token = object()
+        self._receipts: dict[str, ContextEgressReceiptV1] = {}
+
+    def issue(self, gateway: ContextEgressGatewayV1) -> ContextEgressReceiptV1:
+        if type(gateway) is not ContextEgressGatewayV1:
+            raise _error("EGRESS_GATEWAY_REQUIRED", "provider context must pass through the gateway")
+        if gateway.sensitivity_policy_ref != self.policy.policy_ref:
+            raise _error("EGRESS_POLICY_MISMATCH", "gateway policy ref does not match server policy")
+        if gateway.destination != self.policy.destination or gateway.provider_ref != self.policy.provider_ref:
+            raise _error("EGRESS_SCOPE_MISMATCH", "destination/provider is outside the declared policy")
+        if gateway.sensitivity not in self.policy.allowed_sensitivity:
+            raise _error("EGRESS_SENSITIVITY_DENIED", "sensitivity is outside the declared policy")
+        if gateway.token_budget > self.policy.max_token_budget:
+            raise _error("EGRESS_BUDGET_EXCEEDED", "token budget exceeds policy")
+        if gateway.row_budget > self.policy.max_row_budget:
+            raise _error("EGRESS_BUDGET_EXCEEDED", "row budget exceeds policy")
+        if gateway.time_budget_ms > self.policy.max_time_budget_ms:
+            raise _error("EGRESS_BUDGET_EXCEEDED", "time budget exceeds policy")
+        receipt = ContextEgressReceiptV1(
+            receipt_id=f"egress-receipt:{gateway.request_id}",
+            gateway_request_digest=gateway.request_digest,
+            destination=gateway.destination,
+            provider_ref=gateway.provider_ref,
+            sensitivity_policy_ref=gateway.sensitivity_policy_ref,
+            sensitivity=gateway.sensitivity,
+            selected_refs=gateway.selected_refs,
+            redacted_refs=gateway.redacted_refs,
+            token_budget=gateway.token_budget,
+            row_budget=gateway.row_budget,
+            time_budget_ms=gateway.time_budget_ms,
+            purpose_ref=gateway.purpose_ref,
+            materialized_context_digest=gateway.materialized_context_digest,
+            issued_at=gateway.requested_at,
+            expires_at=gateway.expires_at,
+            _issuer_token=self._issuer_token,
+        )
+        self._receipts[receipt.receipt_digest] = receipt
+        _ISSUED_RECEIPTS[(id(self._issuer_token), receipt.receipt_digest)] = receipt
+        return receipt
+
+    def require(
+        self,
+        gateway: ContextEgressGatewayV1,
+        receipt: ContextEgressReceiptV1,
+        *,
+        at: str | None = None,
+    ) -> None:
+        if type(gateway) is not ContextEgressGatewayV1 or type(receipt) is not ContextEgressReceiptV1:
+            raise _error("EGRESS_RECEIPT_REQUIRED", "provider context requires an egress receipt")
+        if receipt._issuer_token is not self._issuer_token or self._receipts.get(receipt.receipt_digest) is not receipt:
+            raise _error("EGRESS_RECEIPT_REQUIRED", "receipt was not issued by this egress policy")
+        if receipt.gateway_request_digest != gateway.request_digest:
+            raise _error("EGRESS_DIGEST_MISMATCH", "receipt does not match gateway request")
+        if (
+            receipt.destination != gateway.destination
+            or receipt.provider_ref != gateway.provider_ref
+            or receipt.sensitivity_policy_ref != gateway.sensitivity_policy_ref
+            or receipt.sensitivity is not gateway.sensitivity
+            or receipt.selected_refs != gateway.selected_refs
+            or receipt.redacted_refs != gateway.redacted_refs
+            or receipt.token_budget != gateway.token_budget
+            or receipt.row_budget != gateway.row_budget
+            or receipt.time_budget_ms != gateway.time_budget_ms
+            or receipt.purpose_ref != gateway.purpose_ref
+            or receipt.materialized_context_digest != gateway.materialized_context_digest
+        ):
+            raise _error("EGRESS_SCOPE_MISMATCH", "receipt scope or materialized context digest mismatches")
+        if at is not None and _timestamp(at, "at") >= _timestamp(receipt.expires_at, "expires_at"):
+            raise _error("EGRESS_EXPIRED", "egress receipt is expired")
+
+
+def require_context_egress_receipt(
+    gateway: ContextEgressGatewayV1,
+    receipt: object,
+    *,
+    issuer: ContextEgressReceiptIssuerV1 | None = None,
+    at: str | None = None,
+) -> ContextEgressReceiptV1:
+    if type(gateway) is not ContextEgressGatewayV1 or type(receipt) is not ContextEgressReceiptV1:
+        raise _error("EGRESS_RECEIPT_REQUIRED", "provider context requires an egress receipt")
+    if issuer is None:
+        token = receipt._issuer_token
+        if token is None or _ISSUED_RECEIPTS.get((id(token), receipt.receipt_digest)) is not receipt:
+            raise _error("EGRESS_RECEIPT_REQUIRED", "receipt was not issued by a server egress issuer")
+    else:
+        issuer.require(gateway, receipt, at=at)
+    return receipt
+
+
+__all__ = [
+    "ContextEgressGatewayV1",
+    "ContextEgressPolicyV1",
+    "ContextEgressReceiptIssuerV1",
+    "ContextEgressReceiptV1",
+    "EGRESS_RECEIPT_SCHEMA_V1",
+    "EGRESS_SCHEMA_V1",
+    "EgressContractError",
+    "SensitivityClassV1",
+    "require_context_egress_receipt",
+]

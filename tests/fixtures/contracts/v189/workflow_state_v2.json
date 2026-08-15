@@ -1,0 +1,58 @@
+{
+  "catalog_snapshot_ref": "catalog-snapshot:1",
+  "contract_snapshot_ref": "contract-snapshot:1",
+  "execution_instance_hash": "4623911077972c19426714290b45c197cdb826df54da1c3671b8e0338784c058",
+  "model_branches": [
+    {
+      "artifact_refs": ["artifact:model:1"],
+      "branch_digest": "a4fa61e224d2d1a5430c459d34fc511a60099cad2d701a4f82eb14caca6464f2",
+      "branch_id": "branch:1",
+      "model_family": "logit",
+      "run_ref": "run:1",
+      "schema_ref": {
+        "contract_digest": "c811196064d09d4721f5fc5a615d7fa7041a3f5ee3c9d825fae33728a50fca90",
+        "kind": "model-branch",
+        "logical_id": "logit",
+        "semantic_version": "1.0"
+      }
+    }
+  ],
+  "output_bindings": [
+    {
+      "artifact_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "artifact_ref": "artifact:model:1",
+      "direction": "output",
+      "port_name": "model",
+      "schema_ref": {
+        "contract_digest": "e61fe05f93c2315d12fea2cfce1efa467222289e2f100db490d7aecd27764043",
+        "kind": "port-schema",
+        "logical_id": "model.result",
+        "semantic_version": "1.0"
+      },
+      "validation_receipt": {
+        "artifact_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "receipt_ref": "validation:receipt:1",
+        "schema_ref": {
+          "contract_digest": "e61fe05f93c2315d12fea2cfce1efa467222289e2f100db490d7aecd27764043",
+          "kind": "port-schema",
+          "logical_id": "model.result",
+          "semantic_version": "1.0"
+        },
+        "validation_digest": "076ac23679095bbf19f2cdb701dc02b76a07d4e3a30d6baffd011272385ad46d",
+        "validator_ref": {
+          "contract_digest": "7858719d1e29ac31d73e8f136763707e4939844994f22b1a69907316f87f3d5c",
+          "kind": "validator",
+          "logical_id": "model.result",
+          "semantic_version": "1.0"
+        }
+      },
+      "validation_status": "validated"
+    }
+  ],
+  "policy_snapshot_ref": "policy:snapshot:1",
+  "run_id": "run:1",
+  "schema_version": "workflow-execution-state.v2",
+  "semantic_plan_hash": "66a767ea15ba4debe3cffdf1ff5b8c4b347cca3a157790fb232b878a39ba7615",
+  "status": "completed",
+  "workflow_id": "workflow:1"
+}

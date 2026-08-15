@@ -1,0 +1,65 @@
+{
+  "catalog_snapshot_ref": "catalog:snapshot:1",
+  "compiled_workflow": {
+    "capability_refs": [
+      {
+        "contract_digest": "29339b4d6bb4066cda77ec4d008c18d9c1be8baedc385fc44c898288cb289899",
+        "kind": "capability",
+        "logical_id": "model.logit",
+        "semantic_version": "1.0"
+      }
+    ],
+    "catalog_snapshot_ref": "catalog:snapshot:1",
+    "compiler_version": "compiler:1.8.9",
+    "config": {"analysis_mode": "predictive", "seed": 7},
+    "connections": [],
+    "contract_snapshot_refs": [
+      {
+        "contract_digest": "29339b4d6bb4066cda77ec4d008c18d9c1be8baedc385fc44c898288cb289899",
+        "kind": "capability",
+        "logical_id": "model.logit",
+        "semantic_version": "1.0"
+      }
+    ],
+    "effect": "model_fit",
+    "intent_ref": "intent:classification:1",
+    "nodes": [
+      {
+        "capability_ref": "capability:model.logit",
+        "node_id": "fit",
+        "options": {"threshold": 0.5},
+        "roles": {"feature": "column:x1", "target": "column:target"}
+      }
+    ],
+    "plan_diff": {"data_impact": "read_dataset", "effect": "model_fit"},
+    "policy_snapshot_ref": "policy:snapshot:1",
+    "preview_fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "resource_budget": {"cpu_ms": 1000, "memory_mb": 128},
+    "risk_level": "medium",
+    "schema_version": "compiled-workflow.v1",
+    "semantic_plan_hash": "66a767ea15ba4debe3cffdf1ff5b8c4b347cca3a157790fb232b878a39ba7615",
+    "server_execution_identity": "compile:server:1"
+  },
+  "compiler_version": "compiler:1.8.9",
+  "contract_snapshot_refs": [
+    {
+      "contract_digest": "29339b4d6bb4066cda77ec4d008c18d9c1be8baedc385fc44c898288cb289899",
+      "kind": "capability",
+      "logical_id": "model.logit",
+      "semantic_version": "1.0"
+    }
+  ],
+  "created_at": "2026-08-15T17:00:00+00:00",
+  "expires_at": "2026-08-15T18:00:00+00:00",
+  "policy_snapshot_ref": "policy:snapshot:1",
+  "principal_ref": "principal:user:1",
+  "project_ref": "project:1",
+  "record_digest": "7f3ced9acbcdfc2b4ece8600f940be69ef62e7da4ef8d5ab7509b7f62db41d05",
+  "record_id": "compilation-record:1",
+  "schema_version": "compilation-record.v1",
+  "semantic_plan_hash": "66a767ea15ba4debe3cffdf1ff5b8c4b347cca3a157790fb232b878a39ba7615",
+  "session_ref": "session:1",
+  "source_commitments": {
+    "dataset": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  }
+}
