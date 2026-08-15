@@ -52,6 +52,23 @@ def _string_tuple(value: object, name: str) -> tuple[str, ...]:
     return tuple(_text(item, f"{name}[]") for item in value)
 
 
+def _wire_dict(
+    value: object,
+    required: set[str],
+    name: str,
+) -> dict[str, object]:
+    if type(value) is not dict:
+        raise ContractError(f"{name} must be a built-in dict")
+    require_exact_keys(value, required, name)
+    return value
+
+
+def _wire_mapping(value: object, name: str) -> dict[str, object]:
+    if type(value) is not dict:
+        raise ContractError(f"{name} must be a built-in dict")
+    return value
+
+
 def _supersedes(value: object) -> str | NotApplicableV1:
     if type(value) is str:
         return _text(value, "supersedes_ref")
@@ -105,7 +122,7 @@ class EvidenceCommitRequestV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "EvidenceCommitRequestV1":
-        require_exact_keys(
+        value = _wire_dict(
             value,
             {
                 "artifact_admission_ref",
@@ -119,7 +136,9 @@ class EvidenceCommitRequestV1:
         )
         return cls(
             artifact_admission_ref=value["artifact_admission_ref"],  # type: ignore[arg-type]
-            projector_ref=ContractRefV1.from_dict(value["projector_ref"]),  # type: ignore[arg-type]
+            projector_ref=ContractRefV1.from_dict(
+                _wire_mapping(value["projector_ref"], "projector_ref")
+            ),
             envelope_digest=value["envelope_digest"],  # type: ignore[arg-type]
             idempotency_key=value["idempotency_key"],  # type: ignore[arg-type]
             supersedes_ref=_supersedes(value["supersedes_ref"]),
@@ -157,7 +176,7 @@ class FailureReceiptV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "FailureReceiptV1":
-        require_exact_keys(
+        value = _wire_dict(
             value,
             {"code", "message", "retryable", "evidence_refs"},
             "failure_receipt",
@@ -228,7 +247,7 @@ class EvidenceCommitBindingV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "EvidenceCommitBindingV1":
-        require_exact_keys(
+        value = _wire_dict(
             value,
             {
                 "commit_id",
@@ -248,9 +267,7 @@ class EvidenceCommitBindingV1:
             status = TransactionStatusV1(value["transaction_status"])
         except (TypeError, ValueError) as exc:
             raise ContractError("transaction_status is invalid") from exc
-        raw_failure = value["failure_receipt"]
-        if not isinstance(raw_failure, Mapping):
-            raise ContractError("failure_receipt must be a mapping")
+        raw_failure = _wire_mapping(value["failure_receipt"], "failure_receipt")
         failure_receipt: FailureReceiptV1 | NotApplicableV1
         if raw_failure.get("status") == "not_applicable":
             failure_receipt = NotApplicableV1.from_dict(raw_failure)
@@ -260,7 +277,9 @@ class EvidenceCommitBindingV1:
             commit_id=value["commit_id"],  # type: ignore[arg-type]
             request_digest=value["request_digest"],  # type: ignore[arg-type]
             artifact_admission_ref=value["artifact_admission_ref"],  # type: ignore[arg-type]
-            projector_ref=ContractRefV1.from_dict(value["projector_ref"]),  # type: ignore[arg-type]
+            projector_ref=ContractRefV1.from_dict(
+                _wire_mapping(value["projector_ref"], "projector_ref")
+            ),
             envelope_digest=value["envelope_digest"],  # type: ignore[arg-type]
             idempotency_key=value["idempotency_key"],  # type: ignore[arg-type]
             transaction_status=status,

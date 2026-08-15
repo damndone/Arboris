@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
@@ -35,11 +36,17 @@ from workbench.contracts.common.foundation_status import (
 )
 from workbench.contracts.evidence.envelope import (
     DenominatorV1,
+    DistributionRefV1,
     EvidenceEnvelopeV1,
     EvidenceReasonV1,
+    IntervalV1,
+    MultipleComparisonV1,
     NotApplicableV1,
     NumericFactV1,
+    OracleCheckV1,
+    SourceSelectorV1,
     ValidationSummaryV1,
+    WeightBasisV1,
 )
 from workbench.contracts.evidence.persistence import (
     EVIDENCE_IDEMPOTENCY_CONFLICT,
@@ -53,10 +60,35 @@ from workbench.contracts.evidence.persistence import (
 
 
 _FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "contracts" / "v189"
+_EVIDENCE_FIXTURE_CANONICAL_SHA256 = (
+    "4b26cf04a29fed51795a04aac8102bf3af55659efaa817829f897cb00c37de65"
+)
+
+
+class _DictSubclass(dict[str, object]):
+    pass
+
+
+def _reject_duplicate_json_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON key: {key}")
+        value[key] = item
+    return value
+
+
+def _load_json(text: str) -> dict[str, object]:
+    value = json.loads(text, object_pairs_hook=_reject_duplicate_json_keys)
+    if type(value) is not dict:
+        raise ValueError("fixture root must be a JSON object")
+    return value
 
 
 def _fixture(name: str) -> dict[str, object]:
-    return json.loads((_FIXTURE_ROOT / name).read_text(encoding="utf-8"))
+    return _load_json((_FIXTURE_ROOT / name).read_text(encoding="utf-8"))
 
 
 def _ref(
@@ -77,6 +109,54 @@ def _ref(
         semantic_version=semantic_version,
         contract_digest=canonical_contract_digest(contract_payload),
     )
+
+
+def _reason(code: str) -> dict[str, object]:
+    return {
+        "code": code,
+        "message": f"{code} reason.",
+        "source_refs": [f"source:{code.lower()}"],
+    }
+
+
+def _empty_evidence() -> dict[str, object]:
+    return {
+        "numeric_facts": [],
+        "figures": [],
+        "validation_summary": {
+            "levels_present": [],
+            "minimum_required": "none",
+            "requirement_status": "not_applicable",
+        },
+    }
+
+
+def _commit_pair(
+    *,
+    invalidation_refs: tuple[str, ...] = (),
+    idempotency_key: str = "evidence-commit-1",
+) -> tuple[EvidenceCommitRequestV1, EvidenceCommitBindingV1]:
+    request = EvidenceCommitRequestV1(
+        artifact_admission_ref="admission-1",
+        projector_ref=_ref(kind="projector", logical_id="evidence.ols"),
+        envelope_digest="a" * 64,
+        idempotency_key=idempotency_key,
+        supersedes_ref=NotApplicableV1("initial commit"),
+        invalidation_refs=invalidation_refs,
+    )
+    binding = EvidenceCommitBindingV1(
+        commit_id="commit-1",
+        request_digest=request.request_digest,
+        artifact_admission_ref=request.artifact_admission_ref,
+        projector_ref=request.projector_ref,
+        envelope_digest=request.envelope_digest,
+        idempotency_key=request.idempotency_key,
+        transaction_status=TransactionStatusV1.COMMITTED,
+        supersedes_ref=request.supersedes_ref,
+        invalidation_refs=request.invalidation_refs,
+        failure_receipt=NotApplicableV1("commit succeeded"),
+    )
+    return request, binding
 
 
 def test_contract_ref_requires_kind_id_semver_and_digest() -> None:
@@ -232,6 +312,296 @@ def test_evidence_status_axes_are_independent() -> None:
     assert validation_level_rank(ValidationLevelV1.REFERENCE_SOFTWARE) == 4
 
 
+def test_duplicate_oracle_check_ids_are_rejected_before_validation_resolution() -> None:
+    fact = _fixture("evidence_envelope.json")["numeric_facts"][0]  # type: ignore[index]
+    duplicated = {
+        **fact,
+        "oracle_checks": [fact["oracle_checks"][0], fact["oracle_checks"][0]],
+    }
+
+    with pytest.raises(ContractError):
+        NumericFactV1.from_dict(duplicated)
+
+
+def test_duplicate_numeric_fact_ids_are_rejected_before_figure_resolution() -> None:
+    payload = _fixture("evidence_envelope.json")
+    facts = payload["numeric_facts"]
+    duplicated = {**payload, "numeric_facts": [*facts, facts[0]]}
+
+    with pytest.raises(ContractError):
+        EvidenceEnvelopeV1.from_dict(duplicated)
+
+
+def test_public_wire_decoders_require_exact_builtin_dicts() -> None:
+    payload = _fixture("evidence_envelope.json")
+    fact = payload["numeric_facts"][0]  # type: ignore[index]
+    request = EvidenceCommitRequestV1(
+        artifact_admission_ref="admission-1",
+        projector_ref=_ref(kind="projector", logical_id="evidence.ols"),
+        envelope_digest="a" * 64,
+        idempotency_key="commit-1",
+        supersedes_ref=NotApplicableV1("initial commit"),
+        invalidation_refs=(),
+    )
+    binding = EvidenceCommitBindingV1(
+        commit_id="binding-1",
+        request_digest=request.request_digest,
+        artifact_admission_ref=request.artifact_admission_ref,
+        projector_ref=request.projector_ref,
+        envelope_digest=request.envelope_digest,
+        idempotency_key=request.idempotency_key,
+        transaction_status=TransactionStatusV1.COMMITTED,
+        supersedes_ref=request.supersedes_ref,
+        invalidation_refs=request.invalidation_refs,
+        failure_receipt=NotApplicableV1("commit succeeded"),
+    )
+    decoder_payloads = (
+        (NotApplicableV1.from_dict, {"status": "not_applicable", "reason": "unused"}),
+        (EvidenceReasonV1.from_dict, _reason("WIRE")),
+        (DenominatorV1.from_dict, fact["denominator"]),
+        (WeightBasisV1.from_dict, fact["weight"]),
+        (IntervalV1.from_dict, fact["confidence_interval"]),
+        (DistributionRefV1.from_dict, fact["reference_distribution"]),
+        (MultipleComparisonV1.from_dict, fact["multiple_comparison"]),
+        (SourceSelectorV1.from_dict, fact["source_selector"]),
+        (OracleCheckV1.from_dict, fact["oracle_checks"][0]),
+        (NumericFactV1.from_dict, fact),
+        (ValidationSummaryV1.from_dict, payload["validation_summary"]),
+        (EvidenceEnvelopeV1.from_dict, payload),
+        (EvidenceCommitRequestV1.from_dict, request.to_dict()),
+        (
+            FailureReceiptV1.from_dict,
+            {
+                "code": "FAILED",
+                "message": "Commit failed.",
+                "retryable": True,
+                "evidence_refs": ["failure-1"],
+            },
+        ),
+        (EvidenceCommitBindingV1.from_dict, binding.to_dict()),
+    )
+
+    for decoder, wire_payload in decoder_payloads:
+        with pytest.raises(ContractError):
+            decoder(_DictSubclass(wire_payload))
+
+    with pytest.raises(ContractError):
+        EvidenceEnvelopeV1.from_dict(
+            {**payload, "method": _DictSubclass(payload["method"])}
+        )
+    with pytest.raises(ContractError):
+        EvidenceCommitRequestV1.from_dict(
+            {**request.to_dict(), "projector_ref": _DictSubclass(request.projector_ref.to_dict())}
+        )
+    with pytest.raises(ContractError):
+        EvidenceCommitBindingV1.from_dict(
+            {
+                **binding.to_dict(),
+                "failure_receipt": _DictSubclass(binding.failure_receipt.to_dict()),
+            }
+        )
+
+
+def test_nested_frozen_json_rejects_nfc_equivalent_duplicate_keys() -> None:
+    payload = _fixture("evidence_envelope.json")
+    payload["method"] = {
+        "nested": {
+            "é": "precomposed",
+            "e\u0301": "decomposed",
+        }
+    }
+
+    with pytest.raises(ContractError):
+        EvidenceEnvelopeV1.from_dict(payload)
+
+
+def test_malformed_numeric_and_oracle_values_have_stable_contract_errors() -> None:
+    fact = _fixture("evidence_envelope.json")["numeric_facts"][0]  # type: ignore[index]
+    huge_integer = 10**1_000
+    huge = NumericFactV1.from_dict({**fact, "value": huge_integer})
+    assert huge.value == huge_integer
+    assert f'"value":{huge_integer}' in canonical_json_v1(huge.to_dict())
+
+    for malformed in (True, [], {}, {"unhashable"}):
+        with pytest.raises(ContractError):
+            NumericFactV1.from_dict({**fact, "value": malformed})
+
+    malformed_oracle = {
+        **fact["oracle_checks"][0],
+        "status": ["pass"],
+    }
+    with pytest.raises(ContractError):
+        OracleCheckV1.from_dict(malformed_oracle)
+
+    for degrees_of_freedom in (0.0, -1.0):
+        with pytest.raises(ContractError):
+            DistributionRefV1.from_dict(
+                {
+                    **fact["reference_distribution"],
+                    "degrees_of_freedom": degrees_of_freedom,
+                }
+            )
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"execution_reasons": [_reason("UNEXPECTED")]},
+        {
+            "execution_status": "partial",
+            "completeness_status": "degraded",
+            "degradation_reasons": [_reason("DEGRADED")],
+        },
+        {
+            "execution_status": "partial",
+            "execution_reasons": [_reason("PARTIAL")],
+        },
+        {
+            "execution_status": "blocked",
+            "completeness_status": "insufficient",
+            "execution_reasons": [_reason("BLOCKED")],
+            "degradation_reasons": [_reason("INSUFFICIENT")],
+            **_empty_evidence(),
+        },
+        {
+            "execution_status": "failed",
+            "completeness_status": "insufficient",
+            "execution_reasons": [_reason("FAILED")],
+            "degradation_reasons": [_reason("INSUFFICIENT")],
+            **_empty_evidence(),
+        },
+        {
+            "execution_status": "blocked",
+            "availability": "not_available",
+            "completeness_status": "degraded",
+            "execution_reasons": [_reason("BLOCKED")],
+            "availability_reasons": [_reason("NOT_AVAILABLE")],
+            "degradation_reasons": [_reason("DEGRADED")],
+            **_empty_evidence(),
+        },
+        {
+            "execution_status": "failed",
+            "availability": "not_applicable",
+            "completeness_status": "degraded",
+            "execution_reasons": [_reason("FAILED")],
+            "availability_reasons": [_reason("NOT_APPLICABLE")],
+            "degradation_reasons": [_reason("DEGRADED")],
+            **_empty_evidence(),
+        },
+        {
+            "availability": "not_available",
+            "availability_reasons": [_reason("NOT_AVAILABLE")],
+            "completeness_status": "insufficient",
+            "degradation_reasons": [_reason("INSUFFICIENT")],
+            "figures": [],
+        },
+        {
+            "availability": "not_applicable",
+            "availability_reasons": [_reason("NOT_APPLICABLE")],
+            "completeness_status": "insufficient",
+            "degradation_reasons": [_reason("INSUFFICIENT")],
+            "numeric_facts": [],
+            "validation_summary": {
+                "levels_present": [],
+                "minimum_required": "none",
+                "requirement_status": "not_applicable",
+            },
+        },
+        {
+            "availability": "not_available",
+            "availability_reasons": [_reason("NOT_AVAILABLE")],
+            **_empty_evidence(),
+        },
+    ],
+    ids=[
+        "completed-forbids-execution-reasons",
+        "partial-requires-execution-reason",
+        "partial-cannot-be-complete",
+        "blocked-cannot-be-available",
+        "failed-cannot-be-available",
+        "blocked-requires-insufficient-or-not-applicable",
+        "failed-requires-insufficient-or-not-applicable",
+        "not-available-forbids-numeric-facts",
+        "not-applicable-forbids-figures",
+        "complete-requires-available",
+    ],
+)
+def test_evidence_envelope_rejects_contradictory_state_matrix(
+    updates: dict[str, object],
+) -> None:
+    payload = {**_fixture("evidence_envelope.json"), **updates}
+
+    with pytest.raises(ContractError):
+        EvidenceEnvelopeV1.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {},
+        {
+            "completeness_status": "degraded",
+            "degradation_reasons": [_reason("DEGRADED")],
+        },
+        {
+            "execution_status": "partial",
+            "completeness_status": "degraded",
+            "execution_reasons": [_reason("PARTIAL")],
+            "degradation_reasons": [_reason("DEGRADED")],
+        },
+        {
+            "execution_status": "blocked",
+            "availability": "not_available",
+            "completeness_status": "insufficient",
+            "execution_reasons": [_reason("BLOCKED")],
+            "availability_reasons": [_reason("NOT_AVAILABLE")],
+            "degradation_reasons": [_reason("INSUFFICIENT")],
+            **_empty_evidence(),
+        },
+        {
+            "execution_status": "failed",
+            "availability": "not_applicable",
+            "completeness_status": "not_applicable",
+            "execution_reasons": [_reason("FAILED")],
+            "availability_reasons": [_reason("NOT_APPLICABLE")],
+            "degradation_reasons": [_reason("NOT_APPLICABLE")],
+            **_empty_evidence(),
+        },
+        {
+            "execution_status": "partial",
+            "availability": "not_available",
+            "completeness_status": "insufficient",
+            "execution_reasons": [_reason("PARTIAL")],
+            "availability_reasons": [_reason("NOT_AVAILABLE")],
+            "degradation_reasons": [_reason("INSUFFICIENT")],
+            **_empty_evidence(),
+        },
+    ],
+    ids=[
+        "completed-available-complete",
+        "completed-available-degraded",
+        "partial-available-degraded",
+        "blocked-not-available-insufficient",
+        "failed-not-applicable",
+        "partial-not-available-insufficient",
+    ],
+)
+def test_evidence_envelope_accepts_valid_orthogonal_state_matrix(
+    updates: dict[str, object],
+) -> None:
+    envelope = EvidenceEnvelopeV1.from_dict(
+        {**_fixture("evidence_envelope.json"), **updates}
+    )
+
+    assert envelope.execution_status.value == updates.get(
+        "execution_status", "completed"
+    )
+    assert envelope.availability.value == updates.get("availability", "available")
+    assert envelope.completeness_status.value == updates.get(
+        "completeness_status", "complete"
+    )
+
+
 def test_same_library_regression_cannot_claim_independent_validation() -> None:
     fact = _fixture("evidence_envelope.json")["numeric_facts"][0]  # type: ignore[index]
     forged = {**fact, "validation_level": "independent_implementation"}
@@ -335,6 +705,7 @@ def test_degraded_is_completeness_not_execution_or_availability() -> None:
 
 def test_fact_validation_does_not_promote_the_whole_envelope() -> None:
     fixture_path = _FIXTURE_ROOT / "evidence_envelope.json"
+    fixture_text = fixture_path.read_text(encoding="utf-8")
     payload = _fixture("evidence_envelope.json")
     envelope = EvidenceEnvelopeV1.from_dict(payload)
 
@@ -362,10 +733,17 @@ def test_fact_validation_does_not_promote_the_whole_envelope() -> None:
     with pytest.raises(ContractError):
         EvidenceEnvelopeV1.from_dict(promoted)
 
-    assert canonical_json_v1(envelope.to_dict()) == canonical_json_v1(
-        json.loads(fixture_path.read_text(encoding="utf-8"))
+    canonical_bytes = canonical_json_v1(envelope.to_dict()).encode("utf-8")
+    assert canonical_bytes == canonical_json_v1(_load_json(fixture_text)).encode(
+        "utf-8"
+    )
+    assert (
+        hashlib.sha256(canonical_bytes).hexdigest()
+        == _EVIDENCE_FIXTURE_CANONICAL_SHA256
     )
     assert EvidenceEnvelopeV1.from_dict(envelope.to_dict()) == envelope
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        _load_json('{"nested":{"duplicate":1,"duplicate":2}}')
     with pytest.raises(ContractError):
         EvidenceEnvelopeV1.from_dict({**payload, "unknown": "rejected"})
     with pytest.raises(ContractError):
@@ -507,6 +885,111 @@ def test_evidence_commit_binds_artifact_projector_and_envelope_digests() -> None
         failure_receipt=NotApplicableV1("invalidation is not a commit failure"),
     )
     assert EvidenceCommitBindingV1.from_dict(invalidated_binding.to_dict()) == invalidated_binding
+
+
+@pytest.mark.parametrize(
+    ("field_name", "replacement"),
+    [
+        ("artifact_admission_ref", "admission-2"),
+        (
+            "projector_ref",
+            _ref(
+                kind="projector",
+                logical_id="evidence.ols",
+                semantic_version="1.1",
+            ),
+        ),
+        ("envelope_digest", "b" * 64),
+        ("idempotency_key", "evidence-commit-2"),
+        ("supersedes_ref", "commit-0"),
+        ("invalidation_refs", ("invalidation-1",)),
+        ("request_digest", "0" * 64),
+    ],
+)
+def test_evidence_binding_rejects_each_request_bound_field_mutation(
+    field_name: str,
+    replacement: object,
+) -> None:
+    _, binding = _commit_pair()
+
+    with pytest.raises(ContractError):
+        EvidenceCommitBindingV1(
+            **{
+                **binding.__dict__,
+                field_name: replacement,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_digest",
+    ["f" * 63, "F" * 64, "sha256:" + "f" * 64, "not-a-digest"],
+)
+def test_persistence_records_reject_malformed_digests(invalid_digest: str) -> None:
+    request, binding = _commit_pair()
+
+    with pytest.raises(ContractError):
+        EvidenceCommitRequestV1.from_dict(
+            {**request.to_dict(), "envelope_digest": invalid_digest}
+        )
+    with pytest.raises(ContractError):
+        EvidenceCommitBindingV1.from_dict(
+            {**binding.to_dict(), "request_digest": invalid_digest}
+        )
+    with pytest.raises(ContractError):
+        EvidenceCommitBindingV1.from_dict(
+            {**binding.to_dict(), "envelope_digest": invalid_digest}
+        )
+
+
+def test_transaction_status_and_failure_receipt_matrix_is_strict() -> None:
+    _, binding = _commit_pair()
+    failure = FailureReceiptV1(
+        code="PERSISTENCE_FAILED",
+        message="The immutable commit failed.",
+        retryable=True,
+        evidence_refs=("failure-1",),
+    )
+    _, invalidation_binding = _commit_pair(
+        invalidation_refs=("invalidation-1",),
+        idempotency_key="evidence-invalidation-1",
+    )
+
+    invalid_variants = (
+        {**binding.__dict__, "failure_receipt": failure},
+        {
+            **binding.__dict__,
+            "transaction_status": TransactionStatusV1.FAILED,
+        },
+        {
+            **binding.__dict__,
+            "transaction_status": TransactionStatusV1.INVALIDATED,
+        },
+        {
+            **invalidation_binding.__dict__,
+            "transaction_status": TransactionStatusV1.INVALIDATED,
+            "failure_receipt": failure,
+        },
+    )
+    for variant in invalid_variants:
+        with pytest.raises(ContractError):
+            EvidenceCommitBindingV1(**variant)
+
+    failed = EvidenceCommitBindingV1(
+        **{
+            **binding.__dict__,
+            "transaction_status": TransactionStatusV1.FAILED,
+            "failure_receipt": failure,
+        }
+    )
+    invalidated = EvidenceCommitBindingV1(
+        **{
+            **invalidation_binding.__dict__,
+            "transaction_status": TransactionStatusV1.INVALIDATED,
+        }
+    )
+    assert failed.transaction_status is TransactionStatusV1.FAILED
+    assert invalidated.transaction_status is TransactionStatusV1.INVALIDATED
 
 
 def test_resolver_rejects_duplicate_and_unresolved_refs() -> None:

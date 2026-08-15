@@ -8,6 +8,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
+from workbench.canonical import CanonicalJSONError, canonical_json_v1
 from workbench.contracts.common.envelope import (
     ContractError,
     freeze_json,
@@ -47,13 +48,19 @@ def _string_tuple(value: object, name: str) -> tuple[str, ...]:
 
 
 def _finite_number(value: object, name: str) -> int | float:
-    if type(value) not in {int, float} or not math.isfinite(value):
+    if type(value) is int:
+        return value
+    if type(value) is float:
+        if math.isfinite(value):
+            return value
         raise ContractError(f"{name} must be a finite number")
-    return value
+    raise ContractError(f"{name} must be a finite number")
 
 
 def _finite_float(value: object, name: str) -> float:
-    if type(value) is not float or not math.isfinite(value):
+    if type(value) is not float:
+        raise ContractError(f"{name} must be a finite float")
+    if not math.isfinite(value):
         raise ContractError(f"{name} must be a finite float")
     return value
 
@@ -70,6 +77,10 @@ def _enum(value: object, enum_type: type[_EnumT], name: str) -> _EnumT:
 def _mapping(value: object, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ContractError(f"{name} must be a mapping")
+    try:
+        canonical_json_v1(value)
+    except CanonicalJSONError as exc:
+        raise ContractError(f"{name} must be canonical JSON") from exc
     frozen = freeze_json(value, name)
     if not isinstance(frozen, Mapping):  # pragma: no cover - freeze_json contract
         raise ContractError(f"{name} must be a mapping")
@@ -80,6 +91,32 @@ def _mapping_tuple(value: object, name: str) -> tuple[Mapping[str, Any], ...]:
     if not isinstance(value, (list, tuple)):
         raise ContractError(f"{name} must be an array")
     return tuple(_mapping(item, f"{name}[]") for item in value)
+
+
+def _wire_dict(
+    value: object,
+    required: set[str],
+    name: str,
+) -> dict[str, object]:
+    if type(value) is not dict:
+        raise ContractError(f"{name} must be a built-in dict")
+    require_exact_keys(value, required, name)
+    return value
+
+
+def _wire_mapping(value: object, name: str) -> dict[str, object]:
+    if type(value) is not dict:
+        raise ContractError(f"{name} must be a built-in dict")
+    return value
+
+
+def _wire_mapping_tuple(
+    value: object,
+    name: str,
+) -> tuple[dict[str, object], ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ContractError(f"{name} must be an array")
+    return tuple(_wire_mapping(item, f"{name}[]") for item in value)
 
 
 @dataclass(frozen=True)
@@ -94,7 +131,7 @@ class NotApplicableV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "NotApplicableV1":
-        require_exact_keys(value, _NOT_APPLICABLE_FIELDS, "not_applicable")
+        value = _wire_dict(value, _NOT_APPLICABLE_FIELDS, "not_applicable")
         if value["status"] != "not_applicable":
             raise ContractError("not_applicable.status must be not_applicable")
         return cls(reason=value["reason"])  # type: ignore[arg-type]
@@ -144,7 +181,11 @@ class EvidenceReasonV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "EvidenceReasonV1":
-        require_exact_keys(value, {"code", "message", "source_refs"}, "evidence_reason")
+        value = _wire_dict(
+            value,
+            {"code", "message", "source_refs"},
+            "evidence_reason",
+        )
         return cls(
             code=value["code"],  # type: ignore[arg-type]
             message=value["message"],  # type: ignore[arg-type]
@@ -170,7 +211,7 @@ class DenominatorV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "DenominatorV1":
-        require_exact_keys(value, {"kind", "value", "unit"}, "denominator")
+        value = _wire_dict(value, {"kind", "value", "unit"}, "denominator")
         return cls(
             kind=value["kind"],  # type: ignore[arg-type]
             value=value["value"],  # type: ignore[arg-type]
@@ -195,7 +236,7 @@ class WeightBasisV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "WeightBasisV1":
-        require_exact_keys(value, {"kind", "variable_ref"}, "weight_basis")
+        value = _wire_dict(value, {"kind", "variable_ref"}, "weight_basis")
         return cls(
             kind=value["kind"],  # type: ignore[arg-type]
             variable_ref=_string_or_not_applicable(value["variable_ref"], "variable_ref"),
@@ -220,7 +261,7 @@ class IntervalV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "IntervalV1":
-        require_exact_keys(value, {"lower", "upper", "method"}, "interval")
+        value = _wire_dict(value, {"lower", "upper", "method"}, "interval")
         return cls(
             lower=value["lower"],  # type: ignore[arg-type]
             upper=value["upper"],  # type: ignore[arg-type]
@@ -237,7 +278,12 @@ class DistributionRefV1:
     def __post_init__(self) -> None:
         _text(self.name, "name")
         if type(self.degrees_of_freedom) is float:
-            _finite_float(self.degrees_of_freedom, "degrees_of_freedom")
+            degrees_of_freedom = _finite_float(
+                self.degrees_of_freedom,
+                "degrees_of_freedom",
+            )
+            if degrees_of_freedom <= 0:
+                raise ContractError("degrees_of_freedom must be greater than zero")
         elif type(self.degrees_of_freedom) is not NotApplicableV1:
             raise ContractError("degrees_of_freedom must be a float or NotApplicableV1")
         object.__setattr__(self, "parameters", _mapping(self.parameters, "parameters"))
@@ -251,7 +297,7 @@ class DistributionRefV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "DistributionRefV1":
-        require_exact_keys(
+        value = _wire_dict(
             value,
             {"name", "degrees_of_freedom", "parameters"},
             "distribution_ref",
@@ -261,7 +307,7 @@ class DistributionRefV1:
             degrees_of_freedom=_float_or_not_applicable(
                 value["degrees_of_freedom"], "degrees_of_freedom"
             ),
-            parameters=value["parameters"],  # type: ignore[arg-type]
+            parameters=_wire_mapping(value["parameters"], "parameters"),
         )
 
 
@@ -286,7 +332,11 @@ class MultipleComparisonV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "MultipleComparisonV1":
-        require_exact_keys(value, {"family_id", "correction"}, "multiple_comparison")
+        value = _wire_dict(
+            value,
+            {"family_id", "correction"},
+            "multiple_comparison",
+        )
         return cls(
             family_id=_string_or_not_applicable(value["family_id"], "family_id"),
             correction=_string_or_not_applicable(value["correction"], "correction"),
@@ -314,7 +364,7 @@ class SourceSelectorV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "SourceSelectorV1":
-        require_exact_keys(
+        value = _wire_dict(
             value,
             {"artifact_ref", "selector", "artifact_digest"},
             "source_selector",
@@ -337,7 +387,7 @@ class OracleCheckV1:
 
     def __post_init__(self) -> None:
         _text(self.check_id, "check_id")
-        if self.status not in _ORACLE_STATUSES:
+        if type(self.status) is not str or self.status not in _ORACLE_STATUSES:
             raise ContractError("status is invalid")
         if type(self.basis) is not ValidationLevelV1:
             raise ContractError("basis must be ValidationLevelV1")
@@ -366,7 +416,7 @@ class OracleCheckV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "OracleCheckV1":
-        require_exact_keys(
+        value = _wire_dict(
             value,
             {
                 "check_id",
@@ -489,6 +539,9 @@ class NumericFactV1:
         ):
             raise ContractError("oracle_checks must contain OracleCheckV1 values")
         object.__setattr__(self, "oracle_checks", tuple(self.oracle_checks))
+        check_ids = [check.check_id for check in self.oracle_checks]
+        if len(check_ids) != len(set(check_ids)):
+            raise ContractError("oracle_checks must have unique check_id values")
         if type(self.validation_level) is not ValidationLevelV1:
             raise ContractError("validation_level must be ValidationLevelV1")
 
@@ -529,7 +582,7 @@ class NumericFactV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "NumericFactV1":
-        require_exact_keys(value, _NUMERIC_FACT_FIELDS, "numeric_fact")
+        value = _wire_dict(value, _NUMERIC_FACT_FIELDS, "numeric_fact")
         oracle_checks = value["oracle_checks"]
         if not isinstance(oracle_checks, (list, tuple)):
             raise ContractError("oracle_checks must be an array")
@@ -682,7 +735,7 @@ class ValidationSummaryV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "ValidationSummaryV1":
-        require_exact_keys(
+        value = _wire_dict(
             value,
             {"levels_present", "minimum_required", "requirement_status"},
             "validation_summary",
@@ -796,6 +849,9 @@ class EvidenceEnvelopeV1:
         ):
             raise ContractError("numeric_facts must contain NumericFactV1 values")
         object.__setattr__(self, "numeric_facts", tuple(self.numeric_facts))
+        fact_id_list = [fact.fact_id for fact in self.numeric_facts]
+        if len(fact_id_list) != len(set(fact_id_list)):
+            raise ContractError("numeric_facts must have unique fact_id values")
         object.__setattr__(
             self,
             "lineage_refs",
@@ -814,13 +870,13 @@ class EvidenceEnvelopeV1:
         if type(self.validation_summary) is not ValidationSummaryV1:
             raise ContractError("validation_summary must be ValidationSummaryV1")
 
-        if self.execution_status is ExecutionStatusV1.BLOCKED:
-            if not self.execution_reasons:
-                raise ContractError("blocked execution requires execution_reasons")
-            if self.availability is AvailabilityStatusV1.AVAILABLE:
-                raise ContractError("blocked execution cannot be available")
-        elif self.execution_reasons:
-            raise ContractError("non-blocked execution forbids execution_reasons")
+        if self.execution_status is ExecutionStatusV1.COMPLETED:
+            if self.execution_reasons:
+                raise ContractError("completed execution forbids execution_reasons")
+        elif not self.execution_reasons:
+            raise ContractError(
+                "partial, blocked, and failed execution require execution_reasons"
+            )
 
         if self.availability is AvailabilityStatusV1.AVAILABLE:
             if self.availability_reasons:
@@ -829,14 +885,49 @@ class EvidenceEnvelopeV1:
             raise ContractError(
                 "not_available and not_applicable require availability_reasons"
             )
+        elif self.numeric_facts or self.figures:
+            raise ContractError(
+                "unavailable and not-applicable evidence forbid numeric_facts and figures"
+            )
 
         if self.completeness_status is CompletenessStatusV1.COMPLETE:
             if self.degradation_reasons:
                 raise ContractError("complete evidence forbids degradation_reasons")
+            if (
+                self.execution_status is not ExecutionStatusV1.COMPLETED
+                or self.availability is not AvailabilityStatusV1.AVAILABLE
+            ):
+                raise ContractError(
+                    "complete evidence requires completed and available status"
+                )
         elif not self.degradation_reasons:
             raise ContractError(
                 "non-complete evidence requires degradation_reasons"
             )
+
+        if self.execution_status in {
+            ExecutionStatusV1.BLOCKED,
+            ExecutionStatusV1.FAILED,
+        }:
+            if self.availability is AvailabilityStatusV1.AVAILABLE:
+                raise ContractError("blocked and failed execution cannot be available")
+            if self.completeness_status not in {
+                CompletenessStatusV1.INSUFFICIENT,
+                CompletenessStatusV1.NOT_APPLICABLE,
+            }:
+                raise ContractError(
+                    "blocked and failed execution require insufficient or "
+                    "not_applicable completeness"
+                )
+            if self.numeric_facts or self.figures:
+                raise ContractError(
+                    "blocked and failed execution forbid numeric_facts and figures"
+                )
+        elif (
+            self.execution_status is ExecutionStatusV1.PARTIAL
+            and self.completeness_status is CompletenessStatusV1.COMPLETE
+        ):
+            raise ContractError("partial execution cannot be complete")
 
         expected_summary = ValidationSummaryV1.from_facts(
             self.numeric_facts,
@@ -897,7 +988,7 @@ class EvidenceEnvelopeV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "EvidenceEnvelopeV1":
-        require_exact_keys(value, _ENVELOPE_FIELDS, "evidence_envelope")
+        value = _wire_dict(value, _ENVELOPE_FIELDS, "evidence_envelope")
 
         def reasons(name: str) -> tuple[EvidenceReasonV1, ...]:
             raw = value[name]
@@ -909,7 +1000,9 @@ class EvidenceEnvelopeV1:
         if not isinstance(raw_facts, (list, tuple)):
             raise ContractError("numeric_facts must be an array")
         return cls(
-            result_identity=value["result_identity"],  # type: ignore[arg-type]
+            result_identity=_wire_mapping(
+                value["result_identity"], "result_identity"
+            ),
             execution_status=_enum(
                 value["execution_status"], ExecutionStatusV1, "execution_status"
             ),
@@ -936,19 +1029,23 @@ class EvidenceEnvelopeV1:
             validation_summary=ValidationSummaryV1.from_dict(
                 value["validation_summary"]  # type: ignore[arg-type]
             ),
-            method=value["method"],  # type: ignore[arg-type]
-            estimand=value["estimand"],  # type: ignore[arg-type]
-            input_provenance=value["input_provenance"],  # type: ignore[arg-type]
-            assumptions=_mapping_tuple(value["assumptions"], "assumptions"),
-            diagnostics=_mapping_tuple(value["diagnostics"], "diagnostics"),
-            figures=_mapping_tuple(value["figures"], "figures"),
-            warnings=_mapping_tuple(value["warnings"], "warnings"),
-            dependencies=_mapping_tuple(value["dependencies"], "dependencies"),
+            method=_wire_mapping(value["method"], "method"),
+            estimand=_wire_mapping(value["estimand"], "estimand"),
+            input_provenance=_wire_mapping(
+                value["input_provenance"], "input_provenance"
+            ),
+            assumptions=_wire_mapping_tuple(value["assumptions"], "assumptions"),
+            diagnostics=_wire_mapping_tuple(value["diagnostics"], "diagnostics"),
+            figures=_wire_mapping_tuple(value["figures"], "figures"),
+            warnings=_wire_mapping_tuple(value["warnings"], "warnings"),
+            dependencies=_wire_mapping_tuple(value["dependencies"], "dependencies"),
             numeric_facts=tuple(
                 NumericFactV1.from_dict(fact) for fact in raw_facts  # type: ignore[arg-type]
             ),
-            family_evidence=value["family_evidence"],  # type: ignore[arg-type]
-            oracle=value["oracle"],  # type: ignore[arg-type]
+            family_evidence=_wire_mapping(
+                value["family_evidence"], "family_evidence"
+            ),
+            oracle=_wire_mapping(value["oracle"], "oracle"),
             lineage_refs=_string_tuple(value["lineage_refs"], "lineage_refs"),
         )
 
