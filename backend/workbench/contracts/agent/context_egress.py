@@ -28,6 +28,7 @@ _MAX_JSON_SAFE_INTEGER = 9_007_199_254_740_991
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _ISSUED_RECEIPTS: dict[tuple[int, str], object] = {}
+_MATERIALIZATION_ISSUANCES: dict[tuple[int, str], object] = {}
 
 
 class EgressContractError(ContractError):
@@ -65,6 +66,10 @@ _SENSITIVE_KEY_MARKERS = (
     "phone",
     "ssn",
     "address",
+    "prompt",
+    "instruction",
+    "system_message",
+    "user_message",
 )
 _SECRET_VALUE_MARKERS = ("raw:", "secret:", "token:", "bearer ", "sk-")
 
@@ -156,7 +161,7 @@ def _validate_json(value: object, name: str, active: set[int] | None = None) -> 
         if not math.isfinite(value):
             raise _error("EGRESS_CONTEXT_INVALID", f"{name} contains a non-finite number")
         return
-    if type(value) not in {dict, list, tuple}:
+    if not isinstance(value, (Mapping, list, tuple)):
         raise _error("EGRESS_CONTEXT_INVALID", f"{name} contains an unsupported value")
     active_ids = active if active is not None else set()
     value_id = id(value)
@@ -164,7 +169,7 @@ def _validate_json(value: object, name: str, active: set[int] | None = None) -> 
         raise _error("EGRESS_CONTEXT_INVALID", f"{name} must be acyclic JSON")
     active_ids.add(value_id)
     try:
-        if type(value) is dict:
+        if isinstance(value, Mapping):
             if any(type(key) is not str for key in value):
                 raise _error("EGRESS_CONTEXT_INVALID", f"{name} keys must be strings")
             children = value.values()
@@ -227,7 +232,7 @@ def _wire_boundary(function):
 def _classify_and_redact(value: object, path: str = "context") -> tuple[object, SensitivityClassV1, tuple[str, ...]]:
     """Deterministically redact PII/secret-like leaves and report evidence."""
 
-    if type(value) is dict:
+    if isinstance(value, Mapping):
         output: dict[str, object] = {}
         observed = SensitivityClassV1.PUBLIC
         redacted: list[str] = []
@@ -256,6 +261,17 @@ def _classify_and_redact(value: object, path: str = "context") -> tuple[object, 
             if _SENSITIVITY_RANK[child_sensitivity] > _SENSITIVITY_RANK[observed]:
                 observed = child_sensitivity
         return values, observed, tuple(redacted)
+    if type(value) is tuple:
+        values: list[object] = []
+        observed = SensitivityClassV1.PUBLIC
+        redacted: list[str] = []
+        for index, child in enumerate(value):
+            redacted_child, child_sensitivity, child_refs = _classify_and_redact(child, f"{path}[{index}]")
+            values.append(redacted_child)
+            redacted.extend(child_refs)
+            if _SENSITIVITY_RANK[child_sensitivity] > _SENSITIVITY_RANK[observed]:
+                observed = child_sensitivity
+        return tuple(values), observed, tuple(redacted)
     if type(value) is str:
         lowered = value.casefold()
         if _EMAIL.fullmatch(value) or any(lowered.startswith(marker) for marker in _SECRET_VALUE_MARKERS):
@@ -331,7 +347,18 @@ class ContextMaterializationStoreV1:
         except (AttributeError, CanonicalJSONError, RecursionError, TypeError, ValueError) as exc:
             raise _error("EGRESS_CONTEXT_INVALID", "source context must be canonical JSON") from exc
         selected = _refs(selected_refs, "selected_refs")
-        redacted, observed, redacted_refs = _classify_and_redact(context)
+        if not selected:
+            raise _error("EGRESS_SELECTION_INVALID", "selected_refs must not be empty")
+        if any(ref not in context for ref in selected):
+            raise _error("EGRESS_SELECTION_INVALID", "every selected ref must resolve in the source context")
+        unselected = set(context).difference(selected)
+        if unselected:
+            raise _error(
+                "EGRESS_UNSELECTED_CONTENT_FORBIDDEN",
+                "source context contains fields that were not selected",
+            )
+        selected_context = {ref: context[ref] for ref in selected}
+        redacted, observed, redacted_refs = _classify_and_redact(selected_context)
         frozen = _frozen_mapping(redacted, "materialized_context")
         digest = sha256_canonical(_plain(frozen))
         result = ContextMaterializationResultV1(
@@ -347,13 +374,22 @@ class ContextMaterializationStoreV1:
             _issuer_token=self._issuer_token,
         )
         self._results[result.result_ref] = result
+        _MATERIALIZATION_ISSUANCES[(id(self._issuer_token), result.result_ref)] = result
         return result
+
+    @classmethod
+    def is_server_issued(cls, result: object) -> bool:
+        return (
+            type(result) is ContextMaterializationResultV1
+            and result._issuer_token is not None
+            and _MATERIALIZATION_ISSUANCES.get((id(result._issuer_token), result.result_ref)) is result
+        )
 
     def resolve(self, result_ref: str) -> ContextMaterializationResultV1:
         if type(result_ref) is not str:
             raise _error("EGRESS_MATERIALIZATION_AUTHORITY_REQUIRED", "materialization ref is invalid")
         result = self._results.get(result_ref)
-        if result is None or result._issuer_token is not self._issuer_token:
+        if result is None or result._issuer_token is not self._issuer_token or not self.is_server_issued(result):
             raise _error("EGRESS_MATERIALIZATION_AUTHORITY_REQUIRED", "materialization result is not server-owned")
         actual = sha256_canonical(_plain(result.materialized_context))
         if actual != result.materialized_payload_digest or actual != result.materialized_context_digest:
@@ -496,7 +532,7 @@ class ContextEgressGatewayV1:
         requested_at: str,
         expires_at: str,
     ) -> "ContextEgressGatewayV1":
-        if type(result) is not ContextMaterializationResultV1 or result._issuer_token is None:
+        if type(result) is not ContextMaterializationResultV1 or not ContextMaterializationStoreV1.is_server_issued(result):
             raise _error("EGRESS_MATERIALIZATION_AUTHORITY_REQUIRED", "gateway requires a server materialization result")
         return cls(
             request_id=request_id,
@@ -829,15 +865,12 @@ def require_context_egress_receipt(
 ) -> ContextEgressReceiptV1:
     if type(gateway) is not ContextEgressGatewayV1 or type(receipt) is not ContextEgressReceiptV1:
         raise _error("EGRESS_RECEIPT_REQUIRED", "provider context requires an egress receipt")
-    if issuer is not None:
-        issuer.require(gateway, receipt, at=at)
-    else:
-        token = receipt._issuer_token
-        if token is None or _ISSUED_RECEIPTS.get((id(token), receipt.receipt_digest)) is not receipt:
-            raise _error("EGRESS_RECEIPT_REQUIRED", "receipt was not issued by a server egress issuer")
-        current = _now(None, at)
-        if current >= _timestamp(receipt.expires_at, "expires_at"):
-            raise _error("EGRESS_EXPIRED", "egress receipt is expired")
+    if type(issuer) is not ContextEgressReceiptIssuerV1:
+        raise _error(
+            "EGRESS_SERVER_ISSUER_REQUIRED",
+            "provider context receipt verification requires the current server egress issuer",
+        )
+    issuer.require(gateway, receipt, at=at)
     return receipt
 
 

@@ -18,6 +18,7 @@ from workbench.contracts.agent.planning import (
     CompilationRecordReferenceV1,
     CompilationRecordStoreV1,
     ConfirmationBindingV1,
+    ConfirmationBindingStoreV1,
     PlanningContractError,
 )
 
@@ -463,6 +464,7 @@ class ExecutionAdmissionGateV1:
         method_snapshot_ref: str | None = None,
         risk_snapshot_ref: str | None = None,
         policy_snapshot_ref: str | None = None,
+        confirmation_store: ConfirmationBindingStoreV1 | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if type(record_store) is not CompilationRecordStoreV1:
@@ -471,6 +473,12 @@ class ExecutionAdmissionGateV1:
         self.method_snapshot_ref = method_snapshot_ref
         self.risk_snapshot_ref = risk_snapshot_ref
         self.policy_snapshot_ref = policy_snapshot_ref
+        if confirmation_store is not None and type(confirmation_store) is not ConfirmationBindingStoreV1:
+            raise _error(
+                "ADMISSION_CONFIRMATION_STORE_REQUIRED",
+                "confirmation_store must be a server confirmation store",
+            )
+        self.confirmation_store = confirmation_store if confirmation_store is not None else ConfirmationBindingStoreV1()
         self.clock = clock
         self._issuer_token = object()
         self._receipts: dict[str, ExecutionAdmissionReceiptV1] = {}
@@ -480,6 +488,7 @@ class ExecutionAdmissionGateV1:
             raise _error("ADMISSION_REQUEST_REQUIRED", "runtime requires an ExecutionAdmissionV1 request")
         if type(confirmation) is not ConfirmationBindingV1:
             raise _error("CONFIRMATION_REQUIRED", "runtime requires a ConfirmationBindingV1")
+        self.confirmation_store.require(confirmation)
         if not all(type(value) is str and value for value in (self.method_snapshot_ref, self.risk_snapshot_ref, self.policy_snapshot_ref)):
             raise _error("ADMISSION_CURRENT_SNAPSHOT_REQUIRED", "runtime requires independent current method/risk/policy snapshots")
         record, server_ref = self.record_store.resolve_client_reference(request.compilation_record_ref)

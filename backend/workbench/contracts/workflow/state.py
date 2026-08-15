@@ -39,6 +39,7 @@ _REQUIRED_DEVELOPMENT_STATE_FIELDS = {
     "output_bindings",
     "model_branches",
 }
+_VALIDATION_RECEIPT_ISSUANCES: dict[tuple[int, str], object] = {}
 
 
 class WorkflowStateContractError(ContractError):
@@ -274,6 +275,11 @@ class PortBindingV1:
                 raise _error("WORKFLOW_RECEIPT_SCOPE_MISMATCH", "validation receipt artifact scope mismatches")
             if self.validation_receipt.schema_ref != self.schema_ref:
                 raise _error("WORKFLOW_RECEIPT_SCOPE_MISMATCH", "validation receipt schema scope mismatches")
+            if not ValidationReceiptStoreV1.is_server_issued(self.validation_receipt):
+                raise _error(
+                    "WORKFLOW_VALIDATION_AUTHORITY_REQUIRED",
+                    "validated binding requires a receipt issued by a server validation store",
+                )
         elif type(self.validation_receipt) is not NotApplicableV1:
             raise _error("WORKFLOW_RECEIPT_INVALID", "validation_receipt is invalid")
 
@@ -343,11 +349,20 @@ class ValidationReceiptStoreV1:
     def issue(self, receipt: PortValidationReceiptV1) -> PortValidationReceiptV1:
         if type(receipt) is not PortValidationReceiptV1:
             raise _error("WORKFLOW_RECEIPT_REQUIRED", "validator store accepts a typed receipt")
-        if receipt._issuer_token not in {None, self._issuer_token}:
+        if receipt._issuer_token is not None and receipt._issuer_token is not self._issuer_token:
             raise _error("WORKFLOW_RECEIPT_ISSUER_MISMATCH", "receipt belongs to another validator store")
         object.__setattr__(receipt, "_issuer_token", self._issuer_token)
         self._receipts[receipt.validation_digest] = receipt
+        _VALIDATION_RECEIPT_ISSUANCES[(id(self._issuer_token), receipt.validation_digest)] = receipt
         return receipt
+
+    @classmethod
+    def is_server_issued(cls, receipt: object) -> bool:
+        return (
+            type(receipt) is PortValidationReceiptV1
+            and receipt._issuer_token is not None
+            and _VALIDATION_RECEIPT_ISSUANCES.get((id(receipt._issuer_token), receipt.validation_digest)) is receipt
+        )
 
     def require(self, receipt: PortValidationReceiptV1) -> PortValidationReceiptV1:
         if type(receipt) is not PortValidationReceiptV1:
@@ -360,7 +375,7 @@ class ValidationReceiptStoreV1:
                 "WORKFLOW_VALIDATION_AUTHORITY_REQUIRED",
                 "validation receipt was not issued by the server validator issuer authority",
             )
-        if self._receipts.get(receipt.validation_digest) is not receipt:
+        if self._receipts.get(receipt.validation_digest) is not receipt or not self.is_server_issued(receipt):
             raise _error(
                 "WORKFLOW_VALIDATION_RECEIPT_INVALID",
                 "validation receipt is not current store state",

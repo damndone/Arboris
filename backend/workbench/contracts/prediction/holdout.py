@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from threading import RLock
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
@@ -20,6 +21,7 @@ _REQUIRED_DEVELOPMENT_HASHES = frozenset(
         "candidate_search", "calibration", "threshold", "decision_policy",
     }
 )
+_HOLDOUT_SEAL_ISSUERS: dict[int, object] = {}
 
 
 class HoldoutContractError(ContractError):
@@ -125,6 +127,142 @@ def _frozen_hashes(value: object) -> Mapping[str, str]:
         return freeze_json(normalized, "development_hashes")
     except (AttributeError, CanonicalJSONError, ContractError, RecursionError, TypeError, ValueError) as exc:
         raise _error("HOLDOUT_HASH_SET_INVALID", "development_hashes are not safely serializable") from exc
+
+
+def _frozen_declaration(value: object) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        raise _error("HOLDOUT_METRIC_BUNDLE_INVALID", "metric bundle declaration must be a non-empty mapping")
+    try:
+        frozen = freeze_json(value, "metric_bundle.declaration")
+    except (AttributeError, CanonicalJSONError, ContractError, RecursionError, TypeError, ValueError) as exc:
+        raise _error("HOLDOUT_METRIC_BUNDLE_INVALID", "metric bundle declaration is not canonical JSON") from exc
+    if not isinstance(frozen, Mapping):  # pragma: no cover - defensive invariant
+        raise _error("HOLDOUT_METRIC_BUNDLE_INVALID", "metric bundle declaration must be an object")
+    return frozen
+
+
+def _require_complete_metric_declaration(
+    declaration: Mapping[str, Any], metric_refs: tuple[str, ...]
+) -> None:
+    plain = thaw_json(declaration)
+    if not isinstance(plain, dict) or type(plain.get("metrics")) is not list:
+        raise _error(
+            "HOLDOUT_METRIC_BUNDLE_INVALID",
+            "metric bundle declaration must contain a complete metrics list",
+        )
+    entries = plain["metrics"]
+    if len(entries) != len(metric_refs) or any(type(entry) is not dict for entry in entries):
+        raise _error("HOLDOUT_METRIC_BUNDLE_INVALID", "metric declaration is incomplete")
+    declared_refs: list[str] = []
+    for entry in entries:
+        declared_ref = entry.get("ref")
+        definition_ref = entry.get("definition_ref")
+        _text(declared_ref, "metric declaration ref")
+        _text(definition_ref, "metric declaration definition_ref")
+        declared_refs.append(declared_ref)
+    if tuple(declared_refs) != metric_refs:
+        raise _error("HOLDOUT_METRIC_BUNDLE_MISMATCH", "metric declaration refs do not match metric_refs")
+
+
+@dataclass(frozen=True)
+class HoldoutMetricBundleV1:
+    """A complete server-registered metric declaration package."""
+
+    bundle_ref: str
+    metric_refs: tuple[str, ...]
+    declaration: Mapping[str, Any]
+    content_digest: str
+    _issuer_token: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        _text(self.bundle_ref, "bundle_ref")
+        object.__setattr__(self, "metric_refs", _refs(self.metric_refs, "metric_refs"))
+        if not self.metric_refs:
+            raise _error("HOLDOUT_METRICS_REQUIRED", "metric bundle metric_refs must not be empty")
+        declaration = _frozen_declaration(self.declaration)
+        object.__setattr__(self, "declaration", declaration)
+        _require_complete_metric_declaration(declaration, self.metric_refs)
+        _digest(self.content_digest, "content_digest")
+        expected = sha256_canonical(
+            {"metric_refs": list(self.metric_refs), "declaration": thaw_json(declaration)}
+        )
+        if self.content_digest != expected:
+            raise _error("HOLDOUT_METRIC_BUNDLE_MISMATCH", "metric bundle content digest does not match declaration")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "bundle_ref": self.bundle_ref,
+            "metric_refs": list(self.metric_refs),
+            "declaration": thaw_json(self.declaration),
+            "content_digest": self.content_digest,
+        }
+
+
+@dataclass(frozen=True, init=False)
+class ServerHoldoutMetricBundleReferenceV1:
+    bundle_ref: str
+    metric_refs: tuple[str, ...]
+    content_digest: str
+    _issuer_token: object
+
+    @classmethod
+    def _issue(cls, bundle: HoldoutMetricBundleV1, token: object) -> "ServerHoldoutMetricBundleReferenceV1":
+        value = object.__new__(cls)
+        object.__setattr__(value, "bundle_ref", bundle.bundle_ref)
+        object.__setattr__(value, "metric_refs", bundle.metric_refs)
+        object.__setattr__(value, "content_digest", bundle.content_digest)
+        object.__setattr__(value, "_issuer_token", token)
+        return value
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "bundle_ref": self.bundle_ref,
+            "metric_refs": list(self.metric_refs),
+            "content_digest": self.content_digest,
+        }
+
+
+class HoldoutMetricBundleStoreV1:
+    """Server-owned metric bundle registry; digests are computed, never supplied."""
+
+    def __init__(self) -> None:
+        self._issuer_token = object()
+        self._bundles: dict[str, HoldoutMetricBundleV1] = {}
+
+    def issue(
+        self,
+        *,
+        bundle_ref: str,
+        metric_refs: tuple[str, ...],
+        declaration: Mapping[str, Any],
+    ) -> ServerHoldoutMetricBundleReferenceV1:
+        _text(bundle_ref, "bundle_ref")
+        if bundle_ref in self._bundles:
+            raise _error("HOLDOUT_DUPLICATE_BUNDLE", "metric bundle ref is already registered")
+        normalized_refs = _refs(metric_refs, "metric_refs")
+        frozen_declaration = _frozen_declaration(declaration)
+        content_digest = sha256_canonical(
+            {"metric_refs": list(normalized_refs), "declaration": thaw_json(frozen_declaration)}
+        )
+        bundle = HoldoutMetricBundleV1(
+            bundle_ref=bundle_ref,
+            metric_refs=normalized_refs,
+            declaration=frozen_declaration,
+            content_digest=content_digest,
+            _issuer_token=self._issuer_token,
+        )
+        self._bundles[bundle_ref] = bundle
+        return ServerHoldoutMetricBundleReferenceV1._issue(bundle, self._issuer_token)
+
+    register = issue
+
+    def resolve(self, reference: ServerHoldoutMetricBundleReferenceV1) -> HoldoutMetricBundleV1:
+        if type(reference) is not ServerHoldoutMetricBundleReferenceV1 or reference._issuer_token is not self._issuer_token:
+            raise _error("HOLDOUT_METRIC_BUNDLE_AUTHORITY_REQUIRED", "metric bundle requires a server registry reference")
+        bundle = self._bundles.get(reference.bundle_ref)
+        if bundle is None or bundle.content_digest != reference.content_digest or bundle.metric_refs != reference.metric_refs:
+            raise _error("HOLDOUT_METRIC_BUNDLE_MISMATCH", "metric bundle reference is stale or mismatched")
+        return bundle
 
 
 @dataclass(frozen=True)
@@ -362,8 +500,23 @@ class HoldoutSealV1:
         )
 
     def authorize_access(self, request: HoldoutAccessRequestV1) -> HoldoutReleaseDecisionV1:
+        """Reject direct release attempts; release authority lives in the store."""
+
         if type(request) is not HoldoutAccessRequestV1:
             raise _error("HOLDOUT_REQUEST_REQUIRED", "holdout access requires a typed request")
+        raise _error(
+            "HOLDOUT_SERVER_STORE_REQUIRED",
+            "holdout release requires a server-owned store consume operation",
+        )
+
+    def _authorize_access_server(self, request: HoldoutAccessRequestV1) -> HoldoutReleaseDecisionV1:
+        if type(request) is not HoldoutAccessRequestV1:
+            raise _error("HOLDOUT_REQUEST_REQUIRED", "holdout access requires a typed request")
+        if self._issuer_token is None or _HOLDOUT_SEAL_ISSUERS.get(id(self._issuer_token)) is not self._issuer_token:
+            raise _error(
+                "HOLDOUT_SERVER_STORE_REQUIRED",
+                "holdout release requires a seal issued by the server store",
+            )
         before = _parse_status(self.status)
         allowed = False
         reason = "HOLDOUT_LEDGER_CLOSED"
@@ -485,20 +638,58 @@ class ServerHoldoutSealReferenceV1:
 class HoldoutSealStoreV1:
     """Server-owned one-time consume/CAS seam for holdout releases."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, metric_bundle_store: HoldoutMetricBundleStoreV1) -> None:
+        if type(metric_bundle_store) is not HoldoutMetricBundleStoreV1:
+            raise _error(
+                "HOLDOUT_METRIC_BUNDLE_AUTHORITY_REQUIRED",
+                "holdout seal store requires a server metric bundle registry",
+            )
+        self.metric_bundle_store = metric_bundle_store
         self._issuer_token = object()
+        _HOLDOUT_SEAL_ISSUERS[id(self._issuer_token)] = self._issuer_token
         self._current: dict[str, HoldoutSealV1] = {}
+        self._lock = RLock()
 
-    def issue(self, seal: HoldoutSealV1) -> ServerHoldoutSealReferenceV1:
+    def issue(
+        self,
+        seal: HoldoutSealV1,
+        *,
+        metric_bundle_reference: ServerHoldoutMetricBundleReferenceV1,
+    ) -> ServerHoldoutSealReferenceV1:
         if type(seal) is not HoldoutSealV1:
             raise _error("HOLDOUT_SERVER_SEAL_REQUIRED", "store issue requires a typed seal")
-        if seal.seal_id in self._current:
-            raise _error("HOLDOUT_DUPLICATE_SEAL", "seal is already issued by this store")
-        object.__setattr__(seal, "_issuer_token", self._issuer_token)
-        self._current[seal.seal_id] = seal
-        return ServerHoldoutSealReferenceV1._issue(seal, self._issuer_token)
+        if seal._issuer_token is not None:
+            raise _error(
+                "HOLDOUT_SERVER_SEAL_AUTHORITY_MISMATCH",
+                "seal store accepts only an unissued initial state",
+            )
+        if (
+            seal.status != HoldoutSealStatusV1.SEALED.value
+            or seal.transition_history != (HoldoutSealStatusV1.SEALED.value,)
+            or seal.access_ledger
+        ):
+            raise _error(
+                "HOLDOUT_INITIAL_STATE_REQUIRED",
+                "seal store accepts only a fresh sealed state",
+            )
+        bundle = self.metric_bundle_store.resolve(metric_bundle_reference)
+        if (
+            seal.metric_release_bundle_ref != bundle.bundle_ref
+            or seal.metric_bundle_digest != bundle.content_digest
+            or seal.metric_refs != bundle.metric_refs
+        ):
+            raise _error(
+                "HOLDOUT_METRIC_BUNDLE_MISMATCH",
+                "seal must bind the complete server-resolved metric bundle",
+            )
+        with self._lock:
+            if seal.seal_id in self._current:
+                raise _error("HOLDOUT_DUPLICATE_SEAL", "seal is already issued by this store")
+            object.__setattr__(seal, "_issuer_token", self._issuer_token)
+            self._current[seal.seal_id] = seal
+            return ServerHoldoutSealReferenceV1._issue(seal, self._issuer_token)
 
-    def resolve(self, reference: ServerHoldoutSealReferenceV1) -> HoldoutSealV1:
+    def _resolve_unlocked(self, reference: ServerHoldoutSealReferenceV1) -> HoldoutSealV1:
         if type(reference) is not ServerHoldoutSealReferenceV1 or reference._issuer_token is not self._issuer_token:
             raise _error("HOLDOUT_SERVER_REFERENCE_REQUIRED", "holdout consume requires a server-owned reference")
         seal = self._current.get(reference.seal_id)
@@ -506,38 +697,51 @@ class HoldoutSealStoreV1:
             raise _error("HOLDOUT_SERVER_SEAL_UNRESOLVED", "server holdout seal is unavailable")
         return seal
 
+    def resolve(self, reference: ServerHoldoutSealReferenceV1) -> HoldoutSealV1:
+        with self._lock:
+            return self._resolve_unlocked(reference)
+
+    def current_reference(self, seal_id: str) -> ServerHoldoutSealReferenceV1:
+        with self._lock:
+            _text(seal_id, "seal_id")
+            seal = self._current.get(seal_id)
+            if seal is None:
+                raise _error("HOLDOUT_SERVER_SEAL_UNRESOLVED", "server holdout seal is unavailable")
+            return ServerHoldoutSealReferenceV1._issue(seal, self._issuer_token)
+
     def consume(self, reference: ServerHoldoutSealReferenceV1, request: HoldoutAccessRequestV1) -> HoldoutReleaseDecisionV1:
         if type(request) is not HoldoutAccessRequestV1:
             raise _error("HOLDOUT_REQUEST_REQUIRED", "holdout consume requires a typed request")
-        current = self.resolve(reference)
-        if reference.state_digest != current.state_digest:
-            before = _parse_status(current.status)
-            if any(entry.access_id == request.access_id for entry in current.access_ledger):
-                raise _error("HOLDOUT_DUPLICATE_ACCESS", "access id is already in the append-only ledger")
-            entry = HoldoutAccessLedgerEntryV1.from_request(
-                request,
-                decision="rejected",
-                reason_code="HOLDOUT_STALE_STATE",
-                state_before=before,
-                state_after=before,
-            )
-            denied = HoldoutSealV1(
-                seal_id=current.seal_id,
-                principal_ref=current.principal_ref,
-                development_hashes=dict(current.development_hashes),
-                metric_release_bundle_ref=current.metric_release_bundle_ref,
-                metric_bundle_digest=current.metric_bundle_digest,
-                metric_refs=current.metric_refs,
-                status=current.status,
-                transition_history=current.transition_history,
-                access_ledger=(*current.access_ledger, entry),
-                _issuer_token=self._issuer_token,
-            )
-            self._current[current.seal_id] = denied
-            return HoldoutReleaseDecisionV1(allowed=False, reason_code="HOLDOUT_STALE_STATE", seal=denied)
-        decision = current.authorize_access(request)
-        self._current[current.seal_id] = decision.seal
-        return decision
+        with self._lock:
+            current = self._resolve_unlocked(reference)
+            if reference.state_digest != current.state_digest:
+                before = _parse_status(current.status)
+                if any(entry.access_id == request.access_id for entry in current.access_ledger):
+                    raise _error("HOLDOUT_DUPLICATE_ACCESS", "access id is already in the append-only ledger")
+                entry = HoldoutAccessLedgerEntryV1.from_request(
+                    request,
+                    decision="rejected",
+                    reason_code="HOLDOUT_STALE_STATE",
+                    state_before=before,
+                    state_after=before,
+                )
+                denied = HoldoutSealV1(
+                    seal_id=current.seal_id,
+                    principal_ref=current.principal_ref,
+                    development_hashes=dict(current.development_hashes),
+                    metric_release_bundle_ref=current.metric_release_bundle_ref,
+                    metric_bundle_digest=current.metric_bundle_digest,
+                    metric_refs=current.metric_refs,
+                    status=current.status,
+                    transition_history=current.transition_history,
+                    access_ledger=(*current.access_ledger, entry),
+                    _issuer_token=self._issuer_token,
+                )
+                self._current[current.seal_id] = denied
+                return HoldoutReleaseDecisionV1(allowed=False, reason_code="HOLDOUT_STALE_STATE", seal=denied)
+            decision = current._authorize_access_server(request)
+            self._current[current.seal_id] = decision.seal
+            return decision
 
 
 __all__ = [
@@ -546,9 +750,12 @@ __all__ = [
     "HoldoutAccessLedgerEntryV1",
     "HoldoutAccessRequestV1",
     "HoldoutContractError",
+    "HoldoutMetricBundleStoreV1",
+    "HoldoutMetricBundleV1",
     "HoldoutReleaseDecisionV1",
     "HoldoutSealStatusV1",
     "HoldoutSealStoreV1",
     "HoldoutSealV1",
+    "ServerHoldoutMetricBundleReferenceV1",
     "ServerHoldoutSealReferenceV1",
 ]

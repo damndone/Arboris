@@ -122,6 +122,91 @@ _DRAFT_FORBIDDEN_SENSITIVE_KEYS = frozenset(
     }
 )
 _DRAFT_FORBIDDEN_SENSITIVE_PREFIXES = ("raw:", "secret:", "prompt:", "token:")
+_DRAFT_OPAQUE_REF_PREFIXES = ("prompt-ref:", "descriptor:", "symbol:", "rationale:")
+_DRAFT_OPAQUE_REF_KEYS = frozenset(
+    {
+        "prompt_ref",
+        "prompt_refs",
+        "descriptor_ref",
+        "descriptor_refs",
+        "symbol_ref",
+        "symbol_refs",
+        "rationale_ref",
+        "rationale_refs",
+    }
+)
+_DRAFT_OPAQUE_REF_PREFIX_BY_KEY = {
+    "prompt_ref": "prompt-ref:",
+    "prompt_refs": "prompt-ref:",
+    "descriptor_ref": "descriptor:",
+    "descriptor_refs": "descriptor:",
+    "symbol_ref": "symbol:",
+    "symbol_refs": "symbol:",
+    "rationale_ref": "rationale:",
+    "rationale_refs": "rationale:",
+}
+_DRAFT_FREE_TEXT_KEYS = frozenset(
+    {
+        "body",
+        "content",
+        "description",
+        "descriptions",
+        "free_text",
+        "instruction",
+        "instructions",
+        "message",
+        "messages",
+        "note",
+        "notes",
+        "rationale",
+        "text",
+    }
+)
+_DRAFT_TYPED_STRING_KEYS = frozenset(
+    {
+        "analysis_mode",
+        "capability_ref",
+        "column",
+        "connection_id",
+        "data_impact",
+        "effect",
+        "from_node",
+        "kind",
+        "method",
+        "method_ref",
+        "mode",
+        "name",
+        "node_id",
+        "read_refs",
+        "ref",
+        "role",
+        "scope",
+        "solver",
+        "source",
+        "source_node",
+        "source_port",
+        "strategy",
+        "target",
+        "target_node",
+        "target_port",
+        "type",
+        "value_kind",
+        "write_refs",
+        "write_mode",
+        "to_node",
+    }
+)
+_DRAFT_SENSITIVE_TEXT_MARKERS = (
+    "prompt",
+    "secret",
+    "password",
+    "credential",
+    "api_key",
+    "api key",
+    "access_token",
+    "private_key",
+    "raw:",
+)
 _SERVER_COMPILER_AUTHORITY = object()
 
 
@@ -293,23 +378,90 @@ def _reject_draft_server_fields(value: object, name: str) -> None:
         for child in value:
             _reject_draft_server_fields(child, name)
 
-def _reject_draft_sensitive_content(value: object, name: str) -> None:
+def _reject_draft_sensitive_content(value: object, name: str, *, opaque_ref: bool = False) -> None:
+    if opaque_ref and type(value) not in {str, list, tuple}:
+        raise _error("DRAFT_OPAQUE_REF_REQUIRED", f"{name} must contain an opaque reference")
     if isinstance(value, Mapping):
         for key, child in value.items():
             lowered = key.casefold()
-            if lowered in _DRAFT_FORBIDDEN_SENSITIVE_KEYS or any(
+            if lowered in _DRAFT_OPAQUE_REF_KEYS:
+                _reject_draft_sensitive_content(child, name, opaque_ref=True)
+                continue
+            if lowered in _DRAFT_FREE_TEXT_KEYS or lowered in _DRAFT_FORBIDDEN_SENSITIVE_KEYS or any(
                 marker in lowered for marker in ("prompt", "secret", "password", "credential")
             ):
                 raise _error(
                     "DRAFT_SENSITIVE_CONTENT_FORBIDDEN",
                     f"{name} contains a raw prompt or secret field",
                 )
-            _reject_draft_sensitive_content(child, name)
+            _reject_draft_sensitive_content(child, name, opaque_ref=False)
     elif type(value) in {list, tuple}:
         for child in value:
-            _reject_draft_sensitive_content(child, name)
-    elif type(value) is str and value.casefold().startswith(_DRAFT_FORBIDDEN_SENSITIVE_PREFIXES):
-        raise _error("DRAFT_SENSITIVE_CONTENT_FORBIDDEN", f"{name} contains raw sensitive content")
+            _reject_draft_sensitive_content(child, name, opaque_ref=opaque_ref)
+    elif type(value) is str:
+        if opaque_ref:
+            _require_opaque_ref(value, name)
+            return
+        lowered = value.casefold()
+        if lowered.startswith(_DRAFT_FORBIDDEN_SENSITIVE_PREFIXES) or any(
+            marker in lowered for marker in _DRAFT_SENSITIVE_TEXT_MARKERS
+        ):
+            raise _error("DRAFT_SENSITIVE_CONTENT_FORBIDDEN", f"{name} contains raw sensitive content")
+
+
+def _require_opaque_ref(
+    value: object,
+    name: str,
+    prefixes: tuple[str, ...] = _DRAFT_OPAQUE_REF_PREFIXES,
+) -> None:
+    if type(value) is not str or not value or value != value.strip() or not value.startswith(prefixes):
+        raise _error("DRAFT_OPAQUE_REF_REQUIRED", f"{name} must contain an explicit opaque reference")
+    prefix = next(prefix for prefix in prefixes if value.startswith(prefix))
+    suffix = value[len(prefix) :]
+    if not suffix.strip() or any(char.isspace() for char in suffix):
+        raise _error("DRAFT_OPAQUE_REF_REQUIRED", f"{name} must contain a non-empty opaque reference")
+
+
+def _validate_durable_option_value(value: object, name: str, field_name: str | None = None) -> None:
+    """Allow typed options while keeping prose and prompt material out of storage."""
+
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if type(key) is not str:
+                raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name} option keys must be strings")
+            lowered = key.casefold()
+            if lowered in _DRAFT_OPAQUE_REF_KEYS:
+                prefixes = (_DRAFT_OPAQUE_REF_PREFIX_BY_KEY[lowered],)
+                if type(child) is str:
+                    _require_opaque_ref(child, f"{name}.{key}", prefixes)
+                elif type(child) in {list, tuple}:
+                    for index, item in enumerate(child):
+                        _require_opaque_ref(item, f"{name}.{key}[{index}]", prefixes)
+                else:
+                    raise _error("DRAFT_OPAQUE_REF_REQUIRED", f"{name}.{key} must contain opaque references")
+                continue
+            if lowered in _DRAFT_FREE_TEXT_KEYS or lowered in _DRAFT_FORBIDDEN_SENSITIVE_KEYS or any(
+                marker in lowered for marker in ("prompt", "secret", "password", "credential")
+            ):
+                raise _error("DRAFT_FREE_TEXT_FORBIDDEN", f"{name}.{key} is not a durable typed option")
+            if type(child) is str and lowered not in _DRAFT_TYPED_STRING_KEYS:
+                raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}.{key} requires a typed option or opaque ref")
+            if type(child) is str:
+                _reject_draft_sensitive_content(child, f"{name}.{key}")
+            _validate_durable_option_value(child, f"{name}.{key}", lowered)
+        return
+    if type(value) in {list, tuple}:
+        for index, child in enumerate(value):
+            if type(child) is str and field_name not in _DRAFT_TYPED_STRING_KEYS:
+                raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}[{index}] requires a typed option or opaque ref")
+            _validate_durable_option_value(child, f"{name}[{index}]", field_name)
+        return
+    if type(value) is str:
+        _reject_draft_sensitive_content(value, name)
+        return
+    if value is None or type(value) in {bool, int, float}:
+        return
+    raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name} contains an unsupported durable option")
 
 
 def _plain(value: object) -> object:
@@ -460,15 +612,27 @@ class DraftAgentPlanV1:
             raise _error("PLANNING_ARRAY_INVALID", "connections must be an array")
         connections = tuple(_frozen_mapping(_plain(connection), "connections[]") for connection in self.connections)
         for connection in connections:
+            _reject_draft_server_fields(connection, "connection")
             _reject_draft_sensitive_content(connection, "connection")
         object.__setattr__(self, "connections", connections)
         object.__setattr__(self, "config", _frozen_mapping(_plain(self.config), "config"))
-        _reject_draft_sensitive_content(self.config, "config")
+        _reject_draft_server_fields(self.config, "config")
+        _validate_durable_option_value(self.config, "config")
+        _reject_draft_server_fields(self.data_impact, "data_impact")
         _reject_draft_sensitive_content(self.data_impact, "data_impact")
         _text(self.policy_snapshot_ref, "policy_snapshot_ref")
         if not isinstance(self.rationale, (tuple, list)):
             raise _error("PLANNING_ARRAY_INVALID", "rationale must be an array")
-        object.__setattr__(self, "rationale", tuple(_text(item, "rationale[]") for item in self.rationale))
+        rationale = tuple(_text(item, "rationale[]") for item in self.rationale)
+        for item in rationale:
+            try:
+                _require_opaque_ref(item, "rationale[]", ("rationale:",))
+            except PlanningContractError as exc:
+                raise _error(
+                    "DRAFT_RATIONALE_OPAQUE_REQUIRED",
+                    "rationale must contain opaque rationale refs, not free text",
+                ) from exc
+        object.__setattr__(self, "rationale", rationale)
 
     def semantic_hash_input(self) -> dict[str, object]:
         return _semantic_payload(
@@ -599,16 +763,26 @@ class CompiledWorkflowV1:
         if not isinstance(self.nodes, (tuple, list)) or any(not isinstance(node, Mapping) for node in self.nodes):
             raise _error("PLANNING_NODE_INVALID", "nodes are invalid")
         object.__setattr__(self, "nodes", tuple(_frozen_mapping(_plain(node), "nodes[]") for node in self.nodes))
+        for node in self.nodes:
+            _reject_draft_sensitive_content(node, "compiled node")
         if not isinstance(self.connections, (tuple, list)) or any(not isinstance(item, Mapping) for item in self.connections):
             raise _error("PLANNING_NODE_INVALID", "connections are invalid")
         object.__setattr__(self, "connections", tuple(_frozen_mapping(_plain(item), "connections[]") for item in self.connections))
+        for connection in self.connections:
+            _reject_draft_sensitive_content(connection, "compiled connection")
         object.__setattr__(self, "config", _frozen_mapping(_plain(self.config), "config"))
+        _reject_draft_server_fields(self.config, "compiled config")
+        _validate_durable_option_value(self.config, "compiled config")
+        _reject_draft_server_fields(self.data_impact, "compiled data_impact")
+        _reject_draft_sensitive_content(self.data_impact, "compiled data_impact")
         _text(self.catalog_snapshot_ref, "catalog_snapshot_ref")
         _text(self.policy_snapshot_ref, "policy_snapshot_ref")
         _text(self.compiler_version, "compiler_version")
         _text(self.server_execution_identity, "server_execution_identity")
         _digest(self.preview_fingerprint, "preview_fingerprint")
         object.__setattr__(self, "plan_diff", _frozen_mapping(_plain(self.plan_diff), "plan_diff"))
+        _reject_draft_server_fields(self.plan_diff, "compiled plan_diff")
+        _validate_durable_option_value(self.plan_diff, "compiled plan_diff")
         _digest(self.semantic_plan_hash, "semantic_plan_hash")
         if self.semantic_plan_hash != sha256_canonical(self.semantic_hash_input()):
             raise _error("PLANNING_HASH_MISMATCH", "semantic_plan_hash does not match semantic fields")
@@ -1087,6 +1261,7 @@ class ConfirmationBindingV1:
     policy_snapshot_ref: str
     confirmed_at: str
     expires_at: str
+    _issuer_token: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         _text(self.confirmation_id, "confirmation_id")
@@ -1176,27 +1351,30 @@ class ConfirmationBindingV1:
     @classmethod
     @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "ConfirmationBindingV1":
-        required = {
-            "confirmation_id",
-            "compilation_record_ref",
-            "actor_ref",
-            "session_ref",
-            "project_ref",
-            "semantic_plan_hash",
-            "method_snapshot_ref",
-            "risk_snapshot_ref",
-            "policy_snapshot_ref",
-            "confirmed_at",
-            "expires_at",
-            "confirmation_digest",
-        }
-        value = _wire(value, required, "confirmation_binding")
-        raw_ref = value["compilation_record_ref"]
-        if type(raw_ref) is not dict:
+        value = _wire(
+            value,
+            {
+                "confirmation_id",
+                "compilation_record_ref",
+                "actor_ref",
+                "session_ref",
+                "project_ref",
+                "semantic_plan_hash",
+                "method_snapshot_ref",
+                "risk_snapshot_ref",
+                "policy_snapshot_ref",
+                "confirmed_at",
+                "expires_at",
+                "confirmation_digest",
+            },
+            "confirmation_binding",
+        )
+        raw_reference = value["compilation_record_ref"]
+        if type(raw_reference) is not dict:
             raise _error("PLANNING_NESTED_DICT_REQUIRED", "compilation_record_ref must be a built-in dict")
         binding = cls(
             confirmation_id=value["confirmation_id"],  # type: ignore[arg-type]
-            compilation_record_ref=CompilationRecordReferenceV1.from_dict(raw_ref),
+            compilation_record_ref=CompilationRecordReferenceV1.from_dict(raw_reference),
             actor_ref=value["actor_ref"],  # type: ignore[arg-type]
             session_ref=value["session_ref"],  # type: ignore[arg-type]
             project_ref=value["project_ref"],  # type: ignore[arg-type]
@@ -1208,9 +1386,49 @@ class ConfirmationBindingV1:
             expires_at=value["expires_at"],  # type: ignore[arg-type]
         )
         if value["confirmation_digest"] != binding.confirmation_digest:
-            raise _error("PLANNING_DIGEST_MISMATCH", "confirmation_digest does not match")
+            raise _error("PLANNING_DIGEST_MISMATCH", "confirmation_digest does not match binding fields")
         return binding
 
+
+class ConfirmationBindingStoreV1:
+    """Server-owned confirmation authority used by the admission gate."""
+
+    def __init__(self) -> None:
+        self._issuer_token = object()
+        self._bindings: dict[str, ConfirmationBindingV1] = {}
+
+    def issue(self, binding: ConfirmationBindingV1) -> ConfirmationBindingV1:
+        if type(binding) is not ConfirmationBindingV1:
+            raise _error("PLANNING_CONFIRMATION_REQUIRED", "confirmation store accepts a typed binding")
+        if binding._issuer_token is not None and binding._issuer_token is not self._issuer_token:
+            raise _error(
+                "PLANNING_CONFIRMATION_ISSUER_MISMATCH",
+                "confirmation belongs to another server confirmation store",
+            )
+        existing = self._bindings.get(binding.confirmation_digest)
+        if existing is not None and existing is not binding:
+            raise _error("PLANNING_CONFIRMATION_DUPLICATE", "confirmation digest is already issued")
+        object.__setattr__(binding, "_issuer_token", self._issuer_token)
+        self._bindings[binding.confirmation_digest] = binding
+        return binding
+
+    def require(self, binding: ConfirmationBindingV1) -> ConfirmationBindingV1:
+        if type(binding) is not ConfirmationBindingV1:
+            raise _error(
+                "PLANNING_CONFIRMATION_AUTHORITY_REQUIRED",
+                "a server-issued confirmation binding is required",
+            )
+        if binding._issuer_token is not self._issuer_token:
+            raise _error(
+                "PLANNING_CONFIRMATION_AUTHORITY_REQUIRED",
+                "confirmation was not issued by the current server confirmation store",
+            )
+        if self._bindings.get(binding.confirmation_digest) is not binding:
+            raise _error(
+                "PLANNING_CONFIRMATION_INVALID",
+                "confirmation is not current store state",
+            )
+        return binding
 
 @dataclass(frozen=True)
 class FailureEnvelopeV1:
@@ -1294,6 +1512,7 @@ __all__ = [
     "CompilationRecordV1",
     "CompiledWorkflowV1",
     "ConfirmationBindingV1",
+    "ConfirmationBindingStoreV1",
     "DraftAgentPlanV1",
     "FailureEnvelopeV1",
     "PlanRiskLevelV1",
