@@ -121,7 +121,7 @@ class EvidenceCommitRequestV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "EvidenceCommitRequestV1":
+    def from_dict(cls, value: dict[str, object]) -> "EvidenceCommitRequestV1":
         value = _wire_dict(
             value,
             {
@@ -175,7 +175,7 @@ class FailureReceiptV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "FailureReceiptV1":
+    def from_dict(cls, value: dict[str, object]) -> "FailureReceiptV1":
         value = _wire_dict(
             value,
             {"code", "message", "retryable", "evidence_refs"},
@@ -246,7 +246,7 @@ class EvidenceCommitBindingV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "EvidenceCommitBindingV1":
+    def from_dict(cls, value: dict[str, object]) -> "EvidenceCommitBindingV1":
         value = _wire_dict(
             value,
             {

@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 
@@ -417,10 +418,12 @@ def test_nested_frozen_json_rejects_nfc_equivalent_duplicate_keys() -> None:
 
 def test_malformed_numeric_and_oracle_values_have_stable_contract_errors() -> None:
     fact = _fixture("evidence_envelope.json")["numeric_facts"][0]  # type: ignore[index]
-    huge_integer = 10**1_000
-    huge = NumericFactV1.from_dict({**fact, "value": huge_integer})
-    assert huge.value == huge_integer
-    assert f'"value":{huge_integer}' in canonical_json_v1(huge.to_dict())
+    largest_portable_integer = 9_007_199_254_740_991
+    portable = NumericFactV1.from_dict({**fact, "value": largest_portable_integer})
+    assert portable.value == largest_portable_integer
+    assert f'"value":{largest_portable_integer}' in canonical_json_v1(
+        portable.to_dict()
+    )
 
     for malformed in (True, [], {}, {"unhashable"}):
         with pytest.raises(ContractError):
@@ -441,6 +444,65 @@ def test_malformed_numeric_and_oracle_values_have_stable_contract_errors() -> No
                     "degrees_of_freedom": degrees_of_freedom,
                 }
             )
+
+
+def test_nonportable_evidence_integers_fail_before_canonical_serialization() -> None:
+    fact = _fixture("evidence_envelope.json")["numeric_facts"][0]  # type: ignore[index]
+    largest_portable_integer = 9_007_199_254_740_991
+
+    for nonportable in (
+        largest_portable_integer + 1,
+        -(largest_portable_integer + 1),
+        10**10_000,
+    ):
+        with pytest.raises(ContractError):
+            NumericFactV1.from_dict({**fact, "value": nonportable})
+        with pytest.raises(ContractError):
+            DenominatorV1.from_dict(
+                {"kind": "rows", "value": nonportable, "unit": "row"}
+            )
+
+    denominator = DenominatorV1.from_dict(
+        {"kind": "rows", "value": largest_portable_integer, "unit": "row"}
+    )
+    assert denominator.value == largest_portable_integer
+
+
+def test_frozen_json_mappings_translate_cycles_and_nonportable_ints() -> None:
+    payload = _fixture("evidence_envelope.json")
+    cyclic: dict[str, object] = {}
+    cyclic["nested"] = {"cycle": cyclic}
+
+    with pytest.raises(ContractError):
+        EvidenceEnvelopeV1.from_dict({**payload, "method": cyclic})
+    for nonportable in (9_007_199_254_740_992, 10**10_000):
+        with pytest.raises(ContractError):
+            EvidenceEnvelopeV1.from_dict(
+                {**payload, "method": {"nested": {"value": nonportable}}}
+            )
+
+
+def test_task2_from_dict_annotations_match_exact_builtin_dict_boundary() -> None:
+    record_types = (
+        NotApplicableV1,
+        EvidenceReasonV1,
+        DenominatorV1,
+        WeightBasisV1,
+        IntervalV1,
+        DistributionRefV1,
+        MultipleComparisonV1,
+        SourceSelectorV1,
+        OracleCheckV1,
+        NumericFactV1,
+        ValidationSummaryV1,
+        EvidenceEnvelopeV1,
+        EvidenceCommitRequestV1,
+        FailureReceiptV1,
+        EvidenceCommitBindingV1,
+    )
+
+    for record_type in record_types:
+        assert get_type_hints(record_type.from_dict)["value"] == dict[str, object]
 
 
 @pytest.mark.parametrize(

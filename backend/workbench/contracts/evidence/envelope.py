@@ -29,6 +29,7 @@ from workbench.contracts.common.foundation_status import (
 
 
 _EnumT = TypeVar("_EnumT")
+_MAX_JSON_SAFE_INTEGER = 9_007_199_254_740_991
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _ORACLE_STATUSES = frozenset({"pass", "fail", "not_verified", "not_applicable"})
 _TEST_DIRECTIONS = frozenset({"two_sided", "greater", "less"})
@@ -49,7 +50,9 @@ def _string_tuple(value: object, name: str) -> tuple[str, ...]:
 
 def _finite_number(value: object, name: str) -> int | float:
     if type(value) is int:
-        return value
+        if -_MAX_JSON_SAFE_INTEGER <= value <= _MAX_JSON_SAFE_INTEGER:
+            return value
+        raise ContractError(f"{name} must be a portable finite number")
     if type(value) is float:
         if math.isfinite(value):
             return value
@@ -74,14 +77,40 @@ def _enum(value: object, enum_type: type[_EnumT], name: str) -> _EnumT:
         raise ContractError(f"{name} is invalid") from exc
 
 
+def _validate_portable_json_integers(
+    value: object,
+    name: str,
+    active_container_ids: set[int] | None = None,
+) -> None:
+    if type(value) is int:
+        if not -_MAX_JSON_SAFE_INTEGER <= value <= _MAX_JSON_SAFE_INTEGER:
+            raise ContractError(f"{name} contains a nonportable integer")
+        return
+    if not isinstance(value, (Mapping, list, tuple)):
+        return
+
+    active = active_container_ids if active_container_ids is not None else set()
+    container_id = id(value)
+    if container_id in active:
+        raise ContractError(f"{name} must be acyclic JSON")
+    active.add(container_id)
+    try:
+        items = value.values() if isinstance(value, Mapping) else value
+        for item in items:
+            _validate_portable_json_integers(item, name, active)
+    finally:
+        active.remove(container_id)
+
+
 def _mapping(value: object, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ContractError(f"{name} must be a mapping")
     try:
+        _validate_portable_json_integers(value, name)
         canonical_json_v1(value)
-    except CanonicalJSONError as exc:
+        frozen = freeze_json(value, name)
+    except (CanonicalJSONError, ValueError, OverflowError, RecursionError) as exc:
         raise ContractError(f"{name} must be canonical JSON") from exc
-    frozen = freeze_json(value, name)
     if not isinstance(frozen, Mapping):  # pragma: no cover - freeze_json contract
         raise ContractError(f"{name} must be a mapping")
     return frozen
@@ -130,7 +159,7 @@ class NotApplicableV1:
         return {"status": "not_applicable", "reason": self.reason}
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "NotApplicableV1":
+    def from_dict(cls, value: dict[str, object]) -> "NotApplicableV1":
         value = _wire_dict(value, _NOT_APPLICABLE_FIELDS, "not_applicable")
         if value["status"] != "not_applicable":
             raise ContractError("not_applicable.status must be not_applicable")
@@ -180,7 +209,7 @@ class EvidenceReasonV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "EvidenceReasonV1":
+    def from_dict(cls, value: dict[str, object]) -> "EvidenceReasonV1":
         value = _wire_dict(
             value,
             {"code", "message", "source_refs"},
@@ -210,7 +239,7 @@ class DenominatorV1:
         return {"kind": self.kind, "value": self.value, "unit": self.unit}
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "DenominatorV1":
+    def from_dict(cls, value: dict[str, object]) -> "DenominatorV1":
         value = _wire_dict(value, {"kind", "value", "unit"}, "denominator")
         return cls(
             kind=value["kind"],  # type: ignore[arg-type]
@@ -235,7 +264,7 @@ class WeightBasisV1:
         return {"kind": self.kind, "variable_ref": _serialize_union(self.variable_ref)}
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "WeightBasisV1":
+    def from_dict(cls, value: dict[str, object]) -> "WeightBasisV1":
         value = _wire_dict(value, {"kind", "variable_ref"}, "weight_basis")
         return cls(
             kind=value["kind"],  # type: ignore[arg-type]
@@ -260,7 +289,7 @@ class IntervalV1:
         return {"lower": self.lower, "upper": self.upper, "method": self.method}
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "IntervalV1":
+    def from_dict(cls, value: dict[str, object]) -> "IntervalV1":
         value = _wire_dict(value, {"lower", "upper", "method"}, "interval")
         return cls(
             lower=value["lower"],  # type: ignore[arg-type]
@@ -296,7 +325,7 @@ class DistributionRefV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "DistributionRefV1":
+    def from_dict(cls, value: dict[str, object]) -> "DistributionRefV1":
         value = _wire_dict(
             value,
             {"name", "degrees_of_freedom", "parameters"},
@@ -331,7 +360,7 @@ class MultipleComparisonV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "MultipleComparisonV1":
+    def from_dict(cls, value: dict[str, object]) -> "MultipleComparisonV1":
         value = _wire_dict(
             value,
             {"family_id", "correction"},
@@ -363,7 +392,7 @@ class SourceSelectorV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "SourceSelectorV1":
+    def from_dict(cls, value: dict[str, object]) -> "SourceSelectorV1":
         value = _wire_dict(
             value,
             {"artifact_ref", "selector", "artifact_digest"},
@@ -415,7 +444,7 @@ class OracleCheckV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "OracleCheckV1":
+    def from_dict(cls, value: dict[str, object]) -> "OracleCheckV1":
         value = _wire_dict(
             value,
             {
@@ -581,7 +610,7 @@ class NumericFactV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "NumericFactV1":
+    def from_dict(cls, value: dict[str, object]) -> "NumericFactV1":
         value = _wire_dict(value, _NUMERIC_FACT_FIELDS, "numeric_fact")
         oracle_checks = value["oracle_checks"]
         if not isinstance(oracle_checks, (list, tuple)):
@@ -734,7 +763,7 @@ class ValidationSummaryV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "ValidationSummaryV1":
+    def from_dict(cls, value: dict[str, object]) -> "ValidationSummaryV1":
         value = _wire_dict(
             value,
             {"levels_present", "minimum_required", "requirement_status"},
@@ -987,7 +1016,7 @@ class EvidenceEnvelopeV1:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, object]) -> "EvidenceEnvelopeV1":
+    def from_dict(cls, value: dict[str, object]) -> "EvidenceEnvelopeV1":
         value = _wire_dict(value, _ENVELOPE_FIELDS, "evidence_envelope")
 
         def reasons(name: str) -> tuple[EvidenceReasonV1, ...]:
