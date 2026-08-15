@@ -12,9 +12,10 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
+from functools import wraps
 from typing import Any
 
 from workbench.canonical import CanonicalJSONError, canonical_json_v1, sha256_canonical
@@ -32,6 +33,15 @@ _DRAFT_FIELDS = {
     "schema_version",
     "intent_ref",
     "capability_refs",
+    "method_ref",
+    "effect",
+    "risk_level",
+    "resource_budget",
+    "data_impact",
+    "output_contract_refs",
+    "evidence_contract_refs",
+    "contract_snapshot_refs",
+    "catalog_snapshot_ref",
     "nodes",
     "connections",
     "config",
@@ -43,6 +53,13 @@ _COMPILED_FIELDS = {
     "schema_version",
     "intent_ref",
     "capability_refs",
+    "method_ref",
+    "effect",
+    "risk_level",
+    "resource_budget",
+    "data_impact",
+    "output_contract_refs",
+    "evidence_contract_refs",
     "nodes",
     "connections",
     "config",
@@ -90,6 +107,22 @@ _DRAFT_FORBIDDEN_SERVER_FIELDS = frozenset(
         "compilation_record_id",
     }
 )
+_DRAFT_FORBIDDEN_SENSITIVE_KEYS = frozenset(
+    {
+        "prompt",
+        "raw_prompt",
+        "secret",
+        "raw_secret",
+        "password",
+        "api_key",
+        "apikey",
+        "access_token",
+        "private_key",
+        "credential",
+    }
+)
+_DRAFT_FORBIDDEN_SENSITIVE_PREFIXES = ("raw:", "secret:", "prompt:", "token:")
+_SERVER_COMPILER_AUTHORITY = object()
 
 
 class PlanningContractError(ContractError):
@@ -151,6 +184,20 @@ def _ref_tuple(value: object, name: str) -> tuple[ContractRefV1, ...]:
     return refs
 
 
+def _typed_ref_tuple(value: object, name: str) -> tuple[ContractRefV1, ...]:
+    if not isinstance(value, (tuple, list)):
+        raise _error("PLANNING_ARRAY_INVALID", f"{name} must be an array")
+    refs = tuple(value)
+    if any(type(ref) is not ContractRefV1 for ref in refs):
+        raise _error("PLANNING_CONTRACT_REF_INVALID", f"{name} contains an invalid ref")
+    identities = [(ref.kind, ref.logical_id, ref.semantic_version) for ref in refs]
+    if len(set(identities)) != len(identities):
+        raise _error("PLANNING_DUPLICATE_ID", f"{name} contains duplicate identities")
+    if not refs:
+        raise _error("PLANNING_CONTRACT_REF_REQUIRED", f"{name} must not be empty")
+    return refs
+
+
 def _text_tuple(value: object, name: str) -> tuple[str, ...]:
     if type(value) is not list:
         raise _error("PLANNING_ARRAY_INVALID", f"{name} must be a built-in list")
@@ -195,7 +242,15 @@ def _frozen_mapping(value: object, name: str) -> Mapping[str, Any]:
     try:
         canonical_json_v1(value)
         frozen = freeze_json(value, name)
-    except (CanonicalJSONError, ContractError, RecursionError, OverflowError, ValueError) as exc:
+    except (
+        AttributeError,
+        CanonicalJSONError,
+        ContractError,
+        RecursionError,
+        OverflowError,
+        TypeError,
+        ValueError,
+    ) as exc:
         raise _error("PLANNING_JSON_INVALID", f"{name} must be canonical JSON") from exc
     if not isinstance(frozen, Mapping):  # pragma: no cover
         raise _error("PLANNING_JSON_INVALID", f"{name} must be an object")
@@ -225,7 +280,7 @@ def _frozen_mappings(value: object, name: str) -> tuple[Mapping[str, Any], ...]:
 
 
 def _reject_draft_server_fields(value: object, name: str) -> None:
-    if type(value) is dict:
+    if isinstance(value, Mapping):
         forbidden = _DRAFT_FORBIDDEN_SERVER_FIELDS.intersection(value)
         if forbidden:
             raise _error(
@@ -238,19 +293,65 @@ def _reject_draft_server_fields(value: object, name: str) -> None:
         for child in value:
             _reject_draft_server_fields(child, name)
 
+def _reject_draft_sensitive_content(value: object, name: str) -> None:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            lowered = key.casefold()
+            if lowered in _DRAFT_FORBIDDEN_SENSITIVE_KEYS or any(
+                marker in lowered for marker in ("prompt", "secret", "password", "credential")
+            ):
+                raise _error(
+                    "DRAFT_SENSITIVE_CONTENT_FORBIDDEN",
+                    f"{name} contains a raw prompt or secret field",
+                )
+            _reject_draft_sensitive_content(child, name)
+    elif type(value) in {list, tuple}:
+        for child in value:
+            _reject_draft_sensitive_content(child, name)
+    elif type(value) is str and value.casefold().startswith(_DRAFT_FORBIDDEN_SENSITIVE_PREFIXES):
+        raise _error("DRAFT_SENSITIVE_CONTENT_FORBIDDEN", f"{name} contains raw sensitive content")
+
 
 def _plain(value: object) -> object:
     try:
         return thaw_json(value)
-    except (RecursionError, ValueError, TypeError) as exc:
+    except (AttributeError, CanonicalJSONError, RecursionError, ValueError, TypeError) as exc:
         raise _error("PLANNING_JSON_INVALID", "value must be finite, acyclic JSON") from exc
+
+
+def _wire_boundary(function):
+    @wraps(function)
+    def wrapped(cls, value):
+        try:
+            return function(cls, value)
+        except PlanningContractError:
+            raise
+        except (
+            AttributeError,
+            CanonicalJSONError,
+            ContractError,
+            RecursionError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise _error("PLANNING_WIRE_INVALID", "planning wire value is invalid") from exc
+
+    return wrapped
 
 
 def _semantic_payload(
     *,
-    schema_version: str,
     intent_ref: str,
     capability_refs: tuple[ContractRefV1, ...],
+    method_ref: str,
+    effect: str,
+    risk_level: PlanRiskLevelV1,
+    resource_budget: Mapping[str, Any],
+    data_impact: Mapping[str, Any],
+    output_contract_refs: tuple[ContractRefV1, ...],
+    evidence_contract_refs: tuple[ContractRefV1, ...],
+    contract_snapshot_refs: tuple[ContractRefV1, ...],
+    catalog_snapshot_ref: str,
     nodes: tuple[Mapping[str, Any], ...],
     connections: tuple[Mapping[str, Any], ...],
     config: Mapping[str, Any],
@@ -265,6 +366,15 @@ def _semantic_payload(
         "semantic_schema_version": "agent-plan-semantic.v1",
         "intent_ref": intent_ref,
         "capability_refs": [ref.to_dict() for ref in capability_refs],
+        "method_ref": method_ref,
+        "effect": effect,
+        "risk_level": risk_level.value,
+        "resource_budget": _plain(resource_budget),
+        "data_impact": _plain(data_impact),
+        "output_contract_refs": [ref.to_dict() for ref in output_contract_refs],
+        "evidence_contract_refs": [ref.to_dict() for ref in evidence_contract_refs],
+        "contract_snapshot_refs": [ref.to_dict() for ref in contract_snapshot_refs],
+        "catalog_snapshot_ref": catalog_snapshot_ref,
         "nodes": [_plain(node) for node in nodes],
         "connections": [_plain(connection) for connection in connections],
         "config": _plain(config),
@@ -299,6 +409,15 @@ class DraftAgentPlanV1:
     schema_version: str
     intent_ref: str
     capability_refs: tuple[ContractRefV1, ...]
+    method_ref: str
+    effect: str
+    risk_level: PlanRiskLevelV1
+    resource_budget: Mapping[str, Any]
+    data_impact: Mapping[str, Any]
+    output_contract_refs: tuple[ContractRefV1, ...]
+    evidence_contract_refs: tuple[ContractRefV1, ...]
+    contract_snapshot_refs: tuple[ContractRefV1, ...]
+    catalog_snapshot_ref: str
     nodes: tuple[Mapping[str, Any], ...]
     connections: tuple[Mapping[str, Any], ...]
     config: Mapping[str, Any]
@@ -317,11 +436,21 @@ class DraftAgentPlanV1:
         if len({(ref.kind, ref.logical_id, ref.semantic_version) for ref in refs}) != len(refs):
             raise _error("PLANNING_DUPLICATE_ID", "capability_refs contain duplicate identities")
         object.__setattr__(self, "capability_refs", refs)
+        _text(self.method_ref, "method_ref")
+        _text(self.effect, "effect")
+        if type(self.risk_level) is not PlanRiskLevelV1:
+            raise _error("PLANNING_ENUM_INVALID", "risk_level is invalid")
+        object.__setattr__(self, "resource_budget", _frozen_mapping(_plain(self.resource_budget), "resource_budget"))
+        object.__setattr__(self, "data_impact", _frozen_mapping(_plain(self.data_impact), "data_impact"))
+        for name in ("output_contract_refs", "evidence_contract_refs", "contract_snapshot_refs"):
+            object.__setattr__(self, name, _typed_ref_tuple(getattr(self, name), name))
+        _text(self.catalog_snapshot_ref, "catalog_snapshot_ref")
         if not isinstance(self.nodes, (tuple, list)):
             raise _error("PLANNING_ARRAY_INVALID", "nodes must be an array")
         nodes = tuple(_frozen_mapping(_plain(node), "nodes[]") for node in self.nodes)
         for node in nodes:
             _reject_draft_server_fields(node, "node")
+            _reject_draft_sensitive_content(node, "node")
             if type(node.get("node_id")) is not str or not node["node_id"]:
                 raise _error("PLANNING_NODE_INVALID", "each node must have a node_id")
         if len({node["node_id"] for node in nodes}) != len(nodes):
@@ -330,8 +459,12 @@ class DraftAgentPlanV1:
         if not isinstance(self.connections, (tuple, list)):
             raise _error("PLANNING_ARRAY_INVALID", "connections must be an array")
         connections = tuple(_frozen_mapping(_plain(connection), "connections[]") for connection in self.connections)
+        for connection in connections:
+            _reject_draft_sensitive_content(connection, "connection")
         object.__setattr__(self, "connections", connections)
         object.__setattr__(self, "config", _frozen_mapping(_plain(self.config), "config"))
+        _reject_draft_sensitive_content(self.config, "config")
+        _reject_draft_sensitive_content(self.data_impact, "data_impact")
         _text(self.policy_snapshot_ref, "policy_snapshot_ref")
         if not isinstance(self.rationale, (tuple, list)):
             raise _error("PLANNING_ARRAY_INVALID", "rationale must be an array")
@@ -339,9 +472,17 @@ class DraftAgentPlanV1:
 
     def semantic_hash_input(self) -> dict[str, object]:
         return _semantic_payload(
-            schema_version=self.schema_version,
             intent_ref=self.intent_ref,
             capability_refs=self.capability_refs,
+            method_ref=self.method_ref,
+            effect=self.effect,
+            risk_level=self.risk_level,
+            resource_budget=self.resource_budget,
+            data_impact=self.data_impact,
+            output_contract_refs=self.output_contract_refs,
+            evidence_contract_refs=self.evidence_contract_refs,
+            contract_snapshot_refs=self.contract_snapshot_refs,
+            catalog_snapshot_ref=self.catalog_snapshot_ref,
             nodes=self.nodes,
             connections=self.connections,
             config=self.config,
@@ -357,6 +498,15 @@ class DraftAgentPlanV1:
             "schema_version": self.schema_version,
             "intent_ref": self.intent_ref,
             "capability_refs": [ref.to_dict() for ref in self.capability_refs],
+            "method_ref": self.method_ref,
+            "effect": self.effect,
+            "risk_level": self.risk_level.value,
+            "resource_budget": _plain(self.resource_budget),
+            "data_impact": _plain(self.data_impact),
+            "output_contract_refs": [ref.to_dict() for ref in self.output_contract_refs],
+            "evidence_contract_refs": [ref.to_dict() for ref in self.evidence_contract_refs],
+            "contract_snapshot_refs": [ref.to_dict() for ref in self.contract_snapshot_refs],
+            "catalog_snapshot_ref": self.catalog_snapshot_ref,
             "nodes": [_plain(node) for node in self.nodes],
             "connections": [_plain(connection) for connection in self.connections],
             "config": _plain(self.config),
@@ -366,18 +516,32 @@ class DraftAgentPlanV1:
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "DraftAgentPlanV1":
         value = _wire(value, _DRAFT_FIELDS, "draft_agent_plan")
         raw_nodes = value["nodes"]
         raw_connections = value["connections"]
+        raw_resource_budget = value["resource_budget"]
+        raw_data_impact = value["data_impact"]
         if type(raw_nodes) is not list or type(raw_connections) is not list:
             raise _error("PLANNING_ARRAY_INVALID", "nodes and connections must be built-in lists")
+        if type(raw_resource_budget) is not dict or type(raw_data_impact) is not dict:
+            raise _error("PLANNING_NESTED_DICT_REQUIRED", "plan budgets and data impact must be built-in dicts")
         if any(type(item) is not dict for item in raw_nodes + raw_connections):
             raise _error("PLANNING_NESTED_DICT_REQUIRED", "plan nodes and connections must be built-in dicts")
         plan = cls(
             schema_version=value["schema_version"],  # type: ignore[arg-type]
             intent_ref=value["intent_ref"],  # type: ignore[arg-type]
             capability_refs=tuple(_ref_tuple(value["capability_refs"], "capability_refs")),
+            method_ref=value["method_ref"],  # type: ignore[arg-type]
+            effect=value["effect"],  # type: ignore[arg-type]
+            risk_level=_enum(value["risk_level"], PlanRiskLevelV1, "risk_level"),
+            resource_budget=_frozen_mapping(raw_resource_budget, "resource_budget"),
+            data_impact=_frozen_mapping(raw_data_impact, "data_impact"),
+            output_contract_refs=_ref_tuple(value["output_contract_refs"], "output_contract_refs"),
+            evidence_contract_refs=_ref_tuple(value["evidence_contract_refs"], "evidence_contract_refs"),
+            contract_snapshot_refs=_ref_tuple(value["contract_snapshot_refs"], "contract_snapshot_refs"),
+            catalog_snapshot_ref=value["catalog_snapshot_ref"],  # type: ignore[arg-type]
             nodes=tuple(_frozen_nodes(raw_nodes, "nodes")),  # type: ignore[arg-type]
             connections=_frozen_mappings(raw_connections, "connections"),  # type: ignore[arg-type]
             config=_frozen_mapping(value["config"], "config"),  # type: ignore[arg-type]
@@ -394,6 +558,13 @@ class CompiledWorkflowV1:
     schema_version: str
     intent_ref: str
     capability_refs: tuple[ContractRefV1, ...]
+    method_ref: str
+    effect: str
+    risk_level: PlanRiskLevelV1
+    resource_budget: Mapping[str, Any]
+    data_impact: Mapping[str, Any]
+    output_contract_refs: tuple[ContractRefV1, ...]
+    evidence_contract_refs: tuple[ContractRefV1, ...]
     nodes: tuple[Mapping[str, Any], ...]
     connections: tuple[Mapping[str, Any], ...]
     config: Mapping[str, Any]
@@ -404,9 +575,6 @@ class CompiledWorkflowV1:
     server_execution_identity: str
     preview_fingerprint: str
     plan_diff: Mapping[str, Any]
-    risk_level: PlanRiskLevelV1
-    effect: str
-    resource_budget: Mapping[str, Any]
     semantic_plan_hash: str
 
     def __post_init__(self) -> None:
@@ -416,10 +584,18 @@ class CompiledWorkflowV1:
         for name, refs in (
             ("capability_refs", self.capability_refs),
             ("contract_snapshot_refs", self.contract_snapshot_refs),
+            ("output_contract_refs", self.output_contract_refs),
+            ("evidence_contract_refs", self.evidence_contract_refs),
         ):
             if not isinstance(refs, (tuple, list)) or any(type(ref) is not ContractRefV1 for ref in refs):
                 raise _error("PLANNING_CONTRACT_REF_INVALID", f"{name} contains an invalid ref")
             object.__setattr__(self, name, tuple(refs))
+        _text(self.method_ref, "method_ref")
+        _text(self.effect, "effect")
+        if type(self.risk_level) is not PlanRiskLevelV1:
+            raise _error("PLANNING_ENUM_INVALID", "risk_level is invalid")
+        object.__setattr__(self, "resource_budget", _frozen_mapping(_plain(self.resource_budget), "resource_budget"))
+        object.__setattr__(self, "data_impact", _frozen_mapping(_plain(self.data_impact), "data_impact"))
         if not isinstance(self.nodes, (tuple, list)) or any(not isinstance(node, Mapping) for node in self.nodes):
             raise _error("PLANNING_NODE_INVALID", "nodes are invalid")
         object.__setattr__(self, "nodes", tuple(_frozen_mapping(_plain(node), "nodes[]") for node in self.nodes))
@@ -433,10 +609,6 @@ class CompiledWorkflowV1:
         _text(self.server_execution_identity, "server_execution_identity")
         _digest(self.preview_fingerprint, "preview_fingerprint")
         object.__setattr__(self, "plan_diff", _frozen_mapping(_plain(self.plan_diff), "plan_diff"))
-        if type(self.risk_level) is not PlanRiskLevelV1:
-            raise _error("PLANNING_ENUM_INVALID", "risk_level is invalid")
-        _text(self.effect, "effect")
-        object.__setattr__(self, "resource_budget", _frozen_mapping(_plain(self.resource_budget), "resource_budget"))
         _digest(self.semantic_plan_hash, "semantic_plan_hash")
         if self.semantic_plan_hash != sha256_canonical(self.semantic_hash_input()):
             raise _error("PLANNING_HASH_MISMATCH", "semantic_plan_hash does not match semantic fields")
@@ -453,43 +625,65 @@ class CompiledWorkflowV1:
         risk_level: PlanRiskLevelV1,
         effect: str,
         resource_budget: Mapping[str, Any],
-        contract_snapshot_refs: tuple[ContractRefV1, ...] | None = None,
-        catalog_snapshot_ref: str = "catalog:snapshot:1",
+        contract_snapshot_refs: tuple[ContractRefV1, ...],
+        catalog_snapshot_ref: str,
     ) -> "CompiledWorkflowV1":
         if type(draft) is not DraftAgentPlanV1:
             raise _error("PLANNING_DRAFT_INVALID", "only DraftAgentPlanV1 can be compiled")
+        if effect != draft.effect or risk_level is not draft.risk_level or _plain(resource_budget) != _plain(draft.resource_budget):
+            raise _error("PLANNING_SEMANTIC_MISMATCH", "compiled semantics must match the draft plan")
+        if tuple(contract_snapshot_refs) != draft.contract_snapshot_refs or catalog_snapshot_ref != draft.catalog_snapshot_ref:
+            raise _error("PLANNING_SNAPSHOT_MISMATCH", "compiled snapshots must be explicit and match the draft")
         return cls(
             schema_version=_COMPILED_SCHEMA,
             intent_ref=draft.intent_ref,
             capability_refs=draft.capability_refs,
+            method_ref=draft.method_ref,
+            effect=draft.effect,
+            risk_level=draft.risk_level,
+            resource_budget=draft.resource_budget,
+            data_impact=draft.data_impact,
+            output_contract_refs=draft.output_contract_refs,
+            evidence_contract_refs=draft.evidence_contract_refs,
             nodes=draft.nodes,
             connections=draft.connections,
             config=draft.config,
-            contract_snapshot_refs=contract_snapshot_refs or draft.capability_refs,
+            contract_snapshot_refs=contract_snapshot_refs,
             catalog_snapshot_ref=catalog_snapshot_ref,
             policy_snapshot_ref=draft.policy_snapshot_ref,
             compiler_version=compiler_version,
             server_execution_identity=server_execution_identity,
             preview_fingerprint=preview_fingerprint,
             plan_diff=plan_diff,
-            risk_level=risk_level,
-            effect=effect,
-            resource_budget=resource_budget,
             semantic_plan_hash=draft.semantic_plan_hash,
         )
 
     def semantic_hash_input(self) -> dict[str, object]:
         return _semantic_payload(
-            schema_version=self.schema_version,
             intent_ref=self.intent_ref,
             capability_refs=self.capability_refs,
+            method_ref=self.method_ref,
+            effect=self.effect,
+            risk_level=self.risk_level,
+            resource_budget=self.resource_budget,
+            data_impact=self.data_impact,
+            output_contract_refs=self.output_contract_refs,
+            evidence_contract_refs=self.evidence_contract_refs,
+            contract_snapshot_refs=self.contract_snapshot_refs,
+            catalog_snapshot_ref=self.catalog_snapshot_ref,
             nodes=self.nodes,
             connections=self.connections,
             config=self.config,
             policy_snapshot_ref=self.policy_snapshot_ref,
         )
 
-    def execution_instance_hash(self, resolved_artifact_digests: Mapping[str, str]) -> str:
+    def execution_instance_hash(
+        self,
+        resolved_artifact_digests: Mapping[str, str],
+        *,
+        resolved_run_identity: str,
+        resolved_node_identities: Mapping[str, str],
+    ) -> str:
         if type(resolved_artifact_digests) is not dict:
             raise _error("PLANNING_NESTED_DICT_REQUIRED", "resolved_artifact_digests must be a built-in dict")
         normalized: dict[str, str] = {}
@@ -498,9 +692,19 @@ class CompiledWorkflowV1:
             normalized[ref] = _digest(digest, "resolved_artifact_digests value") or digest
         if not normalized:
             raise _error("PLANNING_ARTIFACTS_REQUIRED", "execution hash requires resolved artifact digests")
+        _text(resolved_run_identity, "resolved_run_identity")
+        if type(resolved_node_identities) is not dict or not resolved_node_identities:
+            raise _error("PLANNING_NODE_IDENTITY_REQUIRED", "execution hash requires resolved node identities")
+        normalized_nodes = {
+            _text(node_ref, "resolved_node_identities key"): _text(node_id, "resolved_node_identities value")
+            for node_ref, node_id in resolved_node_identities.items()
+        }
         return sha256_canonical(
             {
                 "semantic_plan_hash": self.semantic_plan_hash,
+                "server_execution_identity": self.server_execution_identity,
+                "resolved_run_identity": resolved_run_identity,
+                "resolved_node_identities": normalized_nodes,
                 "resolved_artifact_digests": normalized,
             }
         )
@@ -510,6 +714,13 @@ class CompiledWorkflowV1:
             "schema_version": self.schema_version,
             "intent_ref": self.intent_ref,
             "capability_refs": [ref.to_dict() for ref in self.capability_refs],
+            "method_ref": self.method_ref,
+            "effect": self.effect,
+            "risk_level": self.risk_level.value,
+            "resource_budget": _plain(self.resource_budget),
+            "data_impact": _plain(self.data_impact),
+            "output_contract_refs": [ref.to_dict() for ref in self.output_contract_refs],
+            "evidence_contract_refs": [ref.to_dict() for ref in self.evidence_contract_refs],
             "nodes": [_plain(node) for node in self.nodes],
             "connections": [_plain(connection) for connection in self.connections],
             "config": _plain(self.config),
@@ -520,25 +731,34 @@ class CompiledWorkflowV1:
             "server_execution_identity": self.server_execution_identity,
             "preview_fingerprint": self.preview_fingerprint,
             "plan_diff": _plain(self.plan_diff),
-            "risk_level": self.risk_level.value,
-            "effect": self.effect,
-            "resource_budget": _plain(self.resource_budget),
             "semantic_plan_hash": self.semantic_plan_hash,
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "CompiledWorkflowV1":
         value = _wire(value, _COMPILED_FIELDS, "compiled_workflow")
         raw_nodes = value["nodes"]
         raw_connections = value["connections"]
+        raw_resource_budget = value["resource_budget"]
+        raw_data_impact = value["data_impact"]
         if type(raw_nodes) is not list or type(raw_connections) is not list:
             raise _error("PLANNING_ARRAY_INVALID", "nodes and connections must be built-in lists")
+        if type(raw_resource_budget) is not dict or type(raw_data_impact) is not dict:
+            raise _error("PLANNING_NESTED_DICT_REQUIRED", "compiled budgets and data impact must be built-in dicts")
         if any(type(item) is not dict for item in raw_nodes + raw_connections):
             raise _error("PLANNING_NESTED_DICT_REQUIRED", "nodes and connections must be built-in dicts")
         return cls(
             schema_version=value["schema_version"],  # type: ignore[arg-type]
             intent_ref=value["intent_ref"],  # type: ignore[arg-type]
             capability_refs=_ref_tuple(value["capability_refs"], "capability_refs"),
+            method_ref=value["method_ref"],  # type: ignore[arg-type]
+            effect=value["effect"],  # type: ignore[arg-type]
+            risk_level=_enum(value["risk_level"], PlanRiskLevelV1, "risk_level"),
+            resource_budget=_frozen_mapping(raw_resource_budget, "resource_budget"),
+            data_impact=_frozen_mapping(raw_data_impact, "data_impact"),
+            output_contract_refs=_ref_tuple(value["output_contract_refs"], "output_contract_refs"),
+            evidence_contract_refs=_ref_tuple(value["evidence_contract_refs"], "evidence_contract_refs"),
             nodes=tuple(_frozen_nodes(raw_nodes, "nodes")),  # type: ignore[arg-type]
             connections=_frozen_mappings(raw_connections, "connections"),  # type: ignore[arg-type]
             config=_frozen_mapping(value["config"], "config"),  # type: ignore[arg-type]
@@ -549,9 +769,6 @@ class CompiledWorkflowV1:
             server_execution_identity=value["server_execution_identity"],  # type: ignore[arg-type]
             preview_fingerprint=value["preview_fingerprint"],  # type: ignore[arg-type]
             plan_diff=_frozen_mapping(value["plan_diff"], "plan_diff"),  # type: ignore[arg-type]
-            risk_level=_enum(value["risk_level"], PlanRiskLevelV1, "risk_level"),
-            effect=value["effect"],  # type: ignore[arg-type]
-            resource_budget=_frozen_mapping(value["resource_budget"], "resource_budget"),  # type: ignore[arg-type]
             semantic_plan_hash=value["semantic_plan_hash"],  # type: ignore[arg-type]
         )
 
@@ -575,6 +792,7 @@ class CompilationRecordReferenceV1:
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "CompilationRecordReferenceV1":
         value = _wire(value, _REFERENCE_FIELDS, "compilation_record_reference")
         return cls(
@@ -636,6 +854,7 @@ class CompilationRecordV1:
     expires_at: str
     semantic_plan_hash: str
     record_digest: str
+    _authority_token: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.schema_version != _RECORD_SCHEMA:
@@ -715,7 +934,20 @@ class CompilationRecordV1:
             expires_at=expires_at,
             semantic_plan_hash=compiled.semantic_plan_hash,
             record_digest=sha256_canonical(payload),
+            _authority_token=None,
         )
+
+    @classmethod
+    def _from_server_compiled(
+        cls,
+        compiled: CompiledWorkflowV1,
+        **kwargs: Any,
+    ) -> "CompilationRecordV1":
+        """Private server compiler seam; never a wire/client authority flag."""
+
+        record = cls.from_compiled(compiled, **kwargs)
+        object.__setattr__(record, "_authority_token", _SERVER_COMPILER_AUTHORITY)
+        return record
 
     def _record_payload(self) -> dict[str, object]:
         return {
@@ -750,6 +982,7 @@ class CompilationRecordV1:
         return {**self._record_payload(), "record_digest": self.record_digest}
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "CompilationRecordV1":
         value = _wire(value, _RECORD_FIELDS, "compilation_record")
         raw_refs = value["contract_snapshot_refs"]
@@ -786,8 +1019,14 @@ class CompilationRecordStoreV1:
         self._records: dict[tuple[str, str], CompilationRecordV1] = {}
 
     def issue(self, record: CompilationRecordV1) -> ServerCompilationRecordReferenceV1:
-        if type(record) is not CompilationRecordV1:
-            raise _error("SERVER_RECORD_REQUIRED", "only a validated CompilationRecordV1 can be issued")
+        raise _error(
+            "SERVER_COMPILER_AUTHORITY_REQUIRED",
+            "client records cannot be issued; server compiler authority is required",
+        )
+
+    def _issue_server(self, record: CompilationRecordV1) -> ServerCompilationRecordReferenceV1:
+        if type(record) is not CompilationRecordV1 or record._authority_token is not _SERVER_COMPILER_AUTHORITY:
+            raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "record was not produced by the server compiler")
         self._records[(record.record_id, record.record_digest)] = record
         return ServerCompilationRecordReferenceV1._issue(record.reference, self._issuer_token)
 
@@ -811,6 +1050,28 @@ class CompilationRecordStoreV1:
         if record is None or record.semantic_plan_hash != reference.semantic_plan_hash:
             raise _error("SERVER_RECORD_UNRESOLVED", "server compilation record is unavailable")
         return record
+
+
+class ServerCompilationRecordIssuerV1:
+    """Server-owned compiler/issuer seam; persistence parsing is never authority."""
+
+    def __init__(self, store: CompilationRecordStoreV1 | None = None) -> None:
+        if store is not None and type(store) is not CompilationRecordStoreV1:
+            raise _error("SERVER_RECORD_STORE_REQUIRED", "server compiler requires a compilation record store")
+        self.store = store
+
+    def compile_record(self, compiled: CompiledWorkflowV1, **kwargs: Any) -> CompilationRecordV1:
+        if type(compiled) is not CompiledWorkflowV1:
+            raise _error("SERVER_COMPILED_REQUIRED", "server compiler requires a compiled workflow")
+        return CompilationRecordV1._from_server_compiled(
+            compiled,
+            **kwargs,
+        )
+
+    def issue(self, record: CompilationRecordV1) -> ServerCompilationRecordReferenceV1:
+        if self.store is None:
+            raise _error("SERVER_RECORD_STORE_REQUIRED", "server issuer requires a record store")
+        return self.store._issue_server(record)
 
 
 @dataclass(frozen=True)
@@ -913,6 +1174,7 @@ class ConfirmationBindingV1:
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "ConfirmationBindingV1":
         required = {
             "confirmation_id",
@@ -975,8 +1237,8 @@ class FailureEnvelopeV1:
             object.__setattr__(self, name, normalized)
         if type(self.retryable) is not bool or type(self.confirmation_required) is not bool:
             raise _error("PLANNING_BOOLEAN_INVALID", "failure booleans must be exact booleans")
-        if self.partial_output_trust not in {"trusted", "untrusted", "not_available"}:
-            raise _error("PLANNING_ENUM_INVALID", "partial_output_trust is invalid")
+        if self.partial_output_trust not in {"not_available"}:
+            raise _error("PLANNING_ENUM_INVALID", "trusted partial output markers are not accepted")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -994,6 +1256,7 @@ class FailureEnvelopeV1:
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "FailureEnvelopeV1":
         required = {
             "schema_version",
@@ -1036,4 +1299,5 @@ __all__ = [
     "PlanRiskLevelV1",
     "PlanningContractError",
     "ServerCompilationRecordReferenceV1",
+    "ServerCompilationRecordIssuerV1",
 ]

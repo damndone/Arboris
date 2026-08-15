@@ -1,30 +1,23 @@
-"""One-release holdout seal and append-only access ledger contracts."""
+"""One-release holdout seal and server-owned append-only access ledger."""
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
+from functools import wraps
 from typing import Any
 
-from workbench.canonical import CanonicalJSONError, canonical_json_v1, sha256_canonical
+from workbench.canonical import CanonicalJSONError, sha256_canonical
 from workbench.contracts.common.envelope import ContractError, freeze_json, thaw_json
 
 
 HOLDOUT_SCHEMA_V1 = "holdout-seal.v1"
-_MAX_JSON_SAFE_INTEGER = 9_007_199_254_740_991
+_SHA256 = set("0123456789abcdef")
 _REQUIRED_DEVELOPMENT_HASHES = frozenset(
     {
-        "code",
-        "config",
-        "contract",
-        "data",
-        "split",
-        "feature_recipe",
-        "candidate_search",
-        "calibration",
-        "threshold",
-        "decision_policy",
+        "code", "config", "contract", "data", "split", "feature_recipe",
+        "candidate_search", "calibration", "threshold", "decision_policy",
     }
 )
 
@@ -64,7 +57,7 @@ def _text(value: object, name: str) -> str:
 
 
 def _digest(value: object, name: str) -> str:
-    if type(value) is not str or len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+    if type(value) is not str or len(value) != 64 or any(char not in _SHA256 for char in value):
         raise _error("HOLDOUT_DIGEST_INVALID", f"{name} must be a lowercase SHA-256 digest")
     return value
 
@@ -104,18 +97,34 @@ def _wire(value: object, required: set[str], name: str) -> dict[str, object]:
     return value
 
 
-def _frozen_hashes(value: object) -> dict[str, str]:
-    if type(value) is not dict:
-        raise _error("HOLDOUT_NESTED_DICT_REQUIRED", "development_hashes must be a built-in dict")
-    if set(value) != _REQUIRED_DEVELOPMENT_HASHES:
-        missing = _REQUIRED_DEVELOPMENT_HASHES - set(value)
-        extra = set(value) - _REQUIRED_DEVELOPMENT_HASHES
-        raise _error(
-            "HOLDOUT_HASH_SET_INVALID",
-            f"development_hashes exact set required; missing={sorted(missing)} extra={sorted(extra)}",
-        )
-    result = {key: _digest(item, f"development_hashes.{key}") for key, item in value.items()}
-    return result
+def _wire_boundary(function):
+    @wraps(function)
+    def wrapped(cls, value):
+        try:
+            return function(cls, value)
+        except HoldoutContractError:
+            raise
+        except (AttributeError, CanonicalJSONError, ContractError, RecursionError, TypeError, ValueError) as exc:
+            raise _error("HOLDOUT_WIRE_INVALID", "holdout wire value is invalid") from exc
+
+    return wrapped
+
+
+def _frozen_hashes(value: object) -> Mapping[str, str]:
+    if not isinstance(value, Mapping):
+        raise _error("HOLDOUT_NESTED_DICT_REQUIRED", "development_hashes must be a mapping")
+    if any(type(key) is not str for key in value):
+        raise _error("HOLDOUT_HASH_SET_INVALID", "development_hashes keys must be strings")
+    keys = set(value)
+    if keys != _REQUIRED_DEVELOPMENT_HASHES:
+        missing = _REQUIRED_DEVELOPMENT_HASHES - keys
+        extra = keys - _REQUIRED_DEVELOPMENT_HASHES
+        raise _error("HOLDOUT_HASH_SET_INVALID", f"development_hashes exact set required; missing={sorted(missing)} extra={sorted(extra)}")
+    normalized = {key: _digest(item, f"development_hashes.{key}") for key, item in value.items()}
+    try:
+        return freeze_json(normalized, "development_hashes")
+    except (AttributeError, CanonicalJSONError, ContractError, RecursionError, TypeError, ValueError) as exc:
+        raise _error("HOLDOUT_HASH_SET_INVALID", "development_hashes are not safely serializable") from exc
 
 
 @dataclass(frozen=True)
@@ -124,6 +133,7 @@ class HoldoutAccessRequestV1:
     principal_ref: str
     kind: HoldoutAccessKindV1
     metric_refs: tuple[str, ...]
+    metric_bundle_digest: str
 
     def __post_init__(self) -> None:
         _text(self.access_id, "access_id")
@@ -133,6 +143,7 @@ class HoldoutAccessRequestV1:
         object.__setattr__(self, "metric_refs", _refs(self.metric_refs, "metric_refs"))
         if not self.metric_refs:
             raise _error("HOLDOUT_METRICS_REQUIRED", "metric_refs must not be empty")
+        _digest(self.metric_bundle_digest, "metric_bundle_digest")
 
     @property
     def request_digest(self) -> str:
@@ -142,6 +153,7 @@ class HoldoutAccessRequestV1:
                 "principal_ref": self.principal_ref,
                 "kind": self.kind.value,
                 "metric_refs": list(self.metric_refs),
+                "metric_bundle_digest": self.metric_bundle_digest,
             }
         )
 
@@ -151,12 +163,14 @@ class HoldoutAccessRequestV1:
             "principal_ref": self.principal_ref,
             "kind": self.kind.value,
             "metric_refs": list(self.metric_refs),
+            "metric_bundle_digest": self.metric_bundle_digest,
             "request_digest": self.request_digest,
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "HoldoutAccessRequestV1":
-        value = _wire(value, {"access_id", "principal_ref", "kind", "metric_refs", "request_digest"}, "holdout_access_request")
+        value = _wire(value, {"access_id", "principal_ref", "kind", "metric_refs", "metric_bundle_digest", "request_digest"}, "holdout_access_request")
         raw_metrics = value["metric_refs"]
         if type(raw_metrics) is not list:
             raise _error("HOLDOUT_ARRAY_INVALID", "metric_refs must be a built-in list")
@@ -165,6 +179,7 @@ class HoldoutAccessRequestV1:
             principal_ref=value["principal_ref"],  # type: ignore[arg-type]
             kind=_parse_access_kind(value["kind"]),
             metric_refs=_refs(raw_metrics, "metric_refs"),
+            metric_bundle_digest=value["metric_bundle_digest"],  # type: ignore[arg-type]
         )
         if value["request_digest"] != request.request_digest:
             raise _error("HOLDOUT_DIGEST_MISMATCH", "request_digest does not match access request")
@@ -177,6 +192,7 @@ class HoldoutAccessLedgerEntryV1:
     principal_ref: str
     kind: HoldoutAccessKindV1
     metric_refs: tuple[str, ...]
+    metric_bundle_digest: str
     request_digest: str
     decision: str
     reason_code: str
@@ -189,16 +205,18 @@ class HoldoutAccessLedgerEntryV1:
         if type(self.kind) is not HoldoutAccessKindV1:
             raise _error("HOLDOUT_ENUM_INVALID", "kind is invalid")
         object.__setattr__(self, "metric_refs", _refs(self.metric_refs, "metric_refs"))
+        _digest(self.metric_bundle_digest, "metric_bundle_digest")
         _digest(self.request_digest, "request_digest")
-        expected_request_digest = sha256_canonical(
+        expected = sha256_canonical(
             {
                 "access_id": self.access_id,
                 "principal_ref": self.principal_ref,
                 "kind": self.kind.value,
                 "metric_refs": list(self.metric_refs),
+                "metric_bundle_digest": self.metric_bundle_digest,
             }
         )
-        if self.request_digest != expected_request_digest:
+        if self.request_digest != expected:
             raise _error("HOLDOUT_DIGEST_MISMATCH", "ledger request_digest does not match request fields")
         if self.decision not in {"allowed", "rejected"}:
             raise _error("HOLDOUT_DECISION_INVALID", "decision is invalid")
@@ -207,20 +225,13 @@ class HoldoutAccessLedgerEntryV1:
             raise _error("HOLDOUT_ENUM_INVALID", "ledger state is invalid")
 
     @classmethod
-    def from_request(
-        cls,
-        request: HoldoutAccessRequestV1,
-        *,
-        decision: str,
-        reason_code: str,
-        state_before: HoldoutSealStatusV1,
-        state_after: HoldoutSealStatusV1,
-    ) -> "HoldoutAccessLedgerEntryV1":
+    def from_request(cls, request: HoldoutAccessRequestV1, *, decision: str, reason_code: str, state_before: HoldoutSealStatusV1, state_after: HoldoutSealStatusV1) -> "HoldoutAccessLedgerEntryV1":
         return cls(
             access_id=request.access_id,
             principal_ref=request.principal_ref,
             kind=request.kind,
             metric_refs=request.metric_refs,
+            metric_bundle_digest=request.metric_bundle_digest,
             request_digest=request.request_digest,
             decision=decision,
             reason_code=reason_code,
@@ -234,6 +245,7 @@ class HoldoutAccessLedgerEntryV1:
             "principal_ref": self.principal_ref,
             "kind": self.kind.value,
             "metric_refs": list(self.metric_refs),
+            "metric_bundle_digest": self.metric_bundle_digest,
             "request_digest": self.request_digest,
             "decision": self.decision,
             "reason_code": self.reason_code,
@@ -242,20 +254,11 @@ class HoldoutAccessLedgerEntryV1:
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "HoldoutAccessLedgerEntryV1":
         value = _wire(
             value,
-            {
-                "access_id",
-                "principal_ref",
-                "kind",
-                "metric_refs",
-                "request_digest",
-                "decision",
-                "reason_code",
-                "state_before",
-                "state_after",
-            },
+            {"access_id", "principal_ref", "kind", "metric_refs", "metric_bundle_digest", "request_digest", "decision", "reason_code", "state_before", "state_after"},
             "holdout_ledger_entry",
         )
         raw_metrics = value["metric_refs"]
@@ -266,6 +269,7 @@ class HoldoutAccessLedgerEntryV1:
             principal_ref=value["principal_ref"],  # type: ignore[arg-type]
             kind=_parse_access_kind(value["kind"]),
             metric_refs=_refs(raw_metrics, "metric_refs"),
+            metric_bundle_digest=value["metric_bundle_digest"],  # type: ignore[arg-type]
             request_digest=value["request_digest"],  # type: ignore[arg-type]
             decision=value["decision"],  # type: ignore[arg-type]
             reason_code=value["reason_code"],  # type: ignore[arg-type]
@@ -292,44 +296,38 @@ class HoldoutReleaseDecisionV1:
 class HoldoutSealV1:
     seal_id: str
     principal_ref: str
-    development_hashes: dict[str, str]
+    development_hashes: Mapping[str, str]
     metric_release_bundle_ref: str
+    metric_bundle_digest: str
     metric_refs: tuple[str, ...]
     status: str = HoldoutSealStatusV1.SEALED.value
     transition_history: tuple[str, ...] = (HoldoutSealStatusV1.SEALED.value,)
     access_ledger: tuple[HoldoutAccessLedgerEntryV1, ...] = ()
+    _issuer_token: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         _text(self.seal_id, "seal_id")
         _text(self.principal_ref, "principal_ref")
-        hashes = _frozen_hashes(self.development_hashes)
-        object.__setattr__(self, "development_hashes", hashes)
+        object.__setattr__(self, "development_hashes", _frozen_hashes(self.development_hashes))
         _text(self.metric_release_bundle_ref, "metric_release_bundle_ref")
+        _digest(self.metric_bundle_digest, "metric_bundle_digest")
         object.__setattr__(self, "metric_refs", _refs(self.metric_refs, "metric_refs"))
         if not self.metric_refs:
             raise _error("HOLDOUT_METRICS_REQUIRED", "metric_refs must not be empty")
         current_status = _parse_status(self.status)
         history = tuple(self.transition_history)
         if not history or history[0] != HoldoutSealStatusV1.SEALED.value:
-            raise _error("HOLDOUT_STATE_INVALID", "holdout state history must start at sealed")
-        try:
-            history_statuses = tuple(_parse_status(item) for item in history)
-        except HoldoutContractError as exc:
-            raise _error("HOLDOUT_STATE_INVALID", "holdout transition history is invalid") from exc
+            raise _error("HOLDOUT_STATE_INVALID", "holdout history must start at sealed")
+        history_statuses = tuple(_parse_status(item) for item in history)
         if history_statuses[-1] is not current_status:
             raise _error("HOLDOUT_STATE_INVALID", "current status must equal transition history tail")
-        if current_status is HoldoutSealStatusV1.RELEASED and history_statuses != (
-            HoldoutSealStatusV1.SEALED,
-            HoldoutSealStatusV1.RELEASED,
-        ):
+        if current_status is HoldoutSealStatusV1.SEALED and history_statuses != (HoldoutSealStatusV1.SEALED,):
+            raise _error("HOLDOUT_STATE_INVALID", "sealed state cannot have a release history")
+        if current_status is HoldoutSealStatusV1.RELEASED and history_statuses != (HoldoutSealStatusV1.SEALED, HoldoutSealStatusV1.RELEASED):
             raise _error("HOLDOUT_STATE_INVALID", "released state must follow sealed")
-        if current_status is HoldoutSealStatusV1.CLOSED and history_statuses != (
-            HoldoutSealStatusV1.SEALED,
-            HoldoutSealStatusV1.RELEASED,
-            HoldoutSealStatusV1.CLOSED,
-        ):
+        if current_status is HoldoutSealStatusV1.CLOSED and history_statuses != (HoldoutSealStatusV1.SEALED, HoldoutSealStatusV1.RELEASED, HoldoutSealStatusV1.CLOSED):
             raise _error("HOLDOUT_STATE_INVALID", "closed state must follow a recorded release")
-        object.__setattr__(self, "transition_history", tuple(item.value for item in history_statuses))
+        object.__setattr__(self, "transition_history", tuple(status.value for status in history_statuses))
         if not isinstance(self.access_ledger, (tuple, list)):
             raise _error("HOLDOUT_ARRAY_INVALID", "access_ledger must be an array")
         ledger = tuple(self.access_ledger)
@@ -347,6 +345,7 @@ class HoldoutSealV1:
                 "principal_ref": self.principal_ref,
                 "development_hashes": dict(self.development_hashes),
                 "metric_release_bundle_ref": self.metric_release_bundle_ref,
+                "metric_bundle_digest": self.metric_bundle_digest,
                 "metric_refs": list(self.metric_refs),
             }
         )
@@ -373,6 +372,8 @@ class HoldoutSealV1:
             reason = "HOLDOUT_PRINCIPAL_SCOPE_MISMATCH"
         elif before is not HoldoutSealStatusV1.SEALED:
             reason = "HOLDOUT_LEDGER_CLOSED"
+        elif request.metric_bundle_digest != self.metric_bundle_digest:
+            reason = "HOLDOUT_METRIC_BUNDLE_MISMATCH"
         elif request.kind is not HoldoutAccessKindV1.DECLARED_EVALUATION:
             reason = {
                 HoldoutAccessKindV1.REPEAT_EVALUATION: "HOLDOUT_REPEAT_FORBIDDEN",
@@ -389,7 +390,6 @@ class HoldoutSealV1:
             allowed = True
             reason = "HOLDOUT_RELEASE_ALLOWED"
             after = HoldoutSealStatusV1.CLOSED
-
         entry = HoldoutAccessLedgerEntryV1.from_request(
             request,
             decision="allowed" if allowed else "rejected",
@@ -399,20 +399,18 @@ class HoldoutSealV1:
         )
         next_history = self.transition_history
         if allowed:
-            next_history = (
-                HoldoutSealStatusV1.SEALED.value,
-                HoldoutSealStatusV1.RELEASED.value,
-                HoldoutSealStatusV1.CLOSED.value,
-            )
+            next_history = (HoldoutSealStatusV1.SEALED.value, HoldoutSealStatusV1.RELEASED.value, HoldoutSealStatusV1.CLOSED.value)
         next_seal = HoldoutSealV1(
             seal_id=self.seal_id,
             principal_ref=self.principal_ref,
             development_hashes=dict(self.development_hashes),
             metric_release_bundle_ref=self.metric_release_bundle_ref,
+            metric_bundle_digest=self.metric_bundle_digest,
             metric_refs=self.metric_refs,
             status=after.value,
             transition_history=next_history,
             access_ledger=(*self.access_ledger, entry),
+            _issuer_token=self._issuer_token,
         )
         return HoldoutReleaseDecisionV1(allowed=allowed, reason_code=reason, seal=next_seal)
 
@@ -423,6 +421,7 @@ class HoldoutSealV1:
             "principal_ref": self.principal_ref,
             "development_hashes": dict(self.development_hashes),
             "metric_release_bundle_ref": self.metric_release_bundle_ref,
+            "metric_bundle_digest": self.metric_bundle_digest,
             "metric_refs": list(self.metric_refs),
             "status": self.status,
             "transition_history": list(self.transition_history),
@@ -432,35 +431,29 @@ class HoldoutSealV1:
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "HoldoutSealV1":
-        required = {
-            "schema_version",
-            "seal_id",
-            "principal_ref",
-            "development_hashes",
-            "metric_release_bundle_ref",
-            "metric_refs",
-            "status",
-            "transition_history",
-            "access_ledger",
-            "seal_digest",
-            "state_digest",
-        }
-        value = _wire(value, required, "holdout_seal")
+        value = _wire(
+            value,
+            {"schema_version", "seal_id", "principal_ref", "development_hashes", "metric_release_bundle_ref", "metric_bundle_digest", "metric_refs", "status", "transition_history", "access_ledger", "seal_digest", "state_digest"},
+            "holdout_seal",
+        )
         if value["schema_version"] != HOLDOUT_SCHEMA_V1:
             raise _error("HOLDOUT_SCHEMA_INVALID", "holdout schema_version is invalid")
+        raw_hashes = value["development_hashes"]
         raw_metrics = value["metric_refs"]
         raw_history = value["transition_history"]
         raw_ledger = value["access_ledger"]
-        if type(raw_metrics) is not list or type(raw_history) is not list or type(raw_ledger) is not list:
-            raise _error("HOLDOUT_ARRAY_INVALID", "holdout arrays must be built-in lists")
+        if type(raw_hashes) is not dict or type(raw_metrics) is not list or type(raw_history) is not list or type(raw_ledger) is not list:
+            raise _error("HOLDOUT_NESTED_DICT_REQUIRED", "holdout nested values must be built-in containers")
         if any(type(item) is not dict for item in raw_ledger):
             raise _error("HOLDOUT_NESTED_DICT_REQUIRED", "ledger entries must be built-in dicts")
         seal = cls(
             seal_id=value["seal_id"],  # type: ignore[arg-type]
             principal_ref=value["principal_ref"],  # type: ignore[arg-type]
-            development_hashes=value["development_hashes"],  # type: ignore[arg-type]
+            development_hashes=raw_hashes,
             metric_release_bundle_ref=value["metric_release_bundle_ref"],  # type: ignore[arg-type]
+            metric_bundle_digest=value["metric_bundle_digest"],  # type: ignore[arg-type]
             metric_refs=_refs(raw_metrics, "metric_refs"),
             status=value["status"],  # type: ignore[arg-type]
             transition_history=tuple(raw_history),  # type: ignore[arg-type]
@@ -471,6 +464,82 @@ class HoldoutSealV1:
         return seal
 
 
+@dataclass(frozen=True, init=False)
+class ServerHoldoutSealReferenceV1:
+    seal_id: str
+    state_digest: str
+    _issuer_token: object
+
+    @classmethod
+    def _issue(cls, seal: HoldoutSealV1, token: object) -> "ServerHoldoutSealReferenceV1":
+        value = object.__new__(cls)
+        object.__setattr__(value, "seal_id", seal.seal_id)
+        object.__setattr__(value, "state_digest", seal.state_digest)
+        object.__setattr__(value, "_issuer_token", token)
+        return value
+
+    def to_dict(self) -> dict[str, str]:
+        return {"seal_id": self.seal_id, "state_digest": self.state_digest}
+
+
+class HoldoutSealStoreV1:
+    """Server-owned one-time consume/CAS seam for holdout releases."""
+
+    def __init__(self) -> None:
+        self._issuer_token = object()
+        self._current: dict[str, HoldoutSealV1] = {}
+
+    def issue(self, seal: HoldoutSealV1) -> ServerHoldoutSealReferenceV1:
+        if type(seal) is not HoldoutSealV1:
+            raise _error("HOLDOUT_SERVER_SEAL_REQUIRED", "store issue requires a typed seal")
+        if seal.seal_id in self._current:
+            raise _error("HOLDOUT_DUPLICATE_SEAL", "seal is already issued by this store")
+        object.__setattr__(seal, "_issuer_token", self._issuer_token)
+        self._current[seal.seal_id] = seal
+        return ServerHoldoutSealReferenceV1._issue(seal, self._issuer_token)
+
+    def resolve(self, reference: ServerHoldoutSealReferenceV1) -> HoldoutSealV1:
+        if type(reference) is not ServerHoldoutSealReferenceV1 or reference._issuer_token is not self._issuer_token:
+            raise _error("HOLDOUT_SERVER_REFERENCE_REQUIRED", "holdout consume requires a server-owned reference")
+        seal = self._current.get(reference.seal_id)
+        if seal is None:
+            raise _error("HOLDOUT_SERVER_SEAL_UNRESOLVED", "server holdout seal is unavailable")
+        return seal
+
+    def consume(self, reference: ServerHoldoutSealReferenceV1, request: HoldoutAccessRequestV1) -> HoldoutReleaseDecisionV1:
+        if type(request) is not HoldoutAccessRequestV1:
+            raise _error("HOLDOUT_REQUEST_REQUIRED", "holdout consume requires a typed request")
+        current = self.resolve(reference)
+        if reference.state_digest != current.state_digest:
+            before = _parse_status(current.status)
+            if any(entry.access_id == request.access_id for entry in current.access_ledger):
+                raise _error("HOLDOUT_DUPLICATE_ACCESS", "access id is already in the append-only ledger")
+            entry = HoldoutAccessLedgerEntryV1.from_request(
+                request,
+                decision="rejected",
+                reason_code="HOLDOUT_STALE_STATE",
+                state_before=before,
+                state_after=before,
+            )
+            denied = HoldoutSealV1(
+                seal_id=current.seal_id,
+                principal_ref=current.principal_ref,
+                development_hashes=dict(current.development_hashes),
+                metric_release_bundle_ref=current.metric_release_bundle_ref,
+                metric_bundle_digest=current.metric_bundle_digest,
+                metric_refs=current.metric_refs,
+                status=current.status,
+                transition_history=current.transition_history,
+                access_ledger=(*current.access_ledger, entry),
+                _issuer_token=self._issuer_token,
+            )
+            self._current[current.seal_id] = denied
+            return HoldoutReleaseDecisionV1(allowed=False, reason_code="HOLDOUT_STALE_STATE", seal=denied)
+        decision = current.authorize_access(request)
+        self._current[current.seal_id] = decision.seal
+        return decision
+
+
 __all__ = [
     "HOLDOUT_SCHEMA_V1",
     "HoldoutAccessKindV1",
@@ -479,5 +548,7 @@ __all__ = [
     "HoldoutContractError",
     "HoldoutReleaseDecisionV1",
     "HoldoutSealStatusV1",
+    "HoldoutSealStoreV1",
     "HoldoutSealV1",
+    "ServerHoldoutSealReferenceV1",
 ]

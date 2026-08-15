@@ -11,41 +11,78 @@
     ],
     "catalog_snapshot_ref": "catalog:snapshot:1",
     "compiler_version": "compiler:1.8.9",
-    "config": {"analysis_mode": "predictive", "seed": 7},
+    "config": {
+      "analysis_mode": "predictive",
+      "seed": 7
+    },
     "connections": [],
     "contract_snapshot_refs": [
       {
-        "contract_digest": "29339b4d6bb4066cda77ec4d008c18d9c1be8baedc385fc44c898288cb289899",
-        "kind": "capability",
-        "logical_id": "model.logit",
+        "contract_digest": "482e9c0ada340b58bdafcbe3196f14685d7db82b588aebb042e1185abe4abd51",
+        "kind": "contract",
+        "logical_id": "model.logit.contract",
         "semantic_version": "1.0"
       }
     ],
+    "data_impact": {
+      "read_refs": [
+        "dataset:1"
+      ],
+      "write_mode": "none"
+    },
     "effect": "model_fit",
+    "evidence_contract_refs": [
+      {
+        "contract_digest": "6ccd64728da40a7aff2c230d4d313762c3bcf95579ff83f472e6d7aa408345ca",
+        "kind": "evidence-contract",
+        "logical_id": "model.logit.evidence",
+        "semantic_version": "1.0"
+      }
+    ],
     "intent_ref": "intent:classification:1",
+    "method_ref": "method:logit:1",
     "nodes": [
       {
         "capability_ref": "capability:model.logit",
         "node_id": "fit",
-        "options": {"threshold": 0.5},
-        "roles": {"feature": "column:x1", "target": "column:target"}
+        "options": {
+          "threshold": 0.5
+        },
+        "roles": {
+          "feature": "column:x1",
+          "target": "column:target"
+        }
       }
     ],
-    "plan_diff": {"data_impact": "read_dataset", "effect": "model_fit"},
+    "output_contract_refs": [
+      {
+        "contract_digest": "38a049d3b1949af8b185a16adb7625888db37a3bc9cf5b5d62b23bd4df323a78",
+        "kind": "output-contract",
+        "logical_id": "model.logit.output",
+        "semantic_version": "1.0"
+      }
+    ],
+    "plan_diff": {
+      "data_impact": "read_dataset",
+      "effect": "model_fit"
+    },
     "policy_snapshot_ref": "policy:snapshot:1",
     "preview_fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-    "resource_budget": {"cpu_ms": 1000, "memory_mb": 128},
+    "resource_budget": {
+      "cpu_ms": 1000,
+      "memory_mb": 128
+    },
     "risk_level": "medium",
     "schema_version": "compiled-workflow.v1",
-    "semantic_plan_hash": "66a767ea15ba4debe3cffdf1ff5b8c4b347cca3a157790fb232b878a39ba7615",
+    "semantic_plan_hash": "721e1338547f9051e84360f8bcc82eb51a232d96f2097a1f723ec10a7e2ed366",
     "server_execution_identity": "compile:server:1"
   },
   "compiler_version": "compiler:1.8.9",
   "contract_snapshot_refs": [
     {
-      "contract_digest": "29339b4d6bb4066cda77ec4d008c18d9c1be8baedc385fc44c898288cb289899",
-      "kind": "capability",
-      "logical_id": "model.logit",
+      "contract_digest": "482e9c0ada340b58bdafcbe3196f14685d7db82b588aebb042e1185abe4abd51",
+      "kind": "contract",
+      "logical_id": "model.logit.contract",
       "semantic_version": "1.0"
     }
   ],
@@ -54,10 +91,10 @@
   "policy_snapshot_ref": "policy:snapshot:1",
   "principal_ref": "principal:user:1",
   "project_ref": "project:1",
-  "record_digest": "7f3ced9acbcdfc2b4ece8600f940be69ef62e7da4ef8d5ab7509b7f62db41d05",
+  "record_digest": "aed782b05ae82475f22b3bb2c90a16fa33b03b118ccfaec52936d1766995621a",
   "record_id": "compilation-record:1",
   "schema_version": "compilation-record.v1",
-  "semantic_plan_hash": "66a767ea15ba4debe3cffdf1ff5b8c4b347cca3a157790fb232b878a39ba7615",
+  "semantic_plan_hash": "721e1338547f9051e84360f8bcc82eb51a232d96f2097a1f723ec10a7e2ed366",
   "session_ref": "session:1",
   "source_commitments": {
     "dataset": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"

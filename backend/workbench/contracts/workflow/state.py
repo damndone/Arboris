@@ -12,7 +12,8 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import wraps
 from enum import Enum
 from typing import Any
 
@@ -55,7 +56,6 @@ class WorkflowExecutionStatusV2(str, Enum):
     PARTIAL = "partial"
     BLOCKED = "blocked"
     FAILED = "failed"
-    MIGRATION_REQUIRED = "migration_required"
 
 
 class PortDirectionV1(str, Enum):
@@ -100,7 +100,7 @@ def _enum(value: object, enum_type: type[Enum], name: str) -> Any:
     try:
         return enum_type(value)
     except ValueError as exc:
-        raise _error("WORKFLOW_ENUM_INVALID", f"{name} is invalid") from exc
+        raise _error("WORKFLOW_ENUM_INVALID", f"{name} enum is invalid") from exc
 
 
 def _validate_json(value: object, name: str, active: set[int] | None = None) -> None:
@@ -143,7 +143,15 @@ def _frozen_json(value: object, name: str) -> Mapping[str, Any]:
     try:
         canonical_json_v1(value)
         frozen = freeze_json(value, name)
-    except (CanonicalJSONError, ContractError, RecursionError, OverflowError, ValueError) as exc:
+    except (
+        AttributeError,
+        CanonicalJSONError,
+        ContractError,
+        RecursionError,
+        OverflowError,
+        TypeError,
+        ValueError,
+    ) as exc:
         raise _error("WORKFLOW_JSON_INVALID", f"{name} must be canonical JSON") from exc
     if not isinstance(frozen, Mapping):  # pragma: no cover - defensive invariant
         raise _error("WORKFLOW_JSON_INVALID", f"{name} must be an object")
@@ -156,6 +164,26 @@ def _wire_list(value: object, name: str) -> list[object]:
     return value
 
 
+def _wire_boundary(function):
+    @wraps(function)
+    def wrapped(cls, value):
+        try:
+            return function(cls, value)
+        except WorkflowStateContractError:
+            raise
+        except (
+            AttributeError,
+            CanonicalJSONError,
+            ContractError,
+            RecursionError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise _error("WORKFLOW_WIRE_INVALID", "workflow wire value is invalid") from exc
+
+    return wrapped
+
+
 @dataclass(frozen=True)
 class PortValidationReceiptV1:
     """Content-bound proof that one artifact was checked against one schema."""
@@ -164,6 +192,7 @@ class PortValidationReceiptV1:
     validator_ref: ContractRefV1
     artifact_digest: str
     schema_ref: ContractRefV1
+    _issuer_token: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         _text(self.receipt_ref, "receipt_ref")
@@ -194,6 +223,7 @@ class PortValidationReceiptV1:
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "PortValidationReceiptV1":
         if type(value) is not dict:
             raise _error("WORKFLOW_NESTED_DICT_REQUIRED", "validation_receipt must be a built-in dict")
@@ -269,6 +299,7 @@ class PortBindingV1:
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "PortBindingV1":
         if type(value) is not dict:
             raise _error("WORKFLOW_NESTED_DICT_REQUIRED", "port binding must be a built-in dict")
@@ -300,6 +331,41 @@ class PortBindingV1:
             validation_status=_enum(value["validation_status"], PortValidationStatusV1, "validation_status"),
             validation_receipt=receipt,
         )
+
+
+class ValidationReceiptStoreV1:
+    """Server-owned issuance and verification seam for validation receipts."""
+
+    def __init__(self) -> None:
+        self._issuer_token = object()
+        self._receipts: dict[str, PortValidationReceiptV1] = {}
+
+    def issue(self, receipt: PortValidationReceiptV1) -> PortValidationReceiptV1:
+        if type(receipt) is not PortValidationReceiptV1:
+            raise _error("WORKFLOW_RECEIPT_REQUIRED", "validator store accepts a typed receipt")
+        if receipt._issuer_token not in {None, self._issuer_token}:
+            raise _error("WORKFLOW_RECEIPT_ISSUER_MISMATCH", "receipt belongs to another validator store")
+        object.__setattr__(receipt, "_issuer_token", self._issuer_token)
+        self._receipts[receipt.validation_digest] = receipt
+        return receipt
+
+    def require(self, receipt: PortValidationReceiptV1) -> PortValidationReceiptV1:
+        if type(receipt) is not PortValidationReceiptV1:
+            raise _error(
+                "WORKFLOW_VALIDATION_AUTHORITY_REQUIRED",
+                "a server-issued validation receipt is required",
+            )
+        if receipt._issuer_token is not self._issuer_token:
+            raise _error(
+                "WORKFLOW_VALIDATION_AUTHORITY_REQUIRED",
+                "validation receipt was not issued by the server validator issuer authority",
+            )
+        if self._receipts.get(receipt.validation_digest) is not receipt:
+            raise _error(
+                "WORKFLOW_VALIDATION_RECEIPT_INVALID",
+                "validation receipt is not current store state",
+            )
+        return receipt
 
 
 @dataclass(frozen=True)
@@ -348,6 +414,7 @@ class ModelBranchRefV1:
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "ModelBranchRefV1":
         if type(value) is not dict:
             raise _error("WORKFLOW_NESTED_DICT_REQUIRED", "model branch must be a built-in dict")
@@ -425,10 +492,10 @@ class WorkflowExecutionStateV2:
         if not isinstance(self.output_bindings, (tuple, list)):
             raise _error("WORKFLOW_ARRAY_INVALID", "output_bindings must be an array")
         bindings = tuple(self.output_bindings)
-        if len({binding.port_name for binding in bindings}) != len(bindings):
-            raise _error("WORKFLOW_DUPLICATE_ID", "output binding port names must be unique")
         if any(type(binding) is not PortBindingV1 for binding in bindings):
             raise _error("WORKFLOW_BINDING_INVALID", "output_bindings contain an invalid binding")
+        if len({binding.port_name for binding in bindings}) != len(bindings):
+            raise _error("WORKFLOW_DUPLICATE_ID", "output binding port names must be unique")
         if any(binding.direction is not PortDirectionV1.OUTPUT for binding in bindings):
             raise _error("WORKFLOW_BINDING_INVALID", "workflow output_bindings must be output bindings")
         object.__setattr__(self, "output_bindings", bindings)
@@ -461,6 +528,7 @@ class WorkflowExecutionStateV2:
         }
 
     @classmethod
+    @_wire_boundary
     def from_dict(cls, value: dict[str, object]) -> "WorkflowExecutionStateV2":
         if type(value) is not dict:
             raise _error("WORKFLOW_NESTED_DICT_REQUIRED", "workflow state must be a built-in dict")
@@ -527,6 +595,7 @@ __all__ = [
     "PortDirectionV1",
     "PortValidationReceiptV1",
     "PortValidationStatusV1",
+    "ValidationReceiptStoreV1",
     "WORKFLOW_STATE_SCHEMA_V2",
     "WorkflowExecutionStateV2",
     "WorkflowExecutionStatusV2",

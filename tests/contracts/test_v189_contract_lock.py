@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import FrozenInstanceError, fields, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_type_hints
 
@@ -63,6 +64,7 @@ from workbench.contracts.workflow.state import (
     PortDirectionV1,
     PortValidationReceiptV1,
     PortValidationStatusV1,
+    ValidationReceiptStoreV1,
     WorkflowExecutionStateV2,
     WorkflowMigrationRequiredV1,
     load_workflow_state,
@@ -76,6 +78,7 @@ from workbench.contracts.agent.planning import (
     DraftAgentPlanV1,
     FailureEnvelopeV1,
     PlanRiskLevelV1,
+    ServerCompilationRecordIssuerV1,
 )
 from workbench.contracts.agent.execution_admission import (
     AdmissionEffectV1,
@@ -85,6 +88,7 @@ from workbench.contracts.agent.execution_admission import (
     require_execution_admission_receipt,
 )
 from workbench.contracts.agent.context_egress import (
+    ContextMaterializationStoreV1,
     ContextEgressGatewayV1,
     ContextEgressPolicyV1,
     ContextEgressReceiptIssuerV1,
@@ -94,6 +98,7 @@ from workbench.contracts.agent.context_egress import (
 from workbench.contracts.prediction.holdout import (
     HoldoutAccessKindV1,
     HoldoutAccessRequestV1,
+    HoldoutSealStoreV1,
     HoldoutSealV1,
 )
 
@@ -1130,6 +1135,15 @@ def _task3_plan(*, policy_snapshot_ref: str = "policy:snapshot:1") -> DraftAgent
         schema_version="draft-agent-plan.v1",
         intent_ref="intent:classification:1",
         capability_refs=(_ref(kind="capability", logical_id="model.logit"),),
+        method_ref="method:logit:1",
+        effect="model_fit",
+        risk_level=PlanRiskLevelV1.MEDIUM,
+        resource_budget={"cpu_ms": 1000, "memory_mb": 128},
+        data_impact={"read_refs": ["dataset:1"], "write_mode": "none"},
+        output_contract_refs=(_ref(kind="output-contract", logical_id="model.logit.output"),),
+        evidence_contract_refs=(_ref(kind="evidence-contract", logical_id="model.logit.evidence"),),
+        contract_snapshot_refs=(_ref(kind="contract", logical_id="model.logit.contract"),),
+        catalog_snapshot_ref="catalog:snapshot:1",
         nodes=(
             {
                 "node_id": "fit",
@@ -1159,6 +1173,8 @@ def _task3_compiled(
         risk_level=PlanRiskLevelV1.MEDIUM,
         effect="model_fit",
         resource_budget={"cpu_ms": 1000, "memory_mb": 128},
+        contract_snapshot_refs=_task3_plan(policy_snapshot_ref=policy_snapshot_ref).contract_snapshot_refs,
+        catalog_snapshot_ref="catalog:snapshot:1",
     )
 
 
@@ -1167,7 +1183,7 @@ def _task3_record(
     record_id: str = "compilation-record:1",
     policy_snapshot_ref: str = "policy:snapshot:1",
 ) -> CompilationRecordV1:
-    return CompilationRecordV1.from_compiled(
+    return ServerCompilationRecordIssuerV1().compile_record(
         _task3_compiled(policy_snapshot_ref=policy_snapshot_ref),
         record_id=record_id,
         principal_ref="principal:user:1",
@@ -1219,6 +1235,14 @@ def _task3_admission_request(
         catalog_snapshot_ref=record.catalog_snapshot_ref,
         policy_snapshot_ref=record.policy_snapshot_ref,
         effect=AdmissionEffectV1.MODEL_FIT,
+        execution_instance_hash=record.compiled_workflow.execution_instance_hash(
+            {"dataset": "a" * 64, "model": "b" * 64},
+            resolved_run_identity="run:resolved:1",
+            resolved_node_identities={"fit": "node:fit:1"},
+        ),
+        resolved_run_identity="run:resolved:1",
+        resolved_node_identities={"fit": "node:fit:1"},
+        resolved_artifact_digests={"dataset": "a" * 64, "model": "b" * 64},
         resource_budget={"cpu_ms": 1000, "memory_mb": 128},
         requested_at="2026-08-15T17:02:00+00:00",
         expires_at="2026-08-15T18:00:00+00:00",
@@ -1242,6 +1266,7 @@ def _task3_holdout(*, metric_refs: tuple[str, ...] = ("accuracy", "f1")) -> Hold
             "decision_policy": "a" * 64,
         },
         metric_release_bundle_ref="metric-bundle:1",
+        metric_bundle_digest="c" * 64,
         metric_refs=metric_refs,
     )
 
@@ -1302,15 +1327,36 @@ def test_semantic_plan_hash_excludes_server_execution_identity() -> None:
 def test_execution_instance_hash_binds_resolved_artifact_digests() -> None:
     compiled = _task3_compiled()
     first = compiled.execution_instance_hash(
-        {"dataset": "a" * 64, "model": "b" * 64}
+        {"dataset": "a" * 64, "model": "b" * 64},
+        resolved_run_identity="run:one",
+        resolved_node_identities={"fit": "node:one"},
     )
     changed = compiled.execution_instance_hash(
-        {"dataset": "a" * 64, "model": "c" * 64}
+        {"dataset": "a" * 64, "model": "c" * 64},
+        resolved_run_identity="run:one",
+        resolved_node_identities={"fit": "node:one"},
     )
 
     assert first != changed
     assert first == compiled.execution_instance_hash(
-        {"model": "b" * 64, "dataset": "a" * 64}
+        {"model": "b" * 64, "dataset": "a" * 64},
+        resolved_run_identity="run:one",
+        resolved_node_identities={"fit": "node:one"},
+    )
+    assert first != compiled.execution_instance_hash(
+        {"dataset": "a" * 64, "model": "b" * 64},
+        resolved_run_identity="run:two",
+        resolved_node_identities={"fit": "node:one"},
+    )
+    assert first != compiled.execution_instance_hash(
+        {"dataset": "a" * 64, "model": "b" * 64},
+        resolved_run_identity="run:one",
+        resolved_node_identities={"fit": "node:two"},
+    )
+    assert first != _task3_compiled(server_execution_identity="compile:server:two").execution_instance_hash(
+        {"dataset": "a" * 64, "model": "b" * 64},
+        resolved_run_identity="run:one",
+        resolved_node_identities={"fit": "node:one"},
     )
 
 
@@ -1338,7 +1384,7 @@ def test_confirmation_is_invalid_after_method_risk_or_policy_change() -> None:
 def test_runtime_authority_is_a_server_compilation_record_reference() -> None:
     record = _task3_record()
     store = CompilationRecordStoreV1()
-    server_ref = store.issue(record)
+    server_ref = ServerCompilationRecordIssuerV1(store).issue(record)
     wire_ref = CompilationRecordReferenceV1.from_dict(server_ref.to_dict())
 
     assert store.resolve(server_ref) == record
@@ -1368,8 +1414,15 @@ def test_runtime_rejects_any_request_without_execution_admission_receipt() -> No
     confirmation = _task3_confirmation(record)
     request = _task3_admission_request(record, confirmation)
     store = CompilationRecordStoreV1()
-    gate = ExecutionAdmissionGateV1(store)
-    store.issue(record)
+    issuer = ServerCompilationRecordIssuerV1(store)
+    issuer.issue(record)
+    gate = ExecutionAdmissionGateV1(
+        store,
+        method_snapshot_ref=confirmation.method_snapshot_ref,
+        risk_snapshot_ref=confirmation.risk_snapshot_ref,
+        policy_snapshot_ref=confirmation.policy_snapshot_ref,
+        clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+    )
 
     with pytest.raises(ContractError, match="receipt"):
         require_execution_admission_receipt(request)
@@ -1378,7 +1431,7 @@ def test_runtime_rejects_any_request_without_execution_admission_receipt() -> No
 
     receipt = gate.admit(request, confirmation)
     assert isinstance(receipt, ExecutionAdmissionReceiptV1)
-    require_execution_admission_receipt(receipt)
+    require_execution_admission_receipt(receipt, gate=gate)
     with pytest.raises(ContractError, match="receipt"):
         require_execution_admission_receipt(replace(receipt))
     with pytest.raises(ContractError, match="receipt"):
@@ -1396,23 +1449,30 @@ def test_provider_context_requires_egress_policy_and_receipt() -> None:
         max_row_budget=100,
         max_time_budget_ms=5000,
     )
-    gateway = ContextEgressGatewayV1(
+    materializer = ContextMaterializationStoreV1(
+        materializer_ref=_ref(kind="materializer", logical_id="server.context"),
+        redaction_policy_ref=_ref(kind="redaction-policy", logical_id="default"),
+    )
+    result = materializer.materialize({"context": "bounded"}, selected_refs=("evidence:fact:1",))
+    gateway = ContextEgressGatewayV1.from_materialization_result(
+        result,
         request_id="egress-request:1",
         destination="remote",
         provider_ref="provider:remote:1",
         sensitivity_policy_ref=policy_ref,
         sensitivity=SensitivityClassV1.INTERNAL,
-        selected_refs=("evidence:fact:1",),
-        redacted_refs=("column:email",),
         token_budget=500,
         row_budget=10,
         time_budget_ms=1000,
         purpose_ref="purpose:analysis:1",
-        materialized_context_digest=sha256_canonical({"context": "bounded"}),
         requested_at="2026-08-15T17:02:00+00:00",
         expires_at="2026-08-15T18:00:00+00:00",
     )
-    issuer = ContextEgressReceiptIssuerV1(policy)
+    issuer = ContextEgressReceiptIssuerV1(
+        policy,
+        materializer_store=materializer,
+        clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+    )
     receipt = issuer.issue(gateway)
 
     require_context_egress_receipt(gateway, receipt, issuer=issuer)
@@ -1435,6 +1495,7 @@ def test_provider_context_requires_egress_policy_and_receipt() -> None:
             row_budget=1,
             time_budget_ms=1,
             purpose_ref="purpose:analysis:1",
+            materialization_result_ref="materialization:forbidden",
             materialized_context_digest=sha256_canonical({"context": "raw"}),
             requested_at="2026-08-15T17:02:00+00:00",
             expires_at="2026-08-15T18:00:00+00:00",
@@ -1449,6 +1510,7 @@ def test_holdout_seal_allows_one_declared_release_and_closes_ledger() -> None:
             principal_ref=seal.principal_ref,
             kind=HoldoutAccessKindV1.DECLARED_EVALUATION,
             metric_refs=seal.metric_refs,
+            metric_bundle_digest=seal.metric_bundle_digest,
         )
     )
 
@@ -1471,6 +1533,7 @@ def test_holdout_seal_allows_one_declared_release_and_closes_ledger() -> None:
                 principal_ref=seal.principal_ref,
                 kind=kind,
                 metric_refs=(seal.metric_refs[0],),
+                metric_bundle_digest=seal.metric_bundle_digest,
             )
         )
         assert current.allowed is False
@@ -1532,41 +1595,14 @@ def test_task3_wire_decoders_reject_dict_subclasses_cycles_nan_and_nfc_collision
     cyclic: dict[str, object] = {}
     cyclic["cycle"] = cyclic
     with pytest.raises(ContractError):
-        DraftAgentPlanV1(
-            schema_version="draft-agent-plan.v1",
-            intent_ref="intent:cycle",
-            capability_refs=(_ref(kind="capability", logical_id="model.logit"),),
-            nodes=({"node_id": "fit"},),
-            connections=(),
-            config=cyclic,
-            policy_snapshot_ref="policy:snapshot:1",
-            rationale=("cycle",),
-        )
+        replace(_task3_plan(), intent_ref="intent:cycle", config=cyclic, rationale=("cycle",))
 
     with pytest.raises(ContractError):
-        DraftAgentPlanV1(
-            schema_version="draft-agent-plan.v1",
-            intent_ref="intent:nan",
-            capability_refs=(_ref(kind="capability", logical_id="model.logit"),),
-            nodes=({"node_id": "fit"},),
-            connections=(),
-            config={"threshold": float("nan")},
-            policy_snapshot_ref="policy:snapshot:1",
-            rationale=("nan",),
-        )
+        replace(_task3_plan(), intent_ref="intent:nan", config={"threshold": float("nan")}, rationale=("nan",))
 
     nfc_collision = {"e\u0301": 1, "é": 2}
     with pytest.raises(ContractError):
-        DraftAgentPlanV1(
-            schema_version="draft-agent-plan.v1",
-            intent_ref="intent:nfc",
-            capability_refs=(_ref(kind="capability", logical_id="model.logit"),),
-            nodes=({"node_id": "fit"},),
-            connections=(),
-            config=nfc_collision,
-            policy_snapshot_ref="policy:snapshot:1",
-            rationale=("nfc",),
-        )
+        replace(_task3_plan(), intent_ref="intent:nfc", config=nfc_collision, rationale=("nfc",))
 
 
 def test_admission_receipt_rejects_scope_budget_expiry_and_tampering() -> None:
@@ -1576,8 +1612,14 @@ def test_admission_receipt_rejects_scope_budget_expiry_and_tampering() -> None:
 
     def gate_for(record_to_issue: CompilationRecordV1 = record) -> ExecutionAdmissionGateV1:
         store = CompilationRecordStoreV1()
-        store.issue(record_to_issue)
-        return ExecutionAdmissionGateV1(store)
+        ServerCompilationRecordIssuerV1(store).issue(record_to_issue)
+        return ExecutionAdmissionGateV1(
+            store,
+            method_snapshot_ref=confirmation.method_snapshot_ref,
+            risk_snapshot_ref=confirmation.risk_snapshot_ref,
+            policy_snapshot_ref=confirmation.policy_snapshot_ref,
+            clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+        )
 
     with pytest.raises(ContractError, match="policy"):
         gate_for().admit(replace(request, policy_snapshot_ref="policy:changed"), confirmation)
@@ -1608,23 +1650,30 @@ def test_egress_receipt_rejects_scope_budget_expiry_and_materialized_digest_tamp
         max_row_budget=100,
         max_time_budget_ms=5000,
     )
-    gateway = ContextEgressGatewayV1.from_materialized_context(
+    materializer = ContextMaterializationStoreV1(
+        materializer_ref=_ref(kind="materializer", logical_id="server.context"),
+        redaction_policy_ref=_ref(kind="redaction-policy", logical_id="default"),
+    )
+    result = materializer.materialize({"bounded": True}, selected_refs=("evidence:fact:1",))
+    gateway = ContextEgressGatewayV1.from_materialization_result(
+        result,
         request_id="egress-request:adversarial",
         destination="remote",
         provider_ref="provider:remote:1",
         sensitivity_policy_ref=policy_ref,
         sensitivity=SensitivityClassV1.INTERNAL,
-        selected_refs=("evidence:fact:1",),
-        redacted_refs=("column:email",),
         token_budget=500,
         row_budget=10,
         time_budget_ms=1000,
         purpose_ref="purpose:analysis:1",
-        materialized_context={"bounded": True},
         requested_at="2026-08-15T17:02:00+00:00",
         expires_at="2026-08-15T18:00:00+00:00",
     )
-    issuer = ContextEgressReceiptIssuerV1(policy)
+    issuer = ContextEgressReceiptIssuerV1(
+        policy,
+        materializer_store=materializer,
+        clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+    )
     receipt = issuer.issue(gateway)
 
     with pytest.raises(ContractError, match="destination/provider"):
@@ -1648,6 +1697,7 @@ def test_holdout_state_round_trip_preserves_release_transition_and_append_only_l
             principal_ref=seal.principal_ref,
             kind=HoldoutAccessKindV1.DECLARED_EVALUATION,
             metric_refs=seal.metric_refs,
+            metric_bundle_digest=seal.metric_bundle_digest,
         )
     ).seal
     denied = released.authorize_access(
@@ -1656,9 +1706,333 @@ def test_holdout_state_round_trip_preserves_release_transition_and_append_only_l
             principal_ref=seal.principal_ref,
             kind=HoldoutAccessKindV1.REPEAT_EVALUATION,
             metric_refs=seal.metric_refs,
+            metric_bundle_digest=seal.metric_bundle_digest,
         )
     ).seal
 
     assert denied.transition_history == ("sealed", "released", "closed")
     assert [entry.decision for entry in denied.access_ledger] == ["allowed", "rejected"]
     assert HoldoutSealV1.from_dict(denied.to_dict()) == denied
+
+
+def test_execution_admission_default_gate_clock_rejects_expired_receipt() -> None:
+    record = _task3_record()
+    confirmation = _task3_confirmation(record)
+    request = _task3_admission_request(record, confirmation)
+    store = CompilationRecordStoreV1()
+    ServerCompilationRecordIssuerV1(store).issue(record)
+    gate = ExecutionAdmissionGateV1(
+        store,
+        method_snapshot_ref=confirmation.method_snapshot_ref,
+        risk_snapshot_ref=confirmation.risk_snapshot_ref,
+        policy_snapshot_ref=confirmation.policy_snapshot_ref,
+        clock=lambda: datetime.fromisoformat("2026-08-15T18:01:00+00:00"),
+    )
+
+    receipt = gate.admit(request, confirmation, at="2026-08-15T17:30:00+00:00")
+
+    with pytest.raises(ContractError, match="expired"):
+        gate.require(receipt)
+    with pytest.raises(ContractError, match="expired"):
+        require_execution_admission_receipt(receipt, gate=gate)
+
+
+def test_admission_rejects_pre_confirmation_request_and_changed_server_snapshots() -> None:
+    record = _task3_record()
+    confirmation = _task3_confirmation(record)
+    request = _task3_admission_request(record, confirmation)
+    store = CompilationRecordStoreV1()
+    ServerCompilationRecordIssuerV1(store).issue(record)
+
+    current_gate = ExecutionAdmissionGateV1(
+        store,
+        method_snapshot_ref=confirmation.method_snapshot_ref,
+        risk_snapshot_ref=confirmation.risk_snapshot_ref,
+        policy_snapshot_ref=confirmation.policy_snapshot_ref,
+        clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+    )
+    with pytest.raises(ContractError, match="confirmation"):
+        current_gate.admit(
+            replace(request, requested_at="2026-08-15T17:00:00+00:00"),
+            confirmation,
+        )
+
+    changed_gate = ExecutionAdmissionGateV1(
+        store,
+        method_snapshot_ref="method:snapshot:changed",
+        risk_snapshot_ref=confirmation.risk_snapshot_ref,
+        policy_snapshot_ref=confirmation.policy_snapshot_ref,
+        clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+    )
+    with pytest.raises(ContractError, match="snapshot|confirmation"):
+        changed_gate.admit(request, confirmation)
+
+
+def test_admission_and_receipt_bind_execution_instance_and_artifact_refs() -> None:
+    record = _task3_record()
+    confirmation = _task3_confirmation(record)
+    request = _task3_admission_request(record, confirmation)
+    store = CompilationRecordStoreV1()
+    ServerCompilationRecordIssuerV1(store).issue(record)
+    gate = ExecutionAdmissionGateV1(
+        store,
+        method_snapshot_ref=confirmation.method_snapshot_ref,
+        risk_snapshot_ref=confirmation.risk_snapshot_ref,
+        policy_snapshot_ref=confirmation.policy_snapshot_ref,
+        clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+    )
+
+    receipt = gate.admit(request, confirmation)
+    assert receipt.execution_instance_hash == request.execution_instance_hash
+    assert receipt.resolved_artifact_digests == request.resolved_artifact_digests
+    with pytest.raises(ContractError, match="execution"):
+        gate.admit(replace(request, execution_instance_hash="e" * 64), confirmation)
+
+
+def test_egress_requires_server_materialization_and_rejects_raw_or_public_conflicts() -> None:
+    policy_ref = _ref(kind="egress-policy", logical_id="provider.remote")
+    policy = ContextEgressPolicyV1(
+        policy_ref=policy_ref,
+        destination="remote",
+        provider_ref="provider:remote:1",
+        allowed_sensitivity=(SensitivityClassV1.PUBLIC, SensitivityClassV1.INTERNAL),
+        max_token_budget=1000,
+        max_row_budget=100,
+        max_time_budget_ms=5000,
+    )
+    materializer = ContextMaterializationStoreV1(
+        materializer_ref=_ref(kind="materializer", logical_id="server.context"),
+        redaction_policy_ref=_ref(kind="redaction-policy", logical_id="default"),
+    )
+    result = materializer.materialize(
+        {"email": "alice@example.com", "feature": 1},
+        selected_refs=("evidence:fact:1",),
+    )
+    gateway = ContextEgressGatewayV1.from_materialization_result(
+        result,
+        request_id="egress-request:materialized",
+        destination="remote",
+        provider_ref="provider:remote:1",
+        sensitivity_policy_ref=policy_ref,
+        sensitivity=SensitivityClassV1.PUBLIC,
+        token_budget=500,
+        row_budget=10,
+        time_budget_ms=1000,
+        purpose_ref="purpose:analysis:1",
+        requested_at="2026-08-15T17:02:00+00:00",
+        expires_at="2026-08-15T18:00:00+00:00",
+    )
+    issuer = ContextEgressReceiptIssuerV1(
+        policy,
+        materializer_store=materializer,
+        clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+    )
+    with pytest.raises(ContractError, match="sensitivity|raw|PII"):
+        issuer.issue(gateway)
+    with pytest.raises(ContractError, match="authority|materializ"):
+        ContextEgressGatewayV1.from_materialized_context(
+            request_id="egress-request:raw",
+            destination="remote",
+            provider_ref="provider:remote:1",
+            sensitivity_policy_ref=policy_ref,
+            sensitivity=SensitivityClassV1.PUBLIC,
+            selected_refs=("evidence:fact:1",),
+            redacted_refs=(),
+            token_budget=1,
+            row_budget=1,
+            time_budget_ms=1,
+            purpose_ref="purpose:analysis:1",
+            materialized_context={"email": "alice@example.com"},
+            requested_at="2026-08-15T17:02:00+00:00",
+            expires_at="2026-08-15T18:00:00+00:00",
+        )
+
+
+def test_egress_receipt_default_clock_rejects_expiry_and_actual_payload_mismatch() -> None:
+    policy_ref = _ref(kind="egress-policy", logical_id="provider.remote")
+    policy = ContextEgressPolicyV1(
+        policy_ref=policy_ref,
+        destination="remote",
+        provider_ref="provider:remote:1",
+        allowed_sensitivity=(SensitivityClassV1.PUBLIC, SensitivityClassV1.INTERNAL),
+        max_token_budget=1000,
+        max_row_budget=100,
+        max_time_budget_ms=5000,
+    )
+    materializer = ContextMaterializationStoreV1(
+        materializer_ref=_ref(kind="materializer", logical_id="server.context"),
+        redaction_policy_ref=_ref(kind="redaction-policy", logical_id="default"),
+    )
+    result = materializer.materialize({"bounded": True}, selected_refs=("evidence:fact:1",))
+    gateway = ContextEgressGatewayV1.from_materialization_result(
+        result,
+        request_id="egress-request:clock",
+        destination="remote",
+        provider_ref="provider:remote:1",
+        sensitivity_policy_ref=policy_ref,
+        sensitivity=SensitivityClassV1.INTERNAL,
+        token_budget=500,
+        row_budget=10,
+        time_budget_ms=1000,
+        purpose_ref="purpose:analysis:1",
+        requested_at="2026-08-15T17:02:00+00:00",
+        expires_at="2026-08-15T18:00:00+00:00",
+    )
+    issuer = ContextEgressReceiptIssuerV1(
+        policy,
+        materializer_store=materializer,
+        clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+    )
+    receipt = issuer.issue(gateway)
+    issuer_at_expiry = ContextEgressReceiptIssuerV1(
+        policy,
+        materializer_store=materializer,
+        clock=lambda: datetime.fromisoformat("2026-08-15T18:01:00+00:00"),
+    )
+    with pytest.raises(ContractError, match="expired|issuer"):
+        issuer_at_expiry.require(gateway, receipt)
+    with pytest.raises(ContractError, match="digest|payload|scope"):
+        issuer.require(replace(gateway, materialized_context_digest="e" * 64), receipt)
+
+
+def test_holdout_server_cas_rejects_repeat_from_same_old_state_and_records_it() -> None:
+    seal = _task3_holdout()
+    store = HoldoutSealStoreV1()
+    server_ref = store.issue(seal)
+    request = HoldoutAccessRequestV1(
+        access_id="holdout-access:cas-1",
+        principal_ref=seal.principal_ref,
+        kind=HoldoutAccessKindV1.DECLARED_EVALUATION,
+        metric_refs=seal.metric_refs,
+        metric_bundle_digest=seal.metric_bundle_digest,
+    )
+
+    first = store.consume(server_ref, request)
+    second = store.consume(server_ref, replace(request, access_id="holdout-access:cas-2"))
+
+    assert first.allowed is True
+    assert second.allowed is False
+    assert second.reason_code == "HOLDOUT_STALE_STATE"
+    assert [entry.decision for entry in second.seal.access_ledger] == ["allowed", "rejected"]
+
+
+def test_holdout_requires_complete_metric_bundle_digest_and_content_ref() -> None:
+    seal = _task3_holdout()
+    invalid = HoldoutAccessRequestV1(
+        access_id="holdout-access:wrong-bundle",
+        principal_ref=seal.principal_ref,
+        kind=HoldoutAccessKindV1.DECLARED_EVALUATION,
+        metric_refs=seal.metric_refs,
+        metric_bundle_digest="b" * 64,
+    )
+    decision = seal.authorize_access(invalid)
+    assert decision.allowed is False
+    assert decision.reason_code == "HOLDOUT_METRIC_BUNDLE_MISMATCH"
+    with pytest.raises(ContractError):
+        HoldoutSealV1.from_dict({**seal.to_dict(), "metric_release_bundle_ref": ""})
+
+
+def test_semantic_hash_mutation_matrix_covers_all_execution_relevant_semantics() -> None:
+    base = _task3_plan()
+    mutations = {
+        "method_ref": "method:logit:2",
+        "effect": "report_mutation",
+        "risk_level": PlanRiskLevelV1.HIGH,
+        "resource_budget": {"cpu_ms": 2000, "memory_mb": 128},
+        "data_impact": {"read_refs": ["dataset:2"], "write_mode": "none"},
+        "output_contract_refs": (_ref(kind="output-contract", logical_id="other.output"),),
+        "evidence_contract_refs": (_ref(kind="evidence-contract", logical_id="other.evidence"),),
+        "contract_snapshot_refs": (_ref(kind="contract", logical_id="other.contract"),),
+        "catalog_snapshot_ref": "catalog:snapshot:2",
+        "policy_snapshot_ref": "policy:snapshot:2",
+    }
+    for field_name, value in mutations.items():
+        assert replace(base, **{field_name: value}).semantic_plan_hash != base.semantic_plan_hash
+
+
+def test_compilation_store_rejects_client_record_without_server_compiler_authority() -> None:
+    client_record = CompilationRecordV1.from_compiled(
+        _task3_compiled(),
+        record_id="client-record:1",
+        principal_ref="principal:user:1",
+        session_ref="session:1",
+        project_ref="project:1",
+        source_commitments={"dataset": "d" * 64},
+        created_at="2026-08-15T17:00:00+00:00",
+        expires_at="2026-08-15T18:00:00+00:00",
+    )
+    store = CompilationRecordStoreV1()
+    issuer = ServerCompilationRecordIssuerV1(store)
+    with pytest.raises(ContractError, match="authority|compiler"):
+        store.issue(client_record)
+    with pytest.raises(ContractError, match="authority|compiler"):
+        issuer.issue(client_record)
+    server_record = issuer.compile_record(
+        _task3_compiled(),
+        record_id="server-record:1",
+        principal_ref="principal:user:1",
+        session_ref="session:1",
+        project_ref="project:1",
+        source_commitments={"dataset": "d" * 64},
+        created_at="2026-08-15T17:00:00+00:00",
+        expires_at="2026-08-15T18:00:00+00:00",
+    )
+    assert store.resolve(issuer.issue(server_record)) == server_record
+
+
+def test_frozen_contract_maps_reject_nested_mutation_and_validation_receipt_needs_server_issuer() -> None:
+    record = _task3_record()
+    confirmation = _task3_confirmation(record)
+    request = _task3_admission_request(record, confirmation)
+    with pytest.raises(TypeError):
+        request.resource_budget["cpu_ms"] = 2  # type: ignore[index]
+    seal = _task3_holdout()
+    with pytest.raises(TypeError):
+        seal.development_hashes["code"] = "b" * 64  # type: ignore[index]
+
+    receipt = PortValidationReceiptV1(
+        receipt_ref="validation:1",
+        validator_ref=_ref(kind="validator", logical_id="schema.validator"),
+        artifact_digest="a" * 64,
+        schema_ref=_ref(kind="port-schema", logical_id="model.result"),
+    )
+    validation_store = ValidationReceiptStoreV1()
+    with pytest.raises(ContractError, match="authority|issuer"):
+        validation_store.require(receipt)
+    validation_store.issue(receipt)
+    validation_store.require(receipt)
+
+
+def test_draft_rejects_raw_prompt_or_secret_content_and_failure_trust_marker() -> None:
+    plan = _task3_plan().to_dict()
+    plan["config"] = {"prompt": "raw user prompt"}
+    plan["semantic_plan_hash"] = _task3_plan().semantic_plan_hash
+    with pytest.raises(ContractError, match="prompt|secret"):
+        DraftAgentPlanV1.from_dict(plan)
+
+    with pytest.raises(ContractError, match="trusted"):
+        FailureEnvelopeV1(
+            failure_class="partial",
+            reason_code="PARTIAL",
+            capability_ref="capability:model.logit",
+            step_ref="step:fit",
+            evidence_refs=(),
+            retryable=False,
+            remediation_codes=(),
+            confirmation_required=False,
+            partial_output_refs=("output:partial",),
+            partial_output_trust="trusted",
+        )
+
+
+def test_migration_status_is_not_a_loadable_v2_execution_status_and_bad_wire_errors_are_stable() -> None:
+    state = _fixture("workflow_state_v2.json")
+    with pytest.raises(ContractError, match="enum|migration"):
+        WorkflowExecutionStateV2.from_dict({**state, "status": "migration_required"})
+
+    malformed = _task3_holdout().to_dict()
+    hashes = dict(malformed["development_hashes"])
+    hashes[1] = "a" * 64
+    hashes["mixed"] = "b" * 64
+    with pytest.raises(ContractError):
+        HoldoutSealV1.from_dict({**malformed, "development_hashes": hashes})
