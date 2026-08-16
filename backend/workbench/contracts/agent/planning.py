@@ -142,6 +142,7 @@ _DRAFT_TYPED_REF_PREFIXES = (
     "policy:",
     "port:",
     "prompt-ref:",
+    "ref:",
     "rationale:",
     "run:",
     "schema:",
@@ -281,6 +282,53 @@ _DRAFT_DURABLE_REF_KEYS = frozenset(
         "write_refs",
     }
 )
+_DRAFT_DURABLE_REF_PREFIX_BY_KEY = {
+    "actual": "column:",
+    "artifact_ref": "artifact:",
+    "capability_ref": "capability:",
+    "catalog_ref": "catalog:",
+    "column": "column:",
+    "column_ref": "column:",
+    "connection_id": "connection:",
+    "connection_ref": "connection:",
+    "contract_ref": "contract:",
+    "dataset_ref": "dataset:",
+    "descriptor_ref": "descriptor:",
+    "descriptor_refs": "descriptor:",
+    "evidence_ref": "evidence:",
+    "evidence_refs": "evidence:",
+    "feature": "column:",
+    "from_node": "node:",
+    "from_port": "port:",
+    "group": "column:",
+    "method_ref": "method:",
+    "node_ref": "node:",
+    "output_ref": "output:",
+    "output_refs": "output:",
+    "policy_ref": "policy:",
+    "port_ref": "port:",
+    "prediction": "column:",
+    "prompt_ref": "prompt-ref:",
+    "prompt_refs": "prompt-ref:",
+    "rationale_ref": "rationale:",
+    "rationale_refs": "rationale:",
+    "read_refs": "dataset:",
+    "ref": "ref:",
+    "run_ref": "run:",
+    "schema_ref": "schema:",
+    "source": "source:",
+    "source_node": "node:",
+    "source_port": "port:",
+    "symbol_ref": "symbol:",
+    "symbol_refs": "symbol:",
+    "target": "column:",
+    "target_node": "node:",
+    "target_port": "port:",
+    "to_node": "node:",
+    "to_port": "port:",
+    "weight": "column:",
+    "write_refs": "dataset:",
+}
 _DRAFT_DURABLE_ENUMS = {
     "analysis_mode": frozenset({"classification", "descriptive", "diagnostic", "inference", "predictive", "regression"}),
     "data_impact": frozenset({"none", "read_dataset", "read_model", "read_only", "write_dataset"}),
@@ -309,7 +357,32 @@ _DRAFT_DURABLE_ALLOWED_KEYS = (
     | _DRAFT_DURABLE_MAPPING_KEYS
     | _DRAFT_DURABLE_ARRAY_NUMBER_KEYS
 )
-_SERVER_COMPILER_AUTHORITY = object()
+# The compiler capability and the exact record object are kept server-side.
+# Neither appears on the wire or on ``CompilationRecordV1`` itself.  This is
+# deliberately an identity registry rather than a client-controlled marker:
+# parsing/constructing a record can never upgrade it to server authority.
+_SERVER_COMPILER_CAPABILITIES: dict[int, object] = {}
+_SERVER_COMPILER_ISSUER_CAPABILITIES: dict[int, object] = {}
+_SERVER_AUTHORIZED_COMPILED_WORKFLOWS: dict[int, tuple[object, object]] = {}
+_SERVER_AUTHORIZED_RECORDS: dict[int, tuple[object, object]] = {}
+
+
+def _is_server_authorized_record(value: object) -> bool:
+    authority = _SERVER_AUTHORIZED_RECORDS.get(id(value))
+    if authority is None or authority[0] is not value:
+        return False
+    capability = authority[1]
+    return _SERVER_COMPILER_CAPABILITIES.get(id(capability)) is capability
+
+
+def _is_server_authorized_compiled(value: object, capability: object) -> bool:
+    authority = _SERVER_AUTHORIZED_COMPILED_WORKFLOWS.get(id(value))
+    return (
+        authority is not None
+        and authority[0] is value
+        and authority[1] is capability
+        and _SERVER_COMPILER_CAPABILITIES.get(id(capability)) is capability
+    )
 
 
 class PlanningContractError(ContractError):
@@ -524,9 +597,27 @@ def _require_opaque_ref(
         raise _error("DRAFT_OPAQUE_REF_REQUIRED", f"{name} must contain a non-empty opaque reference")
 
 
+def _require_contract_ref_kind(value: object, expected_kind: str, name: str) -> ContractRefV1:
+    if type(value) is not ContractRefV1 or value.kind != expected_kind:
+        raise _error(
+            "DRAFT_REF_KIND_INVALID",
+            f"{name} must be a {expected_kind} contract reference",
+        )
+    return value
+
+
+def _require_contract_ref_kinds(
+    values: tuple[ContractRefV1, ...],
+    expected_kind: str,
+    name: str,
+) -> None:
+    for index, value in enumerate(values):
+        _require_contract_ref_kind(value, expected_kind, f"{name}[{index}]")
+
+
 def _durable_ref_prefixes(field_name: str | None) -> tuple[str, ...]:
-    if field_name in _DRAFT_OPAQUE_REF_PREFIX_BY_KEY:
-        return (_DRAFT_OPAQUE_REF_PREFIX_BY_KEY[field_name],)
+    if field_name in _DRAFT_DURABLE_REF_PREFIX_BY_KEY:
+        return (_DRAFT_DURABLE_REF_PREFIX_BY_KEY[field_name],)
     return _DRAFT_TYPED_REF_PREFIXES
 
 
@@ -741,7 +832,12 @@ class DraftAgentPlanV1:
         _validate_durable_option_value(self.data_impact, "data_impact")
         for name in ("output_contract_refs", "evidence_contract_refs", "contract_snapshot_refs"):
             object.__setattr__(self, name, _typed_ref_tuple(getattr(self, name), name))
-        _text(self.catalog_snapshot_ref, "catalog_snapshot_ref")
+        _require_contract_ref_kinds(self.capability_refs, "capability", "capability_refs")
+        _require_contract_ref_kinds(self.output_contract_refs, "output-contract", "output_contract_refs")
+        _require_contract_ref_kinds(self.evidence_contract_refs, "evidence-contract", "evidence_contract_refs")
+        _require_contract_ref_kinds(self.contract_snapshot_refs, "contract", "contract_snapshot_refs")
+        _require_opaque_ref(self.method_ref, "method_ref", ("method:",))
+        _require_opaque_ref(self.catalog_snapshot_ref, "catalog_snapshot_ref", ("catalog:",))
         if not isinstance(self.nodes, (tuple, list)):
             raise _error("PLANNING_ARRAY_INVALID", "nodes must be an array")
         nodes = tuple(_frozen_mapping(_plain(node), "nodes[]") for node in self.nodes)
@@ -767,7 +863,7 @@ class DraftAgentPlanV1:
         _validate_durable_option_value(self.config, "config")
         _reject_draft_server_fields(self.data_impact, "data_impact")
         _reject_draft_sensitive_content(self.data_impact, "data_impact")
-        _text(self.policy_snapshot_ref, "policy_snapshot_ref")
+        _require_opaque_ref(self.policy_snapshot_ref, "policy_snapshot_ref", ("policy:",))
         if not isinstance(self.rationale, (tuple, list)):
             raise _error("PLANNING_ARRAY_INVALID", "rationale must be an array")
         rationale = tuple(_text(item, "rationale[]") for item in self.rationale)
@@ -901,7 +997,12 @@ class CompiledWorkflowV1:
             if not isinstance(refs, (tuple, list)) or any(type(ref) is not ContractRefV1 for ref in refs):
                 raise _error("PLANNING_CONTRACT_REF_INVALID", f"{name} contains an invalid ref")
             object.__setattr__(self, name, tuple(refs))
+        _require_contract_ref_kinds(self.capability_refs, "capability", "capability_refs")
+        _require_contract_ref_kinds(self.output_contract_refs, "output-contract", "output_contract_refs")
+        _require_contract_ref_kinds(self.evidence_contract_refs, "evidence-contract", "evidence_contract_refs")
+        _require_contract_ref_kinds(self.contract_snapshot_refs, "contract", "contract_snapshot_refs")
         _text(self.method_ref, "method_ref")
+        _require_opaque_ref(self.method_ref, "method_ref", ("method:",))
         _text(self.effect, "effect")
         if type(self.risk_level) is not PlanRiskLevelV1:
             raise _error("PLANNING_ENUM_INVALID", "risk_level is invalid")
@@ -913,12 +1014,14 @@ class CompiledWorkflowV1:
             raise _error("PLANNING_NODE_INVALID", "nodes are invalid")
         object.__setattr__(self, "nodes", tuple(_frozen_mapping(_plain(node), "nodes[]") for node in self.nodes))
         for node in self.nodes:
+            _reject_draft_server_fields(node, "compiled node")
             _reject_draft_sensitive_content(node, "compiled node")
             _validate_durable_option_value(node, "compiled node")
         if not isinstance(self.connections, (tuple, list)) or any(not isinstance(item, Mapping) for item in self.connections):
             raise _error("PLANNING_NODE_INVALID", "connections are invalid")
         object.__setattr__(self, "connections", tuple(_frozen_mapping(_plain(item), "connections[]") for item in self.connections))
         for connection in self.connections:
+            _reject_draft_server_fields(connection, "compiled connection")
             _reject_draft_sensitive_content(connection, "compiled connection")
             _validate_durable_option_value(connection, "compiled connection")
         object.__setattr__(self, "config", _frozen_mapping(_plain(self.config), "config"))
@@ -926,8 +1029,8 @@ class CompiledWorkflowV1:
         _validate_durable_option_value(self.config, "compiled config")
         _reject_draft_server_fields(self.data_impact, "compiled data_impact")
         _reject_draft_sensitive_content(self.data_impact, "compiled data_impact")
-        _text(self.catalog_snapshot_ref, "catalog_snapshot_ref")
-        _text(self.policy_snapshot_ref, "policy_snapshot_ref")
+        _require_opaque_ref(self.catalog_snapshot_ref, "catalog_snapshot_ref", ("catalog:",))
+        _require_opaque_ref(self.policy_snapshot_ref, "policy_snapshot_ref", ("policy:",))
         _text(self.compiler_version, "compiler_version")
         _text(self.server_execution_identity, "server_execution_identity")
         _digest(self.preview_fingerprint, "preview_fingerprint")
@@ -1179,7 +1282,6 @@ class CompilationRecordV1:
     expires_at: str
     semantic_plan_hash: str
     record_digest: str
-    _authority_token: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.schema_version != _RECORD_SCHEMA:
@@ -1199,6 +1301,9 @@ class CompilationRecordV1:
         ):
             raise _error("PLANNING_CONTRACT_REF_INVALID", "contract_snapshot_refs are invalid")
         object.__setattr__(self, "contract_snapshot_refs", tuple(self.contract_snapshot_refs))
+        _require_contract_ref_kinds(self.contract_snapshot_refs, "contract", "contract_snapshot_refs")
+        _require_opaque_ref(self.catalog_snapshot_ref, "catalog_snapshot_ref", ("catalog:",))
+        _require_opaque_ref(self.policy_snapshot_ref, "policy_snapshot_ref", ("policy:",))
         object.__setattr__(self, "source_commitments", _frozen_mapping(_plain(self.source_commitments), "source_commitments"))
         if type(self.compiled_workflow) is not CompiledWorkflowV1:
             raise _error("PLANNING_COMPILED_INVALID", "compiled_workflow is invalid")
@@ -1259,19 +1364,29 @@ class CompilationRecordV1:
             expires_at=expires_at,
             semantic_plan_hash=compiled.semantic_plan_hash,
             record_digest=sha256_canonical(payload),
-            _authority_token=None,
         )
 
     @classmethod
     def _from_server_compiled(
         cls,
         compiled: CompiledWorkflowV1,
+        *,
+        _compiler_capability: object | None = None,
         **kwargs: Any,
     ) -> "CompilationRecordV1":
-        """Private server compiler seam; never a wire/client authority flag."""
+        """Private server seam requiring a registered compiler capability."""
 
+        if (
+            type(compiled) is not CompiledWorkflowV1
+            or _compiler_capability is None
+            or not _is_server_authorized_compiled(compiled, _compiler_capability)
+        ):
+            raise _error(
+                "SERVER_COMPILER_AUTHORITY_REQUIRED",
+                "private record construction requires a registered server compiler capability",
+            )
         record = cls.from_compiled(compiled, **kwargs)
-        object.__setattr__(record, "_authority_token", _SERVER_COMPILER_AUTHORITY)
+        _SERVER_AUTHORIZED_RECORDS[id(record)] = (record, _compiler_capability)
         return record
 
     def _record_payload(self) -> dict[str, object]:
@@ -1350,7 +1465,7 @@ class CompilationRecordStoreV1:
         )
 
     def _issue_server(self, record: CompilationRecordV1) -> ServerCompilationRecordReferenceV1:
-        if type(record) is not CompilationRecordV1 or record._authority_token is not _SERVER_COMPILER_AUTHORITY:
+        if type(record) is not CompilationRecordV1 or not _is_server_authorized_record(record):
             raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "record was not produced by the server compiler")
         self._records[(record.record_id, record.record_digest)] = record
         return ServerCompilationRecordReferenceV1._issue(record.reference, self._issuer_token)
@@ -1384,18 +1499,38 @@ class ServerCompilationRecordIssuerV1:
         if store is not None and type(store) is not CompilationRecordStoreV1:
             raise _error("SERVER_RECORD_STORE_REQUIRED", "server compiler requires a compilation record store")
         self.store = store
+        capability = object()
+        _SERVER_COMPILER_CAPABILITIES[id(capability)] = capability
+        _SERVER_COMPILER_ISSUER_CAPABILITIES[id(self)] = capability
+
+    def compile_workflow(self, compiled: CompiledWorkflowV1) -> CompiledWorkflowV1:
+        """Register a validated workflow as the output of this server compiler."""
+
+        if type(compiled) is not CompiledWorkflowV1:
+            raise _error("SERVER_COMPILED_REQUIRED", "server compiler requires a compiled workflow")
+        capability = _SERVER_COMPILER_ISSUER_CAPABILITIES.get(id(self))
+        if capability is None or _SERVER_COMPILER_CAPABILITIES.get(id(capability)) is not capability:
+            raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "server compiler capability is unavailable")
+        _SERVER_AUTHORIZED_COMPILED_WORKFLOWS[id(compiled)] = (compiled, capability)
+        return compiled
 
     def compile_record(self, compiled: CompiledWorkflowV1, **kwargs: Any) -> CompilationRecordV1:
         if type(compiled) is not CompiledWorkflowV1:
             raise _error("SERVER_COMPILED_REQUIRED", "server compiler requires a compiled workflow")
+        capability = _SERVER_COMPILER_ISSUER_CAPABILITIES.get(id(self))
+        if capability is None or not _is_server_authorized_compiled(compiled, capability):
+            raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "workflow was not produced by this server compiler seam")
         return CompilationRecordV1._from_server_compiled(
             compiled,
+            _compiler_capability=capability,
             **kwargs,
         )
 
     def issue(self, record: CompilationRecordV1) -> ServerCompilationRecordReferenceV1:
         if self.store is None:
             raise _error("SERVER_RECORD_STORE_REQUIRED", "server issuer requires a record store")
+        if type(record) is not CompilationRecordV1 or not _is_server_authorized_record(record):
+            raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "record was not produced by this server compiler seam")
         return self.store._issue_server(record)
 
 
@@ -1429,6 +1564,9 @@ class ConfirmationBindingV1:
             ("policy_snapshot_ref", self.policy_snapshot_ref),
         ):
             _text(value, name)
+        _require_opaque_ref(self.method_snapshot_ref, "method_snapshot_ref", ("method:",))
+        _require_opaque_ref(self.risk_snapshot_ref, "risk_snapshot_ref", ("risk:",))
+        _require_opaque_ref(self.policy_snapshot_ref, "policy_snapshot_ref", ("policy:",))
         _digest(self.semantic_plan_hash, "semantic_plan_hash")
         if self.semantic_plan_hash != self.compilation_record_ref.semantic_plan_hash:
             raise _error("PLANNING_HASH_MISMATCH", "confirmation semantic hash mismatches record reference")
@@ -1597,6 +1735,8 @@ class FailureEnvelopeV1:
     def __post_init__(self) -> None:
         for name, value in (("failure_class", self.failure_class), ("reason_code", self.reason_code), ("capability_ref", self.capability_ref), ("step_ref", self.step_ref)):
             _text(value, name)
+        _require_opaque_ref(self.capability_ref, "capability_ref", ("capability:",))
+        _require_opaque_ref(self.step_ref, "step_ref", ("step:",))
         for name, values in (("evidence_refs", self.evidence_refs), ("remediation_codes", self.remediation_codes), ("partial_output_refs", self.partial_output_refs)):
             if not isinstance(values, (tuple, list)):
                 raise _error("PLANNING_ARRAY_INVALID", f"{name} must be an array")
@@ -1604,6 +1744,10 @@ class FailureEnvelopeV1:
             if len(set(normalized)) != len(normalized):
                 raise _error("PLANNING_DUPLICATE_ID", f"{name} contains duplicates")
             object.__setattr__(self, name, normalized)
+        for index, value in enumerate(self.evidence_refs):
+            _require_opaque_ref(value, f"evidence_refs[{index}]", ("evidence:",))
+        for index, value in enumerate(self.partial_output_refs):
+            _require_opaque_ref(value, f"partial_output_refs[{index}]", ("output:",))
         if type(self.retryable) is not bool or type(self.confirmation_required) is not bool:
             raise _error("PLANNING_BOOLEAN_INVALID", "failure booleans must be exact booleans")
         if self.partial_output_trust not in {"not_available"}:

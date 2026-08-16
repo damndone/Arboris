@@ -22,7 +22,6 @@ _REQUIRED_DEVELOPMENT_HASHES = frozenset(
     }
 )
 _HOLDOUT_SEAL_ISSUERS: dict[int, object] = {}
-_HOLDOUT_SEAL_CAPABILITIES: dict[int, object] = {}
 
 
 class HoldoutContractError(ContractError):
@@ -516,67 +515,19 @@ class HoldoutSealV1:
         *,
         _capability: object | None = None,
     ) -> HoldoutReleaseDecisionV1:
+        """Legacy helper kept as a fail-closed compatibility seam.
+
+        The release transition is deliberately implemented only by the store's
+        locked ``consume`` operation.  No object-held capability can turn this
+        helper into an alternate release authority.
+        """
+
         if type(request) is not HoldoutAccessRequestV1:
             raise _error("HOLDOUT_REQUEST_REQUIRED", "holdout access requires a typed request")
-        if self._issuer_token is None or _HOLDOUT_SEAL_ISSUERS.get(id(self._issuer_token)) is not self._issuer_token:
-            raise _error(
-                "HOLDOUT_SERVER_STORE_REQUIRED",
-                "holdout release requires a seal issued by the server store",
-            )
-        if _capability is None or _HOLDOUT_SEAL_CAPABILITIES.get(id(self)) is not _capability:
-            raise _error(
-                "HOLDOUT_INTERNAL_CAPABILITY_REQUIRED",
-                "holdout release helper requires the server store internal capability",
-            )
-        before = _parse_status(self.status)
-        allowed = False
-        reason = "HOLDOUT_LEDGER_CLOSED"
-        after = before
-        if request.principal_ref != self.principal_ref:
-            reason = "HOLDOUT_PRINCIPAL_SCOPE_MISMATCH"
-        elif before is not HoldoutSealStatusV1.SEALED:
-            reason = "HOLDOUT_LEDGER_CLOSED"
-        elif request.metric_bundle_digest != self.metric_bundle_digest:
-            reason = "HOLDOUT_METRIC_BUNDLE_MISMATCH"
-        elif request.kind is not HoldoutAccessKindV1.DECLARED_EVALUATION:
-            reason = {
-                HoldoutAccessKindV1.REPEAT_EVALUATION: "HOLDOUT_REPEAT_FORBIDDEN",
-                HoldoutAccessKindV1.PARTIAL_METRIC: "HOLDOUT_PARTIAL_METRIC_FORBIDDEN",
-                HoldoutAccessKindV1.SUBGROUP_QUERY: "HOLDOUT_SUBGROUP_NOT_DECLARED",
-                HoldoutAccessKindV1.SHIFT_QUERY: "HOLDOUT_SHIFT_NOT_DECLARED",
-                HoldoutAccessKindV1.AD_HOC_QUERY: "HOLDOUT_AD_HOC_FORBIDDEN",
-                HoldoutAccessKindV1.REOPEN_ATTEMPT: "HOLDOUT_REOPEN_FORBIDDEN",
-                HoldoutAccessKindV1.DECLARED_EVALUATION: "HOLDOUT_REQUEST_INVALID",
-            }[request.kind]
-        elif request.metric_refs != self.metric_refs:
-            reason = "HOLDOUT_METRIC_BUNDLE_MISMATCH"
-        else:
-            allowed = True
-            reason = "HOLDOUT_RELEASE_ALLOWED"
-            after = HoldoutSealStatusV1.CLOSED
-        entry = HoldoutAccessLedgerEntryV1.from_request(
-            request,
-            decision="allowed" if allowed else "rejected",
-            reason_code=reason,
-            state_before=before,
-            state_after=after,
+        raise _error(
+            "HOLDOUT_SERVER_STORE_REQUIRED",
+            "holdout release requires the locked server store consume operation",
         )
-        next_history = self.transition_history
-        if allowed:
-            next_history = (HoldoutSealStatusV1.SEALED.value, HoldoutSealStatusV1.RELEASED.value, HoldoutSealStatusV1.CLOSED.value)
-        next_seal = HoldoutSealV1(
-            seal_id=self.seal_id,
-            principal_ref=self.principal_ref,
-            development_hashes=dict(self.development_hashes),
-            metric_release_bundle_ref=self.metric_release_bundle_ref,
-            metric_bundle_digest=self.metric_bundle_digest,
-            metric_refs=self.metric_refs,
-            status=after.value,
-            transition_history=next_history,
-            access_ledger=(*self.access_ledger, entry),
-            _issuer_token=self._issuer_token,
-        )
-        return HoldoutReleaseDecisionV1(allowed=allowed, reason_code=reason, seal=next_seal)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -657,7 +608,6 @@ class HoldoutSealStoreV1:
             )
         self.metric_bundle_store = metric_bundle_store
         self._issuer_token = object()
-        self.__consume_capability = object()
         _HOLDOUT_SEAL_ISSUERS[id(self._issuer_token)] = self._issuer_token
         self._current: dict[str, HoldoutSealV1] = {}
         self._lock = RLock()
@@ -698,7 +648,6 @@ class HoldoutSealStoreV1:
             if seal.seal_id in self._current:
                 raise _error("HOLDOUT_DUPLICATE_SEAL", "seal is already issued by this store")
             object.__setattr__(seal, "_issuer_token", self._issuer_token)
-            _HOLDOUT_SEAL_CAPABILITIES[id(seal)] = self.__consume_capability
             self._current[seal.seal_id] = seal
             return ServerHoldoutSealReferenceV1._issue(seal, self._issuer_token)
 
@@ -750,11 +699,57 @@ class HoldoutSealStoreV1:
                     access_ledger=(*current.access_ledger, entry),
                     _issuer_token=self._issuer_token,
                 )
-                _HOLDOUT_SEAL_CAPABILITIES[id(denied)] = self.__consume_capability
                 self._current[current.seal_id] = denied
                 return HoldoutReleaseDecisionV1(allowed=False, reason_code="HOLDOUT_STALE_STATE", seal=denied)
-            decision = current._authorize_access_server(request, _capability=self.__consume_capability)
-            _HOLDOUT_SEAL_CAPABILITIES[id(decision.seal)] = self.__consume_capability
+            before = _parse_status(current.status)
+            allowed = False
+            reason = "HOLDOUT_LEDGER_CLOSED"
+            after = before
+            if request.principal_ref != current.principal_ref:
+                reason = "HOLDOUT_PRINCIPAL_SCOPE_MISMATCH"
+            elif before is not HoldoutSealStatusV1.SEALED:
+                reason = "HOLDOUT_LEDGER_CLOSED"
+            elif request.metric_bundle_digest != current.metric_bundle_digest:
+                reason = "HOLDOUT_METRIC_BUNDLE_MISMATCH"
+            elif request.kind is not HoldoutAccessKindV1.DECLARED_EVALUATION:
+                reason = {
+                    HoldoutAccessKindV1.REPEAT_EVALUATION: "HOLDOUT_REPEAT_FORBIDDEN",
+                    HoldoutAccessKindV1.PARTIAL_METRIC: "HOLDOUT_PARTIAL_METRIC_FORBIDDEN",
+                    HoldoutAccessKindV1.SUBGROUP_QUERY: "HOLDOUT_SUBGROUP_NOT_DECLARED",
+                    HoldoutAccessKindV1.SHIFT_QUERY: "HOLDOUT_SHIFT_NOT_DECLARED",
+                    HoldoutAccessKindV1.AD_HOC_QUERY: "HOLDOUT_AD_HOC_FORBIDDEN",
+                    HoldoutAccessKindV1.REOPEN_ATTEMPT: "HOLDOUT_REOPEN_FORBIDDEN",
+                    HoldoutAccessKindV1.DECLARED_EVALUATION: "HOLDOUT_REQUEST_INVALID",
+                }[request.kind]
+            elif request.metric_refs != current.metric_refs:
+                reason = "HOLDOUT_METRIC_BUNDLE_MISMATCH"
+            else:
+                allowed = True
+                reason = "HOLDOUT_RELEASE_ALLOWED"
+                after = HoldoutSealStatusV1.CLOSED
+            entry = HoldoutAccessLedgerEntryV1.from_request(
+                request,
+                decision="allowed" if allowed else "rejected",
+                reason_code=reason,
+                state_before=before,
+                state_after=after,
+            )
+            next_history = current.transition_history
+            if allowed:
+                next_history = (HoldoutSealStatusV1.SEALED.value, HoldoutSealStatusV1.RELEASED.value, HoldoutSealStatusV1.CLOSED.value)
+            next_seal = HoldoutSealV1(
+                seal_id=current.seal_id,
+                principal_ref=current.principal_ref,
+                development_hashes=dict(current.development_hashes),
+                metric_release_bundle_ref=current.metric_release_bundle_ref,
+                metric_bundle_digest=current.metric_bundle_digest,
+                metric_refs=current.metric_refs,
+                status=after.value,
+                transition_history=next_history,
+                access_ledger=(*current.access_ledger, entry),
+                _issuer_token=self._issuer_token,
+            )
+            decision = HoldoutReleaseDecisionV1(allowed=allowed, reason_code=reason, seal=next_seal)
             self._current[current.seal_id] = decision.seal
             return decision
 

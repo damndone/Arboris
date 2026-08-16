@@ -289,6 +289,36 @@ def _is_opaque_reference(value: object) -> bool:
     return bool(suffix) and not any(char.isspace() for char in suffix)
 
 
+def _is_safe_selected_reference(value: object) -> bool:
+    if not _is_opaque_reference(value):
+        return False
+    lowered = str(value).casefold()
+    return not any(marker in lowered for marker in ("raw:", "secret:", "token:", "sk-"))
+
+
+def _selected_refs(value: object, name: str) -> tuple[str, ...]:
+    refs = _refs(value, name)
+    if any(not _is_safe_selected_reference(ref) for ref in refs):
+        raise _error(
+            "EGRESS_SELECTION_INVALID",
+            f"{name} must contain server-owned typed or opaque references; raw content and prompts are forbidden",
+        )
+    return refs
+
+
+def _validate_context_key(value: object, path: str) -> str:
+    if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+        raise _error("EGRESS_CONTEXT_KEY_INVALID", f"{path} contains an invalid field key")
+    lowered = value.casefold()
+    if lowered.startswith(("raw:", "secret:", "token:", "sk-")) or _EMAIL.fullmatch(value):
+        raise _error("EGRESS_CONTEXT_KEY_INVALID", f"{path} contains a secret-like field key")
+    if _is_opaque_reference(value):
+        return value
+    if any(char.isspace() for char in value) or re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,127}", value) is None:
+        raise _error("EGRESS_CONTEXT_KEY_INVALID", f"{path} requires a typed field key or opaque reference")
+    return value
+
+
 def _is_safe_string(value: str, field_name: str | None) -> bool:
     if _is_opaque_reference(value):
         return True
@@ -316,6 +346,7 @@ def _classify_and_redact(
         observed = SensitivityClassV1.PUBLIC
         redacted: list[str] = []
         for key, child in value.items():
+            key = _validate_context_key(key, f"{path}.key")
             lowered = key.casefold()
             sensitive_key = any(marker in lowered for marker in _SENSITIVE_KEY_MARKERS)
             if sensitive_key:
@@ -399,7 +430,7 @@ class ContextMaterializationResultV1:
         _text(self.result_ref, "result_ref")
         if type(self.materializer_ref) is not ContractRefV1 or type(self.redaction_policy_ref) is not ContractRefV1:
             raise _error("EGRESS_MATERIALIZER_REF_INVALID", "materializer and redaction refs are invalid")
-        object.__setattr__(self, "selected_refs", _refs(self.selected_refs, "selected_refs"))
+        object.__setattr__(self, "selected_refs", _selected_refs(self.selected_refs, "selected_refs"))
         object.__setattr__(self, "redacted_refs", _refs(self.redacted_refs, "redacted_refs"))
         if type(self.observed_sensitivity) is not SensitivityClassV1:
             raise _error("EGRESS_SENSITIVITY_INVALID", "observed sensitivity is invalid")
@@ -447,7 +478,7 @@ class ContextMaterializationStoreV1:
             canonical_json_v1(context)
         except (AttributeError, CanonicalJSONError, RecursionError, TypeError, ValueError) as exc:
             raise _error("EGRESS_CONTEXT_INVALID", "source context must be canonical JSON") from exc
-        selected = _refs(selected_refs, "selected_refs")
+        selected = _selected_refs(selected_refs, "selected_refs")
         if not selected:
             raise _error("EGRESS_SELECTION_INVALID", "selected_refs must not be empty")
         if any(ref not in context for ref in selected):
@@ -597,7 +628,7 @@ class ContextEgressGatewayV1:
         _policy_ref(self.sensitivity_policy_ref)
         if type(self.sensitivity) is not SensitivityClassV1:
             raise _error("EGRESS_SENSITIVITY_INVALID", "sensitivity is invalid")
-        selected = _refs(self.selected_refs, "selected_refs")
+        selected = _selected_refs(self.selected_refs, "selected_refs")
         redacted = _refs(self.redacted_refs, "redacted_refs")
         if any(ref.casefold().startswith(("raw:", "secret:", "prompt:")) for ref in selected):
             raise _error("EGRESS_RAW_CONTENT_FORBIDDEN", "raw secrets and prompts cannot be selected")
@@ -760,7 +791,7 @@ class ContextEgressReceiptV1:
         _policy_ref(self.sensitivity_policy_ref)
         if type(self.sensitivity) is not SensitivityClassV1:
             raise _error("EGRESS_SENSITIVITY_INVALID", "sensitivity is invalid")
-        object.__setattr__(self, "selected_refs", _refs(self.selected_refs, "selected_refs"))
+        object.__setattr__(self, "selected_refs", _selected_refs(self.selected_refs, "selected_refs"))
         object.__setattr__(self, "redacted_refs", _refs(self.redacted_refs, "redacted_refs"))
         _budget(self.token_budget, "token_budget")
         _budget(self.row_budget, "row_budget")

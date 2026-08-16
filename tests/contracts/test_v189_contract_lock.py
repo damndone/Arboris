@@ -1188,8 +1188,10 @@ def _task3_record(
     record_id: str = "compilation-record:1",
     policy_snapshot_ref: str = "policy:snapshot:1",
 ) -> CompilationRecordV1:
-    return ServerCompilationRecordIssuerV1().compile_record(
-        _task3_compiled(policy_snapshot_ref=policy_snapshot_ref),
+    issuer = ServerCompilationRecordIssuerV1()
+    compiled = issuer.compile_workflow(_task3_compiled(policy_snapshot_ref=policy_snapshot_ref))
+    return issuer.compile_record(
+        compiled,
         record_id=record_id,
         principal_ref="principal:user:1",
         session_ref="session:1",
@@ -2039,7 +2041,7 @@ def test_compilation_store_rejects_client_record_without_server_compiler_authori
     with pytest.raises(ContractError, match="authority|compiler"):
         issuer.issue(client_record)
     server_record = issuer.compile_record(
-        _task3_compiled(),
+        issuer.compile_workflow(_task3_compiled()),
         record_id="server-record:1",
         principal_ref="principal:user:1",
         session_ref="session:1",
@@ -2049,6 +2051,35 @@ def test_compilation_store_rejects_client_record_without_server_compiler_authori
         expires_at="2026-08-15T18:00:00+00:00",
     )
     assert store.resolve(issuer.issue(server_record)) == server_record
+
+
+def test_compilation_wire_and_private_helper_cannot_mint_server_authority() -> None:
+    compiled_from_wire = CompiledWorkflowV1.from_dict(_task3_compiled().to_dict())
+    helper_kwargs = {
+        "record_id": "private-helper-record:1",
+        "principal_ref": "principal:user:1",
+        "session_ref": "session:1",
+        "project_ref": "project:1",
+        "source_commitments": {"dataset": "d" * 64},
+        "created_at": "2026-08-15T17:00:00+00:00",
+        "expires_at": "2026-08-15T18:00:00+00:00",
+    }
+    with pytest.raises(ContractError, match="authority|compiler|capability"):
+        CompilationRecordV1._from_server_compiled(compiled_from_wire, **helper_kwargs)  # type: ignore[attr-defined]
+    with pytest.raises(ContractError, match="authority|compiler|capability"):
+        CompilationRecordV1._from_server_compiled(  # type: ignore[attr-defined]
+            compiled_from_wire,
+            _compiler_capability=object(),
+            **helper_kwargs,
+        )
+    issuer = ServerCompilationRecordIssuerV1()
+    assert not hasattr(issuer, "_ServerCompilationRecordIssuerV1__compiler_capability")
+    with pytest.raises(ContractError, match="authority|compiler|capability"):
+        issuer.compile_record(compiled_from_wire, **helper_kwargs)
+
+    parsed_record = CompilationRecordV1.from_dict(_fixture("compilation_record.json"))
+    with pytest.raises(ContractError, match="authority|compiler"):
+        CompilationRecordStoreV1().issue(parsed_record)
 
 
 def test_frozen_contract_maps_reject_nested_mutation_and_validation_receipt_needs_server_issuer() -> None:
@@ -2171,6 +2202,21 @@ def test_egress_rejects_untyped_free_text_in_nested_selected_content() -> None:
         selected_refs=("evidence:typed-scalar",),
     )
     assert safe.observed_sensitivity is SensitivityClassV1.PUBLIC
+
+
+def test_egress_rejects_instruction_or_sensitive_materialization_keys() -> None:
+    materializer = ContextMaterializationStoreV1(
+        materializer_ref=_ref(kind="materializer", logical_id="server.context.keys"),
+        redaction_policy_ref=_ref(kind="redaction-policy", logical_id="strict"),
+    )
+    invalid_contexts = (
+        ({"Do this now": True}, ("Do this now",)),
+        ({"sk-raw-secret": {"bounded": True}}, ("sk-raw-secret",)),
+        ({"evidence:key": {"Do this now": True}}, ("evidence:key",)),
+    )
+    for context, selected_refs in invalid_contexts:
+        with pytest.raises(ContractError, match="free|text|selection|secret|key|opaque"):
+            materializer.materialize(context, selected_refs=selected_refs)
 
 
 def test_egress_materialization_result_requires_registered_server_store() -> None:
@@ -2404,6 +2450,28 @@ def test_holdout_internal_server_helper_rejects_direct_old_state_release() -> No
     assert store.consume(server_reference, request).allowed is True
 
 
+def test_holdout_internal_helper_has_no_extractable_store_capability() -> None:
+    seal, metric_store, metric_reference = _task3_holdout_authority()
+    store = HoldoutSealStoreV1(metric_bundle_store=metric_store)
+    server_reference = store.issue(seal, metric_bundle_reference=metric_reference)
+    old_state = store.resolve(server_reference)
+    request = HoldoutAccessRequestV1(
+        access_id="holdout-access:extracted-capability",
+        principal_ref=seal.principal_ref,
+        kind=HoldoutAccessKindV1.DECLARED_EVALUATION,
+        metric_refs=seal.metric_refs,
+        metric_bundle_digest=seal.metric_bundle_digest,
+    )
+    with pytest.raises(AttributeError):
+        getattr(store, "_HoldoutSealStoreV1__consume_capability")
+
+    with pytest.raises(ContractError, match="store|authority|internal"):
+        old_state._authorize_access_server(request, _capability=object())  # type: ignore[attr-defined]
+    with pytest.raises(ContractError, match="store|authority|internal"):
+        old_state._authorize_access_server(request, _capability=object())  # type: ignore[attr-defined]
+    assert store.resolve(server_reference).status == "sealed"
+
+
 def test_holdout_consume_is_atomic_under_barriered_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
     seal, metric_store, metric_reference = _task3_holdout_authority()
     store = HoldoutSealStoreV1(metric_bundle_store=metric_store)
@@ -2495,6 +2563,65 @@ def test_durable_plan_fields_reject_free_text_and_keep_typed_refs() -> None:
     for mutation in invalid_compiled_values:
         with pytest.raises(ContractError, match="typed|free|opaque|enum|ref|allowlisted"):
             replace(_task3_compiled(), **mutation)
+
+
+def test_compiled_workflow_rejects_server_only_node_and_connection_fields() -> None:
+    compiled = _task3_compiled()
+    server_node = {"node_id": "fit", "node_ref": "node:server"}
+    node_hash_input = compiled.semantic_hash_input()
+    node_hash_input["nodes"] = [server_node]
+    with pytest.raises(ContractError, match="server|forbidden"):
+        replace(
+            compiled,
+            nodes=(server_node,),
+            semantic_plan_hash=sha256_canonical(node_hash_input),
+        )
+    server_connection = {"source_node": "node:fit", "node_ref": "node:server"}
+    connection_hash_input = compiled.semantic_hash_input()
+    connection_hash_input["connections"] = [server_connection]
+    with pytest.raises(ContractError, match="server|forbidden"):
+        replace(
+            compiled,
+            connections=(server_connection,),
+            semantic_plan_hash=sha256_canonical(connection_hash_input),
+        )
+
+
+def test_durable_opaque_refs_are_bound_to_field_kind() -> None:
+    invalid_values = (
+        {"connections": ({"source_node": "artifact:wrong-kind", "target_node": "node:score"},)},
+        {"config": {"connection_id": "prompt-ref:wrong-kind"}},
+        {"data_impact": {"read_refs": ["artifact:wrong-kind"], "write_mode": "none"}},
+        {"plan_diff": {"read_refs": ["artifact:wrong-kind"]}},
+    )
+    for mutation in invalid_values[:3]:
+        with pytest.raises(ContractError, match="opaque|ref|typed"):
+            replace(_task3_plan(), **mutation)
+    with pytest.raises(ContractError, match="opaque|ref|typed"):
+        replace(_task3_compiled(), **invalid_values[3])
+
+
+def test_top_level_and_nested_refs_are_bound_to_field_kind() -> None:
+    base = _task3_plan()
+    bad_node_capability = dict(base.nodes[0])
+    bad_node_capability["capability_ref"] = "descriptor:wrong-kind"
+    bad_column_role = dict(base.nodes[0])
+    bad_column_role["roles"] = {"target": "dataset:wrong-kind"}
+    invalid_plan_values = (
+        {"method_ref": "descriptor:wrong-kind"},
+        {"capability_refs": (_ref(kind="descriptor", logical_id="wrong-capability"),)},
+        {"nodes": (bad_node_capability,)},
+        {"nodes": (bad_column_role,)},
+        {"data_impact": {"read_refs": ["descriptor:wrong-kind"], "write_mode": "none"}},
+    )
+    for mutation in invalid_plan_values:
+        with pytest.raises(ContractError, match="kind|opaque|ref|typed|allowlisted"):
+            replace(base, **mutation)
+
+    confirmation = _task3_confirmation(_task3_record())
+    for field_name in ("method_snapshot_ref", "risk_snapshot_ref", "policy_snapshot_ref"):
+        with pytest.raises(ContractError, match="kind|opaque|ref|snapshot"):
+            replace(confirmation, **{field_name: "descriptor:wrong-kind"})
 
 
 def test_draft_and_compiled_free_text_never_persist_raw_prompt_or_secret() -> None:
