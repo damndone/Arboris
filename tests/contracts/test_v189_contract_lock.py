@@ -6,6 +6,7 @@ from threading import Barrier, Thread
 from dataclasses import FrozenInstanceError, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import get_type_hints
 
 import pytest
@@ -1128,6 +1129,26 @@ def test_resolver_rejects_duplicate_and_unresolved_refs() -> None:
     with pytest.raises(ContractRefError) as exc_info:
         resolver.resolve(wrong_digest)
     assert exc_info.value.code == CONTRACT_DIGEST_MISMATCH
+
+
+def test_resolver_binding_cannot_be_replaced_through_instance_authority_slots() -> None:
+    from workbench.providers.catalog import load_builtin_catalog
+
+    available = _ref()
+    resolver = ContractRefResolverV1((available,))
+
+    with pytest.raises(AttributeError):
+        resolver._refs = MappingProxyType({})  # type: ignore[attr-defined]
+    with pytest.raises(AttributeError):
+        object.__setattr__(resolver, "_refs", MappingProxyType({}))
+    assert not hasattr(resolver, "__dict__")
+    assert resolver.resolve(available) == available
+
+    catalog_resolver = load_builtin_catalog().contract_resolver
+    catalog_ref = load_builtin_catalog().providers[0].contract_refs[0]
+    with pytest.raises(AttributeError):
+        object.__setattr__(catalog_resolver, "_refs", MappingProxyType({}))
+    assert catalog_resolver.resolve(catalog_ref) == catalog_ref
 
 
 def test_major_version_mismatch_is_not_silently_coerced() -> None:

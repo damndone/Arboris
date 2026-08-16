@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
+from weakref import WeakKeyDictionary
 
 from workbench.canonical import sha256_canonical
 
@@ -120,10 +121,17 @@ class ContractRefV1:
         )
 
 
+_RESOLVER_REFS: WeakKeyDictionary[object, MappingProxyType] = WeakKeyDictionary()
+
+
 class ContractRefResolverV1:
     """Resolve exact contract identities without fallback or replacement."""
 
+    __slots__ = ("__weakref__",)
+
     def __init__(self, refs: Iterable[ContractRefV1]) -> None:
+        if self in _RESOLVER_REFS:
+            raise ContractRefError(CONTRACT_REF_INVALID)
         refs_by_key: dict[tuple[str, str, str], ContractRefV1] = {}
         for ref in refs:
             if type(ref) is not ContractRefV1:
@@ -132,14 +140,21 @@ class ContractRefResolverV1:
             if key in refs_by_key:
                 raise ContractRefError(CONTRACT_DUPLICATE)
             refs_by_key[key] = ref
-        self._refs = MappingProxyType(refs_by_key)
+        _RESOLVER_REFS[self] = MappingProxyType(refs_by_key)
+
+    def _bound_refs(self) -> MappingProxyType:
+        try:
+            return _RESOLVER_REFS[self]
+        except KeyError as exc:
+            raise ContractRefError(CONTRACT_UNRESOLVED) from exc
 
     def resolve(self, ref: ContractRefV1) -> ContractRefV1:
         if type(ref) is not ContractRefV1:
             raise ContractRefError(CONTRACT_REF_INVALID)
 
+        refs = self._bound_refs()
         key = (ref.kind, ref.logical_id, ref.semantic_version)
-        available = self._refs.get(key)
+        available = refs.get(key)
         if available is not None:
             if available.contract_digest != ref.contract_digest:
                 raise ContractRefError(CONTRACT_DIGEST_MISMATCH)
@@ -147,7 +162,7 @@ class ContractRefResolverV1:
 
         same_identity = tuple(
             candidate
-            for candidate in self._refs.values()
+            for candidate in refs.values()
             if candidate.kind == ref.kind and candidate.logical_id == ref.logical_id
         )
         if not same_identity:
