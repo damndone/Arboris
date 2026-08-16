@@ -1615,7 +1615,7 @@ def test_task3_hashes_bind_policy_and_strict_wire_round_trips() -> None:
 
 def test_failure_envelope_is_serializable_without_prompt_or_provider_secret() -> None:
     failure = FailureEnvelopeV1(
-        failure_class="authorization",
+        failure_class="policy_block",
         reason_code="CONFIRMATION_STALE",
         capability_ref="capability:model.logit",
         step_ref="step:fit",
@@ -1636,7 +1636,7 @@ def test_failure_envelope_is_serializable_without_prompt_or_provider_secret() ->
 
 def test_failure_envelope_rejects_undeclared_vocabulary_at_constructor_and_wire() -> None:
     failure = FailureEnvelopeV1(
-        failure_class="authorization",
+        failure_class="policy_block",
         reason_code="CONFIRMATION_STALE",
         capability_ref="capability:model.logit",
         step_ref="step:fit",
@@ -1649,6 +1649,8 @@ def test_failure_envelope_rejects_undeclared_vocabulary_at_constructor_and_wire(
     )
     invalid_values = (
         ("failure_class", "arbitrary"),
+        ("failure_class", "authorization"),
+        ("failure_class", "partial"),
         ("reason_code", "arbitrary"),
         ("remediation_codes", ("drop-all-data",)),
     )
@@ -2158,7 +2160,7 @@ def test_draft_rejects_raw_prompt_or_secret_content_and_failure_trust_marker() -
 
     with pytest.raises(ContractError, match="trusted"):
         FailureEnvelopeV1(
-            failure_class="partial",
+            failure_class="execution_failure",
             reason_code="PARTIAL",
             capability_ref="capability:model.logit",
             step_ref="step:fit",

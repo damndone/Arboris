@@ -121,9 +121,6 @@ _FAILURE_CLASS_VALUES_V1 = frozenset(
         "policy_block",
         "execution_failure",
         "corrupted_state",
-        # Compatibility values already used by the v1.8.9 contract fixtures.
-        "authorization",
-        "partial",
     }
 )
 _FAILURE_REASON_CODE_VALUES_V1 = frozenset(
