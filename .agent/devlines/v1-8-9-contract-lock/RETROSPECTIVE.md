@@ -10,14 +10,14 @@ VERIFIED_PENDING_CLOSE
 
 ## Metrics
 
-- Failure frequency: 72/120 (60.0%; 60.0 per 100 events)
+- Failure frequency: 72/132 (54.5%; 54.5 per 100 events)
 - Repeat rate: 0/72 (0.0%)
 - Recurrence rate: 0/72 (0.0%)
-- MTTR: median=0 ms (sample=27; unresolved=45)
+- MTTR: median=0 ms (sample=28; unresolved=44)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/33 (0.0%)
+- Gate waste rate: 0/36 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -270,12 +270,15 @@ VERIFIED_PENDING_CLOSE
 - Add authority-boundary tests before implementation so collection and focused failures expose missing seams rather than allowing convenience paths to survive.
 - Adversarial tests for authority transitions must cover both the old authority category and the new initial-state category.
 - Adversarial tests should assert the public fail-closed boundary and the absence of an extractable authority field after the implementation removes the bypass surface.
+- After a quality review discovers scope drift, correct the frozen scope through the formal rescope workflow and regenerate downstream evidence before declaring readiness.
 - After all gates pass, the isolated worktree needs the minimum explicit Git metadata permission for staging and commit.
+- After every evidence-bearing handoff edit, refresh the artifact digest and append a new formal review rather than mutating historical events.
 - Allowlisted field names do not make their values safe; validate both the field kind and every string leaf.
 - Authority boundaries must resolve canonical server state and use field-specific typed vocabularies before hardening is considered complete.
 - Authority tokens must live in a server-owned registry seam rather than on the public issuer object, and wire/preview objects must be registered by the server compiler before record issuance.
 - Bound evidence integers at the public portability limit and translate all canonical or freezing traversal failures at the contract boundary.
 - Bound semantic version components before integer conversion while preserving the locked resolver error vocabulary.
+- Close a public-shape GAP on its original incident identity before treating implementation tests as approved contract evidence.
 - Compatibility fixtures cannot expand a formal vocabulary when the specification explicitly excludes the values; update fixtures to declared semantics and reject the old labels.
 - Compilation authority must require a server-owned draft registration and opaque issuer capability; a public method accepting a compiled object alone is not a trust boundary.
 - Complete the smallest missing authority seam before running behavior-focused tests, then re-run collection and focused behavior gates.
@@ -299,6 +302,7 @@ VERIFIED_PENDING_CLOSE
 - Keep review-driven contract seams failing at collection or behavior before implementing them so the new tests cannot pass accidentally.
 - Keep schema, digest, snapshot and receipt contracts composable and opaque while leaving runtime cutover to a separately authorized task.
 - Keep the exact identity duplicate guard because the focused test detects and rejects overwrite semantics.
+- Keep the final handoff digest-bound and append-only after all scope corrections.
 - Keep validation claims fact-derived and persistence bindings content-addressed while preserving each status axis independently.
 - Let devline_control calculate event hashes and keep temporary event sources limited to validated event fields.
 - Observe the missing approved public contract modules before implementing the minimal strict schemas.
@@ -471,3 +475,15 @@ VERIFIED_PENDING_CLOSE
 - #118: `7f4e2d1c-9b8a-4c6d-8e0f-1234567890ab` | 2026-08-16T03:55:00.000Z | REVIEW/task6_handoff_review | incident=`8e7d6c5b-4a3f-4210-9fed-cba987654321` | lesson_key=`task6-handoff-evidence-boundary` | event_sha256=`f69f6c91b916f77af535b9a9f273af53098d02086c07b592756000ff8d10e9b1`
 - #119: `9a8b7c6d-5e4f-4321-0fed-cba987654321` | 2026-08-16T03:56:00.000Z | GATE/task6_contract_lock_gate | incident=`0fedcba9-8765-4321-0fed-cba987654321` | lesson_key=`task6-contract-lock-gate` | event_sha256=`6d741218d6e673990a88414c6e7df452f49da4f1de6f4b361867e018f747735d`
 - #120: `1a2b3c4d-5e6f-4780-91a2-b3c4d5e6f708` | 2026-08-16T03:57:00.000Z | STATE_CHANGE/task6_ready_for_c0 | incident=`23456789-abcd-4ef0-9123-456789abcdef` | lesson_key=`task6-ready-for-c0` | event_sha256=`e20069b21d7b2eb67b5344c30e65deec638e3fb702697ae76d71ba7952c5874a`
+- #121: `28f6fb64-22d0-4bd2-8b05-e6e11aad4661` | 2026-08-16T04:05:28.150Z | STATE_CHANGE/context_rescope_required | incident=`a5c8ea9e-3242-4a22-aa82-06ea8145301b` | lesson_key=`context-pack-rescope` | event_sha256=`1a5183e642f0a20da629d332083a9bdf48906014ec935de8176211fc64b9e44e`
+- #122: `4cdb5712-eed7-45d3-81f0-986dd248e9ff` | 2026-08-16T04:05:28.194Z | STATE_CHANGE/context_rescoped | incident=`76f02e37-03d2-4e47-92fb-cede4bc9100d` | lesson_key=`context-pack-rescope` | event_sha256=`254c2f513ec215c06efbddc452df70b89dfdc2d388e3479943bc9ebdf2191601`
+- #123: `3456789a-bcde-4f01-9234-56789abcdef0` | 2026-08-16T04:07:00.000Z | REVIEW/evidence_public_shape_gap_closed | incident=`f5153a97-0616-4cd8-af7d-261102addf44` | lesson_key=`v189-evidence-public-shape-resolved` | event_sha256=`dcfeb698149ae8d8436e02c3291cdd07283fcb030dc84eca0f36b37cf0b77232`
+- #124: `456789ab-cdef-4012-9345-6789abcdef01` | 2026-08-16T04:09:00.000Z | REVIEW/task6_post_rescope_review | incident=`56789abc-def0-4123-9456-789abcdef012` | lesson_key=`task6-post-rescope-review` | event_sha256=`c87cb96b0ff94c52ba395436155ca1ad540a8d2e0b38e8aefd14ee09b73749ae`
+- #125: `6789abcd-ef01-4234-9567-89abcdef0123` | 2026-08-16T04:10:00.000Z | GATE/task6_post_rescope_gate | incident=`789abcde-f012-4345-9678-9abcdef01234` | lesson_key=`task6-post-rescope-gate` | event_sha256=`ae685f431ad34d331e00b8caf759ce1c5ee4c5e3ae644dee1898e261ef0539c6`
+- #126: `9abcdef0-1234-4567-89ab-cdef01234567` | 2026-08-16T04:11:00.000Z | STATE_CHANGE/task6_ready_for_c0_final | incident=`abcdef01-2345-4678-9abc-def012345678` | lesson_key=`task6-ready-for-c0-final` | event_sha256=`9c09cdc1e2e18126464962b13af829b783c4d6c85de92a5fc4a37f7f4fd613d4`
+- #127: `bcdef012-3456-4789-0abc-def012345678` | 2026-08-16T04:13:00.000Z | REVIEW/task6_final_handoff_review | incident=`cdef0123-4567-489a-bcde-f0123456789a` | lesson_key=`task6-final-handoff-review` | event_sha256=`e59bf298cd9c44eec9cd36a30ee503ca2eb99236ce9735efea340c362256db4c`
+- #128: `def01234-5678-49ab-cdef-0123456789ab` | 2026-08-16T04:14:00.000Z | GATE/task6_final_contract_lock_gate | incident=`ef012345-6789-4abc-def0-123456789abc` | lesson_key=`task6-final-contract-lock-gate` | event_sha256=`adbfc6cecc8cc58d0cb239b9ce19e8fa3ae3eee982bb3bf0483b51a4cc0cdcff`
+- #129: `f0123456-789a-4bcd-ef01-23456789abcd` | 2026-08-16T04:15:00.000Z | STATE_CHANGE/task6_ready_for_c0_verified | incident=`01234567-89ab-4cde-f012-3456789abcde` | lesson_key=`task6-ready-for-c0-verified` | event_sha256=`c04faf2bdd30ffea590c9ea8fb03e99b6923b858b7f8a189effa2dcbf7a7ce89`
+- #130: `12345678-9abc-4def-0123-456789abcdef` | 2026-08-16T04:17:00.000Z | REVIEW/task6_closeout_review | incident=`23456789-abcd-4ef0-9123-456789abcdef` | lesson_key=`task6-closeout-review` | event_sha256=`1b96cc1600074ed628937bc4be12c02dd308e3d461bdd57e4cc973c10aa2c0fa`
+- #131: `89abcdef-0123-4456-9789-abcdef012345` | 2026-08-16T04:18:00.000Z | GATE/task6_closeout_gate | incident=`456789ab-cdef-4012-9345-6789abcdef01` | lesson_key=`task6-closeout-gate` | event_sha256=`875d7a7102f8e23aebaf7f1183a371f9cb7c21f63e0e0457ece572b538b748a0`
+- #132: `56789abc-def0-4123-9456-789abcdef012` | 2026-08-16T04:19:00.000Z | STATE_CHANGE/task6_closeout_ready | incident=`6789abcd-ef01-4234-9567-89abcdef0123` | lesson_key=`task6-closeout-ready` | event_sha256=`ee05e82376d3feeb816b648941581f241bb6147890217ca83eb08427562a3f1b`
