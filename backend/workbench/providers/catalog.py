@@ -36,7 +36,6 @@ from workbench.contracts.common.provider import (
 )
 
 
-_DEFAULT_BUILTIN_ROOT = Path(__file__).with_name("builtin")
 _CATALOG_FIELDS = frozenset(
     {
         "provider_id",
@@ -268,10 +267,22 @@ def _load_catalog_from_root(root: Path | str) -> ProviderCatalogV1:
     )
 
 
+def _make_builtin_catalog_loader():
+    repository_builtin_root = Path(__file__).with_name("builtin")
+
+    def load_repository_builtin_catalog() -> ProviderCatalogV1:
+        return _load_catalog_from_root(repository_builtin_root)
+
+    return load_repository_builtin_catalog
+
+
+_LOAD_REPOSITORY_BUILTIN_CATALOG = _make_builtin_catalog_loader()
+
+
 def load_builtin_catalog() -> ProviderCatalogV1:
     """Load only the repository-local builtin provider manifests."""
 
-    return _load_catalog_from_root(_DEFAULT_BUILTIN_ROOT)
+    return _LOAD_REPOSITORY_BUILTIN_CATALOG()
 
 
 def load_provider_catalog() -> ProviderCatalogV1:

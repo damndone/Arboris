@@ -42,6 +42,7 @@ from workbench.contracts.common.foundation_status import (
 from workbench.contracts.evidence.envelope import (
     DenominatorV1,
     DistributionRefV1,
+    ConsumerProjectionPayloadV1,
     ConsumerProjectionV1,
     EvidenceEnvelopeV1,
     EvidenceReasonV1,
@@ -3295,6 +3296,31 @@ def test_public_builtin_loader_and_aliases_have_no_external_root_parameter(
             loader(tmp_path)  # type: ignore[call-arg]
 
 
+def test_public_builtin_loader_ignores_mutated_module_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import workbench.providers.catalog as catalog_module
+
+    baseline = catalog_module.load_builtin_catalog()
+    attacker = _provider_fixture_payload()
+    attacker["provider_id"] = "attacker.external-root"  # type: ignore[index]
+    _write_provider_manifest(tmp_path, "attacker.json", attacker)
+    monkeypatch.setattr(
+        catalog_module, "_DEFAULT_BUILTIN_ROOT", tmp_path, raising=False
+    )
+
+    for loader in (
+        catalog_module.load_builtin_catalog,
+        catalog_module.load_provider_catalog,
+        catalog_module.build_provider_catalog,
+        catalog_module.load_catalog,
+    ):
+        loaded = loader()
+        assert loaded.provider_ids == baseline.provider_ids
+        assert loaded.catalog_digest == baseline.catalog_digest
+        assert "attacker.external-root" not in loaded.provider_ids
+
+
 @pytest.mark.parametrize(
     "path_like",
     (
@@ -3584,6 +3610,75 @@ def test_task5_consumer_projection_mutations_fail_closed_with_reason_codes(
     assert error.value.code == reason_code, label
 
 
+def test_task5_consumer_projection_status_type_failure_is_stable() -> None:
+    projection = ConsumerProjectionV1.from_dict(_fixture("consumer_projection.json"))
+    with pytest.raises(EvidenceContractError) as error:
+        ConsumerProjectionPayloadV1(
+            projection_id="projection:consumer",
+            projection_ref="projection-ref:consumer",
+            projection_status=[],  # type: ignore[arg-type]
+            slots=(),
+            not_applicable_projection=projection.payload.not_applicable_projection,
+        )
+    assert error.value.code == "EVIDENCE_CONSUMER_PROJECTION_STATUS_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("module_attr", "unknown_key", "mutate", "reason_code"),
+    (
+        (
+            "_CONSUMER_PROJECTION_OUTER_FIELDS",
+            "module_widened_outer",
+            lambda raw: raw.update({"module_widened_outer": True}),
+            "EVIDENCE_CONSUMER_PROJECTION_OUTER_FIELDS_INVALID",
+        ),
+        (
+            "_CONSUMER_PROJECTION_PAYLOAD_FIELDS",
+            "module_widened_payload",
+            lambda raw: raw["payload"].update({"module_widened_payload": True}),
+            "EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID",
+        ),
+        (
+            "_CONSUMER_PROJECTION_SLOT_FIELDS",
+            "module_widened_slot",
+            lambda raw: raw["payload"]["slots"][0].update(
+                {"module_widened_slot": True}
+            ),
+            "EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID",
+        ),
+        (
+            "_CONSUMER_PROJECTION_STATUS",
+            "module_widened_status",
+            lambda raw: raw["payload"].update(
+                {"projection_status": "module_widened_status"}
+            ),
+            "EVIDENCE_CONSUMER_PROJECTION_STATUS_INVALID",
+        ),
+    ),
+)
+def test_task5_projection_schema_authority_ignores_module_allowlist_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    module_attr: str,
+    unknown_key: str,
+    mutate: object,
+    reason_code: str,
+) -> None:
+    import workbench.contracts.evidence.envelope as envelope_module
+
+    raw = _fixture("consumer_projection.json")
+    mutable_allowlist = getattr(envelope_module, module_attr)
+    monkeypatch.setattr(
+        envelope_module,
+        module_attr,
+        frozenset(set(mutable_allowlist) | {unknown_key}),
+    )
+    mutate(raw)  # type: ignore[operator]
+
+    with pytest.raises(EvidenceContractError) as error:
+        ConsumerProjectionV1.from_dict(raw)
+    assert error.value.code == reason_code
+
+
 def test_task5_old_minor_and_unknown_major_fail_closed_with_stable_codes() -> None:
     legacy = load_workflow_state(_fixture("legacy_workflow_state.json"))
     assert isinstance(legacy, WorkflowMigrationRequiredV1)
@@ -3600,9 +3695,17 @@ def test_task5_old_minor_and_unknown_major_fail_closed_with_stable_codes() -> No
         logical_id="consumer.projection",
         semantic_version="1.1",
     )
+    newer_minor = _ref(
+        kind="projection",
+        logical_id="consumer.projection",
+        semantic_version="1.2",
+    )
     resolver = ContractRefResolverV1((current, old_minor))
     assert resolver.resolve(current) == current
     assert resolver.resolve(old_minor) == old_minor
+    with pytest.raises(ContractRefError) as unsupported_minor:
+        resolver.resolve(newer_minor)
+    assert unsupported_minor.value.code == CONTRACT_UNRESOLVED
     unknown_major = ContractRefV1.from_dict(_fixture("unknown_major.json"))
     assert canonical_json_v1(unknown_major.to_dict()) == canonical_json_v1(
         _fixture("unknown_major.json")

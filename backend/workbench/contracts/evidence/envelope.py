@@ -121,7 +121,7 @@ def _consumer_projection_text(
 
 
 def _consumer_projection_wire_dict(
-    value: object, fields: set[str], code: str, name: str
+    value: object, fields: frozenset[str], code: str, name: str
 ) -> dict[str, object]:
     if type(value) is not dict or set(value) != fields:
         raise _consumer_projection_error(code, f"{name} fields are not exact")
@@ -162,7 +162,7 @@ class ConsumerProjectionNotApplicableV1:
             )
         value = _consumer_projection_wire_dict(
             value,
-            _NOT_APPLICABLE_FIELDS,
+            frozenset({"status", "reason"}),
             EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_FIELDS_INVALID,
             "not_applicable projection",
         )
@@ -227,7 +227,14 @@ class ConsumerProjectionSlotV1:
     def from_dict(cls, value: object) -> "ConsumerProjectionSlotV1":
         value = _consumer_projection_wire_dict(
             value,
-            _CONSUMER_PROJECTION_SLOT_FIELDS,
+            frozenset(
+                {
+                    "consumer",
+                    "artifact_facets",
+                    "payload_schema_ref",
+                    "source_eligible",
+                }
+            ),
             EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
             "consumer projection slot",
         )
@@ -263,7 +270,9 @@ class ConsumerProjectionPayloadV1:
             "projection_ref",
             EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID,
         )
-        if self.projection_status not in _CONSUMER_PROJECTION_STATUS:
+        if type(self.projection_status) is not str or self.projection_status not in frozenset(
+            {"available", "blocked", "not_applicable"}
+        ):
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_STATUS_INVALID,
                 "projection_status is not allowed",
@@ -301,7 +310,15 @@ class ConsumerProjectionPayloadV1:
     def from_dict(cls, value: object) -> "ConsumerProjectionPayloadV1":
         value = _consumer_projection_wire_dict(
             value,
-            _CONSUMER_PROJECTION_PAYLOAD_FIELDS,
+            frozenset(
+                {
+                    "projection_id",
+                    "projection_ref",
+                    "projection_status",
+                    "slots",
+                    "not_applicable_projection",
+                }
+            ),
             EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID,
             "consumer projection payload",
         )
@@ -330,19 +347,23 @@ class ConsumerProjectionV1:
     payload: ConsumerProjectionPayloadV1
 
     def __post_init__(self) -> None:
-        if self.contract != _CONSUMER_PROJECTION_CONTRACT:
+        if self.contract != "consumer-projection":
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_CONTRACT_INVALID,
                 "consumer projection contract is invalid",
             )
-        if self.contract_version != _CONSUMER_PROJECTION_VERSION:
+        if self.contract_version != "1.0":
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_VERSION_INVALID,
                 "consumer projection contract version is invalid",
             )
         if (
             type(self.producer_version) is not str
-            or _CONSUMER_PRODUCER_VERSION.fullmatch(self.producer_version) is None
+            or re.fullmatch(
+                r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",
+                self.producer_version,
+            )
+            is None
         ):
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_PRODUCER_INVALID,
@@ -366,7 +387,7 @@ class ConsumerProjectionV1:
     def from_dict(cls, value: object) -> "ConsumerProjectionV1":
         value = _consumer_projection_wire_dict(
             value,
-            _CONSUMER_PROJECTION_OUTER_FIELDS,
+            frozenset({"contract", "contract_version", "producer_version", "payload"}),
             EVIDENCE_CONSUMER_PROJECTION_OUTER_FIELDS_INVALID,
             "consumer projection",
         )
