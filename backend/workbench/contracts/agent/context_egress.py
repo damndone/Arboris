@@ -27,6 +27,33 @@ MATERIALIZATION_SCHEMA_V1 = "context-materialization-result.v1"
 _MAX_JSON_SAFE_INTEGER = 9_007_199_254_740_991
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+_OPAQUE_REF_SUFFIX = re.compile(r"[A-Za-z0-9]+(?:[-.:/][A-Za-z0-9]+)*")
+_OPAQUE_REF_FORBIDDEN_SEGMENTS = frozenset(
+    {
+        "address",
+        "body",
+        "credential",
+        "do",
+        "email",
+        "ignore",
+        "instruction",
+        "instructions",
+        "message",
+        "now",
+        "password",
+        "phone",
+        "previous",
+        "prompt",
+        "raw",
+        "reveal",
+        "secret",
+        "send",
+        "ssn",
+        "this",
+        "token",
+        "user",
+    }
+)
 _ISSUED_RECEIPTS: dict[tuple[int, str], object] = {}
 _MATERIALIZATION_ISSUANCES: dict[tuple[int, str], object] = {}
 
@@ -336,7 +363,9 @@ def _is_opaque_reference(value: object) -> bool:
     if prefix is None:
         return False
     suffix = value[len(prefix) :]
-    return bool(suffix) and not any(char.isspace() for char in suffix)
+    if _OPAQUE_REF_SUFFIX.fullmatch(suffix) is None:
+        return False
+    return not any(segment.casefold() in _OPAQUE_REF_FORBIDDEN_SEGMENTS for segment in re.split(r"[-.:/]", suffix))
 
 
 def _is_safe_selected_reference(value: object) -> bool:

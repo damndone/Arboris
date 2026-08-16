@@ -1193,7 +1193,10 @@ def _task3_record(
     draft_ref = issuer.register_draft(_task3_plan(policy_snapshot_ref=policy_snapshot_ref))
     compiled = issuer.compile_workflow(
         draft_ref,
-        _task3_compiled(policy_snapshot_ref=policy_snapshot_ref),
+        compiler_version="compiler:1.8.9",
+        server_execution_identity="compile:server:1",
+        preview_fingerprint="f" * 64,
+        plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
     )
     return issuer.compile_record(
         compiled,
@@ -2046,7 +2049,13 @@ def test_compilation_store_rejects_client_record_without_server_compiler_authori
     with pytest.raises(ContractError, match="authority|compiler"):
         issuer.issue(client_record)
     server_draft_ref = issuer.register_draft(_task3_plan())
-    server_compiled = issuer.compile_workflow(server_draft_ref, _task3_compiled())
+    server_compiled = issuer.compile_workflow(
+        server_draft_ref,
+        compiler_version="compiler:1.8.9",
+        server_execution_identity="compile:server:1",
+        preview_fingerprint="f" * 64,
+        plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
+    )
     server_record = issuer.compile_record(
         server_compiled,
         record_id="server-record:1",
@@ -2087,12 +2096,26 @@ def test_compilation_wire_and_private_helper_cannot_mint_server_authority() -> N
         issuer.compile_workflow(compiled_from_wire)
 
     server_draft_ref = issuer.register_draft(_task3_plan())
-    server_compiled = issuer.compile_workflow(server_draft_ref, _task3_compiled())
+    with pytest.raises(ContractError, match="compiled|input|authority"):
+        issuer.compile_workflow(server_draft_ref, compiled_from_wire)
+    server_compiled = issuer.compile_workflow(
+        server_draft_ref,
+        compiler_version="compiler:1.8.9",
+        server_execution_identity="compile:server:1",
+        preview_fingerprint="f" * 64,
+        plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
+    )
     server_record = issuer.compile_record(server_compiled, **helper_kwargs)
     assert server_record.semantic_plan_hash == compiled_from_wire.semantic_plan_hash
     parsed_draft_ref = ServerDraftPlanReferenceV1.from_dict(server_draft_ref.to_dict())
     with pytest.raises(ContractError, match="authority|draft|registration"):
-        issuer.compile_workflow(parsed_draft_ref, _task3_compiled())
+        issuer.compile_workflow(
+            parsed_draft_ref,
+            compiler_version="compiler:1.8.9",
+            server_execution_identity="compile:server:1",
+            preview_fingerprint="f" * 64,
+            plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
+        )
 
     parsed_record = CompilationRecordV1.from_dict(_fixture("compilation_record.json"))
     with pytest.raises(ContractError, match="authority|compiler"):
@@ -2229,6 +2252,8 @@ def test_egress_rejects_instruction_or_sensitive_materialization_keys() -> None:
     invalid_contexts = (
         ({"Do this now": True}, ("Do this now",)),
         ({"sk-raw-secret": {"bounded": True}}, ("sk-raw-secret",)),
+        ({"evidence:send_data_now": {"bounded": True}}, ("evidence:send_data_now",)),
+        ({"evidence:phone_5551234": {"bounded": True}}, ("evidence:phone_5551234",)),
         ({"evidence:key": {"Do this now": True}}, ("evidence:key",)),
         ({"evidence:key": {"send_data_now": True}}, ("evidence:key",)),
         ({"evidence:key": {"phone_5551234": True}}, ("evidence:key",)),
@@ -2237,6 +2262,36 @@ def test_egress_rejects_instruction_or_sensitive_materialization_keys() -> None:
     for context, selected_refs in invalid_contexts:
         with pytest.raises(ContractError, match="free|text|selection|secret|key|opaque"):
             materializer.materialize(context, selected_refs=selected_refs)
+
+
+def test_server_draft_registration_has_no_reflectable_private_mint_helper() -> None:
+    assert not hasattr(ServerDraftPlanReferenceV1, "_issue")
+
+
+def test_server_draft_registration_allocates_unique_refs_concurrently() -> None:
+    issuer = ServerCompilationRecordIssuerV1()
+    worker_count = 32
+    barrier = Barrier(worker_count)
+    results: list[ServerDraftPlanReferenceV1 | None] = [None] * worker_count
+    errors: list[BaseException] = []
+
+    def register(index: int) -> None:
+        try:
+            barrier.wait()
+            results[index] = issuer.register_draft(_task3_plan())
+        except BaseException as exc:  # pragma: no cover - assertion below reports thread failures
+            errors.append(exc)
+
+    threads = [Thread(target=register, args=(index,)) for index in range(worker_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    refs = [result.draft_ref for result in results if result is not None]
+    assert len(refs) == worker_count
+    assert len(set(refs)) == worker_count
 
 
 def test_egress_materialization_result_requires_registered_server_store() -> None:

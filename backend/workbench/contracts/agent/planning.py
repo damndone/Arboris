@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from functools import wraps
+from threading import Lock
 from typing import Any
 
 from workbench.canonical import CanonicalJSONError, canonical_json_v1, sha256_canonical
@@ -365,6 +366,8 @@ _DRAFT_DURABLE_ALLOWED_KEYS = (
 _SERVER_COMPILER_CAPABILITIES: dict[int, object] = {}
 _SERVER_COMPILER_ISSUER_CAPABILITIES: dict[int, object] = {}
 _SERVER_DRAFT_REFERENCES: dict[int, tuple[object, object, object]] = {}
+_SERVER_DRAFT_REGISTRATION_LOCK = Lock()
+_SERVER_DRAFT_SEQUENCE = 0
 _SERVER_AUTHORIZED_COMPILED_WORKFLOWS: dict[int, tuple[object, object]] = {}
 _SERVER_AUTHORIZED_RECORDS: dict[int, tuple[object, object]] = {}
 
@@ -1228,22 +1231,6 @@ class ServerDraftPlanReferenceV1:
         object.__setattr__(value, "draft_digest", draft_digest)
         return value
 
-    @classmethod
-    def _issue(
-        cls,
-        *,
-        draft_ref: str,
-        draft: DraftAgentPlanV1,
-        capability: object,
-    ) -> "ServerDraftPlanReferenceV1":
-        value = cls._new(
-            draft_ref=draft_ref,
-            semantic_plan_hash=draft.semantic_plan_hash,
-            draft_digest=sha256_canonical(draft.to_dict()),
-        )
-        _SERVER_DRAFT_REFERENCES[id(value)] = (value, capability, draft)
-        return value
-
     def to_dict(self) -> dict[str, str]:
         return {
             "schema_version": _SERVER_DRAFT_REF_SCHEMA,
@@ -1583,24 +1570,55 @@ class ServerCompilationRecordIssuerV1:
             server_draft = DraftAgentPlanV1.from_dict(draft.to_dict())
         except (PlanningContractError, TypeError, ValueError) as exc:
             raise _error("SERVER_DRAFT_INVALID", "server compiler could not register the draft plan") from exc
-        draft_ref = f"draft-plan:{len(_SERVER_DRAFT_REFERENCES) + 1}"
-        return ServerDraftPlanReferenceV1._issue(
-            draft_ref=draft_ref,
-            draft=server_draft,
-            capability=capability,
-        )
+        global _SERVER_DRAFT_SEQUENCE
+        with _SERVER_DRAFT_REGISTRATION_LOCK:
+            _SERVER_DRAFT_SEQUENCE += 1
+            draft_ref = f"draft-plan:{_SERVER_DRAFT_SEQUENCE}"
+            value = ServerDraftPlanReferenceV1._new(
+                draft_ref=draft_ref,
+                semantic_plan_hash=server_draft.semantic_plan_hash,
+                draft_digest=sha256_canonical(server_draft.to_dict()),
+            )
+            _SERVER_DRAFT_REFERENCES[id(value)] = (value, capability, server_draft)
+            return value
 
     def compile_workflow(
         self,
         draft_reference: object,
-        compiled: CompiledWorkflowV1 | None = None,
+        compiled: object | None = None,
+        *,
+        compiler_version: object = None,
+        server_execution_identity: object = None,
+        preview_fingerprint: object = None,
+        plan_diff: object = None,
     ) -> CompiledWorkflowV1:
-        """Compile only against a live server-registered draft reference."""
+        """Compile only from a live server-registered draft reference.
 
-        if type(draft_reference) is not ServerDraftPlanReferenceV1 or type(compiled) is not CompiledWorkflowV1:
+        ``compiled`` is retained as a positional compatibility trap so an old
+        caller gets a stable contract error rather than Python's ``TypeError``.
+        A client/wire compiled object is never promoted; this seam constructs
+        the compiled workflow from the server-owned draft copy itself.
+        """
+
+        if type(draft_reference) is not ServerDraftPlanReferenceV1:
             raise _error(
                 "SERVER_DRAFT_REGISTRATION_REQUIRED",
-                "server compiler requires a live registered draft reference and compiled workflow",
+                "server compiler requires a live registered draft reference",
+            )
+        if compiled is not None:
+            raise _error(
+                "SERVER_COMPILED_INPUT_FORBIDDEN",
+                "server compiler constructs compiled workflows; client compiled input is not accepted",
+            )
+        if (
+            type(compiler_version) is not str
+            or type(server_execution_identity) is not str
+            or type(preview_fingerprint) is not str
+            or type(plan_diff) is not dict
+        ):
+            raise _error(
+                "SERVER_COMPILE_INPUT_INVALID",
+                "server compiler requires explicit compiler metadata and typed plan diff",
             )
         reference_entry = _SERVER_DRAFT_REFERENCES.get(id(draft_reference))
         if reference_entry is None or reference_entry[0] is not draft_reference:
@@ -1614,11 +1632,25 @@ class ServerCompilationRecordIssuerV1:
         if (
             draft_reference.semantic_plan_hash != server_draft.semantic_plan_hash
             or draft_reference.draft_digest != sha256_canonical(server_draft.to_dict())
-            or compiled.semantic_plan_hash != server_draft.semantic_plan_hash
         ):
             raise _error("SERVER_DRAFT_HASH_MISMATCH", "compiled workflow does not match the registered server draft")
-        _SERVER_AUTHORIZED_COMPILED_WORKFLOWS[id(compiled)] = (compiled, capability)
-        return compiled
+        try:
+            server_compiled = CompiledWorkflowV1.from_draft(
+                server_draft,
+                compiler_version=compiler_version,
+                server_execution_identity=server_execution_identity,
+                preview_fingerprint=preview_fingerprint,
+                plan_diff=plan_diff,
+                risk_level=server_draft.risk_level,
+                effect=server_draft.effect,
+                resource_budget=server_draft.resource_budget,
+                contract_snapshot_refs=server_draft.contract_snapshot_refs,
+                catalog_snapshot_ref=server_draft.catalog_snapshot_ref,
+            )
+        except (AttributeError, CanonicalJSONError, RecursionError, PlanningContractError, TypeError, ValueError) as exc:
+            raise _error("SERVER_COMPILE_INVALID", "server compiler could not compile the registered draft") from exc
+        _SERVER_AUTHORIZED_COMPILED_WORKFLOWS[id(server_compiled)] = (server_compiled, capability)
+        return server_compiled
 
     def compile_record(self, compiled: CompiledWorkflowV1, **kwargs: Any) -> CompilationRecordV1:
         if type(compiled) is not CompiledWorkflowV1:
