@@ -1,0 +1,199 @@
+release: v1.8.9
+lock: contract-lock-c0
+plan_lock_commit: f3836408cf15c3e7380823e5c1b303b4467c7aec
+implementation_baseline_commit: 2ab48dbba21bc493769fe6efc7889d5416050e91
+
+# This file is deliberately not self-referential.  The C0 candidate tip is the
+# local commit that adds this manifest, the handoff, and the formal closeout
+# derivatives on top of implementation_baseline_commit.  Resolve that tip with
+# `git rev-parse HEAD` after the local commit; do not stamp it here.
+candidate_tip:
+  semantics: resulting_local_c0_closeout_commit
+  commit_sha: omitted_by_design
+  resolution_command: git rev-parse HEAD
+
+release_history:
+  release_baseline_commit: f564de63b2ca901bc76360e9ace62e89992670d3
+  integration_base_commit: f3836408cf15c3e7380823e5c1b303b4467c7aec
+  branch_start_commit: f3836408cf15c3e7380823e5c1b303b4467c7aec
+  formal_line: v1-8-9-contract-lock
+
+digest_policy:
+  algorithm: sha256
+  contract_root_representation: raw_checked_out_source_file_bytes
+  fixture_representation: raw_checked_out_fixture_bytes
+  catalog_representation: sha256_canonical_v1_catalog_digest_payload
+  semantic_version_basis: public V1/V2 type names and explicit schema/version constants; compiler:1.8.9 is an authority marker, not a contract semantic version
+
+# Every digest below was computed from the files at implementation_baseline_commit.
+# ContractRef packet digests are separately listed under builtin_catalog and are
+# canonical JSON values, not source-file hashes.
+contract_roots:
+  - id: common.contract_ref
+    path: backend/workbench/contracts/common/contract_ref.py
+    semantic_version: "1.0"
+    digest: 85459ac46e4bfb83fea2b607dd5e2bb214cd2cb60e14ed483cb932a2d1385f5e
+    public_types: [ContractRefV1, ContractRefResolverV1]
+  - id: common.foundation_status
+    path: backend/workbench/contracts/common/foundation_status.py
+    semantic_version: "1.0"
+    digest: 97f94f6dd15baf2a42dd096f4fe14ea76afd665b795e830fc610cb3361db288a
+    public_types: [ExecutionStatusV1, AvailabilityStatusV1, CompletenessStatusV1, NumericalMethodV1, InferenceBasisV1, EvaluationDesignV1, ValidationLevelV1, ValidationRequirementStatusV1, TransactionStatusV1]
+  - id: common.provider
+    path: backend/workbench/contracts/common/provider.py
+    semantic_version: "1.0"
+    digest: 619e5b2c9e451cc65c0446f2638f04b9b5f622116b99e5f0e4d17eede2255a47
+    public_types: [AdapterDeclarationV1, ExposurePathRefV1, ProviderContributionV1, TrustedExecutorRegistryV1]
+  - id: workflow.state
+    path: backend/workbench/contracts/workflow/state.py
+    semantic_version: "2.0"
+    digest: d956a65d8d5c8e6add8056b72381f0945e09e9c00a60c8c5d947231abb210aa8
+    schema_versions: ["workflow-execution-state.v2"]
+    public_types: [WorkflowExecutionStateV2, PortBindingV1, ModelBranchRefV1, PortValidationReceiptV1, WorkflowMigrationRequiredV1]
+  - id: agent.planning
+    path: backend/workbench/contracts/agent/planning.py
+    semantic_version: "1.0"
+    digest: 8c771a667f0baeb983576fcc4fc5c0fa3bb34976f4afc60cd4aba62f15ec5041
+    public_types: [DraftAgentPlanV1, CompiledWorkflowV1, CompilationRecordV1, ConfirmationBindingV1, FailureEnvelopeV1]
+    authority_marker: compiler:1.8.9
+  - id: agent.execution_admission
+    path: backend/workbench/contracts/agent/execution_admission.py
+    semantic_version: "1.0"
+    digest: 8459bbfbf01400f3411245d5d1945ae36a300a55c3a096efbb74ea3705ab349a
+    schema_versions: ["execution-admission.v1", "execution-admission-receipt.v1"]
+    public_types: [ExecutionAdmissionV1, ExecutionAdmissionReceiptV1, ExecutionAdmissionGateV1]
+  - id: agent.context_egress
+    path: backend/workbench/contracts/agent/context_egress.py
+    semantic_version: "1.0"
+    digest: 892d6f672a9de9fae50dfe2c029a97e00dc24fede045df6ca9cf35e3c6b10817
+    schema_versions: ["context-egress-gateway.v1", "context-egress-receipt.v1", "context-materialization-result.v1"]
+    public_types: [ContextEgressPolicyV1, ContextEgressGatewayV1, ContextEgressReceiptV1, ContextMaterializationResultV1]
+  - id: evidence.envelope
+    path: backend/workbench/contracts/evidence/envelope.py
+    semantic_version: "1.0"
+    digest: a3aa7ac15779077042ef3f0e15ada0df6e1aefc555723c1617f5876d98a22835
+    explicit_versions: ["consumer-projection:1.0"]
+    public_types: [EvidenceEnvelopeV1, NumericFactV1, ConsumerProjectionV1]
+  - id: evidence.persistence
+    path: backend/workbench/contracts/evidence/persistence.py
+    semantic_version: "1.0"
+    digest: 44105bfc2fdada97a92c136bf29e4e2762e4098bbc5207fa47eb27509d0023f2
+    public_types: [EvidenceCommitRequestV1, EvidenceCommitBindingV1, FailureReceiptV1, EvidencePersistencePortV1]
+  - id: prediction.holdout
+    path: backend/workbench/contracts/prediction/holdout.py
+    semantic_version: "1.0"
+    digest: ce5b694dc4cbec6157571c616993c24681fc241953366153b9f177cd3c21a426
+    schema_versions: ["holdout-seal.v1"]
+    public_types: [HoldoutSealV1, HoldoutMetricBundleV1, HoldoutAccessRequestV1, HoldoutAccessLedgerEntryV1, HoldoutReleaseDecisionV1]
+  - id: providers.catalog
+    path: backend/workbench/providers/catalog.py
+    semantic_version: "1.0"
+    digest: 35feb2ec0b6c17715c6d5feaae3bd5382e832f1153342b54964202ef9d120a2a
+    public_types: [ProviderCatalogV1]
+
+builtin_catalog:
+  root: backend/workbench/providers/builtin
+  source_files:
+    - path: backend/workbench/providers/builtin/contract_fixture.json
+      provider_id: fixture.contracts
+      semantic_version: "1.0"
+      source_sha256: d0770b5ade422a73126ec22c369c25a2366758f5ed385433767b98da7e02f7d6
+      provider_digest: df48994bb6189caf0fc526190e8bc5c123fb1d415dfe1781cb1e9fa425054c8b
+  catalog_digest: cac54a40f62620b84d288416ee09d5b04814f4dbcb2c8ee3a4595522e3e0da40
+  digest_payload_digest: cac54a40f62620b84d288416ee09d5b04814f4dbcb2c8ee3a4595522e3e0da40
+  source_filenames: [contract_fixture.json]
+  provider_manifest_inputs:
+    - provider_id: fixture.contracts
+      semantic_version: "1.0"
+      adapter_ids: [fixture.contracts.adapter]
+      path_ids: [fixture.contracts.direct]
+  declared_contract_refs:
+    - {kind: capability, logical_id: fixture.contracts.capability, semantic_version: "1.0", contract_digest: 4d0bd0e88883d6abb6fc81b0ab74a721cc34f66608eb9d7af67842a0e3098fb2}
+    - {kind: operation, logical_id: fixture.contracts.operation, semantic_version: "1.0", contract_digest: 1f2bb8ac19ac1fc00e10ce83f2202e97cb51f45d3755c1f25d12bb5f7d4a3438}
+    - {kind: step, logical_id: fixture.contracts.step, semantic_version: "1.0", contract_digest: f4bd28ed613a682b37a706dc218e978f98a2812cd7befe82bf1a8d53d3c9ed56}
+    - {kind: schema, logical_id: fixture.contracts.request, semantic_version: "1.0", contract_digest: 6acbd1b0712963d84167c5231ba5e9448c19a79f23009081613791231bfb4000}
+    - {kind: validator, logical_id: fixture.contracts.result, semantic_version: "1.0", contract_digest: 95339485ac1937f1407ab66844926b0faddf44f883f80f343f927deceb79e2fe}
+    - {kind: adapter, logical_id: fixture.contracts.adapter, semantic_version: "1.0", contract_digest: 7bd0d08f9ab9f23dad8cb65df23c66c023c71c47968cd7d295087ae576d02ec2}
+    - {kind: output, logical_id: fixture.contracts.output, semantic_version: "1.0", contract_digest: 32527ae08cf302b7bb2be9457b87b8676a814cf4efde87b400b9790939329cb1}
+    - {kind: evidence, logical_id: fixture.contracts.evidence, semantic_version: "1.0", contract_digest: d1712976f10c0a2f295faf8188e95ac35ba80892573b5963230f908cd911974b}
+    - {kind: projection, logical_id: fixture.contracts.agent, semantic_version: "1.0", contract_digest: 1d21442c1dc8e2254e5dbffa7f14cdae605e767ea55a9bc7e45aa7e97b07aab5}
+    - {kind: renderer, logical_id: fixture.contracts.renderer, semantic_version: "1.0", contract_digest: df9975dd2c8d9f559b40fc3b7bbf6e49b1f1df4e52cf760e3905b7ae70b10eb7}
+    - {kind: policy, logical_id: fixture.contracts.policy, semantic_version: "1.0", contract_digest: 8e745a5a4da947171024e4b28597e5aa000713cdf3f147638684eeeaa9a1ceea}
+  authority: manifest_inputs_only
+  external_discovery: not_allowed
+  feature_code_import_or_execution: not_performed
+
+fixtures:
+  - {path: backend/workbench/providers/builtin/contract_fixture.json, role: builtin_provider, sha256: d0770b5ade422a73126ec22c369c25a2366758f5ed385433767b98da7e02f7d6}
+  - {path: tests/fixtures/contracts/v189/compilation_record.json, role: server_compilation_record, sha256: 426132e37b26e44e4610d5b1bb6b1519ef694c0586b17b456b225b35018bdad6}
+  - {path: tests/fixtures/contracts/v189/consumer_projection.json, role: consumer_projection, sha256: 95d21726ff63cc6713b7c9c472c8dad87677aaabe7cb65f7ffa49c7bc00a12a5}
+  - {path: tests/fixtures/contracts/v189/evidence_corrupt.json, role: corrupt_evidence, sha256: 94a663485dcafc265516af7d6f0bd0816e2d8688351ce94aac01cbde3e687600}
+  - {path: tests/fixtures/contracts/v189/evidence_envelope.json, role: canonical_evidence_envelope, sha256: 851dfbefe082e9a633a5b21b3f98258bf1401d7e69ea8c06ecbdbb0446fa8acf}
+  - {path: tests/fixtures/contracts/v189/legacy_workflow_state.json, role: migration_required_legacy_state, sha256: caddbb33dd057f615a8879b3976d4eb264ef3f17a4be880796f6b5778a813a7c}
+  - {path: tests/fixtures/contracts/v189/provider_contribution.json, role: provider_declaration, sha256: d0770b5ade422a73126ec22c369c25a2366758f5ed385433767b98da7e02f7d6}
+  - {path: tests/fixtures/contracts/v189/unknown_major.json, role: unknown_major_compatibility_failure, sha256: 8f5cbcea2d6b0844cad51a14d3fb14484c4660b8ccce142a2c6d98c2fa24800f}
+  - {path: tests/fixtures/contracts/v189/workflow_state_v2.json, role: canonical_workflow_state, sha256: 3e35e7569d93f3cea7c100031a8d42bdb662fa4de51da42f0db09c94d9b440ca}
+
+tests:
+  focused_contract_lock:
+    command: "cd backend && PYTHONPATH=$PWD ../.venv/bin/python -m pytest ../tests/contracts/test_v189_contract_lock.py -q"
+    observed_result: "157 passed in 1.60s"
+    status: PASSED
+    scope: serialization, semver, canonical digest, compatibility, provider catalog, authority boundaries, security and property-like mutation/injection coverage
+  retained_existing_contract_and_registry:
+    command: "PYTHONPATH=$PWD/backend .venv/bin/python -m pytest tests/contracts/test_v181_contract_lock.py tests/contracts/test_v183_contract_lock.py tests/test_workflow_contracts_v186.py tests/test_workflow_capability_registry.py -q"
+    observed_result: "137 passed in 10.43s"
+    status: PASSED
+    scope: retained pre-v1.8.9 contract and live workflow registry compatibility
+  repository_checks:
+    - command: git diff --check
+      observed_result: exit 0
+      status: PASSED
+    - command: "PYTHONPATH=$PWD/backend .venv/bin/python -m compileall -q backend/workbench/contracts backend/workbench/providers"
+      observed_result: exit 0
+      status: PASSED
+    - command: "ruby -e 'require \"yaml\"; YAML.safe_load(File.read(\"docs/superpowers/release-trains/v1.8.9/contract-lock-manifest.yaml\"), aliases: false)'"
+      observed_result: exit 0
+      status: PASSED
+    - command: "Markdown structural check: git diff --check plus final newline check on the two Task6 Markdown/YAML files"
+      observed_result: PASSED
+      status: PASSED
+
+compatibility:
+  producer_consumer_matrix: current, old_minor, unknown_major, missing_field, unknown_field, digest_mismatch, duplicate_provider, corrupt_state, blocked_evidence, not_applicable_projection
+  stable_fail_closed_reason_codes: true
+  implicit_version_coercion: forbidden
+  live_operation_registry_equivalence: "asserted by focused tests before and after builtin catalog load"
+
+security_boundary:
+  fail_closed_inputs: [wire_input, manifest_input, provider_input, llm_input, ordinary_module_mutation, ordinary_instance_mutation, ordinary_index_mutation]
+  covered_by: tests/contracts/test_v189_contract_lock.py
+  accepted_outside_scope: arbitrary trusted-code function __closure__ monkeypatch
+  outside_scope_reason: pure-Python Contract-only tests cannot establish a process or external authority boundary for arbitrary trusted-code closure mutation
+
+scope_boundary:
+  changed_by_task6:
+    - docs/superpowers/release-trains/v1.8.9/contract-lock-manifest.yaml
+    - docs/superpowers/handoff/2026-08-15-v1.8.9-contract-lock-handoff.md
+    - formal events and RETROSPECTIVE.md generated only through scripts/devline_control.py
+  intentionally_untouched:
+    - runtime
+    - orchestrator
+    - Notebook
+    - Graph
+    - frontend
+    - feature_gate
+    - provider_live_registry
+    - scripts/gate.sh
+    - statistical implementations
+
+acceptance_status:
+  contract_lock_focused_tests: PASSED
+  retained_existing_tests: PASSED
+  browser_acceptance: NOT_VERIFIED
+  external_provider_tests: NOT_VERIFIED
+  full_release_gate: NOT_VERIFIED
+  push: NOT_PERFORMED
+  merge: NOT_PERFORMED
+  tag: NOT_PERFORMED
+  release: NOT_PERFORMED
