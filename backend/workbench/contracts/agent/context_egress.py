@@ -7,6 +7,7 @@ redacted and revalidated the actual payload.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Callable, Mapping
@@ -77,7 +78,7 @@ _OPAQUE_REF_FORBIDDEN_MARKERS = frozenset(
 )
 _ISSUED_RECEIPTS: dict[tuple[int, str], object] = {}
 _MATERIALIZATION_ISSUANCES: dict[tuple[int, str], dict[int, object]] = {}
-_MATERIALIZATION_SNAPSHOTS: dict[tuple[int, str], object] = {}
+_MATERIALIZATION_SNAPSHOTS: dict[tuple[int, str], tuple[str, str]] = {}
 
 
 class EgressContractError(ContractError):
@@ -563,38 +564,45 @@ class ContextMaterializationResultV1:
         }
 
 
-@dataclass(frozen=True)
-class _MaterializationCanonicalSnapshotV1:
-    """Private immutable server state; result objects are disposable projections."""
+_MATERIALIZATION_RECORD_FIELDS = frozenset(
+    {
+        "schema_version",
+        "result_ref",
+        "materializer_ref",
+        "redaction_policy_ref",
+        "selected_refs",
+        "redacted_refs",
+        "observed_sensitivity",
+        "materialized_context_digest",
+        "materialized_payload_digest",
+        "materialized_context",
+    }
+)
 
-    result_ref: str
-    materializer_ref: ContractRefV1
-    redaction_policy_ref: ContractRefV1
-    selected_refs: tuple[str, ...]
-    redacted_refs: tuple[str, ...]
-    observed_sensitivity: SensitivityClassV1
-    materialized_context_digest: str
-    materialized_payload_digest: str
-    materialized_context: Mapping[str, Any]
+
+def _materialization_record_payload(result: ContextMaterializationResultV1) -> dict[str, object]:
+    payload = result.to_dict()
+    payload["materialized_context"] = _plain(result.materialized_context)
+    return payload
 
 
 def _materialization_projection_matches_snapshot(
     result: object,
     snapshot: object,
 ) -> bool:
-    if type(result) is not ContextMaterializationResultV1 or type(snapshot) is not _MaterializationCanonicalSnapshotV1:
+    if (
+        type(result) is not ContextMaterializationResultV1
+        or type(snapshot) is not tuple
+        or len(snapshot) != 2
+        or type(snapshot[0]) is not str
+        or type(snapshot[1]) is not str
+    ):
         return False
     try:
+        payload = _materialization_record_payload(result)
         return (
-            result.result_ref == snapshot.result_ref
-            and result.materializer_ref == snapshot.materializer_ref
-            and result.redaction_policy_ref == snapshot.redaction_policy_ref
-            and result.selected_refs == snapshot.selected_refs
-            and result.redacted_refs == snapshot.redacted_refs
-            and result.observed_sensitivity is snapshot.observed_sensitivity
-            and result.materialized_context_digest == snapshot.materialized_context_digest
-            and result.materialized_payload_digest == snapshot.materialized_payload_digest
-            and _plain(result.materialized_context) == _plain(snapshot.materialized_context)
+            canonical_json_v1(payload) == snapshot[0]
+            and sha256_canonical(payload) == snapshot[1]
         )
     except (AttributeError, CanonicalJSONError, ContractError, RecursionError, TypeError, ValueError):
         return False
@@ -609,24 +617,56 @@ class ContextMaterializationStoreV1:
         self.materializer_ref = materializer_ref
         self.redaction_policy_ref = redaction_policy_ref
         self._issuer_token = object()
-        self._snapshots: dict[str, _MaterializationCanonicalSnapshotV1] = {}
+        self._snapshots: dict[str, tuple[str, str]] = {}
 
-    def _project(self, snapshot: _MaterializationCanonicalSnapshotV1) -> ContextMaterializationResultV1:
-        result = ContextMaterializationResultV1(
-            result_ref=snapshot.result_ref,
-            materializer_ref=snapshot.materializer_ref,
-            redaction_policy_ref=snapshot.redaction_policy_ref,
-            selected_refs=snapshot.selected_refs,
-            redacted_refs=snapshot.redacted_refs,
-            observed_sensitivity=snapshot.observed_sensitivity,
-            materialized_context_digest=snapshot.materialized_context_digest,
-            materialized_payload_digest=snapshot.materialized_payload_digest,
-            materialized_context=snapshot.materialized_context,
-            _issuer_token=self._issuer_token,
-        )
+    def _project(self, record: tuple[str, str]) -> ContextMaterializationResultV1:
+        if (
+            type(record) is not tuple
+            or len(record) != 2
+            or type(record[0]) is not str
+            or type(record[1]) is not str
+        ):
+            raise _error(
+                "EGRESS_MATERIALIZATION_STORAGE_BINDING_MISMATCH",
+                "materialization record is not an immutable canonical pair",
+            )
+        payload, record_digest = record
+        try:
+            _digest(record_digest, "materialization record digest")
+            decoded = json.loads(payload)
+            if (
+                type(decoded) is not dict
+                or set(decoded) != _MATERIALIZATION_RECORD_FIELDS
+                or canonical_json_v1(decoded) != payload
+                or sha256_canonical(decoded) != record_digest
+            ):
+                raise _error(
+                    "EGRESS_MATERIALIZATION_STORAGE_BINDING_MISMATCH",
+                    "materialization record canonical payload or digest mismatches",
+                )
+            materializer_ref = ContractRefV1.from_dict(decoded["materializer_ref"])
+            redaction_policy_ref = ContractRefV1.from_dict(decoded["redaction_policy_ref"])
+            result = ContextMaterializationResultV1(
+                result_ref=decoded["result_ref"],  # type: ignore[arg-type]
+                materializer_ref=materializer_ref,
+                redaction_policy_ref=redaction_policy_ref,
+                selected_refs=decoded["selected_refs"],  # type: ignore[arg-type]
+                redacted_refs=decoded["redacted_refs"],  # type: ignore[arg-type]
+                observed_sensitivity=_parse_sensitivity(decoded["observed_sensitivity"]),
+                materialized_context_digest=decoded["materialized_context_digest"],  # type: ignore[arg-type]
+                materialized_payload_digest=decoded["materialized_payload_digest"],  # type: ignore[arg-type]
+                materialized_context=decoded["materialized_context"],  # type: ignore[arg-type]
+                _issuer_token=self._issuer_token,
+            )
+        except EgressContractError:
+            raise
+        except (AttributeError, CanonicalJSONError, ContractError, RecursionError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise _error(
+                "EGRESS_MATERIALIZATION_STORAGE_INVALID",
+                "materialization record is not canonical JSON",
+            ) from exc
         key = (id(self._issuer_token), result.result_ref)
         _MATERIALIZATION_ISSUANCES.setdefault(key, {})[id(result)] = result
-        _MATERIALIZATION_SNAPSHOTS[key] = snapshot
         return result
 
     def materialize(self, context: dict[str, object], *, selected_refs: tuple[str, ...]) -> ContextMaterializationResultV1:
@@ -652,19 +692,27 @@ class ContextMaterializationStoreV1:
         redacted, observed, redacted_refs = _classify_and_redact(selected_context)
         frozen = _frozen_mapping(redacted, "materialized_context")
         digest = sha256_canonical(_plain(frozen))
-        snapshot = _MaterializationCanonicalSnapshotV1(
-            result_ref=f"materialization:{len(self._snapshots) + 1}",
-            materializer_ref=self.materializer_ref,
-            redaction_policy_ref=self.redaction_policy_ref,
-            selected_refs=selected,
-            redacted_refs=redacted_refs,
-            observed_sensitivity=observed,
-            materialized_context_digest=digest,
-            materialized_payload_digest=digest,
-            materialized_context=frozen,
+        result_ref = f"materialization:{len(self._snapshots) + 1}"
+        payload = {
+            "schema_version": MATERIALIZATION_SCHEMA_V1,
+            "result_ref": result_ref,
+            "materializer_ref": self.materializer_ref.to_dict(),
+            "redaction_policy_ref": self.redaction_policy_ref.to_dict(),
+            "selected_refs": list(selected),
+            "redacted_refs": list(redacted_refs),
+            "observed_sensitivity": observed.value,
+            "materialized_context_digest": digest,
+            "materialized_payload_digest": digest,
+            "materialized_context": _plain(frozen),
+        }
+        record = (
+            canonical_json_v1(payload),
+            sha256_canonical(payload),
         )
-        self._snapshots[snapshot.result_ref] = snapshot
-        return self._project(snapshot)
+        key = (id(self._issuer_token), result_ref)
+        _MATERIALIZATION_SNAPSHOTS[key] = record
+        self._snapshots[result_ref] = record
+        return self._project(record)
 
     @classmethod
     def is_server_issued(cls, result: object) -> bool:
@@ -679,10 +727,16 @@ class ContextMaterializationStoreV1:
     def resolve(self, result_ref: str) -> ContextMaterializationResultV1:
         if type(result_ref) is not str:
             raise _error("EGRESS_MATERIALIZATION_AUTHORITY_REQUIRED", "materialization ref is invalid")
-        snapshot = self._snapshots.get(result_ref)
-        if snapshot is None:
+        record = self._snapshots.get(result_ref)
+        authority = _MATERIALIZATION_SNAPSHOTS.get((id(self._issuer_token), result_ref))
+        if record is None or authority is None:
             raise _error("EGRESS_MATERIALIZATION_AUTHORITY_REQUIRED", "materialization result is not server-owned")
-        return self._project(snapshot)
+        if record != authority:
+            raise _error(
+                "EGRESS_MATERIALIZATION_STORAGE_BINDING_MISMATCH",
+                "materialization store record is not bound to the server registry",
+            )
+        return self._project(authority)
 
 
 @dataclass(frozen=True)

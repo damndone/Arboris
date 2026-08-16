@@ -2838,3 +2838,103 @@ def test_plan_wire_and_register_reject_natural_language_intent_and_effect() -> N
     object.__setattr__(draft, "effect", "please delete every dataset")
     with pytest.raises(ContractError, match="effect|enum|allowlist|draft"):
         ServerCompilationRecordIssuerV1().register_draft(draft)
+
+
+def test_holdout_internal_snapshot_reflection_cannot_rollback_canonical_state() -> None:
+    seal, metric_store, metric_reference = _task3_holdout_authority()
+    store = HoldoutSealStoreV1(metric_bundle_store=metric_store)
+    reference = store.issue(seal, metric_bundle_reference=metric_reference)
+    first_request = HoldoutAccessRequestV1(
+        access_id="holdout-access:internal-reflection:1",
+        principal_ref=seal.principal_ref,
+        kind=HoldoutAccessKindV1.DECLARED_EVALUATION,
+        metric_refs=seal.metric_refs,
+        metric_bundle_digest=seal.metric_bundle_digest,
+    )
+    assert store.consume(reference, first_request).allowed is True
+
+    stored = vars(store)["_current"][seal.seal_id]
+    try:
+        vars(stored)["status"] = "sealed"
+        vars(stored)["transition_history"] = ("sealed",)
+        vars(stored)["access_ledger"] = ()
+    except TypeError:
+        pass
+
+    replay = store.consume(
+        reference,
+        replace(first_request, access_id="holdout-access:internal-reflection:2"),
+    )
+    assert replay.allowed is False
+    assert replay.reason_code in {"HOLDOUT_STALE_STATE", "HOLDOUT_LEDGER_CLOSED"}
+    current = store.resolve(store.current_reference(seal.seal_id))
+    assert current.status == "closed"
+    assert [entry.decision for entry in current.access_ledger] == ["allowed", "rejected"]
+
+
+def test_egress_internal_snapshot_reflection_cannot_replace_registry_payload() -> None:
+    policy_ref = _ref(kind="egress-policy", logical_id="provider.remote.internal-reflection")
+    policy = ContextEgressPolicyV1(
+        policy_ref=policy_ref,
+        destination="remote",
+        provider_ref="provider:remote:internal-reflection",
+        allowed_sensitivity=(SensitivityClassV1.PUBLIC,),
+        max_token_budget=1000,
+        max_row_budget=100,
+        max_time_budget_ms=5000,
+    )
+    materializer = ContextMaterializationStoreV1(
+        materializer_ref=_ref(kind="materializer", logical_id="server.context.internal-reflection"),
+        redaction_policy_ref=_ref(kind="redaction-policy", logical_id="strict"),
+    )
+    result = materializer.materialize(
+        {"evidence:fact:internal-reflection": {"bounded": True}},
+        selected_refs=("evidence:fact:internal-reflection",),
+    )
+    gateway = ContextEgressGatewayV1.from_materialization_result(
+        result,
+        request_id="egress-request:internal-reflection",
+        destination="remote",
+        provider_ref=policy.provider_ref,
+        sensitivity_policy_ref=policy_ref,
+        sensitivity=SensitivityClassV1.PUBLIC,
+        token_budget=10,
+        row_budget=1,
+        time_budget_ms=100,
+        purpose_ref="purpose:internal-reflection",
+        requested_at="2026-08-15T17:02:00+00:00",
+        expires_at="2026-08-15T18:00:00+00:00",
+    )
+    mutated = {
+        "evidence:fact:internal-reflection": {
+            "bounded": True,
+            "raw": "RAW_SECRET",
+        }
+    }
+    mutated_digest = sha256_canonical(mutated)
+    stored = vars(materializer)["_snapshots"][result.result_ref]
+    try:
+        vars(stored)["materialized_context"] = mutated
+        vars(stored)["materialized_context_digest"] = mutated_digest
+        vars(stored)["materialized_payload_digest"] = mutated_digest
+    except TypeError:
+        pass
+    object.__setattr__(gateway, "materialized_context_digest", mutated_digest)
+
+    issuer = ContextEgressReceiptIssuerV1(
+        policy,
+        materializer_store=materializer,
+        clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+    )
+    record_payload = json.loads(stored[0])
+    record_payload["materialized_context"] = mutated
+    record_payload["materialized_context_digest"] = mutated_digest
+    record_payload["materialized_payload_digest"] = mutated_digest
+    synchronized_mutation = (
+        canonical_json_v1(record_payload),
+        sha256_canonical(record_payload),
+    )
+    for replacement in (synchronized_mutation[0], synchronized_mutation):
+        vars(materializer)["_snapshots"][result.result_ref] = replacement
+        with pytest.raises(ContractError, match="authority|digest|materializ|registry"):
+            issuer.issue(gateway)

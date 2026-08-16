@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from threading import RLock
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -9,7 +10,7 @@ from enum import Enum
 from functools import wraps
 from typing import Any
 
-from workbench.canonical import CanonicalJSONError, sha256_canonical
+from workbench.canonical import CanonicalJSONError, canonical_json_v1, sha256_canonical
 from workbench.contracts.common.envelope import ContractError, freeze_json, thaw_json
 
 
@@ -22,6 +23,7 @@ _REQUIRED_DEVELOPMENT_HASHES = frozenset(
     }
 )
 _HOLDOUT_SEAL_ISSUERS: dict[int, object] = {}
+_HOLDOUT_CANONICAL_RECORDS: dict[tuple[int, str], tuple[str, str]] = {}
 
 
 class HoldoutContractError(ContractError):
@@ -431,21 +433,6 @@ class HoldoutReleaseDecisionV1:
 
 
 @dataclass(frozen=True)
-class _HoldoutCanonicalStateV1:
-    """Private state snapshot; returned seal projections are never authoritative."""
-
-    seal_id: str
-    principal_ref: str
-    development_hashes: tuple[tuple[str, str], ...]
-    metric_release_bundle_ref: str
-    metric_bundle_digest: str
-    metric_refs: tuple[str, ...]
-    status: str
-    transition_history: tuple[str, ...]
-    access_ledger: tuple[HoldoutAccessLedgerEntryV1, ...]
-
-
-@dataclass(frozen=True)
 class HoldoutSealV1:
     seal_id: str
     principal_ref: str
@@ -624,46 +611,71 @@ class HoldoutSealStoreV1:
         self.metric_bundle_store = metric_bundle_store
         self._issuer_token = object()
         _HOLDOUT_SEAL_ISSUERS[id(self._issuer_token)] = self._issuer_token
-        self._current: dict[str, _HoldoutCanonicalStateV1] = {}
+        self._current: dict[str, tuple[str, str]] = {}
         self._issued_references: dict[int, tuple[object, str, str]] = {}
         self._lock = RLock()
 
     @staticmethod
-    def _snapshot(seal: HoldoutSealV1) -> _HoldoutCanonicalStateV1:
-        return _HoldoutCanonicalStateV1(
-            seal_id=seal.seal_id,
-            principal_ref=seal.principal_ref,
-            development_hashes=tuple(sorted(seal.development_hashes.items())),
-            metric_release_bundle_ref=seal.metric_release_bundle_ref,
-            metric_bundle_digest=seal.metric_bundle_digest,
-            metric_refs=tuple(seal.metric_refs),
-            status=seal.status,
-            transition_history=tuple(seal.transition_history),
-            access_ledger=tuple(
-                HoldoutAccessLedgerEntryV1.from_dict(entry.to_dict())
-                for entry in seal.access_ledger
-            ),
-        )
+    def _encode(seal: HoldoutSealV1) -> tuple[str, str]:
+        payload = seal.to_dict()
+        return canonical_json_v1(payload), sha256_canonical(payload)
 
-    def _projection(self, snapshot: _HoldoutCanonicalStateV1) -> HoldoutSealV1:
-        return HoldoutSealV1(
-            seal_id=snapshot.seal_id,
-            principal_ref=snapshot.principal_ref,
-            development_hashes=dict(snapshot.development_hashes),
-            metric_release_bundle_ref=snapshot.metric_release_bundle_ref,
-            metric_bundle_digest=snapshot.metric_bundle_digest,
-            metric_refs=snapshot.metric_refs,
-            status=snapshot.status,
-            transition_history=snapshot.transition_history,
-            access_ledger=tuple(
-                HoldoutAccessLedgerEntryV1.from_dict(entry.to_dict())
-                for entry in snapshot.access_ledger
-            ),
-            _issuer_token=self._issuer_token,
-        )
+    def _projection(self, record: tuple[str, str]) -> HoldoutSealV1:
+        if (
+            type(record) is not tuple
+            or len(record) != 2
+            or type(record[0]) is not str
+            or type(record[1]) is not str
+        ):
+            raise _error(
+                "HOLDOUT_STATE_STORAGE_BINDING_MISMATCH",
+                "holdout state record is not an immutable canonical pair",
+            )
+        payload, record_digest = record
+        try:
+            _digest(record_digest, "holdout state record digest")
+            decoded = json.loads(payload)
+            if (
+                type(decoded) is not dict
+                or canonical_json_v1(decoded) != payload
+                or sha256_canonical(decoded) != record_digest
+            ):
+                raise _error(
+                    "HOLDOUT_STATE_STORAGE_BINDING_MISMATCH",
+                    "holdout state record canonical payload or digest mismatches",
+                )
+            projection = HoldoutSealV1.from_dict(decoded)
+        except HoldoutContractError:
+            raise
+        except (CanonicalJSONError, RecursionError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise _error(
+                "HOLDOUT_STATE_STORAGE_INVALID",
+                "holdout state record is not canonical JSON",
+            ) from exc
+        object.__setattr__(projection, "_issuer_token", self._issuer_token)
+        return projection
 
-    def _new_reference(self, snapshot: _HoldoutCanonicalStateV1) -> ServerHoldoutSealReferenceV1:
-        projection = self._projection(snapshot)
+    def _store(self, seal: HoldoutSealV1) -> tuple[str, str]:
+        record = self._encode(seal)
+        key = (id(self._issuer_token), seal.seal_id)
+        _HOLDOUT_CANONICAL_RECORDS[key] = record
+        self._current[seal.seal_id] = record
+        return record
+
+    def _current_record(self, seal_id: str) -> tuple[str, str]:
+        record = self._current.get(seal_id)
+        authority = _HOLDOUT_CANONICAL_RECORDS.get((id(self._issuer_token), seal_id))
+        if record is None or authority is None:
+            raise _error("HOLDOUT_SERVER_SEAL_UNRESOLVED", "server holdout seal is unavailable")
+        if record != authority:
+            raise _error(
+                "HOLDOUT_STATE_STORAGE_BINDING_MISMATCH",
+                "holdout store record is not bound to the server canonical registry",
+            )
+        return authority
+
+    def _new_reference(self, record: tuple[str, str]) -> ServerHoldoutSealReferenceV1:
+        projection = self._projection(record)
         reference = ServerHoldoutSealReferenceV1._issue(projection, self._issuer_token)
         self._issued_references[id(reference)] = (
             reference,
@@ -705,11 +717,9 @@ class HoldoutSealStoreV1:
                 "seal must bind the complete server-resolved metric bundle",
             )
         with self._lock:
-            if seal.seal_id in self._current:
+            if seal.seal_id in self._current or (id(self._issuer_token), seal.seal_id) in _HOLDOUT_CANONICAL_RECORDS:
                 raise _error("HOLDOUT_DUPLICATE_SEAL", "seal is already issued by this store")
-            snapshot = self._snapshot(seal)
-            self._current[seal.seal_id] = snapshot
-            return self._new_reference(snapshot)
+            return self._new_reference(self._store(seal))
 
     def _resolve_unlocked(self, reference: ServerHoldoutSealReferenceV1) -> HoldoutSealV1:
         if type(reference) is not ServerHoldoutSealReferenceV1 or reference._issuer_token is not self._issuer_token:
@@ -722,10 +732,7 @@ class HoldoutSealStoreV1:
             or issued[2] != reference.state_digest
         ):
             raise _error("HOLDOUT_SERVER_REFERENCE_REQUIRED", "holdout reference projection was mutated")
-        snapshot = self._current.get(reference.seal_id)
-        if snapshot is None:
-            raise _error("HOLDOUT_SERVER_SEAL_UNRESOLVED", "server holdout seal is unavailable")
-        return self._projection(snapshot)
+        return self._projection(self._current_record(reference.seal_id))
 
     def resolve(self, reference: ServerHoldoutSealReferenceV1) -> HoldoutSealV1:
         with self._lock:
@@ -734,10 +741,7 @@ class HoldoutSealStoreV1:
     def current_reference(self, seal_id: str) -> ServerHoldoutSealReferenceV1:
         with self._lock:
             _text(seal_id, "seal_id")
-            seal = self._current.get(seal_id)
-            if seal is None:
-                raise _error("HOLDOUT_SERVER_SEAL_UNRESOLVED", "server holdout seal is unavailable")
-            return self._new_reference(seal)
+            return self._new_reference(self._current_record(seal_id))
 
     def consume(self, reference: ServerHoldoutSealReferenceV1, request: HoldoutAccessRequestV1) -> HoldoutReleaseDecisionV1:
         if type(request) is not HoldoutAccessRequestV1:
@@ -767,7 +771,7 @@ class HoldoutSealStoreV1:
                     access_ledger=(*current.access_ledger, entry),
                     _issuer_token=self._issuer_token,
                 )
-                self._current[current.seal_id] = self._snapshot(denied)
+                self._store(denied)
                 return HoldoutReleaseDecisionV1(allowed=False, reason_code="HOLDOUT_STALE_STATE", seal=denied)
             before = _parse_status(current.status)
             allowed = False
@@ -818,7 +822,7 @@ class HoldoutSealStoreV1:
                 _issuer_token=self._issuer_token,
             )
             decision = HoldoutReleaseDecisionV1(allowed=allowed, reason_code=reason, seal=next_seal)
-            self._current[current.seal_id] = self._snapshot(decision.seal)
+            self._store(decision.seal)
             return decision
 
 
