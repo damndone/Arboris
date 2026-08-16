@@ -3342,7 +3342,16 @@ def test_provider_catalog_and_nested_declarations_reject_ordinary_mutation() -> 
         with pytest.raises(AttributeError):
             object.__setattr__(value, "attacker_field", "forged")
 
-    with pytest.raises(FrozenInstanceError):
+    for value, field, forged in (
+        (catalog, "providers", ()),
+        (provider, "provider_id", "forged.provider"),
+        (path, "path_id", "forged.path"),
+        (adapter, "adapter_id", "forged.adapter"),
+    ):
+        with pytest.raises(AttributeError):
+            object.__setattr__(value, field, forged)
+
+    with pytest.raises(AttributeError):
         catalog.providers = ()  # type: ignore[misc]
     with pytest.raises(TypeError):
         catalog.providers[0] = provider  # type: ignore[index]
@@ -3677,13 +3686,22 @@ def test_task5_consumer_projection_classes_reject_ordinary_mutation() -> None:
         with pytest.raises(AttributeError):
             object.__setattr__(value, "attacker_field", "forged")
 
-    with pytest.raises(FrozenInstanceError):
+    for value, field, forged in (
+        (not_applicable, "reason", "forged.reason"),
+        (slot, "artifact_facets", ("forged",)),
+        (payload, "slots", ()),
+        (projection, "producer_version", "forged.version"),
+    ):
+        with pytest.raises(AttributeError):
+            object.__setattr__(value, field, forged)
+
+    with pytest.raises(AttributeError):
         not_applicable.reason = "forged"  # type: ignore[misc]
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(AttributeError):
         slot.artifact_facets = ("forged",)  # type: ignore[misc]
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(AttributeError):
         payload.projection_id = "forged"  # type: ignore[misc]
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(AttributeError):
         projection.producer_version = "forged"  # type: ignore[misc]
     with pytest.raises(TypeError):
         slot.artifact_facets[0] = "forged"  # type: ignore[index]

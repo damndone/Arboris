@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable, Mapping
+from collections import namedtuple
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -128,22 +129,42 @@ def _consumer_projection_wire_dict(
     return value
 
 
-@dataclass(frozen=True, slots=True)
-class ConsumerProjectionNotApplicableV1:
+class _StrictValueTuple:
+    """Tuple-backed value base with dataclass-like same-type equality."""
+
+    __slots__ = ()
+    __hash__ = tuple.__hash__
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not type(self):
+            return NotImplemented
+        return tuple.__eq__(self, other)  # type: ignore[arg-type]
+
+
+class ConsumerProjectionNotApplicableV1(
+    _StrictValueTuple,
+    namedtuple(
+        "_ConsumerProjectionNotApplicableV1Base",
+        ("status", "reason"),
+        module=__name__,
+    ),
+):
+    __slots__ = ()
     status: str
     reason: str
 
-    def __post_init__(self) -> None:
-        if self.status != "not_applicable":
+    def __new__(cls, status: str, reason: str) -> "ConsumerProjectionNotApplicableV1":
+        if status != "not_applicable":
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_STATUS_INVALID,
                 "not_applicable status must be not_applicable",
             )
         _consumer_projection_text(
-            self.reason,
+            reason,
             "not_applicable.reason",
             EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_REASON_INVALID,
         )
+        return tuple.__new__(cls, (status, reason))
 
     def to_dict(self) -> dict[str, str]:
         return {"status": self.status, "reason": self.reason}
@@ -172,20 +193,33 @@ class ConsumerProjectionNotApplicableV1:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class ConsumerProjectionSlotV1:
+class ConsumerProjectionSlotV1(
+    _StrictValueTuple,
+    namedtuple(
+        "_ConsumerProjectionSlotV1Base",
+        ("consumer", "artifact_facets", "payload_schema_ref", "source_eligible"),
+        module=__name__,
+    ),
+):
+    __slots__ = ()
     consumer: str
     artifact_facets: tuple[str, ...]
     payload_schema_ref: str
     source_eligible: bool
 
-    def __post_init__(self) -> None:
+    def __new__(
+        cls,
+        consumer: str,
+        artifact_facets: list[str] | tuple[str, ...],
+        payload_schema_ref: str,
+        source_eligible: bool,
+    ) -> "ConsumerProjectionSlotV1":
         _consumer_projection_text(
-            self.consumer,
+            consumer,
             "slot.consumer",
             EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
         )
-        if not isinstance(self.artifact_facets, (list, tuple)):
+        if not isinstance(artifact_facets, (list, tuple)):
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
                 "slot.artifact_facets must be an array",
@@ -196,24 +230,27 @@ class ConsumerProjectionSlotV1:
                 "slot.artifact_facets[]",
                 EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
             )
-            for item in self.artifact_facets
+            for item in artifact_facets
         )
         if len(facets) != len(set(facets)):
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
                 "slot.artifact_facets must be unique",
             )
-        object.__setattr__(self, "artifact_facets", facets)
         _consumer_projection_text(
-            self.payload_schema_ref,
+            payload_schema_ref,
             "slot.payload_schema_ref",
             EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
         )
-        if type(self.source_eligible) is not bool:
+        if type(source_eligible) is not bool:
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
                 "slot.source_eligible must be a boolean",
             )
+        return tuple.__new__(
+            cls,
+            (consumer, facets, payload_schema_ref, source_eligible),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -251,51 +288,80 @@ class ConsumerProjectionSlotV1:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class ConsumerProjectionPayloadV1:
+class ConsumerProjectionPayloadV1(
+    _StrictValueTuple,
+    namedtuple(
+        "_ConsumerProjectionPayloadV1Base",
+        (
+            "projection_id",
+            "projection_ref",
+            "projection_status",
+            "slots",
+            "not_applicable_projection",
+        ),
+        module=__name__,
+    ),
+):
+    __slots__ = ()
     projection_id: str
     projection_ref: str
     projection_status: str
     slots: tuple[ConsumerProjectionSlotV1, ...]
     not_applicable_projection: ConsumerProjectionNotApplicableV1
 
-    def __post_init__(self) -> None:
+    def __new__(
+        cls,
+        projection_id: str,
+        projection_ref: str,
+        projection_status: str,
+        slots: list[ConsumerProjectionSlotV1] | tuple[ConsumerProjectionSlotV1, ...],
+        not_applicable_projection: ConsumerProjectionNotApplicableV1,
+    ) -> "ConsumerProjectionPayloadV1":
         _consumer_projection_text(
-            self.projection_id,
+            projection_id,
             "projection_id",
             EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID,
         )
         _consumer_projection_text(
-            self.projection_ref,
+            projection_ref,
             "projection_ref",
             EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID,
         )
-        if type(self.projection_status) is not str or self.projection_status not in frozenset(
+        if type(projection_status) is not str or projection_status not in frozenset(
             {"available", "blocked", "not_applicable"}
         ):
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_STATUS_INVALID,
                 "projection_status is not allowed",
             )
-        if not isinstance(self.slots, (list, tuple)) or any(
-            type(slot) is not ConsumerProjectionSlotV1 for slot in self.slots
+        if not isinstance(slots, (list, tuple)) or any(
+            type(slot) is not ConsumerProjectionSlotV1 for slot in slots
         ):
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
                 "slots must contain ConsumerProjectionSlotV1 values",
             )
-        slots = tuple(self.slots)
-        if len({slot.consumer for slot in slots}) != len(slots):
+        normalized_slots = tuple(slots)
+        if len({slot.consumer for slot in normalized_slots}) != len(normalized_slots):
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
                 "slots must have unique consumers",
             )
-        object.__setattr__(self, "slots", slots)
-        if type(self.not_applicable_projection) is not ConsumerProjectionNotApplicableV1:
+        if type(not_applicable_projection) is not ConsumerProjectionNotApplicableV1:
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_FIELDS_INVALID,
                 "not_applicable_projection has an invalid type",
             )
+        return tuple.__new__(
+            cls,
+            (
+                projection_id,
+                projection_ref,
+                projection_status,
+                normalized_slots,
+                not_applicable_projection,
+            ),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -339,29 +405,42 @@ class ConsumerProjectionPayloadV1:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class ConsumerProjectionV1:
+class ConsumerProjectionV1(
+    _StrictValueTuple,
+    namedtuple(
+        "_ConsumerProjectionV1Base",
+        ("contract", "contract_version", "producer_version", "payload"),
+        module=__name__,
+    ),
+):
+    __slots__ = ()
     contract: str
     contract_version: str
     producer_version: str
     payload: ConsumerProjectionPayloadV1
 
-    def __post_init__(self) -> None:
-        if self.contract != "consumer-projection":
+    def __new__(
+        cls,
+        contract: str,
+        contract_version: str,
+        producer_version: str,
+        payload: ConsumerProjectionPayloadV1,
+    ) -> "ConsumerProjectionV1":
+        if contract != "consumer-projection":
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_CONTRACT_INVALID,
                 "consumer projection contract is invalid",
             )
-        if self.contract_version != "1.0":
+        if contract_version != "1.0":
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_VERSION_INVALID,
                 "consumer projection contract version is invalid",
             )
         if (
-            type(self.producer_version) is not str
+            type(producer_version) is not str
             or re.fullmatch(
                 r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",
-                self.producer_version,
+                producer_version,
             )
             is None
         ):
@@ -369,11 +448,15 @@ class ConsumerProjectionV1:
                 EVIDENCE_CONSUMER_PROJECTION_PRODUCER_INVALID,
                 "consumer projection producer version is invalid",
             )
-        if type(self.payload) is not ConsumerProjectionPayloadV1:
+        if type(payload) is not ConsumerProjectionPayloadV1:
             raise _consumer_projection_error(
                 EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID,
                 "consumer projection payload has an invalid type",
             )
+        return tuple.__new__(
+            cls,
+            (contract, contract_version, producer_version, payload),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {

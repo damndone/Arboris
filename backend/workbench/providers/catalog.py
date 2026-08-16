@@ -10,8 +10,8 @@ import json
 import os
 import stat
 import unicodedata
+from collections import namedtuple
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from types import MappingProxyType
 from typing import Any
@@ -134,14 +134,58 @@ def _provider_error(error: ContractRefError) -> ProviderContractError:
     return ProviderContractError(PROVIDER_REF_INVALID)
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderCatalogV1:
+class _StrictValueTuple:
+    __slots__ = ()
+    __hash__ = tuple.__hash__
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not type(self):
+            return NotImplemented
+        return tuple.__eq__(self, other)  # type: ignore[arg-type]
+
+
+class ProviderCatalogV1(
+    _StrictValueTuple,
+    namedtuple(
+        "_ProviderCatalogV1Base",
+        ("providers", "source_filenames", "contract_resolver", "catalog_digest"),
+        module=__name__,
+    ),
+):
     """Immutable catalog projection produced from fixed builtin manifests."""
+
+    __slots__ = ()
 
     providers: tuple[ProviderContributionV1, ...]
     source_filenames: tuple[str, ...]
     contract_resolver: ContractRefResolverV1
     catalog_digest: str
+
+    def __new__(
+        cls,
+        providers: tuple[ProviderContributionV1, ...],
+        source_filenames: tuple[str, ...],
+        contract_resolver: ContractRefResolverV1,
+        catalog_digest: str,
+    ) -> "ProviderCatalogV1":
+        if type(providers) is not tuple or any(
+            type(provider) is not ProviderContributionV1 for provider in providers
+        ):
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "providers")
+        if type(source_filenames) is not tuple or any(
+            type(filename) is not str for filename in source_filenames
+        ):
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "source_filenames")
+        if len(source_filenames) != len(providers):
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "catalog rows")
+        if type(contract_resolver) is not ContractRefResolverV1:
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "contract_resolver")
+        if type(catalog_digest) is not str:
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "catalog_digest")
+        return tuple.__new__(
+            cls,
+            (providers, source_filenames, contract_resolver, catalog_digest),
+        )
 
     @property
     def digest(self) -> str:

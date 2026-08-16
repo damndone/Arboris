@@ -8,8 +8,8 @@ the trusted registry below only records and checks a later server-owned join.
 from __future__ import annotations
 
 import re
+from collections import namedtuple
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
@@ -120,9 +120,33 @@ def _optional_ref(value: object, name: str) -> ContractRefV1 | None:
     return _contract_ref(value, name)
 
 
-@dataclass(frozen=True, slots=True)
-class AdapterDeclarationV1:
+class _StrictValueTuple:
+    __slots__ = ()
+    __hash__ = tuple.__hash__
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not type(self):
+            return NotImplemented
+        return tuple.__eq__(self, other)  # type: ignore[arg-type]
+
+
+class AdapterDeclarationV1(
+    _StrictValueTuple,
+    namedtuple(
+        "_AdapterDeclarationV1Base",
+        (
+            "adapter_id",
+            "semantic_version",
+            "request_schema_ref",
+            "executor_ref",
+            "result_validator_ref",
+            "output_refs",
+        ),
+        module=__name__,
+    ),
+):
     """One version-pinned adapter contract, kept as an inseparable group."""
+    __slots__ = ()
 
     adapter_id: str
     semantic_version: str
@@ -131,18 +155,37 @@ class AdapterDeclarationV1:
     result_validator_ref: ContractRefV1
     output_refs: tuple[ContractRefV1, ...]
 
-    def __post_init__(self) -> None:
-        _text(self.adapter_id, "adapter_id")
-        _version(self.semantic_version)
-        if type(self.request_schema_ref) is not ContractRefV1:
+    def __new__(
+        cls,
+        adapter_id: str,
+        semantic_version: str,
+        request_schema_ref: ContractRefV1,
+        executor_ref: str,
+        result_validator_ref: ContractRefV1,
+        output_refs: tuple[ContractRefV1, ...],
+    ) -> "AdapterDeclarationV1":
+        _text(adapter_id, "adapter_id")
+        _version(semantic_version)
+        if type(request_schema_ref) is not ContractRefV1:
             raise ProviderContractError(PROVIDER_REF_INVALID, "request_schema_ref")
-        if type(self.result_validator_ref) is not ContractRefV1:
+        if type(result_validator_ref) is not ContractRefV1:
             raise ProviderContractError(PROVIDER_REF_INVALID, "result_validator_ref")
-        _executor_ref(self.executor_ref)
-        if type(self.output_refs) is not tuple or not self.output_refs:
+        _executor_ref(executor_ref)
+        if type(output_refs) is not tuple or not output_refs:
             raise ProviderContractError(PROVIDER_REF_INVALID, "output_refs")
-        if any(type(ref) is not ContractRefV1 for ref in self.output_refs):
+        if any(type(ref) is not ContractRefV1 for ref in output_refs):
             raise ProviderContractError(PROVIDER_REF_INVALID, "output_refs")
+        return tuple.__new__(
+            cls,
+            (
+                adapter_id,
+                semantic_version,
+                request_schema_ref,
+                executor_ref,
+                result_validator_ref,
+                output_refs,
+            ),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -175,9 +218,29 @@ class AdapterDeclarationV1:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class ExposurePathRefV1:
+class ExposurePathRefV1(
+    _StrictValueTuple,
+    namedtuple(
+        "_ExposurePathRefV1Base",
+        (
+            "path_id",
+            "semantic_version",
+            "exposure",
+            "capability_ref",
+            "operation_ref",
+            "step_contract_ref",
+            "family_contract_ref",
+            "execution_adapter_ref",
+            "result_contract_refs",
+            "evidence_contract_refs",
+            "projection_refs",
+        ),
+        module=__name__,
+    ),
+):
     """A path row composed solely from existing versioned refs."""
+
+    __slots__ = ()
 
     path_id: str
     semantic_version: str
@@ -191,32 +254,64 @@ class ExposurePathRefV1:
     evidence_contract_refs: tuple[ContractRefV1, ...]
     projection_refs: Mapping[str, ContractRefV1]
 
-    def __post_init__(self) -> None:
-        _text(self.path_id, "path_id")
-        _version(self.semantic_version)
-        if self.exposure not in {"direct", "composition", "read_only", "closed"}:
+    def __new__(
+        cls,
+        path_id: str,
+        semantic_version: str,
+        exposure: str,
+        capability_ref: ContractRefV1,
+        operation_ref: ContractRefV1 | None,
+        step_contract_ref: ContractRefV1 | None,
+        family_contract_ref: ContractRefV1 | None,
+        execution_adapter_ref: ContractRefV1 | None,
+        result_contract_refs: tuple[ContractRefV1, ...],
+        evidence_contract_refs: tuple[ContractRefV1, ...],
+        projection_refs: Mapping[str, ContractRefV1],
+    ) -> "ExposurePathRefV1":
+        _text(path_id, "path_id")
+        _version(semantic_version)
+        if exposure not in {"direct", "composition", "read_only", "closed"}:
             raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "exposure")
-        if type(self.capability_ref) is not ContractRefV1:
+        if type(capability_ref) is not ContractRefV1:
             raise ProviderContractError(PROVIDER_REF_INVALID, "capability_ref")
-        for name in (
-            "operation_ref",
-            "step_contract_ref",
-            "family_contract_ref",
-            "execution_adapter_ref",
-        ):
-            if getattr(self, name) is not None and type(getattr(self, name)) is not ContractRefV1:
+        optional_refs = {
+            "operation_ref": operation_ref,
+            "step_contract_ref": step_contract_ref,
+            "family_contract_ref": family_contract_ref,
+            "execution_adapter_ref": execution_adapter_ref,
+        }
+        for name, ref in optional_refs.items():
+            if ref is not None and type(ref) is not ContractRefV1:
                 raise ProviderContractError(PROVIDER_REF_INVALID, name)
-        for name in ("result_contract_refs", "evidence_contract_refs"):
-            refs = getattr(self, name)
+        for name, refs in {
+            "result_contract_refs": result_contract_refs,
+            "evidence_contract_refs": evidence_contract_refs,
+        }.items():
             if type(refs) is not tuple or any(type(ref) is not ContractRefV1 for ref in refs):
                 raise ProviderContractError(PROVIDER_REF_INVALID, name)
-        if type(self.projection_refs) is not MappingProxyType:
+        if type(projection_refs) is not MappingProxyType:
             raise ProviderContractError(PROVIDER_REF_INVALID, "projection_refs")
-        if not self.projection_refs or any(
+        if not projection_refs or any(
             type(key) is not str or type(ref) is not ContractRefV1
-            for key, ref in self.projection_refs.items()
+            for key, ref in projection_refs.items()
         ):
             raise ProviderContractError(PROVIDER_REF_INVALID, "projection_refs")
+        return tuple.__new__(
+            cls,
+            (
+                path_id,
+                semantic_version,
+                exposure,
+                capability_ref,
+                operation_ref,
+                step_contract_ref,
+                family_contract_ref,
+                execution_adapter_ref,
+                result_contract_refs,
+                evidence_contract_refs,
+                projection_refs,
+            ),
+        )
 
     def to_dict(self) -> dict[str, object]:
         def optional(ref: ContractRefV1 | None) -> dict[str, str] | None:
@@ -291,9 +386,26 @@ def _unique_ref_identities(refs: Sequence[ContractRefV1], name: str) -> None:
         raise ProviderContractError(PROVIDER_DUPLICATE, name)
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderContributionV1:
+class ProviderContributionV1(
+    _StrictValueTuple,
+    namedtuple(
+        "_ProviderContributionV1Base",
+        (
+            "provider_id",
+            "semantic_version",
+            "contract_refs",
+            "exposure_paths",
+            "adapter_declarations",
+            "projection_refs",
+            "renderer_refs",
+            "policy_refs",
+        ),
+        module=__name__,
+    ),
+):
     """The provider manifest root; it carries refs, never feature behavior."""
+
+    __slots__ = ()
 
     provider_id: str
     semantic_version: str
@@ -308,9 +420,27 @@ class ProviderContributionV1:
     def contracts(self) -> tuple[ContractRefV1, ...]:
         return self.contract_refs
 
-    def __post_init__(self) -> None:
-        _text(self.provider_id, "provider_id")
-        _version(self.semantic_version)
+    def __new__(
+        cls,
+        provider_id: str,
+        semantic_version: str,
+        contract_refs: tuple[ContractRefV1, ...],
+        exposure_paths: tuple[ExposurePathRefV1, ...],
+        adapter_declarations: tuple[AdapterDeclarationV1, ...],
+        projection_refs: tuple[ContractRefV1, ...],
+        renderer_refs: tuple[ContractRefV1, ...],
+        policy_refs: tuple[ContractRefV1, ...],
+    ) -> "ProviderContributionV1":
+        _text(provider_id, "provider_id")
+        _version(semantic_version)
+        values = {
+            "contract_refs": contract_refs,
+            "exposure_paths": exposure_paths,
+            "adapter_declarations": adapter_declarations,
+            "projection_refs": projection_refs,
+            "renderer_refs": renderer_refs,
+            "policy_refs": policy_refs,
+        }
         for name in (
             "contract_refs",
             "exposure_paths",
@@ -319,24 +449,37 @@ class ProviderContributionV1:
             "renderer_refs",
             "policy_refs",
         ):
-            if type(getattr(self, name)) is not tuple:
+            if type(values[name]) is not tuple:
                 raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, name)
-        if not self.exposure_paths or not self.adapter_declarations:
+        if not exposure_paths or not adapter_declarations:
             raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "empty contribution")
-        if any(type(path) is not ExposurePathRefV1 for path in self.exposure_paths):
+        if any(type(path) is not ExposurePathRefV1 for path in exposure_paths):
             raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "exposure_paths")
-        if any(type(adapter) is not AdapterDeclarationV1 for adapter in self.adapter_declarations):
+        if any(type(adapter) is not AdapterDeclarationV1 for adapter in adapter_declarations):
             raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "adapter_declarations")
-        if len({path.path_id for path in self.exposure_paths}) != len(self.exposure_paths):
+        if len({path.path_id for path in exposure_paths}) != len(exposure_paths):
             raise ProviderContractError(PROVIDER_DUPLICATE, "path_id")
-        if len({adapter.adapter_id for adapter in self.adapter_declarations}) != len(self.adapter_declarations):
+        if len({adapter.adapter_id for adapter in adapter_declarations}) != len(adapter_declarations):
             raise ProviderContractError(PROVIDER_DUPLICATE, "adapter_id")
-        _unique_ref_identities(self.contract_refs, "contracts")
+        _unique_ref_identities(contract_refs, "contracts")
         for name in ("projection_refs", "renderer_refs", "policy_refs"):
-            refs = getattr(self, name)
+            refs = values[name]
             if any(type(ref) is not ContractRefV1 for ref in refs):
                 raise ProviderContractError(PROVIDER_REF_INVALID, name)
             _unique_ref_identities(refs, name)
+        return tuple.__new__(
+            cls,
+            (
+                provider_id,
+                semantic_version,
+                contract_refs,
+                exposure_paths,
+                adapter_declarations,
+                projection_refs,
+                renderer_refs,
+                policy_refs,
+            ),
+        )
 
     def all_referenced_contracts(self) -> tuple[ContractRefV1, ...]:
         refs: list[ContractRefV1] = []
