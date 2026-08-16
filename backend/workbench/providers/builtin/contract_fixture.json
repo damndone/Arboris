@@ -1,0 +1,50 @@
+{
+  "provider_id": "fixture.contracts",
+  "semantic_version": "1.0",
+  "contracts": [
+    {"kind": "capability", "logical_id": "fixture.contracts.capability", "semantic_version": "1.0", "contract_digest": "4d0bd0e88883d6abb6fc81b0ab74a721cc34f66608eb9d7af67842a0e3098fb2"},
+    {"kind": "operation", "logical_id": "fixture.contracts.operation", "semantic_version": "1.0", "contract_digest": "1f2bb8ac19ac1fc00e10ce83f2202e97cb51f45d3755c1f25d12bb5f7d4a3438"},
+    {"kind": "step", "logical_id": "fixture.contracts.step", "semantic_version": "1.0", "contract_digest": "f4bd28ed613a682b37a706dc218e978f98a2812cd7befe82bf1a8d53d3c9ed56"},
+    {"kind": "schema", "logical_id": "fixture.contracts.request", "semantic_version": "1.0", "contract_digest": "6acbd1b0712963d84167c5231ba5e9448c19a79f23009081613791231bfb4000"},
+    {"kind": "validator", "logical_id": "fixture.contracts.result", "semantic_version": "1.0", "contract_digest": "95339485ac1937f1407ab66844926b0faddf44f883f80f343f927deceb79e2fe"},
+    {"kind": "adapter", "logical_id": "fixture.contracts.adapter", "semantic_version": "1.0", "contract_digest": "7bd0d08f9ab9f23dad8cb65df23c66c023c71c47968cd7d295087ae576d02ec2"},
+    {"kind": "output", "logical_id": "fixture.contracts.output", "semantic_version": "1.0", "contract_digest": "32527ae08cf302b7bb2be9457b87b8676a814cf4efde87b400b9790939329cb1"},
+    {"kind": "evidence", "logical_id": "fixture.contracts.evidence", "semantic_version": "1.0", "contract_digest": "d1712976f10c0a2f295faf8188e95ac35ba80892573b5963230f908cd911974b"},
+    {"kind": "projection", "logical_id": "fixture.contracts.agent", "semantic_version": "1.0", "contract_digest": "1d21442c1dc8e2254e5dbffa7f14cdae605e767ea55a9bc7e45aa7e97b07aab5"},
+    {"kind": "renderer", "logical_id": "fixture.contracts.renderer", "semantic_version": "1.0", "contract_digest": "df9975dd2c8d9f559b40fc3b7bbf6e49b1f1df4e52cf760e3905b7ae70b10eb7"},
+    {"kind": "policy", "logical_id": "fixture.contracts.policy", "semantic_version": "1.0", "contract_digest": "8e745a5a4da947171024e4b28597e5aa000713cdf3f147638684eeeaa9a1ceea"}
+  ],
+  "exposure_paths": [
+    {
+      "path_id": "fixture.contracts.direct",
+      "semantic_version": "1.0",
+      "exposure": "direct",
+      "capability_ref": {"kind": "capability", "logical_id": "fixture.contracts.capability", "semantic_version": "1.0", "contract_digest": "4d0bd0e88883d6abb6fc81b0ab74a721cc34f66608eb9d7af67842a0e3098fb2"},
+      "operation_ref": {"kind": "operation", "logical_id": "fixture.contracts.operation", "semantic_version": "1.0", "contract_digest": "1f2bb8ac19ac1fc00e10ce83f2202e97cb51f45d3755c1f25d12bb5f7d4a3438"},
+      "step_contract_ref": {"kind": "step", "logical_id": "fixture.contracts.step", "semantic_version": "1.0", "contract_digest": "f4bd28ed613a682b37a706dc218e978f98a2812cd7befe82bf1a8d53d3c9ed56"},
+      "family_contract_ref": null,
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "fixture.contracts.adapter", "semantic_version": "1.0", "contract_digest": "7bd0d08f9ab9f23dad8cb65df23c66c023c71c47968cd7d295087ae576d02ec2"},
+      "result_contract_refs": [{"kind": "output", "logical_id": "fixture.contracts.output", "semantic_version": "1.0", "contract_digest": "32527ae08cf302b7bb2be9457b87b8676a814cf4efde87b400b9790939329cb1"}],
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "fixture.contracts.evidence", "semantic_version": "1.0", "contract_digest": "d1712976f10c0a2f295faf8188e95ac35ba80892573b5963230f908cd911974b"}],
+      "projection_refs": {
+        "agent": {"kind": "projection", "logical_id": "fixture.contracts.agent", "semantic_version": "1.0", "contract_digest": "1d21442c1dc8e2254e5dbffa7f14cdae605e767ea55a9bc7e45aa7e97b07aab5"}
+      }
+    }
+  ],
+  "adapter_declarations": [
+    {
+      "adapter_id": "fixture.contracts.adapter",
+      "semantic_version": "1.0",
+      "request_schema_ref": {"kind": "schema", "logical_id": "fixture.contracts.request", "semantic_version": "1.0", "contract_digest": "6acbd1b0712963d84167c5231ba5e9448c19a79f23009081613791231bfb4000"},
+      "executor_ref": "executor:fixture.contracts.adapter",
+      "result_validator_ref": {"kind": "validator", "logical_id": "fixture.contracts.result", "semantic_version": "1.0", "contract_digest": "95339485ac1937f1407ab66844926b0faddf44f883f80f343f927deceb79e2fe"},
+      "output_refs": [
+        {"kind": "output", "logical_id": "fixture.contracts.output", "semantic_version": "1.0", "contract_digest": "32527ae08cf302b7bb2be9457b87b8676a814cf4efde87b400b9790939329cb1"},
+        {"kind": "evidence", "logical_id": "fixture.contracts.evidence", "semantic_version": "1.0", "contract_digest": "d1712976f10c0a2f295faf8188e95ac35ba80892573b5963230f908cd911974b"}
+      ]
+    }
+  ],
+  "projection_refs": [{"kind": "projection", "logical_id": "fixture.contracts.agent", "semantic_version": "1.0", "contract_digest": "1d21442c1dc8e2254e5dbffa7f14cdae605e767ea55a9bc7e45aa7e97b07aab5"}],
+  "renderer_refs": [{"kind": "renderer", "logical_id": "fixture.contracts.renderer", "semantic_version": "1.0", "contract_digest": "df9975dd2c8d9f559b40fc3b7bbf6e49b1f1df4e52cf760e3905b7ae70b10eb7"}],
+  "policy_refs": [{"kind": "policy", "logical_id": "fixture.contracts.policy", "semantic_version": "1.0", "contract_digest": "8e745a5a4da947171024e4b28597e5aa000713cdf3f147638684eeeaa9a1ceea"}]
+}

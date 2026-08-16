@@ -3097,3 +3097,175 @@ def test_egress_issuer_token_slot_replacement_cannot_restore_raw_prompt() -> Non
     with pytest.raises(AttributeError):
         object.__setattr__(materializer, "_issuer_token", forged_authority)
     assert not hasattr(materializer, "__dict__")
+
+
+def _provider_contract_api():
+    try:
+        from workbench.contracts.common.provider import (
+            AdapterDeclarationV1,
+            ProviderContributionV1,
+            ProviderContractError,
+            TrustedExecutorRegistryV1,
+        )
+        from workbench.providers.catalog import load_builtin_catalog
+    except ModuleNotFoundError as exc:
+        pytest.fail(f"provider contract seam is missing: {exc}")
+    return (
+        AdapterDeclarationV1,
+        ProviderContributionV1,
+        ProviderContractError,
+        TrustedExecutorRegistryV1,
+        load_builtin_catalog,
+    )
+
+
+def _provider_fixture_payload() -> dict[str, object]:
+    return _load_json(
+        (_FIXTURE_ROOT / "provider_contribution.json").read_text(encoding="utf-8")
+    )
+
+
+def _write_provider_manifest(root: Path, name: str, payload: dict[str, object]) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / name).write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+    )
+
+
+def test_provider_contribution_keeps_adapter_schema_and_validator_together() -> None:
+    (
+        AdapterDeclarationV1,
+        ProviderContributionV1,
+        ProviderContractError,
+        _,
+        _,
+    ) = _provider_contract_api()
+    payload = _provider_fixture_payload()
+    contribution = ProviderContributionV1.from_dict(payload)
+    adapter = contribution.adapter_declarations[0]
+
+    assert type(adapter) is AdapterDeclarationV1
+    assert adapter.request_schema_ref.kind == "schema"
+    assert adapter.result_validator_ref.kind == "validator"
+    assert adapter.executor_ref.startswith("executor:")
+    assert adapter.output_refs
+    assert adapter.semantic_version == contribution.semantic_version
+    assert canonical_json_v1(contribution.to_dict()) == canonical_json_v1(
+        ProviderContributionV1.from_dict(contribution.to_dict()).to_dict()
+    )
+
+    without_validator = dict(payload)
+    without_validator["adapter_declarations"] = [
+        {
+            key: value
+            for key, value in payload["adapter_declarations"][0].items()  # type: ignore[union-attr]
+            if key != "result_validator_ref"
+        }
+    ]
+    with pytest.raises(ProviderContractError, match="validator|adapter"):
+        ProviderContributionV1.from_dict(without_validator)
+
+
+def test_catalog_load_order_and_digest_are_deterministic() -> None:
+    _, _, _, _, load_builtin_catalog = _provider_contract_api()
+
+    first = load_builtin_catalog()
+    second = load_builtin_catalog()
+
+    assert first.to_dict() == second.to_dict()
+    assert first.catalog_digest == second.catalog_digest
+    assert first.provider_ids == tuple(sorted(first.provider_ids))
+    assert first.catalog_digest == sha256_canonical(first.digest_payload())
+
+
+def test_duplicate_versionless_unresolved_or_path_like_refs_fail_closed(
+    tmp_path: Path,
+) -> None:
+    _, _, ProviderContractError, _, load_builtin_catalog = _provider_contract_api()
+    payload = _provider_fixture_payload()
+
+    duplicate_root = tmp_path / "duplicate"
+    _write_provider_manifest(duplicate_root, "a.json", payload)
+    _write_provider_manifest(duplicate_root, "b.json", payload)
+    with pytest.raises(ProviderContractError, match="duplicate") as duplicate:
+        load_builtin_catalog(duplicate_root)
+    assert duplicate.value.code == "PROVIDER_DUPLICATE"
+
+    versionless = json.loads(json.dumps(payload))
+    versionless["contracts"][0].pop("semantic_version")
+    versionless_root = tmp_path / "versionless"
+    _write_provider_manifest(versionless_root, "fixture.json", versionless)
+    with pytest.raises(ProviderContractError, match="version|reference") as missing_version:
+        load_builtin_catalog(versionless_root)
+    assert missing_version.value.code == "PROVIDER_REF_INVALID"
+
+    unresolved = json.loads(json.dumps(payload))
+    unresolved["adapter_declarations"][0]["request_schema_ref"]["logical_id"] = (
+        "schema.missing"
+    )
+    unresolved_root = tmp_path / "unresolved"
+    _write_provider_manifest(unresolved_root, "fixture.json", unresolved)
+    with pytest.raises(ProviderContractError, match="unresolved") as missing_ref:
+        load_builtin_catalog(unresolved_root)
+    assert missing_ref.value.code == "PROVIDER_UNRESOLVED"
+
+    path_like = json.loads(json.dumps(payload))
+    path_like["adapter_declarations"][0]["executor_ref"] = "file:///tmp/feature.py"
+    path_like_root = tmp_path / "path-like"
+    _write_provider_manifest(path_like_root, "fixture.json", path_like)
+    with pytest.raises(ProviderContractError, match="opaque|path") as path_ref:
+        load_builtin_catalog(path_like_root)
+    assert path_ref.value.code == "PROVIDER_EXECUTOR_INVALID"
+
+
+def test_executor_ref_is_opaque_and_resolves_only_through_trusted_registry() -> None:
+    (
+        AdapterDeclarationV1,
+        _,
+        ProviderContractError,
+        TrustedExecutorRegistryV1,
+        _,
+    ) = _provider_contract_api()
+    adapter_payload = _provider_fixture_payload()["adapter_declarations"][0]
+    adapter = AdapterDeclarationV1.from_dict(adapter_payload)  # type: ignore[arg-type]
+
+    with pytest.raises(ProviderContractError, match="opaque|executor"):
+        AdapterDeclarationV1.from_dict(
+            {**adapter_payload, "executor_ref": "workbench.feature:run"}  # type: ignore[arg-type]
+        )
+
+    trusted = TrustedExecutorRegistryV1()
+    trusted.declare(
+        executor_ref=adapter.executor_ref,
+        owner_ref="owner:fixture",
+        signature_ref="signature:fixture:1",
+        effect="read_only",
+        request_schema_ref=adapter.request_schema_ref,
+        result_validator_ref=adapter.result_validator_ref,
+    )
+    trusted.validate(adapter)
+    assert not hasattr(trusted, "execute")
+    assert not hasattr(trusted, "import_module")
+
+
+def test_fixture_provider_flows_to_manifest_inputs_without_central_switch() -> None:
+    _, _, _, _, load_builtin_catalog = _provider_contract_api()
+    from workbench.agent.workflow_capability_registry import workflow_capability_registry
+
+    before = workflow_capability_registry().operation_ids()
+    catalog = load_builtin_catalog()
+    after = workflow_capability_registry().operation_ids()
+
+    assert before == after
+    assert any(
+        item["provider_id"] == "fixture.contracts"
+        for item in catalog.manifest_inputs
+    )
+    assert any(
+        item["path_id"] == "fixture.contracts.direct"
+        for item in catalog.path_rows
+    )
+    assert any(
+        item["provider_id"] == "fixture.contracts"
+        for item in catalog.descriptor_inputs
+    )
