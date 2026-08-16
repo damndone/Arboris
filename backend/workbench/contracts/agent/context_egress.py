@@ -78,7 +78,7 @@ _OPAQUE_REF_FORBIDDEN_MARKERS = frozenset(
 )
 _ISSUED_RECEIPTS: dict[tuple[int, str], object] = {}
 _MATERIALIZATION_ISSUANCES: dict[tuple[int, str], dict[int, object]] = {}
-_MATERIALIZATION_SNAPSHOTS: dict[tuple[int, str], tuple[str, str]] = {}
+_MATERIALIZATION_SNAPSHOTS: dict[tuple[int, str], object] = {}
 
 
 class EgressContractError(ContractError):
@@ -608,7 +608,40 @@ def _materialization_projection_matches_snapshot(
         return False
 
 
-class ContextMaterializationStoreV1:
+class _ContextMaterializationAuthorityV1:
+    """Opaque per-store authority; canonical records live in a closure."""
+
+    __slots__ = ("__binding", "__read", "__write")
+
+    def __init__(self) -> None:
+        records: dict[str, tuple[str, str]] = {}
+
+        def read(result_ref: str) -> tuple[str, str] | None:
+            return records.get(result_ref)
+
+        def write(result_ref: str, record: tuple[str, str]) -> None:
+            records[result_ref] = record
+
+        self.__binding = object()
+        self.__read = read
+        self.__write = write
+
+    @property
+    def binding(self) -> object:
+        return self.__binding
+
+    def read(self, result_ref: str) -> tuple[str, str] | None:
+        return self.__read(result_ref)
+
+    def write(self, result_ref: str, record: tuple[str, str]) -> None:
+        self.__write(result_ref, record)
+
+
+class _ContextMaterializationStoreAuthoritySlots:
+    __slots__ = ("_issuer_token",)
+
+
+class ContextMaterializationStoreV1(_ContextMaterializationStoreAuthoritySlots):
     """Server-owned deterministic materializer and result store."""
 
     def __init__(self, *, materializer_ref: ContractRefV1, redaction_policy_ref: ContractRefV1) -> None:
@@ -616,7 +649,7 @@ class ContextMaterializationStoreV1:
             raise _error("EGRESS_MATERIALIZER_REF_INVALID", "server materializer refs are required")
         self.materializer_ref = materializer_ref
         self.redaction_policy_ref = redaction_policy_ref
-        self._issuer_token = object()
+        self._issuer_token = _ContextMaterializationAuthorityV1()
         self._snapshots: dict[str, tuple[str, str]] = {}
 
     def _project(self, record: tuple[str, str]) -> ContextMaterializationResultV1:
@@ -669,6 +702,24 @@ class ContextMaterializationStoreV1:
         _MATERIALIZATION_ISSUANCES.setdefault(key, {})[id(result)] = result
         return result
 
+    def _authority_record(self, result_ref: str) -> tuple[str, str]:
+        key = (id(self._issuer_token), result_ref)
+        if _MATERIALIZATION_SNAPSHOTS.get(key) is not self._issuer_token.binding:
+            raise _error(
+                "EGRESS_MATERIALIZATION_AUTHORITY_BINDING_MISMATCH",
+                "materialization index is not bound to the opaque server authority",
+            )
+        record = self._snapshots.get(result_ref)
+        authority = self._issuer_token.read(result_ref)
+        if record is None or authority is None:
+            raise _error("EGRESS_MATERIALIZATION_AUTHORITY_REQUIRED", "materialization result is not server-owned")
+        if record != authority:
+            raise _error(
+                "EGRESS_MATERIALIZATION_STORAGE_BINDING_MISMATCH",
+                "materialization store record is not bound to the opaque server authority",
+            )
+        return authority
+
     def materialize(self, context: dict[str, object], *, selected_refs: tuple[str, ...]) -> ContextMaterializationResultV1:
         if type(context) is not dict:
             raise _error("EGRESS_NESTED_DICT_REQUIRED", "source context must be a built-in dict")
@@ -710,7 +761,8 @@ class ContextMaterializationStoreV1:
             sha256_canonical(payload),
         )
         key = (id(self._issuer_token), result_ref)
-        _MATERIALIZATION_SNAPSHOTS[key] = record
+        self._issuer_token.write(result_ref, record)
+        _MATERIALIZATION_SNAPSHOTS[key] = self._issuer_token.binding
         self._snapshots[result_ref] = record
         return self._project(record)
 
@@ -718,25 +770,20 @@ class ContextMaterializationStoreV1:
     def is_server_issued(cls, result: object) -> bool:
         if type(result) is not ContextMaterializationResultV1 or result._issuer_token is None:
             return False
+        if type(result._issuer_token) is not _ContextMaterializationAuthorityV1:
+            return False
         key = (id(result._issuer_token), result.result_ref)
+        authority = result._issuer_token.read(result.result_ref)
         return (
             _MATERIALIZATION_ISSUANCES.get(key, {}).get(id(result)) is result
-            and _materialization_projection_matches_snapshot(result, _MATERIALIZATION_SNAPSHOTS.get(key))
+            and _MATERIALIZATION_SNAPSHOTS.get(key) is result._issuer_token.binding
+            and _materialization_projection_matches_snapshot(result, authority)
         )
 
     def resolve(self, result_ref: str) -> ContextMaterializationResultV1:
         if type(result_ref) is not str:
             raise _error("EGRESS_MATERIALIZATION_AUTHORITY_REQUIRED", "materialization ref is invalid")
-        record = self._snapshots.get(result_ref)
-        authority = _MATERIALIZATION_SNAPSHOTS.get((id(self._issuer_token), result_ref))
-        if record is None or authority is None:
-            raise _error("EGRESS_MATERIALIZATION_AUTHORITY_REQUIRED", "materialization result is not server-owned")
-        if record != authority:
-            raise _error(
-                "EGRESS_MATERIALIZATION_STORAGE_BINDING_MISMATCH",
-                "materialization store record is not bound to the server registry",
-            )
-        return self._project(authority)
+        return self._project(self._authority_record(result_ref))
 
 
 @dataclass(frozen=True)

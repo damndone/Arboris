@@ -23,7 +23,7 @@ _REQUIRED_DEVELOPMENT_HASHES = frozenset(
     }
 )
 _HOLDOUT_SEAL_ISSUERS: dict[int, object] = {}
-_HOLDOUT_CANONICAL_RECORDS: dict[tuple[int, str], tuple[str, str]] = {}
+_HOLDOUT_CANONICAL_RECORDS: dict[tuple[int, str], object] = {}
 
 
 class HoldoutContractError(ContractError):
@@ -599,7 +599,40 @@ class ServerHoldoutSealReferenceV1:
         return {"seal_id": self.seal_id, "state_digest": self.state_digest}
 
 
-class HoldoutSealStoreV1:
+class _HoldoutCanonicalAuthorityV1:
+    """Opaque per-store authority; its canonical records are closure-owned."""
+
+    __slots__ = ("__binding", "__read", "__write")
+
+    def __init__(self) -> None:
+        records: dict[str, tuple[str, str]] = {}
+
+        def read(seal_id: str) -> tuple[str, str] | None:
+            return records.get(seal_id)
+
+        def write(seal_id: str, record: tuple[str, str]) -> None:
+            records[seal_id] = record
+
+        self.__binding = object()
+        self.__read = read
+        self.__write = write
+
+    @property
+    def binding(self) -> object:
+        return self.__binding
+
+    def read(self, seal_id: str) -> tuple[str, str] | None:
+        return self.__read(seal_id)
+
+    def write(self, seal_id: str, record: tuple[str, str]) -> None:
+        self.__write(seal_id, record)
+
+
+class _HoldoutSealStoreAuthoritySlots:
+    __slots__ = ("_authority", "_issuer_token")
+
+
+class HoldoutSealStoreV1(_HoldoutSealStoreAuthoritySlots):
     """Server-owned one-time consume/CAS seam for holdout releases."""
 
     def __init__(self, *, metric_bundle_store: HoldoutMetricBundleStoreV1) -> None:
@@ -611,6 +644,7 @@ class HoldoutSealStoreV1:
         self.metric_bundle_store = metric_bundle_store
         self._issuer_token = object()
         _HOLDOUT_SEAL_ISSUERS[id(self._issuer_token)] = self._issuer_token
+        self._authority = _HoldoutCanonicalAuthorityV1()
         self._current: dict[str, tuple[str, str]] = {}
         self._issued_references: dict[int, tuple[object, str, str]] = {}
         self._lock = RLock()
@@ -657,14 +691,21 @@ class HoldoutSealStoreV1:
 
     def _store(self, seal: HoldoutSealV1) -> tuple[str, str]:
         record = self._encode(seal)
+        self._authority.write(seal.seal_id, record)
         key = (id(self._issuer_token), seal.seal_id)
-        _HOLDOUT_CANONICAL_RECORDS[key] = record
+        _HOLDOUT_CANONICAL_RECORDS[key] = self._authority.binding
         self._current[seal.seal_id] = record
         return record
 
     def _current_record(self, seal_id: str) -> tuple[str, str]:
+        key = (id(self._issuer_token), seal_id)
+        if _HOLDOUT_CANONICAL_RECORDS.get(key) is not self._authority.binding:
+            raise _error(
+                "HOLDOUT_STATE_AUTHORITY_BINDING_MISMATCH",
+                "holdout state index is not bound to the opaque server authority",
+            )
         record = self._current.get(seal_id)
-        authority = _HOLDOUT_CANONICAL_RECORDS.get((id(self._issuer_token), seal_id))
+        authority = self._authority.read(seal_id)
         if record is None or authority is None:
             raise _error("HOLDOUT_SERVER_SEAL_UNRESOLVED", "server holdout seal is unavailable")
         if record != authority:
@@ -717,7 +758,7 @@ class HoldoutSealStoreV1:
                 "seal must bind the complete server-resolved metric bundle",
             )
         with self._lock:
-            if seal.seal_id in self._current or (id(self._issuer_token), seal.seal_id) in _HOLDOUT_CANONICAL_RECORDS:
+            if seal.seal_id in self._current or self._authority.read(seal.seal_id) is not None:
                 raise _error("HOLDOUT_DUPLICATE_SEAL", "seal is already issued by this store")
             return self._new_reference(self._store(seal))
 
