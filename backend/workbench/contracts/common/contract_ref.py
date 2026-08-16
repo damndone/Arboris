@@ -121,58 +121,68 @@ class ContractRefV1:
         )
 
 
-_RESOLVER_REFS: WeakKeyDictionary[object, MappingProxyType] = WeakKeyDictionary()
+def _make_contract_ref_resolver_v1() -> type:
+    """Create the public resolver with closure-owned immutable bindings."""
 
+    states: WeakKeyDictionary[object, MappingProxyType] = WeakKeyDictionary()
 
-class ContractRefResolverV1:
-    """Resolve exact contract identities without fallback or replacement."""
-
-    __slots__ = ("__weakref__",)
-
-    def __init__(self, refs: Iterable[ContractRefV1]) -> None:
-        if self in _RESOLVER_REFS:
-            raise ContractRefError(CONTRACT_REF_INVALID)
-        refs_by_key: dict[tuple[str, str, str], ContractRefV1] = {}
-        for ref in refs:
-            if type(ref) is not ContractRefV1:
-                raise ContractRefError(CONTRACT_REF_INVALID)
-            key = (ref.kind, ref.logical_id, ref.semantic_version)
-            if key in refs_by_key:
-                raise ContractRefError(CONTRACT_DUPLICATE)
-            refs_by_key[key] = ref
-        _RESOLVER_REFS[self] = MappingProxyType(refs_by_key)
-
-    def _bound_refs(self) -> MappingProxyType:
+    def state_for(instance: object) -> MappingProxyType:
         try:
-            return _RESOLVER_REFS[self]
+            return states[instance]
         except KeyError as exc:
             raise ContractRefError(CONTRACT_UNRESOLVED) from exc
 
-    def resolve(self, ref: ContractRefV1) -> ContractRefV1:
-        if type(ref) is not ContractRefV1:
-            raise ContractRefError(CONTRACT_REF_INVALID)
+    class ContractRefResolverV1:
+        """Resolve exact contract identities without fallback or replacement."""
 
-        refs = self._bound_refs()
-        key = (ref.kind, ref.logical_id, ref.semantic_version)
-        available = refs.get(key)
-        if available is not None:
-            if available.contract_digest != ref.contract_digest:
-                raise ContractRefError(CONTRACT_DIGEST_MISMATCH)
-            return available
+        __slots__ = ("__weakref__",)
 
-        same_identity = tuple(
-            candidate
-            for candidate in refs.values()
-            if candidate.kind == ref.kind and candidate.logical_id == ref.logical_id
-        )
-        if not same_identity:
+        def __init__(self, refs: Iterable[ContractRefV1]) -> None:
+            if self in states:
+                raise ContractRefError(CONTRACT_REF_INVALID)
+            refs_by_key: dict[tuple[str, str, str], ContractRefV1] = {}
+            for ref in refs:
+                if type(ref) is not ContractRefV1:
+                    raise ContractRefError(CONTRACT_REF_INVALID)
+                key = (ref.kind, ref.logical_id, ref.semantic_version)
+                if key in refs_by_key:
+                    raise ContractRefError(CONTRACT_DUPLICATE)
+                refs_by_key[key] = ref
+            states[self] = MappingProxyType(refs_by_key)
+
+        def _bound_refs(self) -> MappingProxyType:
+            return state_for(self)
+
+        def resolve(self, ref: ContractRefV1) -> ContractRefV1:
+            if type(ref) is not ContractRefV1:
+                raise ContractRefError(CONTRACT_REF_INVALID)
+
+            refs = self._bound_refs()
+            key = (ref.kind, ref.logical_id, ref.semantic_version)
+            available = refs.get(key)
+            if available is not None:
+                if available.contract_digest != ref.contract_digest:
+                    raise ContractRefError(CONTRACT_DIGEST_MISMATCH)
+                return available
+
+            same_identity = tuple(
+                candidate
+                for candidate in refs.values()
+                if candidate.kind == ref.kind and candidate.logical_id == ref.logical_id
+            )
+            if not same_identity:
+                raise ContractRefError(CONTRACT_UNRESOLVED)
+
+            requested_major, _ = parse_semantic_version(ref.semantic_version)
+            available_majors = {
+                parse_semantic_version(candidate.semantic_version)[0]
+                for candidate in same_identity
+            }
+            if requested_major not in available_majors:
+                raise ContractRefError(CONTRACT_MAJOR_INCOMPATIBLE)
             raise ContractRefError(CONTRACT_UNRESOLVED)
 
-        requested_major, _ = parse_semantic_version(ref.semantic_version)
-        available_majors = {
-            parse_semantic_version(candidate.semantic_version)[0]
-            for candidate in same_identity
-        }
-        if requested_major not in available_majors:
-            raise ContractRefError(CONTRACT_MAJOR_INCOMPATIBLE)
-        raise ContractRefError(CONTRACT_UNRESOLVED)
+    return ContractRefResolverV1
+
+
+ContractRefResolverV1 = _make_contract_ref_resolver_v1()

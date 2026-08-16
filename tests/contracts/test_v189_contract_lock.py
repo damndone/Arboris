@@ -1132,6 +1132,7 @@ def test_resolver_rejects_duplicate_and_unresolved_refs() -> None:
 
 
 def test_resolver_binding_cannot_be_replaced_through_instance_authority_slots() -> None:
+    import workbench.contracts.common.contract_ref as contract_ref_module
     from workbench.providers.catalog import load_builtin_catalog
 
     available = _ref()
@@ -1141,6 +1142,8 @@ def test_resolver_binding_cannot_be_replaced_through_instance_authority_slots() 
         resolver._refs = MappingProxyType({})  # type: ignore[attr-defined]
     with pytest.raises(AttributeError):
         object.__setattr__(resolver, "_refs", MappingProxyType({}))
+    with pytest.raises(AttributeError):
+        object.__setattr__(resolver, "attacker_state", MappingProxyType({}))
     assert not hasattr(resolver, "__dict__")
     assert resolver.resolve(available) == available
 
@@ -1149,6 +1152,27 @@ def test_resolver_binding_cannot_be_replaced_through_instance_authority_slots() 
     with pytest.raises(AttributeError):
         object.__setattr__(catalog_resolver, "_refs", MappingProxyType({}))
     assert catalog_resolver.resolve(catalog_ref) == catalog_ref
+
+
+def test_resolver_state_is_not_a_mutable_module_registry() -> None:
+    import workbench.contracts.common.contract_ref as contract_ref_module
+
+    available = _ref()
+    resolver = ContractRefResolverV1((available,))
+    module_vars = vars(contract_ref_module)
+    assert "_RESOLVER_REFS" not in module_vars
+    sentinel = object()
+    previous = module_vars.get("_RESOLVER_REFS", sentinel)
+    module_vars["_RESOLVER_REFS"] = {}
+    try:
+        assert resolver.resolve(available) == available
+        module_vars["_RESOLVER_REFS"].clear()
+        assert resolver.resolve(available) == available
+    finally:
+        if previous is sentinel:
+            module_vars.pop("_RESOLVER_REFS", None)
+        else:
+            module_vars["_RESOLVER_REFS"] = previous
 
 
 def test_major_version_mismatch_is_not_silently_coerced() -> None:
