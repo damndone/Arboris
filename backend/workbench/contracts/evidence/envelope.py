@@ -36,6 +36,14 @@ _TEST_DIRECTIONS = frozenset({"two_sided", "greater", "less"})
 _NOT_APPLICABLE_FIELDS = {"status", "reason"}
 
 
+class EvidenceContractError(ContractError):
+    """Evidence wire failure with a stable machine-readable reason code."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        self.code = code
+        super().__init__(message or code)
+
+
 def _text(value: object, name: str) -> str:
     if type(value) is not str or not value or value != value.strip():
         raise ContractError(f"{name} must be an exact non-empty string")
@@ -903,8 +911,9 @@ class EvidenceEnvelopeV1:
             if self.execution_reasons:
                 raise ContractError("completed execution forbids execution_reasons")
         elif not self.execution_reasons:
-            raise ContractError(
-                "partial, blocked, and failed execution require execution_reasons"
+            raise EvidenceContractError(
+                "EVIDENCE_EXECUTION_REASON_REQUIRED",
+                "partial, blocked, and failed execution require execution_reasons",
             )
 
         if self.availability is AvailabilityStatusV1.AVAILABLE:
@@ -1082,6 +1091,7 @@ class EvidenceEnvelopeV1:
 __all__ = [
     "DenominatorV1",
     "DistributionRefV1",
+    "EvidenceContractError",
     "EvidenceEnvelopeV1",
     "EvidenceReasonV1",
     "IntervalV1",

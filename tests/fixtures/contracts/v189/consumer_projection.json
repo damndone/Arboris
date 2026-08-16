@@ -1,0 +1,28 @@
+{
+  "contract": "consumer-projection",
+  "contract_version": "1.0",
+  "producer_version": "1.8.9",
+  "payload": {
+    "projection_id": "projection:fixture:classification",
+    "projection_ref": "projection-ref:fixture:classification",
+    "projection_status": "available",
+    "slots": [
+      {
+        "artifact_facets": ["parameters", "evidence"],
+        "consumer": "report",
+        "payload_schema_ref": "schema:fixture:classification",
+        "source_eligible": false
+      },
+      {
+        "artifact_facets": ["metrics"],
+        "consumer": "notebook",
+        "payload_schema_ref": "schema:fixture:classification.metrics",
+        "source_eligible": true
+      }
+    ],
+    "not_applicable_projection": {
+      "reason": "consumer is not declared",
+      "status": "not_applicable"
+    }
+  }
+}

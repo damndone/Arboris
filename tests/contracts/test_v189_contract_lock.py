@@ -13,7 +13,7 @@ import pytest
 
 from workbench.contracts.agent import context_egress as context_egress_module
 from workbench.canonical import canonical_json_v1, sha256_canonical
-from workbench.contracts.common.envelope import ContractError
+from workbench.contracts.common.envelope import ContractError, PacketEnvelope
 from workbench.contracts.common.contract_ref import (
     CONTRACT_DIGEST_MISMATCH,
     CONTRACT_DUPLICATE,
@@ -53,6 +53,7 @@ from workbench.contracts.evidence.envelope import (
     ValidationSummaryV1,
     WeightBasisV1,
 )
+from workbench.contracts.evidence.envelope import EvidenceContractError
 from workbench.contracts.evidence.persistence import (
     EVIDENCE_IDEMPOTENCY_CONFLICT,
     EVIDENCE_IDEMPOTENCY_KEY_MISMATCH,
@@ -72,6 +73,7 @@ from workbench.contracts.workflow.state import (
     WorkflowExecutionStateV2,
     WorkflowExecutionStatusV2,
     WorkflowMigrationRequiredV1,
+    WorkflowStateContractError,
     load_workflow_state,
 )
 from workbench.contracts.agent.planning import (
@@ -3429,3 +3431,253 @@ def test_fixture_provider_flows_to_manifest_inputs_without_central_switch() -> N
         item["provider_id"] == "fixture.contracts"
         for item in catalog.descriptor_inputs
     )
+
+
+def _contract_ref_payload(
+    *, kind: str, logical_id: str, semantic_version: str = "1.0"
+) -> dict[str, str]:
+    return {
+        "kind": kind,
+        "logical_id": logical_id,
+        "semantic_version": semantic_version,
+        "contract_digest": canonical_contract_digest(
+            {"kind": kind, "logical_id": logical_id, "version": semantic_version}
+        ),
+    }
+
+
+def _new_family_provider_payload(
+    base: dict[str, object], *, provider_id: str, exposure: str
+) -> dict[str, object]:
+    """Produce a structurally different declaration without feature imports."""
+
+    payload = json.loads(json.dumps(base))
+    def rewrite(value: object) -> None:
+        if isinstance(value, dict):
+            if set(value) == {"kind", "logical_id", "semantic_version", "contract_digest"}:
+                logical_id = value["logical_id"].replace("fixture.contracts", provider_id)
+                value["logical_id"] = logical_id
+                value["contract_digest"] = canonical_contract_digest(
+                    {
+                        "kind": value["kind"],
+                        "logical_id": logical_id,
+                        "version": value["semantic_version"],
+                    }
+                )
+            for key, item in list(value.items()):
+                if isinstance(item, str) and "fixture.contracts" in item:
+                    value[key] = item.replace("fixture.contracts", provider_id)
+                else:
+                    rewrite(item)
+        elif isinstance(value, list):
+            for item in value:
+                rewrite(item)
+
+    rewrite(payload)
+    payload["provider_id"] = provider_id
+    payload["contracts"].extend(  # type: ignore[union-attr]
+        [
+            _contract_ref_payload(
+                kind="family", logical_id=f"{provider_id}.family"
+            ),
+        ]
+    )
+    path = json.loads(json.dumps(payload["exposure_paths"][0]))  # type: ignore[index]
+    path["path_id"] = f"{provider_id}.composition"
+    path["exposure"] = exposure
+    path["capability_ref"] = payload["exposure_paths"][0]["capability_ref"]  # type: ignore[index]
+    path["family_contract_ref"] = _contract_ref_payload(
+        kind="family", logical_id=f"{provider_id}.family"
+    )
+    payload["exposure_paths"] = [path]  # type: ignore[assignment]
+    return payload
+
+
+def _matrix_state_payload() -> dict[str, object]:
+    return _fixture("workflow_state_v2.json")
+
+
+def test_task5_current_consumer_projection_round_trip_is_byte_stable() -> None:
+    raw = _fixture("consumer_projection.json")
+    packet = PacketEnvelope.from_dict(raw)
+
+    assert canonical_json_v1(packet.to_dict()) == canonical_json_v1(raw)
+    assert PacketEnvelope.from_dict(packet.to_dict()) == packet
+    assert packet.payload["projection_status"] == "available"
+    assert packet.payload["not_applicable_projection"]["status"] == "not_applicable"  # type: ignore[index]
+
+
+def test_task5_old_minor_and_unknown_major_fail_closed_with_stable_codes() -> None:
+    legacy = load_workflow_state(_fixture("legacy_workflow_state.json"))
+    assert isinstance(legacy, WorkflowMigrationRequiredV1)
+    assert legacy.reason_code == "MIGRATION_REQUIRED"
+    assert legacy.to_dict()["reason_code"] == "MIGRATION_REQUIRED"
+
+    current = _ref(
+        kind="projection",
+        logical_id="consumer.projection",
+        semantic_version="1.0",
+    )
+    old_minor = _ref(
+        kind="projection",
+        logical_id="consumer.projection",
+        semantic_version="1.1",
+    )
+    resolver = ContractRefResolverV1((current, old_minor))
+    assert resolver.resolve(current) == current
+    assert resolver.resolve(old_minor) == old_minor
+    unknown_major = ContractRefV1.from_dict(_fixture("unknown_major.json"))
+    assert canonical_json_v1(unknown_major.to_dict()) == canonical_json_v1(
+        _fixture("unknown_major.json")
+    )
+
+    with pytest.raises(ContractRefError) as incompatible:
+        resolver.resolve(unknown_major)
+    assert incompatible.value.code == CONTRACT_MAJOR_INCOMPATIBLE
+
+
+@pytest.mark.parametrize(
+    ("label", "mutate", "reason_code"),
+    (
+        (
+            "missing-field",
+            lambda state: state.pop("run_id"),
+            "WORKFLOW_SCHEMA_INVALID",
+        ),
+        (
+            "unknown-field",
+            lambda state: state.update({"unversioned_field": "must reject"}),
+            "WORKFLOW_SCHEMA_INVALID",
+        ),
+        (
+            "corrupt-state",
+            lambda state: state.update({"status": "completed-ish"}),
+            "WORKFLOW_ENUM_INVALID",
+        ),
+    ),
+)
+def test_task5_state_matrix_rejects_corruption_with_reason_code(
+    label: str,
+    mutate: object,
+    reason_code: str,
+) -> None:
+    state = _matrix_state_payload()
+    mutate(state)  # type: ignore[operator]
+
+    with pytest.raises(WorkflowStateContractError) as error:
+        WorkflowExecutionStateV2.from_dict(state)
+    assert error.value.code == reason_code, label
+
+
+def test_task5_digest_mismatch_is_rejected_with_reason_code() -> None:
+    state = _matrix_state_payload()
+    branch = dict(state["model_branches"][0])  # type: ignore[index]
+    branch["branch_digest"] = "0" * 64
+
+    with pytest.raises(WorkflowStateContractError) as error:
+        ModelBranchRefV1.from_dict(branch)
+    assert error.value.code == "WORKFLOW_DIGEST_MISMATCH"
+
+
+def test_task5_blocked_evidence_and_not_applicable_projection_are_explicit() -> None:
+    blocked = _fixture("evidence_corrupt.json")
+    with pytest.raises(EvidenceContractError) as error:
+        EvidenceEnvelopeV1.from_dict(blocked)
+    assert error.value.code == "EVIDENCE_EXECUTION_REASON_REQUIRED"
+
+    packet = PacketEnvelope.from_dict(_fixture("consumer_projection.json"))
+    not_applicable = packet.payload["not_applicable_projection"]
+    assert not_applicable == {"reason": "consumer is not declared", "status": "not_applicable"}
+
+
+def test_task5_duplicate_provider_has_stable_reason_code(tmp_path: Path) -> None:
+    _, _, ProviderContractError, _, _ = _provider_contract_api()
+    load_catalog_from_root = _private_provider_catalog_loader()
+    payload = _provider_fixture_payload()
+    _write_provider_manifest(tmp_path, "a.json", payload)
+    _write_provider_manifest(tmp_path, "b.json", payload)
+
+    with pytest.raises(ProviderContractError) as error:
+        load_catalog_from_root(tmp_path)
+    assert error.value.code == "PROVIDER_DUPLICATE"
+
+
+@pytest.mark.parametrize(
+    ("provider_id", "exposure"),
+    (
+        ("fixture.family.logit", "composition"),
+        ("fixture.family.readonly", "read_only"),
+    ),
+)
+def test_task5_injected_family_is_visible_then_denominator_recovers(
+    tmp_path: Path,
+    provider_id: str,
+    exposure: str,
+) -> None:
+    import workbench.providers.catalog as catalog_module
+
+    load_catalog_from_root = _private_provider_catalog_loader()
+    base = _provider_fixture_payload()
+    baseline = catalog_module.load_builtin_catalog()
+    from workbench.agent.workflow_capability_registry import workflow_capability_registry
+
+    operations_before = workflow_capability_registry().operation_ids()
+    _write_provider_manifest(tmp_path, "contract_fixture.json", base)
+    injected = _new_family_provider_payload(
+        base, provider_id=provider_id, exposure=exposure
+    )
+    _write_provider_manifest(tmp_path, "new-family.json", injected)
+
+    catalog = load_catalog_from_root(tmp_path)
+    assert provider_id in catalog.provider_ids
+    assert any(item["provider_id"] == provider_id for item in catalog.manifest_inputs)
+    assert any(item["provider_id"] == provider_id for item in catalog.path_rows)
+    assert any(item["provider_id"] == provider_id for item in catalog.descriptor_inputs)
+    assert workflow_capability_registry().operation_ids() == operations_before
+
+    (tmp_path / "new-family.json").unlink()
+    restored = load_catalog_from_root(tmp_path)
+    assert restored.provider_ids == ("fixture.contracts",)
+    assert len(restored.manifest_inputs) == len(baseline.manifest_inputs)
+    assert len(restored.path_rows) == len(baseline.path_rows)
+    assert len(restored.descriptor_inputs) == len(baseline.descriptor_inputs)
+    assert restored.catalog_digest == baseline.catalog_digest
+    assert workflow_capability_registry().operation_ids() == operations_before
+
+
+def test_task5_adversarial_provider_and_trust_effect_fail_closed(tmp_path: Path) -> None:
+    AdapterDeclarationV1, _, ProviderContractError, TrustedExecutorRegistryV1, _ = _provider_contract_api()
+    load_catalog_from_root = _private_provider_catalog_loader()
+    base = _provider_fixture_payload()
+
+    path_like = _new_family_provider_payload(
+        base, provider_id="fixture.adversarial.path", exposure="direct"
+    )
+    path_like["adapter_declarations"][0]["executor_ref"] = "file:///tmp/evil.py"  # type: ignore[index]
+    _write_provider_manifest(tmp_path, "path-like.json", path_like)
+    with pytest.raises(ProviderContractError) as path_error:
+        load_catalog_from_root(tmp_path)
+    assert path_error.value.code == "PROVIDER_EXECUTOR_INVALID"
+
+    (tmp_path / "path-like.json").unlink()
+    wrong_contract = _new_family_provider_payload(
+        base, provider_id="fixture.adversarial.digest", exposure="direct"
+    )
+    wrong_contract["adapter_declarations"][0]["request_schema_ref"]["contract_digest"] = "0" * 64  # type: ignore[index]
+    _write_provider_manifest(tmp_path, "wrong-contract.json", wrong_contract)
+    with pytest.raises(ProviderContractError) as contract_error:
+        load_catalog_from_root(tmp_path)
+    assert contract_error.value.code == "PROVIDER_REF_INVALID"
+
+    adapter = AdapterDeclarationV1.from_dict(base["adapter_declarations"][0])  # type: ignore[arg-type]
+    registry = TrustedExecutorRegistryV1()
+    with pytest.raises(ProviderContractError) as effect_error:
+        registry.declare(
+            executor_ref=adapter.executor_ref,
+            owner_ref="owner:fixture",
+            signature_ref="signature:fixture:1",
+            effect="execute",
+            request_schema_ref=adapter.request_schema_ref,
+            result_validator_ref=adapter.result_validator_ref,
+        )
+    assert effect_error.value.code == "PROVIDER_TRUST_INVALID"
