@@ -122,6 +122,56 @@ _SAFE_ENUM_FIELDS = {
     "write_mode": frozenset({"append", "create", "none", "read_only", "replace"}),
 }
 _SAFE_IDENTIFIER_FIELDS = frozenset({"id", "node_id", "port_name"})
+_KNOWN_CONTEXT_KEYS = frozenset(
+    set(_SAFE_ENUM_FIELDS)
+    | set(_SAFE_IDENTIFIER_FIELDS)
+    | set(_FREE_TEXT_FIELDS)
+    | set(_SENSITIVE_KEY_MARKERS)
+    | {
+        "actual",
+        "artifact_digest",
+        "artifact_ref",
+        "bounded",
+        "column_ref",
+        "count",
+        "data",
+        "dataset_ref",
+        "definition_ref",
+        "enabled",
+        "evidence_ref",
+        "feature",
+        "features",
+        "index",
+        "labels",
+        "lower",
+        "max",
+        "mean",
+        "metric_ref",
+        "metrics",
+        "min",
+        "model_ref",
+        "name",
+        "node_ref",
+        "output_ref",
+        "port_ref",
+        "prediction",
+        "predictions",
+        "probability",
+        "record_ref",
+        "ref",
+        "rows",
+        "row_count",
+        "schema_ref",
+        "source_ref",
+        "std",
+        "threshold",
+        "upper",
+        "value",
+        "values",
+        "version",
+        "weight",
+    }
+)
 
 
 def _error(code: str, message: str) -> EgressContractError:
@@ -314,8 +364,8 @@ def _validate_context_key(value: object, path: str) -> str:
         raise _error("EGRESS_CONTEXT_KEY_INVALID", f"{path} contains a secret-like field key")
     if _is_opaque_reference(value):
         return value
-    if any(char.isspace() for char in value) or re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,127}", value) is None:
-        raise _error("EGRESS_CONTEXT_KEY_INVALID", f"{path} requires a typed field key or opaque reference")
+    if lowered not in _KNOWN_CONTEXT_KEYS:
+        raise _error("EGRESS_CONTEXT_KEY_INVALID", f"{path} requires a known typed field key or opaque reference")
     return value
 
 

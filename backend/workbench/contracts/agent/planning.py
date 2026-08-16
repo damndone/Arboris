@@ -28,6 +28,7 @@ _MAX_JSON_SAFE_INTEGER = 9_007_199_254_740_991
 _DRAFT_SCHEMA = "draft-agent-plan.v1"
 _COMPILED_SCHEMA = "compiled-workflow.v1"
 _RECORD_SCHEMA = "compilation-record.v1"
+_SERVER_DRAFT_REF_SCHEMA = "server-draft-plan-ref.v1"
 _REFERENCE_FIELDS = {"record_id", "record_digest", "semantic_plan_hash"}
 _DRAFT_FIELDS = {
     "schema_version",
@@ -363,6 +364,7 @@ _DRAFT_DURABLE_ALLOWED_KEYS = (
 # parsing/constructing a record can never upgrade it to server authority.
 _SERVER_COMPILER_CAPABILITIES: dict[int, object] = {}
 _SERVER_COMPILER_ISSUER_CAPABILITIES: dict[int, object] = {}
+_SERVER_DRAFT_REFERENCES: dict[int, tuple[object, object, object]] = {}
 _SERVER_AUTHORIZED_COMPILED_WORKFLOWS: dict[int, tuple[object, object]] = {}
 _SERVER_AUTHORIZED_RECORDS: dict[int, tuple[object, object]] = {}
 
@@ -1201,6 +1203,72 @@ class CompiledWorkflowV1:
         )
 
 
+@dataclass(frozen=True, init=False)
+class ServerDraftPlanReferenceV1:
+    """Opaque server registration for a server-created draft plan copy."""
+
+    draft_ref: str
+    semantic_plan_hash: str
+    draft_digest: str
+
+    @classmethod
+    def _new(
+        cls,
+        *,
+        draft_ref: str,
+        semantic_plan_hash: str,
+        draft_digest: str,
+    ) -> "ServerDraftPlanReferenceV1":
+        _require_opaque_ref(draft_ref, "draft_ref", ("draft-plan:",))
+        _digest(semantic_plan_hash, "semantic_plan_hash")
+        _digest(draft_digest, "draft_digest")
+        value = object.__new__(cls)
+        object.__setattr__(value, "draft_ref", draft_ref)
+        object.__setattr__(value, "semantic_plan_hash", semantic_plan_hash)
+        object.__setattr__(value, "draft_digest", draft_digest)
+        return value
+
+    @classmethod
+    def _issue(
+        cls,
+        *,
+        draft_ref: str,
+        draft: DraftAgentPlanV1,
+        capability: object,
+    ) -> "ServerDraftPlanReferenceV1":
+        value = cls._new(
+            draft_ref=draft_ref,
+            semantic_plan_hash=draft.semantic_plan_hash,
+            draft_digest=sha256_canonical(draft.to_dict()),
+        )
+        _SERVER_DRAFT_REFERENCES[id(value)] = (value, capability, draft)
+        return value
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "schema_version": _SERVER_DRAFT_REF_SCHEMA,
+            "draft_ref": self.draft_ref,
+            "semantic_plan_hash": self.semantic_plan_hash,
+            "draft_digest": self.draft_digest,
+        }
+
+    @classmethod
+    @_wire_boundary
+    def from_dict(cls, value: dict[str, object]) -> "ServerDraftPlanReferenceV1":
+        value = _wire(
+            value,
+            {"schema_version", "draft_ref", "semantic_plan_hash", "draft_digest"},
+            "server_draft_plan_reference",
+        )
+        if value["schema_version"] != _SERVER_DRAFT_REF_SCHEMA:
+            raise _error("PLANNING_SCHEMA_INVALID", "server draft reference schema_version is invalid")
+        return cls._new(
+            draft_ref=value["draft_ref"],  # type: ignore[arg-type]
+            semantic_plan_hash=value["semantic_plan_hash"],  # type: ignore[arg-type]
+            draft_digest=value["draft_digest"],  # type: ignore[arg-type]
+        )
+
+
 @dataclass(frozen=True)
 class CompilationRecordReferenceV1:
     record_id: str
@@ -1503,14 +1571,52 @@ class ServerCompilationRecordIssuerV1:
         _SERVER_COMPILER_CAPABILITIES[id(capability)] = capability
         _SERVER_COMPILER_ISSUER_CAPABILITIES[id(self)] = capability
 
-    def compile_workflow(self, compiled: CompiledWorkflowV1) -> CompiledWorkflowV1:
-        """Register a validated workflow as the output of this server compiler."""
+    def register_draft(self, draft: DraftAgentPlanV1) -> ServerDraftPlanReferenceV1:
+        """Create a server-owned draft copy and return its opaque registration."""
 
-        if type(compiled) is not CompiledWorkflowV1:
-            raise _error("SERVER_COMPILED_REQUIRED", "server compiler requires a compiled workflow")
+        if type(draft) is not DraftAgentPlanV1:
+            raise _error("SERVER_DRAFT_REQUIRED", "server compiler requires a typed draft plan")
         capability = _SERVER_COMPILER_ISSUER_CAPABILITIES.get(id(self))
         if capability is None or _SERVER_COMPILER_CAPABILITIES.get(id(capability)) is not capability:
             raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "server compiler capability is unavailable")
+        try:
+            server_draft = DraftAgentPlanV1.from_dict(draft.to_dict())
+        except (PlanningContractError, TypeError, ValueError) as exc:
+            raise _error("SERVER_DRAFT_INVALID", "server compiler could not register the draft plan") from exc
+        draft_ref = f"draft-plan:{len(_SERVER_DRAFT_REFERENCES) + 1}"
+        return ServerDraftPlanReferenceV1._issue(
+            draft_ref=draft_ref,
+            draft=server_draft,
+            capability=capability,
+        )
+
+    def compile_workflow(
+        self,
+        draft_reference: object,
+        compiled: CompiledWorkflowV1 | None = None,
+    ) -> CompiledWorkflowV1:
+        """Compile only against a live server-registered draft reference."""
+
+        if type(draft_reference) is not ServerDraftPlanReferenceV1 or type(compiled) is not CompiledWorkflowV1:
+            raise _error(
+                "SERVER_DRAFT_REGISTRATION_REQUIRED",
+                "server compiler requires a live registered draft reference and compiled workflow",
+            )
+        reference_entry = _SERVER_DRAFT_REFERENCES.get(id(draft_reference))
+        if reference_entry is None or reference_entry[0] is not draft_reference:
+            raise _error("SERVER_DRAFT_REGISTRATION_REQUIRED", "draft reference was not issued by this server compiler")
+        capability = _SERVER_COMPILER_ISSUER_CAPABILITIES.get(id(self))
+        if capability is None or reference_entry[1] is not capability:
+            raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "draft reference is outside this server compiler scope")
+        server_draft = reference_entry[2]
+        if type(server_draft) is not DraftAgentPlanV1:
+            raise _error("SERVER_DRAFT_INVALID", "registered server draft is invalid")
+        if (
+            draft_reference.semantic_plan_hash != server_draft.semantic_plan_hash
+            or draft_reference.draft_digest != sha256_canonical(server_draft.to_dict())
+            or compiled.semantic_plan_hash != server_draft.semantic_plan_hash
+        ):
+            raise _error("SERVER_DRAFT_HASH_MISMATCH", "compiled workflow does not match the registered server draft")
         _SERVER_AUTHORIZED_COMPILED_WORKFLOWS[id(compiled)] = (compiled, capability)
         return compiled
 
@@ -1812,6 +1918,7 @@ __all__ = [
     "FailureEnvelopeV1",
     "PlanRiskLevelV1",
     "PlanningContractError",
+    "ServerDraftPlanReferenceV1",
     "ServerCompilationRecordReferenceV1",
     "ServerCompilationRecordIssuerV1",
 ]

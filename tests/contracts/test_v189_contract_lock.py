@@ -82,6 +82,7 @@ from workbench.contracts.agent.planning import (
     DraftAgentPlanV1,
     FailureEnvelopeV1,
     PlanRiskLevelV1,
+    ServerDraftPlanReferenceV1,
     ServerCompilationRecordIssuerV1,
 )
 from workbench.contracts.agent.execution_admission import (
@@ -1189,7 +1190,11 @@ def _task3_record(
     policy_snapshot_ref: str = "policy:snapshot:1",
 ) -> CompilationRecordV1:
     issuer = ServerCompilationRecordIssuerV1()
-    compiled = issuer.compile_workflow(_task3_compiled(policy_snapshot_ref=policy_snapshot_ref))
+    draft_ref = issuer.register_draft(_task3_plan(policy_snapshot_ref=policy_snapshot_ref))
+    compiled = issuer.compile_workflow(
+        draft_ref,
+        _task3_compiled(policy_snapshot_ref=policy_snapshot_ref),
+    )
     return issuer.compile_record(
         compiled,
         record_id=record_id,
@@ -2040,8 +2045,10 @@ def test_compilation_store_rejects_client_record_without_server_compiler_authori
         store.issue(client_record)
     with pytest.raises(ContractError, match="authority|compiler"):
         issuer.issue(client_record)
+    server_draft_ref = issuer.register_draft(_task3_plan())
+    server_compiled = issuer.compile_workflow(server_draft_ref, _task3_compiled())
     server_record = issuer.compile_record(
-        issuer.compile_workflow(_task3_compiled()),
+        server_compiled,
         record_id="server-record:1",
         principal_ref="principal:user:1",
         session_ref="session:1",
@@ -2076,6 +2083,16 @@ def test_compilation_wire_and_private_helper_cannot_mint_server_authority() -> N
     assert not hasattr(issuer, "_ServerCompilationRecordIssuerV1__compiler_capability")
     with pytest.raises(ContractError, match="authority|compiler|capability"):
         issuer.compile_record(compiled_from_wire, **helper_kwargs)
+    with pytest.raises(ContractError, match="authority|compiler|draft|registration"):
+        issuer.compile_workflow(compiled_from_wire)
+
+    server_draft_ref = issuer.register_draft(_task3_plan())
+    server_compiled = issuer.compile_workflow(server_draft_ref, _task3_compiled())
+    server_record = issuer.compile_record(server_compiled, **helper_kwargs)
+    assert server_record.semantic_plan_hash == compiled_from_wire.semantic_plan_hash
+    parsed_draft_ref = ServerDraftPlanReferenceV1.from_dict(server_draft_ref.to_dict())
+    with pytest.raises(ContractError, match="authority|draft|registration"):
+        issuer.compile_workflow(parsed_draft_ref, _task3_compiled())
 
     parsed_record = CompilationRecordV1.from_dict(_fixture("compilation_record.json"))
     with pytest.raises(ContractError, match="authority|compiler"):
@@ -2213,6 +2230,9 @@ def test_egress_rejects_instruction_or_sensitive_materialization_keys() -> None:
         ({"Do this now": True}, ("Do this now",)),
         ({"sk-raw-secret": {"bounded": True}}, ("sk-raw-secret",)),
         ({"evidence:key": {"Do this now": True}}, ("evidence:key",)),
+        ({"evidence:key": {"send_data_now": True}}, ("evidence:key",)),
+        ({"evidence:key": {"phone_5551234": True}}, ("evidence:key",)),
+        ({"evidence:key": [{"user_ssn_123": True}]}, ("evidence:key",)),
     )
     for context, selected_refs in invalid_contexts:
         with pytest.raises(ContractError, match="free|text|selection|secret|key|opaque"):
