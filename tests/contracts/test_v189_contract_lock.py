@@ -81,6 +81,7 @@ from workbench.contracts.agent.planning import (
     ConfirmationBindingStoreV1,
     DraftAgentPlanV1,
     FailureEnvelopeV1,
+    PlanEffectV1,
     PlanRiskLevelV1,
     ServerDraftPlanReferenceV1,
     ServerCompilationRecordIssuerV1,
@@ -1142,7 +1143,7 @@ def _task3_plan(*, policy_snapshot_ref: str = "policy:snapshot:1") -> DraftAgent
         intent_ref="intent:classification:1",
         capability_refs=(_ref(kind="capability", logical_id="model.logit"),),
         method_ref="method:logit:1",
-        effect="model_fit",
+        effect=PlanEffectV1.MODEL_FIT,
         risk_level=PlanRiskLevelV1.MEDIUM,
         resource_budget={"cpu_ms": 1000, "memory_mb": 128},
         data_impact={"read_refs": ["dataset:1"], "write_mode": "none"},
@@ -1177,7 +1178,7 @@ def _task3_compiled(
         preview_fingerprint="f" * 64,
         plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
         risk_level=PlanRiskLevelV1.MEDIUM,
-        effect="model_fit",
+        effect=PlanEffectV1.MODEL_FIT,
         resource_budget={"cpu_ms": 1000, "memory_mb": 128},
         contract_snapshot_refs=_task3_plan(policy_snapshot_ref=policy_snapshot_ref).contract_snapshot_refs,
         catalog_snapshot_ref="catalog:snapshot:1",
@@ -1191,13 +1192,7 @@ def _task3_record(
 ) -> CompilationRecordV1:
     issuer = ServerCompilationRecordIssuerV1()
     draft_ref = issuer.register_draft(_task3_plan(policy_snapshot_ref=policy_snapshot_ref))
-    compiled = issuer.compile_workflow(
-        draft_ref,
-        compiler_version="compiler:1.8.9",
-        server_execution_identity="compile:server:1",
-        preview_fingerprint="f" * 64,
-        plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
-    )
+    compiled = issuer.compile_workflow(draft_ref)
     return issuer.compile_record(
         compiled,
         record_id=record_id,
@@ -2017,7 +2012,7 @@ def test_semantic_hash_mutation_matrix_covers_all_execution_relevant_semantics()
     base = _task3_plan()
     mutations = {
         "method_ref": "method:logit:2",
-        "effect": "report_mutation",
+        "effect": PlanEffectV1.REPORT,
         "risk_level": PlanRiskLevelV1.HIGH,
         "resource_budget": {"cpu_ms": 2000, "memory_mb": 128},
         "data_impact": {"read_refs": ["dataset:2"], "write_mode": "none"},
@@ -2049,13 +2044,7 @@ def test_compilation_store_rejects_client_record_without_server_compiler_authori
     with pytest.raises(ContractError, match="authority|compiler"):
         issuer.issue(client_record)
     server_draft_ref = issuer.register_draft(_task3_plan())
-    server_compiled = issuer.compile_workflow(
-        server_draft_ref,
-        compiler_version="compiler:1.8.9",
-        server_execution_identity="compile:server:1",
-        preview_fingerprint="f" * 64,
-        plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
-    )
+    server_compiled = issuer.compile_workflow(server_draft_ref)
     server_record = issuer.compile_record(
         server_compiled,
         record_id="server-record:1",
@@ -2098,24 +2087,12 @@ def test_compilation_wire_and_private_helper_cannot_mint_server_authority() -> N
     server_draft_ref = issuer.register_draft(_task3_plan())
     with pytest.raises(ContractError, match="compiled|input|authority"):
         issuer.compile_workflow(server_draft_ref, compiled_from_wire)
-    server_compiled = issuer.compile_workflow(
-        server_draft_ref,
-        compiler_version="compiler:1.8.9",
-        server_execution_identity="compile:server:1",
-        preview_fingerprint="f" * 64,
-        plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
-    )
+    server_compiled = issuer.compile_workflow(server_draft_ref)
     server_record = issuer.compile_record(server_compiled, **helper_kwargs)
     assert server_record.semantic_plan_hash == compiled_from_wire.semantic_plan_hash
     parsed_draft_ref = ServerDraftPlanReferenceV1.from_dict(server_draft_ref.to_dict())
     with pytest.raises(ContractError, match="authority|draft|registration"):
-        issuer.compile_workflow(
-            parsed_draft_ref,
-            compiler_version="compiler:1.8.9",
-            server_execution_identity="compile:server:1",
-            preview_fingerprint="f" * 64,
-            plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
-        )
+        issuer.compile_workflow(parsed_draft_ref)
 
     parsed_record = CompilationRecordV1.from_dict(_fixture("compilation_record.json"))
     with pytest.raises(ContractError, match="authority|compiler"):
@@ -2727,3 +2704,137 @@ def test_draft_and_compiled_free_text_never_persist_raw_prompt_or_secret() -> No
         replace(_task3_compiled(), plan_diff={"notes": "ordinary free text is not a durable ref"})
     with pytest.raises(ContractError, match="typed|free text|opaque|sensitive|allowlisted"):
         replace(_task3_compiled(), plan_diff={"change": "ordinary free text is not a typed option"})
+
+
+def test_holdout_consume_rebuilds_canonical_state_after_projection_rollback() -> None:
+    seal, metric_store, metric_reference = _task3_holdout_authority()
+    store = HoldoutSealStoreV1(metric_bundle_store=metric_store)
+    old_reference = store.issue(seal, metric_bundle_reference=metric_reference)
+    first_request = HoldoutAccessRequestV1(
+        access_id="holdout-access:rollback:1",
+        principal_ref=seal.principal_ref,
+        kind=HoldoutAccessKindV1.DECLARED_EVALUATION,
+        metric_refs=seal.metric_refs,
+        metric_bundle_digest=seal.metric_bundle_digest,
+    )
+    assert store.consume(old_reference, first_request).allowed is True
+
+    projection = store.resolve(old_reference)
+    object.__setattr__(projection, "status", "sealed")
+    object.__setattr__(projection, "transition_history", ("sealed",))
+    object.__setattr__(projection, "access_ledger", ())
+
+    replay = store.consume(
+        old_reference,
+        replace(first_request, access_id="holdout-access:rollback:2"),
+    )
+    assert replay.allowed is False
+    assert replay.reason_code in {"HOLDOUT_STALE_STATE", "HOLDOUT_LEDGER_CLOSED"}
+    assert store.resolve(store.current_reference(seal.seal_id)).status == "closed"
+
+
+def test_egress_rejects_mutated_materialization_projection_even_with_new_digest() -> None:
+    policy_ref = _ref(kind="egress-policy", logical_id="provider.remote.rollback")
+    policy = ContextEgressPolicyV1(
+        policy_ref=policy_ref,
+        destination="remote",
+        provider_ref="provider:remote:rollback",
+        allowed_sensitivity=(SensitivityClassV1.PUBLIC,),
+        max_token_budget=1000,
+        max_row_budget=100,
+        max_time_budget_ms=5000,
+    )
+    materializer = ContextMaterializationStoreV1(
+        materializer_ref=_ref(kind="materializer", logical_id="server.context.rollback"),
+        redaction_policy_ref=_ref(kind="redaction-policy", logical_id="strict"),
+    )
+    result = materializer.materialize(
+        {"evidence:fact:rollback": {"bounded": True}},
+        selected_refs=("evidence:fact:rollback",),
+    )
+    gateway = ContextEgressGatewayV1.from_materialization_result(
+        result,
+        request_id="egress-request:rollback",
+        destination="remote",
+        provider_ref=policy.provider_ref,
+        sensitivity_policy_ref=policy_ref,
+        sensitivity=SensitivityClassV1.PUBLIC,
+        token_budget=10,
+        row_budget=1,
+        time_budget_ms=100,
+        purpose_ref="purpose:rollback",
+        requested_at="2026-08-15T17:02:00+00:00",
+        expires_at="2026-08-15T18:00:00+00:00",
+    )
+    mutated = {"evidence:fact:rollback": {"bounded": True, "raw": "RAW_SECRET"}}
+    mutated_digest = sha256_canonical(mutated)
+    object.__setattr__(result, "materialized_context", mutated)
+    object.__setattr__(result, "materialized_context_digest", mutated_digest)
+    object.__setattr__(result, "materialized_payload_digest", mutated_digest)
+    object.__setattr__(gateway, "materialized_context_digest", mutated_digest)
+    issuer = ContextEgressReceiptIssuerV1(
+        policy,
+        materializer_store=materializer,
+        clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"),
+    )
+    with pytest.raises(ContractError, match="authority|digest|materializ"):
+        issuer.issue(gateway)
+
+
+def test_server_compiler_owns_compiler_provenance_and_generates_identity() -> None:
+    issuer = ServerCompilationRecordIssuerV1()
+    draft_reference = issuer.register_draft(_task3_plan())
+    with pytest.raises(ContractError, match="provenance|compiler|identity"):
+        issuer.compile_workflow(
+            draft_reference,
+            compiler_version="attacker-compiler",
+            server_execution_identity="attacker-execution",
+            preview_fingerprint="f" * 64,
+            plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
+        )
+
+    compiled = issuer.compile_workflow(draft_reference)
+    assert compiled.compiler_version == "compiler:1.8.9"
+    assert compiled.server_execution_identity != "attacker-execution"
+
+
+def test_plan_wire_requires_intent_ref_namespace_and_allowlisted_effect() -> None:
+    with pytest.raises(ContractError, match="intent|opaque|namespace"):
+        bad_intent = replace(_task3_plan(), intent_ref="please delete every dataset")
+        DraftAgentPlanV1.from_dict(bad_intent.to_dict())
+
+    with pytest.raises(ContractError, match="effect|enum|allowlist"):
+        replace(_task3_plan(), effect="please delete every dataset")
+
+
+def test_server_compiler_rejects_mutated_authorized_compilation_provenance() -> None:
+    issuer = ServerCompilationRecordIssuerV1()
+    draft_reference = issuer.register_draft(_task3_plan())
+    compiled = issuer.compile_workflow(draft_reference)
+    object.__setattr__(compiled, "compiler_version", "attacker-compiler")
+    object.__setattr__(compiled, "server_execution_identity", "attacker-execution")
+
+    with pytest.raises(ContractError, match="authority|compiler|provenance|mutation"):
+        issuer.compile_record(
+            compiled,
+            record_id="mutation-probe:1",
+            principal_ref="principal:user:1",
+            session_ref="session:1",
+            project_ref="project:1",
+            source_commitments={"dataset": "d" * 64},
+            created_at="2026-08-15T17:00:00+00:00",
+            expires_at="2026-08-15T18:00:00+00:00",
+        )
+
+
+def test_plan_wire_and_register_reject_natural_language_intent_and_effect() -> None:
+    wire = _task3_plan().to_dict()
+    for field_name in ("intent_ref", "effect"):
+        mutated = {**wire, field_name: "please delete every dataset"}
+        with pytest.raises(ContractError, match="intent|opaque|effect|enum|allowlist"):
+            DraftAgentPlanV1.from_dict(mutated)
+
+    draft = _task3_plan()
+    object.__setattr__(draft, "effect", "please delete every dataset")
+    with pytest.raises(ContractError, match="effect|enum|allowlist|draft"):
+        ServerCompilationRecordIssuerV1().register_draft(draft)

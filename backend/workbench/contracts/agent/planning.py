@@ -124,7 +124,7 @@ _DRAFT_FORBIDDEN_SENSITIVE_KEYS = frozenset(
     }
 )
 _DRAFT_FORBIDDEN_SENSITIVE_PREFIXES = ("raw:", "secret:", "prompt:", "token:")
-_DRAFT_OPAQUE_REF_PREFIXES = ("prompt-ref:", "descriptor:", "symbol:", "rationale:")
+_DRAFT_OPAQUE_REF_PREFIXES = ("prompt-ref:", "descriptor:", "symbol:", "rationale:", "intent:")
 _DRAFT_TYPED_REF_PREFIXES = (
     "artifact:",
     "capability:",
@@ -150,6 +150,7 @@ _DRAFT_TYPED_REF_PREFIXES = (
     "schema:",
     "source:",
     "symbol:",
+    "intent:",
 )
 _DRAFT_OPAQUE_REF_KEYS = frozenset(
     {
@@ -368,7 +369,9 @@ _SERVER_COMPILER_ISSUER_CAPABILITIES: dict[int, object] = {}
 _SERVER_DRAFT_REFERENCES: dict[int, tuple[object, object, object]] = {}
 _SERVER_DRAFT_REGISTRATION_LOCK = Lock()
 _SERVER_DRAFT_SEQUENCE = 0
-_SERVER_AUTHORIZED_COMPILED_WORKFLOWS: dict[int, tuple[object, object]] = {}
+_SERVER_COMPILATION_SEQUENCE = 0
+_SERVER_COMPILER_VERSION = "compiler:1.8.9"
+_SERVER_AUTHORIZED_COMPILED_WORKFLOWS: dict[int, tuple[object, object, str]] = {}
 _SERVER_AUTHORIZED_RECORDS: dict[int, tuple[object, object]] = {}
 
 
@@ -382,12 +385,17 @@ def _is_server_authorized_record(value: object) -> bool:
 
 def _is_server_authorized_compiled(value: object, capability: object) -> bool:
     authority = _SERVER_AUTHORIZED_COMPILED_WORKFLOWS.get(id(value))
-    return (
-        authority is not None
-        and authority[0] is value
-        and authority[1] is capability
-        and _SERVER_COMPILER_CAPABILITIES.get(id(capability)) is capability
-    )
+    if (
+        authority is None
+        or authority[0] is not value
+        or authority[1] is not capability
+        or _SERVER_COMPILER_CAPABILITIES.get(id(capability)) is not capability
+    ):
+        return False
+    try:
+        return authority[2] == sha256_canonical(value.to_dict())
+    except (AttributeError, CanonicalJSONError, ContractError, RecursionError, TypeError, ValueError):
+        return False
 
 
 class PlanningContractError(ContractError):
@@ -403,6 +411,18 @@ class PlanRiskLevelV1(str, Enum):
     MEDIUM = "medium"
     HIGH = "high"
     RESTRICTED = "restricted"
+
+
+class PlanEffectV1(str, Enum):
+    """The finite effect vocabulary allowed to cross the planning seam."""
+
+    MODEL_EVALUATE = "model_evaluate"
+    MODEL_FIT = "model_fit"
+    MODEL_PREDICT = "model_predict"
+    NONE = "none"
+    READ = "read"
+    REPORT = "report"
+    WRITE = "write"
 
 
 def _error(code: str, message: str) -> PlanningContractError:
@@ -735,7 +755,7 @@ def _semantic_payload(
     intent_ref: str,
     capability_refs: tuple[ContractRefV1, ...],
     method_ref: str,
-    effect: str,
+    effect: PlanEffectV1,
     risk_level: PlanRiskLevelV1,
     resource_budget: Mapping[str, Any],
     data_impact: Mapping[str, Any],
@@ -758,7 +778,7 @@ def _semantic_payload(
         "intent_ref": intent_ref,
         "capability_refs": [ref.to_dict() for ref in capability_refs],
         "method_ref": method_ref,
-        "effect": effect,
+        "effect": effect.value,
         "risk_level": risk_level.value,
         "resource_budget": _plain(resource_budget),
         "data_impact": _plain(data_impact),
@@ -801,7 +821,7 @@ class DraftAgentPlanV1:
     intent_ref: str
     capability_refs: tuple[ContractRefV1, ...]
     method_ref: str
-    effect: str
+    effect: PlanEffectV1
     risk_level: PlanRiskLevelV1
     resource_budget: Mapping[str, Any]
     data_impact: Mapping[str, Any]
@@ -818,7 +838,7 @@ class DraftAgentPlanV1:
     def __post_init__(self) -> None:
         if self.schema_version != _DRAFT_SCHEMA:
             raise _error("PLANNING_SCHEMA_INVALID", "draft schema_version is invalid")
-        _text(self.intent_ref, "intent_ref")
+        _require_opaque_ref(self.intent_ref, "intent_ref", ("intent:",))
         if not isinstance(self.capability_refs, (tuple, list)):
             raise _error("PLANNING_ARRAY_INVALID", "capability_refs must be an array")
         refs = tuple(self.capability_refs)
@@ -828,7 +848,8 @@ class DraftAgentPlanV1:
             raise _error("PLANNING_DUPLICATE_ID", "capability_refs contain duplicate identities")
         object.__setattr__(self, "capability_refs", refs)
         _text(self.method_ref, "method_ref")
-        _text(self.effect, "effect")
+        if type(self.effect) is not PlanEffectV1:
+            raise _error("PLANNING_ENUM_INVALID", "effect is invalid")
         if type(self.risk_level) is not PlanRiskLevelV1:
             raise _error("PLANNING_ENUM_INVALID", "risk_level is invalid")
         object.__setattr__(self, "resource_budget", _frozen_mapping(_plain(self.resource_budget), "resource_budget"))
@@ -911,7 +932,7 @@ class DraftAgentPlanV1:
             "intent_ref": self.intent_ref,
             "capability_refs": [ref.to_dict() for ref in self.capability_refs],
             "method_ref": self.method_ref,
-            "effect": self.effect,
+            "effect": self.effect.value,
             "risk_level": self.risk_level.value,
             "resource_budget": _plain(self.resource_budget),
             "data_impact": _plain(self.data_impact),
@@ -946,7 +967,7 @@ class DraftAgentPlanV1:
             intent_ref=value["intent_ref"],  # type: ignore[arg-type]
             capability_refs=tuple(_ref_tuple(value["capability_refs"], "capability_refs")),
             method_ref=value["method_ref"],  # type: ignore[arg-type]
-            effect=value["effect"],  # type: ignore[arg-type]
+            effect=_enum(value["effect"], PlanEffectV1, "effect"),
             risk_level=_enum(value["risk_level"], PlanRiskLevelV1, "risk_level"),
             resource_budget=_frozen_mapping(raw_resource_budget, "resource_budget"),
             data_impact=_frozen_mapping(raw_data_impact, "data_impact"),
@@ -971,7 +992,7 @@ class CompiledWorkflowV1:
     intent_ref: str
     capability_refs: tuple[ContractRefV1, ...]
     method_ref: str
-    effect: str
+    effect: PlanEffectV1
     risk_level: PlanRiskLevelV1
     resource_budget: Mapping[str, Any]
     data_impact: Mapping[str, Any]
@@ -992,7 +1013,7 @@ class CompiledWorkflowV1:
     def __post_init__(self) -> None:
         if self.schema_version != _COMPILED_SCHEMA:
             raise _error("PLANNING_SCHEMA_INVALID", "compiled schema_version is invalid")
-        _text(self.intent_ref, "intent_ref")
+        _require_opaque_ref(self.intent_ref, "intent_ref", ("intent:",))
         for name, refs in (
             ("capability_refs", self.capability_refs),
             ("contract_snapshot_refs", self.contract_snapshot_refs),
@@ -1008,7 +1029,8 @@ class CompiledWorkflowV1:
         _require_contract_ref_kinds(self.contract_snapshot_refs, "contract", "contract_snapshot_refs")
         _text(self.method_ref, "method_ref")
         _require_opaque_ref(self.method_ref, "method_ref", ("method:",))
-        _text(self.effect, "effect")
+        if type(self.effect) is not PlanEffectV1:
+            raise _error("PLANNING_ENUM_INVALID", "effect is invalid")
         if type(self.risk_level) is not PlanRiskLevelV1:
             raise _error("PLANNING_ENUM_INVALID", "risk_level is invalid")
         object.__setattr__(self, "resource_budget", _frozen_mapping(_plain(self.resource_budget), "resource_budget"))
@@ -1056,7 +1078,7 @@ class CompiledWorkflowV1:
         preview_fingerprint: str,
         plan_diff: Mapping[str, Any],
         risk_level: PlanRiskLevelV1,
-        effect: str,
+        effect: PlanEffectV1,
         resource_budget: Mapping[str, Any],
         contract_snapshot_refs: tuple[ContractRefV1, ...],
         catalog_snapshot_ref: str,
@@ -1148,7 +1170,7 @@ class CompiledWorkflowV1:
             "intent_ref": self.intent_ref,
             "capability_refs": [ref.to_dict() for ref in self.capability_refs],
             "method_ref": self.method_ref,
-            "effect": self.effect,
+            "effect": self.effect.value,
             "risk_level": self.risk_level.value,
             "resource_budget": _plain(self.resource_budget),
             "data_impact": _plain(self.data_impact),
@@ -1186,7 +1208,7 @@ class CompiledWorkflowV1:
             intent_ref=value["intent_ref"],  # type: ignore[arg-type]
             capability_refs=_ref_tuple(value["capability_refs"], "capability_refs"),
             method_ref=value["method_ref"],  # type: ignore[arg-type]
-            effect=value["effect"],  # type: ignore[arg-type]
+            effect=_enum(value["effect"], PlanEffectV1, "effect"),
             risk_level=_enum(value["risk_level"], PlanRiskLevelV1, "risk_level"),
             resource_budget=_frozen_mapping(raw_resource_budget, "resource_budget"),
             data_impact=_frozen_mapping(raw_data_impact, "data_impact"),
@@ -1568,7 +1590,7 @@ class ServerCompilationRecordIssuerV1:
             raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "server compiler capability is unavailable")
         try:
             server_draft = DraftAgentPlanV1.from_dict(draft.to_dict())
-        except (PlanningContractError, TypeError, ValueError) as exc:
+        except (AttributeError, PlanningContractError, TypeError, ValueError) as exc:
             raise _error("SERVER_DRAFT_INVALID", "server compiler could not register the draft plan") from exc
         global _SERVER_DRAFT_SEQUENCE
         with _SERVER_DRAFT_REGISTRATION_LOCK:
@@ -1597,7 +1619,9 @@ class ServerCompilationRecordIssuerV1:
         ``compiled`` is retained as a positional compatibility trap so an old
         caller gets a stable contract error rather than Python's ``TypeError``.
         A client/wire compiled object is never promoted; this seam constructs
-        the compiled workflow from the server-owned draft copy itself.
+        the compiled workflow from the server-owned draft copy itself. Compiler
+        provenance is generated inside this seam, so caller-supplied compiler
+        versions, execution identities, previews, or diffs are rejected.
         """
 
         if type(draft_reference) is not ServerDraftPlanReferenceV1:
@@ -1610,15 +1634,13 @@ class ServerCompilationRecordIssuerV1:
                 "SERVER_COMPILED_INPUT_FORBIDDEN",
                 "server compiler constructs compiled workflows; client compiled input is not accepted",
             )
-        if (
-            type(compiler_version) is not str
-            or type(server_execution_identity) is not str
-            or type(preview_fingerprint) is not str
-            or type(plan_diff) is not dict
+        if any(
+            value is not None
+            for value in (compiler_version, server_execution_identity, preview_fingerprint, plan_diff)
         ):
             raise _error(
-                "SERVER_COMPILE_INPUT_INVALID",
-                "server compiler requires explicit compiler metadata and typed plan diff",
+                "SERVER_COMPILER_PROVENANCE_FORBIDDEN",
+                "compiler provenance is generated by the server compiler",
             )
         reference_entry = _SERVER_DRAFT_REFERENCES.get(id(draft_reference))
         if reference_entry is None or reference_entry[0] is not draft_reference:
@@ -1634,6 +1656,22 @@ class ServerCompilationRecordIssuerV1:
             or draft_reference.draft_digest != sha256_canonical(server_draft.to_dict())
         ):
             raise _error("SERVER_DRAFT_HASH_MISMATCH", "compiled workflow does not match the registered server draft")
+        global _SERVER_COMPILATION_SEQUENCE
+        with _SERVER_DRAFT_REGISTRATION_LOCK:
+            _SERVER_COMPILATION_SEQUENCE += 1
+            server_execution_identity = f"compile:server:{_SERVER_COMPILATION_SEQUENCE}"
+        compiler_version = _SERVER_COMPILER_VERSION
+        preview_fingerprint = sha256_canonical(
+            {
+                "semantic_plan_hash": server_draft.semantic_plan_hash,
+                "compiler_version": compiler_version,
+                "draft_ref": draft_reference.draft_ref,
+            }
+        )
+        plan_diff = {
+            "effect": server_draft.effect.value,
+            "data_impact": "read_dataset" if "read_refs" in server_draft.data_impact else "none",
+        }
         try:
             server_compiled = CompiledWorkflowV1.from_draft(
                 server_draft,
@@ -1649,7 +1687,11 @@ class ServerCompilationRecordIssuerV1:
             )
         except (AttributeError, CanonicalJSONError, RecursionError, PlanningContractError, TypeError, ValueError) as exc:
             raise _error("SERVER_COMPILE_INVALID", "server compiler could not compile the registered draft") from exc
-        _SERVER_AUTHORIZED_COMPILED_WORKFLOWS[id(server_compiled)] = (server_compiled, capability)
+        _SERVER_AUTHORIZED_COMPILED_WORKFLOWS[id(server_compiled)] = (
+            server_compiled,
+            capability,
+            sha256_canonical(server_compiled.to_dict()),
+        )
         return server_compiled
 
     def compile_record(self, compiled: CompiledWorkflowV1, **kwargs: Any) -> CompilationRecordV1:
@@ -1948,6 +1990,7 @@ __all__ = [
     "ConfirmationBindingStoreV1",
     "DraftAgentPlanV1",
     "FailureEnvelopeV1",
+    "PlanEffectV1",
     "PlanRiskLevelV1",
     "PlanningContractError",
     "ServerDraftPlanReferenceV1",

@@ -431,6 +431,21 @@ class HoldoutReleaseDecisionV1:
 
 
 @dataclass(frozen=True)
+class _HoldoutCanonicalStateV1:
+    """Private state snapshot; returned seal projections are never authoritative."""
+
+    seal_id: str
+    principal_ref: str
+    development_hashes: tuple[tuple[str, str], ...]
+    metric_release_bundle_ref: str
+    metric_bundle_digest: str
+    metric_refs: tuple[str, ...]
+    status: str
+    transition_history: tuple[str, ...]
+    access_ledger: tuple[HoldoutAccessLedgerEntryV1, ...]
+
+
+@dataclass(frozen=True)
 class HoldoutSealV1:
     seal_id: str
     principal_ref: str
@@ -609,8 +624,53 @@ class HoldoutSealStoreV1:
         self.metric_bundle_store = metric_bundle_store
         self._issuer_token = object()
         _HOLDOUT_SEAL_ISSUERS[id(self._issuer_token)] = self._issuer_token
-        self._current: dict[str, HoldoutSealV1] = {}
+        self._current: dict[str, _HoldoutCanonicalStateV1] = {}
+        self._issued_references: dict[int, tuple[object, str, str]] = {}
         self._lock = RLock()
+
+    @staticmethod
+    def _snapshot(seal: HoldoutSealV1) -> _HoldoutCanonicalStateV1:
+        return _HoldoutCanonicalStateV1(
+            seal_id=seal.seal_id,
+            principal_ref=seal.principal_ref,
+            development_hashes=tuple(sorted(seal.development_hashes.items())),
+            metric_release_bundle_ref=seal.metric_release_bundle_ref,
+            metric_bundle_digest=seal.metric_bundle_digest,
+            metric_refs=tuple(seal.metric_refs),
+            status=seal.status,
+            transition_history=tuple(seal.transition_history),
+            access_ledger=tuple(
+                HoldoutAccessLedgerEntryV1.from_dict(entry.to_dict())
+                for entry in seal.access_ledger
+            ),
+        )
+
+    def _projection(self, snapshot: _HoldoutCanonicalStateV1) -> HoldoutSealV1:
+        return HoldoutSealV1(
+            seal_id=snapshot.seal_id,
+            principal_ref=snapshot.principal_ref,
+            development_hashes=dict(snapshot.development_hashes),
+            metric_release_bundle_ref=snapshot.metric_release_bundle_ref,
+            metric_bundle_digest=snapshot.metric_bundle_digest,
+            metric_refs=snapshot.metric_refs,
+            status=snapshot.status,
+            transition_history=snapshot.transition_history,
+            access_ledger=tuple(
+                HoldoutAccessLedgerEntryV1.from_dict(entry.to_dict())
+                for entry in snapshot.access_ledger
+            ),
+            _issuer_token=self._issuer_token,
+        )
+
+    def _new_reference(self, snapshot: _HoldoutCanonicalStateV1) -> ServerHoldoutSealReferenceV1:
+        projection = self._projection(snapshot)
+        reference = ServerHoldoutSealReferenceV1._issue(projection, self._issuer_token)
+        self._issued_references[id(reference)] = (
+            reference,
+            reference.seal_id,
+            reference.state_digest,
+        )
+        return reference
 
     def issue(
         self,
@@ -647,17 +707,25 @@ class HoldoutSealStoreV1:
         with self._lock:
             if seal.seal_id in self._current:
                 raise _error("HOLDOUT_DUPLICATE_SEAL", "seal is already issued by this store")
-            object.__setattr__(seal, "_issuer_token", self._issuer_token)
-            self._current[seal.seal_id] = seal
-            return ServerHoldoutSealReferenceV1._issue(seal, self._issuer_token)
+            snapshot = self._snapshot(seal)
+            self._current[seal.seal_id] = snapshot
+            return self._new_reference(snapshot)
 
     def _resolve_unlocked(self, reference: ServerHoldoutSealReferenceV1) -> HoldoutSealV1:
         if type(reference) is not ServerHoldoutSealReferenceV1 or reference._issuer_token is not self._issuer_token:
             raise _error("HOLDOUT_SERVER_REFERENCE_REQUIRED", "holdout consume requires a server-owned reference")
-        seal = self._current.get(reference.seal_id)
-        if seal is None:
+        issued = self._issued_references.get(id(reference))
+        if (
+            issued is None
+            or issued[0] is not reference
+            or issued[1] != reference.seal_id
+            or issued[2] != reference.state_digest
+        ):
+            raise _error("HOLDOUT_SERVER_REFERENCE_REQUIRED", "holdout reference projection was mutated")
+        snapshot = self._current.get(reference.seal_id)
+        if snapshot is None:
             raise _error("HOLDOUT_SERVER_SEAL_UNRESOLVED", "server holdout seal is unavailable")
-        return seal
+        return self._projection(snapshot)
 
     def resolve(self, reference: ServerHoldoutSealReferenceV1) -> HoldoutSealV1:
         with self._lock:
@@ -669,7 +737,7 @@ class HoldoutSealStoreV1:
             seal = self._current.get(seal_id)
             if seal is None:
                 raise _error("HOLDOUT_SERVER_SEAL_UNRESOLVED", "server holdout seal is unavailable")
-            return ServerHoldoutSealReferenceV1._issue(seal, self._issuer_token)
+            return self._new_reference(seal)
 
     def consume(self, reference: ServerHoldoutSealReferenceV1, request: HoldoutAccessRequestV1) -> HoldoutReleaseDecisionV1:
         if type(request) is not HoldoutAccessRequestV1:
@@ -699,7 +767,7 @@ class HoldoutSealStoreV1:
                     access_ledger=(*current.access_ledger, entry),
                     _issuer_token=self._issuer_token,
                 )
-                self._current[current.seal_id] = denied
+                self._current[current.seal_id] = self._snapshot(denied)
                 return HoldoutReleaseDecisionV1(allowed=False, reason_code="HOLDOUT_STALE_STATE", seal=denied)
             before = _parse_status(current.status)
             allowed = False
@@ -750,7 +818,7 @@ class HoldoutSealStoreV1:
                 _issuer_token=self._issuer_token,
             )
             decision = HoldoutReleaseDecisionV1(allowed=allowed, reason_code=reason, seal=next_seal)
-            self._current[current.seal_id] = decision.seal
+            self._current[current.seal_id] = self._snapshot(decision.seal)
             return decision
 
 
