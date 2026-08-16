@@ -54,6 +54,27 @@ _OPAQUE_REF_FORBIDDEN_SEGMENTS = frozenset(
         "user",
     }
 )
+_OPAQUE_REF_FORBIDDEN_MARKERS = frozenset(
+    {
+        "address",
+        "credential",
+        "email",
+        "ignore",
+        "instruction",
+        "message",
+        "password",
+        "phone",
+        "previous",
+        "prompt",
+        "raw",
+        "reveal",
+        "secret",
+        "send",
+        "ssn",
+        "token",
+        "user",
+    }
+)
 _ISSUED_RECEIPTS: dict[tuple[int, str], object] = {}
 _MATERIALIZATION_ISSUANCES: dict[tuple[int, str], object] = {}
 
@@ -365,7 +386,10 @@ def _is_opaque_reference(value: object) -> bool:
     suffix = value[len(prefix) :]
     if _OPAQUE_REF_SUFFIX.fullmatch(suffix) is None:
         return False
-    return not any(segment.casefold() in _OPAQUE_REF_FORBIDDEN_SEGMENTS for segment in re.split(r"[-.:/]", suffix))
+    lowered_suffix = suffix.casefold()
+    if suffix != lowered_suffix or any(marker in lowered_suffix for marker in _OPAQUE_REF_FORBIDDEN_MARKERS):
+        return False
+    return not any(segment in _OPAQUE_REF_FORBIDDEN_SEGMENTS for segment in re.split(r"[-.:/]", lowered_suffix))
 
 
 def _is_safe_selected_reference(value: object) -> bool:
