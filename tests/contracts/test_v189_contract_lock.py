@@ -3321,6 +3321,47 @@ def test_public_builtin_loader_ignores_mutated_module_root(
         assert "attacker.external-root" not in loaded.provider_ids
 
 
+def test_provider_catalog_and_nested_declarations_reject_ordinary_mutation() -> None:
+    from workbench.providers.catalog import load_builtin_catalog
+
+    catalog = load_builtin_catalog()
+    provider = catalog.providers[0]
+    path = provider.exposure_paths[0]
+    adapter = provider.adapter_declarations[0]
+    before = (
+        catalog.catalog_digest,
+        catalog.provider_ids,
+        catalog.manifest_inputs,
+        catalog.path_rows,
+        catalog.descriptor_inputs,
+    )
+
+    for value in (catalog, provider, path, adapter):
+        with pytest.raises(TypeError):
+            vars(value)
+        with pytest.raises(AttributeError):
+            object.__setattr__(value, "attacker_field", "forged")
+
+    with pytest.raises(FrozenInstanceError):
+        catalog.providers = ()  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        catalog.providers[0] = provider  # type: ignore[index]
+    with pytest.raises(TypeError):
+        provider.contract_refs[0] = provider.contract_refs[0]  # type: ignore[index]
+    with pytest.raises(TypeError):
+        path.result_contract_refs[0] = path.result_contract_refs[0]  # type: ignore[index]
+    with pytest.raises(TypeError):
+        adapter.output_refs[0] = adapter.output_refs[0]  # type: ignore[index]
+
+    assert (
+        catalog.catalog_digest,
+        catalog.provider_ids,
+        catalog.manifest_inputs,
+        catalog.path_rows,
+        catalog.descriptor_inputs,
+    ) == before
+
+
 @pytest.mark.parametrize(
     "path_like",
     (
@@ -3621,6 +3662,35 @@ def test_task5_consumer_projection_status_type_failure_is_stable() -> None:
             not_applicable_projection=projection.payload.not_applicable_projection,
         )
     assert error.value.code == "EVIDENCE_CONSUMER_PROJECTION_STATUS_INVALID"
+
+
+def test_task5_consumer_projection_classes_reject_ordinary_mutation() -> None:
+    projection = ConsumerProjectionV1.from_dict(_fixture("consumer_projection.json"))
+    not_applicable = projection.payload.not_applicable_projection
+    slot = projection.payload.slots[0]
+    payload = projection.payload
+    before = projection.to_dict()
+
+    for value in (not_applicable, slot, payload, projection):
+        with pytest.raises(TypeError):
+            vars(value)
+        with pytest.raises(AttributeError):
+            object.__setattr__(value, "attacker_field", "forged")
+
+    with pytest.raises(FrozenInstanceError):
+        not_applicable.reason = "forged"  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        slot.artifact_facets = ("forged",)  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        payload.projection_id = "forged"  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        projection.producer_version = "forged"  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        slot.artifact_facets[0] = "forged"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        payload.slots[0] = slot  # type: ignore[index]
+
+    assert projection.to_dict() == before
 
 
 @pytest.mark.parametrize(

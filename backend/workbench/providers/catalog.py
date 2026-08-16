@@ -134,7 +134,7 @@ def _provider_error(error: ContractRefError) -> ProviderContractError:
     return ProviderContractError(PROVIDER_REF_INVALID)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ProviderCatalogV1:
     """Immutable catalog projection produced from fixed builtin manifests."""
 

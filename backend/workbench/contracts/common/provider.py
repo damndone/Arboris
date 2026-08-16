@@ -120,7 +120,7 @@ def _optional_ref(value: object, name: str) -> ContractRefV1 | None:
     return _contract_ref(value, name)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AdapterDeclarationV1:
     """One version-pinned adapter contract, kept as an inseparable group."""
 
@@ -175,7 +175,7 @@ class AdapterDeclarationV1:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ExposurePathRefV1:
     """A path row composed solely from existing versioned refs."""
 
@@ -291,7 +291,7 @@ def _unique_ref_identities(refs: Sequence[ContractRefV1], name: str) -> None:
         raise ProviderContractError(PROVIDER_DUPLICATE, name)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ProviderContributionV1:
     """The provider manifest root; it carries refs, never feature behavior."""
 

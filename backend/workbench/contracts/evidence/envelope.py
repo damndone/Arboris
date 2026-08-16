@@ -128,7 +128,7 @@ def _consumer_projection_wire_dict(
     return value
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ConsumerProjectionNotApplicableV1:
     status: str
     reason: str
@@ -172,7 +172,7 @@ class ConsumerProjectionNotApplicableV1:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ConsumerProjectionSlotV1:
     consumer: str
     artifact_facets: tuple[str, ...]
@@ -251,7 +251,7 @@ class ConsumerProjectionSlotV1:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ConsumerProjectionPayloadV1:
     projection_id: str
     projection_ref: str
@@ -339,7 +339,7 @@ class ConsumerProjectionPayloadV1:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ConsumerProjectionV1:
     contract: str
     contract_version: str
