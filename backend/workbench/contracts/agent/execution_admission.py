@@ -504,7 +504,7 @@ class ExecutionAdmissionGateV1:
             raise _error("ADMISSION_CATALOG_CHANGED", "catalog snapshot changed after compilation")
         if request.contract_snapshot_refs != record.contract_snapshot_refs:
             raise _error("ADMISSION_CONTRACT_CHANGED", "contract snapshot changed after compilation")
-        if request.effect.value != record.compiled_workflow.effect:
+        if request.effect.value != record.compiled_workflow.effect.value:
             raise _error("ADMISSION_EFFECT_MISMATCH", "requested effect mismatches compiled effect")
         if not _budget_within(request.resource_budget, record.compiled_workflow.resource_budget):
             raise _error("ADMISSION_BUDGET_EXCEEDED", "requested resource budget exceeds compiled budget")
