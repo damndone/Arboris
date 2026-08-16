@@ -1634,6 +1634,31 @@ def test_failure_envelope_is_serializable_without_prompt_or_provider_secret() ->
     assert "secret" not in encoded.lower()
 
 
+def test_failure_envelope_rejects_undeclared_vocabulary_at_constructor_and_wire() -> None:
+    failure = FailureEnvelopeV1(
+        failure_class="authorization",
+        reason_code="CONFIRMATION_STALE",
+        capability_ref="capability:model.logit",
+        step_ref="step:fit",
+        evidence_refs=("evidence:diagnostic:1",),
+        retryable=False,
+        remediation_codes=("recompile", "reconfirm"),
+        confirmation_required=True,
+        partial_output_refs=(),
+        partial_output_trust="not_available",
+    )
+    invalid_values = (
+        ("failure_class", "arbitrary"),
+        ("reason_code", "arbitrary"),
+        ("remediation_codes", ("drop-all-data",)),
+    )
+    for field_name, invalid_value in invalid_values:
+        with pytest.raises(ContractError, match="failure|reason|remediation|enum|allowlist|declared"):
+            replace(failure, **{field_name: invalid_value})
+        with pytest.raises(ContractError, match="failure|reason|remediation|enum|allowlist|declared"):
+            FailureEnvelopeV1.from_dict({**failure.to_dict(), field_name: invalid_value})
+
+
 def test_workflow_state_fixture_requires_server_validation_authority() -> None:
     fixture = _fixture("workflow_state_v2.json")
     with pytest.raises(ContractError, match="authority|issuer|server"):

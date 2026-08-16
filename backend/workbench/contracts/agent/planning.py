@@ -109,6 +109,35 @@ _DRAFT_FORBIDDEN_SERVER_FIELDS = frozenset(
         "compilation_record_id",
     }
 )
+_FAILURE_CLASS_VALUES_V1 = frozenset(
+    {
+        "invalid_request",
+        "incompatible_input",
+        "stale",
+        "unavailable_evidence",
+        "optional_dependency",
+        "nonconvergence",
+        "resource_limit",
+        "policy_block",
+        "execution_failure",
+        "corrupted_state",
+        # Compatibility values already used by the v1.8.9 contract fixtures.
+        "authorization",
+        "partial",
+    }
+)
+_FAILURE_REASON_CODE_VALUES_V1 = frozenset(
+    {
+        "CONFIRMATION_STALE",
+        "PARTIAL",
+    }
+)
+_FAILURE_REMEDIATION_CODE_VALUES_V1 = frozenset(
+    {
+        "recompile",
+        "reconfirm",
+    }
+)
 _DRAFT_FORBIDDEN_SENSITIVE_KEYS = frozenset(
     {
         "prompt",
@@ -1915,6 +1944,10 @@ class FailureEnvelopeV1:
     def __post_init__(self) -> None:
         for name, value in (("failure_class", self.failure_class), ("reason_code", self.reason_code), ("capability_ref", self.capability_ref), ("step_ref", self.step_ref)):
             _text(value, name)
+        if self.failure_class not in _FAILURE_CLASS_VALUES_V1:
+            raise _error("PLANNING_ENUM_INVALID", "failure_class is not a declared value")
+        if self.reason_code not in _FAILURE_REASON_CODE_VALUES_V1:
+            raise _error("PLANNING_ENUM_INVALID", "reason_code is not a declared value")
         _require_opaque_ref(self.capability_ref, "capability_ref", ("capability:",))
         _require_opaque_ref(self.step_ref, "step_ref", ("step:",))
         for name, values in (("evidence_refs", self.evidence_refs), ("remediation_codes", self.remediation_codes), ("partial_output_refs", self.partial_output_refs)):
@@ -1923,6 +1956,8 @@ class FailureEnvelopeV1:
             normalized = tuple(_text(item, f"{name}[]") for item in values)
             if len(set(normalized)) != len(normalized):
                 raise _error("PLANNING_DUPLICATE_ID", f"{name} contains duplicates")
+            if name == "remediation_codes" and any(item not in _FAILURE_REMEDIATION_CODE_VALUES_V1 for item in normalized):
+                raise _error("PLANNING_ENUM_INVALID", "remediation_codes contains an undeclared value")
             object.__setattr__(self, name, normalized)
         for index, value in enumerate(self.evidence_refs):
             _require_opaque_ref(value, f"evidence_refs[{index}]", ("evidence:",))
