@@ -34,6 +34,65 @@ _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _ORACLE_STATUSES = frozenset({"pass", "fail", "not_verified", "not_applicable"})
 _TEST_DIRECTIONS = frozenset({"two_sided", "greater", "less"})
 _NOT_APPLICABLE_FIELDS = {"status", "reason"}
+_CONSUMER_PROJECTION_OUTER_FIELDS = {
+    "contract",
+    "contract_version",
+    "producer_version",
+    "payload",
+}
+_CONSUMER_PROJECTION_PAYLOAD_FIELDS = {
+    "projection_id",
+    "projection_ref",
+    "projection_status",
+    "slots",
+    "not_applicable_projection",
+}
+_CONSUMER_PROJECTION_SLOT_FIELDS = {
+    "consumer",
+    "artifact_facets",
+    "payload_schema_ref",
+    "source_eligible",
+}
+_CONSUMER_PROJECTION_STATUS = frozenset({"available", "blocked", "not_applicable"})
+_CONSUMER_PROJECTION_CONTRACT = "consumer-projection"
+_CONSUMER_PROJECTION_VERSION = "1.0"
+_CONSUMER_PRODUCER_VERSION = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+)
+
+EVIDENCE_CONSUMER_PROJECTION_OUTER_FIELDS_INVALID = (
+    "EVIDENCE_CONSUMER_PROJECTION_OUTER_FIELDS_INVALID"
+)
+EVIDENCE_CONSUMER_PROJECTION_CONTRACT_INVALID = (
+    "EVIDENCE_CONSUMER_PROJECTION_CONTRACT_INVALID"
+)
+EVIDENCE_CONSUMER_PROJECTION_VERSION_INVALID = (
+    "EVIDENCE_CONSUMER_PROJECTION_VERSION_INVALID"
+)
+EVIDENCE_CONSUMER_PROJECTION_PRODUCER_INVALID = (
+    "EVIDENCE_CONSUMER_PROJECTION_PRODUCER_INVALID"
+)
+EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID = (
+    "EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID"
+)
+EVIDENCE_CONSUMER_PROJECTION_STATUS_INVALID = (
+    "EVIDENCE_CONSUMER_PROJECTION_STATUS_INVALID"
+)
+EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID = (
+    "EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID"
+)
+EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_FIELDS_INVALID = (
+    "EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_FIELDS_INVALID"
+)
+EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_STATUS_INVALID = (
+    "EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_STATUS_INVALID"
+)
+EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_REASON_REQUIRED = (
+    "EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_REASON_REQUIRED"
+)
+EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_REASON_INVALID = (
+    "EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_REASON_INVALID"
+)
 
 
 class EvidenceContractError(ContractError):
@@ -42,6 +101,281 @@ class EvidenceContractError(ContractError):
     def __init__(self, code: str, message: str | None = None) -> None:
         self.code = code
         super().__init__(message or code)
+
+
+def _consumer_projection_error(code: str, message: str) -> EvidenceContractError:
+    return EvidenceContractError(code, message)
+
+
+def _consumer_projection_text(
+    value: object, name: str, code: str
+) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or value != value.strip()
+        or any(ord(char) < 0x20 for char in value)
+    ):
+        raise _consumer_projection_error(code, f"{name} is invalid")
+    return value
+
+
+def _consumer_projection_wire_dict(
+    value: object, fields: set[str], code: str, name: str
+) -> dict[str, object]:
+    if type(value) is not dict or set(value) != fields:
+        raise _consumer_projection_error(code, f"{name} fields are not exact")
+    return value
+
+
+@dataclass(frozen=True)
+class ConsumerProjectionNotApplicableV1:
+    status: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        if self.status != "not_applicable":
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_STATUS_INVALID,
+                "not_applicable status must be not_applicable",
+            )
+        _consumer_projection_text(
+            self.reason,
+            "not_applicable.reason",
+            EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_REASON_INVALID,
+        )
+
+    def to_dict(self) -> dict[str, str]:
+        return {"status": self.status, "reason": self.reason}
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ConsumerProjectionNotApplicableV1":
+        if type(value) is not dict:
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_FIELDS_INVALID,
+                "not_applicable projection must be a built-in dict",
+            )
+        if "reason" not in value:
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_REASON_REQUIRED,
+                "not_applicable projection requires reason",
+            )
+        value = _consumer_projection_wire_dict(
+            value,
+            _NOT_APPLICABLE_FIELDS,
+            EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_FIELDS_INVALID,
+            "not_applicable projection",
+        )
+        return cls(
+            status=value["status"],  # type: ignore[arg-type]
+            reason=value["reason"],  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True)
+class ConsumerProjectionSlotV1:
+    consumer: str
+    artifact_facets: tuple[str, ...]
+    payload_schema_ref: str
+    source_eligible: bool
+
+    def __post_init__(self) -> None:
+        _consumer_projection_text(
+            self.consumer,
+            "slot.consumer",
+            EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+        )
+        if not isinstance(self.artifact_facets, (list, tuple)):
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+                "slot.artifact_facets must be an array",
+            )
+        facets = tuple(
+            _consumer_projection_text(
+                item,
+                "slot.artifact_facets[]",
+                EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+            )
+            for item in self.artifact_facets
+        )
+        if len(facets) != len(set(facets)):
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+                "slot.artifact_facets must be unique",
+            )
+        object.__setattr__(self, "artifact_facets", facets)
+        _consumer_projection_text(
+            self.payload_schema_ref,
+            "slot.payload_schema_ref",
+            EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+        )
+        if type(self.source_eligible) is not bool:
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+                "slot.source_eligible must be a boolean",
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "consumer": self.consumer,
+            "artifact_facets": list(self.artifact_facets),
+            "payload_schema_ref": self.payload_schema_ref,
+            "source_eligible": self.source_eligible,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ConsumerProjectionSlotV1":
+        value = _consumer_projection_wire_dict(
+            value,
+            _CONSUMER_PROJECTION_SLOT_FIELDS,
+            EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+            "consumer projection slot",
+        )
+        if type(value["artifact_facets"]) is not list:
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+                "slot.artifact_facets must be a list",
+            )
+        return cls(
+            consumer=value["consumer"],  # type: ignore[arg-type]
+            artifact_facets=tuple(value["artifact_facets"]),  # type: ignore[arg-type]
+            payload_schema_ref=value["payload_schema_ref"],  # type: ignore[arg-type]
+            source_eligible=value["source_eligible"],  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True)
+class ConsumerProjectionPayloadV1:
+    projection_id: str
+    projection_ref: str
+    projection_status: str
+    slots: tuple[ConsumerProjectionSlotV1, ...]
+    not_applicable_projection: ConsumerProjectionNotApplicableV1
+
+    def __post_init__(self) -> None:
+        _consumer_projection_text(
+            self.projection_id,
+            "projection_id",
+            EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID,
+        )
+        _consumer_projection_text(
+            self.projection_ref,
+            "projection_ref",
+            EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID,
+        )
+        if self.projection_status not in _CONSUMER_PROJECTION_STATUS:
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_STATUS_INVALID,
+                "projection_status is not allowed",
+            )
+        if not isinstance(self.slots, (list, tuple)) or any(
+            type(slot) is not ConsumerProjectionSlotV1 for slot in self.slots
+        ):
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+                "slots must contain ConsumerProjectionSlotV1 values",
+            )
+        slots = tuple(self.slots)
+        if len({slot.consumer for slot in slots}) != len(slots):
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+                "slots must have unique consumers",
+            )
+        object.__setattr__(self, "slots", slots)
+        if type(self.not_applicable_projection) is not ConsumerProjectionNotApplicableV1:
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_FIELDS_INVALID,
+                "not_applicable_projection has an invalid type",
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "projection_id": self.projection_id,
+            "projection_ref": self.projection_ref,
+            "projection_status": self.projection_status,
+            "slots": [slot.to_dict() for slot in self.slots],
+            "not_applicable_projection": self.not_applicable_projection.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ConsumerProjectionPayloadV1":
+        value = _consumer_projection_wire_dict(
+            value,
+            _CONSUMER_PROJECTION_PAYLOAD_FIELDS,
+            EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID,
+            "consumer projection payload",
+        )
+        raw_slots = value["slots"]
+        if type(raw_slots) is not list:
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID,
+                "slots must be a list",
+            )
+        return cls(
+            projection_id=value["projection_id"],  # type: ignore[arg-type]
+            projection_ref=value["projection_ref"],  # type: ignore[arg-type]
+            projection_status=value["projection_status"],  # type: ignore[arg-type]
+            slots=tuple(ConsumerProjectionSlotV1.from_dict(slot) for slot in raw_slots),
+            not_applicable_projection=ConsumerProjectionNotApplicableV1.from_dict(
+                value["not_applicable_projection"]
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class ConsumerProjectionV1:
+    contract: str
+    contract_version: str
+    producer_version: str
+    payload: ConsumerProjectionPayloadV1
+
+    def __post_init__(self) -> None:
+        if self.contract != _CONSUMER_PROJECTION_CONTRACT:
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_CONTRACT_INVALID,
+                "consumer projection contract is invalid",
+            )
+        if self.contract_version != _CONSUMER_PROJECTION_VERSION:
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_VERSION_INVALID,
+                "consumer projection contract version is invalid",
+            )
+        if (
+            type(self.producer_version) is not str
+            or _CONSUMER_PRODUCER_VERSION.fullmatch(self.producer_version) is None
+        ):
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_PRODUCER_INVALID,
+                "consumer projection producer version is invalid",
+            )
+        if type(self.payload) is not ConsumerProjectionPayloadV1:
+            raise _consumer_projection_error(
+                EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID,
+                "consumer projection payload has an invalid type",
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "contract": self.contract,
+            "contract_version": self.contract_version,
+            "producer_version": self.producer_version,
+            "payload": self.payload.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ConsumerProjectionV1":
+        value = _consumer_projection_wire_dict(
+            value,
+            _CONSUMER_PROJECTION_OUTER_FIELDS,
+            EVIDENCE_CONSUMER_PROJECTION_OUTER_FIELDS_INVALID,
+            "consumer projection",
+        )
+        return cls(
+            contract=value["contract"],  # type: ignore[arg-type]
+            contract_version=value["contract_version"],  # type: ignore[arg-type]
+            producer_version=value["producer_version"],  # type: ignore[arg-type]
+            payload=ConsumerProjectionPayloadV1.from_dict(value["payload"]),
+        )
 
 
 def _text(value: object, name: str) -> str:
@@ -1089,6 +1423,10 @@ class EvidenceEnvelopeV1:
 
 
 __all__ = [
+    "ConsumerProjectionNotApplicableV1",
+    "ConsumerProjectionPayloadV1",
+    "ConsumerProjectionSlotV1",
+    "ConsumerProjectionV1",
     "DenominatorV1",
     "DistributionRefV1",
     "EvidenceContractError",

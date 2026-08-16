@@ -13,7 +13,7 @@ import pytest
 
 from workbench.contracts.agent import context_egress as context_egress_module
 from workbench.canonical import canonical_json_v1, sha256_canonical
-from workbench.contracts.common.envelope import ContractError, PacketEnvelope
+from workbench.contracts.common.envelope import ContractError
 from workbench.contracts.common.contract_ref import (
     CONTRACT_DIGEST_MISMATCH,
     CONTRACT_DUPLICATE,
@@ -42,6 +42,7 @@ from workbench.contracts.common.foundation_status import (
 from workbench.contracts.evidence.envelope import (
     DenominatorV1,
     DistributionRefV1,
+    ConsumerProjectionV1,
     EvidenceEnvelopeV1,
     EvidenceReasonV1,
     IntervalV1,
@@ -3447,7 +3448,7 @@ def _contract_ref_payload(
 
 
 def _new_family_provider_payload(
-    base: dict[str, object], *, provider_id: str, exposure: str
+    base: dict[str, object], *, provider_id: str, exposure: str, variant: int = 0
 ) -> dict[str, object]:
     """Produce a structurally different declaration without feature imports."""
 
@@ -3475,20 +3476,29 @@ def _new_family_provider_payload(
 
     rewrite(payload)
     payload["provider_id"] = provider_id
-    payload["contracts"].extend(  # type: ignore[union-attr]
-        [
-            _contract_ref_payload(
-                kind="family", logical_id=f"{provider_id}.family"
-            ),
-        ]
+    family_ref = _contract_ref_payload(
+        kind="family" if variant % 2 == 0 else "model-family",
+        logical_id=f"{provider_id}.family.{variant}",
     )
+    payload["contracts"].append(family_ref)  # type: ignore[union-attr]
     path = json.loads(json.dumps(payload["exposure_paths"][0]))  # type: ignore[index]
-    path["path_id"] = f"{provider_id}.composition"
+    path["path_id"] = f"{provider_id}.path.{variant}"
     path["exposure"] = exposure
     path["capability_ref"] = payload["exposure_paths"][0]["capability_ref"]  # type: ignore[index]
-    path["family_contract_ref"] = _contract_ref_payload(
-        kind="family", logical_id=f"{provider_id}.family"
-    )
+    path["family_contract_ref"] = family_ref
+    if variant % 3 == 0:
+        path["operation_ref"] = None
+        path["step_contract_ref"] = None
+        path["execution_adapter_ref"] = None
+    elif variant % 3 == 1:
+        path["result_contract_refs"] = []
+        path["evidence_contract_refs"] = []
+    else:
+        projection_ref = _contract_ref_payload(
+            kind="projection", logical_id=f"{provider_id}.projection.{variant}"
+        )
+        payload["contracts"].append(projection_ref)  # type: ignore[union-attr]
+        path["projection_refs"] = {"agent": projection_ref}
     payload["exposure_paths"] = [path]  # type: ignore[assignment]
     return payload
 
@@ -3499,12 +3509,79 @@ def _matrix_state_payload() -> dict[str, object]:
 
 def test_task5_current_consumer_projection_round_trip_is_byte_stable() -> None:
     raw = _fixture("consumer_projection.json")
-    packet = PacketEnvelope.from_dict(raw)
+    projection = ConsumerProjectionV1.from_dict(raw)
 
-    assert canonical_json_v1(packet.to_dict()) == canonical_json_v1(raw)
-    assert PacketEnvelope.from_dict(packet.to_dict()) == packet
-    assert packet.payload["projection_status"] == "available"
-    assert packet.payload["not_applicable_projection"]["status"] == "not_applicable"  # type: ignore[index]
+    assert canonical_json_v1(projection.to_dict()) == canonical_json_v1(raw)
+    assert ConsumerProjectionV1.from_dict(projection.to_dict()) == projection
+    assert projection.payload.projection_status == "available"
+    assert projection.payload.not_applicable_projection.status == "not_applicable"
+
+
+@pytest.mark.parametrize(
+    ("label", "mutate", "reason_code"),
+    (
+        (
+            "not-applicable-status",
+            lambda raw: raw["payload"]["not_applicable_projection"].update(
+                {"status": "available"}
+            ),
+            "EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_STATUS_INVALID",
+        ),
+        (
+            "unknown-payload-field",
+            lambda raw: raw["payload"].update({"unknown_payload": True}),
+            "EVIDENCE_CONSUMER_PROJECTION_PAYLOAD_FIELDS_INVALID",
+        ),
+        (
+            "unknown-slot-field",
+            lambda raw: raw["payload"]["slots"][0].update({"unknown_slot": True}),
+            "EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID",
+        ),
+        (
+            "invalid-slot-facets-shape",
+            lambda raw: raw["payload"]["slots"][0].update(
+                {"artifact_facets": "metric"}
+            ),
+            "EVIDENCE_CONSUMER_PROJECTION_SLOT_FIELDS_INVALID",
+        ),
+        (
+            "missing-not-applicable-reason",
+            lambda raw: raw["payload"]["not_applicable_projection"].pop("reason"),
+            "EVIDENCE_CONSUMER_PROJECTION_NOT_APPLICABLE_REASON_REQUIRED",
+        ),
+        (
+            "unknown-outer-field",
+            lambda raw: raw.update({"unknown_outer": True}),
+            "EVIDENCE_CONSUMER_PROJECTION_OUTER_FIELDS_INVALID",
+        ),
+        (
+            "invalid-outer-contract",
+            lambda raw: raw.update({"contract": "packet-envelope"}),
+            "EVIDENCE_CONSUMER_PROJECTION_CONTRACT_INVALID",
+        ),
+        (
+            "invalid-outer-version",
+            lambda raw: raw.update({"contract_version": "2.0"}),
+            "EVIDENCE_CONSUMER_PROJECTION_VERSION_INVALID",
+        ),
+        (
+            "invalid-outer-producer",
+            lambda raw: raw.update({"producer_version": "v1.8.9"}),
+            "EVIDENCE_CONSUMER_PROJECTION_PRODUCER_INVALID",
+        ),
+    ),
+)
+def test_task5_consumer_projection_mutations_fail_closed_with_reason_codes(
+    label: str,
+    mutate: object,
+    reason_code: str,
+) -> None:
+    raw = _fixture("consumer_projection.json")
+    mutate(raw)  # type: ignore[operator]
+
+    with pytest.raises(EvidenceContractError) as error:
+        ConsumerProjectionV1.from_dict(raw)
+    assert error.value.code == reason_code, label
 
 
 def test_task5_old_minor_and_unknown_major_fail_closed_with_stable_codes() -> None:
@@ -3585,9 +3662,9 @@ def test_task5_blocked_evidence_and_not_applicable_projection_are_explicit() -> 
         EvidenceEnvelopeV1.from_dict(blocked)
     assert error.value.code == "EVIDENCE_EXECUTION_REASON_REQUIRED"
 
-    packet = PacketEnvelope.from_dict(_fixture("consumer_projection.json"))
-    not_applicable = packet.payload["not_applicable_projection"]
-    assert not_applicable == {"reason": "consumer is not declared", "status": "not_applicable"}
+    projection = ConsumerProjectionV1.from_dict(_fixture("consumer_projection.json"))
+    not_applicable = projection.payload.not_applicable_projection
+    assert not_applicable.reason == "consumer is not declared"
 
 
 def test_task5_duplicate_provider_has_stable_reason_code(tmp_path: Path) -> None:
@@ -3603,16 +3680,25 @@ def test_task5_duplicate_provider_has_stable_reason_code(tmp_path: Path) -> None
 
 
 @pytest.mark.parametrize(
-    ("provider_id", "exposure"),
+    ("provider_id", "exposure", "variant"),
     (
-        ("fixture.family.logit", "composition"),
-        ("fixture.family.readonly", "read_only"),
+        ("fixture.family.direct", "direct", 0),
+        ("fixture.family.composition", "composition", 1),
+        ("fixture.family.readonly", "read_only", 2),
+        ("fixture.family.closed", "closed", 3),
+        ("fixture.family.alt-direct", "direct", 4),
+        ("fixture.family.alt-composition", "composition", 5),
+        ("fixture.family.alt-readonly", "read_only", 6),
+        ("fixture.family.alt-closed", "closed", 7),
+        ("fixture.family.ref-direct", "direct", 8),
+        ("fixture.family.ref-readonly", "read_only", 9),
     ),
 )
 def test_task5_injected_family_is_visible_then_denominator_recovers(
     tmp_path: Path,
     provider_id: str,
     exposure: str,
+    variant: int,
 ) -> None:
     import workbench.providers.catalog as catalog_module
 
@@ -3624,7 +3710,7 @@ def test_task5_injected_family_is_visible_then_denominator_recovers(
     operations_before = workflow_capability_registry().operation_ids()
     _write_provider_manifest(tmp_path, "contract_fixture.json", base)
     injected = _new_family_provider_payload(
-        base, provider_id=provider_id, exposure=exposure
+        base, provider_id=provider_id, exposure=exposure, variant=variant
     )
     _write_provider_manifest(tmp_path, "new-family.json", injected)
 
@@ -3633,6 +3719,13 @@ def test_task5_injected_family_is_visible_then_denominator_recovers(
     assert any(item["provider_id"] == provider_id for item in catalog.manifest_inputs)
     assert any(item["provider_id"] == provider_id for item in catalog.path_rows)
     assert any(item["provider_id"] == provider_id for item in catalog.descriptor_inputs)
+    manifest = next(item for item in catalog.manifest_inputs if item["provider_id"] == provider_id)
+    rows = [item for item in catalog.path_rows if item["provider_id"] == provider_id]
+    descriptor = next(item for item in catalog.descriptor_inputs if item["provider_id"] == provider_id)
+    assert rows
+    assert {item["path_id"] for item in rows} == set(descriptor["path_ids"])
+    assert all(item["provider_digest"] == manifest["provider_digest"] for item in rows)
+    assert catalog.catalog_digest == sha256_canonical(catalog.digest_payload())
     assert workflow_capability_registry().operation_ids() == operations_before
 
     (tmp_path / "new-family.json").unlink()
