@@ -12,7 +12,7 @@ import stat
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import MappingProxyType
 from typing import Any
 
@@ -79,8 +79,10 @@ def _load_json(path: Path) -> Mapping[str, object]:
 def _reject_path_like_refs(value: object, location: str = "manifest") -> None:
     if type(value) is str:
         normalized = unicodedata.normalize("NFC", value)
+        windows_absolute = PureWindowsPath(normalized).is_absolute()
         if (
             normalized.startswith(("/", "\\", "~"))
+            or windows_absolute
             or "://" in normalized
             or any(part == ".." for part in normalized.replace("\\", "/").split("/"))
         ):
@@ -120,7 +122,7 @@ def _safe_manifest_paths(root: Path) -> tuple[Path, ...]:
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
             raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, f"unsafe manifest {path.name}")
         paths.append(path)
-    return tuple(sorted(paths, key=lambda item: _normalized_filename(item)))
+    return tuple(paths)
 
 
 def _provider_error(error: ContractRefError) -> ProviderContractError:
@@ -215,15 +217,13 @@ class ProviderCatalogV1:
         }
 
 
-def load_builtin_catalog(root: Path | str | None = None) -> ProviderCatalogV1:
-    """Load only regular JSON files from the repository-local builtin root."""
+def _load_catalog_from_root(root: Path | str) -> ProviderCatalogV1:
+    """Test-only injection seam; callers must use ``load_builtin_catalog``."""
 
-    manifest_root = _DEFAULT_BUILTIN_ROOT if root is None else Path(root)
+    manifest_root = Path(root)
     paths = _safe_manifest_paths(manifest_root)
-    providers: list[ProviderContributionV1] = []
-    filenames: list[str] = []
+    candidates: list[tuple[str, ProviderContributionV1]] = []
     seen_provider_ids: set[str] = set()
-    declared_refs = []
 
     for path in paths:
         payload = _load_json(path)
@@ -234,9 +234,12 @@ def load_builtin_catalog(root: Path | str | None = None) -> ProviderCatalogV1:
         if contribution.provider_id in seen_provider_ids:
             raise ProviderContractError(PROVIDER_DUPLICATE, contribution.provider_id)
         seen_provider_ids.add(contribution.provider_id)
-        providers.append(contribution)
-        filenames.append(_normalized_filename(path))
-        declared_refs.extend(contribution.contract_refs)
+        candidates.append((_normalized_filename(path), contribution))
+
+    candidates.sort(key=lambda item: (item[0], item[1].provider_id))
+    filenames = [filename for filename, _ in candidates]
+    providers = [provider for _, provider in candidates]
+    declared_refs = [ref for provider in providers for ref in provider.contract_refs]
 
     if not providers:
         raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "no builtin manifests")
@@ -265,16 +268,22 @@ def load_builtin_catalog(root: Path | str | None = None) -> ProviderCatalogV1:
     )
 
 
-def load_provider_catalog(root: Path | str | None = None) -> ProviderCatalogV1:
-    return load_builtin_catalog(root)
+def load_builtin_catalog() -> ProviderCatalogV1:
+    """Load only the repository-local builtin provider manifests."""
+
+    return _load_catalog_from_root(_DEFAULT_BUILTIN_ROOT)
 
 
-def build_provider_catalog(root: Path | str | None = None) -> ProviderCatalogV1:
-    return load_builtin_catalog(root)
+def load_provider_catalog() -> ProviderCatalogV1:
+    return load_builtin_catalog()
 
 
-def load_catalog(root: Path | str | None = None) -> ProviderCatalogV1:
-    return load_builtin_catalog(root)
+def build_provider_catalog() -> ProviderCatalogV1:
+    return load_builtin_catalog()
+
+
+def load_catalog() -> ProviderCatalogV1:
+    return load_builtin_catalog()
 
 
 __all__ = [

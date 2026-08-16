@@ -3119,6 +3119,14 @@ def _provider_contract_api():
     )
 
 
+def _private_provider_catalog_loader():
+    try:
+        from workbench.providers.catalog import _load_catalog_from_root
+    except ModuleNotFoundError as exc:
+        pytest.fail(f"private provider test seam is missing: {exc}")
+    return _load_catalog_from_root
+
+
 def _provider_fixture_payload() -> dict[str, object]:
     return _load_json(
         (_FIXTURE_ROOT / "provider_contribution.json").read_text(encoding="utf-8")
@@ -3182,13 +3190,14 @@ def test_duplicate_versionless_unresolved_or_path_like_refs_fail_closed(
     tmp_path: Path,
 ) -> None:
     _, _, ProviderContractError, _, load_builtin_catalog = _provider_contract_api()
+    load_catalog_from_root = _private_provider_catalog_loader()
     payload = _provider_fixture_payload()
 
     duplicate_root = tmp_path / "duplicate"
     _write_provider_manifest(duplicate_root, "a.json", payload)
     _write_provider_manifest(duplicate_root, "b.json", payload)
     with pytest.raises(ProviderContractError, match="duplicate") as duplicate:
-        load_builtin_catalog(duplicate_root)
+        load_catalog_from_root(duplicate_root)
     assert duplicate.value.code == "PROVIDER_DUPLICATE"
 
     versionless = json.loads(json.dumps(payload))
@@ -3196,7 +3205,7 @@ def test_duplicate_versionless_unresolved_or_path_like_refs_fail_closed(
     versionless_root = tmp_path / "versionless"
     _write_provider_manifest(versionless_root, "fixture.json", versionless)
     with pytest.raises(ProviderContractError, match="version|reference") as missing_version:
-        load_builtin_catalog(versionless_root)
+        load_catalog_from_root(versionless_root)
     assert missing_version.value.code == "PROVIDER_REF_INVALID"
 
     unresolved = json.loads(json.dumps(payload))
@@ -3206,7 +3215,7 @@ def test_duplicate_versionless_unresolved_or_path_like_refs_fail_closed(
     unresolved_root = tmp_path / "unresolved"
     _write_provider_manifest(unresolved_root, "fixture.json", unresolved)
     with pytest.raises(ProviderContractError, match="unresolved") as missing_ref:
-        load_builtin_catalog(unresolved_root)
+        load_catalog_from_root(unresolved_root)
     assert missing_ref.value.code == "PROVIDER_UNRESOLVED"
 
     path_like = json.loads(json.dumps(payload))
@@ -3214,8 +3223,114 @@ def test_duplicate_versionless_unresolved_or_path_like_refs_fail_closed(
     path_like_root = tmp_path / "path-like"
     _write_provider_manifest(path_like_root, "fixture.json", path_like)
     with pytest.raises(ProviderContractError, match="opaque|path") as path_ref:
-        load_builtin_catalog(path_like_root)
+        load_catalog_from_root(path_like_root)
     assert path_ref.value.code == "PROVIDER_EXECUTOR_INVALID"
+
+
+def test_public_builtin_loader_and_aliases_have_no_external_root_parameter(
+    tmp_path: Path,
+) -> None:
+    from workbench.providers.catalog import (
+        build_provider_catalog,
+        load_builtin_catalog,
+        load_catalog,
+        load_provider_catalog,
+    )
+
+    for loader in (
+        load_builtin_catalog,
+        load_provider_catalog,
+        build_provider_catalog,
+        load_catalog,
+    ):
+        with pytest.raises(TypeError):
+            loader(tmp_path)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize(
+    "path_like",
+    (
+        r"C:\\tmp\\feature.py",
+        r"\\\\server\\share\\feature.py",
+    ),
+)
+def test_catalog_rejects_windows_absolute_and_unc_refs(
+    tmp_path: Path,
+    path_like: str,
+) -> None:
+    _, _, ProviderContractError, _, _ = _provider_contract_api()
+    load_catalog_from_root = _private_provider_catalog_loader()
+    payload = _provider_fixture_payload()
+    payload["adapter_declarations"][0]["executor_ref"] = path_like  # type: ignore[index]
+    executor_root = tmp_path / "executor"
+    _write_provider_manifest(executor_root, "fixture.json", payload)
+    with pytest.raises(ProviderContractError) as executor_error:
+        load_catalog_from_root(executor_root)
+    assert executor_error.value.code == "PROVIDER_EXECUTOR_INVALID"
+
+    nested_payload = _provider_fixture_payload()
+    nested_payload["contracts"][0]["logical_id"] = path_like  # type: ignore[index]
+    logical_root = tmp_path / "logical"
+    _write_provider_manifest(logical_root, "fixture.json", nested_payload)
+    with pytest.raises(ProviderContractError) as logical_error:
+        load_catalog_from_root(logical_root)
+    assert logical_error.value.code == "PROVIDER_REF_INVALID"
+
+
+def test_catalog_sorts_parsed_candidates_by_normalized_filename_and_provider_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import workbench.providers.catalog as catalog_module
+
+    load_catalog_from_root = _private_provider_catalog_loader()
+    payload = _provider_fixture_payload()
+
+    def renamed_payload(provider_id: str, prefix: str) -> dict[str, object]:
+        result = json.loads(json.dumps(payload))
+
+        def rewrite(value: object) -> None:
+            if isinstance(value, dict):
+                if value.get("provider_id") == "fixture.contracts":
+                    value["provider_id"] = provider_id
+                for key, item in list(value.items()):
+                    if key == "logical_id" and isinstance(item, str):
+                        value[key] = item.replace("fixture.contracts", prefix, 1)
+                    elif key == "adapter_id" and item == "fixture.contracts.adapter":
+                        value[key] = f"{prefix}.adapter"
+                    elif key == "path_id" and item == "fixture.contracts.direct":
+                        value[key] = f"{prefix}.direct"
+                    elif key == "executor_ref" and item == "executor:fixture.contracts.adapter":
+                        value[key] = f"executor:{prefix}.adapter"
+                    rewrite(item)
+            elif isinstance(value, list):
+                for item in value:
+                    rewrite(item)
+
+        rewrite(result)
+        return result
+
+    _write_provider_manifest(
+        tmp_path,
+        "zeta.json",
+        renamed_payload("fixture.zeta", "fixture.zeta"),
+    )
+    _write_provider_manifest(
+        tmp_path,
+        "alpha.json",
+        renamed_payload("fixture.alpha", "fixture.alpha"),
+    )
+    monkeypatch.setattr(
+        catalog_module,
+        "_normalized_filename",
+        lambda path: "normalized-collision.json",
+    )
+
+    first = load_catalog_from_root(tmp_path)
+    second = load_catalog_from_root(tmp_path)
+    assert first.provider_ids == ("fixture.alpha", "fixture.zeta")
+    assert first.to_dict() == second.to_dict()
+    assert first.catalog_digest == second.catalog_digest
 
 
 def test_executor_ref_is_opaque_and_resolves_only_through_trusted_registry() -> None:
