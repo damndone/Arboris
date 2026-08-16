@@ -22,7 +22,6 @@ _REQUIRED_DEVELOPMENT_HASHES = frozenset(
         "candidate_search", "calibration", "threshold", "decision_policy",
     }
 )
-_HOLDOUT_SEAL_ISSUERS: dict[int, object] = {}
 _HOLDOUT_CANONICAL_RECORDS: dict[tuple[int, str], object] = {}
 
 
@@ -628,26 +627,57 @@ class _HoldoutCanonicalAuthorityV1:
         self.__write(seal_id, record)
 
 
-class _HoldoutSealStoreAuthoritySlots:
-    __slots__ = ("_authority", "_issuer_token")
+def _make_holdout_seal_store_v1() -> type:
+    """Create the public store type with closure-owned authority state."""
 
+    states: dict[int, tuple[object, dict[str, object]]] = {}
+    public_class: type
 
-class HoldoutSealStoreV1(_HoldoutSealStoreAuthoritySlots):
-    """Server-owned one-time consume/CAS seam for holdout releases."""
-
-    def __init__(self, *, metric_bundle_store: HoldoutMetricBundleStoreV1) -> None:
-        if type(metric_bundle_store) is not HoldoutMetricBundleStoreV1:
+    def state_for(instance: object) -> dict[str, object]:
+        if type(instance) is not public_class:
             raise _error(
-                "HOLDOUT_METRIC_BUNDLE_AUTHORITY_REQUIRED",
-                "holdout seal store requires a server metric bundle registry",
+                "HOLDOUT_SERVER_STORE_REQUIRED",
+                "holdout operation requires the current server store",
             )
-        self.metric_bundle_store = metric_bundle_store
-        self._issuer_token = object()
-        _HOLDOUT_SEAL_ISSUERS[id(self._issuer_token)] = self._issuer_token
-        self._authority = _HoldoutCanonicalAuthorityV1()
-        self._current: dict[str, tuple[str, str]] = {}
-        self._issued_references: dict[int, tuple[object, str, str]] = {}
-        self._lock = RLock()
+        entry = states.get(id(instance))
+        if entry is None or entry[0] is not instance:
+            raise _error(
+                "HOLDOUT_SERVER_STORE_REQUIRED",
+                "holdout store authority is unavailable",
+            )
+        return entry[1]
+
+    class HoldoutSealStoreV1:
+        """Server-owned one-time consume/CAS seam for holdout releases."""
+
+        __slots__ = ()
+
+        def __init__(self, *, metric_bundle_store: HoldoutMetricBundleStoreV1) -> None:
+            if type(metric_bundle_store) is not HoldoutMetricBundleStoreV1:
+                raise _error(
+                    "HOLDOUT_METRIC_BUNDLE_AUTHORITY_REQUIRED",
+                    "holdout seal store requires a server metric bundle registry",
+                )
+            token = object()
+            states[id(self)] = (
+                self,
+                {
+                    "metric_bundle_store": metric_bundle_store,
+                    "issuer_token": token,
+                    "authority": _HoldoutCanonicalAuthorityV1(),
+                    "current": {},
+                    "issued_references": {},
+                    "lock": RLock(),
+                },
+            )
+
+        @property
+        def metric_bundle_store(self) -> HoldoutMetricBundleStoreV1:
+            return state_for(self)["metric_bundle_store"]  # type: ignore[return-value]
+
+        @property
+        def _issuer_token(self) -> object:
+            return state_for(self)["issuer_token"]
 
     @staticmethod
     def _encode(seal: HoldoutSealV1) -> tuple[str, str]:
@@ -655,6 +685,7 @@ class HoldoutSealStoreV1(_HoldoutSealStoreAuthoritySlots):
         return canonical_json_v1(payload), sha256_canonical(payload)
 
     def _projection(self, record: tuple[str, str]) -> HoldoutSealV1:
+        state = state_for(self)
         if (
             type(record) is not tuple
             or len(record) != 2
@@ -686,26 +717,30 @@ class HoldoutSealStoreV1(_HoldoutSealStoreAuthoritySlots):
                 "HOLDOUT_STATE_STORAGE_INVALID",
                 "holdout state record is not canonical JSON",
             ) from exc
-        object.__setattr__(projection, "_issuer_token", self._issuer_token)
+        object.__setattr__(projection, "_issuer_token", state["issuer_token"])
         return projection
 
     def _store(self, seal: HoldoutSealV1) -> tuple[str, str]:
+        state = state_for(self)
         record = self._encode(seal)
-        self._authority.write(seal.seal_id, record)
-        key = (id(self._issuer_token), seal.seal_id)
-        _HOLDOUT_CANONICAL_RECORDS[key] = self._authority.binding
-        self._current[seal.seal_id] = record
+        authority = state["authority"]
+        authority.write(seal.seal_id, record)  # type: ignore[union-attr]
+        key = (id(state["issuer_token"]), seal.seal_id)
+        _HOLDOUT_CANONICAL_RECORDS[key] = authority.binding  # type: ignore[union-attr]
+        state["current"][seal.seal_id] = record  # type: ignore[index]
         return record
 
     def _current_record(self, seal_id: str) -> tuple[str, str]:
-        key = (id(self._issuer_token), seal_id)
-        if _HOLDOUT_CANONICAL_RECORDS.get(key) is not self._authority.binding:
+        state = state_for(self)
+        authority = state["authority"]
+        key = (id(state["issuer_token"]), seal_id)
+        if _HOLDOUT_CANONICAL_RECORDS.get(key) is not authority.binding:  # type: ignore[union-attr]
             raise _error(
                 "HOLDOUT_STATE_AUTHORITY_BINDING_MISMATCH",
                 "holdout state index is not bound to the opaque server authority",
             )
-        record = self._current.get(seal_id)
-        authority = self._authority.read(seal_id)
+        record = state["current"].get(seal_id)  # type: ignore[union-attr]
+        authority = authority.read(seal_id)  # type: ignore[union-attr]
         if record is None or authority is None:
             raise _error("HOLDOUT_SERVER_SEAL_UNRESOLVED", "server holdout seal is unavailable")
         if record != authority:
@@ -716,9 +751,10 @@ class HoldoutSealStoreV1(_HoldoutSealStoreAuthoritySlots):
         return authority
 
     def _new_reference(self, record: tuple[str, str]) -> ServerHoldoutSealReferenceV1:
+        state = state_for(self)
         projection = self._projection(record)
-        reference = ServerHoldoutSealReferenceV1._issue(projection, self._issuer_token)
-        self._issued_references[id(reference)] = (
+        reference = ServerHoldoutSealReferenceV1._issue(projection, state["issuer_token"])
+        state["issued_references"][id(reference)] = (  # type: ignore[index]
             reference,
             reference.seal_id,
             reference.state_digest,
@@ -747,7 +783,8 @@ class HoldoutSealStoreV1(_HoldoutSealStoreAuthoritySlots):
                 "HOLDOUT_INITIAL_STATE_REQUIRED",
                 "seal store accepts only a fresh sealed state",
             )
-        bundle = self.metric_bundle_store.resolve(metric_bundle_reference)
+        state = state_for(self)
+        bundle = state["metric_bundle_store"].resolve(metric_bundle_reference)  # type: ignore[union-attr]
         if (
             seal.metric_release_bundle_ref != bundle.bundle_ref
             or seal.metric_bundle_digest != bundle.content_digest
@@ -757,15 +794,17 @@ class HoldoutSealStoreV1(_HoldoutSealStoreAuthoritySlots):
                 "HOLDOUT_METRIC_BUNDLE_MISMATCH",
                 "seal must bind the complete server-resolved metric bundle",
             )
-        with self._lock:
-            if seal.seal_id in self._current or self._authority.read(seal.seal_id) is not None:
+        with state["lock"]:  # type: ignore[union-attr]
+            authority = state["authority"]
+            if seal.seal_id in state["current"] or authority.read(seal.seal_id) is not None:  # type: ignore[union-attr]
                 raise _error("HOLDOUT_DUPLICATE_SEAL", "seal is already issued by this store")
             return self._new_reference(self._store(seal))
 
     def _resolve_unlocked(self, reference: ServerHoldoutSealReferenceV1) -> HoldoutSealV1:
-        if type(reference) is not ServerHoldoutSealReferenceV1 or reference._issuer_token is not self._issuer_token:
+        state = state_for(self)
+        if type(reference) is not ServerHoldoutSealReferenceV1 or reference._issuer_token is not state["issuer_token"]:
             raise _error("HOLDOUT_SERVER_REFERENCE_REQUIRED", "holdout consume requires a server-owned reference")
-        issued = self._issued_references.get(id(reference))
+        issued = state["issued_references"].get(id(reference))  # type: ignore[union-attr]
         if (
             issued is None
             or issued[0] is not reference
@@ -776,18 +815,21 @@ class HoldoutSealStoreV1(_HoldoutSealStoreAuthoritySlots):
         return self._projection(self._current_record(reference.seal_id))
 
     def resolve(self, reference: ServerHoldoutSealReferenceV1) -> HoldoutSealV1:
-        with self._lock:
+        state = state_for(self)
+        with state["lock"]:  # type: ignore[union-attr]
             return self._resolve_unlocked(reference)
 
     def current_reference(self, seal_id: str) -> ServerHoldoutSealReferenceV1:
-        with self._lock:
+        state = state_for(self)
+        with state["lock"]:  # type: ignore[union-attr]
             _text(seal_id, "seal_id")
             return self._new_reference(self._current_record(seal_id))
 
     def consume(self, reference: ServerHoldoutSealReferenceV1, request: HoldoutAccessRequestV1) -> HoldoutReleaseDecisionV1:
         if type(request) is not HoldoutAccessRequestV1:
             raise _error("HOLDOUT_REQUEST_REQUIRED", "holdout consume requires a typed request")
-        with self._lock:
+        state = state_for(self)
+        with state["lock"]:  # type: ignore[union-attr]
             current = self._resolve_unlocked(reference)
             if reference.state_digest != current.state_digest:
                 before = _parse_status(current.status)
@@ -810,7 +852,7 @@ class HoldoutSealStoreV1(_HoldoutSealStoreAuthoritySlots):
                     status=current.status,
                     transition_history=current.transition_history,
                     access_ledger=(*current.access_ledger, entry),
-                    _issuer_token=self._issuer_token,
+                    _issuer_token=state["issuer_token"],
                 )
                 self._store(denied)
                 return HoldoutReleaseDecisionV1(allowed=False, reason_code="HOLDOUT_STALE_STATE", seal=denied)
@@ -860,11 +902,27 @@ class HoldoutSealStoreV1(_HoldoutSealStoreAuthoritySlots):
                 status=after.value,
                 transition_history=next_history,
                 access_ledger=(*current.access_ledger, entry),
-                _issuer_token=self._issuer_token,
+                _issuer_token=state["issuer_token"],
             )
             decision = HoldoutReleaseDecisionV1(allowed=allowed, reason_code=reason, seal=next_seal)
             self._store(decision.seal)
             return decision
+
+    HoldoutSealStoreV1._encode = _encode
+    HoldoutSealStoreV1._projection = _projection
+    HoldoutSealStoreV1._store = _store
+    HoldoutSealStoreV1._current_record = _current_record
+    HoldoutSealStoreV1._new_reference = _new_reference
+    HoldoutSealStoreV1.issue = issue
+    HoldoutSealStoreV1._resolve_unlocked = _resolve_unlocked
+    HoldoutSealStoreV1.resolve = resolve
+    HoldoutSealStoreV1.current_reference = current_reference
+    HoldoutSealStoreV1.consume = consume
+    public_class = HoldoutSealStoreV1
+    return public_class
+
+
+HoldoutSealStoreV1 = _make_holdout_seal_store_v1()
 
 
 __all__ = [
