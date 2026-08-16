@@ -22,6 +22,7 @@ _REQUIRED_DEVELOPMENT_HASHES = frozenset(
     }
 )
 _HOLDOUT_SEAL_ISSUERS: dict[int, object] = {}
+_HOLDOUT_SEAL_CAPABILITIES: dict[int, object] = {}
 
 
 class HoldoutContractError(ContractError):
@@ -509,13 +510,23 @@ class HoldoutSealV1:
             "holdout release requires a server-owned store consume operation",
         )
 
-    def _authorize_access_server(self, request: HoldoutAccessRequestV1) -> HoldoutReleaseDecisionV1:
+    def _authorize_access_server(
+        self,
+        request: HoldoutAccessRequestV1,
+        *,
+        _capability: object | None = None,
+    ) -> HoldoutReleaseDecisionV1:
         if type(request) is not HoldoutAccessRequestV1:
             raise _error("HOLDOUT_REQUEST_REQUIRED", "holdout access requires a typed request")
         if self._issuer_token is None or _HOLDOUT_SEAL_ISSUERS.get(id(self._issuer_token)) is not self._issuer_token:
             raise _error(
                 "HOLDOUT_SERVER_STORE_REQUIRED",
                 "holdout release requires a seal issued by the server store",
+            )
+        if _capability is None or _HOLDOUT_SEAL_CAPABILITIES.get(id(self)) is not _capability:
+            raise _error(
+                "HOLDOUT_INTERNAL_CAPABILITY_REQUIRED",
+                "holdout release helper requires the server store internal capability",
             )
         before = _parse_status(self.status)
         allowed = False
@@ -646,6 +657,7 @@ class HoldoutSealStoreV1:
             )
         self.metric_bundle_store = metric_bundle_store
         self._issuer_token = object()
+        self.__consume_capability = object()
         _HOLDOUT_SEAL_ISSUERS[id(self._issuer_token)] = self._issuer_token
         self._current: dict[str, HoldoutSealV1] = {}
         self._lock = RLock()
@@ -686,6 +698,7 @@ class HoldoutSealStoreV1:
             if seal.seal_id in self._current:
                 raise _error("HOLDOUT_DUPLICATE_SEAL", "seal is already issued by this store")
             object.__setattr__(seal, "_issuer_token", self._issuer_token)
+            _HOLDOUT_SEAL_CAPABILITIES[id(seal)] = self.__consume_capability
             self._current[seal.seal_id] = seal
             return ServerHoldoutSealReferenceV1._issue(seal, self._issuer_token)
 
@@ -737,9 +750,11 @@ class HoldoutSealStoreV1:
                     access_ledger=(*current.access_ledger, entry),
                     _issuer_token=self._issuer_token,
                 )
+                _HOLDOUT_SEAL_CAPABILITIES[id(denied)] = self.__consume_capability
                 self._current[current.seal_id] = denied
                 return HoldoutReleaseDecisionV1(allowed=False, reason_code="HOLDOUT_STALE_STATE", seal=denied)
-            decision = current._authorize_access_server(request)
+            decision = current._authorize_access_server(request, _capability=self.__consume_capability)
+            _HOLDOUT_SEAL_CAPABILITIES[id(decision.seal)] = self.__consume_capability
             self._current[current.seal_id] = decision.seal
             return decision
 

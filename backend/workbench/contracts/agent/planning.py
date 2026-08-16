@@ -123,6 +123,31 @@ _DRAFT_FORBIDDEN_SENSITIVE_KEYS = frozenset(
 )
 _DRAFT_FORBIDDEN_SENSITIVE_PREFIXES = ("raw:", "secret:", "prompt:", "token:")
 _DRAFT_OPAQUE_REF_PREFIXES = ("prompt-ref:", "descriptor:", "symbol:", "rationale:")
+_DRAFT_TYPED_REF_PREFIXES = (
+    "artifact:",
+    "capability:",
+    "catalog:",
+    "column:",
+    "connection:",
+    "contract:",
+    "dataset:",
+    "descriptor:",
+    "effect:",
+    "evidence:",
+    "metric:",
+    "method:",
+    "model:",
+    "node:",
+    "output:",
+    "policy:",
+    "port:",
+    "prompt-ref:",
+    "rationale:",
+    "run:",
+    "schema:",
+    "source:",
+    "symbol:",
+)
 _DRAFT_OPAQUE_REF_KEYS = frozenset(
     {
         "prompt_ref",
@@ -206,6 +231,83 @@ _DRAFT_SENSITIVE_TEXT_MARKERS = (
     "access_token",
     "private_key",
     "raw:",
+)
+_DRAFT_DURABLE_REF_KEYS = frozenset(
+    {
+        "actual",
+        "artifact_ref",
+        "capability_ref",
+        "catalog_ref",
+        "column",
+        "column_ref",
+        "connection_id",
+        "connection_ref",
+        "contract_ref",
+        "dataset_ref",
+        "descriptor_ref",
+        "descriptor_refs",
+        "evidence_ref",
+        "evidence_refs",
+        "feature",
+        "from_node",
+        "from_port",
+        "group",
+        "method_ref",
+        "node_ref",
+        "output_ref",
+        "output_refs",
+        "policy_ref",
+        "port_ref",
+        "prediction",
+        "prompt_ref",
+        "prompt_refs",
+        "rationale_ref",
+        "rationale_refs",
+        "read_refs",
+        "ref",
+        "run_ref",
+        "schema_ref",
+        "source",
+        "source_node",
+        "source_port",
+        "symbol_ref",
+        "symbol_refs",
+        "target",
+        "target_node",
+        "target_port",
+        "to_node",
+        "to_port",
+        "weight",
+        "write_refs",
+    }
+)
+_DRAFT_DURABLE_ENUMS = {
+    "analysis_mode": frozenset({"classification", "descriptive", "diagnostic", "inference", "predictive", "regression"}),
+    "data_impact": frozenset({"none", "read_dataset", "read_model", "read_only", "write_dataset"}),
+    "effect": frozenset({"model_evaluate", "model_fit", "model_predict", "none", "read", "report", "write"}),
+    "kind": frozenset({"artifact", "dataset", "evidence", "metric", "model", "port", "schema"}),
+    "mode": frozenset({"read", "read_only", "write"}),
+    "role": frozenset({"actual", "feature", "group", "id", "prediction", "target", "time", "weight"}),
+    "status": frozenset({"available", "complete", "completed", "ready", "validated"}),
+    "type": frozenset({"boolean", "integer", "metric", "number", "reference", "scalar"}),
+    "value_kind": frozenset({"boolean", "integer", "number", "reference", "scalar"}),
+    "write_mode": frozenset({"append", "create", "none", "read_only", "replace"}),
+}
+_DRAFT_DURABLE_IDENTIFIER_KEYS = frozenset({"connection_name", "key", "name", "node_id", "port_name"})
+_DRAFT_DURABLE_NUMBER_KEYS = frozenset(
+    {"alpha", "cpu_ms", "limit", "max_rows", "max_tokens", "memory_mb", "probability", "seed", "threshold", "timeout_ms"}
+)
+_DRAFT_DURABLE_BOOLEAN_KEYS = frozenset({"allow_missing", "enabled", "include_intercept", "normalize", "strict"})
+_DRAFT_DURABLE_MAPPING_KEYS = frozenset({"bounds", "constraints", "options", "parameters", "resource_budget", "roles"})
+_DRAFT_DURABLE_ARRAY_NUMBER_KEYS = frozenset({"class_weights", "quantiles", "thresholds"})
+_DRAFT_DURABLE_ALLOWED_KEYS = (
+    _DRAFT_DURABLE_REF_KEYS
+    | frozenset(_DRAFT_DURABLE_ENUMS)
+    | _DRAFT_DURABLE_IDENTIFIER_KEYS
+    | _DRAFT_DURABLE_NUMBER_KEYS
+    | _DRAFT_DURABLE_BOOLEAN_KEYS
+    | _DRAFT_DURABLE_MAPPING_KEYS
+    | _DRAFT_DURABLE_ARRAY_NUMBER_KEYS
 )
 _SERVER_COMPILER_AUTHORITY = object()
 
@@ -422,43 +524,84 @@ def _require_opaque_ref(
         raise _error("DRAFT_OPAQUE_REF_REQUIRED", f"{name} must contain a non-empty opaque reference")
 
 
+def _durable_ref_prefixes(field_name: str | None) -> tuple[str, ...]:
+    if field_name in _DRAFT_OPAQUE_REF_PREFIX_BY_KEY:
+        return (_DRAFT_OPAQUE_REF_PREFIX_BY_KEY[field_name],)
+    return _DRAFT_TYPED_REF_PREFIXES
+
+
 def _validate_durable_option_value(value: object, name: str, field_name: str | None = None) -> None:
-    """Allow typed options while keeping prose and prompt material out of storage."""
+    """Allow only typed scalar/enum/ref shapes in durable plan maps."""
 
     if isinstance(value, Mapping):
         for key, child in value.items():
             if type(key) is not str:
                 raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name} option keys must be strings")
             lowered = key.casefold()
-            if lowered in _DRAFT_OPAQUE_REF_KEYS:
-                prefixes = (_DRAFT_OPAQUE_REF_PREFIX_BY_KEY[lowered],)
+            if lowered not in _DRAFT_DURABLE_ALLOWED_KEYS:
+                raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}.{key} is not an allowlisted durable field")
+            if lowered in _DRAFT_DURABLE_REF_KEYS:
+                prefixes = _durable_ref_prefixes(lowered)
                 if type(child) is str:
                     _require_opaque_ref(child, f"{name}.{key}", prefixes)
                 elif type(child) in {list, tuple}:
                     for index, item in enumerate(child):
                         _require_opaque_ref(item, f"{name}.{key}[{index}]", prefixes)
                 else:
-                    raise _error("DRAFT_OPAQUE_REF_REQUIRED", f"{name}.{key} must contain opaque references")
+                    raise _error("DRAFT_OPAQUE_REF_REQUIRED", f"{name}.{key} must contain typed opaque references")
                 continue
-            if lowered in _DRAFT_FREE_TEXT_KEYS or lowered in _DRAFT_FORBIDDEN_SENSITIVE_KEYS or any(
-                marker in lowered for marker in ("prompt", "secret", "password", "credential")
-            ):
-                raise _error("DRAFT_FREE_TEXT_FORBIDDEN", f"{name}.{key} is not a durable typed option")
-            if type(child) is str and lowered not in _DRAFT_TYPED_STRING_KEYS:
-                raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}.{key} requires a typed option or opaque ref")
-            if type(child) is str:
-                _reject_draft_sensitive_content(child, f"{name}.{key}")
-            _validate_durable_option_value(child, f"{name}.{key}", lowered)
+            if lowered in _DRAFT_DURABLE_ENUMS:
+                if type(child) is not str or child not in _DRAFT_DURABLE_ENUMS[lowered]:
+                    raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}.{key} must contain an allowlisted enum")
+                continue
+            if lowered in _DRAFT_DURABLE_IDENTIFIER_KEYS:
+                if type(child) is not str or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,127}", child):
+                    raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}.{key} must contain a typed identifier")
+                continue
+            if lowered in _DRAFT_DURABLE_NUMBER_KEYS:
+                if type(child) not in {int, float} or isinstance(child, bool) or not math.isfinite(child):
+                    raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}.{key} must contain a finite number")
+                continue
+            if lowered in _DRAFT_DURABLE_BOOLEAN_KEYS:
+                if type(child) is not bool:
+                    raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}.{key} must contain a boolean")
+                continue
+            if lowered in _DRAFT_DURABLE_ARRAY_NUMBER_KEYS:
+                if type(child) not in {list, tuple} or any(
+                    type(item) not in {int, float} or isinstance(item, bool) or not math.isfinite(item)
+                    for item in child
+                ):
+                    raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}.{key} must contain numeric values")
+                continue
+            if lowered in _DRAFT_DURABLE_MAPPING_KEYS:
+                if not isinstance(child, Mapping):
+                    raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}.{key} must contain a typed mapping")
+                _validate_durable_option_value(child, f"{name}.{key}", lowered)
+                continue
+            raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}.{key} is not a durable typed option")
         return
     if type(value) in {list, tuple}:
+        if field_name in _DRAFT_DURABLE_REF_KEYS:
+            prefixes = _durable_ref_prefixes(field_name)
+            for index, child in enumerate(value):
+                _require_opaque_ref(child, f"{name}[{index}]", prefixes)
+            return
+        if field_name in _DRAFT_DURABLE_ARRAY_NUMBER_KEYS:
+            if any(type(child) not in {int, float} or isinstance(child, bool) or not math.isfinite(child) for child in value):
+                raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name} must contain numeric values")
+            return
         for index, child in enumerate(value):
-            if type(child) is str and field_name not in _DRAFT_TYPED_STRING_KEYS:
-                raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name}[{index}] requires a typed option or opaque ref")
             _validate_durable_option_value(child, f"{name}[{index}]", field_name)
         return
     if type(value) is str:
-        _reject_draft_sensitive_content(value, name)
-        return
+        if field_name in _DRAFT_DURABLE_ENUMS and value in _DRAFT_DURABLE_ENUMS[field_name]:
+            return
+        if field_name in _DRAFT_DURABLE_REF_KEYS:
+            _require_opaque_ref(value, name, _durable_ref_prefixes(field_name))
+            return
+        if field_name in _DRAFT_DURABLE_IDENTIFIER_KEYS and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,127}", value):
+            return
+        raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name} requires an allowlisted enum, number, boolean or opaque ref")
     if value is None or type(value) in {bool, int, float}:
         return
     raise _error("DRAFT_TYPED_OPTION_REQUIRED", f"{name} contains an unsupported durable option")
@@ -593,7 +736,9 @@ class DraftAgentPlanV1:
         if type(self.risk_level) is not PlanRiskLevelV1:
             raise _error("PLANNING_ENUM_INVALID", "risk_level is invalid")
         object.__setattr__(self, "resource_budget", _frozen_mapping(_plain(self.resource_budget), "resource_budget"))
+        _validate_durable_option_value(self.resource_budget, "resource_budget")
         object.__setattr__(self, "data_impact", _frozen_mapping(_plain(self.data_impact), "data_impact"))
+        _validate_durable_option_value(self.data_impact, "data_impact")
         for name in ("output_contract_refs", "evidence_contract_refs", "contract_snapshot_refs"):
             object.__setattr__(self, name, _typed_ref_tuple(getattr(self, name), name))
         _text(self.catalog_snapshot_ref, "catalog_snapshot_ref")
@@ -603,6 +748,7 @@ class DraftAgentPlanV1:
         for node in nodes:
             _reject_draft_server_fields(node, "node")
             _reject_draft_sensitive_content(node, "node")
+            _validate_durable_option_value(node, "node")
             if type(node.get("node_id")) is not str or not node["node_id"]:
                 raise _error("PLANNING_NODE_INVALID", "each node must have a node_id")
         if len({node["node_id"] for node in nodes}) != len(nodes):
@@ -614,6 +760,7 @@ class DraftAgentPlanV1:
         for connection in connections:
             _reject_draft_server_fields(connection, "connection")
             _reject_draft_sensitive_content(connection, "connection")
+            _validate_durable_option_value(connection, "connection")
         object.__setattr__(self, "connections", connections)
         object.__setattr__(self, "config", _frozen_mapping(_plain(self.config), "config"))
         _reject_draft_server_fields(self.config, "config")
@@ -759,17 +906,21 @@ class CompiledWorkflowV1:
         if type(self.risk_level) is not PlanRiskLevelV1:
             raise _error("PLANNING_ENUM_INVALID", "risk_level is invalid")
         object.__setattr__(self, "resource_budget", _frozen_mapping(_plain(self.resource_budget), "resource_budget"))
+        _validate_durable_option_value(self.resource_budget, "compiled resource_budget")
         object.__setattr__(self, "data_impact", _frozen_mapping(_plain(self.data_impact), "data_impact"))
+        _validate_durable_option_value(self.data_impact, "compiled data_impact")
         if not isinstance(self.nodes, (tuple, list)) or any(not isinstance(node, Mapping) for node in self.nodes):
             raise _error("PLANNING_NODE_INVALID", "nodes are invalid")
         object.__setattr__(self, "nodes", tuple(_frozen_mapping(_plain(node), "nodes[]") for node in self.nodes))
         for node in self.nodes:
             _reject_draft_sensitive_content(node, "compiled node")
+            _validate_durable_option_value(node, "compiled node")
         if not isinstance(self.connections, (tuple, list)) or any(not isinstance(item, Mapping) for item in self.connections):
             raise _error("PLANNING_NODE_INVALID", "connections are invalid")
         object.__setattr__(self, "connections", tuple(_frozen_mapping(_plain(item), "connections[]") for item in self.connections))
         for connection in self.connections:
             _reject_draft_sensitive_content(connection, "compiled connection")
+            _validate_durable_option_value(connection, "compiled connection")
         object.__setattr__(self, "config", _frozen_mapping(_plain(self.config), "config"))
         _reject_draft_server_fields(self.config, "compiled config")
         _validate_durable_option_value(self.config, "compiled config")

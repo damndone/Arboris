@@ -72,6 +72,56 @@ _SENSITIVE_KEY_MARKERS = (
     "user_message",
 )
 _SECRET_VALUE_MARKERS = ("raw:", "secret:", "token:", "bearer ", "sk-")
+_OPAQUE_REF_PREFIXES = (
+    "artifact:",
+    "column:",
+    "connection:",
+    "contract:",
+    "data-ref:",
+    "dataset:",
+    "descriptor:",
+    "evidence:",
+    "metric:",
+    "model:",
+    "node:",
+    "port:",
+    "prompt-ref:",
+    "rationale:",
+    "schema:",
+    "source:",
+    "symbol:",
+)
+_FREE_TEXT_FIELDS = frozenset(
+    {
+        "body",
+        "comment",
+        "comments",
+        "content",
+        "description",
+        "descriptions",
+        "free_text",
+        "instruction",
+        "instructions",
+        "label",
+        "message",
+        "messages",
+        "note",
+        "notes",
+        "text",
+    }
+)
+_SAFE_ENUM_FIELDS = {
+    "analysis_mode": frozenset({"classification", "descriptive", "diagnostic", "inference", "predictive", "regression"}),
+    "kind": frozenset({"artifact", "dataset", "evidence", "feature", "metric", "model", "prediction", "schema"}),
+    "mode": frozenset({"read", "read_only", "write"}),
+    "role": frozenset({"actual", "feature", "group", "id", "prediction", "target", "time", "weight"}),
+    "status": frozenset({"available", "complete", "completed", "ready", "validated"}),
+    "type": frozenset({"boolean", "integer", "metric", "number", "reference", "scalar"}),
+    "unit": frozenset({"bytes", "count", "milliseconds", "probability", "ratio", "rows", "seconds"}),
+    "value_kind": frozenset({"boolean", "integer", "number", "reference", "scalar"}),
+    "write_mode": frozenset({"append", "create", "none", "read_only", "replace"}),
+}
+_SAFE_IDENTIFIER_FIELDS = frozenset({"id", "node_id", "port_name"})
 
 
 def _error(code: str, message: str) -> EgressContractError:
@@ -229,7 +279,36 @@ def _wire_boundary(function):
     return wrapped
 
 
-def _classify_and_redact(value: object, path: str = "context") -> tuple[object, SensitivityClassV1, tuple[str, ...]]:
+def _is_opaque_reference(value: object) -> bool:
+    if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+        return False
+    prefix = next((item for item in _OPAQUE_REF_PREFIXES if value.startswith(item)), None)
+    if prefix is None:
+        return False
+    suffix = value[len(prefix) :]
+    return bool(suffix) and not any(char.isspace() for char in suffix)
+
+
+def _is_safe_string(value: str, field_name: str | None) -> bool:
+    if _is_opaque_reference(value):
+        return True
+    if field_name is None:
+        return False
+    lowered = field_name.casefold()
+    if lowered.endswith("_ref"):
+        return False
+    if lowered in _SAFE_ENUM_FIELDS:
+        return value in _SAFE_ENUM_FIELDS[lowered]
+    if lowered in _SAFE_IDENTIFIER_FIELDS:
+        return bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,127}", value))
+    return False
+
+
+def _classify_and_redact(
+    value: object,
+    path: str = "context",
+    field_name: str | None = None,
+) -> tuple[object, SensitivityClassV1, tuple[str, ...]]:
     """Deterministically redact PII/secret-like leaves and report evidence."""
 
     if isinstance(value, Mapping):
@@ -244,7 +323,16 @@ def _classify_and_redact(value: object, path: str = "context") -> tuple[object, 
                 redacted.append(f"field:{path}.{key}")
                 observed = SensitivityClassV1.RESTRICTED
                 continue
-            redacted_child, child_sensitivity, child_refs = _classify_and_redact(child, f"{path}.{key}")
+            if lowered in _FREE_TEXT_FIELDS and not _is_opaque_reference(child):
+                raise _error(
+                    "EGRESS_FREE_TEXT_FORBIDDEN",
+                    f"{path}.{key} requires a typed scalar or opaque reference",
+                )
+            redacted_child, child_sensitivity, child_refs = _classify_and_redact(
+                child,
+                f"{path}.{key}",
+                lowered,
+            )
             output[key] = redacted_child
             redacted.extend(child_refs)
             if _SENSITIVITY_RANK[child_sensitivity] > _SENSITIVITY_RANK[observed]:
@@ -255,7 +343,11 @@ def _classify_and_redact(value: object, path: str = "context") -> tuple[object, 
         observed = SensitivityClassV1.PUBLIC
         redacted: list[str] = []
         for index, child in enumerate(value):
-            redacted_child, child_sensitivity, child_refs = _classify_and_redact(child, f"{path}[{index}]")
+            redacted_child, child_sensitivity, child_refs = _classify_and_redact(
+                child,
+                f"{path}[{index}]",
+                field_name,
+            )
             values.append(redacted_child)
             redacted.extend(child_refs)
             if _SENSITIVITY_RANK[child_sensitivity] > _SENSITIVITY_RANK[observed]:
@@ -266,7 +358,11 @@ def _classify_and_redact(value: object, path: str = "context") -> tuple[object, 
         observed = SensitivityClassV1.PUBLIC
         redacted: list[str] = []
         for index, child in enumerate(value):
-            redacted_child, child_sensitivity, child_refs = _classify_and_redact(child, f"{path}[{index}]")
+            redacted_child, child_sensitivity, child_refs = _classify_and_redact(
+                child,
+                f"{path}[{index}]",
+                field_name,
+            )
             values.append(redacted_child)
             redacted.extend(child_refs)
             if _SENSITIVITY_RANK[child_sensitivity] > _SENSITIVITY_RANK[observed]:
@@ -276,6 +372,11 @@ def _classify_and_redact(value: object, path: str = "context") -> tuple[object, 
         lowered = value.casefold()
         if _EMAIL.fullmatch(value) or any(lowered.startswith(marker) for marker in _SECRET_VALUE_MARKERS):
             return "[REDACTED]", SensitivityClassV1.RESTRICTED, (f"value:{path}",)
+        if not _is_safe_string(value, field_name):
+            raise _error(
+                "EGRESS_FREE_TEXT_FORBIDDEN",
+                f"{path} requires a typed scalar or opaque reference",
+            )
     return value, SensitivityClassV1.PUBLIC, ()
 
 
