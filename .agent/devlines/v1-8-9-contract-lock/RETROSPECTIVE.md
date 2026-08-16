@@ -6,18 +6,18 @@
 
 ## Final status
 
-VERIFIED_PENDING_CLOSE
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 72/132 (54.5%; 54.5 per 100 events)
+- Failure frequency: 72/135 (53.3%; 53.3 per 100 events)
 - Repeat rate: 0/72 (0.0%)
 - Recurrence rate: 0/72 (0.0%)
 - MTTR: median=0 ms (sample=28; unresolved=44)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/36 (0.0%)
+- Gate waste rate: 0/37 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -305,6 +305,7 @@ VERIFIED_PENDING_CLOSE
 - Keep the final handoff digest-bound and append-only after all scope corrections.
 - Keep validation claims fact-derived and persistence bindings content-addressed while preserving each status axis independently.
 - Let devline_control calculate event hashes and keep temporary event sources limited to validated event fields.
+- Lifecycle completion must update handoff status without weakening evidence boundaries or release gates.
 - Observe the missing approved public contract modules before implementing the minimal strict schemas.
 - Observe the missing-contract collection failure before implementing the public ContractRefV1 API.
 - Opaque ref safety must reject both case variants and marker substrings, not only whole separator-delimited words.
@@ -487,3 +488,6 @@ VERIFIED_PENDING_CLOSE
 - #130: `12345678-9abc-4def-0123-456789abcdef` | 2026-08-16T04:17:00.000Z | REVIEW/task6_closeout_review | incident=`23456789-abcd-4ef0-9123-456789abcdef` | lesson_key=`task6-closeout-review` | event_sha256=`1b96cc1600074ed628937bc4be12c02dd308e3d461bdd57e4cc973c10aa2c0fa`
 - #131: `89abcdef-0123-4456-9789-abcdef012345` | 2026-08-16T04:18:00.000Z | GATE/task6_closeout_gate | incident=`456789ab-cdef-4012-9345-6789abcdef01` | lesson_key=`task6-closeout-gate` | event_sha256=`875d7a7102f8e23aebaf7f1183a371f9cb7c21f63e0e0457ece572b538b748a0`
 - #132: `56789abc-def0-4123-9456-789abcdef012` | 2026-08-16T04:19:00.000Z | STATE_CHANGE/task6_closeout_ready | incident=`6789abcd-ef01-4234-9567-89abcdef0123` | lesson_key=`task6-closeout-ready` | event_sha256=`ee05e82376d3feeb816b648941581f241bb6147890217ca83eb08427562a3f1b`
+- #133: `abcdef12-3456-4789-0abc-def012345678` | 2026-08-16T04:23:00.000Z | REVIEW/task6_completed_handoff_review | incident=`def01234-5678-49ab-cdef-0123456789ab` | lesson_key=`task6-completed-handoff-review` | event_sha256=`8b0104e98090a3d7971497b86de1c0084c5c23aa1ffbe200b76274598aa0211f`
+- #134: `bcdef123-4567-489a-bcde-f0123456789a` | 2026-08-16T04:24:00.000Z | GATE/task6_completed_gate | incident=`cdef0123-4567-489a-bcde-f0123456789a` | lesson_key=`task6-completed-gate` | event_sha256=`38a1a4291ce1287fba01f2c75520fbf7ef59ca7e9096b4496bd5e3e85581cca2`
+- #135: `f1234567-89ab-4cde-f012-3456789abcde` | 2026-08-16T04:25:00.000Z | STATE_CHANGE/task6_line_completed | incident=`f2345678-9abc-4def-0123-456789abcdef` | lesson_key=`task6-line-completed` | event_sha256=`ff5b303451edd2c3ea16d2857dd386396b23b02481470333e918658f4d4d1ae1`
