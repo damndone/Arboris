@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import io
 import zipfile
-from io import BytesIO
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from openpyxl import load_workbook
 
 from workbench.app import app
 from workbench.artifacts import write_json
@@ -38,6 +36,35 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
     return project.root, run.run_id
 
 
+def _typed_projection() -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "projectionId": "report:evidence-commit-1",
+        "consumerId": "report",
+        "consumerVersion": "1.0",
+        "actorRef": "actor:1",
+        "projectRef": "project:1",
+        "sessionRef": "session:1",
+        "scopeRef": "scope:project:1",
+        "runId": "run-1",
+        "modelRunId": "run-1",
+        "artifactRef": "artifact-1",
+        "commitId": "evidence-commit-1",
+        "confirmationRef": "confirmation:run-1",
+        "envelopeRef": "evidence-envelope:1",
+        "envelopeDigest": "a" * 64,
+        "status": "available",
+        "executionStatus": "completed",
+        "availability": "available",
+        "completenessStatus": "complete",
+        "validationStatus": "met",
+        "validationSummary": {"requirement_status": "met"},
+        "facts": [{"factId": "fact-1", "statisticId": "estimate", "value": 1.25}],
+        "sections": [],
+        "provenance": {"artifactRef": "artifact-1", "commitId": "evidence-commit-1"},
+    }
+
+
 def test_report_export_embeds_figures_in_html_and_print_html(tmp_path: Path) -> None:
     project_root, run_id = _fixture(tmp_path)
     markdown = "# Results\n\nThe effect is **positive**.\n\n[[fig:coef_plot]]"
@@ -45,7 +72,7 @@ def test_report_export_embeds_figures_in_html_and_print_html(tmp_path: Path) -> 
 
     run_root = project_root / "runs" / run_id
     html, media, filename = export_report(
-        run_root, markdown=markdown, figures=figures, format="html"
+        run_root, markdown=markdown, figures=figures, format="html", evidence_projection=_typed_projection()
     )
     text = html.decode("utf-8")
     assert media == "text/html"
@@ -55,7 +82,7 @@ def test_report_export_embeds_figures_in_html_and_print_html(tmp_path: Path) -> 
     assert "Coefficient plot" in text
 
     printed, _, print_name = export_report(
-        run_root, markdown=markdown, figures=figures, format="pdf-print"
+        run_root, markdown=markdown, figures=figures, format="pdf-print", evidence_projection=_typed_projection()
     )
     assert print_name == "report-print.html"
     assert b"@media print" in printed
@@ -68,7 +95,7 @@ def test_report_export_produces_docx_and_latex_zip_without_new_dependencies(tmp_
     figures = [{"artifact_id": "coef_plot", "chart_type": "Coefficient plot"}]
 
     docx, media, _ = export_report(
-        run_root, markdown=markdown, figures=figures, format="docx"
+        run_root, markdown=markdown, figures=figures, format="docx", evidence_projection=_typed_projection()
     )
     assert media.startswith("application/vnd.openxmlformats")
     with zipfile.ZipFile(io.BytesIO(docx)) as archive:
@@ -83,7 +110,7 @@ def test_report_export_produces_docx_and_latex_zip_without_new_dependencies(tmp_
         assert "• one".encode() in document
 
     tex_zip, media, filename = export_report(
-        run_root, markdown=markdown, figures=figures, format="tex"
+        run_root, markdown=markdown, figures=figures, format="tex", evidence_projection=_typed_projection()
     )
     assert media == "application/zip"
     assert filename == "report.tex.zip"
@@ -95,7 +122,7 @@ def test_report_export_produces_docx_and_latex_zip_without_new_dependencies(tmp_
         assert "[[fig:" not in tex
 
 
-def test_report_export_route_rejects_unknown_figure_and_returns_file(tmp_path: Path) -> None:
+def test_report_export_route_requires_committed_typed_evidence(tmp_path: Path) -> None:
     project_root, run_id = _fixture(tmp_path)
     client = TestClient(app)
     response = client.post(
@@ -103,17 +130,16 @@ def test_report_export_route_rejects_unknown_figure_and_returns_file(tmp_path: P
         params={"project_root": str(project_root), "format": "html"},
         json={"markdown": "# Report\n\n[[fig:coef_plot]]", "figures": [{"artifact_id": "coef_plot"}]},
     )
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/html")
-    assert b"data:image/png;base64" in response.content
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "REPORT_EVIDENCE_UNAVAILABLE"
 
     missing = client.post(
         f"/runs/{run_id}/report/export",
         params={"project_root": str(project_root), "format": "html"},
         json={"markdown": "[[fig:missing]]", "figures": [{"artifact_id": "missing"}]},
     )
-    assert missing.status_code == 422
-    assert missing.json()["error"]["code"] == "REPORT_EXPORT_INVALID"
+    assert missing.status_code == 409
+    assert missing.json()["error"]["code"] == "REPORT_EVIDENCE_UNAVAILABLE"
 
 
 def test_persisted_report_export_is_bound_to_the_stored_revision(tmp_path: Path) -> None:
@@ -149,9 +175,8 @@ def test_persisted_report_export_is_bound_to_the_stored_revision(tmp_path: Path)
             "figures": [{"artifact_id": "coef_plot", "chart_type": "Coefficient plot"}],
         },
     )
-    assert exported.status_code == 200, exported.text
-    assert b"Stored report" in exported.content
-    assert b"data:image/png;base64" in exported.content
+    assert exported.status_code == 409, exported.text
+    assert exported.json()["error"]["code"] == "REPORT_EVIDENCE_UNAVAILABLE"
 
     mismatch = client.post(
         f"/runs/{run_id}/report/export",
@@ -163,7 +188,7 @@ def test_persisted_report_export_is_bound_to_the_stored_revision(tmp_path: Path)
         },
     )
     assert mismatch.status_code == 409
-    assert mismatch.json()["error"]["code"] == "AI_REPORT_SOURCE_MISMATCH"
+    assert mismatch.json()["error"]["code"] == "REPORT_EVIDENCE_UNAVAILABLE"
 
     missing = client.post(
         f"/runs/{run_id}/report/export",
@@ -174,8 +199,8 @@ def test_persisted_report_export_is_bound_to_the_stored_revision(tmp_path: Path)
             "figures": [],
         },
     )
-    assert missing.status_code == 404
-    assert missing.json()["error"]["code"] == "AI_REPORT_NOT_FOUND"
+    assert missing.status_code == 409
+    assert missing.json()["error"]["code"] == "REPORT_EVIDENCE_UNAVAILABLE"
 
 
 def test_persisted_curated_report_export_reuses_the_included_snapshot(tmp_path: Path) -> None:
@@ -223,8 +248,8 @@ def test_persisted_curated_report_export_reuses_the_included_snapshot(tmp_path: 
         },
     )
 
-    assert exported.status_code == 200, exported.text
-    assert b"Stored curated report" in exported.content
+    assert exported.status_code == 409, exported.text
+    assert exported.json()["error"]["code"] == "REPORT_EVIDENCE_UNAVAILABLE"
 
 
 def test_result_table_export_route_reads_authoritative_run_evidence(tmp_path: Path) -> None:
@@ -265,17 +290,9 @@ def test_result_table_export_route_reads_authoritative_run_evidence(tmp_path: Pa
         json={"sections": ["regression_table", "statistical_evidence"]},
     )
 
-    assert response.status_code == 200, response.text
-    assert response.headers["content-type"].startswith(
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    workbook = load_workbook(BytesIO(response.content), read_only=True)
-    assert {"regression_table", "statistical_evidence"} <= set(workbook.sheetnames)
-    rows = list(workbook["regression_table"].iter_rows(values_only=True))
-    assert "ols_1 estimate" in rows[0]
-    assert any("model_results.ols_1.coefficients.x" in row for row in rows)
-    assert not (run_root / "reports" / "report.pdf").exists()
-    assert not (run_root / "exports" / "tables.xlsx").exists()
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "RESULT_TABLE_EXPORT_UNAVAILABLE"
+    assert response.json()["error"]["details"]["projection"]["facts"] == []
 
     rejected = TestClient(app).post(
         f"/runs/{run_id}/report/result-table-export",

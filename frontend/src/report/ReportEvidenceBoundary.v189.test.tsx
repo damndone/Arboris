@@ -45,11 +45,20 @@ const rawRegressionResult = {
 } as unknown as FamilyModelResult;
 
 const committedProjection: ReportEvidenceProjection = {
+  schemaVersion: 1,
   projectionId: "report:evidence-commit-1",
   consumerId: "report",
   consumerVersion: "1.0",
+  actorRef: "actor:1",
+  projectRef: "project:1",
+  sessionRef: "session:1",
+  scopeRef: "scope:project:1",
+  runId: "run-1",
+  modelRunId: "run-1",
+  confirmationRef: "confirmation:run-1",
   artifactRef: "artifact-1",
   envelopeRef: "evidence-envelope:result-1",
+  commitId: "evidence-commit-1",
   envelopeDigest: "a".repeat(64),
   status: "available",
   executionStatus: "completed",
@@ -82,6 +91,54 @@ const validatedProjection = {
 } as ReportEvidenceProjection;
 
 describe("Report evidence boundary v1.8.9", () => {
+  it("rejects malformed, stale, and identity-inconsistent projections before rendering facts", () => {
+    expect(readReportEvidenceProjection({ ...committedProjection, schemaVersion: 2 })).toBeNull();
+    expect(readReportEvidenceProjection({
+      ...committedProjection,
+      schemaVersion: 1,
+      projectRef: "project:foreign",
+      sessionRef: "session:foreign",
+      scopeRef: "scope:foreign",
+      runId: "run-foreign",
+      modelRunId: "model-foreign",
+      artifactRef: "artifact-foreign",
+      commitId: "commit-foreign",
+      status: "available",
+    }, {
+      projectRef: "project:1",
+      sessionRef: "session:1",
+      scopeRef: "scope:project:1",
+      runId: "run-1",
+      modelRunId: "run-1",
+      artifactRef: "artifact-1",
+      commitId: "evidence-commit-1",
+    })).toBeNull();
+    expect(readReportEvidenceProjection({
+      ...committedProjection,
+      schemaVersion: 1,
+      status: "degraded",
+      availability: "available",
+      validationStatus: "met",
+    })).toBeNull();
+    expect(readReportEvidenceProjection({
+      ...committedProjection,
+      schemaVersion: 1,
+      status: "available",
+      availability: "unavailable",
+    })).toBeNull();
+    expect(readReportEvidenceProjection({
+      ...committedProjection,
+      provenance: { ...committedProjection.provenance, commitId: "commit-foreign" },
+    })).toBeNull();
+    expect(readReportEvidenceProjection({
+      ...committedProjection,
+      provenance: {
+        ...committedProjection.provenance,
+        resultIdentity: { runId: "run-foreign", modelRunId: "run-1" },
+      },
+    })).toBeNull();
+  });
+
   it("does not make an indexed uncommitted result citable", () => {
     const unavailable = unavailableReportEvidence(
       "EVIDENCE_COMMIT_BINDING_REQUIRED",

@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..artifacts import read_json
@@ -192,6 +193,19 @@ class PersistedEvidenceResultsFacadeV1:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ReportEvidenceRequestIdentityV1:
+    """Server-observed identity used at the HTTP-to-Report boundary."""
+
+    actor_ref: str
+    project_ref: str
+    session_ref: str
+    scope_ref: str
+    run_id: str
+    model_run_id: str
+    confirmation_ref: str
+
+
 class ServerOwnedReportEvidencePersistenceV1:
     """Read Report evidence through the real C0 store, registry, and receipt."""
 
@@ -199,6 +213,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         "_evidence_store",
         "_registry",
         "_receipt",
+        "_actor_ref",
         "_project_ref",
         "_session_ref",
         "_scope_ref",
@@ -206,6 +221,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         "_model_run_id",
         "_artifact_id",
         "_commit_id",
+        "_confirmation_ref",
         "_artifact_file_sha256",
     )
 
@@ -215,6 +231,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         registry: EvidenceRegistryV1,
         receipt: EvidenceRegistryReceiptV1,
         *,
+        actor_ref: str,
         project_ref: str,
         session_ref: str,
         scope_ref: str,
@@ -222,6 +239,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         model_run_id: str,
         artifact_id: str,
         commit_id: str,
+        confirmation_ref: str,
         artifact_file_sha256: str,
     ) -> None:
         if type(evidence_store) is not EvidencePacketStoreV1:
@@ -245,11 +263,13 @@ class ServerOwnedReportEvidencePersistenceV1:
                 "Report evidence requires a server-owned model run identity",
             )
         for name, value in (
+            ("actor_ref", actor_ref),
             ("project_ref", project_ref),
             ("session_ref", session_ref),
             ("scope_ref", scope_ref),
             ("artifact_id", artifact_id),
             ("commit_id", commit_id),
+            ("confirmation_ref", confirmation_ref),
             ("artifact_file_sha256", artifact_file_sha256),
         ):
             if type(value) is not str or not value.strip():
@@ -307,6 +327,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         self._evidence_store = evidence_store
         self._registry = registry
         self._receipt = receipt
+        self._actor_ref = actor_ref
         self._project_ref = project_ref
         self._session_ref = session_ref
         self._scope_ref = scope_ref
@@ -314,11 +335,16 @@ class ServerOwnedReportEvidencePersistenceV1:
         self._model_run_id = model_run_id
         self._artifact_id = artifact_id
         self._commit_id = commit_id
+        self._confirmation_ref = confirmation_ref
         self._artifact_file_sha256 = artifact_file_sha256
 
     @property
     def project_ref(self) -> str:
         return self._project_ref
+
+    @property
+    def actor_ref(self) -> str:
+        return self._actor_ref
 
     @property
     def session_ref(self) -> str:
@@ -345,6 +371,10 @@ class ServerOwnedReportEvidencePersistenceV1:
         return self._commit_id
 
     @property
+    def confirmation_ref(self) -> str:
+        return self._confirmation_ref
+
+    @property
     def artifact_file_sha256(self) -> str:
         return self._artifact_file_sha256
 
@@ -352,6 +382,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         self,
         commit_id: str,
         *,
+        actor_ref: str,
         project_ref: str,
         session_ref: str,
         scope_ref: str,
@@ -360,12 +391,16 @@ class ServerOwnedReportEvidencePersistenceV1:
         model_run_id: str,
         content_hash: str,
         admission_ref: str,
+        confirmation_ref: str,
         artifact_file_sha256: str,
         envelope_digest: str | None = None,
     ) -> PersistedEvidenceEnvelopeV1:
         """Load only the registry-owned artifact bound to this commit context."""
 
         if (
+            actor_ref != self._actor_ref
+            or confirmation_ref != self._confirmation_ref
+            or
             project_ref != self._project_ref
             or session_ref != self._session_ref
             or scope_ref != self._scope_ref
@@ -494,6 +529,7 @@ def configure_report_evidence_persistence(
 
 def current_report_evidence_persistence(
     *,
+    actor_ref: str | None,
     run_id: str | None,
     project_ref: str | None,
     session_ref: str | None,
@@ -501,6 +537,7 @@ def current_report_evidence_persistence(
     model_run_id: str | None,
     artifact_id: str | None,
     commit_id: str | None,
+    confirmation_ref: str | None,
     artifact_file_sha256: str | None,
 ) -> ServerOwnedReportEvidencePersistenceV1 | None:
     """Return only the capability bound to the complete server-owned identity.
@@ -515,17 +552,21 @@ def current_report_evidence_persistence(
         return None
     expected = (
         run_id,
+        actor_ref,
         project_ref,
         session_ref,
         scope_ref,
         model_run_id,
         artifact_id,
         commit_id,
+        confirmation_ref,
         artifact_file_sha256,
     )
     if not all(type(value) is str and value.strip() for value in expected):
         return None
     if (
+        capability.actor_ref != actor_ref
+        or
         capability.run_id != run_id
         or capability.project_ref != project_ref
         or capability.session_ref != session_ref
@@ -533,6 +574,7 @@ def current_report_evidence_persistence(
         or capability.model_run_id != model_run_id
         or capability.artifact_id != artifact_id
         or capability.commit_id != commit_id
+        or capability.confirmation_ref != confirmation_ref
         or capability.artifact_file_sha256 != artifact_file_sha256
     ):
         return None
@@ -541,6 +583,7 @@ def current_report_evidence_persistence(
 
 __all__ = [
     "PersistedEvidenceResultsFacadeV1",
+    "ReportEvidenceRequestIdentityV1",
     "ServerOwnedReportEvidencePersistenceV1",
     "configure_report_evidence_persistence",
     "current_report_evidence_persistence",

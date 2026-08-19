@@ -5,9 +5,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .artifacts import read_json
 from .canonical import sha256_canonical
+# Kept as a module attribute for legacy test/import compatibility.  The typed
+# report consumer below never invokes narrative rendering.
 from .narrative.render import render_template
+from .services.results_service import ReportEvidenceRequestIdentityV1
 
 
 _DEFAULT_SIGNIFICANCE_LEVELS: dict[str, float] = {
@@ -15,6 +17,21 @@ _DEFAULT_SIGNIFICANCE_LEVELS: dict[str, float] = {
     "**": 0.05,
     "*": 0.1,
 }
+
+
+def _projection_identity_fields(projection: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        key: str(projection.get(key, "UNAVAILABLE"))
+        for key in (
+            "actorRef",
+            "projectRef",
+            "sessionRef",
+            "scopeRef",
+            "runId",
+            "modelRunId",
+            "confirmationRef",
+        )
+    }
 
 
 def build_regression_table(
@@ -169,234 +186,100 @@ def build_report_view_model(
     statistical_evidence: dict[str, Any] | None = None,
     regression_table: dict[str, Any] | None = None,
     exploration: dict[str, Any] | None = None,
+    evidence_projection: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    diagnostics = summary.get("diagnostics", {})
-
-    def _render_issues(issues: list[dict]) -> list[dict]:
-        result: list[dict] = []
-        for issue in issues:
-            tk = issue.get("template_key", "")
-            params = issue.get("template_params", {})
-            if tk:
-                try:
-                    text = render_template(tk, params)
-                except (KeyError, ValueError):
-                    text = issue.get("message", "")
-            else:
-                text = issue.get("message", "")
-            result.append({
-                "text": text,
-                "code": issue.get("code", ""),
-                "severity": issue.get("severity", ""),
-                "variables": issue.get("variables", []),
-            })
-        return result
-
-    coeff_rows = summary.get("coefficients_summary", {}).get("rows", [])
-    coeff_views: list[dict] = []
-    for row in coeff_rows:
-        guide = row.get("interpretation_guide", "standard")
-        tk = row.get("template_key", "")
-        # Guardrail: categorical/dummy variables must not use continuous templates
-        if guide == "categorical_levels_vs_reference":
-            tk = "coef_categorical"
-        elif tk in ("coef_continuous_association",) and row.get("level"):
-            # Has a level → likely categorical, don't use continuous text
-            tk = "coef_categorical"
-        if tk:
-            try:
-                text = render_template(tk, {
-                    "variable": row.get("display_name", row.get("variable", "")),
-                    "estimate": _format_estimate(row.get("estimate")),
-                    "p_label": row.get("significance_label", "not reported"),
-                    "y": summary.get("model_identity", {}).get("y_variable", "y"),
-                    "level": row.get("level", ""),
-                    "reference": "1",
-                })
-            except (KeyError, ValueError):
-                text = row.get("message", "")
-        else:
-            text = ""
-        coeff_views.append({
-            "text": text,
-            "variable": row.get("variable", ""),
-            "interpretation_guide": guide,
-        })
-
-    nc = summary.get("narrative_contract", {})
-    has_treatment = nc.get("constraints", {}).get("must_not_interpret_treatment_independently", False)
-    if has_treatment:
-        try:
-            causal_text = render_template("causal_caution_with_treatment", {})
-        except (KeyError, ValueError):
-            causal_text = ""
-    else:
-        try:
-            causal_text = render_template("causal_caution_default", {})
-        except (KeyError, ValueError):
-            causal_text = ""
-
-    ds = descriptive_stats if descriptive_stats is not None else _load_if_exists(run_root / "staged" / "data_profile.json")
-    st = statistical_tests if statistical_tests is not None else _load_if_exists(run_root / "staged" / "statistical_test_summaries.json")
-
-    model_diag: dict[str, Any] = {}
-    diag_dir = run_root / "model_results"
-    if diag_dir.is_dir():
-        for path in sorted(diag_dir.glob("diagnostics_*.json")):
-            try:
-                data = read_json(path)
-                if isinstance(data, dict):
-                    model_diag[path.stem] = data
-            except Exception:
-                pass
-
-    critical_errors = _render_issues(diagnostics.get("blockers", []))
-    if exploration is not None and exploration.get("status") != "completed":
-        # Report text is read by whoever ran the workflow, so it must describe
-        # the workflow, not the exercise this feature was first built for.
-        critical_errors.append(
-            {
-                "text": (
-                    "The statistical workflow did not complete; "
-                    "the final report is blocked."
-                ),
-                "code": "WORKFLOW_INCOMPLETE",
-                "severity": "BLOCKER",
-                "variables": [],
-            }
-        )
-
-    return {
-        "title": summary.get("model_identity", {}).get("model_label", "Econometrics Report"),
-        "facts": _build_facts_list(summary) + _survey_design_facts(run_root),
-        "critical_errors": critical_errors,
-        "warnings": _render_issues(diagnostics.get("warnings", [])),
-        "cautions": _render_issues(diagnostics.get("cautions", [])),
-        "system_notes": _render_issues(diagnostics.get("info", [])),
-        "coefficient_interpretations": coeff_views,
-        "causal_caution": causal_text,
-        "descriptive_stats": ds,
-        "statistical_tests": st,
-        "statistical_evidence": (
-            statistical_evidence
-            if statistical_evidence is not None
-            else _load_if_exists(run_root / "statistical_tests" / "evidence.json")
-        ),
-        "regression_table": regression_table,
-        "model_family_evidence": summary.get("model_family_evidence"),
-        "exploration": exploration,
-        "model_diagnostics": model_diag,
-        "model_quality": summary.get("model_quality"),
-    }
-
-
-def _build_facts_list(summary: dict[str, Any]) -> list[str]:
-    mi = summary.get("model_identity", {})
-    pp = summary.get("preprocessing", {})
-
-    exposure_var = pp.get("exposure_variable")
-    x_vars = mi.get("x_variables", [])
-    display_x = [v for v in x_vars if v != exposure_var] if exposure_var else x_vars
-
-    model_label = mi.get("model_label", "")
-    if exposure_var:
-        model_label = f"Poisson rate model with log({exposure_var}) as offset"
-
-    facts = [
-        f"Model: {model_label}",
-        f"y = {mi.get('y_variable', '')};  X = {', '.join(display_x)}",
-    ]
-    if exposure_var:
-        facts.append(f"Exposure/offset: log({exposure_var}), coefficient fixed at 1")
-    facts.extend([
-        f"Rows used: {mi.get('n_observations', 0)} · Columns: {pp.get('column_count_after_encoding', mi.get('n_predictors_after_encoding', 0) + 1)}",
-        f"Dataset kind: {mi.get('dataset_kind', 'unknown')}",
-    ])
-    imputation = pp.get("imputation", {})
-    if isinstance(imputation, dict) and imputation.get("method") == "mice" and imputation.get("status") == "completed":
-        facts.append(_mice_imputation_fact(imputation))
-    encoded = pp.get("categorical_encoded", [])
-    if encoded:
-        names = ", ".join(e["variable"] for e in encoded)
-        facts.append(f"Categorical variable(s): {names} (dummy-coded in model)")
-    return facts
-
-
-def _mice_imputation_fact(imputation: dict[str, Any]) -> str:
-    columns = imputation.get("imputed_columns", [])
-    columns_text = ", ".join(str(column) for column in columns) if columns else "none"
-    persisted = imputation.get("persisted_datasets", 0)
-    persisted_text = "one" if persisted == 1 else str(persisted)
-    pooled = "were produced" if imputation.get("pooled_estimates") else "were not produced"
-    return (
-        f"MICE imputation: {persisted_text} persisted imputed dataset; "
-        f"imputed columns: {columns_text}; pooled estimates {pooled}."
+    # Report view models are consumer projections, never a raw summary or
+    # model_results recomputation.  Keep the legacy arguments for call-site
+    # compatibility, but require the typed projection at this boundary.
+    if not isinstance(evidence_projection, Mapping):
+        return {
+            "schemaVersion": 1,
+            "status": "unavailable",
+            "projectionId": "report:unavailable",
+            "commitId": "UNAVAILABLE",
+            "envelopeDigest": "UNAVAILABLE",
+            "validationStatus": "unavailable",
+            "validationSummary": {"status": "unavailable", "reasonCode": "REPORT_EVIDENCE_REQUIRED"},
+            "provenance": {},
+            "facts": [],
+            "critical_errors": [{"code": "REPORT_EVIDENCE_REQUIRED", "severity": "BLOCKER"}],
+            **_projection_identity_fields({}),
+        }
+    projection = evidence_projection
+    if projection.get("status") != "available":
+        return {
+            "schemaVersion": 1,
+            "status": str(projection.get("status", "unavailable")),
+            "projectionId": str(projection.get("projectionId", "report:unavailable")),
+            "commitId": str(projection.get("commitId", "UNAVAILABLE")),
+            "envelopeDigest": str(projection.get("envelopeDigest", "UNAVAILABLE")),
+            "validationStatus": str(projection.get("validationStatus", "unavailable")),
+            "validationSummary": dict(projection.get("validationSummary", {})) if isinstance(projection.get("validationSummary"), Mapping) else {},
+            "provenance": dict(projection.get("provenance", {})) if isinstance(projection.get("provenance"), Mapping) else {},
+            "facts": [],
+            "critical_errors": [{"code": str(projection.get("reasonCode", "REPORT_EVIDENCE_UNAVAILABLE")), "severity": "BLOCKER"}],
+            **_projection_identity_fields(projection),
+        }
+    facts = projection.get("facts")
+    required_projection_fields = (
+        "projectionId",
+        "commitId",
+        "envelopeDigest",
+        "validationStatus",
     )
-
-
-def _format_estimate(estimate: Any) -> str:
-    if estimate is None:
-        return "N/A"
-    try:
-        return f"{float(estimate):+.4f}"
-    except (ValueError, TypeError):
-        return str(estimate)
-
-
-def _load_if_exists(path: Path) -> Any | None:
-    if path.is_file():
-        try:
-            return read_json(path)
-        except Exception:
-            return None
-    return None
-
-
-def _survey_design_facts(run_root: Path) -> list[str]:
-    """State the design in the report, or say nothing at all.
-
-    A design-based standard error that lives only in a JSON artifact leaves the
-    report claiming a precision the analysis did not have -- and the report is
-    where the number gets read. Appended to the facts rather than given its own
-    section so it sits beside the sample size and the model label, which is
-    where a reader looks for the terms an interval is conditional on.
-
-    Nothing is emitted for a run without a declared design: a section present on
-    every run stops carrying information.
-    """
-    for path in sorted((run_root / "model_results").glob("*.json")):
-        if path.name.startswith("diagnostics_"):
-            continue
-        try:
-            payload = read_json(path)
-        except (OSError, ValueError):
-            continue
-        design = payload.get("survey_design") if isinstance(payload, dict) else None
-        if not isinstance(design, dict):
-            continue
-
-        facts = [
-            "Standard errors are design-based, not the usual independent-sample "
-            f"kind: {design.get('variance_method', 'linearization')} over "
-            f"{design.get('n_strata', 0)} strata and {design.get('n_psu', 0)} PSUs "
-            f"(strata = {design.get('strata_column')}, PSU = {design.get('psu_column')})",
-            f"Design degrees of freedom: {design.get('degf')} "
-            f"(confidence intervals use this, not the sample size)",
-        ]
-        deff = design.get("design_effect")
-        n_eff = design.get("effective_sample_size")
-        if deff is not None and n_eff is not None:
-            facts.append(
-                f"Design effect {float(deff):.2f}; effective sample size "
-                f"{float(n_eff):.1f} of {design.get('n_obs')} observations"
-            )
-        if design.get("subpopulation"):
-            facts.append(
-                f"Subpopulation: {design['subpopulation']} "
-                "(taken on the full design, not by filtering the data first)"
-            )
-        return facts
-    return []
+    identity_fields = (
+        "actorRef",
+        "projectRef",
+        "sessionRef",
+        "scopeRef",
+        "runId",
+        "modelRunId",
+        "confirmationRef",
+    )
+    typed_projection = (
+        projection.get("schemaVersion") == 1
+        and all(isinstance(projection.get(key), str) and str(projection[key]).strip() for key in required_projection_fields)
+        and isinstance(projection.get("provenance"), Mapping)
+        and all(isinstance(projection.get(key), str) and str(projection[key]).strip() != "UNAVAILABLE" for key in identity_fields)
+    )
+    typed_facts = (
+        isinstance(facts, list)
+        and len(facts) <= 80
+        and all(
+            isinstance(fact, Mapping)
+            and isinstance(fact.get("factId"), str)
+            and isinstance(fact.get("statisticId"), str)
+            and "value" in fact
+            for fact in facts
+        )
+    )
+    if not typed_projection or not typed_facts:
+        return {
+            "schemaVersion": 1,
+            "status": "blocked",
+            "projectionId": str(projection.get("projectionId", "report:blocked")),
+            "commitId": str(projection.get("commitId", "UNAVAILABLE")),
+            "envelopeDigest": str(projection.get("envelopeDigest", "UNAVAILABLE")),
+            "validationStatus": "unavailable",
+            "validationSummary": {"status": "blocked", "reasonCode": "REPORT_EVIDENCE_FACTS_INVALID"},
+            "provenance": {},
+            "facts": [],
+            "critical_errors": [{"code": "REPORT_EVIDENCE_FACTS_INVALID", "severity": "BLOCKER"}],
+            **_projection_identity_fields(projection),
+        }
+    return {
+        "schemaVersion": 1,
+        "status": "available",
+        "projectionId": str(projection.get("projectionId")),
+        "commitId": str(projection.get("commitId")),
+        "envelopeDigest": str(projection.get("envelopeDigest")),
+        "validationStatus": str(projection.get("validationStatus", "unavailable")),
+        "validationSummary": dict(projection.get("validationSummary", {})) if isinstance(projection.get("validationSummary"), Mapping) else {},
+        "provenance": dict(projection.get("provenance", {})) if isinstance(projection.get("provenance"), Mapping) else {},
+        "facts": [dict(fact) for fact in facts],
+        "critical_errors": [],
+        **_projection_identity_fields(projection),
+    }
 
 
 def _design_summary(design: Any) -> str:
@@ -422,6 +305,8 @@ def _design_summary(design: Any) -> str:
 
 def build_persisted_evidence_report_view(
     projection: "EvidenceProjectionV1",
+    *,
+    request_identity: ReportEvidenceRequestIdentityV1 | None = None,
 ) -> dict[str, object]:
     """Expose a bounded report view by copying a typed projection only."""
 
@@ -451,6 +336,7 @@ def build_persisted_evidence_report_view(
     if status != "available":
         sections.append({"key": "persisted-evidence", "label": "Persisted evidence", "status": status})
     view: dict[str, object] = {
+        "schemaVersion": 1,
         "projectionId": f"{projection.consumer_id}:{projection.commit_id}",
         "consumerId": projection.consumer_id,
         "consumerVersion": projection.consumer_version,
@@ -479,6 +365,17 @@ def build_persisted_evidence_report_view(
     }
     if projection.audit.restriction_reason:
         view["reasonCode"] = projection.audit.restriction_reason
+    view.update(
+        {
+            "actorRef": request_identity.actor_ref if request_identity else "UNAVAILABLE",
+            "projectRef": request_identity.project_ref if request_identity else "UNAVAILABLE",
+            "sessionRef": request_identity.session_ref if request_identity else "UNAVAILABLE",
+            "scopeRef": request_identity.scope_ref if request_identity else "UNAVAILABLE",
+            "runId": request_identity.run_id if request_identity else "UNAVAILABLE",
+            "modelRunId": request_identity.model_run_id if request_identity else "UNAVAILABLE",
+            "confirmationRef": request_identity.confirmation_ref if request_identity else "UNAVAILABLE",
+        }
+    )
     return view
 
 
@@ -488,6 +385,7 @@ def _unavailable_report_evidence(
     artifact_type: str,
     reason_code: str,
     status: str = "unavailable",
+    request_identity: ReportEvidenceRequestIdentityV1 | None = None,
 ) -> dict[str, object]:
     """Return a typed empty view for an artifact that did not pass admission.
 
@@ -499,6 +397,7 @@ def _unavailable_report_evidence(
     safe_artifact_id = artifact_id if artifact_id else "UNAVAILABLE"
     safe_artifact_type = artifact_type if artifact_type else "unknown"
     return {
+        "schemaVersion": 1,
         "projectionId": f"report:unavailable:{safe_artifact_id}",
         "consumerId": "report",
         "consumerVersion": "1.0",
@@ -530,6 +429,13 @@ def _unavailable_report_evidence(
             "indexed": True,
             "admissionStatus": status,
         },
+        "actorRef": request_identity.actor_ref if request_identity else "UNAVAILABLE",
+        "projectRef": request_identity.project_ref if request_identity else "UNAVAILABLE",
+        "sessionRef": request_identity.session_ref if request_identity else "UNAVAILABLE",
+        "scopeRef": request_identity.scope_ref if request_identity else "UNAVAILABLE",
+        "runId": request_identity.run_id if request_identity else "UNAVAILABLE",
+        "modelRunId": request_identity.model_run_id if request_identity else "UNAVAILABLE",
+        "confirmationRef": request_identity.confirmation_ref if request_identity else "UNAVAILABLE",
     }
 
 
@@ -620,11 +526,13 @@ def _evidence_identity_fields(
     )
 
     return (
+        first("actor_ref", "evidence_actor_ref"),
         first("evidence_commit_ref", "commit_ref", "evidence_commit_id", "commit_id"),
         first("evidence_artifact_admission_ref", "artifact_admission_ref"),
         first("project_ref", "evidence_project_ref"),
         first("session_ref", "evidence_session_ref"),
         first("scope_ref", "evidence_scope_ref"),
+        first("confirmation_ref", "evidence_confirmation_ref"),
         first("run_id", "evidence_run_id"),
         first("model_run_id", "evidence_model_run_id"),
         first("evidence_run_id"),
@@ -642,6 +550,7 @@ def build_indexed_report_evidence(
     *,
     artifact_content_sha256: str | None = None,
     authoritative_persistence: object | None = None,
+    request_identity: ReportEvidenceRequestIdentityV1 | None = None,
 ) -> dict[str, object]:
     """Project one indexed artifact into the Report consumer boundary.
 
@@ -675,11 +584,13 @@ def build_indexed_report_evidence(
     binding_raw, envelope_raw, *_ = _evidence_wire_fields(indexed_artifact)
 
     (
+        actor_ref_raw,
         commit_ref_raw,
         admission_ref_raw,
         project_ref_raw,
         session_ref_raw,
         scope_ref_raw,
+        confirmation_ref_raw,
         run_id_raw,
         model_run_id_raw,
         evidence_run_id_raw,
@@ -715,6 +626,7 @@ def build_indexed_report_evidence(
                 raise EvidenceProjectionError(reason_code, "authoritative indexed identity is required")
             return value
 
+        actor_ref = required_text(actor_ref_raw, "EVIDENCE_ACTOR_REF_REQUIRED")
         commit_ref = required_text(commit_ref_raw, "EVIDENCE_COMMIT_REF_REQUIRED")
         admission_ref = required_text(
             admission_ref_raw,
@@ -723,6 +635,10 @@ def build_indexed_report_evidence(
         project_ref = required_text(project_ref_raw, "EVIDENCE_PROJECT_REF_REQUIRED")
         session_ref = required_text(session_ref_raw, "EVIDENCE_SESSION_REF_REQUIRED")
         scope_ref = required_text(scope_ref_raw, "EVIDENCE_SCOPE_REF_REQUIRED")
+        confirmation_ref = required_text(
+            confirmation_ref_raw,
+            "EVIDENCE_CONFIRMATION_REF_REQUIRED",
+        )
         indexed_artifact_ref = required_text(
             indexed_artifact_ref_raw,
             "EVIDENCE_ARTIFACT_REF_REQUIRED",
@@ -757,6 +673,19 @@ def build_indexed_report_evidence(
 
         run_id = required_text(run_id_raw, "EVIDENCE_RUN_ID_REQUIRED")
         model_run_id = required_text(model_run_id_raw, "EVIDENCE_MODEL_RUN_ID_REQUIRED")
+        if request_identity is not None and (
+            actor_ref != request_identity.actor_ref
+            or project_ref != request_identity.project_ref
+            or session_ref != request_identity.session_ref
+            or scope_ref != request_identity.scope_ref
+            or run_id != request_identity.run_id
+            or model_run_id != request_identity.model_run_id
+            or confirmation_ref != request_identity.confirmation_ref
+        ):
+            raise EvidenceProjectionError(
+                "EVIDENCE_OWNER_CONTEXT_MISMATCH",
+                "indexed evidence identity differs from server-observed request identity",
+            )
         for name, observed, expected in (
             ("evidence_run_id", evidence_run_id_raw, run_id),
             ("evidence_model_run_id", evidence_model_run_id_raw, model_run_id),
@@ -811,6 +740,7 @@ def build_indexed_report_evidence(
 
         persisted_record = authoritative_persistence.read_bound(
             commit_ref,
+            actor_ref=actor_ref,
             project_ref=project_ref,
             session_ref=session_ref,
             scope_ref=scope_ref,
@@ -819,6 +749,7 @@ def build_indexed_report_evidence(
             model_run_id=model_run_id,
             content_hash=indexed_content_hash,
             admission_ref=admission_ref,
+            confirmation_ref=confirmation_ref,
             artifact_file_sha256=artifact_file_sha256,
             envelope_digest=(candidate_binding.envelope_digest if candidate_binding is not None else None),
         )
@@ -827,7 +758,19 @@ def build_indexed_report_evidence(
             consumer_id="report",
             destination="local",
         )
-        return build_persisted_evidence_report_view(projection)
+        identity = request_identity or ReportEvidenceRequestIdentityV1(
+            actor_ref=actor_ref,
+            project_ref=project_ref,
+            session_ref=session_ref,
+            scope_ref=scope_ref,
+            run_id=run_id,
+            model_run_id=model_run_id,
+            confirmation_ref=confirmation_ref,
+        )
+        return build_persisted_evidence_report_view(
+            projection,
+            request_identity=identity,
+        )
     except EvidenceProjectionError as exc:
         return _unavailable_report_evidence(
             artifact_id=artifact_id,
@@ -862,6 +805,7 @@ def build_report_evidence_bundle(
         "envelopeDigests": [view.get("envelopeDigest") for view in views],
     }
     result: dict[str, object] = {
+        "schemaVersion": 1,
         "projectionId": "report:evidence-bundle",
         "consumerId": "report",
         "consumerVersion": str(first.get("consumerVersion", "1.0")),
@@ -889,5 +833,12 @@ def build_report_evidence_bundle(
         ],
         "provenance": provenance,
         "reasonCode": "REPORT_EVIDENCE_BUNDLE_IDENTITY_UNBOUND",
+        "actorRef": first.get("actorRef", "UNAVAILABLE"),
+        "projectRef": first.get("projectRef", "UNAVAILABLE"),
+        "sessionRef": first.get("sessionRef", "UNAVAILABLE"),
+        "scopeRef": first.get("scopeRef", "UNAVAILABLE"),
+        "runId": first.get("runId", "UNAVAILABLE"),
+        "modelRunId": first.get("modelRunId", "UNAVAILABLE"),
+        "confirmationRef": first.get("confirmationRef", "UNAVAILABLE"),
     }
     return result

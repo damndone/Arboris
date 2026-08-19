@@ -45,10 +45,30 @@ export interface ReportEvidenceProvenance {
   readonly envelopeDigests?: readonly string[];
 }
 
+export interface ReportEvidenceIdentity {
+  readonly actorRef: string;
+  readonly projectRef: string;
+  readonly sessionRef: string;
+  readonly scopeRef: string;
+  readonly runId: string;
+  readonly modelRunId: string;
+  readonly artifactRef: string;
+  readonly commitId: string;
+  readonly confirmationRef: string;
+}
+
 export type ReportEvidenceProjection = EvidenceViewModel & {
+  readonly schemaVersion: 1;
+  readonly actorRef: string;
+  readonly projectRef: string;
+  readonly sessionRef: string;
+  readonly scopeRef: string;
+  readonly runId: string;
+  readonly modelRunId: string;
   readonly validationStatus: string;
   readonly validationSummary: Readonly<Record<string, unknown>>;
-  readonly commitId?: string;
+  readonly commitId: string;
+  readonly confirmationRef: string;
   readonly reasonCode?: string;
   readonly provenance: ReportEvidenceProvenance;
 };
@@ -110,24 +130,86 @@ function readEvidenceProvenance(value: unknown): ReportEvidenceProvenance | null
 }
 
 /** Parse the server-owned report projection, including its provenance gate. */
-export function readReportEvidenceProjection(value: unknown): ReportEvidenceProjection | null {
+export function readReportEvidenceProjection(
+  value: unknown,
+  expectedIdentity?: Partial<ReportEvidenceIdentity>,
+): ReportEvidenceProjection | null {
   const base = readReportEvidence(value);
   if (!base || !asEvidenceRecord(value)) return null;
   const candidate = asEvidenceRecord(value)!;
+  if (candidate.schemaVersion !== 1) return null;
+  const identityKeys = [
+    "actorRef",
+    "projectRef",
+    "sessionRef",
+    "scopeRef",
+    "runId",
+    "modelRunId",
+    "artifactRef",
+    "commitId",
+    "confirmationRef",
+  ] as const;
+  if (identityKeys.some((key) => typeof candidate[key] !== "string" || String(candidate[key]).trim().length === 0)) {
+    return null;
+  }
+  for (const key of identityKeys) {
+    const expected = expectedIdentity?.[key];
+    if (expected !== undefined && candidate[key] !== expected) return null;
+  }
   const provenance = readEvidenceProvenance(candidate.provenance);
   if (!provenance) return null;
+  const parsedStatus = base.status;
+  if (candidate.consumerId !== "report" || candidate.consumerVersion !== "1.0") return null;
   const validationStatus = candidate.validationStatus;
   const validationSummary = asEvidenceRecord(candidate.validationSummary);
   if (typeof validationStatus !== "string" || validationStatus.trim().length === 0 || !validationSummary) return null;
+  const parsedValidationStatus: string = validationStatus;
   const commitId = candidate.commitId;
   const reasonCode = candidate.reasonCode;
-  if (commitId !== undefined && typeof commitId !== "string") return null;
+  if (typeof commitId !== "string") return null;
   if (reasonCode !== undefined && typeof reasonCode !== "string") return null;
+  if (typeof provenance.commitId === "string" && provenance.commitId !== commitId) return null;
+  if (typeof provenance.artifactRef === "string" && provenance.artifactRef !== candidate.artifactRef) return null;
+  if (typeof provenance.envelopeRef === "string" && provenance.envelopeRef !== candidate.envelopeRef) return null;
+  if (
+    Array.isArray(provenance.envelopeDigests)
+    && !provenance.envelopeDigests.includes(candidate.envelopeDigest)
+  ) return null;
+  const resultIdentity = provenance.resultIdentity;
+  if (resultIdentity) {
+    for (const key of ["projectRef", "sessionRef", "scopeRef", "runId", "modelRunId"] as const) {
+      if (resultIdentity[key] !== undefined && resultIdentity[key] !== candidate[key]) return null;
+    }
+  }
+  if (parsedStatus === "available") {
+    if (
+      candidate.availability !== "available"
+      || candidate.executionStatus !== "completed"
+      || candidate.completenessStatus !== "complete"
+      || candidate.validationStatus === "unavailable"
+      || commitId === "UNAVAILABLE"
+      || candidate.envelopeDigest === "UNAVAILABLE"
+      || candidate.projectionId !== `${candidate.consumerId}:${commitId}`
+      || identityKeys.some((key) => candidate[key] === "UNAVAILABLE")
+    ) return null;
+  } else {
+    if (base.facts.length !== 0) return null;
+    if (["degraded", "blocked"].includes(parsedStatus) && ["met", "validated", "complete"].includes(parsedValidationStatus)) return null;
+    if (parsedStatus === "unavailable" && candidate.availability === "available") return null;
+  }
   return {
     ...base,
+    schemaVersion: 1,
+    actorRef: candidate.actorRef as string,
+    projectRef: candidate.projectRef as string,
+    sessionRef: candidate.sessionRef as string,
+    scopeRef: candidate.scopeRef as string,
+    runId: candidate.runId as string,
+    modelRunId: candidate.modelRunId as string,
+    confirmationRef: candidate.confirmationRef as string,
     validationStatus,
     validationSummary,
-    ...(commitId !== undefined ? { commitId } : {}),
+    commitId,
     ...(reasonCode !== undefined ? { reasonCode } : {}),
     provenance,
   };
@@ -139,17 +221,26 @@ export function unavailableReportEvidence(
   artifactRef = "UNAVAILABLE",
 ): ReportEvidenceProjection {
   return {
+    schemaVersion: 1,
     projectionId: `report:unavailable:${artifactRef}`,
     consumerId: "report",
     consumerVersion: "1.0",
+    actorRef: "UNAVAILABLE",
+    projectRef: "UNAVAILABLE",
+    sessionRef: "UNAVAILABLE",
+    scopeRef: "UNAVAILABLE",
+    runId: artifactRef.startsWith("run:") ? artifactRef.slice(4) : "UNAVAILABLE",
+    modelRunId: "UNAVAILABLE",
     artifactRef,
     envelopeRef: "UNAVAILABLE",
+    commitId: "UNAVAILABLE",
     envelopeDigest: "UNAVAILABLE",
     status: "unavailable",
     executionStatus: "unavailable",
     availability: "unavailable",
     completenessStatus: "unavailable",
     validationStatus: "unavailable",
+    confirmationRef: "UNAVAILABLE",
     validationSummary: {
       status: "unavailable",
       reasonCode,

@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 8/30 (26.7%; 26.7 per 100 events)
-- Repeat rate: 0/8 (0.0%)
-- Recurrence rate: 0/8 (0.0%)
-- MTTR: median=0 ms (sample=4; unresolved=4)
+- Failure frequency: 18/47 (38.3%; 38.3 per 100 events)
+- Repeat rate: 0/18 (0.0%)
+- Recurrence rate: 0/18 (0.0%)
+- MTTR: median=0 ms (sample=13; unresolved=5)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/14 (0.0%)
+- Gate waste rate: 0/18 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -35,10 +35,19 @@ COMPLETED
 - #17 2026-08-19T17:59:30.000Z `content_hash_alias_probe_failure`; cause_status: `known`; cause: The first real C0 owner probe reached production persistence but exposed an inconsistent pair of content-hash aliases: evidence_content_hash remained canonical while content_hash was tampered.; resolution: `resolved`; lesson: All index aliases for an authoritative identity must agree before a persistence capability is called.
 - #18 2026-08-19T18:02:00.000Z `route_owner_setup_failure`; cause_status: `known`; cause: The first route-level owner injection probe passed a non-existent persistence root to EvidencePacketStoreV1.admit, which correctly rejected the root before the route could run.; resolution: `resolved`; lesson: Owner-side persistence probes must materialize the admitted root before constructing the immutable store capability.
 - #27 2026-08-19T18:55:40.000Z `route_identity_seam_regression`; cause_status: `known`; cause: The first final backend gate started while the route still used the pre-hardening run-only current_report_evidence_persistence call, so the HTTP typed-failure probe raised TypeError before reaching the fail-closed projection.; resolution: `resolved`; lesson: After tightening an owner-capability selector, rerun the real HTTP route probe immediately rather than relying on an earlier in-flight test process.
+- #33 2026-08-19T19:30:00.000Z `formal_cli_unknown_command`; cause_status: `known`; cause: The initial formal CLI inspection attempted an unsupported status subcommand while the documented control surface uses verify and refresh-context.; resolution: `resolved`; lesson: Use only the documented devline_control subcommands and record command-surface errors.
+- #34 2026-08-19T19:31:00.000Z `formal_append_stage_validation`; cause_status: `known`; cause: The first material event append was rejected because the event used an undocumented verification stage value.; resolution: `resolved`; lesson: Use an existing documented event stage when appending formal evidence.
+- #37 2026-08-19T19:42:00.000Z `report_view_model_restore_and_migration`; cause_status: `known`; cause: The first sandboxed git restore could not create the worktree index lock and a locale-dependent mechanical rewrite command exited before changing the test file; both were retried or replaced with the allowed controlled edit path.; resolution: `resolved`; lesson: When a requested test restoration touches protected worktree metadata, use the smallest approved restore and keep the complete regression surface visible before migration.
+- #38 2026-08-19T19:43:30.000Z `formal_append_lesson_key_validation`; cause_status: `known`; cause: The formal event append for the migrated test green was rejected because its lesson_key used underscores instead of the normalized identifier grammar.; resolution: `resolved`; lesson: Use normalized hyphenated lesson identifiers for formal event append.
+- #40 2026-08-19T19:54:00.000Z `frontend_typecheck_guard_narrowing`; cause_status: `known`; cause: The first frontend typecheck after adding provenance and status monotonicity guards rejected an unknown validationStatus value at the Array.includes boundary.; resolution: `resolved`; lesson: Keep runtime schema guards and TypeScript narrowing aligned when hardening a consumer boundary.
+- #41 2026-08-19T19:55:00.000Z `diagnostic_locale_failure`; cause_status: `known`; cause: A diagnostic shasum command emitted a locale initialization panic in the managed shell; the digest was obtained with openssl dgst and no source change was made by the failed command.; resolution: `resolved`; lesson: Use locale-independent repository diagnostics when the managed shell cannot initialize its configured locale.
+- #42 2026-08-19T19:55:00.000Z `frontend_typecheck_status_narrowing`; cause_status: `known`; cause: The first narrowing fix still left candidate.status as unknown in the frontend status monotonicity includes check, so the second typecheck remained red while focused Vitest and backend tests were green.; resolution: `resolved`; lesson: Narrow discriminated runtime values once and reuse the narrowed value throughout the consumer contract checks.
+- #44 2026-08-19T19:56:30.000Z `formal_append_evidence_validation`; cause_status: `known`; cause: The first formal append attempt for the out-of-scope legacy incompatibility GAP was rejected because evidence.sha256 used the placeholder not_applicable instead of a digest; the event was corrected and appended, and no repository source was changed by the rejected CLI call.; resolution: `resolved`; lesson: Use a real evidence digest for every formal event, including compatibility gaps discovered outside the frozen scope.
+- #46 2026-08-19T19:59:30.000Z `formal_append_preventability_validation`; cause_status: `known`; cause: The first final focused-green event append was rejected because preventability used the unsupported not_applicable value; the event was corrected to the accepted unknown value and appended without source changes.; resolution: `resolved`; lesson: Validate formal event enum values against the control CLI before recording final gates.
 
 ## All gaps
 
-- None recorded.
+- #43 2026-08-19T19:56:00.000Z `out_of_scope_legacy_report_incompatibility`; cause_status: `known`; cause: An exploratory run of historical tests outside the frozen allowlist produced 14 failures: legacy build_report_view_model assertions expect narrative/exploration recomputation, and reporting/export tests call write-capable artifact helpers without an admitted workflow receipt or read reports/report.html directly.; resolution: `open`; lesson: Separate allowlisted typed Report acceptance from historical writer/engine tests whose raw or admission-free assumptions require a separately authorized migration.
 
 ## All waste
 
@@ -47,12 +56,22 @@ COMPLETED
 ## Root causes and solutions
 
 - `fail-closed-content-hash-aliases`: occurrences=1; cause_status: `known`; root cause: The first real C0 owner probe reached production persistence but exposed an inconsistent pair of content-hash aliases: evidence_content_hash remained canonical while content_hash was tampered.; solution: `resolved`
+- `formal-cli-command-surface`: occurrences=1; cause_status: `known`; root cause: The initial formal CLI inspection attempted an unsupported status subcommand while the documented control surface uses verify and refresh-context.; solution: `resolved`
+- `formal-event-lesson-key`: occurrences=1; cause_status: `known`; root cause: The formal event append for the migrated test green was rejected because its lesson_key used underscores instead of the normalized identifier grammar.; solution: `resolved`
+- `formal-event-stage-validation`: occurrences=1; cause_status: `known`; root cause: The first material event append was rejected because the event used an undocumented verification stage value.; solution: `resolved`
+- `formal-gap-evidence-digest`: occurrences=1; cause_status: `known`; root cause: The first formal append attempt for the out-of-scope legacy incompatibility GAP was rejected because evidence.sha256 used the placeholder not_applicable instead of a digest; the event was corrected and appended, and no repository source was changed by the rejected CLI call.; solution: `resolved`
+- `formal-gate-enum-validation`: occurrences=1; cause_status: `known`; root cause: The first final focused-green event append was rejected because preventability used the unsupported not_applicable value; the event was corrected to the accepted unknown value and appended without source changes.; solution: `resolved`
 - `formal-retrospective-after-append`: occurrences=1; cause_status: `known`; root cause: Formal verify observed that the completed retrospective had not yet been regenerated after the new TDD red event was appended.; solution: `mitigated`
+- `legacy-report-incompatibility-boundary`: occurrences=1; cause_status: `known`; root cause: An exploratory run of historical tests outside the frozen allowlist produced 14 failures: legacy build_report_view_model assertions expect narrative/exploration recomputation, and reporting/export tests call write-capable artifact helpers without an admitted workflow receipt or read reports/report.html directly.; solution: `open`
+- `locale-independent-diagnostics`: occurrences=1; cause_status: `known`; root cause: A diagnostic shasum command emitted a locale initialization panic in the managed shell; the digest was obtained with openssl dgst and no source change was made by the failed command.; solution: `resolved`
 - `owner-store-root-precondition`: occurrences=1; cause_status: `known`; root cause: The first route-level owner injection probe passed a non-existent persistence root to EvidencePacketStoreV1.admit, which correctly rejected the root before the route could run.; solution: `resolved`
 - `report-tests-use-c0-owner-capability`: occurrences=1; cause_status: `known`; root cause: After removing the report-local fake persistence ports, the existing canonical indexed tests still supplied a C1 fixture without a C0 owner capability and failed closed at the required content-hash gate.; solution: `not_applicable`
+- `restore-complete-report-regression-surface`: occurrences=1; cause_status: `known`; root cause: The first sandboxed git restore could not create the worktree index lock and a locale-dependent mechanical rewrite command exited before changing the test file; both were retried or replaced with the allowed controlled edit path.; solution: `resolved`
+- `reuse-narrowed-status`: occurrences=1; cause_status: `known`; root cause: The first narrowing fix still left candidate.status as unknown in the frontend status monotonicity includes check, so the second typecheck remained red while focused Vitest and backend tests were green.; solution: `resolved`
 - `route-identity-seam-regression`: occurrences=1; cause_status: `known`; root cause: The first final backend gate started while the route still used the pre-hardening run-only current_report_evidence_persistence call, so the HTTP typed-failure probe raised TypeError before reaching the fail-closed projection.; solution: `resolved`
 - `separate-agent-host-authority-failure`: occurrences=1; cause_status: `external`; root cause: The existing post-estimation compatibility run failed before the Report route assertion because the protected Agent workflow host-authority resolver is not configured.; solution: `accepted`
 - `separate-api-admission-failure`: occurrences=1; cause_status: `external`; root cause: The broader API compatibility suite could not materialize its completed-run report artifacts because the host-owned workflow admission receipt is unavailable.; solution: `accepted`
+- `strict-reader-type-narrowing`: occurrences=1; cause_status: `known`; root cause: The first frontend typecheck after adding provenance and status monotonicity guards rejected an unknown validationStatus value at the Array.includes boundary.; solution: `resolved`
 - `validate-formal-event-enums`: occurrences=1; cause_status: `known`; root cause: The first TDD red gate event draft used an unsupported preventability value and was rejected by the formal CLI before being corrected and appended.; solution: `resolved`
 
 ## Added tests
@@ -62,12 +81,22 @@ COMPLETED
 ## New rules
 
 - `fail-closed-content-hash-aliases`: line experience occurrence(s)=1
+- `formal-cli-command-surface`: line experience occurrence(s)=1
+- `formal-event-lesson-key`: line experience occurrence(s)=1
+- `formal-event-stage-validation`: line experience occurrence(s)=1
+- `formal-gap-evidence-digest`: line experience occurrence(s)=1
+- `formal-gate-enum-validation`: line experience occurrence(s)=1
 - `formal-retrospective-after-append`: line experience occurrence(s)=1
+- `legacy-report-incompatibility-boundary`: line experience occurrence(s)=1
+- `locale-independent-diagnostics`: line experience occurrence(s)=1
 - `owner-store-root-precondition`: line experience occurrence(s)=1
 - `report-tests-use-c0-owner-capability`: line experience occurrence(s)=1
+- `restore-complete-report-regression-surface`: line experience occurrence(s)=1
+- `reuse-narrowed-status`: line experience occurrence(s)=1
 - `route-identity-seam-regression`: line experience occurrence(s)=1
 - `separate-agent-host-authority-failure`: line experience occurrence(s)=1
 - `separate-api-admission-failure`: line experience occurrence(s)=1
+- `strict-reader-type-narrowing`: line experience occurrence(s)=1
 - `validate-formal-event-enums`: line experience occurrence(s)=1
 
 ## Future guidance
@@ -76,10 +105,20 @@ COMPLETED
 - All index aliases for an authoritative identity must agree before a persistence capability is called.
 - Canonical Report probes must exercise the same C0 owner capability as production rather than pass a detached consumer fixture.
 - Keep Agent host-authority failures separate from the Report consumer gate and use an isolated route probe for this line.
+- Keep runtime schema guards and TypeScript narrowing aligned when hardening a consumer boundary.
+- Narrow discriminated runtime values once and reuse the narrowed value throughout the consumer contract checks.
 - Owner-side persistence probes must materialize the admitted root before constructing the immutable store capability.
 - Regenerate the formal retrospective immediately after appending post-closeout evidence before running final verification.
+- Separate allowlisted typed Report acceptance from historical writer/engine tests whose raw or admission-free assumptions require a separately authorized migration.
+- Use a real evidence digest for every formal event, including compatibility gaps discovered outside the frozen scope.
+- Use an existing documented event stage when appending formal evidence.
 - Use focused route probes when the broader API fixture depends on an unavailable host admission receipt.
+- Use locale-independent repository diagnostics when the managed shell cannot initialize its configured locale.
+- Use normalized hyphenated lesson identifiers for formal event append.
+- Use only the documented devline_control subcommands and record command-surface errors.
+- Validate formal event enum values against the control CLI before recording final gates.
 - Validate formal event enum values before invoking the append control.
+- When a requested test restoration touches protected worktree metadata, use the smallest approved restore and keep the complete regression surface visible before migration.
 
 ## Event index
 
@@ -113,3 +152,20 @@ COMPLETED
 - #28: `fae7c979-5a4c-46b6-9223-ff952220d685` | 2026-08-19T18:56:11.000Z | GATE/report_static_gates_green | incident=`86b93edd-2903-4fe5-8b9f-68b87b35e616` | lesson_key=`scoped-gates-separate` | event_sha256=`1ec34ac0854f74b5c01687f2c7abbe7508d443b234cac293ad77fe788da880d2`
 - #29: `e3dfcb11-7722-45c0-8840-4bf70c54254f` | 2026-08-19T18:56:19.000Z | GATE/report_hardening_final_gate | incident=`ba6fd4c8-104c-4b5a-bd72-5f49010763b7` | lesson_key=`report-hardening-final-gate` | event_sha256=`852270c84cacfd9d8335a161da5157cc5773524714874c4c4bfbe4922afda4dc`
 - #30: `824db8c5-dade-486b-9562-c893cab40c02` | 2026-08-19T18:56:40.000Z | STATE_CHANGE/report_hardening_completed | incident=`e91149e7-0f40-41f1-8660-d992dbc3bc55` | lesson_key=`report-hardening-complete` | event_sha256=`91bacf390c4ead5ff25fd459dc07a86e313cb60b4b238064d004de0d0bd1ecc2`
+- #31: `c8df8935-f44c-411a-9b9c-72de9480bdc8` | 2026-08-19T19:22:14.015Z | STATE_CHANGE/context_rescope_required | incident=`f82a384c-9fe4-40ae-badc-0183ab7172a1` | lesson_key=`context-pack-rescope` | event_sha256=`dda1805263bfca6fd6f7e8d15cb199d540a4e8a45da3d37d34744752d9499710`
+- #32: `9197a6c3-5dcb-4ea6-a39a-369b42a7cf40` | 2026-08-19T19:22:14.028Z | STATE_CHANGE/context_rescoped | incident=`049bb495-4859-423a-bc1f-14f7b9a4316b` | lesson_key=`context-pack-rescope` | event_sha256=`0e440bf2cb033dfdbb9b4313b4ea9f1c3d21f32280ba4ce75e46adff7441e073`
+- #33: `c01b0b8e-4a55-4e3b-a126-8cb1d68fd56a` | 2026-08-19T19:30:00.000Z | ERROR/formal_cli_unknown_command | incident=`e6e80195-ff68-4f18-90b4-3889a53dcfd6` | lesson_key=`formal-cli-command-surface` | event_sha256=`3aa91c12fb41ae90d19a893954e102fd974b2923edb33de552d090c5f26996b5`
+- #34: `a6d9972c-15f3-4e02-9ac5-0bb2dc5ba77d` | 2026-08-19T19:31:00.000Z | ERROR/formal_append_stage_validation | incident=`27a6c64a-f1e3-44f0-af33-2e99f114c1fa` | lesson_key=`formal-event-stage-validation` | event_sha256=`90973c309f0c1d5c1c7b5a54e66fb9da0f1d5dcd31d85ab230e17d967db44c94`
+- #35: `fd32f952-7a57-4c45-a3f1-45fa8e7a60af` | 2026-08-19T19:32:00.000Z | GATE/tdd_red_review_report_boundary | incident=`f4f6f9a6-936c-4aec-8cb7-8b36640fbc7a` | lesson_key=`tdd-red-review-report-boundary` | event_sha256=`c42c05187a706c0d3cd05d0cf3e9cb1d80fe3aec455899abd74a412ce238cbe7`
+- #36: `8b99dff4-e31f-4edc-b2ef-e1fe87aeff84` | 2026-08-19T19:34:00.000Z | GATE/tdd_red_real_http_report_boundary | incident=`2ff97fa7-8229-4b06-957c-25a4fd2ca1a6` | lesson_key=`tdd-red-real-http-report-boundary` | event_sha256=`ac0b79a77d7bee2e966dcc963d67c06898c5c7daf060f1154781c03a2f711f35`
+- #37: `59b7b8d1-9a1f-420b-a697-53002fe4d6e7` | 2026-08-19T19:42:00.000Z | ERROR/report_view_model_restore_and_migration | incident=`8aa927e3-5b89-49c4-87cd-27bf06cae532` | lesson_key=`restore-complete-report-regression-surface` | event_sha256=`5c40746802d205f93e2afa9db14bd62073fdfd8e0c2bde407e985091cb9ca3a4`
+- #38: `baf33ccb-6b75-4c92-aaf6-fb3bc5f01157` | 2026-08-19T19:43:30.000Z | ERROR/formal_append_lesson_key_validation | incident=`b4c6867f-dc07-4b5c-86f4-e441299eed50` | lesson_key=`formal-event-lesson-key` | event_sha256=`b26e1b5492c5096bf8e01ffa274c5d99131ca7f4ccc0f1b917c2957c8665ab1f`
+- #39: `9c30fa83-5fd5-472e-a1c0-30260a14b123` | 2026-08-19T19:43:45.000Z | GATE/typed_report_view_model_regression_green | incident=`f01c5e5d-ff48-4d76-bc93-48c2e0681e71` | lesson_key=`typed-report-view-model-regression` | event_sha256=`dbd65f7c30e39dd9d1ad7c76c06ebef68df45c044aa44bf279856ca2ddd874cf`
+- #40: `c7b2a29e-2a35-4e4a-9f54-7ea0eafc09b4` | 2026-08-19T19:54:00.000Z | ERROR/frontend_typecheck_guard_narrowing | incident=`0d24b1c1-bb2b-4f14-a6d5-b8cb0b0f76d5` | lesson_key=`strict-reader-type-narrowing` | event_sha256=`94756f760cef722ebb1a5e71fa5999626c10c1768dbfe5d55c58e127740ca706`
+- #41: `49f15c1e-3ee1-4a28-9d75-8ee99e86403c` | 2026-08-19T19:55:00.000Z | ERROR/diagnostic_locale_failure | incident=`1e083b80-2b3e-4e54-af01-7be8980cd497` | lesson_key=`locale-independent-diagnostics` | event_sha256=`74761c57c3aa6f6b1fa6244ba4942e43354572059c253d134f397e5c2129cce4`
+- #42: `a260f74d-3ff6-4cb2-997b-9b06c5df8c30` | 2026-08-19T19:55:00.000Z | ERROR/frontend_typecheck_status_narrowing | incident=`f1c59ef7-5c4f-4a41-9d52-6bcb37e28cd4` | lesson_key=`reuse-narrowed-status` | event_sha256=`70c7f1dfc8b051f135d7f00aae2352a28b67a77a8961dda472778bb576e2a6dd`
+- #43: `ab8c854e-1ce7-456e-8ae9-0c12c8735ce3` | 2026-08-19T19:56:00.000Z | GAP/out_of_scope_legacy_report_incompatibility | incident=`f0b614e8-a70b-4ddc-a32c-14c7a756f7d8` | lesson_key=`legacy-report-incompatibility-boundary` | event_sha256=`89d8a36c3c21df2457f2f294c7b54555e90b6170ded437696b0d0f8b0231c3e9`
+- #44: `a8ded2c5-01a9-416f-9bf3-dae81048b1ca` | 2026-08-19T19:56:30.000Z | ERROR/formal_append_evidence_validation | incident=`1af1c36b-2c12-4e8a-9d39-b6778acb9d43` | lesson_key=`formal-gap-evidence-digest` | event_sha256=`862a8823937a2891d21fc3bba6c19277b963597217286c563fcaaa1a797edfb9`
+- #45: `b4e4ec41-5605-4c87-83ad-44d8444a5e11` | 2026-08-19T19:59:00.000Z | GATE/focused_report_hardening_green | incident=`4ab8948c-e2f5-48ae-af25-524103f2cae3` | lesson_key=`focused-report-hardening-green` | event_sha256=`809e99f9fda86decc3f557abd8bac11a6e3c8c39a7bb53cba48783e53a763894`
+- #46: `fc5f7c21-6b8f-47e2-89cb-633903a26ff5` | 2026-08-19T19:59:30.000Z | ERROR/formal_append_preventability_validation | incident=`54156f8a-dc0a-4197-ae6f-3227c5cb021c` | lesson_key=`formal-gate-enum-validation` | event_sha256=`ca91957c80eff7a14db7e2f91029640e5991f5b9d9af03f1bb6018a14cf2e2d9`
+- #47: `d9df0255-4638-47f0-bd54-0d0a5c7d8ce5` | 2026-08-19T20:02:00.000Z | STATE_CHANGE/report_hardening_completed_after_review | incident=`0e25a455-01dd-4457-aad3-bc56d7bb0805` | lesson_key=`report-hardening-complete-after-review` | event_sha256=`26f2e68ce02151cbc3ec3410dac291721a7dc47c7695af2c4da360758df91950`

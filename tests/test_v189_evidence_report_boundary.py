@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import copy
 from contextlib import contextmanager
@@ -8,6 +9,7 @@ from pathlib import Path
 from collections.abc import Iterator
 
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 import pytest
 
 from workbench.canonical import sha256_canonical
@@ -25,6 +27,7 @@ from workbench.evidence.consumer_adapters import (
 )
 from workbench.evidence.contracts import ArtifactAdmissionV1
 from workbench.api import app
+from workbench.app import configure_report_evidence_owner
 from workbench.http import runs_routes
 from workbench.report_view_model import (
     build_indexed_report_evidence,
@@ -128,6 +131,8 @@ def _canonical_indexed_artifact(
         scope_ref=scope_ref,
         content_hash=record.content_hash,
         evidence_content_hash=record.content_hash,
+        actor_ref="actor:1",
+        confirmation_ref=f"confirmation:{run_id}",
         evidence_commit_ref=binding.commit_id,
         evidence_commit_binding=binding.to_dict(),
         evidence_envelope=record.envelope.to_dict(),
@@ -175,6 +180,7 @@ def _server_owned_evidence(
             store,
             registry,
             receipt,
+            actor_ref="actor:1",
             project_ref="project:1",
             session_ref="session:1",
             scope_ref="scope:project:1",
@@ -182,6 +188,7 @@ def _server_owned_evidence(
             model_run_id=model_run_id,
             artifact_id=record.artifact_id,
             commit_id=binding.commit_id,
+            confirmation_ref=f"confirmation:{run_id}",
             artifact_file_sha256=hashlib.sha256(owner_raw).hexdigest(),
         )
         yield record, binding, capability
@@ -574,6 +581,49 @@ def test_http_run_detail_rejects_a_rehashed_index_for_tampered_payload(
     assert "999.0" not in json.dumps(report_evidence, sort_keys=True)
 
 
+def test_http_run_detail_rejects_foreign_actor_and_copied_confirmation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    artifact_path = run_root / "artifacts" / "post_estimation" / "result.json"
+    artifact_path.parent.mkdir(parents=True)
+    (run_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "run-1", "status": "completed", "mode": "auto", "lineage": []}),
+        encoding="utf-8",
+    )
+    owner_root = tmp_path / "owner-store"
+    owner_root.mkdir()
+    with _server_owned_evidence(owner_root) as (record, binding, capability):
+        index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
+        index["path"] = "artifacts/post_estimation/result.json"
+        index["actor_ref"] = "actor:foreign"
+        index["confirmation_ref"] = "confirmation:copied"
+        index.pop("evidence_commit_binding")
+        index.pop("evidence_envelope")
+        artifact_path.write_bytes(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
+        (run_root / "artifacts_index.json").write_text(
+            json.dumps({"schema_version": 1, "artifacts": [index]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            runs_routes,
+            "current_report_evidence_persistence",
+            lambda **_kwargs: capability,
+        )
+        response = TestClient(app).get(
+            "/runs/run-1",
+            params={"project_root": str(project_root)},
+        )
+
+    report_evidence = response.json()["report_evidence"]
+    assert response.status_code == 200
+    assert report_evidence["status"] == "blocked"
+    assert report_evidence["reasonCode"] == "EVIDENCE_OWNER_CONTEXT_MISMATCH"
+    assert report_evidence["facts"] == []
+
+
 def test_run_detail_exposes_typed_unavailable_projection_for_indexed_result(tmp_path, monkeypatch) -> None:
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-1"
@@ -598,23 +648,6 @@ def test_run_detail_exposes_typed_unavailable_projection_for_indexed_result(tmp_
         json.dumps({"schema_version": 1, "artifacts": [record]}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        runs_routes,
-        "collect_post_estimation_results",
-        lambda *_: [
-            {
-                "artifact_id": record["artifact_id"],
-                "artifact_type": record["artifact_type"],
-                "operation_id": "model.quadratic_stationary_point",
-                "run_id": "run-1",
-                "model_run_id": "run-1",
-                "workflow_id": "wf-1",
-                "workflow_step_id": "step-1",
-                "result": payload["result"],
-            }
-        ],
-    )
-
     response = TestClient(app).get("/runs/run-1", params={"project_root": str(project_root)})
 
     assert response.status_code == 200, response.text
@@ -624,3 +657,213 @@ def test_run_detail_exposes_typed_unavailable_projection_for_indexed_result(tmp_
     assert report_evidence["facts"] == []
     assert "211.5" not in json.dumps(report_evidence, sort_keys=True)
     assert "secret_scalar" not in json.dumps(report_evidence, sort_keys=True)
+
+
+def test_default_app_lifespan_uses_the_server_owned_report_capability(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    artifact_path = run_root / "artifacts" / "post_estimation" / "result.json"
+    artifact_path.parent.mkdir(parents=True)
+    (run_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "run-1", "status": "completed", "mode": "auto", "lineage": []}),
+        encoding="utf-8",
+    )
+    owner_root = tmp_path / "owner-store"
+    owner_root.mkdir()
+    with _server_owned_evidence(owner_root) as (record, binding, capability):
+        index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
+        index["path"] = "artifacts/post_estimation/result.json"
+        index.pop("evidence_commit_binding")
+        index.pop("evidence_envelope")
+        artifact_path.write_bytes(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
+        (run_root / "artifacts_index.json").write_text(
+            json.dumps({"schema_version": 1, "artifacts": [index]}),
+            encoding="utf-8",
+        )
+        configure_report_evidence_owner(capability)
+        try:
+            with TestClient(app) as client:
+                response = client.get(
+                    "/runs/run-1",
+                    params={"project_root": str(project_root)},
+                )
+        finally:
+            configure_report_evidence_owner(None)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["report_evidence"]["status"] == "available"
+
+
+def test_http_run_detail_never_returns_raw_model_results(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    (run_root / "model_results").mkdir(parents=True)
+    (run_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "run-1", "status": "completed", "mode": "auto", "lineage": []}),
+        encoding="utf-8",
+    )
+    (run_root / "model_results" / "ols_1.json").write_text(
+        json.dumps({"model_id": "ols_1", "coefficients": {"leaked": {"estimate": 999.0}}}),
+        encoding="utf-8",
+    )
+
+    response = TestClient(app).get("/runs/run-1", params={"project_root": str(project_root)})
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["model_results"] == []
+    assert payload.get("model_family_evidence") in (None, {})
+    assert "999.0" not in json.dumps(payload, sort_keys=True)
+
+
+def test_result_table_export_missing_evidence_is_a_typed_unavailable_contract(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    (run_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "run-1", "status": "completed", "mode": "auto", "lineage": []}),
+        encoding="utf-8",
+    )
+
+    response = TestClient(app).post(
+        "/runs/run-1/report/result-table-export",
+        params={"project_root": str(project_root)},
+        json={"sections": ["regression_table"]},
+    )
+
+    assert response.status_code != 500
+    assert response.headers["content-type"].startswith("application/json")
+    body = response.json()
+    projection = body.get("error", {}).get("details", {}).get("projection")
+    assert projection["status"] == "unavailable"
+    assert projection["facts"] == []
+
+
+def test_result_table_export_valid_commit_downloads_only_typed_facts(tmp_path: Path, monkeypatch) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    artifact_path = run_root / "artifacts" / "post_estimation" / "result.json"
+    artifact_path.parent.mkdir(parents=True)
+    (run_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "run-1", "status": "completed", "mode": "auto", "lineage": []}),
+        encoding="utf-8",
+    )
+    owner_root = tmp_path / "owner-store"
+    owner_root.mkdir()
+    with _server_owned_evidence(owner_root) as (record, binding, capability):
+        index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
+        index["path"] = "artifacts/post_estimation/result.json"
+        index.pop("evidence_commit_binding")
+        index.pop("evidence_envelope")
+        artifact_path.write_bytes(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
+        (run_root / "artifacts_index.json").write_text(
+            json.dumps({"schema_version": 1, "artifacts": [index]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            runs_routes,
+            "current_report_evidence_persistence",
+            lambda **_kwargs: capability,
+        )
+        response = TestClient(app).post(
+            "/runs/run-1/report/result-table-export",
+            params={"project_root": str(project_root)},
+            json={"sections": ["regression_table"]},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    workbook = load_workbook(io.BytesIO(response.content), read_only=True, data_only=True)
+    values = list(workbook["regression_table"].values)
+    workbook.close()
+    assert values[0][:3] == ("fact_id", "statistic_id", "value")
+    assert values[1][2] == 2.0
+    assert binding.commit_id in values[1]
+    assert record.envelope_digest in values[1]
+
+
+def test_result_table_export_download_failure_is_typed_blocked(tmp_path: Path, monkeypatch) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    artifact_path = run_root / "artifacts" / "post_estimation" / "result.json"
+    artifact_path.parent.mkdir(parents=True)
+    (run_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "run-1", "status": "completed", "mode": "auto", "lineage": []}),
+        encoding="utf-8",
+    )
+    owner_root = tmp_path / "owner-store"
+    owner_root.mkdir()
+    with _server_owned_evidence(owner_root) as (record, binding, capability):
+        index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
+        index["path"] = "artifacts/post_estimation/result.json"
+        index.pop("evidence_commit_binding")
+        index.pop("evidence_envelope")
+        artifact_path.write_bytes(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
+        (run_root / "artifacts_index.json").write_text(
+            json.dumps({"schema_version": 1, "artifacts": [index]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            runs_routes,
+            "current_report_evidence_persistence",
+            lambda **_kwargs: capability,
+        )
+        monkeypatch.setattr(
+            runs_routes,
+            "render_typed_xlsx",
+            lambda _tables: (_ for _ in ()).throw(OSError("download failed")),
+        )
+        response = TestClient(app).post(
+            "/runs/run-1/report/result-table-export",
+            params={"project_root": str(project_root)},
+            json={"sections": ["regression_table"]},
+        )
+
+    assert response.status_code == 409
+    assert response.headers["content-type"].startswith("application/json")
+    error = response.json()["error"]
+    assert error["code"] == "RESULT_TABLE_EXPORT_FAILED"
+    assert error["details"]["projection"]["status"] == "blocked"
+    assert error["details"]["projection"]["facts"] == []
+
+
+def test_html_report_endpoint_never_returns_an_unindexed_report_file(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    (run_root / "reports").mkdir(parents=True)
+    (run_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "run-1", "status": "completed", "mode": "auto", "lineage": []}),
+        encoding="utf-8",
+    )
+    (run_root / "reports" / "report.html").write_text("<html>raw-secret-999</html>", encoding="utf-8")
+
+    response = TestClient(app).get("/runs/run-1/report", params={"project_root": str(project_root)})
+
+    assert response.status_code != 200 or not response.headers.get("content-type", "").startswith("text/html")
+    assert "raw-secret-999" not in response.text
+    if response.headers.get("content-type", "").startswith("application/json"):
+        projection = response.json().get("error", {}).get("details", {}).get("projection")
+        assert projection["status"] in {"unavailable", "blocked"}
+
+
+def test_report_view_model_does_not_recompute_raw_summary_values(tmp_path: Path) -> None:
+    view_builder = __import__("workbench.report_view_model", fromlist=["build_report_view_model"]).build_report_view_model
+    view_model = view_builder(
+        {"model_identity": {"model_label": "raw-secret-123"}, "coefficients_summary": {"rows": []}},
+        tmp_path,
+    )
+
+    assert view_model["status"] == "unavailable"
+    assert view_model["facts"] == []
+    assert "raw-secret-123" not in json.dumps(view_model, sort_keys=True)
+
+    malformed_projection = {
+        "status": "available",
+        "facts": [{"factId": "raw-fact", "statisticId": "estimate", "value": "raw-secret-456"}],
+    }
+    blocked = view_builder({}, tmp_path, evidence_projection=malformed_projection)
+    assert blocked["status"] == "blocked"
+    assert blocked["facts"] == []
+    assert "raw-secret-456" not in json.dumps(blocked, sort_keys=True)

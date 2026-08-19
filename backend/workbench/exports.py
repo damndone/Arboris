@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import io
 import json
 import os
 from pathlib import Path
@@ -115,28 +116,9 @@ def export_xlsx(
     )
 
     try:
-        workbook = Workbook()
-        default_sheet = workbook.active
-        workbook.remove(default_sheet)
-        for name, rows in tables.items():
-            worksheet = workbook.create_sheet(title=_sheet_title(name))
-            normalized_rows = list(rows)
-            headers = _headers(normalized_rows)
-            worksheet.append(headers)
-            worksheet.freeze_panes = "A2"
-            for cell in worksheet[1]:
-                cell.font = Font(bold=True, color="FFFFFF")
-                cell.fill = PatternFill("solid", fgColor="1F4E78")
-            for row in normalized_rows:
-                worksheet.append([_excel_value(row.get(header, "")) for header in headers])
-            worksheet.auto_filter.ref = worksheet.dimensions
-            for index, header in enumerate(headers, start=1):
-                values = [str(header)] + [str(row.get(header, "")) for row in normalized_rows[:200]]
-                worksheet.column_dimensions[get_column_letter(index)].width = min(48, max(12, max(map(len, values)) + 2))
-        if not workbook.worksheets:
-            workbook.create_sheet(title="tables")
+        xlsx_bytes = render_typed_xlsx(tables)
         with output.open_binary() as stream:
-            workbook.save(stream)
+            stream.write(xlsx_bytes)
             stream.flush()
             os.fsync(stream.fileno())
         xlsx_path = output.commit()
@@ -158,6 +140,36 @@ def export_xlsx(
     finally:
         output.close()
     return xlsx_path
+
+
+def render_typed_xlsx(
+    tables: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> bytes:
+    """Render a transient typed-consumer workbook without raw result access."""
+
+    workbook = Workbook()
+    default_sheet = workbook.active
+    workbook.remove(default_sheet)
+    for name, rows in tables.items():
+        worksheet = workbook.create_sheet(title=_sheet_title(name))
+        normalized_rows = list(rows)
+        headers = _headers(normalized_rows)
+        worksheet.append(headers)
+        worksheet.freeze_panes = "A2"
+        for cell in worksheet[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="1F4E78")
+        for row in normalized_rows:
+            worksheet.append([_excel_value(row.get(header, "")) for header in headers])
+        worksheet.auto_filter.ref = worksheet.dimensions
+        for index, header in enumerate(headers, start=1):
+            values = [str(header)] + [str(row.get(header, "")) for row in normalized_rows[:200]]
+            worksheet.column_dimensions[get_column_letter(index)].width = min(48, max(12, max(map(len, values)) + 2))
+    if not workbook.worksheets:
+        workbook.create_sheet(title="tables")
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 
 def _draw_section(pdf: canvas.Canvas, title: str, items: Any, y: float) -> float:

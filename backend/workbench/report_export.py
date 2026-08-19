@@ -15,6 +15,7 @@ import io
 import mimetypes
 import re
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape as xml_escape
@@ -421,10 +422,57 @@ def export_report(
     markdown: str,
     figures: list[dict[str, Any]],
     format: str,
+    evidence_projection: Mapping[str, Any] | None = None,
 ) -> tuple[bytes, str, str]:
+    if not isinstance(evidence_projection, Mapping):
+        raise ReportExportError("REPORT_EVIDENCE_PROJECTION_REQUIRED")
+    if evidence_projection.get("status") != "available":
+        raise ReportExportError("REPORT_EVIDENCE_PROJECTION_UNAVAILABLE")
+    if evidence_projection.get("schemaVersion") != 1 or evidence_projection.get("consumerId") != "report":
+        raise ReportExportError("REPORT_EVIDENCE_SCHEMA_INVALID")
+    facts = evidence_projection.get("facts")
+    if not isinstance(facts, list) or len(facts) > 80 or any(
+        not isinstance(fact, Mapping)
+        or not isinstance(fact.get("factId"), str)
+        or not isinstance(fact.get("statisticId"), str)
+        for fact in facts
+    ):
+        raise ReportExportError("REPORT_EVIDENCE_FACTS_INVALID")
+    for key in ("projectionId", "commitId", "envelopeDigest", "validationStatus", "provenance"):
+        if key == "provenance":
+            if not isinstance(evidence_projection.get(key), Mapping):
+                raise ReportExportError("REPORT_EVIDENCE_PROVENANCE_REQUIRED")
+        elif not isinstance(evidence_projection.get(key), str) or not str(evidence_projection[key]).strip():
+            raise ReportExportError(f"REPORT_EVIDENCE_{key.upper()}_REQUIRED")
+    for key in (
+        "actorRef",
+        "projectRef",
+        "sessionRef",
+        "scopeRef",
+        "runId",
+        "modelRunId",
+        "artifactRef",
+        "confirmationRef",
+    ):
+        value = evidence_projection.get(key)
+        if not isinstance(value, str) or not value.strip() or value == "UNAVAILABLE":
+            raise ReportExportError(f"REPORT_EVIDENCE_{key.upper()}_REQUIRED")
+    provenance = evidence_projection["provenance"]
+    if isinstance(provenance.get("commitId"), str) and provenance["commitId"] != evidence_projection["commitId"]:
+        raise ReportExportError("REPORT_EVIDENCE_PROVENANCE_MISMATCH")
+    if isinstance(provenance.get("artifactRef"), str) and provenance["artifactRef"] != evidence_projection["artifactRef"]:
+        raise ReportExportError("REPORT_EVIDENCE_PROVENANCE_MISMATCH")
     if format not in {"html", "docx", "tex", "pdf-print"}:
         raise ReportExportError(f"Unsupported report export format: {format}")
     assets = _figure_assets(run_root, figures)
+    evidence_footer = (
+        "\n\n---\n\n"
+        f"Evidence projection: {evidence_projection['projectionId']}\n\n"
+        f"Commit: {evidence_projection['commitId']}\n\n"
+        f"Digest: {evidence_projection['envelopeDigest']}\n\n"
+        f"Validation: {evidence_projection['validationStatus']}"
+    )
+    markdown = markdown + evidence_footer
     if format in {"html", "pdf-print"}:
         filename = "report-print.html" if format == "pdf-print" else "report.html"
         return render_report_html(markdown, assets).encode("utf-8"), "text/html", filename

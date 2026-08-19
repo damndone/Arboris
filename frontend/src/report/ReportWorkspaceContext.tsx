@@ -12,9 +12,7 @@ import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
 import { REPORT_REVIEW_TAB_ID } from "../workbench/state/tabsSchema";
 import {
   buildFactTable,
-  buildFigureFacts,
   buildReportEvidenceFacts,
-  buildTimeSeriesFacts,
   readReportEvidenceProjection,
   unavailableReportEvidence,
   type CitableFact,
@@ -59,7 +57,6 @@ import type {
   ModelResult,
   PostEstimationResult,
   PredictionResearchEvidence,
-  RunDetail,
 } from "../api";
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
@@ -450,7 +447,8 @@ export function ReportWorkspaceProvider({
           setPredictionEvidence(detail.prediction_evidence ?? null);
           setModelResults(detail.model_results ?? []);
           const reportEvidence = readReportEvidenceProjection(
-            (detail as RunDetail & { report_evidence?: unknown }).report_evidence,
+            detail.report_evidence,
+            { runId },
           );
           setReportEvidenceProjection(
             reportEvidence ?? unavailableReportEvidence("REPORT_EVIDENCE_SCHEMA_INVALID", `run:${runId}`),
@@ -674,39 +672,16 @@ export function ReportWorkspaceProvider({
     return buildFactTable(forest.forest, forest.activeRunId);
   }, [forest]);
 
-  const figureFacts = useMemo(
-    () => buildFigureFacts(reportFigures, table?.facts.length ?? 0),
-    [reportFigures, table?.facts.length],
-  );
-  const timeSeriesProvenance = useMemo(() => {
-    const modelNode = forest?.forest.nodes.find(
-      (node) =>
-        (node.runs ?? []).includes(forest.activeRunId ?? "")
-        && node.opType === "time_series.arma_garch"
-        && node.kind === "model",
-    );
-    return modelNode
-      ? { nodeKey: modelNode.nodeKey, nodeLabel: modelNode.title }
-      : { nodeKey: "model:arma_garch_1", nodeLabel: "ARMA-GARCH" };
-  }, [forest]);
-  const timeSeriesFacts = useMemo(
-    () => buildTimeSeriesFacts(
-      timeSeriesArtifacts,
-      (table?.facts.length ?? 0) + figureFacts.length,
-      timeSeriesProvenance,
-    ),
-    [figureFacts.length, table?.facts.length, timeSeriesArtifacts, timeSeriesProvenance],
-  );
   const postEstimationFacts = useMemo(
     () => buildReportEvidenceFacts(
       reportEvidenceProjection,
-      (table?.facts.length ?? 0) + figureFacts.length + timeSeriesFacts.length,
+      0,
     ),
-    [figureFacts.length, reportEvidenceProjection, table?.facts.length, timeSeriesFacts.length],
+    [reportEvidenceProjection],
   );
   const allFacts = useMemo(
-    () => (table ? [...table.facts, ...figureFacts, ...timeSeriesFacts, ...postEstimationFacts] : []),
-    [figureFacts, postEstimationFacts, table, timeSeriesFacts],
+    () => (table ? postEstimationFacts : []),
+    [postEstimationFacts, table],
   );
   const includedFigures = includedReportFigures(reportFigures, [...excludedFigureIds]);
   const includedFacts = includedReportFacts(allFacts, [...excludedIds], [...excludedFigureIds]);
