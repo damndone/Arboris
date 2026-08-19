@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 9/28 (32.1%; 32.1 per 100 events)
-- Repeat rate: 0/9 (0.0%)
-- Recurrence rate: 0/9 (0.0%)
-- MTTR: median=0 ms (sample=5; unresolved=4)
+- Failure frequency: 12/41 (29.3%; 29.3 per 100 events)
+- Repeat rate: 0/12 (0.0%)
+- Recurrence rate: 0/12 (0.0%)
+- MTTR: median=0 ms (sample=7; unresolved=5)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/6 (0.0%)
+- Gate waste rate: 0/8 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -26,18 +26,21 @@ COMPLETED
 - #2 2026-08-19T16:58:00.000Z `survey_glm_wiring_red`; cause_status: `known`; cause: The required RED run showed that Logit, Probit, and Poisson family workflows completed without entering the shared survey variance engine, and the unsupported FPC workflow completed instead of being blocked.; resolution: `resolved`; lesson: Instrument real family workflows before trusting capability declarations.
 - #13 2026-08-19T17:23:50.000Z `reviewer_spec_compliance_red`; cause_status: `known`; cause: The reviewer-directed RED probes showed that auto count falls through to the OLS fallback instead of the weighted poisson_rate handler, the clean capability helper is absent while build_capabilities hits the central import cycle, and both direct report HTML assertions still encounter a missing report artifact.; resolution: `open`; lesson: Turn reviewer findings into output-level red probes before changing production wiring or acceptance scope.
 - #18 2026-08-19T17:56:49.000Z `invalid_survey_inputs_red`; cause_status: `known`; cause: The new real-entry probes show that SurveyDesign accepts negative, non-finite, and all-zero sampling weights, the engine accepts a mutated all-zero weight frame, and Poisson exposure values can be treated as ordinary predictors or raise an untyped overflow instead of a stable typed failure.; resolution: `open`; lesson: Probe mutable real entry points and invalid family inputs before trusting downstream numerical failures or capability declarations.
+- #35 2026-08-19T18:59:35.000Z `large_object_weight_red`; cause_status: `known`; cause: The new object-sized sampling-weight probes reproduced pandas' raw OverflowError during float conversion in the SurveyDesign/engine path and before the typed guard in the source-to-workflow CSV path; the initial Report consumer probes also dropped survey coefficient and replicate provenance.; resolution: `resolved`; lesson: Validate object-sized survey inputs before any lossy numeric conversion and test every consumer at its typed projection seam.
 
 ## All errors
 
 - #4 2026-08-19T16:58:20.000Z `formal_cli_probe_error`; cause_status: `known`; cause: An unsupported devline-control subcommand and an unavailable interpreter path were used during an early status probe before the formal CLI command surface was checked.; resolution: `resolved`; lesson: Use the worktree interpreter and inspect the formal CLI command surface before appending line evidence.
 - #8 2026-08-19T16:59:10.000Z `formal_event_schema_probe`; cause_status: `known`; cause: The first core verification event source used preventability=not_applicable, which the formal event schema correctly rejected before append.; resolution: `resolved`; lesson: Validate formal event vocabulary before submitting gate evidence.
 - #23 2026-08-19T18:08:03.000Z `formal_event_schema_probe`; cause_status: `known`; cause: The first append attempt supplied two SHA-256 digests in one evidence.sha256 field, and the formal CLI rejected the event before it entered the chain.; resolution: `resolved`; lesson: Submit one digest per formal evidence block and let the CLI validate the event before treating it as recorded.
+- #41 2026-08-19T19:02:35.000Z `formal_duplicate_event_id_probe`; cause_status: `known`; cause: The first final-state append used an event UUID already present in the formal log and the CLI rejected it with duplicate event_id before writing; a unique UUID was then appended successfully.; resolution: `resolved`; lesson: Let the formal CLI reject duplicate identities and record the corrected append rather than hand-editing the event chain.
 
 ## All gaps
 
 - #5 2026-08-19T16:58:30.000Z `report_admission_receipt_boundary`; cause_status: `known`; cause: The existing survey report visibility tests reach run completion, but HTML report rendering is refused by the protected report helper because this direct test workflow has no admitted server receipt.; resolution: `accepted`; lesson: Keep package-local survey evidence separate from the protected admission-receipt and browser acceptance boundary.
 - #6 2026-08-19T16:58:40.000Z `capability_bootstrap_import_boundary`; cause_status: `known`; cause: A clean-process direct build_capabilities probe failed in the pre-existing StatisticalTestsStage and orchestrator circular import before reaching the survey capability projection; the scoped capability composition tests pass through their established harness.; resolution: `accepted`; lesson: Report capability projection tests with their actual bootstrap context and keep unrelated import-cycle gates out of the survey implementation scope.
 - #27 2026-08-19T18:10:52.000Z `external_acceptance_boundaries_not_verified`; cause_status: `known`; cause: The survey package gate does not establish Report HTML/admitted-receipt content, a raw clean-process build_capabilities bootstrap, an R oracle rerun, browser acceptance, provider evidence, or the full release gate.; resolution: `accepted`; lesson: Keep package-local survey verification separate from Report admission, browser, provider, external-oracle, full-gate, and release claims.
+- #38 2026-08-19T19:01:05.000Z `report_admission_gate_not_verified`; cause_status: `external`; cause: The expanded Report command reached the existing write-capable Report and result-table route helpers without an admitted workflow receipt, so those helpers returned WORKFLOW_ADMISSION_RECEIPT_REQUIRED before producing their files.; resolution: `accepted`; lesson: Do not convert a protected write-admission failure into a survey green claim; retain typed projection evidence and leave the consumer gate with its owning line.
 
 ## All waste
 
@@ -46,9 +49,12 @@ COMPLETED
 ## Root causes and solutions
 
 - `explicit-external-boundaries`: occurrences=1; cause_status: `known`; root cause: The survey package gate does not establish Report HTML/admitted-receipt content, a raw clean-process build_capabilities bootstrap, an R oracle rerun, browser acceptance, provider evidence, or the full release gate.; solution: `accepted`
+- `formal-cli-rejects-duplicate-event`: occurrences=1; cause_status: `known`; root cause: The first final-state append used an event UUID already present in the formal log and the CLI rejected it with duplicate event_id before writing; a unique UUID was then appended successfully.; solution: `resolved`
 - `formal-evidence-single-digest`: occurrences=1; cause_status: `known`; root cause: The first append attempt supplied two SHA-256 digests in one evidence.sha256 field, and the formal CLI rejected the event before it entered the chain.; solution: `resolved`
 - `instrument-real-survey-workflows`: occurrences=1; cause_status: `known`; root cause: The required RED run showed that Logit, Probit, and Poisson family workflows completed without entering the shared survey variance engine, and the unsupported FPC workflow completed instead of being blocked.; solution: `resolved`
+- `large-object-survey-input-red`: occurrences=1; cause_status: `known`; root cause: The new object-sized sampling-weight probes reproduced pandas' raw OverflowError during float conversion in the SurveyDesign/engine path and before the typed guard in the source-to-workflow CSV path; the initial Report consumer probes also dropped survey coefficient and replicate provenance.; solution: `resolved`
 - `real-entry-invalid-input-red`: occurrences=1; cause_status: `known`; root cause: The new real-entry probes show that SurveyDesign accepts negative, non-finite, and all-zero sampling weights, the engine accepts a mutated all-zero weight frame, and Poisson exposure values can be treated as ordinary predictors or raise an untyped overflow instead of a stable typed failure.; solution: `open`
+- `report-admission-boundary-not-verified`: occurrences=1; cause_status: `external`; root cause: The expanded Report command reached the existing write-capable Report and result-table route helpers without an admitted workflow receipt, so those helpers returned WORKFLOW_ADMISSION_RECEIPT_REQUIRED before producing their files.; solution: `accepted`
 - `reviewer-spec-red-probes`: occurrences=1; cause_status: `known`; root cause: The reviewer-directed RED probes showed that auto count falls through to the OLS fallback instead of the weighted poisson_rate handler, the clean capability helper is absent while build_capabilities hits the central import cycle, and both direct report HTML assertions still encounter a missing report artifact.; solution: `open`
 - `separate-capability-bootstrap-gate`: occurrences=1; cause_status: `known`; root cause: A clean-process direct build_capabilities probe failed in the pre-existing StatisticalTestsStage and orchestrator circular import before reaching the survey capability projection; the scoped capability composition tests pass through their established harness.; solution: `accepted`
 - `separate-report-receipt-gate`: occurrences=1; cause_status: `known`; root cause: The existing survey report visibility tests reach run completion, but HTML report rendering is refused by the protected report helper because this direct test workflow has no admitted server receipt.; solution: `accepted`
@@ -57,6 +63,7 @@ COMPLETED
 
 ## Added tests
 
+- `tests/test_reporting_exports.py`
 - `tests/test_survey_design_engine_v187.py`
 - `tests/test_survey_glm_family_wiring_v189.py`
 - `tests/test_survey_report_visibility_v187.py`
@@ -64,9 +71,12 @@ COMPLETED
 ## New rules
 
 - `explicit-external-boundaries`: line experience occurrence(s)=1
+- `formal-cli-rejects-duplicate-event`: line experience occurrence(s)=1
 - `formal-evidence-single-digest`: line experience occurrence(s)=1
 - `instrument-real-survey-workflows`: line experience occurrence(s)=1
+- `large-object-survey-input-red`: line experience occurrence(s)=1
 - `real-entry-invalid-input-red`: line experience occurrence(s)=1
+- `report-admission-boundary-not-verified`: line experience occurrence(s)=1
 - `reviewer-spec-red-probes`: line experience occurrence(s)=1
 - `separate-capability-bootstrap-gate`: line experience occurrence(s)=1
 - `separate-report-receipt-gate`: line experience occurrence(s)=1
@@ -75,18 +85,22 @@ COMPLETED
 
 ## Future guidance
 
+- Do not convert a protected write-admission failure into a survey green claim; retain typed projection evidence and leave the consumer gate with its owning line.
 - Instrument real family workflows before trusting capability declarations.
+- Keep Report facts and presentation exports downstream of the same typed projection used by Agent consumers; do not re-read or recompute model results in a consumer.
 - Keep input validation at the earliest executable family boundary and carry provenance through the same typed result projection used by ordinary coefficients.
 - Keep internal aliases on one family contract and make package-local acceptance distinguish typed external unavailability from successful report rendering.
 - Keep model-specific link and offset details inside the shared estimator adapter, not in a second variance workflow.
 - Keep package-local survey evidence separate from the protected admission-receipt and browser acceptance boundary.
 - Keep package-local survey verification separate from Report admission, browser, provider, external-oracle, full-gate, and release claims.
+- Let the formal CLI reject duplicate identities and record the corrected append rather than hand-editing the event chain.
 - Probe mutable real entry points and invalid family inputs before trusting downstream numerical failures or capability declarations.
 - Report capability projection tests with their actual bootstrap context and keep unrelated import-cycle gates out of the survey implementation scope.
 - Submit one digest per formal evidence block and let the CLI validate the event before treating it as recorded.
 - Turn reviewer findings into output-level red probes before changing production wiring or acceptance scope.
 - Use the worktree interpreter and inspect the formal CLI command surface before appending line evidence.
 - Validate formal event vocabulary before submitting gate evidence.
+- Validate object-sized survey inputs before any lossy numeric conversion and test every consumer at its typed projection seam.
 
 ## Event index
 
@@ -118,3 +132,16 @@ COMPLETED
 - #26: `b6e9a2d1-7c54-4f80-9a3e-1d6c8b2f7045` | 2026-08-19T18:10:36.000Z | GATE/compile_and_diff_check_green | incident=`c7a4d1e9-5f20-8b36-2c7e-9a1d6f4b8053` | lesson_key=`final-syntax-diff-gate` | event_sha256=`13300233eb801632a244c2e1710597dee4de99fe0f4511b3071e11fbe45aec4b`
 - #27: `c7f1a4d9-5e20-8b36-2a7d-9c1e6f4b8053` | 2026-08-19T18:10:52.000Z | GAP/external_acceptance_boundaries_not_verified | incident=`d8a4c1e7-5f20-9b36-2c7e-1a6d8f4b9053` | lesson_key=`explicit-external-boundaries` | event_sha256=`925801f88a67b51d71987760e2d2b41be8ef67847c4f3f7469fd1bb94e1ad8ba`
 - #28: `d8a4c1e7-5f20-9b36-2c7e-1a6d8f4b9053` | 2026-08-19T18:11:12.000Z | STATE_CHANGE/line_completed_after_repair_gate | incident=`e9b5d2f8-6c31-4a07-9e2d-7b5f1c8a6043` | lesson_key=`repair-line-close-with-boundaries` | event_sha256=`0c7225ad6113b8a5528e848aa4b04c18f37f3458d2ad6a3dbda3f28516a06668`
+- #29: `26171558-d9b1-40b5-a414-ada2b5166336` | 2026-08-19T18:38:38.339Z | STATE_CHANGE/context_rescope_required | incident=`6e97447c-74a5-40c3-b02f-21236939411d` | lesson_key=`context-pack-rescope` | event_sha256=`32e7dd51c4651917d59b021faefeb98be5e9cd5d262a873e76ecb6f13874332a`
+- #30: `044a0b02-75c1-4015-bbb5-370f463fbe7b` | 2026-08-19T18:38:38.354Z | STATE_CHANGE/context_rescoped | incident=`9f918a69-9f21-407a-935a-fe4c932fed94` | lesson_key=`context-pack-rescope` | event_sha256=`36774fe2ac070989ba43d0273a6bbbde5dc9c4d52942a69a7829c43084c47da4`
+- #31: `1237f262-61e2-49b4-91dc-e2605027b5d8` | 2026-08-19T18:42:11.936Z | STATE_CHANGE/context_rescope_required | incident=`066ec078-7c9c-4f40-a680-d94b4678ffd6` | lesson_key=`context-pack-rescope` | event_sha256=`2fe10d651ba17a333ac4eac69aac3fc75acbf5fc492908c823a12e53fd17ec3b`
+- #32: `d4b68de8-3904-45bc-8515-addf71b19f1e` | 2026-08-19T18:42:11.953Z | STATE_CHANGE/context_rescoped | incident=`18054f9e-5a06-4740-84f1-e4862719fc02` | lesson_key=`context-pack-rescope` | event_sha256=`a52f757c17da48003820559dea2aa2f99f11c4f1a37ecc8b8f0ee1c2b672118c`
+- #33: `6f8b7800-58c7-42ab-b2f3-e339f366c0c6` | 2026-08-19T18:56:30.872Z | STATE_CHANGE/context_rescope_required | incident=`082df382-5cb8-4289-929a-5d9e3bad2b5b` | lesson_key=`context-pack-rescope` | event_sha256=`ee8f4b65642c0e162711ef07e43734684cf8c8e5be1d688ec079d5460280a67f`
+- #34: `a0c444f5-a0d2-49b9-9b9b-5f92780d2525` | 2026-08-19T18:56:30.890Z | STATE_CHANGE/context_rescoped | incident=`5e6b1edf-cad2-4abb-9c08-4531633c7659` | lesson_key=`context-pack-rescope` | event_sha256=`867258034ff889f8051b4ffbd104b8f6061750cad70c9bb8ad3251b608ba9cfa`
+- #35: `b8c4f2a1-7d63-4e90-9f25-1a6c8d3b7045` | 2026-08-19T18:59:35.000Z | FAILURE/large_object_weight_red | incident=`c7d3a1f9-5e82-4b60-9d14-2f6a8c0e7351` | lesson_key=`large-object-survey-input-red` | event_sha256=`dceef5b2c71aad894ddc73816e0749fcd20d3e6dc574cb0da152808cedfdd24a`
+- #36: `d1f7a3c9-5b82-4e60-9a14-2c6e8b0f7351` | 2026-08-19T19:00:05.000Z | REVIEW/typed_report_projection_resolved | incident=`e4b9c1d7-6f20-8a53-2d7e-9c1b5f604382` | lesson_key=`typed-report-projection-single-seam` | event_sha256=`a3cfa005c76b949a29f205e56229fcd4d1f60371c897e0c3b12123aad63248e2`
+- #37: `f2a8c4e1-6d93-4b70-9f25-7c1e5d0a8426` | 2026-08-19T19:00:35.000Z | GATE/survey_expanded_focused_70_green | incident=`a7c3e1f9-5d82-4b60-9f14-2e6a8d0c7351` | lesson_key=`expanded-survey-gate-with-input-boundary` | event_sha256=`bbe1d9be9107c3c6eaafb0dedff975000e6cda9da945a1591678aba4635521ec`
+- #38: `c9e5a1d7-4b82-6f30-9e14-2a7c8d0f5316` | 2026-08-19T19:01:05.000Z | GAP/report_admission_gate_not_verified | incident=`d6a2f8c4-1e73-4b90-5d27-9c0a6f8e3514` | lesson_key=`report-admission-boundary-not-verified` | event_sha256=`2e7a1cf75e20072fa49a8d4edb6d3379074113f962cd6f3adec6b7a426f2941b`
+- #39: `e4b9c1d7-6f20-8a53-2d7e-9c1b5f604382` | 2026-08-19T19:01:35.000Z | GATE/compile_and_diff_check_green | incident=`f1c7a4d9-5e20-8b36-2c7e-9a1d6f4b8053` | lesson_key=`mechanical-checks-separate-from-acceptance` | event_sha256=`6daaade38c1fb925480a04390c564abdf96bc6b7235da3c8b80cca12292411af`
+- #40: `b1e9c3a7-5d82-4f60-9a14-2c6e8b0d7351` | 2026-08-19T19:02:05.000Z | STATE_CHANGE/line_completed_after_large_weight_report_repair | incident=`b6e2a8c4-1f73-4d90-5c27-9a0e6f8b3514` | lesson_key=`close-line-with-explicit-boundaries` | event_sha256=`75c80ae004b17ec72db9ff5888f7dbfa689cdc7fb8ff5e83f0c959f03aefe394`
+- #41: `c3a7e1f9-5d82-4b60-9f14-2e6a8d0c7351` | 2026-08-19T19:02:35.000Z | ERROR/formal_duplicate_event_id_probe | incident=`d8f4b2a1-6c93-4e70-9f25-7a1d5c0b8642` | lesson_key=`formal-cli-rejects-duplicate-event` | event_sha256=`c46dc425805b9c44bf744359b454c3c9b1295be9375a66fb380a3d02e2f0e447`

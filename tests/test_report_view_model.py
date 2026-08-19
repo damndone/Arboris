@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from workbench.report_view_model import build_report_view_model
+from workbench.report_view_model import build_regression_table, build_report_view_model
 
 
 def test_build_view_model_renders_issues():
@@ -221,6 +221,59 @@ def test_facts_mention_categorical():
     view_model = build_report_view_model(summary, Path("/tmp/fake"))
     facts_text = " ".join(view_model["facts"])
     assert "dummy-coded" in facts_text
+
+
+def test_report_facts_preserve_bounded_survey_replicate_metadata(tmp_path: Path):
+    """Facts must qualify design-based precision with replicate outcome status."""
+    result = {
+        "model_id": "ols_1",
+        "model_label": "Survey OLS",
+        "survey_design": {
+            "variance_method": "replicate",
+            "strata_column": "stratum",
+            "psu_column": "psu",
+            "n_strata": 2,
+            "n_psu": 6,
+            "degf": 4,
+            "replicates_attempted": 12,
+            "replicates_succeeded": 10,
+            "replicates_failed": 2,
+            "replicate_failure_reasons": {"ValueError": 2},
+        },
+        "coefficients": {
+            "x": {
+                "variance_source": "survey_design",
+                "source_id": "model_results.ols_1.coefficients.x",
+                "warnings": ["SURVEY_REPLICATE_FAILURES"],
+            }
+        },
+    }
+    regression_table = build_regression_table([("ols_1", result)])
+
+    view_model = build_report_view_model(
+        {
+            "model_identity": {
+                "model_label": "Survey OLS",
+                "y_variable": "y",
+                "x_variables": ["x"],
+                "n_observations": 12,
+                "dataset_kind": "cross_section",
+            },
+            "diagnostics": {"blockers": [], "warnings": [], "cautions": [], "info": []},
+            "coefficients_summary": {"rows": []},
+            "narrative_contract": {"constraints": {}},
+        },
+        tmp_path,
+        regression_table=regression_table,
+    )
+
+    facts_text = " ".join(view_model["facts"])
+    assert "replicates attempted=12" in facts_text
+    assert "succeeded=10" in facts_text
+    assert "failed=2" in facts_text
+    assert "ValueError=2" in facts_text
+    assert "variance_source=survey_design" in facts_text
+    assert "SURVEY_REPLICATE_FAILURES" in facts_text
 
 
 def test_coeff_render_failure_yields_empty_text():

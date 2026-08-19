@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from jinja2 import Environment, FileSystemLoader
+
+import workbench.orchestrator  # noqa: F401 - initialize the stage import seam first
 from workbench.artifacts import read_json
 from workbench.exports import export_pdf, export_xlsx
 from workbench.narrative import build_claims
@@ -7,6 +10,7 @@ from workbench.projects import create_project, create_run
 from workbench.reporting import render_html_report
 from workbench.report_view_model import (
     build_regression_table,
+    build_report_view_model,
     regression_table_export_rows,
 )
 
@@ -217,6 +221,69 @@ def test_regression_table_packet_reaches_html_pdf_and_xlsx_exports(tmp_path: Pat
     assert "ols_1 significance" in rows[0]
     assert "model_results.ols_1.coefficients.x" in rows[1]
     assert "[0.8,1.7]" in rows[1]
+
+
+def test_survey_provenance_reaches_html_and_xlsx_without_recomputation(tmp_path: Path):
+    """Report consumers must retain typed survey provenance and failure status."""
+    project = create_project(tmp_path, "survey-provenance")
+    run = create_run(project.root, mode="auto")
+    result = {
+        "model_id": "ols_1",
+        "model_label": "Survey OLS",
+        "coefficients": {
+            "x": {
+                "estimate": 1.25,
+                "std_error": 0.2,
+                "ci_lower": 0.8,
+                "ci_upper": 1.7,
+                "p_value": 0.04,
+                "variance_source": "survey_design",
+                "source_id": "model_results.ols_1.coefficients.x",
+                "warnings": ["SURVEY_REPLICATE_FAILURES", "LONELY_PSU_ADJUSTED"],
+            }
+        },
+        "survey_design": {
+            "variance_method": "replicate",
+            "strata_column": "stratum",
+            "psu_column": "psu",
+            "degf": 4,
+            "replicates_attempted": 12,
+            "replicates_succeeded": 10,
+            "replicates_failed": 2,
+            "replicate_failure_reasons": {"ValueError": 2},
+        },
+    }
+    packet = build_regression_table([("ols_1", result)])
+    view_model = build_report_view_model(
+        {
+            "model_identity": {"model_label": "Survey OLS", "y_variable": "y", "x_variables": ["x"]},
+            "diagnostics": {"blockers": [], "warnings": [], "cautions": [], "info": []},
+            "coefficients_summary": {"rows": []},
+            "narrative_contract": {"constraints": {}},
+        },
+        run.root,
+        regression_table=packet,
+    )
+    environment = Environment(
+        loader=FileSystemLoader(Path(__file__).parents[1] / "backend" / "workbench" / "templates"),
+        autoescape=True,
+    )
+    html = environment.get_template("report.html.j2").render(view_model=view_model)
+    assert "survey_design" in html
+    assert "SURVEY_REPLICATE_FAILURES" in html
+    assert "replicates_attempted=12" in html
+    assert "replicate_failure_reasons=ValueError:2" in html
+
+    from workbench.engine.stages.report import _xlsx_export_rows
+
+    xlsx_rows = _xlsx_export_rows(regression_table_export_rows(packet))
+    assert "ols_1 variance_source" in xlsx_rows[0]
+    assert "ols_1 warnings" in xlsx_rows[0]
+    flattened = " ".join(str(value) for value in xlsx_rows[0].values())
+    assert "survey_design" in flattened
+    assert "SURVEY_REPLICATE_FAILURES" in flattened
+    assert "replicates_attempted=12" in flattened
+    assert "ValueError:2" in flattened
 
 
 def test_pdf_and_xlsx_keep_variable_and_value_labels(tmp_path: Path):

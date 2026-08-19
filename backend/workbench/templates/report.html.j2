@@ -128,7 +128,7 @@
           <tr>
             <th>Term</th>
             {% for model in view_model.regression_table.models %}
-            <th>{{ model.label }} ({{ model.id }})<br>Estimate</th>
+            <th>{{ model.label }} ({{ model.id }})<br>Estimate{% if model.survey_design %}<br><small>survey: {{ model.survey_design }}</small>{% endif %}</th>
             <th>{{ model.label }} ({{ model.id }})<br>Std. error</th>
             <th>{{ model.label }} ({{ model.id }})<br>p-value</th>
             <th>{{ model.label }} ({{ model.id }})<br>95% CI</th>
@@ -145,6 +145,8 @@
             <td>
               {{ cell.estimate if cell.estimate is defined else "—" }}{% if cell.significance %} {{ cell.significance }}{% endif %}
               {% if cell.source_id is defined %}<br><small>source: {{ cell.source_id }}</small>{% endif %}
+              {% if cell.variance_source is defined %}<br><small>variance_source: {{ cell.variance_source }}</small>{% endif %}
+              {% if cell.warnings is defined and cell.warnings %}<br><small>warnings: {{ cell.warnings|join(", ") }}</small>{% endif %}
             </td>
             <td>{{ cell.std_error if cell.std_error is defined else "—" }}</td>
             <td>{{ cell.p_value if cell.p_value is defined else "—" }}</td>

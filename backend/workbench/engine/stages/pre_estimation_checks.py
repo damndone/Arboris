@@ -81,13 +81,49 @@ class PreEstimationChecksStage:
             return ctx
         env.step("model_check", "complete", "Model columns valid")
 
-        coercion_actions = _coerce_x_columns_to_numeric(cleaned, normalized_x, run_root)
-
         # Exposure detection runs before roles, statistical tests, and VIF.  An
         # invalid exposure must therefore be refused here, through the same
         # family adapter validator used by the survey estimator, rather than
         # being allowed to masquerade as an ordinary predictor.
-        from ...survey.adapters import validate_poisson_exposure
+        from ...survey.adapters import (
+            build_design_from_artifacts,
+            validate_poisson_exposure,
+        )
+
+        # Sampling weights are a survey-design input, not an ordinary model
+        # weight.  Validate them before X coercion or any model runner can
+        # turn an object-sized integer into inf/OverflowError.  This keeps the
+        # constructor, engine, and real workflow on the same typed boundary.
+        if str(ctx.artifacts.get("_sampling_weight") or "").strip():
+            try:
+                build_design_from_artifacts(cleaned, ctx.artifacts)
+            except SurveyEngineError as exc:
+                issue_dicts.append(
+                    GuardrailIssue(
+                        Severity.BLOCKER,
+                        exc.code,
+                        str(exc),
+                        {**exc.context, "detail": exc.detail},
+                    ).to_dict()
+                )
+                write_json(run_root / "errors.json", {"issues": issue_dicts})
+                env.step("model_check", "blocked", str(exc))
+                _write_manifest(
+                    run_root,
+                    run_id,
+                    mode,
+                    "failed",
+                    _lineage(input_files),
+                    started_at=started_at,
+                    y=y,
+                    x=x,
+                    requested_model_type=model_type,
+                )
+                _safe_flush_recorder(env.recorder, context="failed@survey_weight_validation")
+                ctx.terminal_status = "failed"
+                return ctx
+
+        coercion_actions = _coerce_x_columns_to_numeric(cleaned, normalized_x, run_root)
 
         poisson_requested = model_type in {"auto", "poisson", "poisson_rate"}
         poisson_requested = poisson_requested or (

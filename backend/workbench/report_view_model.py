@@ -24,9 +24,10 @@ def build_regression_table(
 ) -> dict[str, Any]:
     """Project multiple model packets into a side-by-side report table.
 
-    This is a report projection only: coefficient values and provenance fields
-    are copied as-is, while the significance marker is derived from the packet's
-    p-value using the explicitly supplied (or default) cutoffs.
+    This is a report projection only: the public coefficient values and
+    provenance fields are bounded from the typed result packet, while the
+    significance marker is derived from the packet's p-value using the
+    explicitly supplied (or default) cutoffs.
     """
 
     labels = variable_labels or {}
@@ -56,6 +57,9 @@ def build_regression_table(
                 # on. A table pasted into a paper without them reports a
                 # precision the analysis did not have.
                 "survey_design": _design_summary(model_result.get("survey_design")),
+                "survey_provenance": _bounded_survey_design(
+                    model_result.get("survey_design")
+                ),
             }
         )
         coefficients = model_result.get("coefficients", {})
@@ -73,7 +77,7 @@ def build_regression_table(
                     "models": {},
                 },
             )
-            cell = dict(values)
+            cell = _bounded_coefficient_projection(values)
             cell["significance"] = _regression_significance_marker(
                 values.get("p_value"), ordered_cutoffs
             )
@@ -118,6 +122,87 @@ def _regression_significance_marker(
     return ""
 
 
+_REPORT_COEFFICIENT_FIELDS = (
+    "estimate",
+    "std_error",
+    "confidence_interval",
+    "ci_lower",
+    "ci_upper",
+    "p_value",
+    "source_id",
+    "variance_source",
+    "warnings",
+)
+_REPORT_STRING_LIMIT = 512
+_REPORT_WARNING_LIMIT = 8
+_REPORT_WARNING_LENGTH = 160
+
+
+def _bounded_report_string(value: Any, *, limit: int = _REPORT_STRING_LIMIT) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    return value[:limit]
+
+
+def _bounded_report_number(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        if not math.isfinite(float(value)):
+            return None
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return value
+
+
+def _bounded_report_integer(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _bounded_report_warnings(value: Any) -> list[str] | None:
+    if not isinstance(value, (list, tuple)):
+        return None
+    return [
+        item[:_REPORT_WARNING_LENGTH]
+        for item in value[:_REPORT_WARNING_LIMIT]
+        if isinstance(item, str) and item
+    ]
+
+
+def _bounded_report_interval(value: Any) -> list[int | float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) > 4:
+        return None
+    values = [_bounded_report_number(item) for item in value]
+    if any(item is None for item in values):
+        return None
+    return [item for item in values if item is not None]
+
+
+def _bounded_coefficient_projection(values: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy only the coefficient fields owned by the Report table contract."""
+    cell: dict[str, Any] = {}
+    for field in _REPORT_COEFFICIENT_FIELDS:
+        if field not in values:
+            continue
+        if field in {"source_id", "variance_source"}:
+            bounded = _bounded_report_string(values.get(field))
+            if bounded is not None:
+                cell[field] = bounded
+        elif field == "warnings":
+            bounded = _bounded_report_warnings(values.get(field))
+            if bounded is not None:
+                cell[field] = bounded
+        elif field == "confidence_interval":
+            bounded = _bounded_report_interval(values.get(field))
+            if bounded is not None:
+                cell[field] = bounded
+        else:
+            cell[field] = values.get(field)
+    return cell
+
+
 def regression_table_export_rows(
     regression_table: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
@@ -151,6 +236,8 @@ def regression_table_export_rows(
                 "p_value",
                 "significance",
                 "source_id",
+                "variance_source",
+                "warnings",
             ):
                 export_row[f"{model_id} {field}"] = (
                     cell.get(field) if isinstance(cell, Mapping) else None
@@ -267,7 +354,7 @@ def build_report_view_model(
 
     return {
         "title": summary.get("model_identity", {}).get("model_label", "Econometrics Report"),
-        "facts": _build_facts_list(summary) + _survey_design_facts(run_root),
+        "facts": _build_facts_list(summary) + _survey_design_facts(regression_table),
         "critical_errors": critical_errors,
         "warnings": _render_issues(diagnostics.get("warnings", [])),
         "cautions": _render_issues(diagnostics.get("cautions", [])),
@@ -351,49 +438,149 @@ def _load_if_exists(path: Path) -> Any | None:
     return None
 
 
-def _survey_design_facts(run_root: Path) -> list[str]:
-    """State the design in the report, or say nothing at all.
+def _bounded_survey_design(design: Any) -> dict[str, Any] | None:
+    """Project only the typed survey fields consumed by Report surfaces."""
+    if not isinstance(design, Mapping):
+        return None
+    bounded: dict[str, Any] = {}
+    for field in (
+        "n_obs",
+        "n_strata",
+        "n_psu",
+        "degf",
+        "residual_degf",
+        "design_effect",
+        "effective_sample_size",
+    ):
+        value = _bounded_report_number(design.get(field))
+        if value is not None:
+            bounded[field] = value
+    for field in (
+        "variance_method",
+        "strata_column",
+        "psu_column",
+        "weight_column",
+        "replicate_type",
+        "lonely_psu_policy",
+        "subpopulation",
+    ):
+        value = _bounded_report_string(design.get(field))
+        if value is not None:
+            bounded[field] = value
+    for field in (
+        "replicates_attempted",
+        "replicates_succeeded",
+        "replicates_failed",
+    ):
+        if field in design:
+            bounded[field] = _bounded_report_integer(design.get(field))
+    if "replicate_failure_reasons" in design:
+        raw_reasons = design.get("replicate_failure_reasons")
+        if isinstance(raw_reasons, Mapping):
+            reasons: dict[str, int] = {}
+            for reason, count in list(raw_reasons.items())[:16]:
+                if not isinstance(reason, str):
+                    continue
+                bounded_count = _bounded_report_integer(count)
+                if bounded_count is not None:
+                    reasons[reason[:128]] = bounded_count
+            bounded["replicate_failure_reasons"] = reasons
+        else:
+            bounded["replicate_failure_reasons"] = None
+    return bounded or None
 
-    A design-based standard error that lives only in a JSON artifact leaves the
-    report claiming a precision the analysis did not have -- and the report is
-    where the number gets read. Appended to the facts rather than given its own
-    section so it sits beside the sample size and the model label, which is
-    where a reader looks for the terms an interval is conditional on.
+
+def _survey_coefficient_facts(
+    regression_table: Mapping[str, Any], model_id: str
+) -> list[str]:
+    raw_rows = regression_table.get("rows", [])
+    if not isinstance(raw_rows, Sequence):
+        return []
+    facts: list[str] = []
+    for raw_row in list(raw_rows)[:16]:
+        if not isinstance(raw_row, Mapping):
+            continue
+        cells = raw_row.get("models")
+        raw_coefficient = cells.get(model_id) if isinstance(cells, Mapping) else None
+        if not isinstance(raw_coefficient, Mapping):
+            continue
+        coefficient = _bounded_coefficient_projection(raw_coefficient)
+        parts: list[str] = []
+        variance_source = _bounded_report_string(coefficient.get("variance_source"))
+        source_id = _bounded_report_string(coefficient.get("source_id"))
+        warnings = _bounded_report_warnings(coefficient.get("warnings"))
+        if variance_source is not None:
+            parts.append(f"variance_source={variance_source}")
+        if source_id is not None:
+            parts.append(f"source_id={source_id}")
+        if warnings:
+            parts.append("warnings=" + ",".join(warnings))
+        if parts:
+            term = str(raw_row.get("term", ""))[:128]
+            facts.append(f"Coefficient provenance ({term}): " + "; ".join(parts))
+    return facts
+
+
+def _survey_design_facts(regression_table: Mapping[str, Any] | None) -> list[str]:
+    """State the design from the typed Report projection, or say nothing.
+
+    A design-based standard error that lives only in an upstream artifact leaves
+    the report claiming a precision the analysis did not have. Appended to the
+    facts rather than given its own section, the bounded projection sits beside
+    the sample size and model label where a reader looks for the terms an
+    interval is conditional on.
 
     Nothing is emitted for a run without a declared design: a section present on
     every run stops carrying information.
     """
-    for path in sorted((run_root / "model_results").glob("*.json")):
-        if path.name.startswith("diagnostics_"):
+    if not isinstance(regression_table, Mapping):
+        return []
+    models = regression_table.get("models", [])
+    if not isinstance(models, Sequence):
+        return []
+    for model in list(models)[:16]:
+        if not isinstance(model, Mapping):
             continue
-        try:
-            payload = read_json(path)
-        except (OSError, ValueError):
-            continue
-        design = payload.get("survey_design") if isinstance(payload, dict) else None
-        if not isinstance(design, dict):
+        bounded = _bounded_survey_design(model.get("survey_provenance"))
+        if bounded is None:
             continue
 
         facts = [
             "Standard errors are design-based, not the usual independent-sample "
-            f"kind: {design.get('variance_method', 'linearization')} over "
-            f"{design.get('n_strata', 0)} strata and {design.get('n_psu', 0)} PSUs "
-            f"(strata = {design.get('strata_column')}, PSU = {design.get('psu_column')})",
-            f"Design degrees of freedom: {design.get('degf')} "
+            f"kind: {bounded.get('variance_method', 'linearization')} over "
+            f"{bounded.get('n_strata', 0)} strata and {bounded.get('n_psu', 0)} PSUs "
+            f"(strata = {bounded.get('strata_column')}, PSU = {bounded.get('psu_column')})",
+            f"Design degrees of freedom: {bounded.get('degf')} "
             f"(confidence intervals use this, not the sample size)",
         ]
-        deff = design.get("design_effect")
-        n_eff = design.get("effective_sample_size")
+        deff = bounded.get("design_effect")
+        n_eff = bounded.get("effective_sample_size")
         if deff is not None and n_eff is not None:
             facts.append(
                 f"Design effect {float(deff):.2f}; effective sample size "
-                f"{float(n_eff):.1f} of {design.get('n_obs')} observations"
+                f"{float(n_eff):.1f} of {bounded.get('n_obs')} observations"
             )
-        if design.get("subpopulation"):
+        if bounded.get("subpopulation"):
             facts.append(
-                f"Subpopulation: {design['subpopulation']} "
+                f"Subpopulation: {bounded['subpopulation']} "
                 "(taken on the full design, not by filtering the data first)"
             )
+        if bounded.get("replicates_attempted") is not None:
+            facts.append(
+                "Replicate status: "
+                f"replicates attempted={bounded.get('replicates_attempted')}; "
+                f"succeeded={bounded.get('replicates_succeeded')}; "
+                f"failed={bounded.get('replicates_failed')}"
+            )
+            reasons = bounded.get("replicate_failure_reasons")
+            if isinstance(reasons, Mapping) and reasons:
+                facts.append(
+                    "Replicate failure reasons: "
+                    + ", ".join(f"{reason}={count}" for reason, count in reasons.items())
+                )
+        facts.extend(
+            _survey_coefficient_facts(regression_table, str(model.get("id", "")))
+        )
         return facts
     return []
 
@@ -405,17 +592,32 @@ def _design_summary(design: Any) -> str:
     cell holds a scalar, and a reader scanning a pasted table needs the terms at
     a glance more than they need the full packet.
     """
-    if not isinstance(design, Mapping):
+    bounded = _bounded_survey_design(design)
+    if bounded is None:
         return ""
     parts = [
-        f"{design.get('variance_method', 'linearization')} design-based SE",
-        f"strata={design.get('strata_column')}",
-        f"PSU={design.get('psu_column')}",
-        f"degf={design.get('degf')}",
+        f"{bounded.get('variance_method', 'linearization')} design-based SE",
+        f"strata={bounded.get('strata_column')}",
+        f"PSU={bounded.get('psu_column')}",
+        f"degf={bounded.get('degf')}",
     ]
-    deff = design.get("design_effect")
+    deff = bounded.get("design_effect")
     if deff is not None:
         parts.append(f"DEFF={float(deff):.2f}")
+    if bounded.get("replicates_attempted") is not None:
+        parts.extend(
+            [
+                f"replicates_attempted={bounded.get('replicates_attempted')}",
+                f"replicates_succeeded={bounded.get('replicates_succeeded')}",
+                f"replicates_failed={bounded.get('replicates_failed')}",
+            ]
+        )
+        reasons = bounded.get("replicate_failure_reasons")
+        if isinstance(reasons, Mapping) and reasons:
+            parts.append(
+                "replicate_failure_reasons="
+                + ",".join(f"{reason}:{count}" for reason, count in reasons.items())
+            )
     return "; ".join(parts)
 
 

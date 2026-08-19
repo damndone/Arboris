@@ -128,7 +128,7 @@ def test_survey_design_rejects_invalid_sampling_weights_at_real_entry(
     with pytest.raises(SurveyEngineError) as excinfo:
         SurveyDesign(frame=frame, strata="stratum", psu="psu", weight="weight")
 
-    assert excinfo.value.code == "SURVEY_WEIGHT_INVALID"
+    assert excinfo.value.code == "SURVEY_INVALID_SAMPLING_WEIGHTS"
     assert excinfo.value.context["reason"] == reason
 
 
@@ -143,8 +143,45 @@ def test_survey_engine_revalidates_mutated_sampling_weights_before_estimation(
     with pytest.raises(SurveyEngineError) as excinfo:
         estimate_with_design(design, linearizable_estimator, method="linearization")
 
-    assert excinfo.value.code == "SURVEY_WEIGHT_INVALID"
+    assert excinfo.value.code == "SURVEY_INVALID_SAMPLING_WEIGHTS"
     assert excinfo.value.context["reason"] == "all_zero"
+
+
+def test_survey_design_rejects_object_integer_weight_before_float_conversion():
+    """An unrepresentable object integer is a typed design failure, not OverflowError."""
+    from workbench.survey import SurveyDesign, SurveyEngineError
+
+    frame = _design_frame()
+    frame["weight"] = pd.Series(
+        [10**400] + [1] * (len(frame) - 1),
+        index=frame.index,
+        dtype=object,
+    )
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        SurveyDesign(frame=frame, strata="stratum", psu="psu", weight="weight")
+
+    assert excinfo.value.code == "SURVEY_INVALID_SAMPLING_WEIGHTS"
+    assert excinfo.value.context["reason"] == "not_float_representable"
+
+
+def test_survey_engine_rejects_mutated_object_integer_weight_before_float_conversion(
+    design, linearizable_estimator
+):
+    """The mutable engine entry must apply the same safe weight boundary."""
+    from workbench.survey import SurveyEngineError, estimate_with_design
+
+    design.frame["weight"] = pd.Series(
+        [10**400] + [1] * (len(design.frame) - 1),
+        index=design.frame.index,
+        dtype=object,
+    )
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        estimate_with_design(design, linearizable_estimator, method="linearization")
+
+    assert excinfo.value.code == "SURVEY_INVALID_SAMPLING_WEIGHTS"
+    assert excinfo.value.context["reason"] == "not_float_representable"
 
 
 def test_confidence_intervals_use_the_design_t_not_the_normal(design, linearizable_estimator):

@@ -15,6 +15,7 @@ about the result looks wrong.  Stata warns about exactly this (`subpop()` versus
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal, DecimalException
 
 import numpy as np
 import pandas as pd
@@ -25,6 +26,7 @@ from .estimator import VARIANCE_METHOD_REQUIREMENTS, EstimatorSpec, missing_capa
 LONELY_PSU_POLICIES = ("fail", "remove", "adjust", "average", "certainty")
 REPLICATE_TYPES = ("brr", "jackknife", "bootstrap", "provided")
 _MAX_INVALID_WEIGHT_ROWS = 16
+SURVEY_INVALID_SAMPLING_WEIGHTS = "SURVEY_INVALID_SAMPLING_WEIGHTS"
 
 
 def _weight_failure(
@@ -53,7 +55,14 @@ def _validated_weight_array(
     allow_zero: bool,
     error_code: str,
 ) -> np.ndarray:
-    """Convert and validate one weight vector at a real design boundary."""
+    """Validate one weight vector before converting it to floating point.
+
+    Pandas/numpy will try to coerce an object integer such as ``10**400`` to a
+    float while constructing an array, which raises a raw ``OverflowError``.
+    Survey weights are an executable boundary, so parse each value as a
+    decimal first, apply the finite/sign/positive-total rules there, and only
+    then perform the bounded float conversion required by the variance math.
+    """
     if column not in frame.columns:
         raise _weight_failure(
             code=error_code,
@@ -62,22 +71,22 @@ def _validated_weight_array(
             detail=f"weight column {column!r} is not in the frame",
         )
     try:
-        values = frame[column].to_numpy(dtype=float)
-    except (TypeError, ValueError) as exc:
+        raw_values = frame[column].to_numpy(dtype=object)
+    except (OverflowError, TypeError, ValueError) as exc:
         raise _weight_failure(
             code=error_code,
             column=column,
             reason="non_numeric",
             detail=f"weight column {column!r} is not numeric",
         ) from exc
-    if values.ndim != 1 or len(values) != len(frame):
+    if raw_values.ndim != 1 or len(raw_values) != len(frame):
         raise _weight_failure(
             code=error_code,
             column=column,
             reason="shape",
             detail=f"weight column {column!r} must be one value per row",
         )
-    if len(values) == 0:
+    if len(raw_values) == 0:
         raise _weight_failure(
             code=error_code,
             column=column,
@@ -85,13 +94,46 @@ def _validated_weight_array(
             detail=f"weight column {column!r} cannot be empty",
         )
 
-    finite = np.isfinite(values)
-    if not finite.all():
-        rows = [
-            str(index)
-            for index, invalid in zip(frame.index, ~finite, strict=True)
-            if invalid
-        ][:_MAX_INVALID_WEIGHT_ROWS]
+    decimals: list[Decimal] = []
+    non_numeric_rows: list[str] = []
+    nonfinite_rows: list[str] = []
+    negative_rows: list[str] = []
+    nonpositive_rows: list[str] = []
+    for index, raw_value in zip(frame.index, raw_values, strict=True):
+        try:
+            if isinstance(raw_value, (bool, np.bool_)):
+                raise ValueError("boolean is not a numeric survey weight")
+            parsed = Decimal(str(raw_value).strip())
+        except (DecimalException, OverflowError, TypeError, ValueError, UnicodeError):
+            non_numeric_rows.append(str(index))
+            continue
+        decimals.append(parsed)
+        if not parsed.is_finite():
+            nonfinite_rows.append(str(index))
+        elif parsed < 0:
+            negative_rows.append(str(index))
+        elif not allow_zero and parsed == 0:
+            nonpositive_rows.append(str(index))
+
+    if non_numeric_rows:
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="non_numeric",
+            invalid_rows=non_numeric_rows[:_MAX_INVALID_WEIGHT_ROWS],
+            detail=f"weight column {column!r} contains values that cannot be parsed safely",
+        )
+    if len(decimals) != len(raw_values):
+        # Defensive guard: the row lists above should make this unreachable,
+        # but never let a future parser change turn into a raw failure.
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="non_numeric",
+            detail=f"weight column {column!r} is not numeric",
+        )
+    if nonfinite_rows:
+        rows = nonfinite_rows[:_MAX_INVALID_WEIGHT_ROWS]
         raise _weight_failure(
             code=error_code,
             column=column,
@@ -99,47 +141,58 @@ def _validated_weight_array(
             invalid_rows=rows,
         )
 
-    if allow_zero:
-        invalid = values < 0
-        if invalid.any():
-            rows = [
-                str(index)
-                for index, bad in zip(frame.index, invalid, strict=True)
-                if bad
-            ][:_MAX_INVALID_WEIGHT_ROWS]
-            raise _weight_failure(
-                code=error_code,
-                column=column,
-                reason="negative",
-                invalid_rows=rows,
-            )
-        total = float(values.sum())
-        if not np.isfinite(total) or total <= 0:
-            reason = "all_zero" if np.all(values == 0) else "nonpositive_sum"
-            raise _weight_failure(code=error_code, column=column, reason=reason)
-        return values
-
-    if np.all(values == 0):
-        raise _weight_failure(code=error_code, column=column, reason="all_zero")
-    invalid = values <= 0
-    if invalid.any():
-        rows = [
-            str(index)
-            for index, bad in zip(frame.index, invalid, strict=True)
-            if bad
-        ][:_MAX_INVALID_WEIGHT_ROWS]
+    if negative_rows:
         raise _weight_failure(
             code=error_code,
             column=column,
-            reason="nonpositive",
-            invalid_rows=rows,
+            reason="negative" if allow_zero else "nonpositive",
+            invalid_rows=negative_rows[:_MAX_INVALID_WEIGHT_ROWS],
         )
-    total = float(values.sum())
+
+    if not allow_zero and nonpositive_rows:
+        all_zero = all(value == 0 for value in decimals)
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="all_zero" if all_zero else "nonpositive",
+            invalid_rows=nonpositive_rows[:_MAX_INVALID_WEIGHT_ROWS],
+        )
+
+    if allow_zero and not any(value > 0 for value in decimals):
+        raise _weight_failure(code=error_code, column=column, reason="all_zero")
+
+    # The decimal checks above establish finite/nonnegative/positive-total
+    # semantics without a float conversion.  This second conversion boundary
+    # rejects values that are mathematically valid but cannot be represented by
+    # the numpy float arrays used by the estimator.
+    float_values: list[float] = []
+    float_overflow_rows: list[str] = []
+    for index, parsed in zip(frame.index, decimals, strict=True):
+        try:
+            converted = float(parsed)
+        except (DecimalException, OverflowError, TypeError, ValueError):
+            float_overflow_rows.append(str(index))
+            continue
+        float_values.append(converted)
+        if not np.isfinite(converted):
+            float_overflow_rows.append(str(index))
+    if float_overflow_rows:
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="not_float_representable",
+            invalid_rows=float_overflow_rows[:_MAX_INVALID_WEIGHT_ROWS],
+            detail=f"weight column {column!r} cannot be represented as finite float values",
+        )
+
+    values = np.asarray(float_values, dtype=float)
+    with np.errstate(over="ignore", invalid="ignore"):
+        total = float(np.sum(values, dtype=float))
     if not np.isfinite(total) or total <= 0:
         raise _weight_failure(
             code=error_code,
             column=column,
-            reason="nonpositive_sum",
+            reason="not_float_representable" if not np.isfinite(total) else "nonpositive_sum",
             total=total,
         )
     return values
@@ -207,7 +260,7 @@ class SurveyDesign:
             self.frame,
             self.weight,
             allow_zero=False,
-            error_code="SURVEY_WEIGHT_INVALID",
+            error_code=SURVEY_INVALID_SAMPLING_WEIGHTS,
         )
 
     # -- structure ---------------------------------------------------------
@@ -218,7 +271,7 @@ class SurveyDesign:
             self.frame,
             self.weight,
             allow_zero=False,
-            error_code="SURVEY_WEIGHT_INVALID",
+            error_code=SURVEY_INVALID_SAMPLING_WEIGHTS,
         )
 
     def validate_for_estimation(self, mask: np.ndarray | None = None) -> None:
@@ -241,12 +294,17 @@ class SurveyDesign:
                 subpopulation=self.subpop,
             )
         selected = values[mask_array]
-        total = float(selected.sum())
+        with np.errstate(over="ignore", invalid="ignore"):
+            total = float(np.sum(selected, dtype=float))
         if not np.isfinite(total) or total <= 0:
             raise _weight_failure(
-                code="SURVEY_WEIGHT_INVALID",
+                code=SURVEY_INVALID_SAMPLING_WEIGHTS,
                 column=self.weight,
-                reason="subpopulation_nonpositive_sum",
+                reason=(
+                    "subpopulation_not_float_representable"
+                    if not np.isfinite(total)
+                    else "subpopulation_nonpositive_sum"
+                ),
                 total=total,
             )
 

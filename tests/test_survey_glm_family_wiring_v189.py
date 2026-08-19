@@ -221,6 +221,40 @@ def test_auto_count_workflow_uses_survey_poisson_alias_with_sampling_weight(
     )
 
 
+def test_survey_workflow_rejects_object_integer_weight_as_typed_failure(tmp_path: Path):
+    """The source-to-estimation workflow must not leak pandas' float overflow."""
+    frame = pd.read_csv(FIXTURES / "design.csv")
+    frame["weight"] = pd.Series(
+        [10**400] + [1] * (len(frame) - 1),
+        index=frame.index,
+        dtype=object,
+    )
+    source = tmp_path / "huge-weight.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "huge-weight")
+
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="ols",
+        y="y",
+        x=["x1", "x2"],
+        sampling_weight="weight",
+        survey_strata_col="stratum",
+        survey_psu_col="psu",
+    )
+
+    assert outcome["status"] == "failed", outcome
+    errors = read_json(project.root / "runs" / outcome["run_id"] / "errors.json")
+    issue = next(
+        issue for issue in errors["issues"]
+        if issue["code"] == "SURVEY_INVALID_SAMPLING_WEIGHTS"
+    )
+    assert "OverflowError" not in issue["message"]
+    assert issue["evidence"]["reason"] == "not_float_representable"
+
+
 @pytest.mark.parametrize(
     "invalid_exposure",
     [

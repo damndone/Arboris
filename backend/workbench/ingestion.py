@@ -83,7 +83,14 @@ def read_frame_bounded(
         raise ValueError("max_excel_sheets must be a positive integer")
     suffix = (file_suffix or path.suffix).lower()
     if suffix == ".csv":
-        frame = pd.read_csv(path, nrows=max_rows + 1)
+        try:
+            frame = pd.read_csv(path, nrows=max_rows + 1)
+        except OverflowError:
+            # Pandas' default inference attempts an eager float conversion for
+            # object-sized integers.  Preserve the token as object data so the
+            # declared survey-design boundary can issue its stable typed
+            # weight failure instead of leaking the parser exception.
+            frame = pd.read_csv(path, nrows=max_rows + 1, dtype=object)
     elif suffix in {".xlsx", ".xls"}:
         with pd.ExcelFile(path) as excel:
             if len(excel.sheet_names) > max_excel_sheets:

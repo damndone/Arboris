@@ -29,8 +29,8 @@ provenance so Agent/Notebook/Report consumers can distinguish survey results
 from ordinary model results.
 
 ## Boundary
-- Affected paths: `backend/workbench/engine/stages/pre_estimation_checks.py`
-- Allowed paths: `docs/superpowers/objectives/2026-08-19-v1.8.9-p1-survey-extension-objective.md`, `backend/workbench/engine/stages/estimation.py`, `backend/workbench/survey/design.py`, `backend/workbench/survey/engine.py`, `backend/workbench/survey/replicates.py`, `backend/workbench/survey/adapters.py`, `backend/workbench/engine/replicate_combine/survey_adapter.py`, `backend/workbench/agent/workflow_contracts.py`, `backend/workbench/engine/capabilities.py`, `backend/workbench/agent/context_tools.py`, `backend/workbench/engine/stages/pre_estimation_checks.py`, `tests/test_survey_glm_family_wiring_v189.py`, `tests/test_survey_design_engine_v187.py`, `tests/test_survey_design_composition_v187.py`, `tests/test_survey_composition_limits_v187.py`, `tests/test_survey_report_visibility_v187.py`, `tests/test_agent_reads_v187_results.py`, `docs/superpowers/handoff/2026-08-19-v1.8.9-p1-survey-extension-handoff.md`, `.agent/devlines/v1-8-9-p1-survey-extension/RETROSPECTIVE.md`, `.agent/devlines/v1-8-9-p1-survey-extension/context-pack.manifest.json`, `.agent/devlines/v1-8-9-p1-survey-extension/context-pack.md`, `.agent/devlines/v1-8-9-p1-survey-extension/events.jsonl`, `.agent/devlines/v1-8-9-p1-survey-extension/events.jsonl.anchor`
+- Affected paths: `backend/workbench/survey/__init__.py`
+- Allowed paths: `backend/workbench/survey/__init__.py`
 - Protected paths: `backend/workbench/agent/http`, `backend/workbench/http`, `backend/workbench/predictive_research`, `frontend/src`, `scripts/gate.sh`
 - Dependencies: `v1-8-9-foundation-integration`
 - Tests: `PYTHONPATH=backend .venv/bin/python -m pytest tests/test_survey_glm_family_wiring_v189.py tests/test_survey_design_engine_v187.py tests/test_survey_design_composition_v187.py tests/test_survey_composition_limits_v187.py tests/test_survey_report_visibility_v187.py -q`, `PYTHONPATH=backend .venv/bin/python -m compileall -q backend/workbench tests`, `git diff --check`
