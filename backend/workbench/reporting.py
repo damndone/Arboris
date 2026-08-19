@@ -2,8 +2,40 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from jinja2 import Environment, FileSystemLoader
+
+from .artifacts import register_artifact, write_bytes_durable
+from .report_export import EvidenceProjectionV1
+
+
+@dataclass(frozen=True, slots=True)
+class ReportDocumentWriterV1:
+    """Typed HTML/PDF document writer capability."""
+
+    view_model: dict[str, Any]
+    projection: EvidenceProjectionV1
+    canonical_run_root: Path
+
+    @classmethod
+    def from_view_model(
+        cls,
+        view_model: Mapping[str, Any],
+        projection: EvidenceProjectionV1,
+        *,
+        canonical_run_root: Path,
+    ) -> "ReportDocumentWriterV1":
+        if not isinstance(view_model, Mapping):
+            raise TypeError("ReportDocumentWriterV1 requires a report view model")
+        if type(projection) is not EvidenceProjectionV1:
+            raise TypeError("ReportDocumentWriterV1 requires EvidenceProjectionV1")
+        return cls(
+            view_model=dict(view_model),
+            projection=projection,
+            canonical_run_root=canonical_run_root.expanduser().resolve(strict=False),
+        )
 
 def _normalize_to_view_model(data: dict[str, Any]) -> dict[str, Any]:
     if "critical_errors" in data:
@@ -44,7 +76,7 @@ def _normalize_to_view_model(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def render_html_report(
-    view_model: dict[str, Any],
+    writer: ReportDocumentWriterV1,
     run_root: Path,
     *,
     filename: str = "report.html",
@@ -53,49 +85,22 @@ def render_html_report(
     evidence_port: Any = None,
     admission_receipt: Any = None,
 ) -> Path:
-    from .agent.workflow_runtime import (
-        prepare_formal_workflow_output,
-        record_formal_workflow_artifact,
+    if type(writer) is not ReportDocumentWriterV1:
+        raise TypeError("render_html_report requires ReportDocumentWriterV1")
+    if writer.canonical_run_root != run_root.expanduser().resolve(strict=False):
+        raise ValueError("REPORT_WRITER_RUN_ROOT_MISMATCH")
+    view_model = writer.view_model
+    environment = Environment(
+        loader=FileSystemLoader(Path(__file__).parent / "templates"),
+        autoescape=True,
     )
-
-    output = prepare_formal_workflow_output(
-        evidence_port,
-        admission_receipt,
-        run_root=run_root,
-        directory_name="reports",
-        filename=filename,
-    )
-
-    try:
-        environment = Environment(
-            loader=FileSystemLoader(Path(__file__).parent / "templates"),
-            autoescape=True,
-        )
-        if view_model.get("report_kind") == "arma_garch":
-            template = environment.get_template("arma_garch_report.html.j2")
-            rendered_view_model = view_model
-        else:
-            template = environment.get_template("report.html.j2")
-            rendered_view_model = _normalize_to_view_model(view_model)
-        with output.open_binary() as stream:
-            stream.write(template.render(view_model=rendered_view_model).encode("utf-8"))
-            stream.flush()
-        html_path = output.commit()
-    except Exception:
-        output.abort()
-        raise
-    try:
-        record_formal_workflow_artifact(
-            evidence_port,
-            admission_receipt,
-            run_root=run_root,
-            artifact_id=artifact_id,
-            path=html_path,
-            artifact_type="report",
-            producer_step="reporting",
-            inputs=inputs,
-            output_target=output,
-        )
-    finally:
-        output.close()
+    if view_model.get("report_kind") == "arma_garch":
+        template = environment.get_template("arma_garch_report.html.j2")
+        rendered_view_model = view_model
+    else:
+        template = environment.get_template("report.html.j2")
+        rendered_view_model = _normalize_to_view_model(view_model)
+    html_path = run_root / "reports" / filename
+    write_bytes_durable(html_path, template.render(view_model=rendered_view_model).encode("utf-8"))
+    register_artifact(run_root, artifact_id, html_path, "report", "reporting", list(inputs))
     return html_path

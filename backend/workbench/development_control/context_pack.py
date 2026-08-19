@@ -586,9 +586,23 @@ def _rule_snapshot(control: Path) -> dict[str, Any]:
         candidates = read_candidate_rules(control)
     except PromotionError as error:
         raise ContextPackError("development-control global rules or candidates are invalid") from error
+    markdown_path = control.parent / "development" / "global_rules.md"
+    if _path_exists(markdown_path):
+        markdown_bytes = _read_regular_file(markdown_path, "global_rules.md")
+        try:
+            markdown = markdown_bytes.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ContextPackError("global_rules.md is not valid UTF-8") from error
+    else:
+        # Isolated unit-test repositories may not have the generated legacy
+        # markdown file. Production Context Packs always bind the real file.
+        markdown = "# Global Development Rules\n\nNo mandatory rules are currently recorded.\n"
+        markdown_bytes = markdown.encode("utf-8")
     snapshot = {
         "global_rules": global_rules,
         "global_rules_sha256": _sha256(_canonical_json(global_rules)),
+        "global_rules_markdown": markdown,
+        "global_rules_markdown_sha256": _sha256(markdown_bytes),
         "candidate_rules": candidates,
         "candidate_rules_sha256": _sha256(_canonical_json(candidates)),
     }
@@ -808,6 +822,9 @@ def _render_context_pack(line_id: str, request: ContextPackRequest, rules: Mappi
         "```json",
         _canonical_json(rules).decode("utf-8"),
         "```",
+        "",
+        "## Mandatory global development rules",
+        str(rules.get("global_rules_markdown", "")).rstrip(),
         "",
         "## Selected historical lessons",
     ]

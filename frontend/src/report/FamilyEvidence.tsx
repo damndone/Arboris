@@ -513,13 +513,16 @@ export function FamilyEvidence({
   modelResults,
   artifacts = {},
   evidence,
+  allowLegacyPresentation = false,
 }: {
   modelResults: readonly FamilyModelResult[];
   artifacts?: FamilyEvidenceArtifacts;
   evidence?: EvidenceViewModel | ReportEvidenceProjection | null;
+  /** Explicit test/compatibility seam; Report never enables raw packets. */
+  allowLegacyPresentation?: boolean;
 }) {
   const familyModels = modelResults.filter((model) => SUPPORTED_FAMILIES.has(String(model.model_type)));
-  const typedBoundary = evidence !== undefined;
+  const typedBoundary = evidence !== undefined || !allowLegacyPresentation;
   if (familyModels.length === 0 && !evidence && !typedBoundary) return null;
   return (
     <>

@@ -13,7 +13,7 @@ import { ReportFigureSelection } from "./ReportFigureSelection";
 import { ReportComposer } from "./ReportComposer";
 import { PredictionResearchReportSections } from "./PredictionResearchReportSections";
 import {
-  buildRegressionTablePacket,
+  buildRegressionTablePacketFromEvidence,
   RegressionTable,
 } from "./RegressionTable";
 import {
@@ -94,7 +94,9 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
   // Legacy model_results remains on the workspace for API compatibility, but
   // it is not a Report source.  The formal result surface is the typed C0
   // evidence projection below; an absent projection is explicitly unavailable.
-  const regressionTable = buildRegressionTablePacket([]);
+  const regressionTable = buildRegressionTablePacketFromEvidence(
+    workspace.reportEvidenceProjection,
+  );
   const classificationEvidenceArtifact = workspace.familyEvidenceArtifacts.classification_evidence;
   const resultFamilies = workspace.reportEvidenceProjection
     ? [`${workspace.reportEvidenceProjection.consumerId}:${workspace.reportEvidenceProjection.status}`]
@@ -167,9 +169,8 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         disabled={
           workspace.figureContextLoading
           || workspace.figureInventoryError !== null
-          || workspace.includedFacts.length === 0
         }
-        submitDisabled={workspace.postEstimationLoadError !== null}
+        submitDisabled={workspace.postEstimationLoadError !== null || workspace.includedFacts.length === 0}
       />
 
       <ReportActionBar />

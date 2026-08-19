@@ -1,4 +1,5 @@
 import type { CoefficientRecord, ModelResult } from "../api";
+import type { ReportEvidenceProjection } from "./factTable";
 
 export type SignificanceLevels = Record<string, number>;
 
@@ -87,6 +88,58 @@ export function buildRegressionTablePacket(
         .join("; "),
     },
   };
+}
+
+/**
+ * Build the regression surface from the admitted Report projection only.
+ *
+ * The statistic-id grammar is deliberately narrow.  It lets the server keep
+ * the existing coefficient-table semantics while preventing a RunDetail raw
+ * model result from becoming a writer input:
+ * `model:<model-id>:coefficient:<term>:<field>`.
+ */
+export function buildRegressionTablePacketFromEvidence(
+  evidence: ReportEvidenceProjection | null | undefined,
+  significanceLevels: SignificanceLevels = DEFAULT_SIGNIFICANCE_LEVELS,
+): RegressionTablePacket {
+  if (!evidence || evidence.status !== "available") {
+    return buildRegressionTablePacket([] , significanceLevels);
+  }
+  const modelFacts = new Map<string, Map<string, Record<string, unknown>>>();
+  const modelMetadata = new Map<string, Record<string, string | number>>();
+  for (const fact of evidence.facts) {
+    const metadataMatch = /^model:([^:]+):meta:(label|nobs|r_squared)$/.exec(fact.statisticId);
+    if (metadataMatch && (typeof fact.value === "string" || typeof fact.value === "number")) {
+      const [, modelId, field] = metadataMatch;
+      const metadata = modelMetadata.get(modelId) ?? {};
+      metadata[field] = fact.value;
+      modelMetadata.set(modelId, metadata);
+      continue;
+    }
+    const match = /^model:([^:]+):coefficient:([^:]+):(estimate|std_error|p_value|ci_lower|ci_upper)$/.exec(fact.statisticId);
+    if (!match || typeof fact.value !== "number" || !Number.isFinite(fact.value)) continue;
+    const [, modelId, term, field] = match;
+    const terms = modelFacts.get(modelId) ?? new Map<string, Record<string, unknown>>();
+    const row = terms.get(term) ?? {};
+    row[field] = fact.value;
+    if (field === "estimate") row.source_id = fact.factId;
+    terms.set(term, row);
+    modelFacts.set(modelId, terms);
+  }
+  const models: ModelResult[] = [...modelFacts.entries()].map(([modelId]) => ({
+    model_id: modelId,
+    model_type: String(modelMetadata.get(modelId)?.label ?? modelId),
+    nobs: typeof modelMetadata.get(modelId)?.nobs === "number" ? modelMetadata.get(modelId)?.nobs as number : undefined,
+    r_squared: typeof modelMetadata.get(modelId)?.r_squared === "number" ? modelMetadata.get(modelId)?.r_squared as number : undefined,
+    coefficients: {},
+  }));
+  for (const [modelId, terms] of modelFacts) {
+    const model = models.find((candidate) => candidate.model_id === modelId)!;
+    model.coefficients = Object.fromEntries(
+      [...terms.entries()].map(([term, values]) => [term, values as CoefficientRecord]),
+    );
+  }
+  return buildRegressionTablePacket(models, significanceLevels);
 }
 
 function significanceMarker(

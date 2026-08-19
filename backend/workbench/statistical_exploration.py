@@ -421,10 +421,22 @@ def _persist_exploration_exports(
     html_rel = f"reports/{stem}.html"
     html_path = run_root / html_rel
     html_artifact_id = f"{stem}_html"
-    from .reporting import render_html_report
+    from .report_export import EvidenceProjectionV1, ReportEvidenceWriterV1
+    from .reporting import ReportDocumentWriterV1, render_html_report
+    typed_projection = EvidenceProjectionV1.unavailable("EVIDENCE_COMMIT_BINDING_REQUIRED")
+    document_writer = ReportDocumentWriterV1.from_view_model(
+        report,
+        typed_projection,
+        canonical_run_root=run_root,
+    )
+    table_writer = ReportEvidenceWriterV1.from_projection(
+        typed_projection,
+        sections=tuple(_exploration_tables(result)),
+        tables=_exploration_tables(result),
+    )
     if not _artifact_is_registered(run_root, html_artifact_id):
         render_html_report(
-            report,
+            document_writer,
             run_root,
             filename=f"{stem}.html",
             artifact_id=html_artifact_id,
@@ -445,7 +457,7 @@ def _persist_exploration_exports(
     pdf_artifact_id = f"{stem}_pdf"
     if not _artifact_is_registered(run_root, pdf_artifact_id):
         export_pdf(
-            report,
+            document_writer,
             run_root,
             filename=f"{stem}.pdf",
             artifact_id=pdf_artifact_id,
@@ -466,7 +478,7 @@ def _persist_exploration_exports(
     xlsx_artifact_id = f"{stem}_xlsx"
     if not _artifact_is_registered(run_root, xlsx_artifact_id):
         export_xlsx(
-            _exploration_tables(result),
+            table_writer,
             run_root,
             filename=f"{stem}.xlsx",
             artifact_id=xlsx_artifact_id,

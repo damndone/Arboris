@@ -112,6 +112,7 @@ describe("FamilyEvidence", () => {
     render(
       <FamilyEvidence
         modelResults={[ordinalResult, multinomialResult]}
+        allowLegacyPresentation
         artifacts={{
           diagnostics_ordinal_logit_1: {
             contract: "workbench.ordinal_logit.diagnostics.v1",
@@ -141,6 +142,7 @@ describe("FamilyEvidence", () => {
     render(
       <FamilyEvidence
         modelResults={[survivalResult, quantileResult]}
+        allowLegacyPresentation
         artifacts={{ survival_evidence: survivalEvidence }}
       />,
     );
@@ -158,7 +160,7 @@ describe("FamilyEvidence", () => {
   });
 
   it("shows an explicit degradation when a required survival artifact is absent", () => {
-    render(<FamilyEvidence modelResults={[survivalResult]} artifacts={{}} />);
+    render(<FamilyEvidence modelResults={[survivalResult]} artifacts={{}} allowLegacyPresentation />);
 
     expect(screen.getByTestId("family-evidence-survival_cox_1")).toHaveTextContent(
       "Survival evidence unavailable",

@@ -442,7 +442,9 @@ def test_e2e_issue_to_rendered_text(tmp_path: Path):
     assert treatment_row["template_key"] == "coef_warn_joint"
 
     # View model must render
-    view_model = build_report_view_model(summary, tmp_path)
+    view_model = build_report_view_model(
+        summary, tmp_path, include_legacy_presentation=True
+    )
     assert any("causal" in cc.lower() for cc in [view_model.get("causal_caution", "")])
 
 

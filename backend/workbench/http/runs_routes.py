@@ -44,10 +44,14 @@ from ..repository.run_repository import (
     _resolve_run_root,
     _summarize_manifest,
 )
-from ..report_export import ReportExportError, export_report
+from ..report_export import EvidenceProjectionV1, ReportEvidenceWriterV1, ReportExportError, export_report
 from ..report_contract import ReportContractError, validate_report_packet
 from ..report_quality import validate_report_response_quality
-from ..report_view_model import build_indexed_report_evidence, build_report_evidence_bundle
+from ..report_view_model import (
+    _unavailable_report_evidence,
+    build_indexed_report_evidence,
+    build_report_evidence_bundle,
+)
 from ..report_store import list_ai_reports, save_ai_report
 from ..services.results_service import (
     _normalize_issue_stream,
@@ -109,6 +113,7 @@ def _report_evidence_for_run(
     run_root: Path,
     post_estimation_results: list[dict[str, Any]],
     request_identity: ReportEvidenceRequestIdentityV1 | None = None,
+    project_root: Path | str | None = None,
 ) -> dict[str, object]:
     """Build the typed Report contribution from indexed artifacts only."""
 
@@ -161,7 +166,22 @@ def _report_evidence_for_run(
             ),
             confirmation_ref=(request_identity.confirmation_ref if request_identity else indexed_text("confirmation_ref", "evidence_confirmation_ref")),
             artifact_file_sha256=artifact_content_sha256,
+            project_root=project_root,
         )
+        if (
+            project_root is not None
+            and type(authoritative_persistence) is ServerOwnedReportEvidencePersistenceV1
+            and not authoritative_persistence.accepts_project_root(project_root)
+        ):
+            views.append(
+                _unavailable_report_evidence(
+                    artifact_id=str(record.get("artifact_id") or "unknown-artifact"),
+                    artifact_type=str(record.get("artifact_type") or "unknown"),
+                    reason_code="EVIDENCE_PROJECT_ROOT_MISMATCH",
+                    request_identity=request_identity,
+                )
+            )
+            continue
         views.append(
             build_indexed_report_evidence(
                 record,
@@ -622,6 +642,7 @@ def get_run_endpoint(run_id: str, project_root: str, request: Request) -> dict:
         run_root,
         post_estimation_results,
         _report_identity_for_request(request, run_id),
+        project_root=project_root,
     )
     try:
         artifact_counts = _artifact_counts(run_root)
@@ -724,6 +745,7 @@ def export_report_endpoint(
         run_root,
         [],
         _report_identity_for_request(http_request, run_id),
+        project_root=project_root,
     )
     if projection.get("status") != "available":
         raise WorkbenchAPIError(
@@ -810,7 +832,7 @@ def export_report_endpoint(
             markdown=markdown,
             figures=figures,
             format=format,
-            evidence_projection=projection,
+            evidence_projection=EvidenceProjectionV1.from_wire(projection),
         )
     except ReportExportError as exc:
         raise WorkbenchAPIError(
@@ -857,6 +879,7 @@ def export_result_table_endpoint(
         run_root,
         [],
         _report_identity_for_request(http_request, run_id),
+        project_root=project_root,
     )
     if projection.get("status") != "available":
         raise WorkbenchAPIError(
@@ -877,37 +900,14 @@ def export_result_table_endpoint(
             details={"run_id": run_id, "projection": unavailable},
         )
 
-    rows = [
-        {
-            "fact_id": fact.get("factId"),
-            "statistic_id": fact.get("statisticId"),
-            "value": fact.get("value"),
-            "unit": fact.get("unit", ""),
-            "standard_error": fact.get("standardError", ""),
-            "confidence_interval": json.dumps(
-                fact.get("confidenceInterval"), sort_keys=True, separators=(",", ":")
-            ) if isinstance(fact.get("confidenceInterval"), dict) else "",
-            "commit_id": projection.get("commitId"),
-            "envelope_digest": projection.get("envelopeDigest"),
-            "validation_status": projection.get("validationStatus"),
-            "validation_summary": json.dumps(
-                projection.get("validationSummary", {}), sort_keys=True, separators=(",", ":")
-            ),
-            "provenance": json.dumps(
-                projection.get("provenance", {}), sort_keys=True, separators=(",", ":")
-            ),
-        }
-        for fact in typed_facts
-        if isinstance(fact, dict)
-    ]
-    tables: dict[str, list[dict[str, Any]]] = {}
-    for section in sections:
-        tables[section] = rows
-
     slug = "-".join(sections)
     filename = f"result-table-{slug}.xlsx"
     try:
-        xlsx_payload = render_typed_xlsx(tables)
+        writer = ReportEvidenceWriterV1.from_projection(
+            EvidenceProjectionV1.from_wire(projection),
+            sections=tuple(sections),
+        )
+        xlsx_payload = render_typed_xlsx(writer)
     except (OSError, ValueError, TypeError, RuntimeError) as exc:
         unavailable = dict(projection)
         unavailable.update({"status": "blocked", "facts": [], "reasonCode": "RESULT_TABLE_EXPORT_FAILED"})
@@ -1116,6 +1116,7 @@ def get_report_endpoint(run_id: str, project_root: str, request: Request) -> Res
         run_root,
         [],
         _report_identity_for_request(request, run_id),
+        project_root=project_root,
     )
     if projection.get("status") != "available":
         raise WorkbenchAPIError(
@@ -1146,7 +1147,7 @@ def get_report_endpoint(run_id: str, project_root: str, request: Request) -> Res
             markdown="\n".join(lines),
             figures=[],
             format="html",
-            evidence_projection=projection,
+            evidence_projection=EvidenceProjectionV1.from_wire(projection),
         )
     except ReportExportError as exc:
         raise WorkbenchAPIError(

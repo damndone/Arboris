@@ -41,6 +41,7 @@ from .native_containment.trace_contracts import _EVENT_FIELDS as _CONTAINMENT_EV
 from .services.execution_profile import current_execution_profile
 from .services.results_service import (
     ServerOwnedReportEvidencePersistenceV1,
+    UnavailableReportEvidenceCapabilityV1,
     configure_report_evidence_persistence,
 )
 from .http.agent_routes import (
@@ -63,10 +64,17 @@ from .http.statistical_exploration_routes import router as statistical_explorati
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     _validate_supported_deployment()
-    persistence = getattr(_app.state, "report_evidence_persistence", None)
-    if persistence is not None and type(persistence) is not ServerOwnedReportEvidencePersistenceV1:
+    persistence = getattr(
+        _app.state,
+        "report_evidence_persistence",
+        UnavailableReportEvidenceCapabilityV1(),
+    )
+    if type(persistence) not in {
+        ServerOwnedReportEvidencePersistenceV1,
+        UnavailableReportEvidenceCapabilityV1,
+    }:
         raise TypeError(
-            "report_evidence_persistence must be the server-owned C0 capability"
+            "report_evidence_persistence must be a server-owned C0 capability"
         )
     configure_report_evidence_persistence(persistence)
     try:
@@ -84,7 +92,7 @@ app.state.agent_notebook_cutover_store = new_agent_notebook_cutover_authority_st
 # this same object. There is no second authority or confirmation map.
 set_default_agent_notebook_cutover_authority_store(app.state.agent_notebook_cutover_store)
 app.state.notebook_cutover_identity_resolver = None
-app.state.report_evidence_persistence = None
+app.state.report_evidence_persistence = UnavailableReportEvidenceCapabilityV1()
 app.state.report_evidence_identity_resolver = None
 app.state.capability_factory_runtime = None
 app.state.domain_memory_service = None
@@ -106,14 +114,14 @@ def _bootstrap_app(app_instance: FastAPI | None) -> FastAPI:
     if not hasattr(target.state, "notebook_cutover_identity_resolver"):
         target.state.notebook_cutover_identity_resolver = None
     if not hasattr(target.state, "report_evidence_persistence"):
-        target.state.report_evidence_persistence = None
+        target.state.report_evidence_persistence = UnavailableReportEvidenceCapabilityV1()
     if not hasattr(target.state, "report_evidence_identity_resolver"):
         target.state.report_evidence_identity_resolver = None
     return target
 
 
 def configure_report_evidence_owner(
-    persistence: ServerOwnedReportEvidencePersistenceV1 | None,
+    persistence: ServerOwnedReportEvidencePersistenceV1 | UnavailableReportEvidenceCapabilityV1 | None,
     *,
     identity_resolver: Callable[..., object] | None = None,
     app_instance: FastAPI | None = None,
@@ -121,13 +129,18 @@ def configure_report_evidence_owner(
     """Install the server-owned C0 Report capability and request identity seam."""
 
     target = _bootstrap_app(app_instance)
-    if persistence is not None and type(persistence) is not ServerOwnedReportEvidencePersistenceV1:
+    if persistence is not None and type(persistence) not in {
+        ServerOwnedReportEvidencePersistenceV1,
+        UnavailableReportEvidenceCapabilityV1,
+    }:
         raise TypeError(
-            "persistence must be ServerOwnedReportEvidencePersistenceV1 or None"
+            "persistence must be a server-owned Report capability or None"
         )
     if identity_resolver is not None and not callable(identity_resolver):
         raise TypeError("identity_resolver must be callable or None")
-    target.state.report_evidence_persistence = persistence
+    target.state.report_evidence_persistence = (
+        persistence if persistence is not None else UnavailableReportEvidenceCapabilityV1()
+    )
     target.state.report_evidence_identity_resolver = identity_resolver
 
 

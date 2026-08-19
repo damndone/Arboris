@@ -223,6 +223,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         "_commit_id",
         "_confirmation_ref",
         "_artifact_file_sha256",
+        "_canonical_project_root",
     )
 
     def __init__(
@@ -241,6 +242,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         commit_id: str,
         confirmation_ref: str,
         artifact_file_sha256: str,
+        canonical_project_root: Path | str | None = None,
     ) -> None:
         if type(evidence_store) is not EvidencePacketStoreV1:
             raise EvidenceProjectionError(
@@ -337,6 +339,11 @@ class ServerOwnedReportEvidencePersistenceV1:
         self._commit_id = commit_id
         self._confirmation_ref = confirmation_ref
         self._artifact_file_sha256 = artifact_file_sha256
+        self._canonical_project_root = (
+            Path(canonical_project_root).expanduser().resolve(strict=False)
+            if canonical_project_root is not None
+            else None
+        )
 
     @property
     def project_ref(self) -> str:
@@ -377,6 +384,20 @@ class ServerOwnedReportEvidencePersistenceV1:
     @property
     def artifact_file_sha256(self) -> str:
         return self._artifact_file_sha256
+
+    @property
+    def canonical_project_root(self) -> Path | None:
+        return self._canonical_project_root
+
+    def accepts_project_root(self, project_root: Path | str) -> bool:
+        """Check the server-owned root binding before any artifact is read."""
+
+        if self._canonical_project_root is None:
+            return False
+        try:
+            return Path(project_root).expanduser().resolve(strict=False) == self._canonical_project_root
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return False
 
     def read_bound(
         self,
@@ -513,16 +534,32 @@ class ServerOwnedReportEvidencePersistenceV1:
             ) from exc
 
 
-_REPORT_EVIDENCE_PERSISTENCE: ServerOwnedReportEvidencePersistenceV1 | None = None
+class UnavailableReportEvidenceCapabilityV1:
+    """Typed server bootstrap result when no host C0 owner is configured."""
+
+    __slots__ = ("reason_code",)
+
+    def __init__(self, reason_code: str = "EVIDENCE_HOST_AUTHORITY_UNAVAILABLE") -> None:
+        if type(reason_code) is not str or not reason_code.strip():
+            raise TypeError("reason_code must be a non-empty string")
+        self.reason_code = reason_code
+
+
+_REPORT_EVIDENCE_PERSISTENCE: ServerOwnedReportEvidencePersistenceV1 | UnavailableReportEvidenceCapabilityV1 = UnavailableReportEvidenceCapabilityV1()
 
 
 def configure_report_evidence_persistence(
-    persistence: ServerOwnedReportEvidencePersistenceV1 | None,
+    persistence: ServerOwnedReportEvidencePersistenceV1 | UnavailableReportEvidenceCapabilityV1 | None,
 ) -> None:
     """Install the owner-issued Report persistence capability at server bootstrap."""
 
-    if persistence is not None and type(persistence) is not ServerOwnedReportEvidencePersistenceV1:
-        raise TypeError("persistence must be ServerOwnedReportEvidencePersistenceV1 or None")
+    if persistence is None:
+        persistence = UnavailableReportEvidenceCapabilityV1()
+    if type(persistence) not in {
+        ServerOwnedReportEvidencePersistenceV1,
+        UnavailableReportEvidenceCapabilityV1,
+    }:
+        raise TypeError("persistence must be a server-owned Report capability or None")
     global _REPORT_EVIDENCE_PERSISTENCE
     _REPORT_EVIDENCE_PERSISTENCE = persistence
 
@@ -539,6 +576,7 @@ def current_report_evidence_persistence(
     commit_id: str | None,
     confirmation_ref: str | None,
     artifact_file_sha256: str | None,
+    project_root: Path | str | None = None,
 ) -> ServerOwnedReportEvidencePersistenceV1 | None:
     """Return only the capability bound to the complete server-owned identity.
 
@@ -548,7 +586,7 @@ def current_report_evidence_persistence(
     """
 
     capability = _REPORT_EVIDENCE_PERSISTENCE
-    if capability is None:
+    if type(capability) is not ServerOwnedReportEvidencePersistenceV1:
         return None
     expected = (
         run_id,
@@ -576,6 +614,10 @@ def current_report_evidence_persistence(
         or capability.commit_id != commit_id
         or capability.confirmation_ref != confirmation_ref
         or capability.artifact_file_sha256 != artifact_file_sha256
+        or (
+            project_root is not None
+            and not capability.accepts_project_root(project_root)
+        )
     ):
         return None
     return capability
@@ -585,6 +627,7 @@ __all__ = [
     "PersistedEvidenceResultsFacadeV1",
     "ReportEvidenceRequestIdentityV1",
     "ServerOwnedReportEvidencePersistenceV1",
+    "UnavailableReportEvidenceCapabilityV1",
     "configure_report_evidence_persistence",
     "current_report_evidence_persistence",
 ]

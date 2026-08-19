@@ -34,7 +34,8 @@ def test_report_view_model_keeps_the_complete_workflow_collection() -> None:
     }
 
     view_model = build_report_view_model(
-        _summary(), Path("/tmp/fake"), exploration=collection
+        _summary(), Path("/tmp/fake"), exploration=collection,
+        include_legacy_presentation=True,
     )
 
     assert view_model["exploration"] == collection
@@ -52,7 +53,8 @@ def test_incomplete_workflow_is_visible_as_a_blocking_report_issue() -> None:
     }
 
     view_model = build_report_view_model(
-        _summary(), Path("/tmp/fake"), exploration=collection
+        _summary(), Path("/tmp/fake"), exploration=collection,
+        include_legacy_presentation=True,
     )
 
     assert view_model["exploration"]["status"] == "failed"

@@ -5,6 +5,7 @@ import { loadAiActivity } from "../aiActivity/aiActivityLog";
 import { ReportReviewPanel } from "./ReportReviewPanel";
 import { ReportViewContent } from "./ReportView";
 import { ReportWorkspaceProvider } from "./ReportWorkspaceContext";
+import type { ReportEvidenceProjection } from "./factTable";
 
 const mockForest = vi.hoisted(() => ({ current: null as unknown }));
 const mockWb = vi.hoisted(() => ({ current: null as unknown }));
@@ -80,6 +81,48 @@ function seedForest() {
   return seed;
 }
 
+function typedReportEvidence(
+  facts: Array<{ statisticId: string; value: number | string; unit?: string }> = [
+    { statisticId: "param:covariance", value: "HC1" },
+    { statisticId: "metric:r_squared", value: 0.86 },
+  ],
+): ReportEvidenceProjection {
+  return {
+    schemaVersion: 1,
+    projectionId: "report:commit:report-test",
+    consumerId: "report",
+    consumerVersion: "1.0",
+    actorRef: "actor:report-test",
+    projectRef: "project:report-test",
+    sessionRef: "session:report-test",
+    scopeRef: "scope:report-test",
+    runId: "run_c",
+    modelRunId: "run_c",
+    artifactRef: "artifact:report-test",
+    envelopeRef: "envelope:report-test",
+    envelopeDigest: "a".repeat(64),
+    commitId: "commit:report-test",
+    confirmationRef: "confirmation:report-test",
+    status: "available",
+    executionStatus: "completed",
+    availability: "available",
+    completenessStatus: "complete",
+    validationStatus: "met",
+    validationSummary: { requirement_status: "met" },
+    facts: facts.map((fact, index) => ({
+      factId: `typed-fact-${index + 1}`,
+      ...fact,
+    })),
+    sections: [],
+    provenance: {
+      artifactRef: "artifact:report-test",
+      commitId: "commit:report-test",
+      envelopeRef: "envelope:report-test",
+      lineageRefs: ["lineage:report-test"],
+    },
+  };
+}
+
 describe("ReportView", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -101,6 +144,7 @@ describe("ReportView", () => {
       model_results: [],
       post_estimation_results: [],
       prediction_evidence: null,
+      report_evidence: typedReportEvidence(),
     });
     mockFigureArtifacts.groups = [];
     mockFigureArtifactsError.current = null;
@@ -108,11 +152,11 @@ describe("ReportView", () => {
     mockArtifactJson.mockReset();
   });
 
-  it("shows the deterministic fact table before any AI call", () => {
-    render(<ReportView />);
-    expect(screen.getByTestId("report-fact-preview")).toBeInTheDocument();
-    expect(screen.getByText("Covariance")).toBeInTheDocument();
-    expect(screen.queryByText("param:covariance")).not.toBeInTheDocument();
+  it("shows the deterministic fact table before any AI call", async () => {
+    render(<ReportView projectRoot="/tmp/projA" />);
+    expect(await screen.findByTestId("report-fact-preview")).toBeInTheDocument();
+    expect(await screen.findByText("Covariance")).toBeInTheDocument();
+    expect(screen.getByText("param:covariance")).toBeInTheDocument();
     expect(mockGenerate.current).not.toHaveBeenCalled();
   });
 
@@ -151,14 +195,26 @@ describe("ReportView", () => {
       return Promise.resolve({ payload: { rmse: 7.4, interval_coverage: 1 } });
     });
 
+    mockRunDetail.current = vi.fn().mockResolvedValue({
+      model_results: [],
+      post_estimation_results: [],
+      prediction_evidence: null,
+      report_evidence: typedReportEvidence([
+        { statisticId: "ts:arma:selected_candidate", value: "arma-p1-q1-n" },
+        { statisticId: "ts:validation:rmse", value: 7.4 },
+        { statisticId: "ts:contract:transform", value: "log_return_pct" },
+        { statisticId: "ts:data:analysis_observations", value: 2542 },
+      ]),
+    });
+
     render(<ReportView projectRoot="/tmp/projA" />);
 
     expect(await screen.findByText("Selected ARMA specification")).toBeInTheDocument();
     expect(screen.getByText("Validation RMSE")).toBeInTheDocument();
     expect(screen.getByText("Analysis transform")).toBeInTheDocument();
     expect(screen.getByText("Analysis-view observations")).toBeInTheDocument();
-    expect(screen.queryByText("ts:arma:selected_candidate")).not.toBeInTheDocument();
-    expect(screen.getByText("arma-p1-q1-n")).toBeInTheDocument();
+    expect(screen.getByTestId("report-fact-preview")).toHaveTextContent("Selected ARMA specification");
+    expect(screen.getAllByText("arma-p1-q1-n").length).toBeGreaterThan(0);
   });
 
   it("projects persisted model results into deterministic regression evidence", async () => {
@@ -182,6 +238,15 @@ describe("ReportView", () => {
       ],
       post_estimation_results: [],
       prediction_evidence: null,
+      report_evidence: typedReportEvidence([
+        { statisticId: "model:ols_1:coefficient:x:estimate", value: 1.25 },
+        { statisticId: "model:ols_1:meta:label", value: "Baseline" },
+        { statisticId: "model:ols_1:meta:nobs", value: 100 },
+        { statisticId: "model:ols_1:coefficient:x:std_error", value: 0.2 },
+        { statisticId: "model:ols_1:coefficient:x:p_value", value: 0.04 },
+        { statisticId: "model:ols_1:coefficient:x:ci_lower", value: 0.8 },
+        { statisticId: "model:ols_1:coefficient:x:ci_upper", value: 1.7 },
+      ]),
     });
 
     render(<ReportView projectRoot="/tmp/projA" />);
@@ -189,7 +254,7 @@ describe("ReportView", () => {
     expect(await screen.findByTestId("regression-evidence")).toBeInTheDocument();
     expect(screen.getByText("Baseline (ols_1)")).toBeInTheDocument();
     expect(screen.getByText("1.25 **")).toBeInTheDocument();
-    expect(screen.getByText("source: model_results.ols_1.coefficients.x")).toBeInTheDocument();
+    expect(screen.getByText("source: typed-fact-1")).toBeInTheDocument();
     expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
   });
 
@@ -225,6 +290,10 @@ describe("ReportView", () => {
       }],
       post_estimation_results: [],
       prediction_evidence: null,
+      report_evidence: typedReportEvidence([
+        { statisticId: "family:ordinal_logit:education:odds_ratio", value: 2.15 },
+        { statisticId: "model:ordinal_logit_1:coefficient:education:estimate", value: 0.76 },
+      ]),
     });
     mockFigureArtifacts.groups = [{
       artifact_type: "model_diagnostic",
@@ -251,10 +320,11 @@ describe("ReportView", () => {
 
     render(<ReportView projectRoot="/tmp/projA" />);
 
-    const familyEvidence = await screen.findByTestId("family-evidence-ordinal_logit_1");
-    expect(familyEvidence).toHaveTextContent("2.15");
-    expect(familyEvidence).toHaveTextContent(/parallel-lines/i);
+    const typedEvidence = await screen.findByTestId("typed-evidence-report:commit:report-test");
+    expect(typedEvidence).toHaveTextContent("2.15");
+    expect(typedEvidence).toHaveTextContent("family:ordinal_logit:education:odds_ratio");
     expect(screen.getByTestId("regression-evidence")).toHaveTextContent("0.76");
+    expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
   });
 
   it("generate renders prose with verified chips and flags unknown ids", async () => {
@@ -262,7 +332,7 @@ describe("ReportView", () => {
       text: "R² 良好 [[c:c2]],而这个引用不存在 [[c:c99]]。",
       model: "deepseek-v4-flash",
     });
-    render(<ReportView />);
+    render(<ReportView projectRoot="/tmp/projA" />);
     fireEvent.click(await screen.findByRole("button", { name: /generate report/i }));
 
     await waitFor(() => expect(screen.getByTestId("report-body")).toBeInTheDocument());
@@ -356,7 +426,7 @@ describe("ReportView", () => {
   });
 
   it("explains scope separately from source regression evidence", () => {
-    render(<ReportView />);
+    render(<ReportView projectRoot="/tmp/projA" />);
 
     expect(screen.getByTestId("report-scope-summary")).toHaveTextContent("What this report covers");
     expect(screen.getByTestId("report-scope-summary")).toHaveTextContent("does not change Workbench data");
@@ -402,8 +472,8 @@ describe("ReportView", () => {
 
   it("chip click jumps back to the graph and selects the node", async () => {
     mockGenerate.current = vi.fn().mockResolvedValue({ text: "见 [[c:c1]]", model: "m" });
-    render(<ReportView />);
-    fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
+    render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: /generate report/i }));
     await waitFor(() => expect(screen.getByTestId("report-body")).toBeInTheDocument());
 
     fireEvent.click(screen.getByTestId("cite-chip"));
@@ -445,7 +515,7 @@ describe("ReportView", () => {
     render(<ReportView projectRoot="/tmp/projA" />);
 
     await waitFor(() => expect(mockFigureContext).toHaveBeenCalledWith("/tmp/projA", "run_c", "coef_plot"));
-    fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate report/i }));
     await waitFor(() => expect(screen.getByTestId("report-figure-coef_plot")).toBeInTheDocument());
 
     const sent = mockGenerate.current.mock.calls[0][0] as {
@@ -454,17 +524,10 @@ describe("ReportView", () => {
     };
     expect(sent.figures).toHaveLength(1);
     expect(sent.figures[0].artifact_id).toBe("coef_plot");
-    expect(sent.figures[0].source).toEqual({
-      artifact_id: "ols_1",
-      kind: "model",
-      preview_json: '{"estimate":2.0}',
-      sha256: null,
-      path: "model_results/ols_1.json",
-      preview_truncated: false,
-    });
-    expect(sent.facts.some((fact: { field: string; value: unknown }) =>
-      fact.field === "figure:coef_plot:source.estimate" && fact.value === 2,
-    )).toBe(true);
+    expect(sent.figures[0].source).toBeUndefined();
+    expect(sent.facts.some((fact: { field: string }) =>
+      fact.field.startsWith("figure:coef_plot:"),
+    )).toBe(false);
     expect(screen.getByTestId("report-figure-coef_plot").getAttribute("src")).toContain("coef_plot");
   });
 
@@ -663,7 +726,7 @@ describe("ReportView", () => {
       "Report evidence (what the AI may reference)",
     );
     expect(screen.getByTestId("report-evidence-divider")).toHaveTextContent(
-      "Regression evidence above is source output; this section is the citable report context.",
+      "Only the typed server-owned projection in this section is citable; legacy model_results are non-authoritative.",
     );
   });
 
@@ -777,6 +840,7 @@ describe("ReportView curation & history (C-3)", () => {
       model_results: [],
       post_estimation_results: [],
       prediction_evidence: null,
+      report_evidence: typedReportEvidence(),
     });
   });
 
@@ -787,7 +851,7 @@ describe("ReportView curation & history (C-3)", () => {
     expect(screen.getByText("Model and estimation")).toBeInTheDocument();
     expect(screen.getByText("Model and estimation").closest("details")).not.toHaveAttribute("open");
     expect(screen.getByText("Covariance")).toBeInTheDocument();
-    expect(screen.queryByText("param:covariance")).not.toBeInTheDocument();
+    expect(screen.getByText("param:covariance")).toBeInTheDocument();
     const details = screen.getByText("Evidence details for fact c1").closest("details");
     expect(details).toBeInTheDocument();
     expect(details).toHaveTextContent("field: param:covariance");
@@ -795,6 +859,7 @@ describe("ReportView curation & history (C-3)", () => {
 
   it("unticking a fact excludes it from generation and discloses the exclusion", async () => {
     render(<ReportView projectRoot="/tmp/projA" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled());
     fireEvent.click(screen.getByRole("checkbox", { name: "Include fact c1" }));
 
     expect(screen.getByTestId("report-provenance").textContent).toContain(
@@ -815,7 +880,7 @@ describe("ReportView curation & history (C-3)", () => {
     // one fewer fact was sent than exists in the table
     expect(sent.facts.length).toBe(1);
     expect(sent.reportStandard).toBe("journal_full_v1");
-    expect(sent.capabilityManifest[0].provider_id).toBe("evidence.estimation.v1");
+    expect(sent.capabilityManifest[0].provider_id).toBe("evidence.report.typed.v1");
     // provenance of the generated report keeps the disclosure
     expect(screen.getByTestId("report-provenance").textContent).toContain(
       "facts were excluded",
@@ -867,6 +932,7 @@ describe("ReportView curation & history (C-3)", () => {
 
   it("starts a new report with all facts included", async () => {
     render(<ReportView projectRoot="/tmp/projA" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled());
     fireEvent.click(screen.getByRole("checkbox", { name: "Include fact c1" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled(),

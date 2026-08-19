@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .artifacts import read_json
 from .canonical import sha256_canonical
 # Kept as a module attribute for legacy test/import compatibility.  The typed
 # report consumer below never invokes narrative rendering.
@@ -177,6 +178,235 @@ def regression_table_export_rows(
     return export_rows
 
 
+def _build_legacy_presentation(
+    summary: dict[str, Any],
+    run_root: Path,
+    *,
+    descriptive_stats: list[dict[str, Any]] | None,
+    statistical_tests: dict[str, Any] | None,
+    statistical_evidence: dict[str, Any] | None,
+    regression_table: dict[str, Any] | None,
+    exploration: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Retain the established report view-model business semantics.
+
+    This helper intentionally operates on presentation inputs only.  Its
+    output is not admitted as Report evidence and is never used by the typed
+    export writer as a fact source.
+    """
+
+    diagnostics = summary.get("diagnostics", {})
+
+    def render_issues(issues: list[dict]) -> list[dict]:
+        result: list[dict] = []
+        for issue in issues:
+            template_key = issue.get("template_key", "")
+            params = issue.get("template_params", {})
+            if template_key:
+                try:
+                    text = render_template(template_key, params)
+                except (KeyError, ValueError):
+                    text = issue.get("message", "")
+            else:
+                text = issue.get("message", "")
+            result.append(
+                {
+                    "text": text,
+                    "code": issue.get("code", ""),
+                    "severity": issue.get("severity", ""),
+                    "variables": issue.get("variables", []),
+                }
+            )
+        return result
+
+    coeff_rows = summary.get("coefficients_summary", {}).get("rows", [])
+    coefficient_interpretations: list[dict[str, Any]] = []
+    for row in coeff_rows:
+        guide = row.get("interpretation_guide", "standard")
+        template_key = row.get("template_key", "")
+        if guide == "categorical_levels_vs_reference":
+            template_key = "coef_categorical"
+        elif template_key == "coef_continuous_association" and row.get("level"):
+            template_key = "coef_categorical"
+        if template_key:
+            try:
+                text = render_template(
+                    template_key,
+                    {
+                        "variable": row.get("display_name", row.get("variable", "")),
+                        "estimate": _format_estimate(row.get("estimate")),
+                        "p_label": row.get("significance_label", "not reported"),
+                        "y": summary.get("model_identity", {}).get("y_variable", "y"),
+                        "level": row.get("level", ""),
+                        "reference": "1",
+                    },
+                )
+            except (KeyError, ValueError):
+                text = row.get("message", "")
+        else:
+            text = ""
+        coefficient_interpretations.append(
+            {
+                "text": text,
+                "variable": row.get("variable", ""),
+                "interpretation_guide": guide,
+            }
+        )
+
+    narrative_contract = summary.get("narrative_contract", {})
+    constraints = narrative_contract.get("constraints", {})
+    if constraints.get("must_not_interpret_treatment_independently", False):
+        try:
+            causal_caution = render_template("causal_caution_with_treatment", {})
+        except (KeyError, ValueError):
+            causal_caution = ""
+    else:
+        try:
+            causal_caution = render_template("causal_caution_default", {})
+        except (KeyError, ValueError):
+            causal_caution = ""
+
+    descriptive = (
+        descriptive_stats
+        if descriptive_stats is not None
+        else _load_if_exists(run_root / "staged" / "data_profile.json")
+    )
+    statistical = (
+        statistical_tests
+        if statistical_tests is not None
+        else _load_if_exists(run_root / "staged" / "statistical_test_summaries.json")
+    )
+    model_diagnostics: dict[str, Any] = {}
+    diag_dir = run_root / "model_results"
+    if diag_dir.is_dir():
+        for path in sorted(diag_dir.glob("diagnostics_*.json")):
+            try:
+                data = read_json(path)
+            except Exception:
+                continue
+            if isinstance(data, dict):
+                model_diagnostics[path.stem] = data
+
+    critical_errors = render_issues(diagnostics.get("blockers", []))
+    if exploration is not None and exploration.get("status") != "completed":
+        critical_errors.append(
+            {
+                "text": "The statistical workflow did not complete; the final report is blocked.",
+                "code": "WORKFLOW_INCOMPLETE",
+                "severity": "BLOCKER",
+                "variables": [],
+            }
+        )
+    return {
+        "title": summary.get("model_identity", {}).get("model_label", "Econometrics Report"),
+        "presentation_facts": _build_facts_list(summary) + _survey_design_facts(run_root),
+        "critical_errors": critical_errors,
+        "warnings": render_issues(diagnostics.get("warnings", [])),
+        "cautions": render_issues(diagnostics.get("cautions", [])),
+        "system_notes": render_issues(diagnostics.get("info", [])),
+        "coefficient_interpretations": coefficient_interpretations,
+        "causal_caution": causal_caution,
+        "descriptive_stats": descriptive,
+        "statistical_tests": statistical,
+        "statistical_evidence": (
+            statistical_evidence
+            if statistical_evidence is not None
+            else _load_if_exists(run_root / "statistical_tests" / "evidence.json")
+        ),
+        "regression_table": regression_table,
+        "model_family_evidence": summary.get("model_family_evidence"),
+        "exploration": exploration,
+        "model_diagnostics": model_diagnostics,
+        "model_quality": summary.get("model_quality"),
+    }
+
+
+def _build_facts_list(summary: dict[str, Any]) -> list[str]:
+    model_identity = summary.get("model_identity", {})
+    preprocessing = summary.get("preprocessing", {})
+    exposure_var = preprocessing.get("exposure_variable")
+    x_vars = model_identity.get("x_variables", [])
+    display_x = [value for value in x_vars if value != exposure_var] if exposure_var else x_vars
+    model_label = model_identity.get("model_label", "")
+    if exposure_var:
+        model_label = f"Poisson rate model with log({exposure_var}) as offset"
+    facts = [
+        f"Model: {model_label}",
+        f"y = {model_identity.get('y_variable', '')};  X = {', '.join(display_x)}",
+    ]
+    if exposure_var:
+        facts.append(f"Exposure/offset: log({exposure_var}), coefficient fixed at 1")
+    facts.extend(
+        [
+            f"Rows used: {model_identity.get('n_observations', 0)} · Columns: {preprocessing.get('column_count_after_encoding', model_identity.get('n_predictors_after_encoding', 0) + 1)}",
+            f"Dataset kind: {model_identity.get('dataset_kind', 'unknown')}",
+        ]
+    )
+    imputation = preprocessing.get("imputation", {})
+    if isinstance(imputation, dict) and imputation.get("method") == "mice" and imputation.get("status") == "completed":
+        facts.append(_mice_imputation_fact(imputation))
+    encoded = preprocessing.get("categorical_encoded", [])
+    if encoded:
+        names = ", ".join(str(item["variable"]) for item in encoded if isinstance(item, dict) and "variable" in item)
+        facts.append(f"Categorical variable(s): {names} (dummy-coded in model)")
+    return facts
+
+
+def _mice_imputation_fact(imputation: dict[str, Any]) -> str:
+    columns = imputation.get("imputed_columns", [])
+    columns_text = ", ".join(str(column) for column in columns) if columns else "none"
+    persisted = imputation.get("persisted_datasets", 0)
+    persisted_text = "one" if persisted == 1 else str(persisted)
+    pooled = "were produced" if imputation.get("pooled_estimates") else "were not produced"
+    return f"MICE imputation: {persisted_text} persisted imputed dataset; imputed columns: {columns_text}; pooled estimates {pooled}."
+
+
+def _format_estimate(estimate: Any) -> str:
+    if estimate is None:
+        return "N/A"
+    try:
+        return f"{float(estimate):+.4f}"
+    except (ValueError, TypeError):
+        return str(estimate)
+
+
+def _load_if_exists(path: Path) -> Any | None:
+    if not path.is_file():
+        return None
+    try:
+        return read_json(path)
+    except Exception:
+        return None
+
+
+def _survey_design_facts(run_root: Path) -> list[str]:
+    for path in sorted((run_root / "model_results").glob("*.json")):
+        if path.name.startswith("diagnostics_"):
+            continue
+        try:
+            payload = read_json(path)
+        except (OSError, ValueError):
+            continue
+        design = payload.get("survey_design") if isinstance(payload, dict) else None
+        if not isinstance(design, dict):
+            continue
+        facts = [
+            "Standard errors are design-based, not the usual independent-sample kind: "
+            f"{design.get('variance_method', 'linearization')} over {design.get('n_strata', 0)} strata and {design.get('n_psu', 0)} PSUs "
+            f"(strata = {design.get('strata_column')}, PSU = {design.get('psu_column')})",
+            f"Design degrees of freedom: {design.get('degf')} (confidence intervals use this, not the sample size)",
+        ]
+        if design.get("design_effect") is not None and design.get("effective_sample_size") is not None:
+            facts.append(
+                f"Design effect {float(design['design_effect']):.2f}; effective sample size "
+                f"{float(design['effective_sample_size']):.1f} of {design.get('n_obs')} observations"
+            )
+        if design.get("subpopulation"):
+            facts.append(f"Subpopulation: {design['subpopulation']} (taken on the full design, not by filtering the data first)")
+        return facts
+    return []
+
+
 def build_report_view_model(
     summary: dict[str, Any],
     run_root: Path,
@@ -187,12 +417,44 @@ def build_report_view_model(
     regression_table: dict[str, Any] | None = None,
     exploration: dict[str, Any] | None = None,
     evidence_projection: Mapping[str, Any] | None = None,
+    include_legacy_presentation: bool = False,
 ) -> dict[str, Any]:
-    # Report view models are consumer projections, never a raw summary or
-    # model_results recomputation.  Keep the legacy arguments for call-site
-    # compatibility, but require the typed projection at this boundary.
+    # Preserve report presentation semantics (narrative, diagnostics,
+    # exploration, statistical and survey sections) while keeping citable
+    # numeric facts on the typed projection lane below.  Presentation fields
+    # are bounded view-model material, never an authority source for exports.
+    if isinstance(evidence_projection, Mapping) or include_legacy_presentation:
+        presentation = _build_legacy_presentation(
+            summary,
+            run_root,
+            descriptive_stats=descriptive_stats,
+            statistical_tests=statistical_tests,
+            statistical_evidence=statistical_evidence,
+            regression_table=regression_table,
+            exploration=exploration,
+        )
+    else:
+        presentation = {
+            "title": "Econometrics Report",
+            "presentation_facts": [],
+            "critical_errors": [],
+            "warnings": [],
+            "cautions": [],
+            "system_notes": [],
+            "coefficient_interpretations": [],
+            "causal_caution": "",
+            "descriptive_stats": None,
+            "statistical_tests": None,
+            "statistical_evidence": None,
+            "regression_table": None,
+            "model_family_evidence": None,
+            "exploration": None,
+            "model_diagnostics": {},
+            "model_quality": None,
+        }
     if not isinstance(evidence_projection, Mapping):
         return {
+            **presentation,
             "schemaVersion": 1,
             "status": "unavailable",
             "projectionId": "report:unavailable",
@@ -202,12 +464,15 @@ def build_report_view_model(
             "validationSummary": {"status": "unavailable", "reasonCode": "REPORT_EVIDENCE_REQUIRED"},
             "provenance": {},
             "facts": [],
-            "critical_errors": [{"code": "REPORT_EVIDENCE_REQUIRED", "severity": "BLOCKER"}],
+            "typedFacts": [],
+            "critical_errors": list(presentation["critical_errors"]),
+            "typed_critical_errors": [{"code": "REPORT_EVIDENCE_REQUIRED", "severity": "BLOCKER"}],
             **_projection_identity_fields({}),
         }
     projection = evidence_projection
     if projection.get("status") != "available":
         return {
+            **presentation,
             "schemaVersion": 1,
             "status": str(projection.get("status", "unavailable")),
             "projectionId": str(projection.get("projectionId", "report:unavailable")),
@@ -217,7 +482,9 @@ def build_report_view_model(
             "validationSummary": dict(projection.get("validationSummary", {})) if isinstance(projection.get("validationSummary"), Mapping) else {},
             "provenance": dict(projection.get("provenance", {})) if isinstance(projection.get("provenance"), Mapping) else {},
             "facts": [],
-            "critical_errors": [{"code": str(projection.get("reasonCode", "REPORT_EVIDENCE_UNAVAILABLE")), "severity": "BLOCKER"}],
+            "typedFacts": [],
+            "critical_errors": list(presentation["critical_errors"]),
+            "typed_critical_errors": [{"code": str(projection.get("reasonCode", "REPORT_EVIDENCE_UNAVAILABLE")), "severity": "BLOCKER"}],
             **_projection_identity_fields(projection),
         }
     facts = projection.get("facts")
@@ -255,6 +522,7 @@ def build_report_view_model(
     )
     if not typed_projection or not typed_facts:
         return {
+            **presentation,
             "schemaVersion": 1,
             "status": "blocked",
             "projectionId": str(projection.get("projectionId", "report:blocked")),
@@ -264,10 +532,13 @@ def build_report_view_model(
             "validationSummary": {"status": "blocked", "reasonCode": "REPORT_EVIDENCE_FACTS_INVALID"},
             "provenance": {},
             "facts": [],
-            "critical_errors": [{"code": "REPORT_EVIDENCE_FACTS_INVALID", "severity": "BLOCKER"}],
+            "typedFacts": [],
+            "critical_errors": list(presentation["critical_errors"]),
+            "typed_critical_errors": [{"code": "REPORT_EVIDENCE_FACTS_INVALID", "severity": "BLOCKER"}],
             **_projection_identity_fields(projection),
         }
     return {
+        **presentation,
         "schemaVersion": 1,
         "status": "available",
         "projectionId": str(projection.get("projectionId")),
@@ -277,7 +548,9 @@ def build_report_view_model(
         "validationSummary": dict(projection.get("validationSummary", {})) if isinstance(projection.get("validationSummary"), Mapping) else {},
         "provenance": dict(projection.get("provenance", {})) if isinstance(projection.get("provenance"), Mapping) else {},
         "facts": [dict(fact) for fact in facts],
-        "critical_errors": [],
+        "typedFacts": [dict(fact) for fact in facts],
+        "critical_errors": list(presentation["critical_errors"]),
+        "typed_critical_errors": [],
         **_projection_identity_fields(projection),
     }
 

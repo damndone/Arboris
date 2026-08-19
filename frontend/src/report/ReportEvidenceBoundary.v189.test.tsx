@@ -167,6 +167,18 @@ describe("Report evidence boundary v1.8.9", () => {
     void rawResult;
   });
 
+  it("does not render raw family packets when the typed report boundary is omitted", () => {
+    render(
+      <FamilyEvidence
+        modelResults={[rawFamilyResult]}
+        artifacts={{ raw: { leaked_scalar: 9.9 } }}
+      />,
+    );
+
+    expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
+    expect(screen.queryByText(/leaked_scalar/i)).not.toBeInTheDocument();
+  });
+
   it("renders only bounded committed projection facts with digest and provenance", () => {
     const facts = buildReportEvidenceFacts(committedProjection);
     expect(facts).toHaveLength(1);

@@ -12,10 +12,12 @@ from __future__ import annotations
 import base64
 import html
 import io
+import json
 import mimetypes
 import re
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape as xml_escape
@@ -30,6 +32,157 @@ _ORDERED = re.compile(r"^\d+[.)]\s+(.*)$")
 
 class ReportExportError(ValueError):
     """A user-visible report export validation or materialisation error."""
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceProjectionV1:
+    """Admitted, immutable Report projection used by every export writer."""
+
+    wire: dict[str, Any]
+
+    @classmethod
+    def unavailable(cls, reason_code: str) -> "EvidenceProjectionV1":
+        if type(reason_code) is not str or not reason_code.strip():
+            raise TypeError("reason_code must be a non-empty string")
+        return cls(
+            wire={
+                "schemaVersion": 1,
+                "projectionId": "report:unavailable",
+                "consumerId": "report",
+                "consumerVersion": "1.0",
+                "status": "unavailable",
+                "commitId": "UNAVAILABLE",
+                "envelopeDigest": "UNAVAILABLE",
+                "validationStatus": "unavailable",
+                "facts": [],
+                "provenance": {},
+                "reasonCode": reason_code,
+            }
+        )
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "EvidenceProjectionV1":
+        if not isinstance(value, Mapping):
+            raise TypeError("EvidenceProjectionV1 requires a mapping at its typed admission seam")
+        wire = dict(value)
+        if wire.get("status") != "available":
+            raise ReportExportError("REPORT_EVIDENCE_PROJECTION_UNAVAILABLE")
+        if wire.get("schemaVersion") != 1 or wire.get("consumerId") != "report":
+            raise ReportExportError("REPORT_EVIDENCE_SCHEMA_INVALID")
+        facts = wire.get("facts")
+        if not isinstance(facts, list) or len(facts) > 80 or any(
+            not isinstance(fact, Mapping)
+            or not isinstance(fact.get("factId"), str)
+            or not isinstance(fact.get("statisticId"), str)
+            for fact in facts
+        ):
+            raise ReportExportError("REPORT_EVIDENCE_FACTS_INVALID")
+        for key in ("projectionId", "commitId", "envelopeDigest", "validationStatus"):
+            if not isinstance(wire.get(key), str) or not str(wire[key]).strip():
+                raise ReportExportError(f"REPORT_EVIDENCE_{key.upper()}_REQUIRED")
+        if len(str(wire["envelopeDigest"])) != 64 or any(
+            char not in "0123456789abcdef" for char in str(wire["envelopeDigest"])
+        ):
+            raise ReportExportError("REPORT_EVIDENCE_PROJECTION_DIGEST_INVALID")
+        provenance = wire.get("provenance")
+        if not isinstance(provenance, Mapping):
+            raise ReportExportError("REPORT_EVIDENCE_PROVENANCE_REQUIRED")
+        for key in (
+            "actorRef",
+            "projectRef",
+            "sessionRef",
+            "scopeRef",
+            "runId",
+            "modelRunId",
+            "artifactRef",
+            "confirmationRef",
+        ):
+            if not isinstance(wire.get(key), str) or not str(wire[key]).strip() or wire[key] == "UNAVAILABLE":
+                raise ReportExportError(f"REPORT_EVIDENCE_{key.upper()}_REQUIRED")
+        for key in ("commitId", "artifactRef"):
+            if isinstance(provenance.get(key), str) and provenance[key] != wire[key]:
+                raise ReportExportError("REPORT_EVIDENCE_PROVENANCE_MISMATCH")
+        projection_digest = wire.get("projectionDigest")
+        if projection_digest is not None and (
+            not isinstance(projection_digest, str)
+            or len(projection_digest) != 64
+            or any(char not in "0123456789abcdef" for char in projection_digest)
+        ):
+            raise ReportExportError("REPORT_EVIDENCE_PROJECTION_DIGEST_INVALID")
+        return cls(wire=wire)
+
+
+@dataclass(frozen=True, slots=True)
+class ReportEvidenceWriterV1:
+    """Server-owned typed writer capability; raw tables are not its input."""
+
+    projection: EvidenceProjectionV1
+    sections: tuple[str, ...] = ("facts",)
+    tables_override: dict[str, tuple[dict[str, Any], ...]] | None = None
+
+    @classmethod
+    def from_projection(
+        cls,
+        projection: EvidenceProjectionV1,
+        *,
+        sections: tuple[str, ...] = ("facts",),
+        tables: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+    ) -> "ReportEvidenceWriterV1":
+        if type(projection) is not EvidenceProjectionV1:
+            raise TypeError("ReportEvidenceWriterV1 requires EvidenceProjectionV1")
+        if not sections or any(type(section) is not str or not section.strip() for section in sections):
+            raise TypeError("ReportEvidenceWriterV1 requires named typed sections")
+        normalized_tables: dict[str, tuple[dict[str, Any], ...]] | None = None
+        if tables is not None:
+            if not isinstance(tables, Mapping):
+                raise TypeError("typed writer tables must be a mapping")
+            normalized_tables = {}
+            for name, rows in tables.items():
+                if not isinstance(name, str) or not name.strip() or not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+                    raise TypeError("typed writer tables must contain named row sequences")
+                normalized_rows = []
+                for row in rows:
+                    if not isinstance(row, Mapping):
+                        raise TypeError("typed writer rows must be mappings")
+                    normalized_rows.append(dict(row))
+                normalized_tables[name] = tuple(normalized_rows)
+        return cls(
+            projection=projection,
+            sections=tuple(sections),
+            tables_override=normalized_tables,
+        )
+
+    def tables(self) -> dict[str, list[dict[str, Any]]]:
+        if self.tables_override is not None:
+            return {
+                name: [dict(row) for row in rows]
+                for name, rows in self.tables_override.items()
+            }
+        facts = self.projection.wire["facts"]
+        rows = [
+            {
+                "fact_id": fact.get("factId"),
+                "statistic_id": fact.get("statisticId"),
+                "value": fact.get("value"),
+                "unit": fact.get("unit", ""),
+                "standard_error": fact.get("standardError", ""),
+                "confidence_interval": json.dumps(
+                    fact.get("confidenceInterval"), sort_keys=True, separators=(",", ":")
+                ) if isinstance(fact.get("confidenceInterval"), dict) else "",
+                "commit_id": self.projection.wire["commitId"],
+                "envelope_digest": self.projection.wire["envelopeDigest"],
+                "validation_status": self.projection.wire["validationStatus"],
+                "validation_summary": json.dumps(
+                    self.projection.wire.get("validationSummary", {}), sort_keys=True, separators=(",", ":")
+                ),
+                "provenance": json.dumps(
+                    self.projection.wire.get("provenance", {}), sort_keys=True, separators=(",", ":")
+                ),
+            }
+            for fact in facts
+            if isinstance(fact, Mapping)
+        ]
+        return {section: list(rows) for section in self.sections}
 
 
 def _figure_assets(run_root: Path, figures: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -56,6 +209,12 @@ def _figure_assets(run_root: Path, figures: list[dict[str, Any]]) -> dict[str, d
             raise ReportExportError(f"Figure artifact file was not found: {artifact_id}")
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         data = path.read_bytes()
+        indexed_sha256 = record.get("sha256")
+        if not isinstance(indexed_sha256, str) or len(indexed_sha256) != 64:
+            raise ReportExportError(f"Figure artifact has no valid indexed sha256: {artifact_id}")
+        import hashlib
+        if hashlib.sha256(data).hexdigest() != indexed_sha256.lower():
+            raise ReportExportError(f"Figure artifact sha256 mismatch: {artifact_id}")
         assets[artifact_id] = {
             "artifact_id": artifact_id,
             "caption": str(item.get("chart_type") or artifact_id),
@@ -422,55 +581,20 @@ def export_report(
     markdown: str,
     figures: list[dict[str, Any]],
     format: str,
-    evidence_projection: Mapping[str, Any] | None = None,
+    evidence_projection: EvidenceProjectionV1 | None = None,
 ) -> tuple[bytes, str, str]:
-    if not isinstance(evidence_projection, Mapping):
+    if type(evidence_projection) is not EvidenceProjectionV1:
         raise ReportExportError("REPORT_EVIDENCE_PROJECTION_REQUIRED")
-    if evidence_projection.get("status") != "available":
-        raise ReportExportError("REPORT_EVIDENCE_PROJECTION_UNAVAILABLE")
-    if evidence_projection.get("schemaVersion") != 1 or evidence_projection.get("consumerId") != "report":
-        raise ReportExportError("REPORT_EVIDENCE_SCHEMA_INVALID")
-    facts = evidence_projection.get("facts")
-    if not isinstance(facts, list) or len(facts) > 80 or any(
-        not isinstance(fact, Mapping)
-        or not isinstance(fact.get("factId"), str)
-        or not isinstance(fact.get("statisticId"), str)
-        for fact in facts
-    ):
-        raise ReportExportError("REPORT_EVIDENCE_FACTS_INVALID")
-    for key in ("projectionId", "commitId", "envelopeDigest", "validationStatus", "provenance"):
-        if key == "provenance":
-            if not isinstance(evidence_projection.get(key), Mapping):
-                raise ReportExportError("REPORT_EVIDENCE_PROVENANCE_REQUIRED")
-        elif not isinstance(evidence_projection.get(key), str) or not str(evidence_projection[key]).strip():
-            raise ReportExportError(f"REPORT_EVIDENCE_{key.upper()}_REQUIRED")
-    for key in (
-        "actorRef",
-        "projectRef",
-        "sessionRef",
-        "scopeRef",
-        "runId",
-        "modelRunId",
-        "artifactRef",
-        "confirmationRef",
-    ):
-        value = evidence_projection.get(key)
-        if not isinstance(value, str) or not value.strip() or value == "UNAVAILABLE":
-            raise ReportExportError(f"REPORT_EVIDENCE_{key.upper()}_REQUIRED")
-    provenance = evidence_projection["provenance"]
-    if isinstance(provenance.get("commitId"), str) and provenance["commitId"] != evidence_projection["commitId"]:
-        raise ReportExportError("REPORT_EVIDENCE_PROVENANCE_MISMATCH")
-    if isinstance(provenance.get("artifactRef"), str) and provenance["artifactRef"] != evidence_projection["artifactRef"]:
-        raise ReportExportError("REPORT_EVIDENCE_PROVENANCE_MISMATCH")
+    projection = evidence_projection.wire
     if format not in {"html", "docx", "tex", "pdf-print"}:
         raise ReportExportError(f"Unsupported report export format: {format}")
     assets = _figure_assets(run_root, figures)
     evidence_footer = (
         "\n\n---\n\n"
-        f"Evidence projection: {evidence_projection['projectionId']}\n\n"
-        f"Commit: {evidence_projection['commitId']}\n\n"
-        f"Digest: {evidence_projection['envelopeDigest']}\n\n"
-        f"Validation: {evidence_projection['validationStatus']}"
+        f"Evidence projection: {projection['projectionId']}\n\n"
+        f"Commit: {projection['commitId']}\n\n"
+        f"Digest: {projection['envelopeDigest']}\n\n"
+        f"Validation: {projection['validationStatus']}"
     )
     markdown = markdown + evidence_footer
     if format in {"html", "pdf-print"}:
@@ -487,4 +611,12 @@ def export_report(
     return output.getvalue(), "application/zip", "report.tex.zip"
 
 
-__all__ = ["ReportExportError", "export_report", "render_report_html", "render_report_docx", "render_report_tex"]
+__all__ = [
+    "EvidenceProjectionV1",
+    "ReportEvidenceWriterV1",
+    "ReportExportError",
+    "export_report",
+    "render_report_html",
+    "render_report_docx",
+    "render_report_tex",
+]

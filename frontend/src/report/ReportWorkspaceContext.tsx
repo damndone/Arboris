@@ -240,6 +240,17 @@ function cloneReportFigure(figure: ReportFigure): ReportFigure {
   return cloneJson(figure);
 }
 
+/** Only artifact identity crosses the Report writer boundary.  Source and
+ * preview_json remain diagnostic compatibility data and are never sent as
+ * writer evidence. */
+function writerFigureReference(figure: ReportFigure): ReportFigure {
+  return {
+    artifact_id: figure.artifact_id,
+    chart_type: figure.chart_type,
+    ...(figure.path ? { path: figure.path } : {}),
+  };
+}
+
 function generationEvidenceFromRecord(record: ReportRecord): ReportGenerationEvidence {
   const source = record.revision?.source;
   const facts = source?.facts ?? record.facts;
@@ -827,7 +838,7 @@ export function ReportWorkspaceProvider({
         facts: includedEvidenceFacts,
         scope: evidence.scope,
         fingerprints: evidence.fingerprints,
-        figures: includedEvidenceFigures,
+        figures: includedEvidenceFigures.map(writerFigureReference),
         instruction: normalizedInstruction,
         reportStandard: "journal_full_v1",
         requiredCapabilities,

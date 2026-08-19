@@ -78,7 +78,8 @@ def test_build_view_model_renders_issues():
     assert view_model["status"] == "available"
     assert view_model["validationStatus"] == "met"
     assert view_model["commitId"] == "evidence-commit-1"
-    assert mock_render.call_count == 0
+    assert view_model["warnings"][0]["text"] == "rendered text"
+    assert mock_render.call_count >= 1
 
 
 def test_build_view_model_empty_diagnostics():
@@ -98,6 +99,8 @@ def test_build_view_model_empty_diagnostics():
         view_model = _build(summary)
     assert view_model["status"] == "available"
     assert view_model["facts"] == _typed_projection()["facts"]
+    assert view_model["title"] == "OLS"
+    assert view_model["causal_caution"]
 
 
 # ---- QA edge-case tests ----
@@ -125,7 +128,8 @@ def test_estimate_none_coeff_row_does_not_crash():
         view_model = _build(summary)
     assert view_model["status"] == "available"
     assert view_model["facts"][0]["value"] == 1.25
-    assert mock_render.call_count == 0
+    assert len(view_model["coefficient_interpretations"]) == 1
+    assert mock_render.call_count >= 1
 
 
 def test_template_keyerror_falls_back_to_message():
@@ -147,7 +151,7 @@ def test_template_keyerror_falls_back_to_message():
     view_model = _build(summary)
     assert view_model["status"] == "available"
     assert view_model["critical_errors"] == []
-    assert "fallback msg" not in json.dumps(view_model, sort_keys=True)
+    assert view_model["warnings"][0]["text"] == "fallback msg"
 
 
 def test_template_valueerror_falls_back_to_message():
@@ -169,7 +173,7 @@ def test_template_valueerror_falls_back_to_message():
     view_model = _build(summary)
     assert view_model["status"] == "available"
     assert view_model["critical_errors"] == []
-    assert "missing params msg" not in json.dumps(view_model, sort_keys=True)
+    assert view_model["warnings"][0]["text"] == "missing params msg"
 
 
 def test_no_template_key_uses_message():
@@ -188,7 +192,7 @@ def test_no_template_key_uses_message():
     }
     view_model = _build(summary)
     assert view_model["status"] == "available"
-    assert "plain message" not in json.dumps(view_model, sort_keys=True)
+    assert view_model["warnings"][0]["text"] == "plain message"
 
 
 def test_causal_caution_with_treatment():
@@ -207,6 +211,7 @@ def test_causal_caution_with_treatment():
     view_model = _build(summary)
     assert view_model["status"] == "available"
     assert view_model["validationSummary"]["requirement_status"] == "met"
+    assert "treatment-like variable" in view_model["causal_caution"]
 
 
 def test_causal_caution_default():
@@ -225,6 +230,7 @@ def test_causal_caution_default():
     view_model = _build(summary)
     assert view_model["status"] == "available"
     assert view_model["envelopeDigest"] == "a" * 64
+    assert "associations" in view_model["causal_caution"].lower()
 
 
 def test_facts_include_model_label_and_y():
@@ -248,8 +254,8 @@ def test_facts_include_model_label_and_y():
     view_model = _build(summary)
     facts = view_model["facts"]
     assert [fact["value"] for fact in facts] == [1.25, 0.2]
-    assert "Poisson regression" not in json.dumps(view_model, sort_keys=True)
-    assert "claim_count" not in json.dumps(view_model, sort_keys=True)
+    assert any("Poisson regression" in fact for fact in view_model["presentation_facts"])
+    assert any("claim_count" in fact for fact in view_model["presentation_facts"])
 
 
 def test_facts_mention_categorical():
@@ -269,7 +275,7 @@ def test_facts_mention_categorical():
     }
     view_model = _build(summary)
     assert view_model["status"] == "available"
-    assert "dummy-coded" not in json.dumps(view_model, sort_keys=True)
+    assert "dummy-coded" in " ".join(view_model["presentation_facts"])
 
 
 def test_coeff_render_failure_yields_empty_text():
@@ -288,6 +294,7 @@ def test_coeff_render_failure_yields_empty_text():
         view_model = _build(summary)
     assert view_model["status"] == "available"
     assert view_model["facts"][1]["statisticId"] == "standard-error"
+    assert view_model["coefficient_interpretations"][0]["text"] == ""
 
 
 def test_empty_summary_does_not_crash():
@@ -298,4 +305,4 @@ def test_empty_summary_does_not_crash():
     assert view_model["status"] == "available"
     assert view_model["critical_errors"] == []
     assert view_model["projectionId"] == "report:evidence-commit-1"
-    assert mock_render.call_count == 0
+    assert mock_render.call_count >= 1

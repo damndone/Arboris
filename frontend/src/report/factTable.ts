@@ -258,6 +258,17 @@ export function unavailableReportEvidence(
 
 const MAX_TYPED_EVIDENCE_FACTS = 80;
 
+function typedFactLabel(statisticId: string): string {
+  const labels: Record<string, string> = {
+    "ts:arma:selected_candidate": "Selected ARMA specification",
+    "ts:validation:rmse": "Validation RMSE",
+    "ts:contract:transform": "Analysis transform",
+    "ts:data:analysis_observations": "Analysis-view observations",
+  };
+  const parts = statisticId.split(":");
+  return labels[statisticId] ?? parts[parts.length - 1]?.replace(/_/g, " ") ?? statisticId;
+}
+
 /** Convert only the bounded server projection into citable report facts. */
 export function buildReportEvidenceFacts(
   evidence: ReportEvidenceProjection | null | undefined,
@@ -269,8 +280,8 @@ export function buildReportEvidenceFacts(
     id: `c${startAt + index + 1}`,
     node_key: `evidence:${evidence.projectionId}`,
     node_label: "Persisted report evidence",
-    field: `evidence:${evidence.consumerId}:${fact.statisticId}`,
-    label: `${fact.statisticId}${fact.unit ? ` (${fact.unit})` : ""}`,
+    field: fact.statisticId,
+    label: `${typedFactLabel(fact.statisticId)}${fact.unit ? ` (${fact.unit})` : ""}`,
     value: fact.value,
     provider_id: "evidence.report.typed.v1",
     kind: "estimate",

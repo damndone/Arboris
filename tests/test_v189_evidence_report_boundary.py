@@ -37,6 +37,7 @@ from workbench.report_view_model import (
 from workbench.services.results_service import (
     PersistedEvidenceResultsFacadeV1,
     ServerOwnedReportEvidencePersistenceV1,
+    UnavailableReportEvidenceCapabilityV1,
 )
 
 
@@ -151,6 +152,7 @@ def _server_owned_evidence(
     *,
     run_id: str = "run-1",
     model_run_id: str = "run-1",
+    canonical_project_root: Path | None = None,
 ) -> Iterator[tuple[ArtifactAdmissionV1, EvidenceCommitBindingV1, ServerOwnedReportEvidencePersistenceV1]]:
     """Build the same C0 registry/store/receipt capability as the owner seam."""
 
@@ -190,6 +192,7 @@ def _server_owned_evidence(
             commit_id=binding.commit_id,
             confirmation_ref=f"confirmation:{run_id}",
             artifact_file_sha256=hashlib.sha256(owner_raw).hexdigest(),
+            canonical_project_root=canonical_project_root,
         )
         yield record, binding, capability
 
@@ -542,7 +545,7 @@ def test_http_run_detail_rejects_a_rehashed_index_for_tampered_payload(
 
     owner_root = tmp_path / "owner-store"
     owner_root.mkdir()
-    with _server_owned_evidence(owner_root) as (record, binding, capability):
+    with _server_owned_evidence(owner_root, canonical_project_root=project_root) as (record, binding, capability):
         indexed_artifact, _payload, _content_hash = _canonical_indexed_artifact(record, binding)
         tampered_payload = {
             "source": {"run_id": "run-1", "model_run_id": "run-1"},
@@ -595,7 +598,7 @@ def test_http_run_detail_rejects_foreign_actor_and_copied_confirmation(
     )
     owner_root = tmp_path / "owner-store"
     owner_root.mkdir()
-    with _server_owned_evidence(owner_root) as (record, binding, capability):
+    with _server_owned_evidence(owner_root, canonical_project_root=project_root) as (record, binding, capability):
         index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
         index["path"] = "artifacts/post_estimation/result.json"
         index["actor_ref"] = "actor:foreign"
@@ -670,7 +673,7 @@ def test_default_app_lifespan_uses_the_server_owned_report_capability(tmp_path: 
     )
     owner_root = tmp_path / "owner-store"
     owner_root.mkdir()
-    with _server_owned_evidence(owner_root) as (record, binding, capability):
+    with _server_owned_evidence(owner_root, canonical_project_root=project_root) as (record, binding, capability):
         index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
         index["path"] = "artifacts/post_estimation/result.json"
         index.pop("evidence_commit_binding")
@@ -692,6 +695,63 @@ def test_default_app_lifespan_uses_the_server_owned_report_capability(tmp_path: 
 
     assert response.status_code == 200, response.text
     assert response.json()["report_evidence"]["status"] == "available"
+
+
+def test_default_app_lifespan_never_leaves_report_owner_as_none() -> None:
+    with TestClient(app):
+        owner = app.state.report_evidence_persistence
+
+    assert owner is not None
+    assert type(owner) in {
+        ServerOwnedReportEvidencePersistenceV1,
+        UnavailableReportEvidenceCapabilityV1,
+    }
+
+
+def test_copied_valid_report_pair_in_foreign_project_root_is_typed_rejected(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    canonical_root = tmp_path / "canonical-project"
+    foreign_root = tmp_path / "foreign-project"
+    run_root = foreign_root / "runs" / "run-1"
+    artifact_path = run_root / "artifacts" / "post_estimation" / "result.json"
+    artifact_path.parent.mkdir(parents=True)
+    (run_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "run-1", "status": "completed", "mode": "auto", "lineage": []}),
+        encoding="utf-8",
+    )
+
+    owner_root = tmp_path / "owner-store"
+    owner_root.mkdir()
+    with _server_owned_evidence(owner_root) as (record, binding, capability):
+        index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
+        index["path"] = "artifacts/post_estimation/result.json"
+        index.pop("evidence_commit_binding")
+        index.pop("evidence_envelope")
+        raw_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+        artifact_path.write_bytes(raw_payload)
+        (run_root / "artifacts_index.json").write_text(
+            json.dumps({"schema_version": 1, "artifacts": [index]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(runs_routes, "current_report_evidence_persistence", lambda **_: capability)
+
+        response = TestClient(app).get(
+            "/runs/run-1",
+            params={"project_root": str(foreign_root)},
+        )
+
+    assert canonical_root != foreign_root
+    assert response.status_code == 200, response.text
+    evidence = response.json()["report_evidence"]
+    assert evidence["status"] in {"unavailable", "blocked"}
+    assert evidence["reasonCode"] in {
+        "EVIDENCE_PROJECT_ROOT_MISMATCH",
+        "EVIDENCE_SCOPE_ROOT_MISMATCH",
+        "EVIDENCE_OWNER_CONTEXT_MISMATCH",
+    }
+    assert evidence["facts"] == []
 
 
 def test_http_run_detail_never_returns_raw_model_results(tmp_path: Path) -> None:
@@ -750,7 +810,7 @@ def test_result_table_export_valid_commit_downloads_only_typed_facts(tmp_path: P
     )
     owner_root = tmp_path / "owner-store"
     owner_root.mkdir()
-    with _server_owned_evidence(owner_root) as (record, binding, capability):
+    with _server_owned_evidence(owner_root, canonical_project_root=project_root) as (record, binding, capability):
         index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
         index["path"] = "artifacts/post_estimation/result.json"
         index.pop("evidence_commit_binding")
@@ -795,7 +855,7 @@ def test_result_table_export_download_failure_is_typed_blocked(tmp_path: Path, m
     )
     owner_root = tmp_path / "owner-store"
     owner_root.mkdir()
-    with _server_owned_evidence(owner_root) as (record, binding, capability):
+    with _server_owned_evidence(owner_root, canonical_project_root=project_root) as (record, binding, capability):
         index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
         index["path"] = "artifacts/post_estimation/result.json"
         index.pop("evidence_commit_binding")

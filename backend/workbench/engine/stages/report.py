@@ -332,8 +332,24 @@ class ReportStage:
                     statistical_tests=statistical_test_summaries,
                     statistical_evidence=statistical_tests.get("evidence"),
                     regression_table=regression_table,
+                    include_legacy_presentation=True,
                 )
-            render_html_report(view_model, run_root)
+                if view_model.get("status") != "available":
+                    # Presentation facts retain the historical report prose
+                    # surface, while the public `facts` field remains empty
+                    # until a typed committed projection is admitted.
+                    view_model["facts"] = list(view_model.get("presentation_facts", []))
+            from ...report_export import EvidenceProjectionV1
+            from ...reporting import ReportDocumentWriterV1
+
+            render_html_report(
+                ReportDocumentWriterV1.from_view_model(
+                    view_model,
+                    EvidenceProjectionV1.unavailable("EVIDENCE_COMMIT_BINDING_REQUIRED"),
+                    canonical_run_root=run_root,
+                ),
+                run_root,
+            )
             report_render_status = "complete"
             report_available = (run_root / "reports" / "report.html").is_file()
             env.step("reporting", "complete", "Rendered HTML report")

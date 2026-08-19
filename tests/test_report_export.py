@@ -1,22 +1,27 @@
 from __future__ import annotations
 
 import io
+import hashlib
+import json
 import zipfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
 from workbench.app import app
 from workbench.artifacts import write_json
 from workbench.projects import create_project, create_run
-from workbench.report_export import export_report
+from workbench.report_export import EvidenceProjectionV1, ReportExportError, export_report
+from workbench.exports import render_typed_xlsx
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, str]:
     project = create_project(tmp_path, "demo")
     run = create_run(project.root, mode="auto")
     (run.root / "figures").mkdir(parents=True, exist_ok=True)
-    (run.root / "figures" / "coef_plot.png").write_bytes(b"\x89PNG fake")
+    figure_bytes = b"\x89PNG fake"
+    (run.root / "figures" / "coef_plot.png").write_bytes(figure_bytes)
     write_json(
         run.root / "artifacts_index.json",
         {
@@ -27,7 +32,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
                     "path": "figures/coef_plot.png",
                     "artifact_type": "figure",
                     "step": "visualization",
-                    "sha256": "stub",
+                    "sha256": hashlib.sha256(figure_bytes).hexdigest(),
                     "inputs": [],
                 }
             ],
@@ -36,8 +41,8 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
     return project.root, run.run_id
 
 
-def _typed_projection() -> dict[str, object]:
-    return {
+def _typed_projection() -> EvidenceProjectionV1:
+    return EvidenceProjectionV1.from_wire({
         "schemaVersion": 1,
         "projectionId": "report:evidence-commit-1",
         "consumerId": "report",
@@ -62,7 +67,7 @@ def _typed_projection() -> dict[str, object]:
         "facts": [{"factId": "fact-1", "statisticId": "estimate", "value": 1.25}],
         "sections": [],
         "provenance": {"artifactRef": "artifact-1", "commitId": "evidence-commit-1"},
-    }
+    })
 
 
 def test_report_export_embeds_figures_in_html_and_print_html(tmp_path: Path) -> None:
@@ -120,6 +125,27 @@ def test_report_export_produces_docx_and_latex_zip_without_new_dependencies(tmp_
         tex = archive.read("report.tex").decode("utf-8")
         assert "includegraphics" in tex
         assert "[[fig:" not in tex
+
+
+def test_report_export_rejects_an_artifact_index_hash_mismatch(tmp_path: Path) -> None:
+    project_root, run_id = _fixture(tmp_path)
+    index_path = project_root / "runs" / run_id / "artifacts_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["artifacts"][0]["sha256"] = "b" * 64
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    with pytest.raises(ReportExportError, match="HASH|hash|artifact"):
+        export_report(
+            project_root / "runs" / run_id,
+            markdown="# Results [[fig:coef_plot]]",
+            figures=[{"artifact_id": "coef_plot", "chart_type": "Coefficient plot"}],
+            format="html",
+            evidence_projection=_typed_projection(),
+        )
+
+
+def test_typed_xlsx_writer_rejects_raw_tables_without_server_owned_projection() -> None:
+    with pytest.raises(TypeError, match="typed|capability|projection"):
+        render_typed_xlsx({"facts": [{"value": 1.25}]})
 
 
 def test_report_export_route_requires_committed_typed_evidence(tmp_path: Path) -> None:
