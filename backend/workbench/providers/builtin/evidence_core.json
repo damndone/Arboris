@@ -1,0 +1,60 @@
+{
+  "provider_id": "evidence.core",
+  "semantic_version": "1.0",
+  "contracts": [
+    {"kind": "capability", "logical_id": "evidence.core.capability", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000001"},
+    {"kind": "operation", "logical_id": "evidence.core.operation", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000002"},
+    {"kind": "step", "logical_id": "evidence.core.step", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000003"},
+    {"kind": "schema", "logical_id": "evidence.core.request", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000004"},
+    {"kind": "validator", "logical_id": "evidence.core.envelope", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000005"},
+    {"kind": "adapter", "logical_id": "evidence.core.adapter", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000006"},
+    {"kind": "output", "logical_id": "evidence.core.output", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000007"},
+    {"kind": "evidence", "logical_id": "evidence.core.envelope.contract", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000008"},
+    {"kind": "projection", "logical_id": "evidence.core.projection", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000009"},
+    {"kind": "renderer", "logical_id": "evidence.core.renderer", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000010"},
+    {"kind": "policy", "logical_id": "evidence.core.policy", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000011"}
+  ],
+  "exposure_paths": [
+    {
+      "path_id": "evidence.core.direct",
+      "semantic_version": "1.0",
+      "exposure": "direct",
+      "capability_ref": {"kind": "capability", "logical_id": "evidence.core.capability", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000001"},
+      "operation_ref": {"kind": "operation", "logical_id": "evidence.core.operation", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000002"},
+      "step_contract_ref": {"kind": "step", "logical_id": "evidence.core.step", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000003"},
+      "family_contract_ref": null,
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "evidence.core.adapter", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000006"},
+      "result_contract_refs": [
+        {"kind": "output", "logical_id": "evidence.core.output", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000007"}
+      ],
+      "evidence_contract_refs": [
+        {"kind": "evidence", "logical_id": "evidence.core.envelope.contract", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000008"}
+      ],
+      "projection_refs": {
+        "agent": {"kind": "projection", "logical_id": "evidence.core.projection", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000009"}
+      }
+    }
+  ],
+  "adapter_declarations": [
+    {
+      "adapter_id": "evidence.core.adapter",
+      "semantic_version": "1.0",
+      "request_schema_ref": {"kind": "schema", "logical_id": "evidence.core.request", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000004"},
+      "executor_ref": "executor:evidence.core.adapter",
+      "result_validator_ref": {"kind": "validator", "logical_id": "evidence.core.envelope", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000005"},
+      "output_refs": [
+        {"kind": "output", "logical_id": "evidence.core.output", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000007"},
+        {"kind": "evidence", "logical_id": "evidence.core.envelope.contract", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000008"}
+      ]
+    }
+  ],
+  "projection_refs": [
+    {"kind": "projection", "logical_id": "evidence.core.projection", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000009"}
+  ],
+  "renderer_refs": [
+    {"kind": "renderer", "logical_id": "evidence.core.renderer", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000010"}
+  ],
+  "policy_refs": [
+    {"kind": "policy", "logical_id": "evidence.core.policy", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000011"}
+  ]
+}
