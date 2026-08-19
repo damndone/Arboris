@@ -268,7 +268,7 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
       <RegressionTable packet={regressionTable} />
       <FamilyEvidence
         modelResults={workspace.modelResults as unknown as FamilyModelResult[]}
-        artifacts={workspace.familyEvidenceArtifacts}
+        evidence={workspace.reportEvidenceProjection}
       />
       {classificationEvidenceArtifact !== undefined && (
         <ReportClassificationEvidenceMount evidence={classificationEvidenceArtifact} />

@@ -52,7 +52,12 @@ from ..repository.run_repository import (
 from ..report_export import ReportExportError, export_report
 from ..report_contract import ReportContractError, validate_report_packet
 from ..report_quality import validate_report_response_quality
-from ..report_view_model import build_regression_table, regression_table_export_rows
+from ..report_view_model import (
+    build_indexed_report_evidence,
+    build_regression_table,
+    build_report_evidence_bundle,
+    regression_table_export_rows,
+)
 from ..report_store import list_ai_reports, save_ai_report
 from ..services.lmm_result_adapter import VersionedResultReadError
 from ..services.results_service import _model_results, _normalize_issue_stream
@@ -100,6 +105,52 @@ _RESULT_TABLE_SECTIONS = frozenset(
         "model_family_evidence",
     }
 )
+
+_REPORT_EVIDENCE_ARTIFACT_TYPES = frozenset(
+    {"post_estimation", "statistical_test", "p7_analysis", "workflow_capability_result"}
+)
+
+
+def _report_evidence_for_run(
+    run_root: Path,
+    post_estimation_results: list[dict[str, Any]],
+) -> dict[str, object]:
+    """Build the typed Report contribution from indexed artifacts only."""
+
+    views: list[dict[str, object]] = []
+    try:
+        indexed_records = _read_artifact_records(run_root)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError):
+        indexed_records = []
+    for record in indexed_records:
+        if not isinstance(record, dict):
+            continue
+        if record.get("artifact_type") not in _REPORT_EVIDENCE_ARTIFACT_TYPES:
+            continue
+        payload: object | None = None
+        try:
+            payload = read_json(_resolve_artifact_path(run_root, record))
+        except (OSError, TypeError, ValueError, WorkbenchAPIError):
+            payload = None
+        views.append(build_indexed_report_evidence(record, payload))
+
+    # A model child may surface a source-run post-estimation entry even when
+    # its own index does not contain that artifact.  Preserve the legacy entry
+    # for compatibility, but give the Report consumer an explicit typed empty
+    # projection instead of treating its result object as evidence.
+    if not views:
+        for entry in post_estimation_results:
+            views.append(build_indexed_report_evidence(entry, entry))
+
+    bundle = build_report_evidence_bundle(views)
+    if bundle is not None:
+        return bundle
+    return build_indexed_report_evidence(
+        {
+            "artifact_id": f"run:{run_root.name}",
+            "artifact_type": "report",
+        }
+    )
 
 
 class ResultTableExportRequest(BaseModel):
@@ -543,6 +594,13 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
             )
         except (PayloadContractError, OSError, ValueError):
             prediction_evidence = {"status": "unavailable"}
+    post_estimation_results = collect_post_estimation_results(
+        run_root.parent.parent, run_id
+    )
+    report_evidence = _report_evidence_for_run(
+        run_root,
+        post_estimation_results,
+    )
     return {
         **summary,
         "lineage": manifest.get("lineage", []),
@@ -558,9 +616,8 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the
         # run surface show that answer instead of leaving it in an artifact.
-        "post_estimation_results": collect_post_estimation_results(
-            run_root.parent.parent, run_id
-        ),
+        "post_estimation_results": post_estimation_results,
+        "report_evidence": report_evidence,
     }
 
 

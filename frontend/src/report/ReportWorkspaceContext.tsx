@@ -13,9 +13,12 @@ import { REPORT_REVIEW_TAB_ID } from "../workbench/state/tabsSchema";
 import {
   buildFactTable,
   buildFigureFacts,
-  buildPostEstimationFacts,
+  buildReportEvidenceFacts,
   buildTimeSeriesFacts,
+  readReportEvidenceProjection,
+  unavailableReportEvidence,
   type CitableFact,
+  type ReportEvidenceProjection,
 } from "./factTable";
 import {
   displayEvidenceLabel,
@@ -52,7 +55,12 @@ import {
   fetchRunArtifacts,
   fetchRunDetail,
 } from "../api";
-import type { ModelResult, PostEstimationResult, PredictionResearchEvidence } from "../api";
+import type {
+  ModelResult,
+  PostEstimationResult,
+  PredictionResearchEvidence,
+  RunDetail,
+} from "../api";
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
 
@@ -278,7 +286,7 @@ function reportEvidenceFingerprint(input: {
   figures: ReportFigure[];
   modelResults: ModelResult[];
   timeSeriesArtifacts: Record<string, unknown>;
-  postEstimation: PostEstimationResult[];
+  reportEvidence: ReportEvidenceProjection | null;
 }): string {
   return `report-evidence-v1:${hashText(canonicalJson(input))}`;
 }
@@ -328,6 +336,7 @@ export interface ReportWorkspaceContextValue {
   postEstimation: PostEstimationResult[];
   modelResults: ModelResult[];
   familyEvidenceArtifacts: Record<string, unknown>;
+  reportEvidenceProjection: ReportEvidenceProjection | null;
   reportContextLines: string[];
   reportContextDetails: string[];
   reportContextUsedTokens: number;
@@ -420,6 +429,7 @@ export function ReportWorkspaceProvider({
   const [predictionEvidence, setPredictionEvidence] = useState<PredictionResearchEvidence | null>(null);
   const [modelResults, setModelResults] = useState<ModelResult[]>([]);
   const [familyEvidenceArtifacts, setFamilyEvidenceArtifacts] = useState<Record<string, unknown>>({});
+  const [reportEvidenceProjection, setReportEvidenceProjection] = useState<ReportEvidenceProjection | null>(null);
 
   useEffect(() => {
     if (!reportWorkspaceRequested) return undefined;
@@ -428,6 +438,7 @@ export function ReportWorkspaceProvider({
       setPostEstimation([]);
       setPredictionEvidence(null);
       setModelResults([]);
+      setReportEvidenceProjection(null);
       setPostEstimationLoadError(null);
       return;
     }
@@ -439,6 +450,12 @@ export function ReportWorkspaceProvider({
           setPostEstimation(detail.post_estimation_results ?? []);
           setPredictionEvidence(detail.prediction_evidence ?? null);
           setModelResults(detail.model_results ?? []);
+          const reportEvidence = readReportEvidenceProjection(
+            (detail as RunDetail & { report_evidence?: unknown }).report_evidence,
+          );
+          setReportEvidenceProjection(
+            reportEvidence ?? unavailableReportEvidence("REPORT_EVIDENCE_SCHEMA_INVALID", `run:${runId}`),
+          );
           setPostEstimationLoadError(null);
         }
       })
@@ -447,6 +464,9 @@ export function ReportWorkspaceProvider({
           setPostEstimation([]);
           setPredictionEvidence(null);
           setModelResults([]);
+          setReportEvidenceProjection(
+            unavailableReportEvidence("REPORT_EVIDENCE_LOAD_FAILED", `run:${runId}`),
+          );
           const message = err instanceof Error ? err.message : "server-owned result evidence is unavailable";
           setPostEstimationLoadError(
             `Unable to load server-owned result evidence; report generation is disabled: ${message}`,
@@ -679,11 +699,11 @@ export function ReportWorkspaceProvider({
     [figureFacts.length, table?.facts.length, timeSeriesArtifacts, timeSeriesProvenance],
   );
   const postEstimationFacts = useMemo(
-    () => buildPostEstimationFacts(
-      postEstimation,
+    () => buildReportEvidenceFacts(
+      reportEvidenceProjection,
       (table?.facts.length ?? 0) + figureFacts.length + timeSeriesFacts.length,
     ),
-    [figureFacts.length, postEstimation, table?.facts.length, timeSeriesFacts.length],
+    [figureFacts.length, reportEvidenceProjection, table?.facts.length, timeSeriesFacts.length],
   );
   const allFacts = useMemo(
     () => (table ? [...table.facts, ...figureFacts, ...timeSeriesFacts, ...postEstimationFacts] : []),
@@ -699,7 +719,7 @@ export function ReportWorkspaceProvider({
         figures: reportFigures,
         modelResults,
         timeSeriesArtifacts,
-        postEstimation,
+        reportEvidence: reportEvidenceProjection,
       })
     : null;
   const activeReportFingerprints = table
@@ -1083,6 +1103,7 @@ export function ReportWorkspaceProvider({
     postEstimation,
     modelResults,
     familyEvidenceArtifacts,
+    reportEvidenceProjection,
     reportContextLines,
     reportContextDetails,
     reportContextUsedTokens,

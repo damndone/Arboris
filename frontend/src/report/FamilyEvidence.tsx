@@ -1,4 +1,5 @@
 import type { ModelResult } from "../api";
+import type { ReportEvidenceProjection } from "./factTable";
 import type { EvidenceViewModel } from "./reportEvidence";
 
 type EvidenceRecord = Record<string, unknown>;
@@ -410,6 +411,10 @@ function FamilyEvidenceCard({
 }
 
 function TypedEvidenceProjection({ evidence }: { evidence: EvidenceViewModel }) {
+  const hasReportProvenance = "provenance" in evidence;
+  const reportEvidence = hasReportProvenance ? evidence as ReportEvidenceProjection : null;
+  const lineageRefs = reportEvidence?.provenance.lineageRefs ?? [];
+  const bundleDigests = reportEvidence?.provenance.envelopeDigests ?? [];
   return (
     <section
       aria-label={`${evidence.consumerId} persisted evidence`}
@@ -422,9 +427,28 @@ function TypedEvidenceProjection({ evidence }: { evidence: EvidenceViewModel }) 
       <dl style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", margin: "0 0 8px", fontSize: 12 }}>
         <dt>Artifact</dt><dd style={{ margin: 0 }}>{evidence.artifactRef}</dd>
         <dt>Envelope</dt><dd style={{ margin: 0 }}>{evidence.envelopeRef}</dd>
+        <dt>Envelope digest</dt><dd style={{ margin: 0, wordBreak: "break-all" }}>{evidence.envelopeDigest}</dd>
         <dt>Availability</dt><dd style={{ margin: 0 }}>{evidence.availability.toUpperCase()}</dd>
         <dt>Completeness</dt><dd style={{ margin: 0 }}>{evidence.completenessStatus.toUpperCase()}</dd>
+        {reportEvidence?.commitId && <><dt>Commit</dt><dd style={{ margin: 0 }}>{reportEvidence.commitId}</dd></>}
+        {hasReportProvenance && (
+          <>
+            <dt>Provenance</dt>
+            <dd data-testid="typed-evidence-provenance" style={{ margin: 0 }}>
+              {lineageRefs.length > 0
+                ? lineageRefs.join(" · ")
+                : bundleDigests.length > 0
+                  ? bundleDigests.join(" · ")
+                  : reportEvidence?.provenance.artifactType ?? "UNAVAILABLE"}
+            </dd>
+          </>
+        )}
       </dl>
+      {reportEvidence?.reasonCode && (
+        <p data-testid="typed-evidence-reason" style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "0 0 6px" }}>
+          Reason: {reportEvidence.reasonCode}
+        </p>
+      )}
       {evidence.facts.length === 0 ? (
         <p style={{ fontSize: 12, color: "var(--label-tertiary)", margin: 0 }}>
           UNAVAILABLE: no persisted facts were supplied by this projection.
@@ -451,6 +475,23 @@ function TypedEvidenceProjection({ evidence }: { evidence: EvidenceViewModel }) 
   );
 }
 
+function TypedEvidenceUnavailable() {
+  return (
+    <section
+      aria-label="report persisted evidence unavailable"
+      data-testid="typed-evidence-unavailable"
+      style={{ marginBottom: 16 }}
+    >
+      <div className="ln-section-label" style={{ marginBottom: 6 }}>
+        Persisted evidence <span>UNAVAILABLE</span>
+      </div>
+      <p style={{ fontSize: 12, color: "var(--label-tertiary)", margin: 0 }}>
+        UNAVAILABLE: the server did not provide a typed evidence projection.
+      </p>
+    </section>
+  );
+}
+
 const SUPPORTED_FAMILIES = new Set([
   "ordinal_logit",
   "multinomial_logit",
@@ -465,14 +506,15 @@ export function FamilyEvidence({
 }: {
   modelResults: readonly FamilyModelResult[];
   artifacts?: FamilyEvidenceArtifacts;
-  evidence?: EvidenceViewModel;
+  evidence?: EvidenceViewModel | ReportEvidenceProjection | null;
 }) {
   const familyModels = modelResults.filter((model) => SUPPORTED_FAMILIES.has(String(model.model_type)));
-  if (familyModels.length === 0 && !evidence) return null;
+  const typedBoundary = evidence !== undefined;
+  if (familyModels.length === 0 && !evidence && !typedBoundary) return null;
   return (
     <>
-      {evidence && <TypedEvidenceProjection evidence={evidence} />}
-      {familyModels.length > 0 && (
+      {evidence ? <TypedEvidenceProjection evidence={evidence} /> : typedBoundary ? <TypedEvidenceUnavailable /> : null}
+      {!typedBoundary && familyModels.length > 0 && (
         <section aria-label="Model family evidence" data-testid="model-family-evidence">
           <div className="ln-section-label" style={{ marginBottom: 6 }}>
             Model family evidence

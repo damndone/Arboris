@@ -449,12 +449,13 @@ def build_persisted_evidence_report_view(
     sections = []
     if status != "available":
         sections.append({"key": "persisted-evidence", "label": "Persisted evidence", "status": status})
-    return {
+    view: dict[str, object] = {
         "projectionId": f"{projection.consumer_id}:{projection.commit_id}",
         "consumerId": projection.consumer_id,
         "consumerVersion": projection.consumer_version,
         "artifactRef": projection.artifact_ref,
         "envelopeRef": projection.envelope_ref,
+        "commitId": projection.commit_id,
         "envelopeDigest": projection.envelope_digest,
         "status": status,
         "executionStatus": projection.execution_status,
@@ -462,4 +463,265 @@ def build_persisted_evidence_report_view(
         "completenessStatus": projection.completeness_status,
         "facts": facts,
         "sections": sections,
+        "provenance": {
+            "artifactRef": projection.artifact_ref,
+            "commitId": projection.commit_id,
+            "envelopeRef": projection.envelope_ref,
+            "lineageRefs": list(projection.lineage_refs),
+            "projectionRef": projection.projection_ref.to_dict(),
+            "resultIdentity": dict(projection.result_identity),
+        },
     }
+    if projection.audit.restriction_reason:
+        view["reasonCode"] = projection.audit.restriction_reason
+    return view
+
+
+def _unavailable_report_evidence(
+    *,
+    artifact_id: str,
+    artifact_type: str,
+    reason_code: str,
+    status: str = "unavailable",
+) -> dict[str, object]:
+    """Return a typed empty view for an artifact that did not pass admission.
+
+    This is deliberately a complete report-view shape.  Consumers can render
+    the failure without having to inspect the indexed artifact or its result,
+    and the result payload never crosses this boundary.
+    """
+
+    safe_artifact_id = artifact_id if artifact_id else "UNAVAILABLE"
+    safe_artifact_type = artifact_type if artifact_type else "unknown"
+    return {
+        "projectionId": f"report:unavailable:{safe_artifact_id}",
+        "consumerId": "report",
+        "consumerVersion": "1.0",
+        "artifactRef": safe_artifact_id,
+        "envelopeRef": "UNAVAILABLE",
+        "commitId": "UNAVAILABLE",
+        "envelopeDigest": "UNAVAILABLE",
+        "status": status,
+        "executionStatus": "unavailable",
+        "availability": "unavailable",
+        "completenessStatus": "unavailable",
+        "facts": [],
+        "sections": [
+            {
+                "key": "persisted-evidence",
+                "label": "Persisted evidence",
+                "status": status,
+            }
+        ],
+        "reasonCode": reason_code,
+        "provenance": {
+            "artifactId": safe_artifact_id,
+            "artifactType": safe_artifact_type,
+            "indexed": True,
+            "admissionStatus": status,
+        },
+    }
+
+
+def _evidence_wire_fields(
+    value: Mapping[str, object],
+) -> tuple[object | None, object | None, object | None, object | None, object | None]:
+    """Read only explicitly named canonical evidence fields from an index row."""
+
+    nested = value.get("evidence")
+    nested_record = nested if isinstance(nested, Mapping) else {}
+    binding = (
+        value.get("evidence_commit_binding")
+        or value.get("commit_binding")
+        or value.get("binding")
+        or nested_record.get("evidence_commit_binding")
+        or nested_record.get("commit_binding")
+        or nested_record.get("binding")
+    )
+    envelope = (
+        value.get("evidence_envelope")
+        or value.get("envelope")
+        or nested_record.get("evidence_envelope")
+        or nested_record.get("envelope")
+    )
+    envelope_ref = (
+        value.get("evidence_envelope_ref")
+        or nested_record.get("evidence_envelope_ref")
+        or nested_record.get("envelope_ref")
+    )
+    sensitivity = value.get("evidence_sensitivity") or nested_record.get("sensitivity")
+    artifact_ref = value.get("evidence_artifact_ref") or nested_record.get("artifact_ref")
+    return binding, envelope, envelope_ref, sensitivity, artifact_ref
+
+
+def build_indexed_report_evidence(
+    indexed_artifact: Mapping[str, object],
+    artifact_payload: object | None = None,
+) -> dict[str, object]:
+    """Project one indexed artifact into the Report consumer boundary.
+
+    An artifact index entry is only an admission/index record.  It is not an
+    evidence commit.  The only accepted path is an explicitly supplied,
+    canonical ``EvidenceCommitBindingV1`` plus ``EvidenceEnvelopeV1`` pair,
+    which is parsed and validated before the existing typed consumer registry
+    is allowed to select facts.
+    """
+
+    if not isinstance(indexed_artifact, Mapping):
+        return _unavailable_report_evidence(
+            artifact_id="unknown-artifact",
+            artifact_type="unknown",
+            reason_code="EVIDENCE_INDEX_INVALID",
+        )
+    raw_artifact_id = indexed_artifact.get("artifact_id")
+    artifact_id = raw_artifact_id if isinstance(raw_artifact_id, str) and raw_artifact_id else "unknown-artifact"
+    raw_artifact_type = indexed_artifact.get("artifact_type")
+    artifact_type = raw_artifact_type if isinstance(raw_artifact_type, str) and raw_artifact_type else "unknown"
+
+    candidates: list[Mapping[str, object]] = [indexed_artifact]
+    if isinstance(artifact_payload, Mapping):
+        candidates.append(artifact_payload)
+    binding_raw: object | None = None
+    envelope_raw: object | None = None
+    envelope_ref_raw: object | None = None
+    sensitivity_raw: object | None = None
+    artifact_ref_raw: object | None = None
+    for candidate in candidates:
+        fields = _evidence_wire_fields(candidate)
+        if binding_raw is None and fields[0] is not None:
+            binding_raw = fields[0]
+        if envelope_raw is None and fields[1] is not None:
+            envelope_raw = fields[1]
+        if envelope_ref_raw is None and fields[2] is not None:
+            envelope_ref_raw = fields[2]
+        if sensitivity_raw is None and fields[3] is not None:
+            sensitivity_raw = fields[3]
+        if artifact_ref_raw is None and fields[4] is not None:
+            artifact_ref_raw = fields[4]
+
+    if binding_raw is None:
+        return _unavailable_report_evidence(
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            reason_code="EVIDENCE_COMMIT_BINDING_REQUIRED",
+        )
+    if envelope_raw is None:
+        return _unavailable_report_evidence(
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            reason_code="EVIDENCE_ENVELOPE_REQUIRED",
+        )
+
+    from .contracts.evidence.envelope import EvidenceEnvelopeV1
+    from .contracts.evidence.persistence import EvidenceCommitBindingV1
+    from .evidence.consumer_adapters import (
+        EvidenceProjectionError,
+        PersistedEvidenceEnvelopeV1,
+        default_projection_registry,
+    )
+
+    try:
+        if not isinstance(binding_raw, Mapping) or not isinstance(envelope_raw, Mapping):
+            raise EvidenceProjectionError("PROJECTION_WIRE_INVALID", "canonical evidence fields must be objects")
+        binding = EvidenceCommitBindingV1.from_dict(dict(binding_raw))
+        envelope = EvidenceEnvelopeV1.from_dict(dict(envelope_raw))
+        artifact_ref = (
+            artifact_ref_raw
+            if isinstance(artifact_ref_raw, str) and artifact_ref_raw
+            else artifact_id
+        )
+        envelope_ref = (
+            envelope_ref_raw
+            if isinstance(envelope_ref_raw, str) and envelope_ref_raw
+            else f"evidence-envelope:{artifact_id}"
+        )
+        sensitivity = sensitivity_raw if isinstance(sensitivity_raw, str) else "public"
+        record = PersistedEvidenceEnvelopeV1(
+            commit_id=binding.commit_id,
+            artifact_ref=artifact_ref,
+            envelope_ref=envelope_ref,
+            sensitivity=sensitivity,
+            binding=binding,
+            envelope=envelope,
+        )
+        projection = default_projection_registry().project(
+            record,
+            consumer_id="report",
+            destination="local",
+        )
+        return build_persisted_evidence_report_view(projection)
+    except EvidenceProjectionError as exc:
+        return _unavailable_report_evidence(
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            reason_code=exc.code,
+            status="blocked",
+        )
+    except (TypeError, KeyError, ValueError) as exc:
+        reason_code = "EVIDENCE_CANONICAL_INVALID"
+        if "digest" in str(exc).lower():
+            reason_code = "PROJECTION_DIGEST_MISMATCH"
+        return _unavailable_report_evidence(
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            reason_code=reason_code,
+            status="blocked",
+        )
+
+
+def build_report_evidence_bundle(
+    views: Sequence[Mapping[str, object]],
+) -> dict[str, object] | None:
+    """Combine multiple per-artifact typed views without reading raw results."""
+
+    if not views:
+        return None
+    if len(views) == 1:
+        return dict(views[0])
+    available = [view for view in views if view.get("status") == "available"]
+    facts = [
+        fact
+        for view in available
+        for fact in view.get("facts", [])
+        if isinstance(fact, Mapping)
+    ][:80]
+    statuses = {str(view.get("status")) for view in views}
+    if statuses == {"available"}:
+        status = "available"
+    elif facts:
+        status = "degraded"
+    elif "blocked" in statuses:
+        status = "blocked"
+    else:
+        status = "unavailable"
+    first = views[0]
+    provenance = {
+        "projections": [view.get("provenance") for view in views],
+        "envelopeDigests": [view.get("envelopeDigest") for view in views],
+    }
+    result: dict[str, object] = {
+        "projectionId": "report:evidence-bundle",
+        "consumerId": "report",
+        "consumerVersion": str(first.get("consumerVersion", "1.0")),
+        "artifactRef": "report-evidence-bundle",
+        "envelopeRef": "UNAVAILABLE",
+        "commitId": "UNAVAILABLE",
+        "envelopeDigest": "UNAVAILABLE",
+        "status": status,
+        "executionStatus": str(first.get("executionStatus", "unavailable")),
+        "availability": status,
+        "completenessStatus": status,
+        "facts": facts,
+        "sections": [
+            {
+                "key": f"projection-{index}",
+                "label": f"{view.get('artifactRef', 'artifact')} evidence",
+                "status": view.get("status", "unavailable"),
+            }
+            for index, view in enumerate(views)
+        ],
+        "provenance": provenance,
+    }
+    if status != "available":
+        result["reasonCode"] = "REPORT_EVIDENCE_BUNDLE_PARTIAL"
+    return result

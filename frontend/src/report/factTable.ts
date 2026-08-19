@@ -7,6 +7,10 @@
 import type { PostEstimationResult } from "../api";
 import type { ForestViewModel } from "../lineage/api/graphViewTypes";
 import { resolveNodeOperationContext } from "../lineage/api/nodeOperationContext";
+import {
+  readReportEvidence,
+  type EvidenceViewModel,
+} from "./reportEvidence";
 
 export interface CitableFact {
   id: string;
@@ -24,6 +28,158 @@ export interface CitableFact {
   claim_types?: string[];
   validation_level?: "external_oracle" | "internal_only" | "unverified" | string;
   qualifiers?: Record<string, unknown>;
+}
+
+export interface ReportEvidenceProvenance {
+  readonly artifactRef?: string;
+  readonly artifactId?: string;
+  readonly artifactType?: string;
+  readonly commitId?: string;
+  readonly envelopeRef?: string;
+  readonly lineageRefs?: readonly string[];
+  readonly projectionRef?: Record<string, unknown>;
+  readonly resultIdentity?: Record<string, unknown>;
+  readonly indexed?: boolean;
+  readonly admissionStatus?: string;
+  readonly projections?: readonly Record<string, unknown>[];
+  readonly envelopeDigests?: readonly string[];
+}
+
+export type ReportEvidenceProjection = EvidenceViewModel & {
+  readonly commitId?: string;
+  readonly reasonCode?: string;
+  readonly provenance: ReportEvidenceProvenance;
+};
+
+function asEvidenceRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readEvidenceProvenance(value: unknown): ReportEvidenceProvenance | null {
+  const record = asEvidenceRecord(value);
+  if (!record) return null;
+  const provenance: ReportEvidenceProvenance = {};
+  for (const key of [
+    "artifactRef",
+    "artifactId",
+    "artifactType",
+    "commitId",
+    "envelopeRef",
+    "admissionStatus",
+  ] as const) {
+    if (record[key] !== undefined && typeof record[key] !== "string") return null;
+    if (typeof record[key] === "string") {
+      (provenance as Record<string, unknown>)[key] = record[key];
+    }
+  }
+  if (record.indexed !== undefined && typeof record.indexed !== "boolean") return null;
+  if (record.indexed === true) {
+    (provenance as Record<string, unknown>).indexed = true;
+  }
+  if (record.lineageRefs !== undefined) {
+    if (!Array.isArray(record.lineageRefs) || !record.lineageRefs.every((item) => typeof item === "string")) return null;
+    (provenance as Record<string, unknown>).lineageRefs = record.lineageRefs;
+  }
+  if (record.envelopeDigests !== undefined) {
+    if (!Array.isArray(record.envelopeDigests) || !record.envelopeDigests.every((item) => typeof item === "string")) return null;
+    (provenance as Record<string, unknown>).envelopeDigests = record.envelopeDigests;
+  }
+  if (record.projectionRef !== undefined) {
+    const projectionRef = asEvidenceRecord(record.projectionRef);
+    if (!projectionRef) return null;
+    (provenance as Record<string, unknown>).projectionRef = projectionRef;
+  }
+  if (record.resultIdentity !== undefined) {
+    const resultIdentity = asEvidenceRecord(record.resultIdentity);
+    if (!resultIdentity) return null;
+    (provenance as Record<string, unknown>).resultIdentity = resultIdentity;
+  }
+  if (record.projections !== undefined) {
+    if (!Array.isArray(record.projections)) return null;
+    const projections = record.projections
+      .map(asEvidenceRecord)
+      .filter((item): item is Record<string, unknown> => item !== null);
+    if (projections.length !== record.projections.length) return null;
+    (provenance as Record<string, unknown>).projections = projections;
+  }
+  return provenance;
+}
+
+/** Parse the server-owned report projection, including its provenance gate. */
+export function readReportEvidenceProjection(value: unknown): ReportEvidenceProjection | null {
+  const base = readReportEvidence(value);
+  if (!base || !asEvidenceRecord(value)) return null;
+  const candidate = asEvidenceRecord(value)!;
+  const provenance = readEvidenceProvenance(candidate.provenance);
+  if (!provenance) return null;
+  const commitId = candidate.commitId;
+  const reasonCode = candidate.reasonCode;
+  if (commitId !== undefined && typeof commitId !== "string") return null;
+  if (reasonCode !== undefined && typeof reasonCode !== "string") return null;
+  return {
+    ...base,
+    ...(commitId !== undefined ? { commitId } : {}),
+    ...(reasonCode !== undefined ? { reasonCode } : {}),
+    provenance,
+  };
+}
+
+/** Construct a typed empty contribution when the server cannot admit facts. */
+export function unavailableReportEvidence(
+  reasonCode: string,
+  artifactRef = "UNAVAILABLE",
+): ReportEvidenceProjection {
+  return {
+    projectionId: `report:unavailable:${artifactRef}`,
+    consumerId: "report",
+    consumerVersion: "1.0",
+    artifactRef,
+    envelopeRef: "UNAVAILABLE",
+    envelopeDigest: "UNAVAILABLE",
+    status: "unavailable",
+    executionStatus: "unavailable",
+    availability: "unavailable",
+    completenessStatus: "unavailable",
+    facts: [],
+    sections: [{ key: "persisted-evidence", label: "Persisted evidence", status: "unavailable" }],
+    reasonCode,
+    provenance: {
+      artifactId: artifactRef,
+      indexed: true,
+      admissionStatus: "unavailable",
+    },
+  };
+}
+
+const MAX_TYPED_EVIDENCE_FACTS = 80;
+
+/** Convert only the bounded server projection into citable report facts. */
+export function buildReportEvidenceFacts(
+  evidence: ReportEvidenceProjection | null | undefined,
+  startAt = 0,
+): CitableFact[] {
+  if (!evidence || evidence.status !== "available") return [];
+  const commitId = evidence.commitId ?? evidence.provenance.commitId;
+  return evidence.facts.slice(0, MAX_TYPED_EVIDENCE_FACTS).map((fact, index) => ({
+    id: `c${startAt + index + 1}`,
+    node_key: `evidence:${evidence.projectionId}`,
+    node_label: "Persisted report evidence",
+    field: `evidence:${evidence.consumerId}:${fact.statisticId}`,
+    label: `${fact.statisticId}${fact.unit ? ` (${fact.unit})` : ""}`,
+    value: fact.value,
+    provider_id: "evidence.report.typed.v1",
+    kind: "estimate",
+    artifact_ids: [evidence.artifactRef],
+    qualifiers: {
+      projection_id: evidence.projectionId,
+      commit_id: commitId ?? "UNAVAILABLE",
+      envelope_digest: evidence.envelopeDigest,
+      fact_id: fact.factId,
+      provenance: evidence.provenance,
+    },
+  }));
 }
 
 export interface ReportScope {
@@ -213,7 +369,13 @@ function collectPostEstimationAtomicValues(
   return true;
 }
 
-/** Make declared post-estimation results citable in a generated report.
+/** Compatibility-only reader for legacy direct callers.
+ *
+ * The ReportWorkspaceContext does not use this raw result adapter.  Its
+ * citable post-estimation facts come exclusively from buildReportEvidenceFacts
+ * after the server-owned committed projection has been parsed.
+ *
+ * Make declared post-estimation results citable in a generated report.
  *
  * These are server-computed scalars with artifact provenance, so they belong
  * in the deterministic fact table rather than in prose. Every atomic field of
