@@ -252,12 +252,17 @@ class DatasetRefV1:
     node_id: str
     artifact_id: str
     content_sha256: str
-    schema_revision: str = "v1"
-    metadata_revision: str = "v1"
+    schema_revision: str
+    metadata_revision: str
 
     def __post_init__(self) -> None:
         for field_name in ("run_id", "node_id", "artifact_id", "schema_revision", "metadata_revision"):
             _text(getattr(self, field_name), field_name)
+        if self.schema_revision == "v1" or self.metadata_revision == "v1":
+            raise DataProfileError(
+                "DATA_PROFILE_REVISION_UNAVAILABLE",
+                "schema_revision and metadata_revision must come from a server-owned metadata artifact",
+            )
         if type(self.content_sha256) is not str or _SHA256_RE.fullmatch(self.content_sha256) is None:
             raise DataProfileError(
                 "DATA_PROFILE_DIGEST_INVALID",

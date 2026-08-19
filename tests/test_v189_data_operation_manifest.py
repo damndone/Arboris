@@ -10,6 +10,7 @@ from workbench.providers.catalog import load_builtin_catalog
 
 
 EXPECTED_OPERATION_IDS = (
+    "data.aggregate",
     "data.append",
     "data.column.cast",
     "data.columns.cast",
@@ -313,3 +314,39 @@ def test_manifest_advertises_only_real_data_consumer_extensions() -> None:
         item["operation_id"] for item in unavailable
         if item["operation_id"] in {"data.interchange.sav", "data.interchange.zsav", "data.interchange.dta"}
     } == {"data.interchange.sav", "data.interchange.zsav", "data.interchange.dta"}
+
+
+def test_package_runtime_adapter_joins_live_catalog_and_exposes_record_evidence_ports() -> None:
+    from workbench.data_operation_manifest import build_data_consumer_runtime_adapter
+
+    adapter = build_data_consumer_runtime_adapter()
+    catalog = load_builtin_catalog()
+    provider = next(
+        item for item in catalog.providers if item.provider_id == "workbench.data_consumer"
+    )
+    declaration = next(
+        item
+        for item in provider.adapter_declarations
+        if item.adapter_id == "workbench.data_consumer.adapter"
+    )
+
+    assert adapter.provider_id == provider.provider_id
+    assert adapter.adapter_id == declaration.adapter_id
+    assert adapter.catalog_digest == catalog.catalog_digest
+    assert adapter.executor_ref == declaration.executor_ref
+    assert {"data.agent", "data.notebook", "data.report"} <= set(adapter.consumer_slots)
+    assert {"derived", "operation_record", "evidence"} <= set(adapter.output_ports)
+    assert callable(adapter.adapt_operation_record)
+
+
+def test_catalog_fixture_digest_is_recomputed_from_live_provider_catalog() -> None:
+    from workbench.canonical import sha256_canonical
+
+    catalog = load_builtin_catalog()
+    provider = next(
+        item for item in catalog.providers if item.provider_id == "workbench.data_consumer"
+    )
+    assert catalog.catalog_digest == sha256_canonical(catalog.digest_payload())
+    assert provider.to_dict()["adapter_declarations"][0]["executor_ref"] == (
+        "executor:workbench.data_consumer.adapter"
+    )

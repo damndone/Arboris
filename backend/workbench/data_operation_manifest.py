@@ -28,6 +28,7 @@ from workbench.contracts.common.provider import (
 
 DATA_OPERATION_MANIFEST_VERSION = "data-operation-manifest.v1"
 _DATA_OPERATION_IDS = (
+    "data.aggregate",
     "data.append",
     "data.column.cast",
     "data.columns.cast",
@@ -59,6 +60,7 @@ _DERIVED_IDENTITY_FIELDS = (
 )
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _OPERATION_ROUTES = {
+    "data.aggregate": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.append": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.column.cast": ("/data-operations/column-cast/preview", "/data-operations/column-cast/confirm"),
     "data.columns.cast": ("/data-operations/columns-cast/preview", "/data-operations/columns-cast/confirm"),
@@ -128,7 +130,7 @@ class DataPortV1:
 
     def __post_init__(self) -> None:
         _text(self.name, "name")
-        if self.port_type not in {"dataset"}:
+        if self.port_type not in {"dataset", "operation_record", "evidence"}:
             raise ValueError("port_type is not closed")
         if self.dataset_kind is not None:
             _text(self.dataset_kind, "dataset_kind")
@@ -602,11 +604,14 @@ def _ports(operation_id: str) -> tuple[tuple[DataPortV1, ...], tuple[DataPortV1,
         )
     return tuple(inputs), (
         DataPortV1("derived", "dataset", "derived_data", "one", True, _DERIVED_IDENTITY_FIELDS),
+        DataPortV1("operation_record", "operation_record", None, "one", True, ("record_id",)),
+        DataPortV1("evidence", "evidence", None, "one", True, ("method",)),
     )
 
 
 def _clarifications(operation_id: str) -> tuple[str, ...]:
     return {
+        "data.aggregate": ("Declare bounded group keys, aggregation functions, and how confirmed weights are consumed.",),
         "data.append": ("Declare exact or union schema policy and an explicit row-growth bound.",),
         "data.column.cast": ("Declare the target dtype and review any lossy coercion.",),
         "data.columns.cast": ("Declare each target dtype and review any lossy coercion.",),
@@ -713,6 +718,82 @@ def build_data_operation_manifest() -> DataOperationManifestV1:
             for operation_id in _NATIVE_INTERCHANGE_IDS
         )
     return DataOperationManifestV1(DATA_OPERATION_MANIFEST_VERSION, tuple(descriptors), unavailable)
+
+
+@dataclass(frozen=True)
+class DataConsumerRuntimeAdapterV1:
+    """Package-owned execution/evidence adapter joined to the live catalog."""
+
+    provider_id: str
+    adapter_id: str
+    catalog_digest: str
+    executor_ref: str
+    consumer_slots: tuple[str, ...]
+    output_ports: tuple[str, ...]
+    operation_ids: tuple[str, ...]
+
+    def adapt_operation_record(self, record: Mapping[str, object]) -> dict[str, object]:
+        if not isinstance(record, Mapping):
+            raise ValueError("operation record must be an object")
+        record_id = record.get("record_id")
+        operation_id = record.get("operation_id")
+        outputs = record.get("outputs")
+        if not isinstance(record_id, str) or not record_id:
+            raise ValueError("operation record has no record_id")
+        if operation_id not in self.operation_ids:
+            raise ValueError(f"operation record operation is not in the live manifest: {operation_id!r}")
+        if not isinstance(outputs, Mapping):
+            raise ValueError("operation record has no outputs projection")
+        ports = outputs.get("ports")
+        if not isinstance(ports, Mapping):
+            raise ValueError("operation record outputs have no ports")
+        missing_ports = set(self.output_ports) - set(ports)
+        if missing_ports:
+            raise ValueError(f"operation record is missing output ports: {sorted(missing_ports)}")
+        consumer_slots = outputs.get("consumer_slots")
+        if not isinstance(consumer_slots, Mapping) or not set(self.consumer_slots) <= set(consumer_slots):
+            raise ValueError("operation record is missing consumer slot projections")
+        return {
+            "record_id": record_id,
+            "operation_id": operation_id,
+            "catalog_digest": self.catalog_digest,
+            "ports": dict(ports),
+            "consumer_slots": dict(consumer_slots),
+        }
+
+
+def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
+    """Join the package executor with the server-loaded provider catalog."""
+
+    from workbench.providers.catalog import load_builtin_catalog
+
+    catalog = load_builtin_catalog()
+    provider = next(
+        (item for item in catalog.providers if item.provider_id == "workbench.data_consumer"),
+        None,
+    )
+    if provider is None:
+        raise RuntimeError("workbench.data_consumer is absent from the live provider catalog")
+    declaration = next(
+        (
+            item
+            for item in provider.adapter_declarations
+            if item.adapter_id == "workbench.data_consumer.adapter"
+        ),
+        None,
+    )
+    if declaration is None:
+        raise RuntimeError("workbench.data_consumer runtime adapter declaration is absent")
+    manifest = build_data_operation_manifest()
+    return DataConsumerRuntimeAdapterV1(
+        provider_id=provider.provider_id,
+        adapter_id=declaration.adapter_id,
+        catalog_digest=catalog.catalog_digest,
+        executor_ref=declaration.executor_ref,
+        consumer_slots=("data.agent", "data.notebook", "data.report"),
+        output_ports=("derived", "operation_record", "evidence"),
+        operation_ids=tuple(item.operation_id for item in manifest.operations),
+    )
 
 
 _PROVIDER_KINDS = (
@@ -888,9 +969,11 @@ __all__ = [
     "DataOperationManifestV1",
     "DataOperationUnavailableV1",
     "DataPortV1",
+    "DataConsumerRuntimeAdapterV1",
     "DraftAgentNotebookFixture",
     "ReplayContractV1",
     "build_builtin_provider_payload",
     "build_data_operation_manifest",
+    "build_data_consumer_runtime_adapter",
     "draft_agent_notebook_composition_fixtures",
 ]

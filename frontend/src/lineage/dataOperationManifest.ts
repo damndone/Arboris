@@ -86,7 +86,7 @@ export interface DataOperationAvailability {
 
 export interface DataOperationPort {
   name: string;
-  port_type: "dataset";
+  port_type: "dataset" | "operation_record" | "evidence";
   dataset_kind: string | null;
   cardinality: "one" | "many";
   required: boolean;
@@ -306,7 +306,9 @@ function validatePort(value: unknown, path: string): asserts value is DataOperat
   }
   if (
     !nonEmptyString(value.name) ||
-    value.port_type !== "dataset" ||
+    (value.port_type !== "dataset" &&
+      value.port_type !== "operation_record" &&
+      value.port_type !== "evidence") ||
     !(value.dataset_kind === null || nonEmptyString(value.dataset_kind)) ||
     (value.cardinality !== "one" && value.cardinality !== "many") ||
     typeof value.required !== "boolean" ||

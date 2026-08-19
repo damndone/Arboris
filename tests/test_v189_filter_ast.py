@@ -168,11 +168,23 @@ def test_filter_ast_uses_declared_user_missing_values_for_missing_predicates() -
 
     frame = pd.DataFrame({"score": [99, 1, None]})
     frame.attrs["user_missing_values"] = {"score": [99]}
+    frame.attrs["metadata_confirmed"] = True
     expression = {"op": "is_missing", "column": "score"}
 
     bound = bind_filter_ast(expression, frame.columns)
 
     assert execute_filter_ast(frame, bound).tolist() == [True, False, True]
+
+
+def test_filter_ast_rejects_unconfirmed_user_missing_values() -> None:
+    from workbench.filter_ast import FilterValidationError, execute_filter_ast
+
+    with pytest.raises(FilterValidationError, match="confirmed metadata"):
+        execute_filter_ast(
+            pd.DataFrame({"score": [99, 1, None]}),
+            {"op": "is_missing", "column": "score"},
+            user_missing_values={"score": [99]},
+        )
 
 
 def test_subset_integrates_bound_filter_ast_before_projection(tmp_path: Path) -> None:

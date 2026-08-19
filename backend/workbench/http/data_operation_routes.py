@@ -37,6 +37,7 @@ from ..data_operations import (
     DataCastItem,
     DataColumnCastSpecV1,
     DataColumnCastValidationError,
+    DataMetadataUnavailableError,
     DataColumnsCastSpecV1,
     FeatureRecipeOperationSpecV1,
     DataTransformSpecV1,
@@ -50,6 +51,7 @@ from ..data_operations import (
     preview_metadata_mutation,
     read_metadata_mutation_record,
     resolve_data_column_cast_context,
+    resolve_metadata_registry,
     _read_frame,
     _resolve_source,
 )
@@ -119,36 +121,19 @@ def _resolve_profile(
     content_sha256 = artifact.get("sha256")
     if not isinstance(content_sha256, str) or not content_sha256:
         content_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    declared_metadata: dict[str, object] = {}
-    try:
-        run_inputs = read_json(_run_root / "run_inputs.json")
-    except (FileNotFoundError, KeyError, TypeError, ValueError):
-        run_inputs = {}
-    form = run_inputs.get("form") if isinstance(run_inputs, dict) else None
-    labels = form.get("labels") if isinstance(form, dict) else None
-    if isinstance(labels, dict):
-        # Labels are server-owned run inputs.  Keep only declarations for the
-        # selected immutable frame: a derived child may legitimately drop a
-        # parent column, but it must never receive a declaration for a column
-        # that is not present.
-        known_columns = set(str(column) for column in frame.columns)
-        for field_name in (
-            "variable_labels",
-            "value_labels",
-            "measurement_level",
-            "missing_policy",
-            "roles",
-            "sensitivity",
-            "user_missing_values",
-        ):
-            mapping = labels.get(field_name)
-            if isinstance(mapping, dict):
-                declared_metadata[field_name] = {
-                    column: value for column, value in mapping.items() if column in known_columns
-                }
-        dataset_declarations = labels.get("__dataset__")
-        if isinstance(dataset_declarations, dict):
-            declared_metadata["__dataset__"] = dataset_declarations
+    registry = resolve_metadata_registry(
+        root,
+        source_run_id=source_run_id,
+        source_node_id=source_node_id,
+        source_artifact_id=source_artifact_id,
+    )
+    if registry is None:
+        raise DataMetadataUnavailableError(
+            "profile requires a confirmed server-owned metadata artifact"
+        )
+    declared_metadata = registry.to_profile_metadata(
+        tuple(str(column) for column in frame.columns)
+    )
     profile = build_data_profile(
         frame=frame,
         dataset_ref=DatasetRefV1(
@@ -156,6 +141,8 @@ def _resolve_profile(
             node_id=source_node_id,
             artifact_id=source_artifact_id,
             content_sha256=content_sha256,
+            schema_revision=registry.schema_revision,
+            metadata_revision=registry.metadata_revision,
         ),
         declared_metadata=declared_metadata,
     )
@@ -512,6 +499,13 @@ def _metadata_mutation_preview_or_error(
 ):
     try:
         return preview_metadata_mutation(root, spec)
+    except DataMetadataUnavailableError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_METADATA_UNAVAILABLE",
+            message="The selected data artifact has no confirmed server-owned metadata registry.",
+            details={"reason": str(exc)},
+        ) from exc
     except (DataColumnCastValidationError, FileNotFoundError, KeyError, TypeError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
@@ -829,12 +823,10 @@ def _confirm_direct_data_operation(
 ) -> dict[str, dict[str, Any]]:
     """Bind a legacy direct data route to the server proposal gate.
 
-    FeatureRecipe and the generic transform executor predate the central
-    operation-record handlers.  Until those handlers are wired, this route
-    must still prove server-owned source identity, preview freshness, and
-    Chain head ownership before it writes a derived artifact.  The returned
-    confirmation is deliberately exposed as evidence; it is not represented
-    as a central OperationRecord that does not exist yet.
+    The route keeps the existing proposal gate, then creates the same durable
+    OperationRecord used by the central operation lifecycle.  The package-owned
+    data-consumer adapter completes that record after the immutable effect is
+    committed.
     """
 
     workbench_root = root / "workbench"
@@ -943,10 +935,121 @@ def _confirm_direct_data_operation(
             message="The typed data proposal is no longer confirmable.",
             details={"proposal_id": proposal_id},
         ) from exc
+    record_store = OperationRecordStore(workbench_root)
+    operation_record = record_store.create_pending(
+        confirmation,
+        command_id=confirmation.command_id,
+    )
+    if operation_record.status not in {"completed", "failed", "stale", "cancelled"}:
+        operation_record = record_store.claim_execution(
+            operation_record.record_id,
+            execution_key=f"exec_{preview_fingerprint[:32]}",
+            lease_owner="data-consumer-route",
+        )
     return {
         "proposal": proposal_store.latest_revision(proposal_id).to_dict(),
         "confirmation": confirmation.to_dict(),
+        "operation_record": operation_record.to_dict(),
     }
+
+
+def _complete_direct_data_operation(
+    root: Path,
+    confirmation_result: dict[str, Any],
+    effect: Any,
+    *,
+    method: str,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Bind a package effect to OperationRecord and expose bounded evidence ports."""
+
+    from ..data_operation_manifest import build_data_consumer_runtime_adapter
+
+    operation_record_payload = confirmation_result.get("operation_record")
+    if not isinstance(operation_record_payload, dict):
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_RECORD_UNAVAILABLE",
+            message="The data operation has no durable OperationRecord.",
+            details={},
+        )
+    record_id = operation_record_payload.get("record_id")
+    if not isinstance(record_id, str) or not record_id:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_RECORD_UNAVAILABLE",
+            message="The data operation record identity is invalid.",
+            details={},
+        )
+    store = OperationRecordStore(root / "workbench")
+    record = store.get(record_id)
+    if record.status == "completed":
+        return record.to_dict()
+    execution_key = record.execution.get("execution_key")
+    if not isinstance(execution_key, str) or not execution_key:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_RECORD_UNAVAILABLE",
+            message="The data operation record has no execution claim.",
+            details={"record_id": record_id},
+        )
+    effect_payload = effect.to_dict()
+    bindings = {
+        key: str(value)
+        for key, value in effect_payload.items()
+        if key.endswith("_id") and value is not None
+    }
+    record = store.bind_effect(
+        record_id,
+        execution_key=execution_key,
+        bindings=bindings,
+    )
+    evidence_payload = {
+        "method": method,
+        **(evidence or {}),
+    }
+    derived_port = {
+        key: value
+        for key, value in effect_payload.items()
+        if key not in {"group_artifacts"}
+    }
+    outputs = {
+        "ports": {
+            "derived": derived_port,
+            "operation_record": {"record_id": record_id},
+            "evidence": evidence_payload,
+        },
+        "consumer_slots": {
+            "data.agent": {"record_id": record_id, "port": "derived"},
+            "data.notebook": {"record_id": record_id, "port": "derived"},
+            "data.report": {"record_id": record_id, "port": "evidence"},
+        },
+    }
+    adapter = build_data_consumer_runtime_adapter()
+    adapter.adapt_operation_record(
+        {
+            **record.to_dict(),
+            "outputs": outputs,
+        }
+    )
+    record = store.append_status(
+        record_id,
+        "completed",
+        outputs=outputs,
+        diff_ref={
+            "kind": "data-consumer-effect.v1",
+            "artifact_id": effect_payload.get("artifact_id")
+            or effect_payload.get("metadata_artifact_id"),
+        },
+        verification={
+            "passed": True,
+            "mode": "immutable_artifact_and_lineage",
+            "child_node_id": effect_payload.get("child_node_id"),
+        },
+        effect_status="committed",
+        projection_status="committed",
+    )
+    return record.to_dict()
 
 
 @router.get("/data-operations/manifest")
@@ -1028,7 +1131,17 @@ def confirm_metadata_mutation_route(
     )
     try:
         effect = apply_metadata_mutation(root, spec, preview)
-        operation = read_metadata_mutation_record(root, effect.record_id)
+        metadata_operation = read_metadata_mutation_record(root, effect.record_id)
+        operation = _complete_direct_data_operation(
+            root,
+            confirmation,
+            effect,
+            method="metadata_update",
+            evidence={
+                "metadata_artifact_id": effect.metadata_artifact_id,
+                "metadata_revision": effect.metadata_revision,
+            },
+        )
     except (DataColumnCastValidationError, FileNotFoundError, KeyError, TypeError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=409,
@@ -1040,7 +1153,8 @@ def confirm_metadata_mutation_route(
         "status": "completed",
         "effect": effect.to_dict(),
         "preview": preview.to_dict(),
-        "operation": operation,
+        "operation": metadata_operation,
+        "operation_record": operation,
         **confirmation,
     }
 
@@ -1108,6 +1222,13 @@ def get_data_operation_profile(
             source_artifact_id=source_artifact_id,
         )
         return {"profile": profile}
+    except DataMetadataUnavailableError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_METADATA_UNAVAILABLE",
+            message="The selected data artifact has no confirmed server-owned metadata registry.",
+            details={"reason": str(exc)},
+        ) from exc
     except (DataColumnCastValidationError, FileNotFoundError, KeyError, TypeError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=422,
@@ -1462,10 +1583,18 @@ def confirm_feature_recipe_route(
             message="The FeatureRecipe could not be applied because its source changed.",
             details={"operation_id": "data.feature_recipe", "reason": str(exc)},
         ) from exc
+    operation = _complete_direct_data_operation(
+        root,
+        confirmation,
+        effect,
+        method="feature_recipe",
+        evidence={"recipe_artifact_id": effect.recipe_artifact_id},
+    )
     return {
         "status": "completed",
         "effect": effect.to_dict(),
         "preview": preview.to_dict(),
+        "operation": operation,
         **confirmation,
     }
 
@@ -1520,10 +1649,18 @@ def confirm_data_transform_route(
             message="The data transform could not be applied because its source changed.",
             details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
         ) from exc
+    operation = _complete_direct_data_operation(
+        root,
+        confirmation,
+        effect,
+        method=preview.method or f"data.{spec.operation}",
+        evidence=dict(preview.evidence),
+    )
     return {
         "status": "completed",
         "effect": effect.to_dict(),
         "preview": preview.to_dict(),
+        "operation": operation,
         **confirmation,
     }
 

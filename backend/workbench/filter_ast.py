@@ -405,6 +405,12 @@ def _resolve_user_missing_values(
         if "user_missing_values" in frame.attrs:
             raise FilterValidationError("user_missing_values must be a column mapping")
         return {}
+    if not raw:
+        return {}
+    if frame.attrs.get("metadata_confirmed") is not True:
+        raise FilterValidationError(
+            "user_missing_values require confirmed metadata from the server-owned registry"
+        )
     normalized: dict[str, tuple[Any, ...]] = {}
     for column, values in raw.items():
         if not isinstance(column, str) or column not in frame.columns:

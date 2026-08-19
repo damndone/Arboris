@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -280,6 +281,173 @@ class MetadataDeclarationsV1:
         }
 
 
+def metadata_revision_digest(
+    metadata: Mapping[str, object],
+    *,
+    schema_revision: str,
+) -> str:
+    """Return a content-bound metadata revision for a confirmed artifact."""
+
+    _metadata_text(schema_revision, "schema_revision")
+    if schema_revision == "v1":
+        raise MetadataProvenanceError(
+            "METADATA_REVISION_UNAVAILABLE",
+            "schema_revision must identify a server-owned schema artifact",
+        )
+    payload = {
+        "schema_revision": schema_revision,
+        "metadata": metadata,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return f"metadata:{digest}"
+
+
+@dataclass(frozen=True)
+class MetadataRegistryV1:
+    """The server-owned, confirmed metadata binding for one immutable frame."""
+
+    source_run_id: str
+    source_node_id: str
+    source_artifact_id: str
+    schema_revision: str
+    metadata_revision: str
+    metadata: Mapping[str, object]
+    confirmed: bool = True
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "source_run_id",
+            "source_node_id",
+            "source_artifact_id",
+            "schema_revision",
+            "metadata_revision",
+        ):
+            _metadata_text(getattr(self, field_name), field_name)
+        if self.schema_revision == "v1" or self.metadata_revision == "v1":
+            raise MetadataProvenanceError(
+                "METADATA_REVISION_UNAVAILABLE",
+                "metadata registry revisions must not default to v1",
+            )
+        if self.confirmed is not True:
+            raise MetadataProvenanceError(
+                "METADATA_CONFIRMATION_REQUIRED",
+                "metadata registry is not confirmed by the server",
+            )
+        if not isinstance(self.metadata, Mapping):
+            raise MetadataProvenanceError(
+                "METADATA_DECLARATION_INVALID", "metadata registry metadata must be an object"
+            )
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+    @classmethod
+    def from_payload(
+        cls,
+        payload: Mapping[str, object],
+        *,
+        source_run_id: str,
+        source_node_id: str,
+        source_artifact_id: str,
+    ) -> "MetadataRegistryV1":
+        if payload.get("payload_schema") != "workbench.data-metadata":
+            raise MetadataProvenanceError(
+                "METADATA_REGISTRY_INVALID", "metadata artifact payload_schema is unsupported"
+            )
+        if payload.get("schema_version") != 1:
+            raise MetadataProvenanceError(
+                "METADATA_REGISTRY_INVALID", "metadata artifact schema_version is unsupported"
+            )
+        source = payload.get("source")
+        if not isinstance(source, Mapping):
+            raise MetadataProvenanceError(
+                "METADATA_REGISTRY_INVALID", "metadata artifact source is missing"
+            )
+        expected_source = {
+            "run_id": source_run_id,
+            "node_id": source_node_id,
+            "artifact_id": source_artifact_id,
+        }
+        for key, expected in expected_source.items():
+            if source.get(key) != expected:
+                raise MetadataProvenanceError(
+                    "METADATA_REGISTRY_SOURCE_MISMATCH",
+                    f"metadata artifact source.{key} does not match the selected dataset",
+                )
+        metadata = payload.get("metadata")
+        if not isinstance(metadata, Mapping):
+            raise MetadataProvenanceError(
+                "METADATA_REGISTRY_INVALID", "metadata artifact metadata is missing"
+            )
+        schema_revision = payload.get("schema_revision")
+        metadata_revision = payload.get("metadata_revision")
+        return cls(
+            source_run_id=source_run_id,
+            source_node_id=source_node_id,
+            source_artifact_id=source_artifact_id,
+            schema_revision=_metadata_text(schema_revision, "schema_revision"),
+            metadata_revision=_metadata_text(metadata_revision, "metadata_revision"),
+            metadata=metadata,
+            confirmed=payload.get("confirmed") is True,
+        )
+
+    def to_profile_metadata(self, columns: tuple[str, ...]) -> dict[str, object]:
+        """Project canonical registry fields into the profile declaration shape."""
+
+        known = frozenset(columns)
+        raw_columns = self.metadata.get("columns", {})
+        if not isinstance(raw_columns, Mapping):
+            raise MetadataProvenanceError(
+                "METADATA_REGISTRY_INVALID", "metadata registry columns must be an object"
+            )
+        projected_columns = {
+            str(column): dict(declaration)
+            for column, declaration in raw_columns.items()
+            if column in known and isinstance(declaration, Mapping)
+        }
+        result: dict[str, object] = dict(projected_columns)
+        dataset = {
+            key: self.metadata[key]
+            for key in ("weight", "split", "group")
+            if key in self.metadata
+        }
+        if dataset:
+            result["__dataset__"] = dataset
+        return result
+
+    def user_missing_values(self, columns: tuple[str, ...]) -> dict[str, list[MetadataScalar]]:
+        profile_metadata = self.to_profile_metadata(columns)
+        raw_columns = {
+            column: declaration
+            for column, declaration in profile_metadata.items()
+            if column != "__dataset__"
+        }
+        if not isinstance(raw_columns, Mapping):
+            return {}
+        return {
+            str(column): list(declaration["user_missing_values"])
+            for column, declaration in raw_columns.items()
+            if isinstance(declaration, Mapping) and "user_missing_values" in declaration
+        }
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "payload_schema": "workbench.data-metadata",
+            "schema_version": 1,
+            "confirmed": True,
+            "schema_revision": self.schema_revision,
+            "metadata_revision": self.metadata_revision,
+            "source": {
+                "run_id": self.source_run_id,
+                "node_id": self.source_node_id,
+                "artifact_id": self.source_artifact_id,
+            },
+            "metadata": dict(self.metadata),
+        }
+
+
 def parse_metadata_declarations(
     normalized: Mapping[str, Mapping[str, object]],
 ) -> MetadataDeclarationsV1:
@@ -393,6 +561,8 @@ class MetadataMutationPreviewV1:
     changed_columns: tuple[str, ...]
     fingerprint: str
     canonical_metadata: Mapping[str, object] = field(default_factory=dict)
+    schema_revision: str = ""
+    metadata_revision: str = ""
     status: str = "ready"
     reason: str | None = None
 
@@ -407,6 +577,8 @@ class MetadataMutationPreviewV1:
             "metadata_fingerprint": self.metadata_fingerprint,
             "changed_columns": list(self.changed_columns),
             "metadata": dict(self.canonical_metadata),
+            "schema_revision": self.schema_revision,
+            "metadata_revision": self.metadata_revision,
             "fingerprint": self.fingerprint,
             "status": self.status,
             "reason": self.reason,
@@ -420,6 +592,8 @@ class MetadataMutationEffectV1:
     metadata_artifact_id: str
     metadata_artifact_path: str
     child_node_id: str
+    schema_revision: str | None = None
+    metadata_revision: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -430,6 +604,8 @@ class MetadataMutationEffectV1:
             "metadata_artifact_id": self.metadata_artifact_id,
             "metadata_artifact_path": self.metadata_artifact_path,
             "child_node_id": self.child_node_id,
+            "schema_revision": self.schema_revision,
+            "metadata_revision": self.metadata_revision,
         }
 
 

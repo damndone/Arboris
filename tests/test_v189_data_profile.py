@@ -16,7 +16,14 @@ def _profile_api():
 
 
 def _dataset_ref(api):
-    return api.DatasetRefV1("run-a", "node-a", "artifact-a", "a" * 64)
+    return api.DatasetRefV1(
+        "run-a",
+        "node-a",
+        "artifact-a",
+        "a" * 64,
+        "schema:fixture",
+        "metadata:fixture",
+    )
 
 
 def test_profile_keeps_observed_declared_and_inferred_metadata_distinct() -> None:
@@ -39,8 +46,14 @@ def test_profile_keeps_observed_declared_and_inferred_metadata_distinct() -> Non
     assert group.inferred.confirmed is False
     assert group.inferred.method
     assert profile.shape == (3, 2)
-    assert profile.dataset_ref.schema_revision == "v1"
-    assert profile.dataset_ref.metadata_revision == "v1"
+    assert profile.dataset_ref.schema_revision == "schema:fixture"
+    assert profile.dataset_ref.metadata_revision == "metadata:fixture"
+
+
+def test_dataset_ref_rejects_implicit_v1_revisions() -> None:
+    api = _profile_api()
+    with pytest.raises(api.DataProfileError, match="revision"):
+        api.DatasetRefV1("run-a", "node-a", "artifact-a", "a" * 64, "v1", "v1")
 
 
 def test_missing_declared_metadata_stays_unknown_and_inference_is_advisory() -> None:
@@ -121,7 +134,14 @@ def test_dataset_identity_rejects_non_digest_content_fingerprints() -> None:
     api = _profile_api()
 
     with pytest.raises(api.DataProfileError) as exc_info:
-        api.DatasetRefV1("run-a", "node-a", "artifact-a", "sha256:truncated")
+        api.DatasetRefV1(
+            "run-a",
+            "node-a",
+            "artifact-a",
+            "sha256:truncated",
+            "schema:fixture",
+            "metadata:fixture",
+        )
 
     assert exc_info.value.code == "DATA_PROFILE_DIGEST_INVALID"
 
