@@ -63,7 +63,9 @@ function assertSourceIdentity(
   manifest: DataOperationManifest,
   identity: ResolvedSourceIdentity,
 ): void {
-  for (const operation of manifest.operations) {
+  for (const operation of manifest.operations.filter(
+    (candidate) => candidate.availability?.status !== "unavailable",
+  )) {
     const properties = operation.request_schema.properties;
     for (const field of DATA_OPERATION_SOURCE_IDENTITY_FIELDS) {
       const identityValue = identity[field];
@@ -261,8 +263,17 @@ function ParsedDataOperationsSection({
   const requestRevision = useRef(0);
 
   const selectedOperation = manifest.operations.find(
-    (operation) => operation.operation_id === selectedOperationId,
+    (operation) =>
+      operation.operation_id === selectedOperationId &&
+      operation.availability?.status !== "unavailable",
   );
+  const availableOperations = manifest.operations.filter(
+    (operation) => operation.availability?.status !== "unavailable",
+  );
+  const unavailableOperations = [
+    ...(manifest.unavailable ?? []),
+    ...manifest.operations.filter((operation) => operation.availability?.status === "unavailable"),
+  ];
 
   function invalidatePreview() {
     requestRevision.current += 1;
@@ -341,22 +352,32 @@ function ParsedDataOperationsSection({
 
   return (
     <section aria-label="Data operations" data-testid="data-operations-section">
-      <label htmlFor="data-operation-select">
-        Data operation
-        <select
-          id="data-operation-select"
-          aria-label="Data operation"
-          value={selectedOperationId}
-          onChange={(event) => selectOperation(event.target.value)}
-        >
-          <option value="">Select operation</option>
-          {manifest.operations.map((operation) => (
-            <option key={operation.operation_id} value={operation.operation_id}>
-              {operation.operation_id}
-            </option>
-          ))}
-        </select>
-      </label>
+      {unavailableOperations.map((operation) => (
+        <div key={operation.operation_id} data-testid="data-operation-unavailable">
+          {operation.operation_id}: {"availability" in operation && isObject(operation.availability)
+            ? `${String(operation.availability.reason_code)} — ${String(operation.availability.message)}`
+            : `${String(operation.reason_code)} — ${String(operation.message)}`}
+        </div>
+      ))}
+
+      {availableOperations.length > 0 && (
+        <label htmlFor="data-operation-select">
+          Data operation
+          <select
+            id="data-operation-select"
+            aria-label="Data operation"
+            value={selectedOperationId}
+            onChange={(event) => selectOperation(event.target.value)}
+          >
+            <option value="">Select operation</option>
+            {availableOperations.map((operation) => (
+              <option key={operation.operation_id} value={operation.operation_id}>
+                {operation.operation_id}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       {selectedOperation && (
         <div data-testid="data-operation-fields">

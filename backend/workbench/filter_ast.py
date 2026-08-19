@@ -393,7 +393,60 @@ def _ensure_value_compatible(series: pd.Series, value: Any, op: str, name: str) 
         )
 
 
-def _predicate_mask(frame: pd.DataFrame, predicate: FilterPredicate) -> pd.Series:
+def _resolve_user_missing_values(
+    frame: pd.DataFrame,
+    declared: Mapping[str, Iterable[Any]] | None,
+) -> dict[str, tuple[Any, ...]]:
+    raw = declared
+    if raw is None:
+        candidate = frame.attrs.get("user_missing_values", {})
+        raw = candidate if isinstance(candidate, Mapping) else None
+    if raw is None:
+        if "user_missing_values" in frame.attrs:
+            raise FilterValidationError("user_missing_values must be a column mapping")
+        return {}
+    normalized: dict[str, tuple[Any, ...]] = {}
+    for column, values in raw.items():
+        if not isinstance(column, str) or column not in frame.columns:
+            raise FilterValidationError(
+                f"user_missing_values names unknown column: {column!r}"
+            )
+        if not isinstance(values, (list, tuple)):
+            raise FilterValidationError(
+                f"user_missing_values[{column!r}] must be an explicit list"
+            )
+        if len(values) > MAX_FILTER_LIST_SIZE:
+            raise FilterValidationError(
+                f"user_missing_values[{column!r}] exceeds the maximum filter list size of {MAX_FILTER_LIST_SIZE}"
+            )
+        normalized[column] = tuple(
+            _normalise_scalar(item, f"user_missing_values[{column!r}][{index}]")
+            for index, item in enumerate(values)
+        )
+    return normalized
+
+
+def _user_missing_mask(
+    series: pd.Series,
+    column: str,
+    declared: Mapping[str, tuple[Any, ...]],
+) -> pd.Series:
+    values = declared.get(column, ())
+    if not values:
+        return pd.Series(False, index=series.index, dtype=bool)
+    try:
+        return series.isin(list(values)).fillna(False).astype(bool)
+    except (TypeError, ValueError) as exc:
+        raise FilterValidationError(
+            f"user_missing_values for {column!r} could not be applied: {exc}"
+        ) from exc
+
+
+def _predicate_mask(
+    frame: pd.DataFrame,
+    predicate: FilterPredicate,
+    declared_user_missing: Mapping[str, tuple[Any, ...]],
+) -> pd.Series:
     if predicate.column not in frame.columns:
         raise FilterValidationError(
             f"bound filter column {predicate.column!r} is not present in the execution frame"
@@ -402,8 +455,10 @@ def _predicate_mask(frame: pd.DataFrame, predicate: FilterPredicate) -> pd.Serie
     if not isinstance(series, pd.Series):
         raise FilterValidationError(f"filter column {predicate.column!r} is not unique")
     op = predicate.op
+    user_missing = _user_missing_mask(series, predicate.column, declared_user_missing)
+    missing = series.isna() | user_missing
     if op in {"is_missing", "not_missing"}:
-        mask = series.isna() if op == "is_missing" else series.notna()
+        mask = missing if op == "is_missing" else ~missing
         return mask.fillna(False).astype(bool)
 
     value = predicate.value
@@ -412,23 +467,23 @@ def _predicate_mask(frame: pd.DataFrame, predicate: FilterPredicate) -> pd.Serie
         _ensure_value_compatible(series, item, op, f"{predicate.column}.{op}.value[{index}]")
     try:
         if op == "eq":
-            mask = series.eq(value)
+            mask = ~missing & series.eq(value)
         elif op == "ne":
-            mask = series.notna() & series.ne(value)
+            mask = ~missing & series.ne(value)
         elif op == "lt":
-            mask = series.notna() & series.lt(value)
+            mask = ~missing & series.lt(value)
         elif op == "le":
-            mask = series.notna() & series.le(value)
+            mask = ~missing & series.le(value)
         elif op == "gt":
-            mask = series.notna() & series.gt(value)
+            mask = ~missing & series.gt(value)
         elif op == "ge":
-            mask = series.notna() & series.ge(value)
+            mask = ~missing & series.ge(value)
         elif op in {"in", "not_in"}:
             membership = series.isin(list(value))
-            mask = membership if op == "in" else series.notna() & ~membership
+            mask = (~missing & membership) if op == "in" else ~missing & ~membership
         elif op == "between":
             lower, upper = value
-            mask = series.notna() & series.ge(lower) & series.le(upper)
+            mask = ~missing & series.ge(lower) & series.le(upper)
         else:  # pragma: no cover - bound nodes cannot contain another operator.
             raise FilterValidationError(f"unsupported bound filter operator: {op}")
     except FilterValidationError:
@@ -442,10 +497,16 @@ def _predicate_mask(frame: pd.DataFrame, predicate: FilterPredicate) -> pd.Serie
     return mask.fillna(False).astype(bool)
 
 
-def _evaluate_bound(frame: pd.DataFrame, node: FilterNode) -> pd.Series:
+def _evaluate_bound(
+    frame: pd.DataFrame,
+    node: FilterNode,
+    declared_user_missing: Mapping[str, tuple[Any, ...]],
+) -> pd.Series:
     if isinstance(node, FilterPredicate):
-        return _predicate_mask(frame, node)
-    child_masks = [_evaluate_bound(frame, child) for child in node.children]
+        return _predicate_mask(frame, node, declared_user_missing)
+    child_masks = [
+        _evaluate_bound(frame, child, declared_user_missing) for child in node.children
+    ]
     if node.op == "and":
         mask = pd.Series(True, index=frame.index, dtype=bool)
         for child_mask in child_masks:
@@ -466,6 +527,7 @@ def execute_filter_ast(
     expression: FilterNode | Mapping[str, Any],
     *,
     limits: FilterLimits | None = None,
+    user_missing_values: Mapping[str, Iterable[Any]] | None = None,
 ) -> pd.Series:
     """Execute a bound tree using explicit pandas boolean masks."""
 
@@ -477,7 +539,10 @@ def execute_filter_ast(
         bound = bind_filter_ast(expression.to_dict(), frame.columns, limits=limits)
     else:
         raise FilterValidationError("filter execution requires a bound filter AST")
-    return _evaluate_bound(frame, bound).reindex(frame.index, fill_value=False).astype(bool)
+    declared_user_missing = _resolve_user_missing_values(frame, user_missing_values)
+    return _evaluate_bound(frame, bound, declared_user_missing).reindex(
+        frame.index, fill_value=False
+    ).astype(bool)
 
 
 def referenced_columns(expression: FilterNode) -> frozenset[str]:

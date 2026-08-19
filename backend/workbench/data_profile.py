@@ -15,9 +15,12 @@ import pandas as pd
 
 from .contracts.agent.context_egress import SensitivityClassV1
 from .metadata import (
+    MetadataDeclarationsV1,
+    MetadataScalar,
     UNKNOWN_METADATA,
     MetadataProvenanceError,
     normalize_declared_metadata,
+    parse_metadata_declarations,
 )
 
 
@@ -78,6 +81,15 @@ def _freeze_numeric_mapping(
     value: Mapping[str, float | None],
 ) -> Mapping[str, float | None]:
     return MappingProxyType(dict(value))
+
+
+def _freeze_values(value: object) -> tuple[MetadataScalar, ...]:
+    if type(value) not in {list, tuple}:
+        raise DataProfileError(
+            "DATA_PROFILE_METADATA_INVALID",
+            "user_missing_values must be an explicit list",
+        )
+    return tuple(value)  # type: ignore[arg-type]
 
 
 def _as_sensitivity(value: object, field_name: str) -> SensitivityClassV1:
@@ -318,10 +330,16 @@ class DeclaredColumnMetadataV1:
     missing_policy: str = UNKNOWN_METADATA
     role: str = UNKNOWN_METADATA
     sensitivity: SensitivityClassV1 = SensitivityClassV1.UNKNOWN
+    user_missing_values: tuple[MetadataScalar, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if self.value_labels is not None:
             object.__setattr__(self, "value_labels", _freeze_mapping(self.value_labels))
+        object.__setattr__(
+            self,
+            "user_missing_values",
+            _freeze_values(self.user_missing_values),
+        )
         object.__setattr__(
             self,
             "sensitivity",
@@ -338,6 +356,7 @@ class DeclaredColumnMetadataV1:
             "missing_policy": self.missing_policy,
             "role": self.role,
             "sensitivity": self.sensitivity.value,
+            "user_missing_values": list(self.user_missing_values),
         }
 
 
@@ -408,6 +427,7 @@ class DataProfileV1:
     dataset_ref: DatasetRefV1
     shape: tuple[int, int]
     columns: tuple[ColumnProfileV1, ...]
+    declarations: MetadataDeclarationsV1 = field(default_factory=MetadataDeclarationsV1)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "shape", tuple(self.shape))
@@ -446,6 +466,7 @@ class DataProfileV1:
             "row_count": self.row_count,
             "column_count": self.column_count,
             "columns": [column.to_dict() for column in self.columns],
+            "declarations": self.declarations.to_dict(),
         }
 
 
@@ -459,6 +480,7 @@ def _declared_column(value: Mapping[str, object] | None) -> DeclaredColumnMetada
         missing_policy=str(raw.get("missing_policy", UNKNOWN_METADATA)),
         role=str(raw.get("role", UNKNOWN_METADATA)),
         sensitivity=_as_sensitivity(sensitivity, "declared sensitivity"),
+        user_missing_values=tuple(raw.get("user_missing_values", ())),  # type: ignore[arg-type]
     )
 
 
@@ -557,6 +579,7 @@ def build_data_profile(
         dataset_ref=dataset_ref,
         shape=(int(frame.shape[0]), int(frame.shape[1])),
         columns=tuple(profiles),
+        declarations=parse_metadata_declarations(declarations),
     )
 
 
@@ -574,6 +597,7 @@ __all__ = [
     "DatasetRefV1",
     "DeclaredColumnMetadataV1",
     "DeclaredMetadataV1",
+    "MetadataDeclarationsV1",
     "InferredColumnMetadataV1",
     "InferredMetadataV1",
     "ObservedColumnMetadataV1",

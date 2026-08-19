@@ -163,6 +163,18 @@ def test_filter_ast_enforces_depth_node_and_list_limits() -> None:
         )
 
 
+def test_filter_ast_uses_declared_user_missing_values_for_missing_predicates() -> None:
+    from workbench.filter_ast import bind_filter_ast, execute_filter_ast
+
+    frame = pd.DataFrame({"score": [99, 1, None]})
+    frame.attrs["user_missing_values"] = {"score": [99]}
+    expression = {"op": "is_missing", "column": "score"}
+
+    bound = bind_filter_ast(expression, frame.columns)
+
+    assert execute_filter_ast(frame, bound).tolist() == [True, False, True]
+
+
 def test_subset_integrates_bound_filter_ast_before_projection(tmp_path: Path) -> None:
     project, run_id, artifact_id = _source_project(
         tmp_path,

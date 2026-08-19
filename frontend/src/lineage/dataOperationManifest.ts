@@ -36,7 +36,8 @@ export type DataOperationSchemaType =
   | "integer"
   | "boolean"
   | "object"
-  | "array";
+  | "array"
+  | "null";
 
 export interface DataOperationFieldSchema {
   type?: DataOperationSchemaType | DataOperationSchemaType[];
@@ -73,7 +74,14 @@ export interface DataOperationDescriptor {
   replay: DataOperationReplay;
   clarification_requirements: string[];
   request_schema_digest: string;
+  availability?: DataOperationAvailability;
   [key: string]: unknown;
+}
+
+export interface DataOperationAvailability {
+  status: "available" | "unavailable";
+  reason_code: string;
+  message: string;
 }
 
 export interface DataOperationPort {
@@ -95,6 +103,15 @@ export interface DataOperationReplay {
 export interface DataOperationManifest {
   schema_version: typeof DATA_OPERATION_MANIFEST_VERSION;
   operations: DataOperationDescriptor[];
+  unavailable?: DataOperationUnavailable[];
+}
+
+export interface DataOperationUnavailable {
+  operation_id: string;
+  operation_version: string;
+  status: "unavailable";
+  reason_code: string;
+  message: string;
 }
 
 const SUPPORTED_SCHEMA_TYPES: ReadonlySet<DataOperationSchemaType> = new Set([
@@ -104,6 +121,7 @@ const SUPPORTED_SCHEMA_TYPES: ReadonlySet<DataOperationSchemaType> = new Set([
   "boolean",
   "object",
   "array",
+  "null",
 ]);
 
 const DESCRIPTOR_REQUIRED_FIELDS = [
@@ -411,6 +429,43 @@ function validateDescriptor(value: unknown, operationIndex: number): asserts val
   }
 
   validateRequestSchema(value.request_schema, operationIndex);
+
+  if (hasOwn(value, "availability")) {
+    if (!isObject(value.availability)) {
+      throw manifestError(
+        "DESCRIPTOR_FIELD_INVALID",
+        `Descriptor availability at ${path}.availability must be an object.`,
+        `${path}.availability`,
+      );
+    }
+    if (
+      (value.availability.status !== "available" && value.availability.status !== "unavailable") ||
+      !nonEmptyString(value.availability.reason_code) ||
+      !nonEmptyString(value.availability.message)
+    ) {
+      throw manifestError(
+        "DESCRIPTOR_FIELD_INVALID",
+        `Descriptor availability at ${path}.availability is invalid.`,
+        `${path}.availability`,
+      );
+    }
+  }
+}
+
+function validateUnavailable(value: unknown, index: number): asserts value is DataOperationUnavailable {
+  const path = `unavailable[${index}]`;
+  if (!isObject(value)) {
+    throw manifestError("DESCRIPTOR_NOT_OBJECT", `Unavailable operation at ${path} must be an object.`, path);
+  }
+  if (
+    !nonEmptyString(value.operation_id) ||
+    !nonEmptyString(value.operation_version) ||
+    value.status !== "unavailable" ||
+    !nonEmptyString(value.reason_code) ||
+    !nonEmptyString(value.message)
+  ) {
+    throw manifestError("DESCRIPTOR_FIELD_INVALID", `Unavailable operation at ${path} is invalid.`, path);
+  }
 }
 
 /**
@@ -424,7 +479,7 @@ export function parseDataOperationManifest(value: unknown): DataOperationManifes
   }
 
   const unknownFields = Object.keys(value).filter(
-    (field) => field !== "schema_version" && field !== "operations",
+    (field) => field !== "schema_version" && field !== "operations" && field !== "unavailable",
   );
   if (unknownFields.length > 0) {
     throw manifestError(
@@ -461,9 +516,21 @@ export function parseDataOperationManifest(value: unknown): DataOperationManifes
     operationIds.add(operation.operation_id);
   });
 
+  let unavailable: DataOperationUnavailable[] | undefined;
+  if (hasOwn(value, "unavailable")) {
+    if (!Array.isArray(value.unavailable)) {
+      throw manifestError("OPERATIONS_INVALID", "Data-operation manifest unavailable must be an array.", "unavailable");
+    }
+    unavailable = value.unavailable.map((item, index) => {
+      validateUnavailable(item, index);
+      return item;
+    });
+  }
+
   return {
     schema_version: DATA_OPERATION_MANIFEST_VERSION,
     operations: value.operations as DataOperationDescriptor[],
+    unavailable,
   };
 }
 

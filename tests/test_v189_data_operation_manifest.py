@@ -15,7 +15,11 @@ EXPECTED_OPERATION_IDS = (
     "data.columns.cast",
     "data.feature_recipe",
     "data.merge",
+    "data.metadata.update",
+    "data.recode",
     "data.reshape",
+    "data.sort",
+    "data.split",
     "data.subset",
 )
 
@@ -39,8 +43,21 @@ def test_manifest_is_derived_from_the_single_live_data_operation_surface() -> No
 
     registry = OperationRegistry()
     for operation_id in EXPECTED_OPERATION_IDS:
-        definition = registry.require(operation_id)
         descriptor = descriptors[operation_id]
+        if operation_id in {"data.metadata.update", "data.sort", "data.split", "data.recode"}:
+            assert descriptor.operation_version == "v1"
+            assert descriptor.effect_level == "mutation"
+            assert descriptor.risk_level == "mutating"
+            assert descriptor.confirmation_policy == "required"
+            assert descriptor.executor_key.startswith("executor:workbench.data_consumer.")
+            assert descriptor.reconciler_key.startswith("reconciler:workbench.data_consumer.")
+            assert descriptor.validator_key == operation_id
+            assert descriptor.request_schema["additionalProperties"] is False
+            assert set(("source_run_id", "source_node_id", "source_artifact_id")) <= set(
+                descriptor.request_schema["properties"]
+            )
+            continue
+        definition = registry.require(operation_id)
         contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
 
         assert descriptor.operation_version == definition.operation_version
@@ -273,3 +290,26 @@ def test_agent_notebook_composition_fixtures_are_draft_planning_only() -> None:
             node["name"] in EXPECTED_OPERATION_IDS for node in fixture.plan.nodes
         )
         assert not hasattr(fixture, "execute")
+
+
+def test_manifest_advertises_only_real_data_consumer_extensions() -> None:
+    manifest, descriptors = _descriptors()
+
+    assert {
+        "data.metadata.update",
+        "data.sort",
+        "data.split",
+        "data.recode",
+    } <= set(descriptors)
+    for operation_id in ("data.metadata.update", "data.sort", "data.split", "data.recode"):
+        descriptor = descriptors[operation_id]
+        assert descriptor.preview_ref.endswith("/preview")
+        assert descriptor.confirm_ref.endswith("/confirm")
+        assert descriptor.request_schema["additionalProperties"] is False
+        assert descriptor.request_schema["properties"]["source_artifact_id"]["type"] == "string"
+
+    unavailable = manifest.to_dict().get("unavailable", [])
+    assert {
+        item["operation_id"] for item in unavailable
+        if item["operation_id"] in {"data.interchange.sav", "data.interchange.zsav", "data.interchange.dta"}
+    } == {"data.interchange.sav", "data.interchange.zsav", "data.interchange.dta"}

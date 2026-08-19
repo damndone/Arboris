@@ -40,18 +40,22 @@ from ..data_operations import (
     DataColumnsCastSpecV1,
     FeatureRecipeOperationSpecV1,
     DataTransformSpecV1,
+    apply_metadata_mutation,
     apply_data_transform,
     apply_feature_recipe_operation,
     preview_data_column_cast,
     preview_data_columns_cast,
     preview_feature_recipe,
     preview_data_transform,
+    preview_metadata_mutation,
+    read_metadata_mutation_record,
     resolve_data_column_cast_context,
     _read_frame,
     _resolve_source,
 )
 from ..data_profile import DatasetRefV1, build_data_profile
 from ..metadata import build_metadata_loss_manifest
+from ..metadata import MetadataMutationSpecV1
 from ..code_execution import (
     MAX_CODE_CHARS,
     CodeExecuteSpecV1,
@@ -64,7 +68,17 @@ from ..sandbox import SandboxUnavailableError
 
 # Typed operations that derive a child data node, and whose records the data
 # drawer resolves by child node id for provenance.
-_DATA_OPERATION_IDS = frozenset({"data.column.cast", "data.columns.cast", "code.execute"})
+_DATA_OPERATION_IDS = frozenset(
+    {
+        "data.column.cast",
+        "data.columns.cast",
+        "code.execute",
+        "data.metadata.update",
+        "data.sort",
+        "data.split",
+        "data.recode",
+    }
+)
 
 router = APIRouter()
 
@@ -118,12 +132,23 @@ def _resolve_profile(
         # parent column, but it must never receive a declaration for a column
         # that is not present.
         known_columns = set(str(column) for column in frame.columns)
-        for field_name in ("variable_labels", "value_labels", "measurement_level"):
+        for field_name in (
+            "variable_labels",
+            "value_labels",
+            "measurement_level",
+            "missing_policy",
+            "roles",
+            "sensitivity",
+            "user_missing_values",
+        ):
             mapping = labels.get(field_name)
             if isinstance(mapping, dict):
                 declared_metadata[field_name] = {
                     column: value for column, value in mapping.items() if column in known_columns
                 }
+        dataset_declarations = labels.get("__dataset__")
+        if isinstance(dataset_declarations, dict):
+            declared_metadata["__dataset__"] = dataset_declarations
     profile = build_data_profile(
         frame=frame,
         dataset_ref=DatasetRefV1(
@@ -209,7 +234,21 @@ class DataTransformRequest(BaseModel):
     source_run_id: str = Field(min_length=1, max_length=200)
     source_node_id: str = Field(min_length=1, max_length=300)
     source_artifact_id: str = Field(min_length=1, max_length=200)
-    operation: Literal["merge", "append", "reshape", "subset"]
+    operation: Literal[
+        "merge",
+        "append",
+        "reshape",
+        "subset",
+        "dedupe",
+        "rename",
+        "aggregate",
+        "fill_missing",
+        "tsset",
+        "lag",
+        "sort",
+        "split",
+        "recode",
+    ]
     parameters: dict[str, Any] = Field(default_factory=dict)
     secondary_run_id: str | None = Field(default=None, max_length=200)
     secondary_node_id: str | None = Field(default=None, max_length=300)
@@ -217,6 +256,23 @@ class DataTransformRequest(BaseModel):
 
 
 class DataTransformConfirmRequest(DataTransformRequest):
+    preview_fingerprint: str = Field(min_length=1, max_length=200)
+    session_id: str = Field(default="agent_data_ui", min_length=1, max_length=200)
+
+
+class MetadataMutationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_run_id: str = Field(min_length=1, max_length=200)
+    source_node_id: str = Field(min_length=1, max_length=300)
+    source_artifact_id: str = Field(min_length=1, max_length=200)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    weight: dict[str, Any] | None = None
+    split: dict[str, Any] | None = None
+    group: dict[str, Any] | None = None
+
+
+class MetadataMutationConfirmRequest(MetadataMutationRequest):
     preview_fingerprint: str = Field(min_length=1, max_length=200)
     session_id: str = Field(default="agent_data_ui", min_length=1, max_length=200)
 
@@ -425,6 +481,47 @@ def _data_transform_preview_or_error(root, spec: DataTransformSpecV1, *, confirm
                 else "The typed data transform cannot be previewed."
             ),
             details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
+        ) from exc
+
+
+def _metadata_mutation_spec(body: MetadataMutationRequest) -> MetadataMutationSpecV1:
+    try:
+        return MetadataMutationSpecV1(
+            source_run_id=body.source_run_id,
+            source_node_id=body.source_node_id,
+            source_artifact_id=body.source_artifact_id,
+            metadata=body.metadata,
+            weight=body.weight,
+            split=body.split,
+            group=body.group,
+        )
+    except (TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_INVALID",
+            message="The typed metadata mutation specification is invalid.",
+            details={"operation_id": "data.metadata.update", "reason": str(exc)},
+        ) from exc
+
+
+def _metadata_mutation_preview_or_error(
+    root,
+    spec: MetadataMutationSpecV1,
+    *,
+    confirm: bool,
+):
+    try:
+        return preview_metadata_mutation(root, spec)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409 if confirm else 422,
+            code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            message=(
+                "The metadata source changed before confirmation."
+                if confirm
+                else "The typed metadata mutation cannot be previewed."
+            ),
+            details={"operation_id": "data.metadata.update", "reason": str(exc)},
         ) from exc
 
 
@@ -751,7 +848,13 @@ def _confirm_direct_data_operation(
         chain_id=chain_id,
         active_head_run_id=source_run_id,
     )
-    definition = OperationRegistry().require(operation_id, "v1")
+    local_operation = operation_id in {
+        "data.metadata.update",
+        "data.sort",
+        "data.split",
+        "data.recode",
+    }
+    definition = None if local_operation else OperationRegistry().require(operation_id, "v1")
     target = {
         "run_id": source_run_id,
         "node_ref": source_node_id,
@@ -771,7 +874,16 @@ def _confirm_direct_data_operation(
         "active_head_run_id": source_run_id,
         "owner_resolution": "typed_data_node",
     }
-    definition.validate(target=target, preconditions=preconditions, changes=changes)
+    if definition is not None:
+        definition.validate(target=target, preconditions=preconditions, changes=changes)
+    else:
+        if any(not isinstance(value, str) or not value.strip() for value in target.values() if isinstance(value, str)):
+            raise WorkbenchAPIError(
+                status_code=422,
+                code="DATA_OPERATION_INVALID",
+                message="The local data-consumer operation has an invalid identity.",
+                details={"operation_id": operation_id},
+            )
     proposal_store = ProposalStore(workbench_root)
     safe_operation_id = operation_id.replace(".", "_")
     proposal_id = f"proposal_{safe_operation_id}_{preview_fingerprint[:24]}"
@@ -869,6 +981,112 @@ def preview_metadata_loss(body: MetadataLossPreviewRequest) -> dict[str, Any]:
             code="METADATA_LOSS_PREVIEW_INVALID",
             message="The metadata-loss preview request is invalid.",
             details={"reason": str(exc)},
+        ) from exc
+
+
+@router.post("/data-operations/metadata/preview")
+def preview_metadata_mutation_route(
+    project_root: str,
+    body: MetadataMutationRequest,
+) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _metadata_mutation_spec(body)
+    preview = _metadata_mutation_preview_or_error(root, spec, confirm=False)
+    return {"spec": spec.to_dict(), "preview": preview.to_dict()}
+
+
+@router.post("/data-operations/metadata/confirm")
+def confirm_metadata_mutation_route(
+    project_root: str,
+    body: MetadataMutationConfirmRequest,
+) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _metadata_mutation_spec(body)
+    preview = _metadata_mutation_preview_or_error(root, spec, confirm=True)
+    if preview.fingerprint != body.preview_fingerprint:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The metadata mutation preview fingerprint no longer matches the source.",
+            details={"expected": preview.fingerprint, "received": body.preview_fingerprint},
+        )
+    confirmation = _confirm_direct_data_operation(
+        root,
+        operation_id="data.metadata.update",
+        source_run_id=spec.source_run_id,
+        source_node_id=spec.source_node_id,
+        source_artifact_id=spec.source_artifact_id,
+        preview_fingerprint=preview.fingerprint,
+        source_sha256=preview.source_sha256,
+        secondary_source_sha256=None,
+        session_id=body.session_id,
+        target_fields={
+            "metadata_fingerprint": preview.metadata_fingerprint,
+            "changed_columns": list(preview.changed_columns),
+        },
+        changes=spec.to_dict(),
+    )
+    try:
+        effect = apply_metadata_mutation(root, spec, preview)
+        operation = read_metadata_mutation_record(root, effect.record_id)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The metadata mutation could not be applied because its source changed.",
+            details={"operation_id": "data.metadata.update", "reason": str(exc)},
+        ) from exc
+    return {
+        "status": "completed",
+        "effect": effect.to_dict(),
+        "preview": preview.to_dict(),
+        "operation": operation,
+        **confirmation,
+    }
+
+
+@router.get("/data-operations/metadata/{record_id}")
+def get_metadata_mutation_route(project_root: str, record_id: str) -> dict[str, Any]:
+    root = _root(project_root)
+    try:
+        operation = read_metadata_mutation_record(root, record_id)
+        source = operation.get("source")
+        artifact = operation.get("metadata_artifact")
+        if not isinstance(source, dict) or not isinstance(artifact, dict):
+            raise ValueError("metadata operation record is malformed")
+        run_id = source.get("run_id")
+        relative = artifact.get("path")
+        expected_sha = artifact.get("sha256")
+        if not isinstance(run_id, str) or not isinstance(relative, str):
+            raise ValueError("metadata operation record has invalid artifact identity")
+        artifact_path = (root / "runs" / run_id / relative).resolve()
+        run_root = (root / "runs" / run_id).resolve()
+        artifact_path.relative_to(run_root)
+        if not artifact_path.is_file():
+            raise FileNotFoundError("metadata artifact is missing")
+        from ..artifacts import sha256_file
+
+        if expected_sha != sha256_file(artifact_path):
+            raise ValueError("metadata artifact fingerprint changed")
+        artifact_payload = read_json(artifact_path)
+        metadata = artifact_payload.get("metadata")
+        if not isinstance(metadata, dict):
+            raise ValueError("metadata artifact payload is malformed")
+        reloaded = {
+            "record_id": record_id,
+            "operation_id": operation.get("operation_id"),
+            "source": source,
+            "metadata_fingerprint": operation.get("metadata_fingerprint"),
+            **metadata,
+            "child_node_id": operation.get("child_node_id"),
+        }
+        return {"metadata": reloaded, "operation": operation}
+    except (FileNotFoundError, KeyError, TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=404,
+            code="DATA_OPERATION_NOT_FOUND",
+            message="The typed metadata mutation record was not found or is invalid.",
+            details={"record_id": record_id, "reason": str(exc)},
         ) from exc
 
 

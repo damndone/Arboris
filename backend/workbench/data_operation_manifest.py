@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
+import importlib.util
 import json
 import re
 from types import MappingProxyType
@@ -32,9 +33,17 @@ _DATA_OPERATION_IDS = (
     "data.columns.cast",
     "data.feature_recipe",
     "data.merge",
+    "data.metadata.update",
+    "data.recode",
     "data.reshape",
+    "data.sort",
+    "data.split",
     "data.subset",
 )
+_LOCAL_OPERATION_IDS = frozenset(
+    {"data.metadata.update", "data.sort", "data.split", "data.recode"}
+)
+_NATIVE_INTERCHANGE_IDS = ("data.interchange.sav", "data.interchange.zsav", "data.interchange.dta")
 _IDENTITY_FIELDS = ("source_run_id", "source_node_id", "source_artifact_id")
 _SECONDARY_IDENTITY_FIELDS = (
     "secondary_run_id",
@@ -55,7 +64,11 @@ _OPERATION_ROUTES = {
     "data.columns.cast": ("/data-operations/columns-cast/preview", "/data-operations/columns-cast/confirm"),
     "data.feature_recipe": ("/data-operations/feature-recipe/preview", "/data-operations/feature-recipe/confirm"),
     "data.merge": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
+    "data.metadata.update": ("/data-operations/metadata/preview", "/data-operations/metadata/confirm"),
+    "data.recode": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.reshape": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
+    "data.sort": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
+    "data.split": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.subset": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
 }
 
@@ -342,9 +355,47 @@ class DataOperationDescriptorV1:
 
 
 @dataclass(frozen=True)
+class DataOperationUnavailableV1:
+    operation_id: str
+    operation_version: str
+    reason_code: str
+    message: str
+    status: str = "unavailable"
+
+    def __post_init__(self) -> None:
+        for name in ("operation_id", "operation_version", "reason_code", "message"):
+            _text(getattr(self, name), name)
+        if self.status != "unavailable":
+            raise ValueError("unavailable operation status must be unavailable")
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "operation_id": self.operation_id,
+            "operation_version": self.operation_version,
+            "status": self.status,
+            "reason_code": self.reason_code,
+            "message": self.message,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> "DataOperationUnavailableV1":
+        fields = {"operation_id", "operation_version", "status", "reason_code", "message"}
+        if not isinstance(value, Mapping) or set(value) != fields:
+            raise ValueError("unavailable operation fields are not exact")
+        return cls(
+            operation_id=value["operation_id"],  # type: ignore[arg-type]
+            operation_version=value["operation_version"],  # type: ignore[arg-type]
+            status=value["status"],  # type: ignore[arg-type]
+            reason_code=value["reason_code"],  # type: ignore[arg-type]
+            message=value["message"],  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True)
 class DataOperationManifestV1:
     schema_version: str
     operations: tuple[DataOperationDescriptorV1, ...]
+    unavailable: tuple[DataOperationUnavailableV1, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version != DATA_OPERATION_MANIFEST_VERSION:
@@ -356,6 +407,15 @@ class DataOperationManifestV1:
         operation_ids = tuple(operation.operation_id for operation in self.operations)
         if len(set(operation_ids)) != len(operation_ids):
             raise ValueError("manifest operation ids must be unique")
+        if type(self.unavailable) is not tuple or any(
+            type(item) is not DataOperationUnavailableV1 for item in self.unavailable
+        ):
+            raise ValueError("manifest unavailable operations are invalid")
+        unavailable_ids = tuple(item.operation_id for item in self.unavailable)
+        if len(set(unavailable_ids)) != len(unavailable_ids):
+            raise ValueError("manifest unavailable operation ids must be unique")
+        if set(operation_ids) & set(unavailable_ids):
+            raise ValueError("manifest cannot advertise and mark an operation unavailable")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -364,11 +424,15 @@ class DataOperationManifestV1:
             # component/Agent planners.  Returning only IDs would force each
             # consumer to recreate request schemas and safety metadata.
             "operations": [operation.to_dict() for operation in self.operations],
+            "unavailable": [item.to_dict() for item in self.unavailable],
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "DataOperationManifestV1":
-        if not isinstance(value, Mapping) or set(value) != {"schema_version", "operations"}:
+        if not isinstance(value, Mapping) or set(value) not in (
+            {"schema_version", "operations"},
+            {"schema_version", "operations", "unavailable"},
+        ):
             raise ValueError("manifest fields are not exact")
         if value["schema_version"] != DATA_OPERATION_MANIFEST_VERSION:
             raise ValueError("manifest schema_version is invalid")
@@ -381,11 +445,20 @@ class DataOperationManifestV1:
             )
         except (TypeError, ValueError) as exc:
             raise ValueError("manifest operations contain an invalid descriptor") from exc
+        raw_unavailable = value.get("unavailable", [])
+        if type(raw_unavailable) is not list:
+            raise ValueError("manifest unavailable operations must be a list")
+        try:
+            unavailable = tuple(
+                DataOperationUnavailableV1.from_dict(item) for item in raw_unavailable
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("manifest unavailable operations contain an invalid item") from exc
 
         live = build_data_operation_manifest()
-        if operations != live.operations:
+        if operations != live.operations or unavailable != live.unavailable:
             raise ValueError("manifest descriptors do not match the live operation surface")
-        return DataOperationManifestV1(DATA_OPERATION_MANIFEST_VERSION, operations)
+        return DataOperationManifestV1(DATA_OPERATION_MANIFEST_VERSION, operations, unavailable)
 
 
 @dataclass(frozen=True)
@@ -408,7 +481,81 @@ class DraftAgentNotebookFixture:
             raise ValueError("plan must be DraftAgentPlanV1")
 
 
+def _local_request_schema(operation_id: str) -> dict[str, Any]:
+    identity_properties = {
+        field: {"type": "string", "minLength": 1, "description": "Bound source identity."}
+        for field in _IDENTITY_FIELDS
+    }
+    if operation_id == "data.metadata.update":
+        properties = {
+            **identity_properties,
+            "metadata": {
+                "type": "object",
+                "description": "Per-column typed variable/value-label and role declarations.",
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "variable_label": {"type": "string"},
+                        "value_labels": {"type": "object", "additionalProperties": {"type": "string"}},
+                        "measurement_level": {"type": "string"},
+                        "missing_policy": {"type": "string"},
+                        "role": {"type": "string"},
+                        "sensitivity": {"type": "string"},
+                        "user_missing_values": {"type": "array", "items": {}},
+                    },
+                },
+            },
+            "weight": {"type": ["object", "null"]},
+            "split": {"type": ["object", "null"]},
+            "group": {"type": ["object", "null"]},
+        }
+        return {
+            "type": "object",
+            "required": list(_IDENTITY_FIELDS),
+            "properties": properties,
+            "additionalProperties": False,
+        }
+
+    parameter_properties: dict[str, Any]
+    if operation_id == "data.sort":
+        parameter_properties = {
+            "keys": {"type": "array", "items": {"oneOf": [{"type": "string"}, {"type": "object"}]}},
+            "by": {"type": "array", "items": {"type": "string"}},
+        }
+    elif operation_id == "data.split":
+        parameter_properties = {
+            "by": {"type": "array", "items": {"type": "string"}},
+            "columns": {"type": "array", "items": {"type": "string"}},
+            "mode": {"type": "string", "enum": ["split_file", "group"]},
+        }
+    else:
+        parameter_properties = {
+            "columns": {"type": "array", "items": {"type": "object"}},
+            "column": {"type": "string"},
+            "mapping": {"type": "object"},
+            "other": {},
+            "missing": {"type": "string", "enum": ["preserve", "missing"]},
+        }
+    return {
+        "type": "object",
+        "required": [*list(_IDENTITY_FIELDS), "operation"],
+        "properties": {
+            **identity_properties,
+            "operation": {"type": "string", "enum": [operation_id.removeprefix("data.")]},
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": parameter_properties,
+            },
+        },
+        "additionalProperties": False,
+    }
+
+
 def _request_schema(operation_id: str, registry: OperationRegistry) -> dict[str, Any]:
+    if operation_id in _LOCAL_OPERATION_IDS:
+        return _local_request_schema(operation_id)
     definition = registry.require(operation_id)
     contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
     if contract is not None:
@@ -465,7 +612,13 @@ def _clarifications(operation_id: str) -> tuple[str, ...]:
         "data.columns.cast": ("Declare each target dtype and review any lossy coercion.",),
         "data.feature_recipe": ("Choose a registered recipe and provide its closed parameters.",),
         "data.merge": ("Declare join keys, join cardinality, and a row-growth policy.",),
+        "data.metadata.update": (
+            "Declare typed variable/value labels, measurement role, missing values, weight, and split/group semantics.",
+        ),
+        "data.recode": ("Declare bounded batch recode rules and an explicit unmatched-value policy.",),
         "data.reshape": ("Declare the reshape direction and its identity/value columns.",),
+        "data.sort": ("Declare stable sort keys and direction for each key.",),
+        "data.split": ("Declare split/group columns and whether the result is split-file or grouped.",),
         "data.subset": ("Declare output columns and closed filters; arbitrary expressions are unsupported.",),
     }[operation_id]
 
@@ -478,23 +631,49 @@ def _replay_identity_fields(operation_id: str) -> tuple[str, ...]:
     return tuple(fields)
 
 
+def _local_operation_surface(operation_id: str) -> dict[str, str]:
+    if operation_id not in _LOCAL_OPERATION_IDS:
+        raise ValueError(f"{operation_id} is not a local data-consumer operation")
+    return {
+        "operation_version": "v1",
+        "effect_level": "mutation",
+        "risk_level": "mutating",
+        "confirmation_policy": "required",
+        "executor_key": f"executor:workbench.data_consumer.{operation_id.removeprefix('data.')}",
+        "reconciler_key": f"reconciler:workbench.data_consumer.{operation_id.removeprefix('data.')}",
+    }
+
+
 def build_data_operation_manifest() -> DataOperationManifestV1:
     registry = OperationRegistry()
     descriptors: list[DataOperationDescriptorV1] = []
     for operation_id in _DATA_OPERATION_IDS:
-        definition = registry.require(operation_id)
+        local_surface = _local_operation_surface(operation_id) if operation_id in _LOCAL_OPERATION_IDS else None
+        definition = None if local_surface is not None else registry.require(operation_id)
         contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
         input_ports, output_ports = _ports(operation_id)
         preview_ref, confirm_ref = _OPERATION_ROUTES[operation_id]
         descriptors.append(
             DataOperationDescriptorV1(
                 operation_id=operation_id,
-                operation_version=definition.operation_version,
-                effect_level=definition.effect_level,
-                risk_level=definition.risk_level,
-                confirmation_policy=definition.confirmation_policy,
-                executor_key=definition.executor_key,
-                reconciler_key=definition.reconciler_key,
+                operation_version=(
+                    local_surface["operation_version"] if local_surface else definition.operation_version
+                ),
+                effect_level=(
+                    local_surface["effect_level"] if local_surface else definition.effect_level
+                ),
+                risk_level=(
+                    local_surface["risk_level"] if local_surface else definition.risk_level
+                ),
+                confirmation_policy=(
+                    local_surface["confirmation_policy"] if local_surface else definition.confirmation_policy
+                ),
+                executor_key=(
+                    local_surface["executor_key"] if local_surface else definition.executor_key
+                ),
+                reconciler_key=(
+                    local_surface["reconciler_key"] if local_surface else definition.reconciler_key
+                ),
                 validator_key=(
                     contract.semantic_validator_key if contract is not None else operation_id
                 ),
@@ -516,7 +695,24 @@ def build_data_operation_manifest() -> DataOperationManifestV1:
                 clarification_requirements=_clarifications(operation_id),
             )
         )
-    return DataOperationManifestV1(DATA_OPERATION_MANIFEST_VERSION, tuple(descriptors))
+    unavailable: tuple[DataOperationUnavailableV1, ...]
+    try:
+        pyreadstat_available = importlib.util.find_spec("pyreadstat") is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        pyreadstat_available = False
+    if pyreadstat_available:
+        unavailable = ()
+    else:
+        unavailable = tuple(
+            DataOperationUnavailableV1(
+                operation_id=operation_id,
+                operation_version="v1",
+                reason_code="optional_dependency",
+                message="pyreadstat is not installed; native statistical-file interchange is not advertised.",
+            )
+            for operation_id in _NATIVE_INTERCHANGE_IDS
+        )
+    return DataOperationManifestV1(DATA_OPERATION_MANIFEST_VERSION, tuple(descriptors), unavailable)
 
 
 _PROVIDER_KINDS = (
@@ -545,17 +741,30 @@ def _provider_binding_payload(kind: str) -> dict[str, object]:
 
     manifest = build_data_operation_manifest().to_dict()
     registry = OperationRegistry()
-    registry_surface = [
-        {
-            "operation_id": operation_id,
-            "operation_version": registry.require(operation_id).operation_version,
-            "executor_key": registry.require(operation_id).executor_key,
-            "reconciler_key": registry.require(operation_id).reconciler_key,
-            "validator_key": manifest["operations"][index]["validator_key"],
-            "request_schema_digest": manifest["operations"][index]["request_schema_digest"],
-        }
-        for index, operation_id in enumerate(_DATA_OPERATION_IDS)
-    ]
+    registry_surface = []
+    for index, operation_id in enumerate(_DATA_OPERATION_IDS):
+        local_surface = (
+            _local_operation_surface(operation_id)
+            if operation_id in _LOCAL_OPERATION_IDS
+            else None
+        )
+        definition = None if local_surface is not None else registry.require(operation_id)
+        registry_surface.append(
+            {
+                "operation_id": operation_id,
+                "operation_version": (
+                    local_surface["operation_version"] if local_surface else definition.operation_version
+                ),
+                "executor_key": (
+                    local_surface["executor_key"] if local_surface else definition.executor_key
+                ),
+                "reconciler_key": (
+                    local_surface["reconciler_key"] if local_surface else definition.reconciler_key
+                ),
+                "validator_key": manifest["operations"][index]["validator_key"],
+                "request_schema_digest": manifest["operations"][index]["request_schema_digest"],
+            }
+        )
     return {
         "provider_id": "workbench.data_consumer",
         "semantic_version": "1.0",
@@ -677,6 +886,7 @@ __all__ = [
     "DATA_OPERATION_MANIFEST_VERSION",
     "DataOperationDescriptorV1",
     "DataOperationManifestV1",
+    "DataOperationUnavailableV1",
     "DataPortV1",
     "DraftAgentNotebookFixture",
     "ReplayContractV1",

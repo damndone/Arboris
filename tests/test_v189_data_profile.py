@@ -126,6 +126,31 @@ def test_dataset_identity_rejects_non_digest_content_fingerprints() -> None:
     assert exc_info.value.code == "DATA_PROFILE_DIGEST_INVALID"
 
 
+def test_profile_keeps_typed_user_missing_and_weight_declarations() -> None:
+    api = _profile_api()
+    profile = api.build_data_profile(
+        frame=pd.DataFrame({"group": [1, 2, 99], "weight": [1.0, 2.0, 1.0]}),
+        dataset_ref=_dataset_ref(api),
+        declared_metadata={
+            "group": {
+                "role": "group",
+                "measurement_level": "nominal",
+                "user_missing_values": [99],
+            },
+            "__dataset__": {
+                "weight": {"column": "weight", "kind": "frequency"},
+                "split": {"columns": ["group"]},
+            },
+        },
+    )
+
+    group = profile.column("group")
+    assert group.declared.user_missing_values == (99,)
+    assert group.declared.role == "group"
+    assert profile.declarations.weight.column == "weight"
+    assert profile.declarations.split.columns == ("group",)
+
+
 def test_metadata_loss_manifest_never_claims_csv_round_trip_for_custom_metadata() -> None:
     from workbench.metadata import build_metadata_loss_manifest
 

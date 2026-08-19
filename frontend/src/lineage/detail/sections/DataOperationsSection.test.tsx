@@ -172,6 +172,27 @@ describe("DataOperationManifest parser", () => {
       "data.example.second",
     ]);
   });
+
+  it("renders a typed unavailable boundary instead of an executable editor", () => {
+    render(
+      <DataOperationsSection
+        {...sectionProps(
+          manifest({
+            availability: {
+              status: "unavailable",
+              reason_code: "optional_dependency",
+              message: "pyreadstat is not installed",
+            },
+          }),
+        )}
+      />,
+    );
+
+    expect(screen.getByTestId("data-operation-unavailable")).toHaveTextContent(
+      "optional_dependency",
+    );
+    expect(screen.queryByLabelText("Data operation")).toBeNull();
+  });
 });
 
 describe("DataOperationsSection", () => {

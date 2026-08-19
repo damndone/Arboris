@@ -84,6 +84,21 @@ def read_frame_bounded(
     suffix = (file_suffix or path.suffix).lower()
     if suffix == ".csv":
         frame = pd.read_csv(path, nrows=max_rows + 1)
+    elif suffix in {".parquet", ".pq"}:
+        try:
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise ValueError(
+                "parquet bounded ingestion requires the optional pyarrow dependency"
+            ) from exc
+        parquet_file = pq.ParquetFile(path)
+        batches = parquet_file.iter_batches(batch_size=max_rows + 1)
+        try:
+            batch = next(batches)
+            frame = pa.Table.from_batches([batch]).to_pandas()
+        except StopIteration:
+            frame = pa.Table.from_batches([], schema=parquet_file.schema_arrow).to_pandas()
     elif suffix in {".xlsx", ".xls"}:
         with pd.ExcelFile(path) as excel:
             if len(excel.sheet_names) > max_excel_sheets:

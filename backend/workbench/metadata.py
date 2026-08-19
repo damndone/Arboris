@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import json
+import math
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, TypeAlias
 
 import pandas as pd
 
@@ -15,6 +17,10 @@ TIME_TOKENS = ("date", "time", "timestamp", "year", "month", "quarter")
 ID_TOKENS = ("id", "code", "key", "gvkey", "permno", "firm", "user", "store")
 
 UNKNOWN_METADATA = "unknown"
+
+MetadataScalar: TypeAlias = str | int | float | bool | None
+MAX_USER_MISSING_VALUES = 64
+MAX_DECLARED_COLUMNS = 500
 
 
 class MetadataProvenanceError(ValueError):
@@ -33,6 +39,7 @@ _COLUMN_METADATA_FIELDS = frozenset(
         "missing_policy",
         "role",
         "sensitivity",
+        "user_missing_values",
     }
 )
 _TOP_LEVEL_METADATA_FIELDS = frozenset(
@@ -43,6 +50,7 @@ _TOP_LEVEL_METADATA_FIELDS = frozenset(
         "missing_policy",
         "roles",
         "sensitivity",
+        "user_missing_values",
     }
 )
 
@@ -80,6 +88,351 @@ def _normalize_value_labels(value: object) -> dict[str, str]:
     return normalized
 
 
+def _normalize_metadata_scalar(value: object, field_name: str) -> MetadataScalar:
+    if value is None or type(value) is bool or type(value) is int or type(value) is str:
+        if type(value) is str and ("\x00" in value or value != value.strip()):
+            raise MetadataProvenanceError(
+                "METADATA_DECLARATION_INVALID",
+                f"{field_name} string values must not contain whitespace padding",
+            )
+        return value  # type: ignore[return-value]
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise MetadataProvenanceError(
+                "METADATA_DECLARATION_INVALID",
+                f"{field_name} values must be finite",
+            )
+        return value
+    raise MetadataProvenanceError(
+        "METADATA_DECLARATION_INVALID",
+        f"{field_name} values must be JSON-like scalars",
+    )
+
+
+def _normalize_user_missing_values(value: object, field_name: str) -> list[MetadataScalar]:
+    if type(value) not in {list, tuple}:
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_INVALID",
+            f"{field_name} must be an explicit list",
+        )
+    if len(value) > MAX_USER_MISSING_VALUES:
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_INVALID",
+            f"{field_name} exceeds {MAX_USER_MISSING_VALUES} values",
+        )
+    normalized = [
+        _normalize_metadata_scalar(item, f"{field_name}[{index}]")
+        for index, item in enumerate(value)
+    ]
+    if len({json.dumps(item, sort_keys=True) for item in normalized}) != len(normalized):
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_INVALID",
+            f"{field_name} must not contain duplicates",
+        )
+    return normalized
+
+
+def _normalize_string_list(value: object, field_name: str) -> list[str]:
+    if type(value) not in {list, tuple} or not value:
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_INVALID",
+            f"{field_name} must be a non-empty list",
+        )
+    if len(value) > MAX_DECLARED_COLUMNS:
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_INVALID",
+            f"{field_name} contains too many columns",
+        )
+    normalized = [_metadata_text(item, f"{field_name}[]") for item in value]
+    if len(set(normalized)) != len(normalized):
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_INVALID",
+            f"{field_name} must not contain duplicates",
+        )
+    return normalized
+
+
+def _normalize_dataset_declarations(
+    value: object,
+    *,
+    columns: frozenset[str],
+) -> dict[str, object]:
+    if value is None:
+        return {}
+    raw = _metadata_mapping(value, "declared_metadata.__dataset__")
+    unknown = sorted(set(raw) - {"weight", "split", "group"})
+    if unknown:
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_FIELD_UNKNOWN",
+            "declared_metadata.__dataset__ contains unknown field(s): " + ", ".join(unknown),
+        )
+    normalized: dict[str, object] = {}
+    weight = raw.get("weight")
+    if weight is not None:
+        weight_map = _metadata_mapping(weight, "declared_metadata.__dataset__.weight")
+        if set(weight_map) != {"column", "kind"}:
+            raise MetadataProvenanceError(
+                "METADATA_DECLARATION_INVALID",
+                "weight must contain exactly column and kind",
+            )
+        column = _metadata_text(weight_map["column"], "weight.column")
+        if column not in columns:
+            raise MetadataProvenanceError("METADATA_COLUMN_UNKNOWN", f"weight names unknown column: {column!r}")
+        kind = _metadata_text(weight_map["kind"], "weight.kind")
+        if kind not in {"frequency", "analytic", "probability", "reliability"}:
+            raise MetadataProvenanceError("METADATA_DECLARATION_INVALID", "weight.kind is not supported")
+        normalized["weight"] = {"column": column, "kind": kind}
+    for field_name in ("split", "group"):
+        declaration = raw.get(field_name)
+        if declaration is None:
+            continue
+        declaration_map = _metadata_mapping(
+            declaration, f"declared_metadata.__dataset__.{field_name}"
+        )
+        unknown_fields = sorted(set(declaration_map) - {"columns", "mode"})
+        if unknown_fields:
+            raise MetadataProvenanceError(
+                "METADATA_DECLARATION_FIELD_UNKNOWN",
+                f"{field_name} contains unknown field(s): {', '.join(unknown_fields)}",
+            )
+        declared_columns = _normalize_string_list(
+            declaration_map.get("columns"), f"{field_name}.columns"
+        )
+        unknown_columns = sorted(set(declared_columns) - columns)
+        if unknown_columns:
+            raise MetadataProvenanceError(
+                "METADATA_COLUMN_UNKNOWN",
+                f"{field_name} names unknown column(s): {', '.join(unknown_columns)}",
+            )
+        mode = declaration_map.get("mode", "split_file" if field_name == "split" else "group")
+        mode = _metadata_text(mode, f"{field_name}.mode")
+        allowed_modes = {"split_file", "group"}
+        if mode not in allowed_modes:
+            raise MetadataProvenanceError(
+                "METADATA_DECLARATION_INVALID",
+                f"{field_name}.mode is not supported",
+            )
+        normalized[field_name] = {"columns": declared_columns, "mode": mode}
+    return normalized
+
+
+@dataclass(frozen=True)
+class WeightDeclarationV1:
+    column: str
+    kind: Literal["frequency", "analytic", "probability", "reliability"]
+
+    def __post_init__(self) -> None:
+        _metadata_text(self.column, "weight.column")
+        if self.kind not in {"frequency", "analytic", "probability", "reliability"}:
+            raise ValueError("weight.kind is not supported")
+
+    def to_dict(self) -> dict[str, str]:
+        return {"column": self.column, "kind": self.kind}
+
+
+@dataclass(frozen=True)
+class SplitDeclarationV1:
+    columns: tuple[str, ...]
+    mode: Literal["split_file", "group"] = "split_file"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "columns", tuple(self.columns))
+        if not self.columns or any(not isinstance(item, str) or not item.strip() for item in self.columns):
+            raise ValueError("split.columns must be non-empty strings")
+        if len(set(self.columns)) != len(self.columns):
+            raise ValueError("split.columns must not contain duplicates")
+        if self.mode not in {"split_file", "group"}:
+            raise ValueError("split.mode is not supported")
+
+    def to_dict(self) -> dict[str, object]:
+        return {"columns": list(self.columns), "mode": self.mode}
+
+
+@dataclass(frozen=True)
+class GroupDeclarationV1:
+    columns: tuple[str, ...]
+    mode: Literal["group", "split_file"] = "group"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "columns", tuple(self.columns))
+        if not self.columns or any(not isinstance(item, str) or not item.strip() for item in self.columns):
+            raise ValueError("group.columns must be non-empty strings")
+        if len(set(self.columns)) != len(self.columns):
+            raise ValueError("group.columns must not contain duplicates")
+        if self.mode not in {"group", "split_file"}:
+            raise ValueError("group.mode is not supported")
+
+    def to_dict(self) -> dict[str, object]:
+        return {"columns": list(self.columns), "mode": self.mode}
+
+
+@dataclass(frozen=True)
+class MetadataDeclarationsV1:
+    weight: WeightDeclarationV1 | None = None
+    split: SplitDeclarationV1 | None = None
+    group: GroupDeclarationV1 | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "weight": None if self.weight is None else self.weight.to_dict(),
+            "split": None if self.split is None else self.split.to_dict(),
+            "group": None if self.group is None else self.group.to_dict(),
+        }
+
+
+def parse_metadata_declarations(
+    normalized: Mapping[str, Mapping[str, object]],
+) -> MetadataDeclarationsV1:
+    raw = normalized.get("__dataset__", {})
+    if not isinstance(raw, Mapping):
+        raise MetadataProvenanceError("METADATA_DECLARATION_INVALID", "dataset declarations must be an object")
+    weight_raw = raw.get("weight")
+    split_raw = raw.get("split")
+    group_raw = raw.get("group")
+    weight = None if weight_raw is None else WeightDeclarationV1(
+        column=str(weight_raw["column"]), kind=str(weight_raw["kind"])
+    )
+    split = None if split_raw is None else SplitDeclarationV1(
+        columns=tuple(split_raw["columns"]), mode=str(split_raw.get("mode", "split_file"))
+    )
+    group = None if group_raw is None else GroupDeclarationV1(
+        columns=tuple(group_raw["columns"]), mode=str(group_raw.get("mode", "group"))
+    )
+    return MetadataDeclarationsV1(weight=weight, split=split, group=group)
+
+
+def normalize_metadata_mutation_payload(
+    metadata: Mapping[str, object],
+    *,
+    weight: Mapping[str, object] | None = None,
+    split: Mapping[str, object] | None = None,
+    group: Mapping[str, object] | None = None,
+    columns: tuple[str, ...],
+) -> dict[str, object]:
+    """Build the canonical, server-validated metadata artifact payload."""
+
+    if not isinstance(metadata, Mapping):
+        raise MetadataProvenanceError("METADATA_DECLARATION_INVALID", "metadata must be an object")
+    combined: dict[str, object] = dict(metadata)
+    dataset: dict[str, object] = {}
+    if weight is not None:
+        dataset["weight"] = dict(weight)
+    if split is not None:
+        dataset["split"] = dict(split)
+    if group is not None:
+        dataset["group"] = dict(group)
+    if "__dataset__" in combined:
+        existing = combined["__dataset__"]
+        if not isinstance(existing, Mapping):
+            raise MetadataProvenanceError(
+                "METADATA_DECLARATION_INVALID", "metadata.__dataset__ must be an object"
+            )
+        if dataset:
+            raise MetadataProvenanceError(
+                "METADATA_DECLARATION_INVALID",
+                "metadata.__dataset__ cannot be combined with top-level declarations",
+            )
+        dataset = dict(existing)
+    if dataset:
+        combined["__dataset__"] = dataset
+    normalized = normalize_declared_metadata(combined, columns=columns)
+    column_payload = {
+        column: dict(declaration)
+        for column, declaration in normalized.items()
+        if column != "__dataset__"
+    }
+    payload: dict[str, object] = {"columns": column_payload}
+    payload.update(dict(normalized.get("__dataset__", {})))
+    return payload
+
+
+@dataclass(frozen=True)
+class MetadataMutationSpecV1:
+    source_run_id: str
+    source_node_id: str
+    source_artifact_id: str
+    metadata: Mapping[str, object] = field(default_factory=dict)
+    weight: Mapping[str, object] | None = None
+    split: Mapping[str, object] | None = None
+    group: Mapping[str, object] | None = None
+    operation_id: str = "data.metadata.update"
+    operation_version: str = "v1"
+
+    def __post_init__(self) -> None:
+        for field_name in ("source_run_id", "source_node_id", "source_artifact_id"):
+            _metadata_text(getattr(self, field_name), field_name)
+        if not isinstance(self.metadata, Mapping):
+            raise ValueError("metadata must be an object")
+        object.__setattr__(self, "metadata", dict(self.metadata))
+        for field_name in ("weight", "split", "group"):
+            value = getattr(self, field_name)
+            if value is not None:
+                if not isinstance(value, Mapping):
+                    raise ValueError(f"{field_name} must be an object")
+                object.__setattr__(self, field_name, dict(value))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "operation_id": self.operation_id,
+            "operation_version": self.operation_version,
+            "source_run_id": self.source_run_id,
+            "source_node_id": self.source_node_id,
+            "source_artifact_id": self.source_artifact_id,
+            "metadata": dict(self.metadata),
+            "weight": None if self.weight is None else dict(self.weight),
+            "split": None if self.split is None else dict(self.split),
+            "group": None if self.group is None else dict(self.group),
+        }
+
+
+@dataclass(frozen=True)
+class MetadataMutationPreviewV1:
+    spec: MetadataMutationSpecV1
+    source_sha256: str
+    metadata_fingerprint: str
+    changed_columns: tuple[str, ...]
+    fingerprint: str
+    canonical_metadata: Mapping[str, object] = field(default_factory=dict)
+    status: str = "ready"
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "changed_columns", tuple(self.changed_columns))
+        object.__setattr__(self, "canonical_metadata", dict(self.canonical_metadata))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            **self.spec.to_dict(),
+            "source_sha256": self.source_sha256,
+            "metadata_fingerprint": self.metadata_fingerprint,
+            "changed_columns": list(self.changed_columns),
+            "metadata": dict(self.canonical_metadata),
+            "fingerprint": self.fingerprint,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class MetadataMutationEffectV1:
+    record_id: str
+    execution_key: str
+    metadata_artifact_id: str
+    metadata_artifact_path: str
+    child_node_id: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "record_id": self.record_id,
+            "operation_id": "data.metadata.update",
+            "status": "completed",
+            "execution_key": self.execution_key,
+            "metadata_artifact_id": self.metadata_artifact_id,
+            "metadata_artifact_path": self.metadata_artifact_path,
+            "child_node_id": self.child_node_id,
+        }
+
+
 def _normalize_column_declaration(value: object, column: str) -> dict[str, object]:
     raw = _metadata_mapping(value, f"metadata[{column!r}]")
     unknown = sorted(set(raw) - _COLUMN_METADATA_FIELDS)
@@ -93,6 +446,10 @@ def _normalize_column_declaration(value: object, column: str) -> dict[str, objec
     for field_name, field_value in raw.items():
         if field_name == "value_labels":
             normalized[field_name] = _normalize_value_labels(field_value)
+        elif field_name == "user_missing_values":
+            normalized[field_name] = _normalize_user_missing_values(
+                field_value, f"metadata[{column!r}].user_missing_values"
+            )
         elif field_name in {
             "variable_label",
             "measurement_level",
@@ -150,15 +507,20 @@ def normalize_declared_metadata(
             "profile columns must be non-empty strings",
         )
 
-    if set(raw) & _TOP_LEVEL_METADATA_FIELDS:
-        unknown = sorted(set(raw) - _TOP_LEVEL_METADATA_FIELDS)
+    dataset_declarations = _normalize_dataset_declarations(
+        raw.get("__dataset__"), columns=known_columns
+    )
+    column_raw = {key: item for key, item in raw.items() if key != "__dataset__"}
+
+    if set(column_raw) & _TOP_LEVEL_METADATA_FIELDS:
+        unknown = sorted(set(column_raw) - _TOP_LEVEL_METADATA_FIELDS)
         if unknown:
             raise MetadataProvenanceError(
                 "METADATA_DECLARATION_FIELD_UNKNOWN",
                 "declared_metadata contains unknown field(s): " + ", ".join(unknown),
             )
         normalized = {column: {} for column in columns}
-        for field_name, field_value in raw.items():
+        for field_name, field_value in column_raw.items():
             if field_name == "variable_labels":
                 values = _normalize_column_map(
                     field_value, field_name, known_columns
@@ -171,6 +533,17 @@ def normalize_declared_metadata(
                 )
                 for column, item in values.items():
                     normalized[column]["value_labels"] = item
+            elif field_name == "user_missing_values":
+                values = _metadata_mapping(field_value, field_name)
+                for column, item in values.items():
+                    if column not in known_columns:
+                        raise MetadataProvenanceError(
+                            "METADATA_COLUMN_UNKNOWN",
+                            f"{field_name} names unknown column: {column!r}",
+                        )
+                    normalized[column]["user_missing_values"] = _normalize_user_missing_values(
+                        item, f"{field_name}[{column!r}]"
+                    )
             elif field_name in {
                 "measurement_level",
                 "missing_policy",
@@ -181,16 +554,23 @@ def normalize_declared_metadata(
                 target_name = "role" if field_name == "roles" else field_name
                 for column, item in values.items():
                     normalized[column][target_name] = item
-        return {column: declaration for column, declaration in normalized.items() if declaration}
+        result = {
+            column: declaration for column, declaration in normalized.items() if declaration
+        }
+        if dataset_declarations:
+            result["__dataset__"] = dataset_declarations
+        return result
 
     normalized = {}
-    for column, declaration in raw.items():
+    for column, declaration in column_raw.items():
         if type(column) is not str or not column or column not in known_columns:
             raise MetadataProvenanceError(
                 "METADATA_COLUMN_UNKNOWN",
                 f"declared_metadata names unknown column: {column!r}",
             )
         normalized[column] = _normalize_column_declaration(declaration, column)
+    if dataset_declarations:
+        normalized["__dataset__"] = dataset_declarations
     return normalized
 
 

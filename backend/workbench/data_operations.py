@@ -22,6 +22,7 @@ from .artifacts import (
 )
 from .graph_model import BranchRef, Edge, Graph, Node, NodeKind, Stage, Trust
 from .filter_ast import (
+    MAX_FILTER_LIST_SIZE,
     FilterNode,
     FilterValidationError,
     bind_filter_ast,
@@ -30,6 +31,13 @@ from .filter_ast import (
 )
 from .predictive_research.contracts import FeatureRecipeV1
 from .predictive_research.feature_recipe import apply_feature_recipe
+from .metadata import (
+    MetadataMutationEffectV1,
+    MetadataMutationPreviewV1,
+    MetadataMutationSpecV1,
+    MetadataProvenanceError,
+    normalize_metadata_mutation_payload,
+)
 
 DataCastTarget = Literal["numeric", "string", "datetime"]
 ALLOWED_CAST_TARGETS = frozenset({"numeric", "string", "datetime"})
@@ -142,6 +150,9 @@ DataTransformOperation = Literal[
     "fill_missing",
     "tsset",
     "lag",
+    "sort",
+    "split",
+    "recode",
 ]
 ALLOWED_DATA_TRANSFORM_OPERATIONS = frozenset(
     {
@@ -155,6 +166,9 @@ ALLOWED_DATA_TRANSFORM_OPERATIONS = frozenset(
         "fill_missing",
         "tsset",
         "lag",
+        "sort",
+        "split",
+        "recode",
     }
 )
 SUBSET_FILTER_OPERATORS = frozenset(
@@ -239,6 +253,8 @@ class DataTransformPreview:
     status: str = "ready"
     reason: str | None = None
     next_step: str | None = None
+    group_count: int | None = None
+    changed_value_count: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -256,6 +272,8 @@ class DataTransformPreview:
             "status": self.status,
             "reason": self.reason,
             "next_step": self.next_step,
+            "group_count": self.group_count,
+            "changed_value_count": self.changed_value_count,
         }
 
 
@@ -422,6 +440,157 @@ def _subset_filter_mask(series: pd.Series, filter_spec: Mapping[str, Any], name:
         raise DataColumnCastValidationError(f"{name}: {exc}") from exc
 
 
+def _sort_spec(parameters: Mapping[str, Any]) -> tuple[list[str], list[bool]]:
+    _reject_unknown_parameters(parameters, {"keys", "by"}, "sort")
+    raw_keys = parameters.get("keys", parameters.get("by"))
+    if not isinstance(raw_keys, list) or not raw_keys:
+        raise DataColumnCastValidationError("sort.keys must be a non-empty list")
+    columns: list[str] = []
+    ascending: list[bool] = []
+    for index, raw_key in enumerate(raw_keys):
+        if isinstance(raw_key, str):
+            column = _require_non_empty_string(raw_key, f"sort.keys[{index}]")
+            direction = True
+        else:
+            parsed = _require_nested_keys(
+                raw_key,
+                name=f"sort.keys[{index}]",
+                required={"column"},
+                optional={"ascending"},
+            )
+            column = _require_non_empty_string(
+                parsed["column"], f"sort.keys[{index}].column"
+            )
+            direction = parsed.get("ascending", True)
+            if type(direction) is not bool:
+                raise DataColumnCastValidationError(
+                    f"sort.keys[{index}].ascending must be boolean"
+                )
+        columns.append(column)
+        ascending.append(direction)
+    if len(set(columns)) != len(columns):
+        raise DataColumnCastValidationError("sort.keys must not contain duplicate columns")
+    return columns, ascending
+
+
+def _recode_rules(
+    value: Any,
+    *,
+    name: str,
+) -> list[tuple[Any, Any]]:
+    if not isinstance(value, list) or not value or len(value) > MAX_FILTER_LIST_SIZE:
+        raise DataColumnCastValidationError(
+            f"{name} must be a non-empty list of at most {MAX_FILTER_LIST_SIZE} rules"
+        )
+    rules: list[tuple[Any, Any]] = []
+    for index, raw_rule in enumerate(value):
+        parsed = _require_nested_keys(
+            raw_rule,
+            name=f"{name}[{index}]",
+            required={"from", "to"},
+        )
+        source = parsed["from"]
+        target = parsed["to"]
+        for candidate, candidate_name in ((source, "from"), (target, "to")):
+            if isinstance(candidate, (Mapping, list, tuple, set, frozenset)):
+                raise DataColumnCastValidationError(
+                    f"{name}[{index}].{candidate_name} must be a scalar"
+                )
+        if any(source == previous for previous, _ in rules):
+            raise DataColumnCastValidationError(f"{name} contains duplicate source values")
+        rules.append((source, target))
+    return rules
+
+
+def _value_changed(before: pd.Series, after: pd.Series) -> int:
+    equal = before.eq(after)
+    both_missing = before.isna() & after.isna()
+    return int((~(equal | both_missing)).sum())
+
+
+def _execute_batch_recode(left: pd.DataFrame, parameters: Mapping[str, Any]) -> tuple[pd.DataFrame, int]:
+    _reject_unknown_parameters(
+        parameters,
+        {"columns", "column", "mapping", "other", "missing"},
+        "recode",
+    )
+    raw_columns = parameters.get("columns")
+    if raw_columns is None:
+        column = _require_non_empty_string(parameters.get("column"), "recode.column")
+        mapping = parameters.get("mapping")
+        if not isinstance(mapping, Mapping) or not mapping:
+            raise DataColumnCastValidationError(
+                "recode.mapping must be a non-empty object when recode.column is used"
+            )
+        raw_columns = [
+            {
+                "column": column,
+                "rules": [{"from": source, "to": target} for source, target in mapping.items()],
+                "other": parameters.get("other", "keep"),
+                "missing": parameters.get("missing", "preserve"),
+            }
+        ]
+    if not isinstance(raw_columns, list) or not raw_columns:
+        raise DataColumnCastValidationError("recode.columns must be a non-empty list")
+    result = left.copy()
+    changed_count = 0
+    seen: set[str] = set()
+    for index, raw_column in enumerate(raw_columns):
+        parsed = _require_nested_keys(
+            raw_column,
+            name=f"recode.columns[{index}]",
+            required={"column", "rules"},
+            optional={"other", "missing"},
+        )
+        column = _require_non_empty_string(
+            parsed["column"], f"recode.columns[{index}].column"
+        )
+        if column in seen:
+            raise DataColumnCastValidationError(f"recode.columns must not repeat {column}")
+        seen.add(column)
+        _require_columns_exist(result, [column], "recode")
+        rules = _recode_rules(parsed["rules"], name=f"recode.columns[{index}].rules")
+        other = parsed.get("other", "keep")
+        if other not in {"keep", "missing"} and isinstance(other, (Mapping, list, tuple, set, frozenset)):
+            raise DataColumnCastValidationError(
+                f"recode.columns[{index}].other must be keep, missing, or a scalar"
+            )
+        missing = parsed.get("missing", "preserve")
+        if missing not in {"preserve", "missing"}:
+            raise DataColumnCastValidationError(
+                f"recode.columns[{index}].missing must be preserve or missing"
+            )
+        source_series = result[column].copy()
+        output_series = source_series.astype("object").copy()
+        matched = pd.Series(False, index=source_series.index, dtype=bool)
+        for source, target in rules:
+            if source is None:
+                current = source_series.isna()
+            else:
+                try:
+                    current = source_series.eq(source).fillna(False)
+                except (TypeError, ValueError) as exc:
+                    raise DataColumnCastValidationError(
+                        f"recode rule for {column!r} could not be applied: {exc}"
+                    ) from exc
+            if bool((matched & current).any()):
+                raise DataColumnCastValidationError(
+                    f"recode rules for {column!r} overlap"
+                )
+            output_series.loc[current] = target
+            matched |= current
+        non_missing_unmatched = ~source_series.isna() & ~matched
+        if other == "missing":
+            output_series.loc[non_missing_unmatched] = pd.NA
+        elif other != "keep":
+            output_series.loc[non_missing_unmatched] = other
+        if missing == "missing":
+            output_series.loc[source_series.isna()] = pd.NA
+        changed_count += _value_changed(source_series, output_series)
+        result[column] = output_series
+    return result, changed_count
+
+
 def _execute_data_transform(
     left: pd.DataFrame,
     spec: DataTransformSpecV1,
@@ -567,6 +736,35 @@ def _execute_data_transform(
                     f"long_to_wide has duplicate or missing keys: {exc}"
                 ) from exc
         raise DataColumnCastValidationError("reshape direction must be wide_to_long or long_to_wide")
+    if spec.operation == "sort":
+        columns, ascending = _sort_spec(parameters)
+        _require_columns_exist(left, columns, "sort")
+        try:
+            return left.sort_values(
+                by=columns,
+                ascending=ascending,
+                kind="mergesort",
+                na_position="last",
+            ).reset_index(drop=True)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise DataColumnCastValidationError(f"sort failed: {exc}") from exc
+    if spec.operation == "split":
+        _reject_unknown_parameters(parameters, {"by", "columns", "mode"}, "split")
+        by = parameters.get("by", parameters.get("columns"))
+        by = _require_string_list(by, "split.by")
+        _require_columns_exist(left, by, "split")
+        mode = parameters.get("mode", "split_file")
+        if mode not in {"split_file", "group"}:
+            raise DataColumnCastValidationError("split.mode must be split_file or group")
+        try:
+            return left.sort_values(by=by, kind="mergesort", na_position="last").reset_index(
+                drop=True
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise DataColumnCastValidationError(f"split failed: {exc}") from exc
+    if spec.operation == "recode":
+        output, _changed_count = _execute_batch_recode(left, parameters)
+        return output.reset_index(drop=True)
     if spec.operation == "subset":
         _reject_unknown_parameters(
             parameters,
@@ -579,6 +777,7 @@ def _execute_data_transform(
                 "row_indices",
                 "row_index_range",
                 "row_range",
+                "user_missing_values",
             },
             "subset",
         )
@@ -631,6 +830,13 @@ def _execute_data_transform(
                 "subset.equals and subset filters cannot both declare: "
                 + ", ".join(sorted(overlap))
             )
+        declared_user_missing = parameters.get("user_missing_values")
+        if declared_user_missing is not None and not isinstance(
+            declared_user_missing, Mapping
+        ):
+            raise DataColumnCastValidationError(
+                "subset.user_missing_values must be a column mapping"
+            )
         mask = pd.Series(True, index=left.index)
         for column, value in legacy_equals.items():
             bound_equals = _bind_subset_filter(
@@ -639,14 +845,22 @@ def _execute_data_transform(
                 f"subset.equals[{column}]",
             )
             try:
-                mask &= execute_filter_ast(left, bound_equals)
+                mask &= execute_filter_ast(
+                    left,
+                    bound_equals,
+                    user_missing_values=declared_user_missing,
+                )
             except FilterValidationError as exc:
                 raise DataColumnCastValidationError(
                     f"subset.equals[{column}]: {exc}"
                 ) from exc
         for bound_filter in bound_filters:
             try:
-                mask &= execute_filter_ast(left, bound_filter)
+                mask &= execute_filter_ast(
+                    left,
+                    bound_filter,
+                    user_missing_values=declared_user_missing,
+                )
             except FilterValidationError as exc:
                 raise DataColumnCastValidationError(f"subset filter: {exc}") from exc
         result = left.loc[mask].loc[:, columns].copy()
@@ -956,6 +1170,14 @@ def preview_data_transform(project_root: Path | str, spec: DataTransformSpecV1) 
     fingerprint = hashlib.sha256(
         json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+    group_count: int | None = None
+    changed_value_count: int | None = None
+    if spec.operation == "split":
+        by = spec.parameters.get("by", spec.parameters.get("columns"))
+        if isinstance(by, list):
+            group_count = int(left.loc[:, by].drop_duplicates().shape[0])
+    elif spec.operation == "recode":
+        _recode_output, changed_value_count = _execute_batch_recode(left, dict(spec.parameters))
     return DataTransformPreview(
         spec=spec,
         source_sha256=source_sha,
@@ -970,6 +1192,8 @@ def preview_data_transform(project_root: Path | str, spec: DataTransformSpecV1) 
         downstream_invalidation=tuple(
             node_id for node_id, candidate in graph.nodes.items() if candidate.kind == NodeKind.MODEL
         ),
+        group_count=group_count,
+        changed_value_count=changed_value_count,
     )
 
 
@@ -1050,6 +1274,202 @@ def apply_data_transform(
         create_if_missing=True,
     )
     return FeatureRecipeEffect(execution, artifact_id, artifact_rel, recipe_artifact_id, recipe_rel, child_node_id)
+
+
+def _metadata_mutation_canonical(
+    frame: pd.DataFrame,
+    spec: MetadataMutationSpecV1,
+) -> dict[str, object]:
+    try:
+        return normalize_metadata_mutation_payload(
+            spec.metadata,
+            weight=spec.weight,
+            split=spec.split,
+            group=spec.group,
+            columns=tuple(str(column) for column in frame.columns),
+        )
+    except (MetadataProvenanceError, TypeError, ValueError) as exc:
+        raise DataColumnCastValidationError(str(exc)) from exc
+
+
+def preview_metadata_mutation(
+    project_root: Path | str,
+    spec: MetadataMutationSpecV1,
+) -> MetadataMutationPreviewV1:
+    _run_root, _graph, _node, artifact, source_path = _resolve_source(
+        project_root,
+        _transform_source_spec(
+            spec.source_run_id,
+            spec.source_node_id,
+            spec.source_artifact_id,
+        ),
+    )
+    frame = _read_frame(source_path)
+    canonical = _metadata_mutation_canonical(frame, spec)
+    source_sha = str(artifact.get("sha256") or sha256_file(source_path))
+    metadata_fingerprint = hashlib.sha256(
+        json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    changed_columns = set(canonical.get("columns", {}))
+    for declaration_name in ("weight", "split", "group"):
+        declaration = canonical.get(declaration_name)
+        if isinstance(declaration, Mapping):
+            if declaration_name == "weight":
+                changed_columns.add(str(declaration["column"]))
+            else:
+                changed_columns.update(str(column) for column in declaration["columns"])
+    identity = {
+        "spec": spec.to_dict(),
+        "source_sha256": source_sha,
+        "metadata_fingerprint": metadata_fingerprint,
+        "metadata": canonical,
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return MetadataMutationPreviewV1(
+        spec=spec,
+        source_sha256=source_sha,
+        metadata_fingerprint=metadata_fingerprint,
+        changed_columns=tuple(sorted(changed_columns)),
+        fingerprint=fingerprint,
+        canonical_metadata=canonical,
+    )
+
+
+def apply_metadata_mutation(
+    project_root: Path | str,
+    spec: MetadataMutationSpecV1,
+    preview: MetadataMutationPreviewV1,
+    *,
+    execution_key_value: str | None = None,
+) -> MetadataMutationEffectV1:
+    if preview.spec != spec:
+        raise DataColumnCastValidationError("metadata mutation preview spec does not match")
+    fresh = preview_metadata_mutation(project_root, spec)
+    if fresh.fingerprint != preview.fingerprint:
+        raise DataColumnCastValidationError("metadata mutation preview is stale")
+    run_root, _graph, _node, source_artifact, _source_path = _resolve_source(
+        project_root,
+        _transform_source_spec(
+            spec.source_run_id,
+            spec.source_node_id,
+            spec.source_artifact_id,
+        ),
+    )
+    execution = execution_key_value or f"exec_{fresh.fingerprint[:32]}"
+    suffix = execution.removeprefix("exec_")
+    record_id = f"metadata_update:{spec.source_run_id}:{suffix}"
+    metadata_artifact_id = f"metadata_update_{suffix}"
+    relative_dir = Path("derived") / "data_operations" / "metadata_update" / suffix
+    metadata_rel = (relative_dir / "metadata.json").as_posix()
+    record_rel = (relative_dir / "operation.json").as_posix()
+    metadata_path = run_root / metadata_rel
+    record_path = run_root / record_rel
+    child_node_id = f"metadata-update:{suffix}"
+    source_sha = str(source_artifact.get("sha256") or "")
+    metadata_payload = {
+        "payload_schema": "workbench.data-metadata",
+        "schema_version": 1,
+        "operation_id": spec.operation_id,
+        "operation_version": spec.operation_version,
+        "record_id": record_id,
+        "execution_key": execution,
+        "source": {
+            "run_id": spec.source_run_id,
+            "node_id": spec.source_node_id,
+            "artifact_id": spec.source_artifact_id,
+            "sha256": source_sha,
+        },
+        "metadata_fingerprint": fresh.metadata_fingerprint,
+        "metadata": fresh.canonical_metadata,
+        "child_node_id": child_node_id,
+    }
+    if metadata_path.exists() and read_json(metadata_path) != metadata_payload:
+        raise DataColumnCastValidationError("deterministic metadata artifact path is occupied")
+    if not metadata_path.exists():
+        write_json(metadata_path, metadata_payload)
+    _ensure_registered_artifact(
+        run_root,
+        artifact_id=metadata_artifact_id,
+        path=metadata_path,
+        artifact_type="metadata",
+        step="data.metadata.update",
+        inputs=[spec.source_artifact_id],
+    )
+    record_payload = {
+        "record_id": record_id,
+        "operation_id": spec.operation_id,
+        "operation_version": spec.operation_version,
+        "status": "completed",
+        "execution_key": execution,
+        "source": metadata_payload["source"],
+        "metadata_fingerprint": fresh.metadata_fingerprint,
+        "metadata": fresh.canonical_metadata,
+        "metadata_artifact": {
+            "artifact_id": metadata_artifact_id,
+            "path": metadata_rel,
+            "sha256": sha256_file(metadata_path),
+        },
+        "child_node_id": child_node_id,
+        "preview": fresh.to_dict(),
+    }
+    if record_path.exists() and read_json(record_path) != record_payload:
+        raise DataColumnCastValidationError("deterministic metadata record path is occupied")
+    if not record_path.exists():
+        write_json(record_path, record_payload)
+    _graph_store_for(run_root).mutate(
+        spec.source_run_id,
+        lambda current: current
+        if child_node_id in current.nodes
+        else _commit_metadata_graph_child(
+            current,
+            spec=spec,
+            preview=fresh,
+            metadata_rel=metadata_rel,
+            child_node_id=child_node_id,
+            execution_key=execution,
+            node_hash=sha256_file(metadata_path),
+        ),
+    )
+    _ensure_node_index_entry(
+        run_root,
+        child_node_id=child_node_id,
+        node_hash=sha256_file(metadata_path),
+        artifact_rel=metadata_rel,
+        producing_stage="data.metadata.update",
+        create_if_missing=True,
+    )
+    return MetadataMutationEffectV1(
+        record_id=record_id,
+        execution_key=execution,
+        metadata_artifact_id=metadata_artifact_id,
+        metadata_artifact_path=metadata_rel,
+        child_node_id=child_node_id,
+    )
+
+
+def read_metadata_mutation_record(project_root: Path | str, record_id: str) -> dict[str, Any]:
+    root = Path(project_root).expanduser().resolve()
+    runs_root = root / "runs"
+    if not runs_root.is_dir():
+        raise FileNotFoundError("project runs root was not found")
+    for run_root in sorted(path for path in runs_root.iterdir() if path.is_dir()):
+        base = run_root / "derived" / "data_operations" / "metadata_update"
+        if not base.is_dir():
+            continue
+        for record_path in sorted(base.glob("*/operation.json")):
+            try:
+                payload = read_json(record_path)
+            except (OSError, ValueError):
+                continue
+            if isinstance(payload, dict) and payload.get("record_id") == record_id:
+                return payload
+    raise FileNotFoundError("metadata mutation record was not found")
 
 
 @dataclass(frozen=True)
@@ -2456,6 +2876,73 @@ def _commit_data_transform_graph_child(
                 "artifact_id": spec.secondary_artifact_id,
             },
         )
+    branches = dict(graph.branches)
+    branches[branch_id] = BranchRef(branch_id, spec.source_node_id, (child_node_id,))
+    return Graph(
+        schema_version=graph.schema_version,
+        run_id=graph.run_id,
+        nodes=nodes,
+        edges=edges,
+        branches=branches,
+        legacy=graph.legacy,
+    )
+
+
+def _commit_metadata_graph_child(
+    graph: Graph,
+    *,
+    spec: MetadataMutationSpecV1,
+    preview: MetadataMutationPreviewV1,
+    metadata_rel: str,
+    child_node_id: str,
+    execution_key: str,
+    node_hash: str,
+) -> Graph:
+    branch_id = f"metadata-update:{execution_key.removeprefix('exec_')[:20]}"
+    child = Node(
+        id=child_node_id,
+        kind=NodeKind.DATASET_STAGE,
+        display_label="Metadata update",
+        created_at=datetime.now(timezone.utc).isoformat(),
+        parent_stage_id=spec.source_node_id,
+        branch_id=branch_id,
+        trust=Trust.OK,
+        payload_ref=metadata_rel,
+        summary=(
+            f"metadata for {len(preview.changed_columns)} columns; "
+            "source rows unchanged; downstream profile reload required"
+        ),
+        annotations=(
+            {
+                "type": "metadata_operation",
+                "operation_id": spec.operation_id,
+                "execution_key": execution_key,
+                "metadata_artifact_path": metadata_rel,
+                "metadata_fingerprint": preview.metadata_fingerprint,
+                "source_node_id": spec.source_node_id,
+            },
+        ),
+        stage=Stage.TRANSFORM,
+        node_hash=node_hash,
+    )
+    nodes = _mark_downstream_invalidation(
+        {**graph.nodes, child_node_id: child},
+        reason="data_metadata_update",
+        source_node_id=spec.source_node_id,
+        child_node_id=child_node_id,
+    )
+    edges = dict(graph.edges)
+    edges[f"edge:{child_node_id}"] = Edge(
+        id=f"edge:{child_node_id}",
+        source_id=spec.source_node_id,
+        target_id=child_node_id,
+        op=spec.operation_id,
+        params={
+            "execution_key": execution_key,
+            "metadata_artifact_path": metadata_rel,
+            "metadata_fingerprint": preview.metadata_fingerprint,
+        },
+    )
     branches = dict(graph.branches)
     branches[branch_id] = BranchRef(branch_id, spec.source_node_id, (child_node_id,))
     return Graph(

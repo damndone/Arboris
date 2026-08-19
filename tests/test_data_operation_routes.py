@@ -463,3 +463,187 @@ def test_metadata_loss_preview_is_explicit_and_read_only() -> None:
     manifest = response.json()["manifest"]
     assert manifest["has_loss"] is True
     assert {item["status"] for item in manifest["items"]} == {"converted", "dropped"}
+
+
+def test_metadata_mutation_is_preview_confirmed_identity_bound_and_reloadable(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame(
+            {
+                "group": [1, 2, 99],
+                "weight": [1.0, 2.0, 1.0],
+            }
+        ),
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "metadata": {
+            "group": {
+                "variable_label": "Treatment group",
+                "value_labels": {"1": "Control", "2": "Treated"},
+                "measurement_level": "nominal",
+                "role": "group",
+                "user_missing_values": [99],
+            }
+        },
+        "weight": {"column": "weight", "kind": "frequency"},
+        "split": {"columns": ["group"]},
+        "group": {"columns": ["group"]},
+    }
+
+    with TestClient(app) as client:
+        preview_response = client.post(
+            "/data-operations/metadata/preview",
+            params={"project_root": str(project)},
+            json=request,
+        )
+        assert preview_response.status_code == 200
+        preview = preview_response.json()["preview"]
+        assert preview["status"] == "ready"
+        assert preview["source_artifact_id"] == artifact_id
+        assert preview["metadata_fingerprint"]
+
+        confirm_response = client.post(
+            "/data-operations/metadata/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+        assert confirm_response.status_code == 200
+        operation = confirm_response.json()["operation"]
+        assert operation["operation_id"] == "data.metadata.update"
+        assert operation["status"] == "completed"
+
+        reload_response = client.get(
+            f"/data-operations/metadata/{operation['record_id']}",
+            params={"project_root": str(project)},
+        )
+
+    assert reload_response.status_code == 200
+    reloaded = reload_response.json()["metadata"]
+    assert reloaded["source"]["artifact_id"] == artifact_id
+    assert reloaded["columns"]["group"]["user_missing_values"] == [99]
+    assert reloaded["weight"] == {"column": "weight", "kind": "frequency"}
+    assert reloaded["split"]["columns"] == ["group"]
+
+
+def test_metadata_mutation_replay_is_idempotent_and_stale_source_is_blocked(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "metadata": {"score": {"variable_label": "Score"}},
+    }
+
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/metadata/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+        body = {**request, "preview_fingerprint": preview["fingerprint"]}
+        first = client.post(
+            "/data-operations/metadata/confirm",
+            params={"project_root": str(project)},
+            json=body,
+        )
+        second = client.post(
+            "/data-operations/metadata/confirm",
+            params={"project_root": str(project)},
+            json=body,
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["operation"]["record_id"] == first.json()["operation"]["record_id"]
+    artifacts = json.loads((project / "runs" / run_id / "artifacts_index.json").read_text())[
+        "artifacts"
+    ]
+    assert len([item for item in artifacts if item["artifact_type"] == "metadata"]) == 1
+
+    source_path = project / "runs" / run_id / "data.csv"
+    source_path.write_text(source_path.read_text() + "3\n", encoding="utf-8")
+    stale = TestClient(app).post(
+        "/data-operations/metadata/confirm",
+        params={"project_root": str(project)},
+        json=body,
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "DATA_OPERATION_STALE"
+
+
+def test_sort_split_and_batch_recode_are_real_previewable_transforms(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame(
+            {
+                "group": ["b", "a", "b", "a"],
+                "score": [2, 4, 1, 3],
+                "code": [1, 2, 3, 99],
+            }
+        ),
+    )
+    requests = {
+        "sort": {
+            "keys": [
+                {"column": "group", "ascending": True},
+                {"column": "score", "ascending": False},
+            ]
+        },
+        "split": {"by": ["group"], "mode": "split_file"},
+        "recode": {
+            "columns": [
+                {
+                    "column": "code",
+                    "rules": [
+                        {"from": 1, "to": "control"},
+                        {"from": 2, "to": "treated"},
+                    ],
+                    "other": "keep",
+                    "missing": "preserve",
+                }
+            ]
+        },
+    }
+
+    with TestClient(app) as client:
+        previews = {}
+        for operation, parameters in requests.items():
+            response = client.post(
+                "/data-operations/transform/preview",
+                params={"project_root": str(project)},
+                json={
+                    "source_run_id": run_id,
+                    "source_node_id": "stage:source",
+                    "source_artifact_id": artifact_id,
+                    "operation": operation,
+                    "parameters": parameters,
+                },
+            )
+            assert response.status_code == 200
+            previews[operation] = response.json()["preview"]
+
+        assert previews["sort"]["row_count_after"] == 4
+        assert previews["split"]["group_count"] == 2
+        assert previews["recode"]["changed_value_count"] == 2
+
+        for operation, parameters in requests.items():
+            response = client.post(
+                "/data-operations/transform/confirm",
+                params={"project_root": str(project)},
+                json={
+                    "source_run_id": run_id,
+                    "source_node_id": "stage:source",
+                    "source_artifact_id": artifact_id,
+                    "operation": operation,
+                    "parameters": parameters,
+                    "preview_fingerprint": previews[operation]["fingerprint"],
+                },
+            )
+            assert response.status_code == 200
+            assert response.json()["effect"]["child_node_id"].startswith(f"data-{operation}:")
