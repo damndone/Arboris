@@ -26,6 +26,7 @@ from workbench.agent.context_tools import (
     _bounded_regression_table,
     _bounded_model_family_evidence,
     _public_requested_model_coefficients,
+    _bounded_coefficient_row,
 )
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
@@ -195,6 +196,8 @@ def test_agent_coefficient_projection_bounds_huge_values_and_provenance():
             }
         },
         "nobs": 10**400,
+        "df_model": -1,
+        "df_resid": 10**400,
         "exposure_col": 10**400,
         "sampling_weight": 10**400,
     }
@@ -209,6 +212,9 @@ def test_agent_coefficient_projection_bounds_huge_values_and_provenance():
     assert projected["projection_status"] == "unavailable"
     assert projected["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
     assert projected_model["nobs"] is None
+    assert projected_model["df_model"] is None
+    assert projected_model["df_resid"] is None
+    assert projected_model["model_metadata_status"] == "unavailable"
     assert projected_model["exposure_col"] is None
     assert projected_model["sampling_weight"] is None
     assert len(projected["source_id"]) <= 128
@@ -219,6 +225,55 @@ def test_agent_coefficient_projection_bounds_huge_values_and_provenance():
     table_cell = _bounded_regression_table([result])["rows"][0]["models"]["ols_1"]
     assert table_cell["projection_status"] == "unavailable"
     assert table_cell["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
+
+
+@pytest.mark.parametrize("bad_p", [-1, 2, 10**400, float("nan"), float("inf")])
+def test_agent_regression_and_diagnostic_projections_do_not_copy_invalid_survey_scalars(bad_p):
+    result = {
+        "model_id": "ols_1",
+        "model_type": "ols",
+        "nobs": 10**400,
+        "survey_design": {
+            "n_obs": -1,
+            "n_psu": 2.5,
+            "degf": -2,
+            "residual_degf": 10**400,
+            "variance_method": "linearization",
+            "source_id": "run-1:model_results.ols_1",
+        },
+        "coefficients": {
+            "x": {
+                "estimate": 1.0,
+                "std_error": -1,
+                "p_value": bad_p,
+                "ci_lower": 2.0,
+                "ci_upper": 1.0,
+                "variance_source": "survey_design",
+                "source_id": "run-1:model_results.ols_1.coefficients.x",
+                "warnings": ["SURVEY_INVALID"],
+            }
+        },
+    }
+
+    table = _bounded_regression_table([result])
+    model = table["models"][0]
+    cell = table["rows"][0]["models"]["ols_1"]
+    assert model["nobs"] is None
+    assert model["projection_status"] == "unavailable"
+    assert model["survey_design"]["projection_status"] == "unavailable"
+    assert "n_obs" not in model["survey_design"]
+    assert "degf" not in model["survey_design"]
+    assert cell["projection_status"] == "unavailable"
+    assert cell.get("p_value") is None
+    assert cell.get("std_error") is None
+    assert cell.get("ci_lower") is None
+    assert cell.get("ci_upper") is None
+    assert cell["source_id"] == "run-1:model_results.ols_1.coefficients.x"
+
+    diagnostic = _bounded_coefficient_row({"variable": "x", **result["coefficients"]["x"]})
+    assert diagnostic["projection_status"] == "unavailable"
+    assert diagnostic.get("p_value") is None
+    assert diagnostic.get("std_error") is None
 
 
 def test_a_run_without_a_design_says_so_rather_than_omitting_the_field(tmp_path):

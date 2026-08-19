@@ -32,6 +32,12 @@ from ..services.server_run_artifacts import (
 )
 from ..data_operations import _read_frame
 from ..graph_model import NodeKind
+from ..survey.projection import (
+    bounded_survey_integer,
+    project_survey_coefficient,
+    project_survey_design,
+    project_survey_model_count,
+)
 from .context_compiler import resolve_registered_artifact
 from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .recipes.registry import build_option_vocabulary, validate_model_options_patch
@@ -3194,7 +3200,7 @@ def _public_requested_model_coefficients(
         public_coefficients.append(
             {
                 "term": term,
-                **_bounded_agent_coefficient(coefficient),
+                **_bounded_agent_coefficient(coefficient, run_id=run_id),
             }
         )
 
@@ -3216,8 +3222,14 @@ def _public_requested_model_coefficients(
     confidence_level = _public_probability(covariance_evidence.get("confidence_level"))
     cluster_variable = covariance_evidence.get("cluster_variable")
     cluster_count = _public_positive_int(covariance_evidence.get("cluster_count"))
-    nobs = _public_positive_int(result.get("nobs"))
-    invalid_model_contract = result.get("nobs") is not None and nobs is None
+    nobs, invalid_nobs = project_survey_model_count(
+        result.get("nobs"), unavailable_reason="AGENT_MODEL_METADATA_INVALID"
+    )
+    df_model = bounded_survey_integer(result.get("df_model"))
+    df_resid = bounded_survey_integer(result.get("df_resid"), positive=True)
+    invalid_df_model = result.get("df_model") is not None and df_model is None
+    invalid_df_resid = result.get("df_resid") is not None and df_resid is None
+    invalid_model_contract = invalid_nobs or invalid_df_model or invalid_df_resid
     exposure_col = result.get("exposure_col")
     sampling_weight = result.get("sampling_weight")
     if exposure_col is not None and (
@@ -3237,8 +3249,8 @@ def _public_requested_model_coefficients(
         "nobs": nobs,
         "r_squared": _public_stat_number(result.get("r_squared")),
         "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
-        "df_model": _public_stat_number(result.get("df_model")),
-        "df_resid": _public_stat_number(result.get("df_resid")),
+        "df_model": df_model,
+        "df_resid": df_resid,
         "outcome": result.get("y_column") if isinstance(result.get("y_column"), str) else None,
         "predictors": public_predictors,
         "predictors_omitted": max(predictor_count - len(public_predictors), 0),
@@ -3512,12 +3524,29 @@ def _bounded_regression_table(
         model_id = result.get("model_id")
         if not isinstance(model_id, str) or not model_id:
             continue
-        models.append({
+        model_nobs, invalid_nobs = project_survey_model_count(
+            result.get("nobs"), unavailable_reason="AGENT_MODEL_METADATA_INVALID"
+        )
+        model_view = {
             "id": model_id,
             "label": result.get("model_label") or result.get("model_type") or model_id,
             "model_type": result.get("model_type"),
-            "nobs": result.get("nobs"),
-        })
+            "nobs": model_nobs,
+        }
+        design = project_survey_design(
+            result.get("survey_design"),
+            unavailable_reason="AGENT_SURVEY_METADATA_INVALID",
+        )
+        if design is not None:
+            model_view["survey_design"] = design
+        if invalid_nobs:
+            model_view.update(
+                {
+                    "projection_status": "unavailable",
+                    "unavailable_reason": "AGENT_MODEL_METADATA_INVALID",
+                }
+            )
+        models.append(model_view)
         coefficients = result.get("coefficients")
         if not isinstance(coefficients, dict):
             continue
@@ -3529,14 +3558,12 @@ def _bounded_regression_table(
                 term_key,
                 {"term": term_key, "label": term_key, "models": {}},
             )
-            cell = _bounded_agent_coefficient(raw_cell, budget=budget)
-            p_value = raw_cell.get("p_value")
-            try:
-                parsed_p = float(p_value)
-            except (OverflowError, TypeError, ValueError):
-                parsed_p = math.nan
+            cell = _bounded_agent_coefficient(
+                raw_cell, budget=budget, run_id=result.get("run_id")
+            )
+            parsed_p = cell.get("p_value")
             cell["significance"] = next(
-                (marker for marker, cutoff in cutoffs if math.isfinite(parsed_p) and parsed_p < cutoff),
+                (marker for marker, cutoff in cutoffs if isinstance(parsed_p, (int, float)) and parsed_p < cutoff),
                 "",
             )
             row["models"][model_id] = cell
@@ -3743,32 +3770,22 @@ def _bounded_labels(value: Any, *, limit: int = 16) -> list[str]:
 
 
 def _bounded_agent_coefficient(
-    coefficient: Mapping[str, Any], *, budget: _PublicResultBudget | None = None
+    coefficient: Mapping[str, Any], *, budget: _PublicResultBudget | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     """Project coefficient evidence with bounded numbers and provenance."""
     numeric_fields = ("estimate", "std_error", "ci_lower", "ci_upper", "p_value")
-    projected: dict[str, Any] = {}
-    invalid_numeric = False
-    for field in numeric_fields:
-        if field not in coefficient:
-            continue
-        value = _public_stat_number(coefficient.get(field))
-        projected[field] = value
-        if coefficient.get(field) is not None and value is None:
-            invalid_numeric = True
-    for field in ("variance_source", "source_id"):
-        if field not in coefficient:
-            continue
-        projected[field] = _bounded_label(coefficient.get(field))
-    if "warnings" in coefficient:
-        projected["warnings"] = _bounded_labels(coefficient.get("warnings"))
-    if invalid_numeric:
-        projected.update(
-            {
-                "projection_status": "unavailable",
-                "unavailable_reason": "AGENT_COEFFICIENT_VALUE_INVALID",
-            }
-        )
+    projected = project_survey_coefficient(
+        coefficient,
+        unavailable_reason="AGENT_COEFFICIENT_VALUE_INVALID",
+        run_id=run_id,
+    )
+    if projected.get("projection_status") == "unavailable":
+        # Preserve the established Agent shape without returning invalid raw
+        # scalars. Report/XLSX intentionally omit these fields instead.
+        for field in numeric_fields:
+            if field in coefficient:
+                projected[field] = None
     return projected
 
 
@@ -4060,14 +4077,29 @@ def _bounded_persisted_model_facts(
         for term, coefficient in list(coefficients.items())[:8]:
             if not isinstance(term, str) or not isinstance(coefficient, dict):
                 continue
+            bounded = _bounded_agent_coefficient(
+                coefficient, run_id=result.get("run_id")
+            )
             rows.append(
                 {
                     "term": term,
-                    "estimate": _public_stat_number(coefficient.get("estimate")),
-                    "std_error": _public_stat_number(coefficient.get("std_error")),
-                    "p_value": _public_stat_number(coefficient.get("p_value")),
-                    "ci_lower": _public_stat_number(coefficient.get("ci_lower")),
-                    "ci_upper": _public_stat_number(coefficient.get("ci_upper")),
+                    "estimate": bounded.get("estimate"),
+                    "std_error": bounded.get("std_error"),
+                    "p_value": bounded.get("p_value"),
+                    "ci_lower": bounded.get("ci_lower"),
+                    "ci_upper": bounded.get("ci_upper"),
+                    **{
+                        key: bounded[key]
+                        for key in (
+                            "variance_source",
+                            "source_id",
+                            "warnings",
+                            "provenance",
+                            "projection_status",
+                            "unavailable_reason",
+                        )
+                        if key in bounded
+                    },
                 }
             )
         projected.append(
@@ -4112,7 +4144,7 @@ def _bounded_coefficient_row(row: dict[str, Any]) -> dict[str, Any]:
         "source_id",
         "warnings",
     ):
-        if key in row:
+        if key in row and key in coefficient:
             bounded[key] = coefficient[key]
     for key in ("projection_status", "unavailable_reason"):
         if key in coefficient:
@@ -5245,57 +5277,10 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
         design = result.get("survey_design")
         if not isinstance(design, dict):
             continue
-        bounded = _bounded_numeric_fields(
+        return project_survey_design(
             design,
-            fields=(
-                "n_obs", "n_strata", "n_psu", "degf", "residual_degf",
-                "design_effect", "effective_sample_size",
-            ),
-            string_fields=(
-                "variance_method", "strata_column", "psu_column",
-                "weight_column", "replicate_type", "lonely_psu_policy",
-                "subpopulation", "weight_frame",
-            ),
+            unavailable_reason="AGENT_SURVEY_METADATA_INVALID",
         )
-        invalid_contract = False
-        for field in ("n_obs", "n_strata", "n_psu", "degf", "residual_degf"):
-            raw_value = design.get(field)
-            if raw_value is not None and _public_positive_int(raw_value) is None:
-                invalid_contract = True
-        for field in (
-            "replicates_attempted", "replicates_succeeded", "replicates_failed"
-        ):
-            bounded[field] = _public_positive_int(design.get(field))
-        for field in ("design_effect", "effective_sample_size"):
-            raw_value = design.get(field)
-            if raw_value is not None and (
-                field not in bounded or bounded[field] < 0
-            ):
-                invalid_contract = True
-        reasons = design.get("replicate_failure_reasons")
-        if isinstance(reasons, dict):
-            bounded_reasons: dict[str, int] = {}
-            for reason, raw_count in list(reasons.items())[:32]:
-                count = _public_positive_int(raw_count)
-                if isinstance(reason, str) and count is not None:
-                    bounded_reasons[reason[:128]] = count
-            bounded["replicate_failure_reasons"] = bounded_reasons
-        else:
-            bounded["replicate_failure_reasons"] = None
-        raw_columns = design.get("replicate_weight_columns")
-        if isinstance(raw_columns, list):
-            bounded["replicate_weight_columns"] = [
-                item[:128] for item in raw_columns[:64]
-                if isinstance(item, str) and item
-            ]
-        elif raw_columns is not None:
-            invalid_contract = True
-        if invalid_contract:
-            bounded.update({
-                "projection_status": "unavailable",
-                "unavailable_reason": "AGENT_SURVEY_METADATA_INVALID",
-            })
-        return bounded
     return None
 
 

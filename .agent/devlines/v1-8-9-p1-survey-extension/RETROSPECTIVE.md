@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 22/93 (23.7%; 23.7 per 100 events)
-- Repeat rate: 1/22 (4.5%)
-- Recurrence rate: 1/21 (4.8%)
-- MTTR: median=0 ms (sample=11; unresolved=11)
+- Failure frequency: 23/109 (21.1%; 21.1 per 100 events)
+- Repeat rate: 1/23 (4.3%)
+- Recurrence rate: 1/22 (4.5%)
+- MTTR: median=0 ms (sample=14; unresolved=9)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/15 (0.0%)
+- Gate waste rate: 0/17 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -31,6 +31,7 @@ COMPLETED
 - #74 2026-08-19T20:01:00.000Z `third_repair_real_entry_red`; cause_status: `known`; cause: Reviewer-directed real source-to-workflow probes showed that partial survey declarations and replicate columns without a method completed ordinary OLS, an unsupported survey family failed without the required typed survey code, and the named Agent coefficient inspector added variance_source=None/warnings=[] while omitting persisted survey design metadata.; resolution: `open`; lesson: Make every survey declaration fail closed or reach the shared adapter before estimation, and preserve optional persisted provenance without inventing defaults.
 - #84 2026-08-19T21:10:00.000Z `reviewer_blocker_red`; cause_status: `known`; cause: Independent reviewer probes initially showed that numeric/object subpopulation expressions were truthy-coerced, generated replicate methods ignored carried columns, nonpositive survey degrees of freedom and nonfinite covariance completed, Poisson exp overflow leaked, and Agent reads accepted tampered model JSON.; resolution: `resolved`; lesson: Turn every reviewer boundary into a real failing probe before changing the production seam.
 - #90 2026-08-19T14:00:00.000Z `third_round_reviewer_blockers_red`; cause_status: `known`; cause: The independent third-round RED probes showed that replicate declarations could be ignored or overridden, falsey subpopulation declarations could pass, extreme weights and undefined design effects could succeed, legacy or synchronized model artifact tampering could remain available, and report inference values could be copied without typed validation.; resolution: `open`; lesson: Third-round remediation must test declaration consistency, falsey declaration presence, server-owned artifact trust, numerical stability, and output-level report/export validation directly.
+- #100 2026-08-19T22:05:00.000Z `fourth_round_bounded_projection_red`; cause_status: `known`; cause: Agent regression-table, diagnostic, coefficient, Report, and XLSX consumers did not share one bounded typed survey projection contract.; resolution: `open`; lesson: All survey result consumers must reuse one bounded typed projection and preserve safe provenance.
 
 ## All errors
 
@@ -72,6 +73,7 @@ COMPLETED
 - `second-repair-review-red-probes`: occurrences=1; cause_status: `known`; root cause: Reviewer-directed RED probes reproduced five spec failures: FPC without sampling_weight completed a naive OLS run, Poisson exposure validation leaked OverflowError and accepted bool, subpopulation expressions leaked pandas/parser errors, Report coefficient and replicate projections copied unbounded values, and Agent coefficient projection leaked OverflowError.; solution: `open`
 - `separate-capability-bootstrap-gate`: occurrences=1; cause_status: `known`; root cause: A clean-process direct build_capabilities probe failed in the pre-existing StatisticalTestsStage and orchestrator circular import before reaching the survey capability projection; the scoped capability composition tests pass through their established harness.; solution: `accepted`
 - `separate-report-receipt-gate`: occurrences=1; cause_status: `known`; root cause: The existing survey report visibility tests reach run completion, but HTML report rendering is refused by the protected report helper because this direct test workflow has no admitted server receipt.; solution: `accepted`
+- `survey-bounded-projection-contract`: occurrences=1; cause_status: `known`; root cause: Agent regression-table, diagnostic, coefficient, Report, and XLSX consumers did not share one bounded typed survey projection contract.; solution: `open`
 - `survey-extension-external-boundaries-not-verified`: occurrences=1; cause_status: `known`; root cause: This remediation lane does not authorize external survey oracle comparison, browser-visible report acceptance, external provider benchmarks, or release integration.; solution: `accepted`
 - `survey-report-acceptance-boundary`: occurrences=1; cause_status: `external`; root cause: Direct reporting_exports tests still require an admitted server receipt from the protected write-capable workflow helper; this survey line does not change that boundary.; solution: `accepted`
 - `third-repair-real-entry-red`: occurrences=1; cause_status: `known`; root cause: Reviewer-directed real source-to-workflow probes showed that partial survey declarations and replicate columns without a method completed ordinary OLS, an unsupported survey family failed without the required typed survey code, and the named Agent coefficient inspector added variance_source=None/warnings=[] while omitting persisted survey design metadata.; solution: `open`
@@ -84,6 +86,9 @@ COMPLETED
 
 - `backend/workbench/engine/stages/estimation.py`
 - `tests/test_agent_context_tools.py`
+- `tests/test_agent_reads_v187_results.py::test_agent_coefficient_projection_bounds_huge_values_and_provenance`
+- `tests/test_agent_reads_v187_results.py::test_agent_regression_and_diagnostic_projections_do_not_copy_invalid_survey_scalars`
+- `tests/test_diagnostic_summary.py::test_diagnostic_projection_is_typed_for_invalid_survey_coefficient_values`
 - `tests/test_reporting_exports.py`
 - `tests/test_survey_design_engine_v187.py`
 - `tests/test_survey_design_engine_v187.py; tests/test_agent_reads_v187_results.py; tests/test_report_view_model.py`
@@ -92,6 +97,7 @@ COMPLETED
 - `tests/test_survey_design_wiring_v187.py`
 - `tests/test_survey_design_wiring_v187.py; tests/test_survey_glm_family_wiring_v189.py; tests/test_agent_context_tools.py`
 - `tests/test_survey_glm_family_wiring_v189.py`
+- `tests/test_survey_glm_family_wiring_v189.py tests/test_survey_design_engine_v187.py tests/test_agent_reads_v187_results.py tests/test_diagnostic_summary.py tests/test_report_view_model.py tests/test_reporting_exports.py`
 - `tests/test_survey_glm_family_wiring_v189.py; tests/test_survey_design_engine_v187.py; tests/test_agent_context_tools.py`
 - `tests/test_survey_glm_family_wiring_v189.py; tests/test_survey_design_engine_v187.py; tests/test_survey_design_composition_v187.py; tests/test_survey_composition_limits_v187.py; tests/test_survey_design_wiring_v187.py; tests/test_survey_report_visibility_v187.py; tests/test_report_view_model.py; tests/test_agent_reads_v187_results.py; tests/test_agent_context_tools.py`
 - `tests/test_survey_glm_family_wiring_v189.py; tests/test_survey_design_engine_v187.py; tests/test_survey_design_composition_v187.py; tests/test_survey_composition_limits_v187.py; tests/test_survey_report_visibility_v187.py; tests/test_survey_design_wiring_v187.py; tests/test_agent_reads_v187_results.py; tests/test_report_view_model.py; tests/test_reporting_exports.py::test_survey_provenance_reaches_html_and_xlsx_without_recomputation`
@@ -113,6 +119,7 @@ COMPLETED
 - `second-repair-review-red-probes`: line experience occurrence(s)=1
 - `separate-capability-bootstrap-gate`: line experience occurrence(s)=1
 - `separate-report-receipt-gate`: line experience occurrence(s)=1
+- `survey-bounded-projection-contract`: line experience occurrence(s)=1
 - `survey-extension-external-boundaries-not-verified`: line experience occurrence(s)=1
 - `survey-report-acceptance-boundary`: line experience occurrence(s)=1
 - `third-repair-real-entry-red`: line experience occurrence(s)=1
@@ -124,6 +131,8 @@ COMPLETED
 ## Future guidance
 
 - A focused green gate must include output-level probes for each trust and numerical boundary, while preserving the existing v1.8.7 survey semantics.
+- All survey result consumers must reuse one bounded typed projection and preserve safe provenance.
+- Centralize survey evidence projection and keep external admission boundaries separately marked not verified.
 - Close reviewer RED incidents with the same incident identity used by the original probe.
 - Close reviewer incidents with output-level RED/GREEN evidence at the same trust boundary.
 - Do not convert a protected write-admission failure into a survey green claim; retain typed projection evidence and leave the consumer gate with its owning line.
@@ -132,6 +141,7 @@ COMPLETED
 - Keep implemented and locally verified boundaries separate from browser, provider, oracle, full-gate, and release claims.
 - Keep input validation at the earliest executable family boundary and carry provenance through the same typed result projection used by ordinary coefficients.
 - Keep internal aliases on one family contract and make package-local acceptance distinguish typed external unavailability from successful report rendering.
+- Keep invalid survey evidence unavailable and provenance-bound at every consumer boundary.
 - Keep model-specific link and offset details inside the shared estimator adapter, not in a second variance workflow.
 - Keep package-local survey evidence separate from the protected admission-receipt and browser acceptance boundary.
 - Keep package-local survey verification separate from Report admission, browser, provider, external-oracle, full-gate, and release claims.
@@ -144,6 +154,7 @@ COMPLETED
 - Probe mutable real entry points and invalid family inputs before trusting downstream numerical failures or capability declarations.
 - Report capability projection tests with their actual bootstrap context and keep unrelated import-cycle gates out of the survey implementation scope.
 - Review survey declarations at the real workflow entry and assert output artifacts, not only capability labels or helper return values.
+- Separate package-local projection closure from protected external admission gates.
 - Submit one digest per formal evidence block and let the CLI validate the event before treating it as recorded.
 - Third-round remediation must test declaration consistency, falsey declaration presence, server-owned artifact trust, numerical stability, and output-level report/export validation directly.
 - Treat rescope-context affected-path arguments as a complete replacement and verify the manifest immediately.
@@ -249,3 +260,19 @@ COMPLETED
 - #91: `019c9f18-7c2d-7c53-9fd4-4b3a7b4d5f12` | 2026-08-19T14:30:00.000Z | REVIEW/third_round_reviewer_blockers_green | incident=`019c9f18-7c2d-7c53-9fd4-4b3a7b4d5f11` | lesson_key=`third-round-reviewer-blockers-green` | event_sha256=`bd8ad3621e5cc13ee099a9b8245e5b4185c54bfeed27232b20c7ba989cf55f82`
 - #92: `019c9f18-7c2d-7c53-9fd4-4b3a7b4d5f13` | 2026-08-19T14:31:00.000Z | GAP/external_and_full_acceptance_not_verified | incident=`019c9f18-7c2d-7c53-9fd4-4b3a7b4d5f14` | lesson_key=`survey-extension-external-boundaries-not-verified` | event_sha256=`fc0581c230c283a1d5c5da76b8f5ad2bf9f4d3e4c2356a6fab427fb648088004`
 - #93: `019c9f18-7c2d-7c53-9fd4-4b3a7b4d5f15` | 2026-08-19T14:35:00.000Z | GATE/third_round_mechanical_gate_green | incident=`019c9f18-7c2d-7c53-9fd4-4b3a7b4d5f16` | lesson_key=`third-round-mechanical-gate` | event_sha256=`7302a29807fb098948024af25b1c536d48691aa26ca92abb23619b91468d93cb`
+- #94: `479e7dda-3cd5-46a1-a6fa-0d83036b7402` | 2026-08-19T21:49:53.952Z | STATE_CHANGE/context_rescope_required | incident=`133ce883-f19d-4cf2-9db6-1290d2e42aab` | lesson_key=`context-pack-rescope` | event_sha256=`b50f52a8295863c57762d61cf24734dc7ad301f24bf05e54cb4ed6fa827532ff`
+- #95: `f0ea4dd8-9e36-45bf-8df5-b90fd9f8e280` | 2026-08-19T21:49:53.992Z | STATE_CHANGE/context_rescoped | incident=`5402632b-575c-417d-a774-431681991690` | lesson_key=`context-pack-rescope` | event_sha256=`2b55b67a014385151a6557c3fb96bd78fc2897c8d0f99b771103b7d44f7db53e`
+- #96: `d24ffb9a-9f93-4838-8853-5a3ec611affc` | 2026-08-19T21:56:19.457Z | STATE_CHANGE/context_rescope_required | incident=`772d6fc5-c039-453b-bb59-fb874c6e409a` | lesson_key=`context-pack-rescope` | event_sha256=`bac321672a2e9a56cbd74fa1c5a748cd09a8a43c271bcf581861bd3ca600da5e`
+- #97: `e33243eb-cee8-4caf-8808-9ed521ebe0b7` | 2026-08-19T21:56:19.498Z | STATE_CHANGE/context_rescoped | incident=`4ac998a3-0be1-4af5-a6b9-9035f13e8df7` | lesson_key=`context-pack-rescope` | event_sha256=`b14379a123a07694a1e42e50db1bcfd800af21561f3a1de0bae259e0bf1154e6`
+- #98: `4a20f3be-c825-4ec3-9cdc-a656ae19082b` | 2026-08-19T21:57:21.309Z | STATE_CHANGE/context_baseline_rebase_required | incident=`b726736a-4c56-44bf-a7ae-17137fb5cdf9` | lesson_key=`context-pack-baseline-rebase` | event_sha256=`f12d0c1d082e08d329ac33c2266817e13c1edd6f6447d489204b23be939f6a1a`
+- #99: `8d4f95b9-5e24-43ee-88e5-fb72d13b9b6c` | 2026-08-19T21:57:21.341Z | STATE_CHANGE/context_baseline_rebased | incident=`7bcdc195-f921-4155-a005-8c82722bbd70` | lesson_key=`context-pack-baseline-rebase` | event_sha256=`cd769b382158e94310d45c9bfd5818c0d716d4e97ca9832fd7292eac1e1165b3`
+- #100: `2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1b3` | 2026-08-19T22:05:00.000Z | FAILURE/fourth_round_bounded_projection_red | incident=`2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1b4` | lesson_key=`survey-bounded-projection-contract` | event_sha256=`0b0040208f6f4acaf012899cb9f4c57b29e738df03921d0bae0a3f46e4dd39c8`
+- #101: `2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1b5` | 2026-08-19T22:06:00.000Z | REVIEW/prior_survey_input_blockers_resolved | incident=`c8e5a1d7-4b92-6f30-9e2c-7a5d1b8f3c64` | lesson_key=`survey-bounded-projection-contract` | event_sha256=`ae8b6d946477dd73a752e6b9fee7c320f5edfa23135ce3eab4adf26f9c0dcb27`
+- #102: `2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1b6` | 2026-08-19T22:07:00.000Z | REVIEW/second_repair_projection_blockers_resolved | incident=`0a1b2c3d-4e5f-6789-ab01-c2d3e4f5a607` | lesson_key=`survey-bounded-projection-contract` | event_sha256=`52c3c8124d2cdcecb1388d2f13b0b12912c3983ec513812b2839dbc23f3f2151`
+- #103: `2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1b7` | 2026-08-19T22:31:00.000Z | REVIEW/fourth_round_bounded_projection_green | incident=`2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1b4` | lesson_key=`survey-bounded-projection-contract` | event_sha256=`13ca8bdf3f6be40bf47d8f5b83091344479b81a2a38efe5fecdb9e020ec2c17f`
+- #104: `2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1b8` | 2026-08-19T22:32:00.000Z | GATE/fourth_round_impacted_tests_green | incident=`2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1b9` | lesson_key=`survey-bounded-projection-contract` | event_sha256=`63fb1ea9f8158ce40c1d1f41be9ecb98f79369ba9bcac9fba6682704e2552845`
+- #105: `2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1ba` | 2026-08-19T22:33:00.000Z | GATE/fourth_round_mechanical_green | incident=`2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1bb` | lesson_key=`survey-bounded-projection-contract` | event_sha256=`7f34ce40c20c8e927a75c3b8b5e00bab5fa097726f832b2ff0b532a92d222016`
+- #106: `2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1bc` | 2026-08-19T22:34:00.000Z | STATE_CHANGE/fourth_round_completed | incident=`2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1bd` | lesson_key=`survey-bounded-projection-contract` | event_sha256=`b38ca24a6ffefeada6fde34582d117f0a4f0459a92b6f53a7eb30149ffcfba34`
+- #107: `dabecdd6-85c0-4c7d-bd29-8d8ee3ce0de9` | 2026-08-19T22:01:13.513Z | STATE_CHANGE/context_rescope_required | incident=`86296e36-9c87-49fc-97e8-323240d33ec9` | lesson_key=`context-pack-rescope` | event_sha256=`898c6189d393a2ba77a45160f03a540e8c47357431072dc2e2117bd6b9161432`
+- #108: `258b6faa-13ce-4efe-a8cf-4c0d904acfee` | 2026-08-19T22:01:13.560Z | STATE_CHANGE/context_rescoped | incident=`bff7fc86-6bac-4de2-936f-0ee30c0b3e37` | lesson_key=`context-pack-rescope` | event_sha256=`a0156d205bcf9737010c57e135f1e416414736047192ebc1824d6676f39c87f5`
+- #109: `2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1be` | 2026-08-19T22:40:00.000Z | STATE_CHANGE/scope_owned_and_completed | incident=`2a4d6f80-1b3c-4e5f-9a70-c2d4e6f8a1bd` | lesson_key=`context-pack-scope-ownership` | event_sha256=`93e277584ed2266ae4516b4c4a6c6930875bd161898ea6683bb046bdc85a20aa`

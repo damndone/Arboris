@@ -7,6 +7,11 @@ from typing import Any
 
 from .artifacts import read_json
 from .narrative.render import render_template
+from .survey.projection import (
+    project_survey_coefficient,
+    project_survey_design,
+    project_survey_model_count,
+)
 
 
 _DEFAULT_SIGNIFICANCE_LEVELS: dict[str, float] = {
@@ -42,6 +47,9 @@ def build_regression_table(
     for model_id, model_result in model_results:
         model_key = str(model_id)
         raw_nobs = model_result.get("nobs")
+        bounded_nobs, invalid_nobs = project_survey_model_count(
+            raw_nobs, unavailable_reason="REPORT_MODEL_METADATA_INVALID"
+        )
         model_view = {
             "id": model_key,
             "label": (
@@ -50,7 +58,7 @@ def build_regression_table(
                 or model_key
             ),
             "model_type": model_result.get("model_type"),
-            "nobs": _bounded_report_integer(raw_nobs),
+            "nobs": bounded_nobs,
             "r_squared": model_result.get("r_squared"),
             "adjusted_r_squared": model_result.get("adjusted_r_squared"),
             # The terms every standard error in this column is conditional
@@ -58,10 +66,11 @@ def build_regression_table(
             # precision the analysis did not have.
             "survey_design": _design_summary(model_result.get("survey_design")),
             "survey_provenance": _bounded_survey_design(
-                model_result.get("survey_design")
+                model_result.get("survey_design"),
+                run_id=model_result.get("run_id"),
             ),
         }
-        if raw_nobs is not None and model_view["nobs"] is None:
+        if invalid_nobs:
             model_view.update(
                 {
                     "projection_status": "unavailable",
@@ -84,7 +93,9 @@ def build_regression_table(
                     "models": {},
                 },
             )
-            cell = _bounded_coefficient_projection(values)
+            cell = _bounded_coefficient_projection(
+                values, run_id=model_result.get("run_id")
+            )
             cell["significance"] = _regression_significance_marker(
                 values.get("p_value"), ordered_cutoffs
             )
@@ -209,54 +220,15 @@ def _bounded_report_interval(value: Any) -> list[int | float] | None:
     return [item for item in values if item is not None]
 
 
-def _bounded_coefficient_projection(values: Mapping[str, Any]) -> dict[str, Any]:
+def _bounded_coefficient_projection(
+    values: Mapping[str, Any], *, run_id: Any = None
+) -> dict[str, Any]:
     """Copy only the coefficient fields owned by the Report table contract."""
-    cell: dict[str, Any] = {}
-    invalid_numeric = False
-    for field in _REPORT_COEFFICIENT_FIELDS:
-        if field not in values:
-            continue
-        if field in {"source_id", "variance_source"}:
-            bounded = _bounded_report_string(values.get(field))
-            if bounded is not None:
-                cell[field] = bounded
-        elif field == "warnings":
-            bounded = _bounded_report_warnings(values.get(field))
-            if bounded is not None:
-                cell[field] = bounded
-        elif field == "confidence_interval":
-            bounded = _bounded_report_interval(values.get(field))
-            if bounded is not None:
-                cell[field] = bounded
-            elif values.get(field) is not None:
-                invalid_numeric = True
-        else:
-            if field == "std_error":
-                bounded = _bounded_report_nonnegative_number(values.get(field))
-            elif field == "p_value":
-                bounded = _bounded_report_probability(values.get(field))
-            else:
-                bounded = _bounded_report_number(values.get(field))
-            if bounded is not None:
-                cell[field] = bounded
-            elif values.get(field) is not None:
-                invalid_numeric = True
-    if "ci_lower" in cell and "ci_upper" in cell and cell["ci_lower"] > cell["ci_upper"]:
-        invalid_numeric = True
-    if invalid_numeric:
-        safe_cell = {
-            key: cell[key]
-            for key in ("source_id", "variance_source", "warnings")
-            if key in cell
-        }
-        safe_cell.update(
-            {
-                "projection_status": "unavailable",
-                "unavailable_reason": "REPORT_COEFFICIENT_VALUE_INVALID",
-            }
-        )
-        return safe_cell
-    return cell
+    return project_survey_coefficient(
+        values,
+        unavailable_reason="REPORT_COEFFICIENT_VALUE_INVALID",
+        run_id=run_id,
+    )
 
 
 def regression_table_export_rows(
@@ -507,87 +479,15 @@ def _load_if_exists(path: Path) -> Any | None:
     return None
 
 
-def _bounded_survey_design(design: Any) -> dict[str, Any] | None:
+def _bounded_survey_design(
+    design: Any, *, run_id: Any = None
+) -> dict[str, Any] | None:
     """Project only the typed survey fields consumed by Report surfaces."""
-    if not isinstance(design, Mapping):
-        return None
-    bounded: dict[str, Any] = {}
-    invalid_numeric = False
-    for field in (
-        "n_obs",
-        "n_strata",
-        "n_psu",
-        "degf",
-        "residual_degf",
-        "design_effect",
-        "effective_sample_size",
-    ):
-        if field in {"n_obs", "n_strata", "n_psu", "degf", "residual_degf"}:
-            value = _bounded_report_integer(design.get(field))
-        else:
-            value = _bounded_report_nonnegative_number(design.get(field))
-        if value is not None:
-            bounded[field] = value
-        elif design.get(field) is not None:
-            invalid_numeric = True
-    for field in (
-        "variance_method",
-        "strata_column",
-        "psu_column",
-        "weight_column",
-        "replicate_type",
-        "lonely_psu_policy",
-        "subpopulation",
-        "weight_frame",
-    ):
-        value = _bounded_report_string(design.get(field))
-        if value is not None:
-            bounded[field] = value
-    for field in (
-        "replicates_attempted",
-        "replicates_succeeded",
-        "replicates_failed",
-    ):
-        if field in design:
-            value = _bounded_report_integer(design.get(field))
-            bounded[field] = value
-            if design.get(field) is not None and value is None:
-                invalid_numeric = True
-    if "replicate_failure_reasons" in design:
-        raw_reasons = design.get("replicate_failure_reasons")
-        if isinstance(raw_reasons, Mapping):
-            reasons: dict[str, int] = {}
-            for reason, count in list(raw_reasons.items())[:16]:
-                if not isinstance(reason, str):
-                    continue
-                bounded_count = _bounded_report_integer(count)
-                if bounded_count is not None:
-                    reasons[reason[:128]] = bounded_count
-                elif count is not None:
-                    invalid_numeric = True
-            bounded["replicate_failure_reasons"] = reasons
-        else:
-            bounded["replicate_failure_reasons"] = None
-            if raw_reasons is not None:
-                invalid_numeric = True
-    if "replicate_weight_columns" in design:
-        raw_columns = design.get("replicate_weight_columns")
-        if isinstance(raw_columns, (list, tuple)):
-            columns = [
-                item[:128] for item in raw_columns[:64]
-                if isinstance(item, str) and item
-            ]
-            bounded["replicate_weight_columns"] = columns
-        elif raw_columns is not None:
-            invalid_numeric = True
-    if invalid_numeric:
-        bounded.update(
-            {
-                "projection_status": "unavailable",
-                "unavailable_reason": "REPORT_SURVEY_METADATA_INVALID",
-            }
-        )
-    return bounded or None
+    return project_survey_design(
+        design,
+        unavailable_reason="REPORT_SURVEY_METADATA_INVALID",
+        run_id=run_id,
+    )
 
 
 def _survey_coefficient_facts(
