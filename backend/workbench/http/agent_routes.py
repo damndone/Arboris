@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..agent.analysis_loop_driver import forward_analysis_intent
@@ -2139,3 +2140,401 @@ def get_agent_events(
             for event in events.replay(session_id, after_seq=after_seq)
         ]
     }
+
+
+# Wave C shared Agent/Notebook cutover ----------------------------------------
+#
+# The HTTP layer never constructs a runtime contribution and never accepts a
+# client-shaped confirmation object. Application startup must explicitly
+# register a server-composed compiler for a project/session scope. Until that
+# join exists, these endpoints fail closed with 503 rather than silently
+# falling back to the legacy provider path.
+class AgentNotebookCutoverCompileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
+    actor_ref: str = Field(min_length=1, max_length=300)
+    session_ref: str = Field(min_length=1, max_length=300)
+    project_ref: str = Field(min_length=1, max_length=300)
+    entrypoint: Literal["agent", "notebook"] = "agent"
+    normalized_fields: dict[str, Any] | None = None
+
+
+class AgentNotebookCutoverScopeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    actor_ref: str = Field(min_length=1, max_length=300)
+    session_ref: str = Field(min_length=1, max_length=300)
+    project_ref: str = Field(min_length=1, max_length=300)
+
+
+class AgentNotebookCutoverExecuteRequest(AgentNotebookCutoverScopeRequest):
+    confirmation_id: str = Field(min_length=1, max_length=300)
+    current_data_snapshot_digest: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+@dataclass
+class AgentNotebookCutoverAuthorityStoreV1:
+    """One authority/receipt store owned by an application instance.
+
+    The direct function fallback is retained only for old unit tests that call
+    route handlers without a FastAPI ``Request``. HTTP requests always resolve
+    this store from ``request.app.state`` so two app instances cannot share
+    compiler bindings or confirmation handles by accident.
+    """
+
+    authorities: dict[tuple[str, str], Any] = field(default_factory=dict)
+    confirmations: dict[tuple[str, str, str], Any] = field(default_factory=dict)
+
+
+_DEFAULT_CUTOVER_STORE = AgentNotebookCutoverAuthorityStoreV1()
+
+
+def new_agent_notebook_cutover_authority_store() -> AgentNotebookCutoverAuthorityStoreV1:
+    return AgentNotebookCutoverAuthorityStoreV1()
+
+
+def set_default_agent_notebook_cutover_authority_store(
+    store: AgentNotebookCutoverAuthorityStoreV1,
+) -> None:
+    """Point legacy direct route calls at the main app's single store."""
+
+    if type(store) is not AgentNotebookCutoverAuthorityStoreV1:
+        raise TypeError("store must be an AgentNotebookCutoverAuthorityStoreV1")
+    global _DEFAULT_CUTOVER_STORE
+    _DEFAULT_CUTOVER_STORE = store
+
+
+def _cutover_store(
+    *,
+    request: Request | None = None,
+    app_instance: Any | None = None,
+) -> AgentNotebookCutoverAuthorityStoreV1:
+    owner = app_instance
+    if request is not None:
+        owner = request.app
+    if owner is not None:
+        store = getattr(getattr(owner, "state", None), "agent_notebook_cutover_store", None)
+        if type(store) is not AgentNotebookCutoverAuthorityStoreV1:
+            raise WorkbenchAPIError(
+                status_code=503,
+                code="AGENT_NOTEBOOK_CUTOVER_STORE_NOT_BOUND",
+                message="The application has no valid Agent/Notebook authority store.",
+            )
+        return store
+    return _DEFAULT_CUTOVER_STORE
+
+
+def resolve_agent_notebook_server_identity(
+    request: Request,
+    *,
+    project_ref: str,
+    claimed_session_ref: str | None,
+    notebook_id: str | None,
+) -> tuple[str, str, str | None]:
+    """Resolve the authenticated actor/session/project at the HTTP boundary.
+
+    ``claimed_session_ref`` is supplied only as a lookup hint for generic
+    Agent calls. A host resolver may ignore it and derive the session from its
+    own authenticated request state. Notebook calls always provide the
+    server-loaded Notebook id as the stable resource key.
+    """
+
+    resolver = getattr(request.app.state, "notebook_cutover_identity_resolver", None)
+    if not callable(resolver):
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_IDENTITY_NOT_BOUND",
+            message="The host has not bound a server-owned Agent/Notebook identity.",
+        )
+    try:
+        resolved = resolver(request, project_ref, claimed_session_ref, notebook_id)
+    except WorkbenchAPIError:
+        raise
+    except Exception as exc:
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_IDENTITY_NOT_BOUND",
+            message="The requested Agent/Notebook scope has no server-owned identity binding.",
+        ) from exc
+    if not isinstance(resolved, tuple) or len(resolved) not in {2, 3}:
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_IDENTITY_NOT_BOUND",
+            message="The host identity resolver returned an invalid binding.",
+        )
+    if any(
+        type(value) is not str
+        or not value
+        or value != value.strip()
+        or "\x00" in value
+        for value in resolved[:2]
+    ):
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_IDENTITY_NOT_BOUND",
+            message="The host identity resolver returned an invalid actor/session binding.",
+        )
+    canonical_project_ref = resolved[2] if len(resolved) == 3 else None
+    if canonical_project_ref is not None and (
+        type(canonical_project_ref) is not str
+        or not canonical_project_ref
+        or canonical_project_ref != canonical_project_ref.strip()
+        or "\x00" in canonical_project_ref
+    ):
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_PROJECT_NOT_BOUND",
+            message="The host identity resolver returned no valid project scope.",
+        )
+    if notebook_id is None and canonical_project_ref is None:
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_PROJECT_NOT_BOUND",
+            message="Generic Agent HTTP calls require a server-owned project scope.",
+        )
+    return resolved[0], resolved[1], canonical_project_ref
+
+
+def _assert_server_identity(
+    request: Request | None,
+    *,
+    project_ref: str,
+    claimed_actor_ref: str,
+    claimed_session_ref: str,
+    notebook_id: str | None = None,
+) -> tuple[str, str, str]:
+    if request is None:
+        # Direct route-function calls are a compatibility/testing seam. Real
+        # HTTP requests always receive a Request and therefore require the
+        # host identity binding above.
+        return claimed_actor_ref, claimed_session_ref, project_ref
+    actor_ref, session_ref, canonical_project_ref = resolve_agent_notebook_server_identity(
+        request,
+        project_ref=project_ref,
+        claimed_session_ref=claimed_session_ref,
+        notebook_id=notebook_id,
+    )
+    if (claimed_actor_ref, claimed_session_ref) != (actor_ref, session_ref):
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_NOTEBOOK_IDENTITY_MISMATCH",
+            message="The request identity does not match the server-owned scope.",
+        )
+    if canonical_project_ref is not None and canonical_project_ref != project_ref:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_NOTEBOOK_PROJECT_MISMATCH",
+            message="The request project does not match the server-owned scope.",
+        )
+    return actor_ref, session_ref, canonical_project_ref or project_ref
+
+
+def _require_cutover_scope_ref(value: object, name: str) -> str:
+    if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+        raise ValueError(f"{name} must be a non-empty scope reference")
+    return value
+
+
+def configure_agent_notebook_cutover_authority(
+    *,
+    project_ref: str,
+    session_ref: str,
+    compiler: Any | None,
+    app_instance: Any | None = None,
+) -> None:
+    """Bind or clear one server-owned compiler for one exact scope.
+
+    Rebinding also drops retained confirmations for that scope so a receipt
+    issued by an earlier compiler cannot cross a bootstrap generation.
+    """
+
+    project_ref = _require_cutover_scope_ref(project_ref, "project_ref")
+    session_ref = _require_cutover_scope_ref(session_ref, "session_ref")
+    if compiler is not None:
+        from ..agent.orchestrator import AgentNotebookCompilerV1
+
+        if type(compiler) is not AgentNotebookCompilerV1:
+            raise TypeError("compiler must be an AgentNotebookCompilerV1")
+        if not callable(getattr(compiler, "evidence_committer", None)):
+            raise ValueError("compiler must have a server-owned evidence committer")
+
+    store = _cutover_store(app_instance=app_instance)
+    scope = (project_ref, session_ref)
+    for key in tuple(store.confirmations):
+        if key[:2] == scope:
+            store.confirmations.pop(key, None)
+    if compiler is None:
+        store.authorities.pop(scope, None)
+    else:
+        store.authorities[scope] = compiler
+
+
+def lookup_agent_notebook_cutover_authority(
+    project_ref: str,
+    session_ref: str,
+    request: Request | None = None,
+) -> Any:
+    """Return only the compiler bound to this exact project/session scope."""
+
+    project_ref = _require_cutover_scope_ref(project_ref, "project_ref")
+    session_ref = _require_cutover_scope_ref(session_ref, "session_ref")
+    compiler = _cutover_store(request=request).authorities.get((project_ref, session_ref))
+    if compiler is None:
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_CUTOVER_NOT_BOUND",
+            message="The shared Agent/Notebook runtime is not server-bound for this scope.",
+            details={"project_ref": project_ref, "session_ref": session_ref},
+        )
+    return compiler
+
+
+def register_agent_notebook_cutover_authority(
+    *,
+    project_ref: str,
+    session_ref: str,
+    compiler: Any,
+    app_instance: Any | None = None,
+) -> None:
+    """Bind one server-composed compiler to one project/session scope.
+
+    This is intentionally explicit and process-local in Wave C. Production
+    startup is responsible for supplying a durable authority and trusted
+    provider contributions in a later integration line; the HTTP route never
+    guesses or imports a provider implementation.
+    """
+
+    configure_agent_notebook_cutover_authority(
+        project_ref=project_ref,
+        session_ref=session_ref,
+        compiler=compiler,
+        app_instance=app_instance,
+    )
+
+
+def _cutover_authority(
+    project_ref: str,
+    session_ref: str,
+    request: Request | None = None,
+) -> Any:
+    return lookup_agent_notebook_cutover_authority(project_ref, session_ref, request=request)
+
+
+def _cutover_error(exc: Exception, *, action: str) -> WorkbenchAPIError:
+    code = str(getattr(exc, "code", "CUTOVER_FAILED"))
+    status = 422 if action == "compile" else 409
+    if code in {"RUNTIME_CATALOG_NOT_BOUND", "PROVIDER_RUNTIME_NOT_BOUND", "CAPABILITY_BINDING_MISSING"}:
+        status = 503
+    return WorkbenchAPIError(status_code=status, code=code, message=str(exc))
+
+
+def _assert_cutover_record_scope(
+    compiler: Any,
+    compilation_record_id: str,
+    body: AgentNotebookCutoverScopeRequest,
+) -> None:
+    try:
+        record = compiler.record(compilation_record_id)
+    except Exception as exc:
+        raise _cutover_error(exc, action="confirm") from exc
+    if (record.principal_ref, record.session_ref, record.project_ref) != (
+        body.actor_ref,
+        body.session_ref,
+        body.project_ref,
+    ):
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="CUTOVER_SCOPE_MISMATCH",
+            message="The record is bound to another actor, session or project.",
+        )
+
+
+@router.post("/agent/cutover/compile")
+def compile_agent_notebook_cutover(
+    body: AgentNotebookCutoverCompileRequest,
+    request: Request = None,
+) -> dict[str, Any]:
+    """Compile one natural-language request into a server-owned preview."""
+
+    actor_ref, session_ref, project_ref = _assert_server_identity(
+        request,
+        project_ref=body.project_ref,
+        claimed_actor_ref=body.actor_ref,
+        claimed_session_ref=body.session_ref,
+    )
+    compiler = _cutover_authority(project_ref, session_ref, request=request)
+    try:
+        preview = compiler.compile_natural_language(
+            body.text,
+            actor_ref=actor_ref,
+            session_ref=session_ref,
+            project_ref=project_ref,
+            normalized_fields=body.normalized_fields,
+            entrypoint=body.entrypoint,
+        )
+    except Exception as exc:
+        raise _cutover_error(exc, action="compile") from exc
+    return {"preview": preview.to_dict()}
+
+
+@router.post("/agent/cutover/{compilation_record_id}/confirm")
+def confirm_agent_notebook_cutover(
+    compilation_record_id: str,
+    body: AgentNotebookCutoverScopeRequest,
+    request: Request = None,
+) -> dict[str, Any]:
+    """Issue and retain a server confirmation for one compiled record."""
+
+    _assert_server_identity(
+        request,
+        project_ref=body.project_ref,
+        claimed_actor_ref=body.actor_ref,
+        claimed_session_ref=body.session_ref,
+    )
+    compiler = _cutover_authority(body.project_ref, body.session_ref, request=request)
+    _assert_cutover_record_scope(compiler, compilation_record_id, body)
+    try:
+        receipt = compiler.confirm(compilation_record_id)
+    except Exception as exc:
+        raise _cutover_error(exc, action="confirm") from exc
+    _cutover_store(request=request).confirmations[
+        (body.project_ref, body.session_ref, compilation_record_id)
+    ] = receipt
+    return {"confirmation": receipt.to_dict()}
+
+
+@router.post("/agent/cutover/{compilation_record_id}/execute")
+def execute_agent_notebook_cutover(
+    compilation_record_id: str,
+    body: AgentNotebookCutoverExecuteRequest,
+    request: Request = None,
+) -> dict[str, Any]:
+    """Execute only with the server-retained confirmation handle."""
+
+    _assert_server_identity(
+        request,
+        project_ref=body.project_ref,
+        claimed_actor_ref=body.actor_ref,
+        claimed_session_ref=body.session_ref,
+    )
+    compiler = _cutover_authority(body.project_ref, body.session_ref, request=request)
+    _assert_cutover_record_scope(compiler, compilation_record_id, body)
+    confirmation = _cutover_store(request=request).confirmations.get(
+        (body.project_ref, body.session_ref, compilation_record_id)
+    )
+    if confirmation is None or confirmation.confirmation_id != body.confirmation_id:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="SERVER_CONFIRMATION_UNKNOWN",
+            message="The confirmation is not a server-retained handle for this scope and record.",
+        )
+    try:
+        result = compiler.execute(
+            compilation_record_id,
+            confirmation,
+            current_data_snapshot_digest=body.current_data_snapshot_digest,
+        )
+    except Exception as exc:
+        raise _cutover_error(exc, action="execute") from exc
+    return {"result": result.to_dict()}

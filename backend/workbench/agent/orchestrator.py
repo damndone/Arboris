@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Iterable
@@ -3004,3 +3004,788 @@ class WorkbenchOrchestrator:
             if event.event_type == "command_completed" and event.payload.get("command_id") == command_id:
                 return str(event.payload.get("result", ""))
         return None
+
+
+# ── v1.8.9 Agent / Notebook shared compiler facade ─────────────────────
+
+from collections.abc import Mapping as CutoverMapping
+from datetime import UTC as CutoverUTC, datetime as CutoverDatetime, timedelta as CutoverTimedelta
+
+
+class CutoverCompilerError(RuntimeError):
+    """A typed, fail-closed failure in the shared Agent/Notebook cutover."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        self.code = code
+        super().__init__(message or code)
+
+
+@dataclass(frozen=True)
+class CutoverCompilationPreviewV1:
+    entrypoint: str
+    operation_id: str | None
+    compilation_record_id: str | None
+    record_digest: str | None
+    semantic_plan_hash: str | None
+    server_execution_identity: str | None
+    preview_fingerprint: str | None
+    plan_diff: Mapping[str, Any]
+    clarifications: tuple[Any, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": "cutover-compilation-preview.v1",
+            "entrypoint": self.entrypoint,
+            "operation_id": self.operation_id,
+            "compilation_record_id": self.compilation_record_id,
+            "record_digest": self.record_digest,
+            "semantic_plan_hash": self.semantic_plan_hash,
+            "server_execution_identity": self.server_execution_identity,
+            "preview_fingerprint": self.preview_fingerprint,
+            "plan_diff": dict(self.plan_diff),
+            "clarifications": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.clarifications
+            ],
+        }
+
+
+@dataclass(frozen=True)
+class ServerConfirmationReceiptV1:
+    """A server-issued confirmation handle; its private token is authority."""
+
+    confirmation_id: str
+    confirmation_digest: str
+    compilation_record_id: str
+    semantic_plan_hash: str
+    actor_ref: str
+    session_ref: str
+    project_ref: str
+    _authority_token: object = field(repr=False, compare=False)
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "schema_version": "server-confirmation-receipt.v1",
+            "confirmation_id": self.confirmation_id,
+            "confirmation_digest": self.confirmation_digest,
+            "compilation_record_id": self.compilation_record_id,
+            "semantic_plan_hash": self.semantic_plan_hash,
+            "actor_ref": self.actor_ref,
+            "session_ref": self.session_ref,
+            "project_ref": self.project_ref,
+        }
+
+
+@dataclass(frozen=True)
+class CutoverExecutionResultV1:
+    operation_id: str
+    compilation_record_id: str
+    execution_instance_hash: str
+    status: str
+    result: Mapping[str, Any]
+    evidence_refs: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": "cutover-execution-result.v1",
+            "operation_id": self.operation_id,
+            "compilation_record_id": self.compilation_record_id,
+            "execution_instance_hash": self.execution_instance_hash,
+            "status": self.status,
+            "result": dict(self.result),
+            "evidence_refs": list(self.evidence_refs),
+        }
+
+
+class AgentNotebookCompilerV1:
+    """One compiler, confirmation authority and dispatch path for both UIs."""
+
+    _UNSAFE_TEXT_MARKERS = (
+        "ignore previous",
+        "忽略之前",
+        "忽略所有规则",
+        "export raw",
+        "导出原始",
+        "dump raw",
+        "泄露",
+    )
+
+    def __init__(
+        self,
+        *,
+        catalog: Any,
+        runtime_registry: Any,
+        evidence_committer: Callable[[Any, Mapping[str, Any]], Any | None] | None,
+        host_compiler: Any | None = None,
+        ttl_seconds: int = 900,
+        clock: Callable[[], CutoverDatetime] | None = None,
+    ) -> None:
+        from .operations import CutoverOperationStoreV1
+        from .trusted_executor_registry import TrustedExecutorRegistry
+        from .workflow_capability_registry import CutoverCapabilityCatalogV1
+
+        if type(catalog) is not CutoverCapabilityCatalogV1:
+            raise CutoverCompilerError("CATALOG_REQUIRED")
+        if type(runtime_registry) is not TrustedExecutorRegistry:
+            raise CutoverCompilerError("TRUSTED_RUNTIME_REQUIRED")
+        if evidence_committer is not None and not callable(evidence_committer):
+            raise CutoverCompilerError("EVIDENCE_COMMITTER_INVALID")
+        if host_compiler is None or not callable(getattr(host_compiler, "compile", None)):
+            raise CutoverCompilerError(
+                "HOST_COMPILER_REQUIRED",
+                "a supervisor-backed host compiler must be supplied at bootstrap",
+            )
+        if type(ttl_seconds) is not int or not 30 <= ttl_seconds <= 86_400:
+            raise CutoverCompilerError("COMPILATION_TTL_INVALID")
+        self.catalog = catalog
+        self.runtime_registry = runtime_registry
+        self.evidence_committer = evidence_committer
+        self.host_compiler = host_compiler
+        self.ttl_seconds = ttl_seconds
+        self.clock = clock or (lambda: CutoverDatetime.now(CutoverUTC))
+        self._record_store = None
+        self._confirmation_store = None
+        self._admission_gate = None
+        self._authority_token = object()
+        self._records: dict[str, Any] = {}
+        self._server_refs: dict[str, Any] = {}
+        self._descriptors: dict[str, Any] = {}
+        self._operation_by_record: dict[str, str] = {}
+        self._confirmations: dict[str, Any] = {}
+        self._operations = CutoverOperationStoreV1()
+        self.method_snapshot_ref = "method:snapshot:1"
+        self.risk_snapshot_ref = "risk:snapshot:1"
+        self.policy_snapshot_ref = f"policy:snapshot:{catalog.catalog_digest}"
+        self._initialize_authority()
+
+    def _initialize_authority(self) -> None:
+        from ..contracts.agent.execution_admission import ExecutionAdmissionGateV1
+        from ..contracts.agent.planning import (
+            CompilationRecordReferenceV1,
+            CompilationRecordStoreV1,
+            ConfirmationBindingStoreV1,
+            ServerCompilationRecordReferenceV1,
+        )
+
+        self._record_store = CompilationRecordStoreV1()
+
+        def resolve_client_reference(reference: Any) -> tuple[Any, Any]:
+            if type(reference) is not CompilationRecordReferenceV1:
+                raise ValueError("client input must be an untrusted compilation record reference")
+            record = self._records.get(reference.record_id)
+            server_ref = self._server_refs.get(reference.record_id)
+            if record is None or type(server_ref) is not ServerCompilationRecordReferenceV1:
+                raise ValueError("host compilation record is unavailable")
+            if record.reference.to_dict() != reference.to_dict():
+                raise ValueError("compilation record reference is not current host state")
+            if server_ref.as_untrusted_reference().to_dict() != reference.to_dict():
+                raise ValueError("server compilation reference is not current host state")
+            return record, server_ref
+
+        def resolve_server_reference(reference: Any) -> Any:
+            if type(reference) is not ServerCompilationRecordReferenceV1:
+                raise ValueError("runtime requires a server-owned compilation record reference")
+            record = self._records.get(reference.record_id)
+            server_ref = self._server_refs.get(reference.record_id)
+            if record is None or server_ref is not reference:
+                raise ValueError("host compilation record is unavailable")
+            if record.record_digest != reference.record_digest or record.semantic_plan_hash != reference.semantic_plan_hash:
+                raise ValueError("server compilation reference is not current host state")
+            return record
+
+        # C1 intentionally removed local issuance and left this C0 store
+        # read-only.  The cutover may only attach resolution callbacks for
+        # records already returned by the injected host compiler; it never
+        # mints a record or a server reference locally.
+        self._record_store.resolve_client_reference = resolve_client_reference  # type: ignore[method-assign]
+        self._record_store.resolve = resolve_server_reference  # type: ignore[method-assign]
+        self._confirmation_store = ConfirmationBindingStoreV1()
+        self._admission_gate = ExecutionAdmissionGateV1(
+            self._record_store,
+            method_snapshot_ref=self.method_snapshot_ref,
+            risk_snapshot_ref=self.risk_snapshot_ref,
+            policy_snapshot_ref=self.policy_snapshot_ref,
+            confirmation_store=self._confirmation_store,
+            clock=self.clock,
+        )
+
+    def _host_request(self, intent: Any, descriptor: Any, draft: Any, *, entrypoint: str) -> Any:
+        from ..canonical import sha256_canonical
+        from .planning_contracts import (
+            AnalysisIntentV1 as HostAnalysisIntentV1,
+            HostCompilationRequestV1,
+        )
+
+        source_commitments = {
+            "dataset": intent.data_snapshot_digest,
+            "data_snapshot": intent.data_snapshot_digest,
+            "target_ref": intent.target_ref,
+        }
+        host_intent = HostAnalysisIntentV1(
+            intent_ref=intent.intent_ref,
+            scope_ref=intent.project_ref,
+            capability_ids=(descriptor.capability_id,),
+            source_digest=intent.data_snapshot_digest,
+            contract_digest=sha256_canonical(
+                {
+                    "schema": "agent-notebook-cutover-host-intent.v1",
+                    "catalog_digest": self.catalog.catalog_digest,
+                }
+            ),
+        )
+        idempotency_key = sha256_canonical(
+            {
+                "schema": "agent-notebook-cutover-host-compilation.v1",
+                "entrypoint": entrypoint,
+                "intent_ref": intent.intent_ref,
+                "semantic_plan_hash": draft.semantic_plan_hash,
+                "actor_ref": intent.actor_ref,
+                "session_ref": intent.session_ref,
+                "project_ref": intent.project_ref,
+                "nonce": uuid4().hex,
+            }
+        )
+        return HostCompilationRequestV1(
+            draft=draft,
+            intent=host_intent,
+            scope_ref=intent.project_ref,
+            principal_ref=intent.actor_ref,
+            session_ref=intent.session_ref,
+            project_ref=intent.project_ref,
+            source_commitments=source_commitments,
+            selection=None,
+            idempotency_key=idempotency_key,
+        )
+
+    def _validate_host_result(self, host_result: Any, request: Any, draft: Any) -> None:
+        from ..contracts.agent.planning import ServerCompilationRecordReferenceV1
+        from .planning_contracts import HostCompilationResultV1
+
+        if type(host_result) is not HostCompilationResultV1:
+            raise CutoverCompilerError(
+                "HOST_COMPILER_RESULT_INVALID",
+                "host compiler must return a typed compilation result",
+            )
+        record = host_result.record
+        compiled = host_result.compiled_plan
+        reference = host_result.reference
+        if type(reference) is not ServerCompilationRecordReferenceV1:
+            raise CutoverCompilerError("HOST_COMPILER_RESULT_INVALID")
+        if (
+            compiled is not record.compiled_workflow
+            or record.record_id != f"compilation-record:{request.idempotency_key}"
+            or record.principal_ref != request.principal_ref
+            or record.session_ref != request.session_ref
+            or record.project_ref != request.project_ref
+            or dict(record.source_commitments) != dict(request.source_commitments)
+            or record.semantic_plan_hash != draft.semantic_plan_hash
+            or compiled.semantic_plan_hash != draft.semantic_plan_hash
+            or compiled.contract_snapshot_refs != draft.contract_snapshot_refs
+            or compiled.catalog_snapshot_ref != draft.catalog_snapshot_ref
+            or compiled.policy_snapshot_ref != draft.policy_snapshot_ref
+            or reference.to_dict() != record.reference.to_dict()
+        ):
+            raise CutoverCompilerError(
+                "HOST_COMPILER_RESULT_INVALID",
+                "host compilation result does not bind to the requested draft",
+            )
+        try:
+            created_at = CutoverDatetime.fromisoformat(record.created_at)
+            expires_at = CutoverDatetime.fromisoformat(record.expires_at)
+        except (TypeError, ValueError) as exc:
+            raise CutoverCompilerError("HOST_COMPILER_RESULT_INVALID") from exc
+        if expires_at - created_at > CutoverTimedelta(seconds=self.ttl_seconds):
+            raise CutoverCompilerError(
+                "HOST_COMPILER_RESULT_INVALID",
+                "host compilation record exceeds the configured TTL",
+            )
+
+    @staticmethod
+    def _typed_contract_ref(kind: str, logical_id: str, seed: str):
+        from ..canonical import sha256_canonical
+        from ..contracts.common.contract_ref import ContractRefV1
+
+        return ContractRefV1(
+            kind=kind,
+            logical_id=logical_id,
+            semantic_version="1.0",
+            contract_digest=sha256_canonical({"kind": kind, "logical_id": logical_id, "seed": seed}),
+        )
+
+    @staticmethod
+    def _plan_effect(value: str):
+        from ..contracts.agent.planning import PlanEffectV1
+
+        values = {
+            "none": PlanEffectV1.NONE,
+            "read": PlanEffectV1.READ,
+            "write": PlanEffectV1.WRITE,
+            "model_fit": PlanEffectV1.MODEL_FIT,
+            "model_predict": PlanEffectV1.MODEL_PREDICT,
+            "report": PlanEffectV1.REPORT,
+        }
+        try:
+            return values[value]
+        except KeyError as exc:
+            raise CutoverCompilerError("EFFECT_UNSUPPORTED", value) from exc
+
+    @staticmethod
+    def _admission_effect(value: str):
+        from ..contracts.agent.execution_admission import AdmissionEffectV1
+
+        values = {
+            "none": AdmissionEffectV1.READ_ONLY,
+            "read": AdmissionEffectV1.READ_ONLY,
+            "write": AdmissionEffectV1.DATASET_MUTATION,
+            "model_fit": AdmissionEffectV1.MODEL_FIT,
+            "model_predict": AdmissionEffectV1.MODEL_FIT,
+            "report": AdmissionEffectV1.REPORT_MUTATION,
+        }
+        try:
+            return values[value]
+        except KeyError as exc:
+            raise CutoverCompilerError("EFFECT_UNSUPPORTED", value) from exc
+
+    def _clarifications(self, intent: Any) -> tuple[Any, ...]:
+        from .workflow_capability_registry import WorkflowCapabilityRegistryError
+        from .workflow_contracts import AnalysisClarificationV1
+
+        missing: list[Any] = []
+        required = (
+            ("capability_id", "请明确要使用的已注册分析能力。"),
+            ("target_ref", "请明确分析对象或数据节点。"),
+            ("data_snapshot_ref", "请明确分析使用的数据快照。"),
+            ("data_snapshot_digest", "请先绑定一个服务端数据快照。"),
+            ("requested_effect", "请明确这是只读检查、建模、预测还是写入操作。"),
+            ("sensitivity", "请明确数据敏感性；未知敏感性不能外发。"),
+        )
+        for field_name, message in required:
+            if getattr(intent, field_name) in {None, ""}:
+                missing.append(
+                    AnalysisClarificationV1(
+                        code="missing_required_information",
+                        field=field_name,
+                        message=message,
+                    )
+                )
+        if intent.sensitivity == "unknown":
+            missing.append(
+                AnalysisClarificationV1(
+                    code="unsafe_instruction",
+                    field="sensitivity",
+                    message="数据敏感性未知，服务器不会把它交给 provider 或远程模型。",
+                )
+            )
+        if intent.capability_id:
+            try:
+                descriptor = self.catalog.require(intent.capability_id)
+            except WorkflowCapabilityRegistryError:
+                missing.append(
+                    AnalysisClarificationV1(
+                        code="no_eligible_capability",
+                        field="capability_id",
+                        message="该能力未在当前 server catalog 中注册，不能猜测或回退。",
+                    )
+                )
+            else:
+                if not descriptor.execution_allowed:
+                    missing.append(
+                        AnalysisClarificationV1(
+                            code="no_eligible_capability",
+                            field="capability_id",
+                            message="该能力当前只有声明，运行时尚未绑定；请等待 provider/runtime 接入。",
+                        )
+                    )
+        return tuple(missing)
+
+    def _draft_for(self, intent: Any, descriptor: Any):
+        from ..contracts.agent.planning import DraftAgentPlanV1, PlanEffectV1, PlanRiskLevelV1
+
+        effect_value = intent.requested_effect or "read"
+        effect = self._plan_effect(effect_value)
+        risk = PlanRiskLevelV1.RESTRICTED if intent.sensitivity == "sensitive" else (
+            PlanRiskLevelV1.LOW if effect in {PlanEffectV1.NONE, PlanEffectV1.READ} else PlanRiskLevelV1.MEDIUM
+        )
+        capability_ref = self._typed_contract_ref(
+            "capability",
+            descriptor.capability_id,
+            descriptor.provider_digest,
+        )
+        contract_ref = self._typed_contract_ref(
+            "contract",
+            f"{descriptor.provider_id}.{descriptor.path_id}.contract",
+            descriptor.provider_digest,
+        )
+        output_ref = self._typed_contract_ref(
+            "output-contract",
+            f"{descriptor.provider_id}.{descriptor.path_id}.output",
+            descriptor.provider_digest,
+        )
+        evidence_ref = self._typed_contract_ref(
+            "evidence-contract",
+            f"{descriptor.provider_id}.{descriptor.path_id}.evidence",
+            descriptor.provider_digest,
+        )
+        options = dict(intent.options)
+        return DraftAgentPlanV1(
+            schema_version="draft-agent-plan.v1",
+            intent_ref=intent.intent_ref,
+            capability_refs=(capability_ref,),
+            method_ref=f"method:{descriptor.capability_id}:1",
+            effect=effect,
+            risk_level=risk,
+            resource_budget=dict(intent.resource_budget),
+            data_impact={
+                "read_refs": [intent.data_snapshot_ref],
+                "write_mode": "none" if effect in {PlanEffectV1.NONE, PlanEffectV1.READ} else "create",
+            },
+            output_contract_refs=(output_ref,),
+            evidence_contract_refs=(evidence_ref,),
+            contract_snapshot_refs=(contract_ref,),
+            catalog_snapshot_ref=f"catalog:snapshot:{self.catalog.catalog_digest}",
+            nodes=(
+                {
+                    "node_id": "analysis",
+                    "capability_ref": f"capability:{descriptor.capability_id}",
+                    "options": options,
+                },
+            ),
+            connections=(),
+            config={
+                "analysis_mode": intent.analysis_mode or "descriptive",
+                "options": options,
+            },
+            policy_snapshot_ref=self.policy_snapshot_ref,
+            rationale=("rationale:agent-notebook-shared-compiler",),
+        )
+
+    def compile(self, intent: Any, *, entrypoint: str) -> CutoverCompilationPreviewV1:
+        from .operations import CutoverOperationStoreV1
+        from .workflow_contracts import AnalysisIntentV1
+
+        if type(intent) is not AnalysisIntentV1:
+            raise CutoverCompilerError("TYPED_INTENT_REQUIRED")
+        if entrypoint not in {"agent", "notebook"}:
+            raise CutoverCompilerError("ENTRYPOINT_INVALID")
+        clarifications = self._clarifications(intent)
+        if clarifications:
+            return CutoverCompilationPreviewV1(
+                entrypoint=entrypoint,
+                operation_id=None,
+                compilation_record_id=None,
+                record_digest=None,
+                semantic_plan_hash=None,
+                server_execution_identity=None,
+                preview_fingerprint=None,
+                plan_diff={"status": "clarification_required"},
+                clarifications=clarifications,
+            )
+        descriptor = self.catalog.require(intent.capability_id)
+        try:
+            draft = self._draft_for(intent, descriptor)
+            host_request = self._host_request(intent, descriptor, draft, entrypoint=entrypoint)
+            host_result = self.host_compiler.compile(host_request)
+            self._validate_host_result(host_result, host_request, draft)
+            record = host_result.record
+            server_ref = host_result.reference
+        except Exception as exc:
+            if isinstance(exc, CutoverCompilerError):
+                raise
+            code = getattr(exc, "code", "COMPILATION_FAILED")
+            raise CutoverCompilerError(str(code), str(exc)) from exc
+        operation_id = f"cutover-operation:{uuid4().hex}"
+        self._operations.create(
+            operation_id=operation_id,
+            entrypoint=entrypoint,
+            semantic_plan_hash=record.semantic_plan_hash,
+        )
+        self._records[record.record_id] = record
+        self._server_refs[record.record_id] = server_ref
+        self._descriptors[record.record_id] = descriptor
+        self._operation_by_record[record.record_id] = operation_id
+        return CutoverCompilationPreviewV1(
+            entrypoint=entrypoint,
+            operation_id=operation_id,
+            compilation_record_id=record.record_id,
+            record_digest=record.record_digest,
+            semantic_plan_hash=record.semantic_plan_hash,
+            server_execution_identity=record.compiled_workflow.server_execution_identity,
+            preview_fingerprint=record.compiled_workflow.preview_fingerprint,
+            plan_diff={
+                **dict(record.compiled_workflow.plan_diff),
+                "entrypoint": entrypoint,
+                "effect": record.compiled_workflow.effect.value,
+                "risk_level": record.compiled_workflow.risk_level.value,
+                "catalog_snapshot_ref": record.catalog_snapshot_ref,
+                "evidence_required": True,
+            },
+        )
+
+    def compile_natural_language(
+        self,
+        text: str,
+        *,
+        actor_ref: str,
+        session_ref: str,
+        project_ref: str,
+        normalized_fields: Mapping[str, Any] | None = None,
+        entrypoint: str = "agent",
+    ) -> CutoverCompilationPreviewV1:
+        from .workflow_contracts import AnalysisIntentV1
+
+        if type(text) is not str or not text.strip():
+            raise CutoverCompilerError("NATURAL_LANGUAGE_REQUIRED")
+        lowered = text.casefold()
+        if any(marker in lowered for marker in self._UNSAFE_TEXT_MARKERS):
+            raise CutoverCompilerError("UNSAFE_INSTRUCTION", "unsafe natural-language request is blocked")
+        fields = dict(normalized_fields or {})
+        allowed = {
+            "capability_id",
+            "target_ref",
+            "data_snapshot_ref",
+            "data_snapshot_digest",
+            "requested_effect",
+            "sensitivity",
+            "analysis_mode",
+            "structure",
+            "time_scope",
+            "entity_scope",
+            "positive_class",
+            "metric",
+            "decision_cost",
+            "resource_budget",
+            "options",
+        }
+        unknown = set(fields) - allowed
+        if unknown:
+            raise CutoverCompilerError("INTENT_FIELDS_UNKNOWN", ", ".join(sorted(unknown)))
+        if "capability_id" not in fields:
+            matches = self.catalog.search(text)
+            if len(matches) == 1:
+                fields["capability_id"] = matches[0].capability_id
+        if "target_ref" not in fields:
+            import re as _re
+
+            candidates = _re.findall(r"\b(?:dataset|node|run):[A-Za-z0-9_.:-]+", text)
+            if len(candidates) == 1:
+                fields["target_ref"] = candidates[0]
+        intent = AnalysisIntentV1.from_fields(
+            actor_ref=actor_ref,
+            session_ref=session_ref,
+            project_ref=project_ref,
+            source_text=text,
+            **fields,
+        )
+        return self.compile(intent, entrypoint=entrypoint)
+
+    def record(self, compilation_record_id: str) -> Any:
+        if type(compilation_record_id) is not str:
+            raise CutoverCompilerError("SERVER_RECORD_ID_REQUIRED")
+        try:
+            return self._records[compilation_record_id]
+        except KeyError as exc:
+            raise CutoverCompilerError("SERVER_RECORD_UNKNOWN") from exc
+
+    def operation(self, operation_id: str, *, entrypoint: str | None = None) -> Any:
+        return self._operations.require(operation_id, entrypoint=entrypoint)
+
+    def confirm(self, compilation_record_id: str) -> ServerConfirmationReceiptV1:
+        from ..contracts.agent.planning import ConfirmationBindingV1
+
+        record = self.record(compilation_record_id)
+        operation_id = self._operation_by_record.get(record.record_id)
+        if operation_id is None:
+            raise CutoverCompilerError("OPERATION_CONFIRMATION_STATE_INVALID")
+        operation = self._operations.require(operation_id)
+        if operation.state != "compiled":
+            raise CutoverCompilerError("OPERATION_CONFIRMATION_STATE_INVALID")
+        now = self.clock()
+        binding = ConfirmationBindingV1(
+            confirmation_id=f"confirmation:{uuid4().hex}",
+            compilation_record_ref=record.reference,
+            actor_ref=record.principal_ref,
+            session_ref=record.session_ref,
+            project_ref=record.project_ref,
+            semantic_plan_hash=record.semantic_plan_hash,
+            method_snapshot_ref=self.method_snapshot_ref,
+            risk_snapshot_ref=self.risk_snapshot_ref,
+            policy_snapshot_ref=self.policy_snapshot_ref,
+            confirmed_at=now.isoformat(),
+            expires_at=record.expires_at,
+        )
+        issued = self._confirmation_store.issue(binding)
+        self._confirmations[record.record_id] = issued
+        self._operations.transition(
+            operation.operation_id,
+            expected="compiled",
+            state="confirmed",
+            confirmation_id=issued.confirmation_id,
+        )
+        return ServerConfirmationReceiptV1(
+            confirmation_id=issued.confirmation_id,
+            confirmation_digest=issued.confirmation_digest,
+            compilation_record_id=record.record_id,
+            semantic_plan_hash=record.semantic_plan_hash,
+            actor_ref=record.principal_ref,
+            session_ref=record.session_ref,
+            project_ref=record.project_ref,
+            _authority_token=self._authority_token,
+        )
+
+    def execute(
+        self,
+        compilation_record_id: str,
+        confirmation: object,
+        *,
+        compiled_workflow: object | None = None,
+        current_data_snapshot_digest: str | None = None,
+    ) -> CutoverExecutionResultV1:
+        from ..contracts.agent.execution_admission import (
+            ExecutionAdmissionV1,
+            require_execution_admission_receipt,
+        )
+        from ..contracts.agent.planning import ConfirmationBindingV1
+        from .operations import CutoverOperationLifecycleError
+        from .cutover_runtime import EvidenceCommitReceiptV1
+        from .trusted_executor_registry import ProviderRuntimeContextV1
+        from .workflow_capability_adapters import dispatch_registered_provider
+
+        if compiled_workflow is not None:
+            raise CutoverCompilerError(
+                "CLIENT_COMPILED_FORBIDDEN",
+                "client compiled workflow is forbidden; execute accepts only a server record id",
+            )
+        if type(confirmation) is not ServerConfirmationReceiptV1 or confirmation._authority_token is not self._authority_token:
+            raise CutoverCompilerError("SERVER_CONFIRMATION_REQUIRED", "server-issued confirmation is required")
+        if confirmation.compilation_record_id != compilation_record_id:
+            raise CutoverCompilerError("CONFIRMATION_SCOPE_MISMATCH")
+        record = self.record(compilation_record_id)
+        binding = self._confirmations.get(compilation_record_id)
+        if type(binding) is not ConfirmationBindingV1:
+            raise CutoverCompilerError("SERVER_CONFIRMATION_UNKNOWN")
+        if binding.confirmation_id != confirmation.confirmation_id or binding.confirmation_digest != confirmation.confirmation_digest:
+            raise CutoverCompilerError("CONFIRMATION_DIGEST_MISMATCH")
+        expected_digest = record.source_commitments.get("data_snapshot")
+        if current_data_snapshot_digest is not None and current_data_snapshot_digest != expected_digest:
+            raise CutoverCompilerError("DATA_SNAPSHOT_CHANGED", "data snapshot changed after compilation")
+        operation_id = self._operation_by_record.get(record.record_id)
+        if operation_id is None:
+            raise CutoverCompilerError("OPERATION_EXECUTION_STATE_INVALID")
+        operation = self._operations.require(operation_id)
+        if operation.state != "confirmed":
+            raise CutoverCompilerError("OPERATION_EXECUTION_STATE_INVALID")
+        descriptor = self._descriptors.get(record.record_id)
+        if descriptor is None:
+            raise CutoverCompilerError("CAPABILITY_BINDING_MISSING")
+        resolved_artifact_digests = {"dataset": str(expected_digest)}
+        resolved_run_identity = str(record.source_commitments.get("target_ref"))
+        resolved_node_identities = {"analysis": f"node:{resolved_run_identity}"}
+        execution_hash = record.compiled_workflow.execution_instance_hash(
+            resolved_artifact_digests,
+            resolved_run_identity=resolved_run_identity,
+            resolved_node_identities=resolved_node_identities,
+        )
+        try:
+            self._operations.transition(
+                operation.operation_id,
+                expected="confirmed",
+                state="admitted",
+                execution_instance_hash=execution_hash,
+            )
+            request = ExecutionAdmissionV1(
+                request_id=f"admission:{uuid4().hex}",
+                compilation_record_ref=record.reference,
+                confirmation_ref=binding.confirmation_id,
+                confirmation_digest=binding.confirmation_digest,
+                principal_ref=record.principal_ref,
+                session_ref=record.session_ref,
+                project_ref=record.project_ref,
+                contract_snapshot_refs=record.contract_snapshot_refs,
+                catalog_snapshot_ref=record.catalog_snapshot_ref,
+                policy_snapshot_ref=record.policy_snapshot_ref,
+                effect=self._admission_effect(record.compiled_workflow.effect.value),
+                resource_budget=dict(record.compiled_workflow.resource_budget),
+                requested_at=self.clock().isoformat(),
+                expires_at=record.expires_at,
+                execution_instance_hash=execution_hash,
+                resolved_run_identity=resolved_run_identity,
+                resolved_node_identities=resolved_node_identities,
+                resolved_artifact_digests=resolved_artifact_digests,
+            )
+            admission_receipt = self._admission_gate.admit(request, binding)
+            require_execution_admission_receipt(admission_receipt, gate=self._admission_gate)
+            self._operations.transition(operation.operation_id, expected="admitted", state="executing")
+            context = ProviderRuntimeContextV1(
+                compilation_record_id=record.record_id,
+                execution_instance_hash=execution_hash,
+                actor_ref=record.principal_ref,
+                session_ref=record.session_ref,
+                project_ref=record.project_ref,
+                effect=record.compiled_workflow.effect.value,
+            )
+            intent_node = record.compiled_workflow.nodes[0]
+            result = dispatch_registered_provider(
+                self.catalog,
+                self.runtime_registry,
+                descriptor.capability_id,
+                context,
+                {
+                    "capability_id": descriptor.capability_id,
+                    "target_ref": resolved_run_identity,
+                    "data_snapshot_ref": record.compiled_workflow.data_impact["read_refs"][0],
+                    "source_text_digest": record.compiled_workflow.intent_ref,
+                    "options": dict(intent_node.get("options") or {}),
+                },
+            )
+            if self.evidence_committer is None:
+                raise CutoverCompilerError("EVIDENCE_COMMIT_REQUIRED", "evidence commit is required")
+            evidence_receipt = self.evidence_committer(context, result)
+            if (
+                type(evidence_receipt) is not EvidenceCommitReceiptV1
+                or not evidence_receipt.matches_context(context)
+                or not evidence_receipt.matches_result(context, result)
+            ):
+                raise CutoverCompilerError(
+                    "EVIDENCE_COMMIT_REQUIRED",
+                    "a persisted, scope-bound evidence receipt is required",
+                )
+            evidence_ref = evidence_receipt.evidence_ref
+            self._operations.transition(
+                operation.operation_id,
+                expected="executing",
+                state="completed",
+                evidence_refs=(evidence_ref,),
+            )
+            return CutoverExecutionResultV1(
+                operation_id=operation.operation_id,
+                compilation_record_id=record.record_id,
+                execution_instance_hash=execution_hash,
+                status="completed",
+                result=result,
+                evidence_refs=(evidence_ref,),
+            )
+        except Exception as exc:
+            current = self._operations.require(operation.operation_id)
+            if current.state in {"compiled", "confirmed", "admitted", "executing"}:
+                code = getattr(exc, "code", None) or getattr(exc, "args", ["EXECUTION_FAILED"])[0]
+                try:
+                    self._operations.transition(
+                        operation.operation_id,
+                        expected=current.state,
+                        state="failed",
+                        error_code=str(code),
+                    )
+                except CutoverOperationLifecycleError:
+                    pass
+            if isinstance(exc, CutoverCompilerError):
+                raise
+            raise CutoverCompilerError(str(getattr(exc, "code", "EXECUTION_FAILED")), str(exc)) from exc
+
+
+__all__ = [
+    "AgentNotebookCompilerV1",
+    "CutoverCompilationPreviewV1",
+    "CutoverCompilerError",
+    "CutoverExecutionResultV1",
+    "ServerConfirmationReceiptV1",
+]

@@ -75,6 +75,7 @@ from ..capability_factory.execution_authorization import (
 router = APIRouter()
 
 NOTEBOOK_PROVIDER_TIMEOUT_S = 300.0
+NOTEBOOK_CUTOVER_MAX_TEXT_CHARS = 4_000
 
 # A local user can cancel a planning pass at any time. Do not impose a short
 # aggregate deadline across its bounded provider turns: a valid inspect →
@@ -209,6 +210,18 @@ class ExecuteOptionRequest(_StrictModel):
     error_code: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class NotebookCutoverCompileRequest(_StrictModel):
+    """Untrusted Notebook input for the shared Agent/Notebook compiler."""
+
+    text: str = Field(min_length=1, max_length=NOTEBOOK_CUTOVER_MAX_TEXT_CHARS)
+    actor_ref: str = Field(min_length=1, max_length=300)
+    session_ref: str = Field(min_length=1, max_length=300)
+    # This is an optional assertion only. The route always derives the
+    # authoritative project_ref from the persisted Notebook record.
+    project_ref: str | None = Field(default=None, min_length=1, max_length=300)
+    normalized_fields: dict[str, Any] | None = None
+
+
 def _project_root(raw: str) -> Path:
     root = Path(raw).expanduser().resolve()
     if not root.is_dir():
@@ -251,6 +264,104 @@ def _service(request: Request, project_root: str) -> tuple[Path, NotebookService
         capability_bindings=catalog,
         execution_gateway=gateway,
     )
+
+
+def _notebook_cutover_authority(
+    project_ref: str,
+    session_ref: str,
+    request: Request,
+) -> Any:
+    """Resolve the shared compiler from this FastAPI app's authority store."""
+
+    from . import agent_routes
+
+    compiler = agent_routes.lookup_agent_notebook_cutover_authority(
+        project_ref,
+        session_ref,
+        request=request,
+    )
+    if compiler is None:
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_CUTOVER_NOT_BOUND",
+            message="The shared Agent/Notebook runtime is not server-bound for this scope.",
+            details={"project_ref": project_ref, "session_ref": session_ref},
+        )
+    return compiler
+
+
+def _notebook_cutover_identity(
+    request: Request,
+    notebook: Any,
+    body: NotebookCutoverCompileRequest,
+) -> tuple[str, str]:
+    """Resolve actor/session from a server-owned host binding.
+
+    ``actor_ref`` and ``session_ref`` in the request are assertions used for
+    compatibility and diagnostics only. They are never the authorization
+    source for the compiler lookup or compilation record.
+    """
+
+    from .agent_routes import resolve_agent_notebook_server_identity
+
+    try:
+        actor_ref, session_ref, _canonical_project_ref = resolve_agent_notebook_server_identity(
+            request,
+            project_ref=f"project:{notebook.project_id}",
+            claimed_session_ref=None,
+            notebook_id=str(notebook.notebook_id),
+        )
+    except WorkbenchAPIError as exc:
+        if exc.code == "AGENT_NOTEBOOK_IDENTITY_MISMATCH":
+            raise WorkbenchAPIError(
+                status_code=403,
+                code="NOTEBOOK_CUTOVER_IDENTITY_MISMATCH",
+                message="The request identity does not match the server-owned Notebook session.",
+            ) from exc
+        raise
+    if (body.actor_ref, body.session_ref) != (actor_ref, session_ref):
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="NOTEBOOK_CUTOVER_IDENTITY_MISMATCH",
+            message="The request identity does not match the server-owned Notebook session.",
+        )
+    return actor_ref, session_ref
+
+
+def _notebook_cutover_error(exc: Exception) -> WorkbenchAPIError:
+    code = str(getattr(exc, "code", "CUTOVER_FAILED"))
+    status = 422
+    if code in {
+        "RUNTIME_CATALOG_NOT_BOUND",
+        "PROVIDER_RUNTIME_NOT_BOUND",
+        "CAPABILITY_BINDING_MISSING",
+    }:
+        status = 503
+    return WorkbenchAPIError(status_code=status, code=code, message=str(exc))
+
+
+def _notebook_cutover_project_ref(
+    root: Path,
+    notebook: Any,
+    requested_project_ref: str | None,
+) -> str:
+    """Derive the project scope from the persisted Notebook identity."""
+
+    persisted_project_id = str(notebook.project_id)
+    if persisted_project_id != root.name:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="NOTEBOOK_CUTOVER_SCOPE_MISMATCH",
+            message="The Notebook is not bound to the requested project root.",
+        )
+    server_project_ref = f"project:{persisted_project_id}"
+    if requested_project_ref is not None and requested_project_ref != server_project_ref:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="NOTEBOOK_CUTOVER_SCOPE_MISMATCH",
+            message="The requested project scope does not match the Notebook scope.",
+        )
+    return server_project_ref
 
 
 def _trace(
@@ -1464,6 +1575,67 @@ def compile_notebook_context_endpoint(
         raise _notebook_error(exc) from exc
     except (OSError, ValueError, KeyError) as exc:
         raise _request_error(exc) from exc
+
+
+@router.post("/notebooks/{notebook_id}/cutover/compile")
+def compile_notebook_cutover_endpoint(
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    body: NotebookCutoverCompileRequest,
+) -> dict[str, Any]:
+    """Compile Notebook natural language through the shared server authority."""
+
+    root, service = _service(request, project_root)
+    try:
+        notebook = service.get_notebook(notebook_id)
+        server_project_ref = _notebook_cutover_project_ref(
+            root,
+            notebook,
+            body.project_ref,
+        )
+    except NotebookOptionError as exc:
+        raise _notebook_error(exc) from exc
+    except (OSError, ValueError, KeyError) as exc:
+        raise _request_error(exc) from exc
+
+    actor_ref, session_ref = _notebook_cutover_identity(request, notebook, body)
+    try:
+        compiler = _notebook_cutover_authority(server_project_ref, session_ref, request)
+    except WorkbenchAPIError:
+        raise
+    except Exception as exc:
+        raise _notebook_cutover_error(exc) from exc
+    try:
+        preview = compiler.compile_natural_language(
+            body.text,
+            actor_ref=actor_ref,
+            session_ref=session_ref,
+            project_ref=server_project_ref,
+            normalized_fields=body.normalized_fields,
+            entrypoint="notebook",
+        )
+        if preview.compilation_record_id is not None:
+            record = compiler.record(preview.compilation_record_id)
+            if (
+                record.principal_ref,
+                record.session_ref,
+                record.project_ref,
+            ) != (
+                actor_ref,
+                session_ref,
+                server_project_ref,
+            ):
+                raise WorkbenchAPIError(
+                    status_code=403,
+                    code="NOTEBOOK_CUTOVER_SCOPE_MISMATCH",
+                    message="The compiled record is not bound to the Notebook scope.",
+                )
+    except WorkbenchAPIError:
+        raise
+    except Exception as exc:
+        raise _notebook_cutover_error(exc) from exc
+    return {"preview": preview.to_dict()}
 
 
 def _planning_attempt_key(

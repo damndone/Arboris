@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import string
 import queue
 import tempfile
 from datetime import datetime, timezone
@@ -27,7 +28,7 @@ from ..api_errors import (
     WorkbenchAPIError,
 )
 from ..agent.workflow_runtime import collect_post_estimation_results
-from ..artifacts import read_json
+from ..artifacts import read_json, sha256_file
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..events import get_event_manager
@@ -1024,6 +1025,52 @@ def download_artifact_endpoint(
             details={"artifact_id": artifact_id, "run_id": run_id},
         )
     path = _resolve_artifact_path(run_root, matched)
+    expected_sha256 = matched.get("sha256")
+    is_valid_sha256 = (
+        isinstance(expected_sha256, str)
+        and len(expected_sha256) == 64
+        and all(character in string.hexdigits for character in expected_sha256)
+    )
+    artifact_type = matched.get("artifact_type")
+    is_classification_evidence = (
+        artifact_type in {"classification_evidence", "classification_artifacts"}
+        or artifact_id in {"classification_evidence", "classification_artifacts"}
+        or (
+            isinstance(matched.get("payload_contract"), dict)
+            and matched["payload_contract"].get("payload_schema")
+            in {
+                "workbench.prediction.classification-evidence",
+                "workbench.prediction.classification-artifacts",
+            }
+        )
+    )
+    # Legacy non-evidence indexes occasionally contain placeholder digests;
+    # preserve their read compatibility, but never expose a typed
+    # classification packet without a verifiable content hash.
+    if not is_valid_sha256 and is_classification_evidence:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="ARTIFACT_INTEGRITY_UNVERIFIED",
+            message="The typed evidence artifact has no valid sha256 digest.",
+            details={"artifact_id": artifact_id, "run_id": run_id},
+        )
+    if is_valid_sha256:
+        try:
+            actual_sha256 = sha256_file(path)
+        except OSError as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="ARTIFACT_INTEGRITY_UNAVAILABLE",
+                message="The artifact could not be hashed for integrity verification.",
+                details={"artifact_id": artifact_id, "run_id": run_id},
+            ) from exc
+        if actual_sha256.lower() != expected_sha256.lower():
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="ARTIFACT_INTEGRITY_MISMATCH",
+                message="The artifact bytes do not match the indexed sha256 digest.",
+                details={"artifact_id": artifact_id, "run_id": run_id},
+            )
     return FileResponse(
         path,
         filename=path.name,

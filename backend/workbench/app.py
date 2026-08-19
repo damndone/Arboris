@@ -16,6 +16,8 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from .agent.cutover_runtime import AgentNotebookRuntimeV1
+from .agent.orchestrator import AgentNotebookCompilerV1
 from .agent.trace import TraceSchemaDescriptor, register_trace_catalog
 from .api_errors import register_error_handlers
 from .capability_factory.notebook_catalog import CapabilityBindingCatalog
@@ -37,7 +39,12 @@ from .domain_memory.trace_contracts import (
 )
 from .native_containment.trace_contracts import _EVENT_FIELDS as _CONTAINMENT_EVENT_FIELDS
 from .services.execution_profile import current_execution_profile
-from .http.agent_routes import router as agent_router
+from .http.agent_routes import (
+    configure_agent_notebook_cutover_authority,
+    new_agent_notebook_cutover_authority_store,
+    router as agent_router,
+    set_default_agent_notebook_cutover_authority_store,
+)
 from .http.drafts_routes import router as drafts_router
 from .http.data_operation_routes import router as data_operation_router
 from .http.graph_routes import router as graph_router
@@ -59,6 +66,11 @@ app = FastAPI(title="Local Econometrics Workbench", lifespan=_lifespan)
 register_error_handlers(app)
 app.state.notebook_capability_bindings = None
 app.state.notebook_execution_gateway = None
+app.state.agent_notebook_cutover_store = new_agent_notebook_cutover_authority_store()
+# Direct route-function compatibility calls and real HTTP requests point at
+# this same object. There is no second authority or confirmation map.
+set_default_agent_notebook_cutover_authority_store(app.state.agent_notebook_cutover_store)
+app.state.notebook_cutover_identity_resolver = None
 app.state.capability_factory_runtime = None
 app.state.domain_memory_service = None
 app.state.domain_memory_review_service = None
@@ -66,6 +78,19 @@ app.state.domain_memory_context_provider = None
 app.state.domain_memory_runtime = None
 app.state.domain_memory_bootstrap_error = None
 app.state.domain_memory_mutations_enabled = False
+
+
+def _bootstrap_app(app_instance: FastAPI | None) -> FastAPI:
+    target = app if app_instance is None else app_instance
+    if not isinstance(target, FastAPI):
+        raise TypeError("app_instance must be a FastAPI instance")
+    if type(getattr(target.state, "agent_notebook_cutover_store", None)) is not type(
+        app.state.agent_notebook_cutover_store
+    ):
+        target.state.agent_notebook_cutover_store = new_agent_notebook_cutover_authority_store()
+    if not hasattr(target.state, "notebook_cutover_identity_resolver"):
+        target.state.notebook_cutover_identity_resolver = None
+    return target
 
 
 def register_v183_trace_catalogs() -> None:
@@ -120,6 +145,70 @@ def configure_notebook_capability_bindings(
         raise TypeError("catalog must be a CapabilityBindingCatalog or None")
     app.state.capability_factory_runtime = None
     app.state.notebook_capability_bindings = catalog
+
+
+def configure_agent_notebook_runtime(
+    *,
+    project_ref: str,
+    session_ref: str,
+    compiler: AgentNotebookCompilerV1 | None,
+    app_instance: FastAPI | None = None,
+) -> None:
+    """Install one server-owned Agent/Notebook compiler at application bootstrap.
+
+    The HTTP route retains only the exact project/session binding.  Passing
+    ``None`` removes that binding and its retained confirmation handles.
+    """
+
+    target = _bootstrap_app(app_instance)
+    if compiler is not None and type(compiler) is not AgentNotebookCompilerV1:
+        raise TypeError("compiler must be an AgentNotebookCompilerV1 or None")
+    if compiler is not None and not callable(getattr(compiler, "evidence_committer", None)):
+        raise ValueError("compiler must have a server-owned evidence committer")
+    configure_agent_notebook_cutover_authority(
+        project_ref=project_ref,
+        session_ref=session_ref,
+        compiler=compiler,
+        app_instance=target,
+    )
+
+
+def configure_notebook_cutover_identity_resolver(
+    resolver: Callable[..., tuple[str, str] | tuple[str, str, str]] | None,
+    *,
+    app_instance: FastAPI | None = None,
+) -> None:
+    """Install the server-owned identity/session binding for Notebook cutover.
+
+    The resolver is supplied by the host authentication/session layer and is
+    called as ``resolver(request, project_ref, claimed_session_ref, notebook_id)``.
+    Notebook and Agent requests may only assert the returned actor/session;
+    they cannot mint either identity themselves.
+    """
+
+    target = _bootstrap_app(app_instance)
+    if resolver is not None and not callable(resolver):
+        raise TypeError("resolver must be callable or None")
+    target.state.notebook_cutover_identity_resolver = resolver
+
+
+def configure_agent_notebook_runtime_bundle(
+    *,
+    project_ref: str,
+    session_ref: str,
+    runtime: AgentNotebookRuntimeV1 | None,
+    app_instance: FastAPI | None = None,
+) -> None:
+    """Install or remove a composed runtime bundle for one exact scope."""
+
+    if runtime is not None and type(runtime) is not AgentNotebookRuntimeV1:
+        raise TypeError("runtime must be an AgentNotebookRuntimeV1 or None")
+    configure_agent_notebook_runtime(
+        project_ref=project_ref,
+        session_ref=session_ref,
+        compiler=None if runtime is None else runtime.compiler,
+        app_instance=app_instance,
+    )
 
 
 def configure_notebook_execution_gateway(gateway: object | None) -> None:
