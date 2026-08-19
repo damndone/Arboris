@@ -6,18 +6,18 @@
 
 ## Final status
 
-COMPLETED
+CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 4/9 (44.4%; 44.4 per 100 events)
-- Repeat rate: 0/4 (0.0%)
-- Recurrence rate: 0/4 (0.0%)
-- MTTR: median=0 ms (sample=1; unresolved=3)
+- Failure frequency: 5/14 (35.7%; 35.7 per 100 events)
+- Repeat rate: 0/5 (0.0%)
+- Recurrence rate: 0/5 (0.0%)
+- MTTR: median=0 ms (sample=2; unresolved=3)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/2 (0.0%)
+- Gate waste rate: 0/4 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -26,6 +26,7 @@ COMPLETED
 - #2 2026-08-19T16:45:00.000Z `tdd_red_legacy_resume_authority`; cause_status: `known`; cause: The six new authority-boundary tests fail on the baseline: legacy routes still reach old execution authority, Resume accepts forged persisted metadata, and model branch declarations are not compared with the compiled model step.; resolution: `accepted`; lesson: Keep legacy execution routes fail-closed and verify persisted workflow truth before callback or dependent artifact work.
 - #3 2026-08-19T17:08:00.000Z `focused_regression_after_authority_hardening`; cause_status: `known`; cause: The first post-implementation focused run exposed three regressions: aborted evidence sequencing changed and two resume fixtures used the persisted workflow_step_id field rather than the old step_id expectation.; resolution: `resolved`; lesson: Run the inherited focused resume suite after adding persisted admission evidence and preserve abort ordering while rebinding resumed rows to the server schema.
 - #6 2026-08-19T17:20:00.000Z `independent_spec_review_red`; cause_status: `known`; cause: Independent Legacy/Resume review probes were red before the hardening implementation: historical Notebook v1.0 confirm reached the legacy service, Agent bindings could select proposal scope and bypass identity binding, revoked or aborted admissions still resumed, corrupt completion metadata was rehydrated before seal validation, and model.custom branches lacked a server branch declaration gate.; resolution: `accepted`; lesson: Run adversarial probes against every retained compatibility entry point before treating a focused green suite as a complete authority boundary.
+- #12 2026-08-19T19:15:00.000Z `post_review_adversarial_red`; cause_status: `known`; cause: Independent post-review probes found that a retained legacy compilation confirmation could be reused by a second proposal, persisted row-count parsing could leak conversion errors for non-integer or unbounded values, an undeclared model.custom gateway could be reached, and the historical reconcile route still constructed the old orchestrator.; resolution: `resolved`; lesson: Run replay, malformed-state, undeclared-gateway, and old-authority probes after the first implementation handoff and before any integration merge.
 
 ## All errors
 
@@ -44,6 +45,7 @@ COMPLETED
 - `focused-regression-after-resume-hardening`: occurrences=1; cause_status: `known`; root cause: The first post-implementation focused run exposed three regressions: aborted evidence sequencing changed and two resume fixtures used the persisted workflow_step_id field rather than the old step_id expectation.; solution: `resolved`
 - `independent-spec-review-red`: occurrences=1; cause_status: `known`; root cause: Independent Legacy/Resume review probes were red before the hardening implementation: historical Notebook v1.0 confirm reached the legacy service, Agent bindings could select proposal scope and bypass identity binding, revoked or aborted admissions still resumed, corrupt completion metadata was rehydrated before seal validation, and model.custom branches lacked a server branch declaration gate.; solution: `accepted`
 - `inherited-seam-fixture-scope-gap`: occurrences=1; cause_status: `known`; root cause: The broader inherited workflow seam suite has fixtures that omit active_head_run_id, so compile_workflow fails at the existing WORKFLOW_SCOPE_MISSING boundary before the seam assertions run; the current implementation diff does not modify that compiler scope contract.; solution: `accepted`
+- `legacy-post-review-adversarial-red`: occurrences=1; cause_status: `known`; root cause: Independent post-review probes found that a retained legacy compilation confirmation could be reused by a second proposal, persisted row-count parsing could leak conversion errors for non-integer or unbounded values, an undeclared model.custom gateway could be reached, and the historical reconcile route still constructed the old orchestrator.; solution: `resolved`
 - `legacy-resume-branch-authority-red-first`: occurrences=1; cause_status: `known`; root cause: The six new authority-boundary tests fail on the baseline: legacy routes still reach old execution authority, Resume accepts forged persisted metadata, and model branch declarations are not compared with the compiled model step.; solution: `accepted`
 
 ## Added tests
@@ -59,12 +61,14 @@ COMPLETED
 - `focused-regression-after-resume-hardening`: line experience occurrence(s)=1
 - `independent-spec-review-red`: line experience occurrence(s)=1
 - `inherited-seam-fixture-scope-gap`: line experience occurrence(s)=1
+- `legacy-post-review-adversarial-red`: line experience occurrence(s)=1
 - `legacy-resume-branch-authority-red-first`: line experience occurrence(s)=1
 
 ## Future guidance
 
 - Keep legacy execution routes fail-closed and verify persisted workflow truth before callback or dependent artifact work.
 - Run adversarial probes against every retained compatibility entry point before treating a focused green suite as a complete authority boundary.
+- Run replay, malformed-state, undeclared-gateway, and old-authority probes after the first implementation handoff and before any integration merge.
 - Run the inherited focused resume suite after adding persisted admission evidence and preserve abort ordering while rebinding resumed rows to the server schema.
 - Separate unchanged inherited fixture failures from the scoped authority gate, and do not weaken a server admission scope contract to satisfy stale setup data.
 - When the security contract removes a legacy execution authority, retain the typed refusal and report stale inherited expectations separately instead of restoring the bypass.
@@ -80,3 +84,8 @@ COMPLETED
 - #7: `a0123456-789b-4cde-f012-345678901234` | 2026-08-19T17:35:00.000Z | REVIEW/inherited_legacy_expectation | incident=`b1234567-89ac-4def-0123-456789012345` | lesson_key=`legacy-expectation-conflicts-with-fail-closed` | event_sha256=`b93a203f63f2b923c658b1672b4d4d414fa5071cb450de21fcb2af6b6e24730a`
 - #8: `c2345678-9abd-4ef0-1234-567890123456` | 2026-08-19T18:05:00.000Z | GAP/inherited_workflow_seam_fixture | incident=`d3456789-abcd-4f01-2345-678901234567` | lesson_key=`inherited-seam-fixture-scope-gap` | event_sha256=`192c020260d53608234a6c1fb6021de5901acde7035ae85c5a824a08a650bedb`
 - #9: `d456789a-bcde-4f12-3456-789012345678` | 2026-08-19T18:20:00.000Z | GATE/post_review_hardening_closeout | incident=`e56789ab-cdef-4012-3456-789012345678` | lesson_key=`legacy-resume-post-review-closeout` | event_sha256=`72248703fc179a4b90896d720469ee4e7c2464a8d7c9b2f701f5181c622c4e06`
+- #10: `6c5ff5b0-b087-4e8e-bc32-d401a3b5c031` | 2026-08-19T18:49:13.810Z | STATE_CHANGE/context_rescope_required | incident=`729ed5b4-d9da-4d0e-9e42-484b3f1cb212` | lesson_key=`context-pack-rescope` | event_sha256=`d3165acb3abf9d7f2fcce707b7b1eee402941fe70920fcc9cde26c881c5e3b76`
+- #11: `d5cc4cbb-5c6d-415b-9372-12d2575118fe` | 2026-08-19T18:49:13.817Z | STATE_CHANGE/context_rescoped | incident=`aaf56364-7eb8-4d67-8e5d-4c2fb27f38a6` | lesson_key=`context-pack-rescope` | event_sha256=`2931d0e9015222ebd68941a5c63da9828df1bb0594b6df9b718a26434b071527`
+- #12: `7b1c3d5e-9f20-4a61-b738-2d4e6f8a0c12` | 2026-08-19T19:15:00.000Z | FAILURE/post_review_adversarial_red | incident=`8c2d4e6f-0a13-4b72-c849-3e5f7a9b1d24` | lesson_key=`legacy-post-review-adversarial-red` | event_sha256=`e5cf413063c50ff1dbea2fdf6cc272519fc16021986d7de8c22aac859824e1db`
+- #13: `9d3f5b7a-1c24-4e68-b902-6f8a0c2d4e17` | 2026-08-19T19:25:00.000Z | GATE/post_review_hardening_green | incident=`ae4f6b8c-2d15-4937-b0c2-7e9a1d3f5b68` | lesson_key=`legacy-post-review-hardening-green` | event_sha256=`7b35b9c68ac04794d9cb90b60b9566d8e7698a07b20d45c39c3e83f7a666ea02`
+- #14: `b5d7f9a1-3c26-4e80-b2d4-6f8a0c1e3b57` | 2026-08-19T19:32:00.000Z | GATE/legacy_reconcile_final_green | incident=`c6e8a0b2-4d37-5f91-a3c5-7e9b1d2f4a68` | lesson_key=`legacy-reconcile-no-old-authority` | event_sha256=`6dd20c0bdc3693c18799d860ba6608442b383fb1d204d3313067245a8801816d`

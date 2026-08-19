@@ -9,6 +9,7 @@ from tests.test_workflow_resume import _execute
 from tests.workflow_fixtures import compile_fixture_workflow
 from workbench.agent.workflow import (
     WorkflowExecutionError,
+    WorkflowStepState,
     WorkflowStepResult,
     WorkflowStateStore,
 )
@@ -226,3 +227,22 @@ def test_resume_validates_completion_seal_before_rehydrating_corrupt_metadata(
     with pytest.raises(WorkflowExecutionError, match="completion integrity seal"):
         _execute(tmp_path, draft, resume_pass)
     assert callback_steps == []
+
+
+@pytest.mark.parametrize(
+    "row_count",
+    [True, 10**400, 1.25, float("inf"), "12"],
+)
+def test_persisted_row_counts_reject_non_finite_or_unbounded_values_as_typed_errors(
+    row_count,
+) -> None:
+    with pytest.raises(WorkflowExecutionError, match="row_counts"):
+        WorkflowStepState.from_dict(
+            {
+                "step_id": "publish",
+                "fingerprint": "step-fingerprint",
+                "status": "completed",
+                "artifact_ids": [],
+                "row_counts": {"source": row_count},
+            }
+        )

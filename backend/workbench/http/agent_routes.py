@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
+from threading import RLock
 from typing import Any, Literal, Mapping
 from uuid import uuid4
 
@@ -1928,17 +1929,17 @@ async def reconcile_agent_operation(
             message="Agent operation record was not found in this session.",
             details={"record_id": record_id, "session_id": session_id},
         )
-    orchestrator = WorkbenchOrchestrator(
-        repository,
-        events,
-        main_session_id=_ensure_main_session(repository, root),
-        context_provider=NodeOperationContextProvider(root),
+    if record.operation_id == "graph.fork":
+        return {"operation": record.to_dict(), "status": record.status}
+    raise WorkbenchAPIError(
+        status_code=409,
+        code="AGENT_LEGACY_RECONCILE_COMPILATION_REQUIRED",
+        message=(
+            "Historical Agent operation reconciliation requires the server-owned "
+            "Agent/Notebook compilation boundary before it can execute."
+        ),
+        details={"record_id": record_id, "operation_id": record.operation_id},
     )
-    if record.operation_id != "graph.fork":
-        record = await orchestrator.reconcile_confirmed_proposal(
-            record_id, project_root=root
-        )
-    return {"operation": record.to_dict(), "status": record.status}
 
 
 @router.post("/agent/sessions/{session_id}/turns")
@@ -2110,6 +2111,12 @@ class AgentNotebookCutoverAuthorityStoreV1:
 
     authorities: dict[tuple[str, str], Any] = field(default_factory=dict)
     confirmations: dict[tuple[str, str, str], Any] = field(default_factory=dict)
+    # A retained legacy compilation record may be used by only the proposal
+    # that first claimed it.  This is server-owned state, not a client hint.
+    legacy_proposal_bindings: dict[tuple[str, str, str], dict[str, Any]] = field(
+        default_factory=dict
+    )
+    lock: RLock = field(default_factory=RLock, repr=False)
 
 
 _DEFAULT_CUTOVER_STORE = AgentNotebookCutoverAuthorityStoreV1()
@@ -2289,6 +2296,9 @@ def configure_agent_notebook_cutover_authority(
     for key in tuple(store.confirmations):
         if key[:2] == scope:
             store.confirmations.pop(key, None)
+    for key in tuple(store.legacy_proposal_bindings):
+        if key[:2] == scope:
+            store.legacy_proposal_bindings.pop(key, None)
     if compiler is None:
         store.authorities.pop(scope, None)
     else:
@@ -2572,6 +2582,33 @@ def _execute_legacy_agent_proposal_via_server_boundary(
             message="The legacy proposal has no matching server-retained confirmation handle.",
             details={"compilation_record_id": record_id, "fields": confirmation_mismatches},
         )
+    proposal_binding = {
+        "proposal_id": expected_proposal["proposal_id"],
+        "proposal_revision": expected_proposal["proposal_revision"],
+        "proposal_fingerprint": expected_proposal["proposal_fingerprint"],
+        "operation_id": expected_proposal["operation_id"],
+        "semantic_plan_hash": binding["semantic_plan_hash"],
+        "confirmation_id": binding["confirmation_id"],
+        "actor_ref": canonical_actor,
+        "session_ref": canonical_session,
+        "project_ref": canonical_project,
+    }
+    binding_key = (canonical_project, canonical_session, record_id)
+    cutover_store = _cutover_store(request=request)
+    with cutover_store.lock:
+        retained = cutover_store.legacy_proposal_bindings.get(binding_key)
+        if retained is not None and retained != proposal_binding:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_LEGACY_PROPOSAL_BINDING_REPLAY",
+                message=(
+                    "The retained compilation confirmation is already bound to a "
+                    "different historical Agent proposal. Recompile and reconfirm."
+                ),
+                details={"compilation_record_id": record_id},
+            )
+        if retained is None:
+            cutover_store.legacy_proposal_bindings[binding_key] = proposal_binding
     try:
         result = compiler.execute(
             record_id,

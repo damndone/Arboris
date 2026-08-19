@@ -43,6 +43,7 @@ from workbench.agent.workflow_runtime import (
     _validate_persisted_model_branch,
     _model_artifact_id,
     _admit_workflow_host_endpoint_from_supervisor,
+    build_workflow_step_executor,
     issue_server_evidence_port,
 )
 from workbench.reporting import render_html_report
@@ -1267,6 +1268,43 @@ def test_model_custom_branch_requires_a_server_branch_declaration(tmp_path) -> N
 
     with pytest.raises(WorkflowExecutionError, match="server.*declaration|branch-producing"):
         _validate_persisted_model_branch(tmp_path, draft, "custom-model", branch)
+
+
+def test_model_custom_gateway_is_not_called_without_a_server_branch_declaration(
+    tmp_path, monkeypatch
+) -> None:
+    draft, _branch = _custom_model_branch_fixture(tmp_path)
+    monkeypatch.setattr(
+        "workbench.agent.workflow_runtime.resolve_statistical_source",
+        lambda *_args, **_kwargs: (
+            {
+                "artifact_id": "raw-1",
+                "node_ref": "stage:raw",
+                "source_sha256": "sha256:source",
+            },
+            pd.DataFrame({"outcome": [1.0], "rate_a": [2.0]}),
+        ),
+    )
+    evidence_port = EvidencePersistencePort(tmp_path)
+    admission = evidence_port.admit(draft, draft.steps[0])
+    calls: list[str] = []
+
+    def unauthorized_gateway(**_kwargs):
+        calls.append("called")
+        return WorkflowStepResult(artifact_ids=[])
+
+    executor = build_workflow_step_executor(
+        tmp_path,
+        draft,
+        custom_step_executor=unauthorized_gateway,
+        evidence_port=evidence_port,
+    )
+    try:
+        with pytest.raises(WorkflowExecutionError, match="server.*declaration|branch-producing"):
+            executor(draft.steps[0], {}, admission_receipt=admission)
+    finally:
+        evidence_port.abort(admission, "undeclared custom gateway probe")
+    assert calls == []
 
 
 @pytest.mark.parametrize(

@@ -32,8 +32,8 @@ release sidecars. Historical response-shape compatibility must remain
 explicitly separated from the security/correctness gate.
 
 ## Boundary
-- Affected paths: `docs/superpowers/objectives/2026-08-19-v1.8.9-p0-legacy-resume-hardening-objective.md`, `backend/workbench/http/agent_routes.py`, `backend/workbench/http/notebook_routes.py`, `backend/workbench/agent/notebook/service.py`, `backend/workbench/agent/workflow.py`, `backend/workbench/agent/workflow_runtime.py`, `tests/test_v189_legacy_route_authority.py`, `tests/test_v189_resume_authority.py`, `tests/test_v189_workflow_truth.py`, `tests/test_workflow_resume.py`, `docs/superpowers/handoff/2026-08-19-v1.8.9-p0-legacy-resume-hardening-handoff.md`
-- Allowed paths: `docs/superpowers/objectives/2026-08-19-v1.8.9-p0-legacy-resume-hardening-objective.md`, `backend/workbench/http/agent_routes.py`, `backend/workbench/http/notebook_routes.py`, `backend/workbench/agent/notebook/service.py`, `backend/workbench/agent/workflow.py`, `backend/workbench/agent/workflow_runtime.py`, `tests/test_v189_legacy_route_authority.py`, `tests/test_v189_resume_authority.py`, `tests/test_v189_workflow_truth.py`, `tests/test_workflow_resume.py`, `docs/superpowers/handoff/2026-08-19-v1.8.9-p0-legacy-resume-hardening-handoff.md`
+- Affected paths: `tests/test_workflow_runtime.py`
+- Allowed paths: `tests/test_workflow_runtime.py`
 - Protected paths: `backend/workbench/http/runs_routes.py`, `backend/workbench/report_view_model.py`, `frontend/src/report`, `backend/workbench/engine/stages/estimation.py`, `backend/workbench/providers`
 - Dependencies: `v1-8-9-foundation-integration`
 - Tests: `PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_legacy_route_authority.py tests/test_v189_resume_authority.py tests/test_v189_workflow_truth.py tests/test_workflow_resume.py -q`, `PYTHONPATH=backend .venv/bin/python -m compileall -q backend/workbench tests`, `git diff --check`

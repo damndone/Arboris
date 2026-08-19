@@ -326,3 +326,142 @@ def test_agent_legacy_binding_cannot_select_scope_or_mismatch_proposal(
     assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
     if mismatch_field == "project_ref":
         assert authority_calls == []
+
+
+def test_reused_legacy_compilation_confirmation_cannot_execute_a_second_proposal(
+    tmp_path, monkeypatch
+) -> None:
+    session_id = "session-1"
+    project_ref = f"project:{tmp_path.resolve()}"
+    actor_ref = f"actor:agent:{session_id}"
+    record_id = "record-a"
+    semantic_plan_hash = "a" * 64
+    store = agent_routes.AgentNotebookCutoverAuthorityStoreV1()
+    store.legacy_proposal_bindings[(project_ref, session_id, record_id)] = {
+        "proposal_id": "proposal-a",
+        "proposal_revision": 1,
+        "proposal_fingerprint": "fingerprint-a",
+        "operation_id": "model.rerun",
+        "semantic_plan_hash": semantic_plan_hash,
+        "confirmation_id": "confirmation-a",
+        "actor_ref": actor_ref,
+        "session_ref": session_id,
+        "project_ref": project_ref,
+    }
+    proposal_b = SimpleNamespace(
+        proposal_id="proposal-b",
+        revision=1,
+        fingerprint="fingerprint-b",
+        chain_id="chain-1",
+        operation_id="model.rerun",
+        preconditions={
+            "server_compilation": {
+                "compilation_record_id": record_id,
+                "confirmation_id": "confirmation-a",
+                "proposal_id": "proposal-b",
+                "proposal_revision": 1,
+                "proposal_fingerprint": "fingerprint-b",
+                "operation_id": "model.rerun",
+                "semantic_plan_hash": semantic_plan_hash,
+                "actor_ref": actor_ref,
+                "session_ref": session_id,
+                "project_ref": project_ref,
+                "data_snapshot_digest": "d" * 64,
+            }
+        },
+    )
+    compiler_calls: list[str] = []
+
+    class Compiler:
+        def record(self, _record_id):
+            return SimpleNamespace(
+                record_id=record_id,
+                semantic_plan_hash=semantic_plan_hash,
+                principal_ref=actor_ref,
+                session_ref=session_id,
+                project_ref=project_ref,
+            )
+
+        def execute(self, *_args, **_kwargs):
+            compiler_calls.append(record_id)
+            return SimpleNamespace(
+                to_dict=lambda: {"operation_id": "model.rerun", "status": "completed"}
+            )
+
+    monkeypatch.setattr(
+        agent_routes,
+        "_cutover_authority",
+        lambda *_args, **_kwargs: Compiler(),
+    )
+    monkeypatch.setattr(
+        agent_routes,
+        "_cutover_store",
+        lambda **_kwargs: store,
+    )
+    monkeypatch.setattr(
+        agent_routes,
+        "_legacy_agent_route_scope",
+        lambda *_args, **_kwargs: (actor_ref, session_id, project_ref),
+    )
+    confirmation = SimpleNamespace(
+        confirmation_id="confirmation-a",
+        compilation_record_id=record_id,
+        semantic_plan_hash=semantic_plan_hash,
+        actor_ref=actor_ref,
+        session_ref=session_id,
+        project_ref=project_ref,
+    )
+    store.confirmations[(project_ref, session_id, record_id)] = confirmation
+
+    with pytest.raises(WorkbenchAPIError) as error:
+        agent_routes._execute_legacy_agent_proposal_via_server_boundary(
+            proposal_b,
+            proposal_id=proposal_b.proposal_id,
+            root=tmp_path,
+            session_id=session_id,
+            request=None,
+        )
+
+    assert error.value.code == "AGENT_LEGACY_PROPOSAL_BINDING_REPLAY"
+    assert compiler_calls == []
+
+
+def test_legacy_reconcile_fails_closed_before_constructing_old_orchestrator(
+    tmp_path, monkeypatch
+) -> None:
+    record = SimpleNamespace(
+        agent_session_id="session-1",
+        operation_id="model.rerun",
+        status="running",
+    )
+
+    class Store:
+        def __init__(self, _root):
+            pass
+
+        def get(self, _record_id):
+            return record
+
+    class LegacyOrchestratorMustNotBeCalled:
+        def __init__(self, *_args, **_kwargs):
+            pytest.fail("legacy WorkbenchOrchestrator was used by reconcile")
+
+    monkeypatch.setattr(agent_routes, "_project_root", lambda _value: tmp_path)
+    monkeypatch.setattr(
+        agent_routes,
+        "_get_session",
+        lambda _root, _session_id: (SimpleNamespace(root=tmp_path), SimpleNamespace(), {}),
+    )
+    monkeypatch.setattr(agent_routes, "OperationRecordStore", Store)
+    monkeypatch.setattr(
+        agent_routes, "WorkbenchOrchestrator", LegacyOrchestratorMustNotBeCalled
+    )
+
+    with pytest.raises(WorkbenchAPIError) as error:
+        asyncio.run(
+            agent_routes.reconcile_agent_operation(
+                "session-1", "record-1", str(tmp_path)
+            )
+        )
+
+    assert error.value.code == "AGENT_LEGACY_RECONCILE_COMPILATION_REQUIRED"

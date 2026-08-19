@@ -82,6 +82,7 @@ from .workflow import (
     _persisted_lineage,
     _binding_body,
     _validated_artifact_ids,
+    MAX_PERSISTED_ROW_COUNT,
 )
 from .post_estimation_registry import (
     PostEstimationRegistryError,
@@ -466,7 +467,11 @@ def _validated_row_counts(value: Any, *, field_name: str) -> dict[str, int]:
             raise WorkflowExecutionError(
                 f"WORKFLOW_EVIDENCE_CORRUPT: {field_name} keys are malformed"
             )
-        if type(count) is not int or count < 0:
+        if (
+            type(count) is not int
+            or count < 0
+            or count > MAX_PERSISTED_ROW_COUNT
+        ):
             raise WorkflowExecutionError(
                 f"WORKFLOW_EVIDENCE_CORRUPT: {field_name} values are malformed"
             )
@@ -5631,6 +5636,7 @@ def build_workflow_step_executor(
                 root, draft, lineage, step_frame, step, previous
             )
         if dispatcher_key == "capability_factory.custom_dispatcher":
+            _require_server_model_custom_dispatch_declaration(draft, step)
             if not callable(custom_step_executor):
                 raise WorkflowExecutionError(
                     "model.custom requires an authorized custom capability gateway"
@@ -6016,6 +6022,36 @@ def _declared_branch_term_groups(
         if terms:
             groups["polynomial"][column] = terms
     return groups
+
+
+def _require_server_model_custom_dispatch_declaration(
+    draft: WorkflowDraft,
+    model_step: Any,
+) -> None:
+    """Prove a custom gateway is declared before it can be invoked."""
+
+    bindings = draft.bindings
+    declarations = bindings.get("server_model_declarations") if isinstance(bindings, Mapping) else None
+    declaration = (
+        declarations.get(model_step.step_id)
+        if isinstance(declarations, Mapping)
+        else None
+    )
+    if (
+        not isinstance(declaration, Mapping)
+        or declaration.get("operation_id") != "model.custom"
+        or declaration.get("branch_producing") is not True
+        or not isinstance(declaration.get("branches"), list)
+        or not declaration.get("branches")
+    ):
+        raise WorkflowExecutionError(
+            "model.custom requires a server-owned branch-producing declaration before gateway dispatch"
+        )
+    for branch in declaration["branches"]:
+        if not isinstance(branch, Mapping) or not isinstance(branch.get("branch_id"), str):
+            raise WorkflowExecutionError(
+                "model.custom server branch declaration is malformed"
+            )
 
 
 def _validate_server_model_custom_branch_declaration(
