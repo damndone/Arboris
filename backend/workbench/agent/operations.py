@@ -31,6 +31,149 @@ class OperationValidationError(RuntimeError):
     """Raised when a registered operation proposal is structurally invalid."""
 
 
+class CutoverOperationLifecycleError(RuntimeError):
+    """Raised when a server-owned Agent/Notebook operation changes unsafely."""
+
+
+_CUTOVER_STATES = frozenset({
+    "compiled",
+    "confirmed",
+    "admitted",
+    "executing",
+    "completed",
+    "failed",
+    "cancelled",
+})
+_CUTOVER_TRANSITIONS = {
+    "compiled": frozenset({"confirmed", "cancelled", "failed"}),
+    "confirmed": frozenset({"admitted", "cancelled", "failed"}),
+    "admitted": frozenset({"executing", "cancelled", "failed"}),
+    "executing": frozenset({"completed", "failed", "cancelled"}),
+    "completed": frozenset(),
+    "failed": frozenset(),
+    "cancelled": frozenset(),
+}
+
+
+@dataclass(frozen=True)
+class CutoverOperationRecordV1:
+    operation_id: str
+    entrypoint: str
+    semantic_plan_hash: str
+    state: str = "compiled"
+    confirmation_id: str | None = None
+    execution_instance_hash: str | None = None
+    evidence_refs: tuple[str, ...] = ()
+    error_code: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.operation_id) is not str or not self.operation_id:
+            raise CutoverOperationLifecycleError("operation_id is required")
+        if self.entrypoint not in {"agent", "notebook"}:
+            raise CutoverOperationLifecycleError("entrypoint must be agent or notebook")
+        if type(self.semantic_plan_hash) is not str or len(self.semantic_plan_hash) != 64:
+            raise CutoverOperationLifecycleError("semantic_plan_hash must be a digest")
+        if self.state not in _CUTOVER_STATES:
+            raise CutoverOperationLifecycleError("unknown lifecycle state")
+        if type(self.evidence_refs) is not tuple or any(type(item) is not str or not item for item in self.evidence_refs):
+            raise CutoverOperationLifecycleError("evidence_refs must be typed references")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": "cutover-operation.v1",
+            "operation_id": self.operation_id,
+            "entrypoint": self.entrypoint,
+            "semantic_plan_hash": self.semantic_plan_hash,
+            "state": self.state,
+            "confirmation_id": self.confirmation_id,
+            "execution_instance_hash": self.execution_instance_hash,
+            "evidence_refs": list(self.evidence_refs),
+            "error_code": self.error_code,
+        }
+
+
+class CutoverOperationStoreV1:
+    """Process-local authority mirror with atomic monotonic transitions.
+
+    The C0 compilation store remains the source of server authority.  This
+    store is deliberately an append/audit projection: it cannot mint a
+    compilation or admission reference and refuses recovery by client-shaped
+    dictionaries.
+    """
+
+    def __init__(self) -> None:
+        self._records: dict[str, CutoverOperationRecordV1] = {}
+        self._lock = RLock()
+
+    def create(self, *, operation_id: str, entrypoint: str, semantic_plan_hash: str) -> CutoverOperationRecordV1:
+        record = CutoverOperationRecordV1(
+            operation_id=operation_id,
+            entrypoint=entrypoint,
+            semantic_plan_hash=semantic_plan_hash,
+        )
+        with self._lock:
+            if operation_id in self._records:
+                raise CutoverOperationLifecycleError("operation already exists")
+            self._records[operation_id] = record
+        return record
+
+    def require(self, operation_id: str, *, entrypoint: str | None = None) -> CutoverOperationRecordV1:
+        with self._lock:
+            try:
+                record = self._records[operation_id]
+            except KeyError as exc:
+                raise CutoverOperationLifecycleError("operation is unknown") from exc
+        if entrypoint is not None and record.entrypoint != entrypoint:
+            raise CutoverOperationLifecycleError("operation entrypoint scope mismatch")
+        return record
+
+    def transition(
+        self,
+        operation_id: str,
+        *,
+        expected: str,
+        state: str,
+        confirmation_id: str | None = None,
+        execution_instance_hash: str | None = None,
+        evidence_refs: tuple[str, ...] = (),
+        error_code: str | None = None,
+    ) -> CutoverOperationRecordV1:
+        if expected not in _CUTOVER_STATES or state not in _CUTOVER_STATES:
+            raise CutoverOperationLifecycleError("unknown lifecycle state")
+        if type(evidence_refs) is not tuple:
+            raise CutoverOperationLifecycleError("evidence_refs must be a tuple")
+        with self._lock:
+            current = self.require(operation_id)
+            if current.state != expected:
+                raise CutoverOperationLifecycleError(
+                    f"expected state {expected}, observed {current.state}"
+                )
+            if state not in _CUTOVER_TRANSITIONS[current.state]:
+                raise CutoverOperationLifecycleError("terminal or invalid lifecycle transition")
+            if state == "completed" and not evidence_refs:
+                raise CutoverOperationLifecycleError("completed operation requires evidence refs")
+            if state == "confirmed" and not confirmation_id:
+                raise CutoverOperationLifecycleError("confirmed operation requires confirmation id")
+            if state == "admitted" and not execution_instance_hash:
+                raise CutoverOperationLifecycleError("admitted operation requires execution instance hash")
+            updated = CutoverOperationRecordV1(
+                operation_id=current.operation_id,
+                entrypoint=current.entrypoint,
+                semantic_plan_hash=current.semantic_plan_hash,
+                state=state,
+                confirmation_id=confirmation_id if confirmation_id is not None else current.confirmation_id,
+                execution_instance_hash=(
+                    execution_instance_hash
+                    if execution_instance_hash is not None
+                    else current.execution_instance_hash
+                ),
+                evidence_refs=evidence_refs or current.evidence_refs,
+                error_code=error_code,
+            )
+            self._records[operation_id] = updated
+            return updated
+
+
 OperationValidator = Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], None]
 
 

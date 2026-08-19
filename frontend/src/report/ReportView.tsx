@@ -21,13 +21,42 @@ import {
   type FamilyModelResult,
 } from "./FamilyEvidence";
 import {
+  ClassificationEvidence,
+  type ClassificationEvidencePacket,
+} from "./ClassificationEvidence";
+import {
   ReportWorkspaceProvider,
+  readClassificationEvidencePacket,
   useReportWorkspaceOptional,
   useReportWorkspace,
 } from "./ReportWorkspaceContext";
 import type { CitableFact } from "./factTable";
 import type { ReportRecord } from "./reportHistory";
 import "./report.css";
+
+/** Resolve only known classification evidence envelopes; never dump unknown JSON. */
+export function readTypedClassificationEvidence(value: unknown): ClassificationEvidencePacket | null {
+  return readClassificationEvidencePacket(value) as ClassificationEvidencePacket | null;
+}
+
+export function ReportClassificationEvidenceMount({ evidence }: { evidence: unknown }) {
+  const packet = readTypedClassificationEvidence(evidence);
+  return (
+    <section
+      aria-label="Classification evidence"
+      data-testid="report-classification-evidence"
+      style={{ marginBottom: 16 }}
+    >
+      {packet ? (
+        <ClassificationEvidence evidence={packet} />
+      ) : (
+        <p style={{ fontSize: 12, color: "var(--label-tertiary)", margin: 0 }}>
+          UNAVAILABLE: the classification evidence packet is missing or has an unsupported schema.
+        </p>
+      )}
+    </section>
+  );
+}
 
 export function ReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: string; focusRequest?: number }) {
   const workspace = useReportWorkspaceOptional();
@@ -63,6 +92,7 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
     wb.dispatch.selectByCanvasClick(nodeKey);
   };
   const regressionTable = buildRegressionTablePacket(workspace.modelResults);
+  const classificationEvidenceArtifact = workspace.familyEvidenceArtifacts.classification_evidence;
   const resultFamilies = [...new Set(
     workspace.modelResults.map((result) => result.model_type?.trim() || "unknown model"),
   )];
@@ -240,6 +270,9 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         modelResults={workspace.modelResults as unknown as FamilyModelResult[]}
         artifacts={workspace.familyEvidenceArtifacts}
       />
+      {classificationEvidenceArtifact !== undefined && (
+        <ReportClassificationEvidenceMount evidence={classificationEvidenceArtifact} />
+      )}
 
       <div data-testid="report-evidence-divider" className="report-evidence-divider">
         <span className="report-evidence-divider__title">

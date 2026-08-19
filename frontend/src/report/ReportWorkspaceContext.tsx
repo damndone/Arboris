@@ -68,6 +68,124 @@ const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
   "ts.next_forecast",
 ]);
 
+const CLASSIFICATION_EVIDENCE_SCHEMA = "workbench.prediction.classification-evidence";
+const CLASSIFICATION_ARTIFACTS_SCHEMA = "workbench.prediction.classification-artifacts";
+const CLASSIFICATION_ARTIFACT_TYPES = new Set(["classification_evidence", "classification_artifacts"]);
+const CLASSIFICATION_ARTIFACT_IDS = new Set(["classification_evidence", "classification_artifacts"]);
+const CLASSIFICATION_EVIDENCE_REQUIRED_FIELDS = [
+  "task",
+  "split",
+  "metrics",
+  "calibration",
+  "baselines",
+  "controls",
+  "comparison",
+  "explanations",
+  "stability",
+  "shift",
+  "decision_policy",
+  "blocked_reasons",
+  "evidence_refs",
+] as const;
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function indexedClassificationArtifactId(value: unknown): string | null {
+  const item = asRecord(value);
+  if (!item) return null;
+  const artifactId = item.artifact_id;
+  const artifactType = item.artifact_type;
+  const path = item.path;
+  const sha256 = item.sha256;
+  if (
+    typeof artifactId !== "string"
+    || artifactId.trim() !== artifactId
+    || artifactId.length === 0
+    || typeof artifactType !== "string"
+    || !CLASSIFICATION_ARTIFACT_TYPES.has(artifactType)
+    || typeof path !== "string"
+    || path.length === 0
+    || typeof sha256 !== "string"
+    || sha256.length === 0
+  ) return null;
+
+  const contract = asRecord(item.payload_contract);
+  const contractSchema = contract?.payload_schema;
+  const contractVersion = contract?.schema_version;
+  const indexedSchema = item.payload_schema;
+  const indexedVersion = item.schema_version;
+  const schemas = [contractSchema, indexedSchema].filter((schema) => schema !== undefined);
+  const versions = [contractVersion, indexedVersion].filter((version) => version !== undefined);
+  const supportedSchemas = new Set([CLASSIFICATION_EVIDENCE_SCHEMA, CLASSIFICATION_ARTIFACTS_SCHEMA]);
+  if (
+    (item.payload_contract !== undefined
+      && (!contract || typeof contractSchema !== "string" || contractVersion !== 1))
+    || (indexedSchema !== undefined
+      && (typeof indexedSchema !== "string" || indexedVersion !== 1))
+    || (indexedVersion !== undefined && indexedSchema === undefined)
+    || schemas.some((schema) => typeof schema !== "string" || !supportedSchemas.has(schema))
+    || versions.some((version) => version !== 1)
+    || (contractSchema !== undefined && indexedSchema !== undefined && contractSchema !== indexedSchema)
+    || (contractVersion !== undefined && indexedVersion !== undefined && contractVersion !== indexedVersion)
+  ) return null;
+
+  // The current artifact-list endpoint exposes the server-owned artifact type,
+  // id, path and hash but older deployments omit payload_contract. In that
+  // narrow compatibility case, only the two canonical ids or the
+  // content-addressed classification id are eligible; arbitrary ids/titles
+  // never become a report input. When the contract is present, it is checked
+  // above and the id remains an opaque server-issued identity.
+  if (schemas.length === 0 && !CLASSIFICATION_ARTIFACT_IDS.has(artifactId) && !/^sha256:[0-9a-f]{64}$/.test(artifactId)) {
+    return null;
+  }
+  return artifactId;
+}
+
+function isTypedClassificationEvidencePacket(value: unknown): value is Record<string, unknown> {
+  const packet = asRecord(value);
+  if (
+    !packet
+    || packet.payload_schema !== CLASSIFICATION_EVIDENCE_SCHEMA
+    || packet.schema_version !== 1
+    || CLASSIFICATION_EVIDENCE_REQUIRED_FIELDS.some((field) => !(field in packet))
+    || asRecord(packet.task) === null
+    || asRecord(packet.split) === null
+    || asRecord(packet.metrics) === null
+    || asRecord(packet.calibration) === null
+    || !Array.isArray(packet.baselines)
+    || !Array.isArray(packet.controls)
+    || asRecord(packet.comparison) === null
+    || asRecord(packet.explanations) === null
+    || asRecord(packet.stability) === null
+    || asRecord(packet.shift) === null
+    || asRecord(packet.decision_policy) === null
+    || !Array.isArray(packet.blocked_reasons)
+    || asRecord(packet.evidence_refs) === null
+  ) return false;
+  return true;
+}
+
+/** Return only the typed evidence packet; never retain an unknown outer payload. */
+export function readClassificationEvidencePacket(value: unknown): Record<string, unknown> | null {
+  if (isTypedClassificationEvidencePacket(value)) return value;
+  const envelope = asRecord(value);
+  for (const nested of [envelope?.evidence, envelope?.payload]) {
+    if (isTypedClassificationEvidencePacket(nested)) return nested;
+  }
+  if (
+    envelope?.payload_schema === CLASSIFICATION_ARTIFACTS_SCHEMA
+    && envelope.schema_version === 1
+    && isTypedClassificationEvidencePacket(envelope.evidence)
+  ) {
+    return envelope.evidence;
+  }
+  return null;
+}
+
 type FactTable = ReturnType<typeof buildFactTable>;
 
 function reportsForRun(records: ReportRecord[], runId: string | null): ReportRecord[] {
@@ -371,9 +489,11 @@ export function ReportWorkspaceProvider({
     ]);
     void fetchRunArtifacts(projectRoot, runId)
       .then(async (response) => {
-        const items = response.groups
-          .flatMap((group) => group.items)
-          .filter((item) => familyArtifactIds.has(item.artifact_id));
+        const allItems = response.groups.flatMap((group) => group.items);
+        const items = allItems.filter((item) => familyArtifactIds.has(item.artifact_id));
+        const classificationItems = allItems
+          .map((item) => ({ item, artifactId: indexedClassificationArtifactId(item) }))
+          .filter((entry): entry is { item: typeof allItems[number]; artifactId: string } => entry.artifactId !== null);
         const loaded = await Promise.all(items.map(async (item) => {
           try {
             return [item.artifact_id, await fetchArtifactJson(projectRoot, runId, item.artifact_id)] as const;
@@ -381,9 +501,35 @@ export function ReportWorkspaceProvider({
             return null;
           }
         }));
+        const loadedClassification = await Promise.all(classificationItems.map(async ({ item }) => {
+          try {
+            return readClassificationEvidencePacket(
+              await fetchArtifactJson(projectRoot, runId, item.artifact_id),
+            );
+          } catch {
+            return null;
+          }
+        }));
+        const validClassificationPackets = loadedClassification.filter(
+          (packet): packet is Record<string, unknown> => packet !== null,
+        );
+        const classificationEntry = classificationItems.length > 0
+          ? [[
+            "classification_evidence",
+            classificationItems.length === 1 && validClassificationPackets.length === 1
+              ? validClassificationPackets[0]
+              : {
+                payload_schema: "workbench.prediction.classification-evidence.unavailable",
+                schema_version: 0,
+              },
+          ] as const]
+          : [];
         if (!cancelled) {
           setFamilyEvidenceArtifacts(
-            Object.fromEntries(loaded.filter((entry): entry is readonly [string, unknown] => entry !== null)),
+            Object.fromEntries([
+              ...loaded.filter((entry): entry is readonly [string, unknown] => entry !== null),
+              ...classificationEntry,
+            ]),
           );
         }
       })

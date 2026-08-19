@@ -1,0 +1,66 @@
+schema_version: workbench.v1.8.9.candidate-lock.v1
+stage: C3
+status: prepared_before_candidate_commit
+
+# The future C3 candidate SHA and future candidate-bound evaluation digest are
+# intentionally absent.  This lock is part of the candidate it protects.
+baseline_commit: 9c3b423f0bb4a875ccb7a5db2b0bd7f20fcfb114
+pre_lock_product_tip: 9c3b423f0bb4a875ccb7a5db2b0bd7f20fcfb114
+formal_line: v1-8-9-foundation-integration
+
+merge_order:
+  - c2_p1_candidate
+  - c3_agent_notebook_typed_cutover
+  - c3_runtime_http_bridge
+  - c3_artifact_integrity_and_report_mount
+  - c3_candidate_bound_acceptance
+merge_order_rationale: The C2 provider and consumer contracts remain frozen; the central Agent/Notebook runtime is then joined to a required host compiler, followed by fail-closed artifact/report consumers and candidate-bound evaluation.
+
+merge_inputs:
+  c2_p1_candidate: 9c3b423f0bb4a875ccb7a5db2b0bd7f20fcfb114
+  c3_source_snapshot: c9f3c4ed3e07faf6f57f795a5e35fa6f8042c749
+  c3_source_material_policy: extract_only_declared_product_files_and_tests_from_dirty_wave_a; retain_exact_C2_P0_P1_contracts_catalog_and_lock
+  evaluation_harness_merge_policy: sidecar_only_not_in_product_candidate
+
+scope:
+  central_agent_notebook_boundary: typed_intent_host_compiler_preview_confirmation_admission_provider_dispatch_evidence
+  runtime_bootstrap: explicit_provider_contributions_identity_scope_and_host_compiler_required
+  notebook_scope: persisted_project_identity_normalized_to_opaque_project_ref
+  evidence_consumer: indexed_sha256_verified_classification_packet_only
+  report_mount: typed_C2_classification_evidence_renderer_only; no_recompute_or_raw_json_fallback
+
+safety_invariants:
+  - no_local_compilation_issuer_or_client_compiled_workflow_authority
+  - host_compiler_result_must_bind_record_workflow_scope_snapshots_and_semantic_hash
+  - admission_resolver_accepts_only_current_host_returned_record_and_reference
+  - unknown_or_invalid_evidence_is_UNAVAILABLE
+  - provider_executor_identity_must_remain_server_composed_and_opaque
+  - historical_notebook_runtime_and_direct_workflow_runtime_paths_are_not_claimed_migrated
+
+tests:
+  - command: PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_agent_notebook_cutover.py tests/test_v189_agent_notebook_runtime_bridge.py tests/test_v189_notebook_cutover_route.py tests/test_v189_artifact_integrity.py tests/test_agent_operation_lifecycle.py tests/test_notebook_planning_agent.py tests/test_agent_routes.py tests/contracts/test_v189_contract_lock.py -q --disable-warnings
+    status: required
+  - command: cd frontend && npm test -- --run src/report/FamilyEvidence.test.tsx src/report/ClassificationEvidence.test.tsx src/lineage/detail/sections/DataOperationsSection.test.tsx src/report/ReportView.v189.test.tsx src/report/ReportWorkspaceContext.v189.test.tsx src/workbench/registry/sectionRegistry.v189.test.ts src/lineage/detail/sections/sectionRegistry.test.ts
+    status: required
+  - command: cd frontend && npm run typecheck
+    status: required
+  - command: PYTHONPATH=backend .venv/bin/python -m pytest tests/predictive_research/test_classification_contracts_v189.py tests/predictive_research/test_classification_protocol_v189.py tests/predictive_research/test_classification_leakage_v189.py tests/predictive_research/test_classification_consumers_v189.py tests/test_v189_consumer_projection.py tests/test_v189_consumer_coverage.py tests/test_v189_context_egress.py tests/test_v189_data_operation_manifest.py tests/test_v189_data_profile.py tests/test_v189_filter_ast.py tests/test_data_operation_routes.py tests/contracts/test_v189_contract_lock.py -q --disable-warnings
+    status: required
+  - command: PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_agent_compiler.py tests/test_v189_capability_manifest.py tests/test_v189_legacy_compilation_authority.py tests/test_v189_evidence_envelope.py tests/test_v189_evidence_host_bootstrap.py tests/test_v189_workflow_truth.py tests/test_workflow_resume.py tests/test_workflow_runtime.py tests/test_reporting.py tests/contracts/test_v189_contract_lock.py -q --disable-warnings
+    status: required_controlled_host
+  - command: PYTHONPATH=backend .venv/bin/python -m compileall -q backend/workbench tests
+    status: required
+  - command: git diff --check
+    status: required
+
+invalidated_evidence:
+  - dirty_wave_a_test_counts_and_handoffs_are_source_material_only
+  - future_candidate_sha_and_future_candidate_bound_evaluation_digest
+  - browser_acceptance
+  - provider_acceptance
+  - restart_durability_and_multi_worker_receipt_consumption
+  - host_full_gate
+  - release_or_tag
+
+known_baseline_boundary:
+  - test_notebook_routes historical confirmation tests currently expect workflow_execution, but the exact C2 baseline returns the newer legacy response shape; this is not a C3 cutover regression and remains a separate compatibility follow-up.
