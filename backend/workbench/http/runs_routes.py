@@ -60,7 +60,11 @@ from ..report_view_model import (
 )
 from ..report_store import list_ai_reports, save_ai_report
 from ..services.lmm_result_adapter import VersionedResultReadError
-from ..services.results_service import _model_results, _normalize_issue_stream
+from ..services.results_service import (
+    _model_results,
+    _normalize_issue_stream,
+    current_report_evidence_persistence,
+)
 from ..predictive_research.consumer_projection import (
     read_prediction_evidence_from_run_root,
 )
@@ -118,6 +122,7 @@ def _report_evidence_for_run(
     """Build the typed Report contribution from indexed artifacts only."""
 
     views: list[dict[str, object]] = []
+    authoritative_persistence = current_report_evidence_persistence(run_id=run_root.name)
     try:
         indexed_records = _read_artifact_records(run_root)
     except (OSError, TypeError, ValueError, WorkbenchAPIError):
@@ -128,11 +133,29 @@ def _report_evidence_for_run(
         if record.get("artifact_type") not in _REPORT_EVIDENCE_ARTIFACT_TYPES:
             continue
         payload: object | None = None
+        artifact_content_sha256: str | None = None
+        artifact_path: Path | None = None
         try:
-            payload = read_json(_resolve_artifact_path(run_root, record))
+            artifact_path = _resolve_artifact_path(run_root, record)
         except (OSError, TypeError, ValueError, WorkbenchAPIError):
-            payload = None
-        views.append(build_indexed_report_evidence(record, payload))
+            artifact_path = None
+        if artifact_path is not None:
+            try:
+                artifact_content_sha256 = sha256_file(artifact_path)
+            except (OSError, TypeError, ValueError):
+                artifact_content_sha256 = None
+            try:
+                payload = read_json(artifact_path)
+            except (OSError, TypeError, ValueError):
+                payload = None
+        views.append(
+            build_indexed_report_evidence(
+                record,
+                payload,
+                artifact_content_sha256=artifact_content_sha256,
+                authoritative_persistence=authoritative_persistence,
+            )
+        )
 
     # A model child may surface a source-run post-estimation entry even when
     # its own index does not contain that artifact.  Preserve the legacy entry
@@ -140,7 +163,13 @@ def _report_evidence_for_run(
     # projection instead of treating its result object as evidence.
     if not views:
         for entry in post_estimation_results:
-            views.append(build_indexed_report_evidence(entry, entry))
+            views.append(
+                build_indexed_report_evidence(
+                    entry,
+                    entry,
+                    authoritative_persistence=authoritative_persistence,
+                )
+            )
 
     bundle = build_report_evidence_bundle(views)
     if bundle is not None:
@@ -149,7 +178,8 @@ def _report_evidence_for_run(
         {
             "artifact_id": f"run:{run_root.name}",
             "artifact_type": "report",
-        }
+        },
+        authoritative_persistence=authoritative_persistence,
     )
 
 

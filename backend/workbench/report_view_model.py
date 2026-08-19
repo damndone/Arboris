@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import read_json
+from .canonical import sha256_canonical
 from .narrative.render import render_template
 
 
@@ -554,17 +555,86 @@ def _evidence_wire_fields(
     return binding, envelope, envelope_ref, sensitivity, artifact_ref
 
 
+def _evidence_identity_fields(
+    value: Mapping[str, object],
+) -> tuple[
+    object | None,
+    object | None,
+    object | None,
+    object | None,
+    object | None,
+    object | None,
+    object | None,
+    object | None,
+    bool,
+    object | None,
+]:
+    """Read index-owned identity fields used to bind a canonical commit.
+
+    These fields are intentionally read from the index row, not synthesized
+    from the result payload.  The payload may help confirm source identity,
+    but it cannot supply the authoritative artifact admission or content hash.
+    """
+
+    nested = value.get("evidence")
+    nested_record = nested if isinstance(nested, Mapping) else {}
+
+    def first(*keys: str) -> object | None:
+        for source in (value, nested_record):
+            for key in keys:
+                candidate = source.get(key)
+                if candidate is not None:
+                    return candidate
+        return None
+
+    def all_values(*keys: str) -> list[object]:
+        values: list[object] = []
+        for source in (value, nested_record):
+            for key in keys:
+                candidate = source.get(key)
+                if candidate is not None:
+                    values.append(candidate)
+        return values
+
+    content_hash_values = all_values(
+        "evidence_content_hash",
+        "content_hash",
+        "evidence_artifact_content_hash",
+        "artifact_content_hash",
+    )
+    content_hash_conflict = any(
+        candidate != content_hash_values[0]
+        for candidate in content_hash_values[1:]
+    )
+
+    return (
+        first("evidence_commit_ref", "commit_ref", "evidence_commit_id", "commit_id"),
+        first("evidence_artifact_admission_ref", "artifact_admission_ref"),
+        first("run_id", "evidence_run_id"),
+        first("model_run_id", "evidence_model_run_id"),
+        first("evidence_run_id"),
+        first("evidence_model_run_id"),
+        first("evidence_content_hash", "content_hash", "evidence_artifact_content_hash", "artifact_content_hash"),
+        content_hash_conflict,
+        first("sha256", "artifact_sha256"),
+        first("evidence_artifact_ref", "artifact_ref"),
+    )
+
+
 def build_indexed_report_evidence(
     indexed_artifact: Mapping[str, object],
     artifact_payload: object | None = None,
+    *,
+    artifact_content_sha256: str | None = None,
+    authoritative_persistence: object | None = None,
 ) -> dict[str, object]:
     """Project one indexed artifact into the Report consumer boundary.
 
     An artifact index entry is only an admission/index record.  It is not an
     evidence commit.  The only accepted path is an explicitly supplied,
-    canonical ``EvidenceCommitBindingV1`` plus ``EvidenceEnvelopeV1`` pair,
-    which is parsed and validated before the existing typed consumer registry
-    is allowed to select facts.
+    canonical commit reference and server-owned admission.  Any wire binding
+    or envelope present in the index is only a tamper check; facts are loaded
+    from the injected owner capability and never from those mappings.
     """
 
     if not isinstance(indexed_artifact, Mapping):
@@ -577,75 +647,175 @@ def build_indexed_report_evidence(
     artifact_id = raw_artifact_id if isinstance(raw_artifact_id, str) and raw_artifact_id else "unknown-artifact"
     raw_artifact_type = indexed_artifact.get("artifact_type")
     artifact_type = raw_artifact_type if isinstance(raw_artifact_type, str) and raw_artifact_type else "unknown"
+    if artifact_id == "unknown-artifact":
+        return _unavailable_report_evidence(
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            reason_code="EVIDENCE_ARTIFACT_ID_REQUIRED",
+        )
 
     candidates: list[Mapping[str, object]] = [indexed_artifact]
     if isinstance(artifact_payload, Mapping):
         candidates.append(artifact_payload)
     binding_raw: object | None = None
     envelope_raw: object | None = None
-    envelope_ref_raw: object | None = None
-    sensitivity_raw: object | None = None
-    artifact_ref_raw: object | None = None
     for candidate in candidates:
         fields = _evidence_wire_fields(candidate)
         if binding_raw is None and fields[0] is not None:
             binding_raw = fields[0]
         if envelope_raw is None and fields[1] is not None:
             envelope_raw = fields[1]
-        if envelope_ref_raw is None and fields[2] is not None:
-            envelope_ref_raw = fields[2]
-        if sensitivity_raw is None and fields[3] is not None:
-            sensitivity_raw = fields[3]
-        if artifact_ref_raw is None and fields[4] is not None:
-            artifact_ref_raw = fields[4]
 
-    if binding_raw is None:
+    (
+        commit_ref_raw,
+        admission_ref_raw,
+        run_id_raw,
+        model_run_id_raw,
+        evidence_run_id_raw,
+        evidence_model_run_id_raw,
+        indexed_content_hash_raw,
+        indexed_content_hash_conflict,
+        indexed_raw_sha256,
+        indexed_artifact_ref_raw,
+    ) = _evidence_identity_fields(indexed_artifact)
+
+    if binding_raw is None and (
+        envelope_raw is not None
+        or not isinstance(commit_ref_raw, str)
+        or not commit_ref_raw.strip()
+    ):
         return _unavailable_report_evidence(
             artifact_id=artifact_id,
             artifact_type=artifact_type,
             reason_code="EVIDENCE_COMMIT_BINDING_REQUIRED",
-        )
-    if envelope_raw is None:
-        return _unavailable_report_evidence(
-            artifact_id=artifact_id,
-            artifact_type=artifact_type,
-            reason_code="EVIDENCE_ENVELOPE_REQUIRED",
         )
 
     from .contracts.evidence.envelope import EvidenceEnvelopeV1
     from .contracts.evidence.persistence import EvidenceCommitBindingV1
     from .evidence.consumer_adapters import (
         EvidenceProjectionError,
-        PersistedEvidenceEnvelopeV1,
         default_projection_registry,
     )
+    from .services.results_service import ServerOwnedReportEvidencePersistenceV1
 
     try:
-        if not isinstance(binding_raw, Mapping) or not isinstance(envelope_raw, Mapping):
-            raise EvidenceProjectionError("PROJECTION_WIRE_INVALID", "canonical evidence fields must be objects")
-        binding = EvidenceCommitBindingV1.from_dict(dict(binding_raw))
-        envelope = EvidenceEnvelopeV1.from_dict(dict(envelope_raw))
-        artifact_ref = (
-            artifact_ref_raw
-            if isinstance(artifact_ref_raw, str) and artifact_ref_raw
-            else artifact_id
+        def required_text(value: object | None, reason_code: str) -> str:
+            if not isinstance(value, str) or not value.strip():
+                raise EvidenceProjectionError(reason_code, "authoritative indexed identity is required")
+            return value
+
+        commit_ref = required_text(commit_ref_raw, "EVIDENCE_COMMIT_REF_REQUIRED")
+        admission_ref = required_text(
+            admission_ref_raw,
+            "EVIDENCE_ARTIFACT_ADMISSION_REF_REQUIRED",
         )
-        envelope_ref = (
-            envelope_ref_raw
-            if isinstance(envelope_ref_raw, str) and envelope_ref_raw
-            else f"evidence-envelope:{artifact_id}"
+        indexed_artifact_ref = required_text(
+            indexed_artifact_ref_raw,
+            "EVIDENCE_ARTIFACT_REF_REQUIRED",
         )
-        sensitivity = sensitivity_raw if isinstance(sensitivity_raw, str) else "public"
-        record = PersistedEvidenceEnvelopeV1(
-            commit_id=binding.commit_id,
-            artifact_ref=artifact_ref,
-            envelope_ref=envelope_ref,
-            sensitivity=sensitivity,
-            binding=binding,
-            envelope=envelope,
+        if indexed_artifact_ref != artifact_id:
+            raise EvidenceProjectionError(
+                "EVIDENCE_ARTIFACT_ID_MISMATCH",
+                "indexed artifact_id differs from the canonical artifact ref",
+            )
+        indexed_content_hash = required_text(
+            indexed_content_hash_raw,
+            "EVIDENCE_ARTIFACT_CONTENT_HASH_REQUIRED",
+        )
+        if indexed_content_hash_conflict:
+            raise EvidenceProjectionError(
+                "EVIDENCE_ARTIFACT_CONTENT_HASH_MISMATCH",
+                "indexed artifact content-hash aliases disagree",
+            )
+        if (
+            indexed_raw_sha256 is not None
+            and artifact_content_sha256 is not None
+            and indexed_raw_sha256 != artifact_content_sha256
+        ):
+            raise EvidenceProjectionError(
+                "EVIDENCE_ARTIFACT_FILE_HASH_MISMATCH",
+                "indexed artifact file hash differs from persisted content",
+            )
+
+        run_id = required_text(run_id_raw, "EVIDENCE_RUN_ID_REQUIRED")
+        model_run_id = required_text(model_run_id_raw, "EVIDENCE_MODEL_RUN_ID_REQUIRED")
+        for name, observed, expected in (
+            ("evidence_run_id", evidence_run_id_raw, run_id),
+            ("evidence_model_run_id", evidence_model_run_id_raw, model_run_id),
+        ):
+            if observed is not None and observed != expected:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_RUN_ID_MISMATCH",
+                    f"indexed {name} differs from the authoritative run identity",
+                    )
+
+        if isinstance(artifact_payload, Mapping):
+            payload_sources: list[Mapping[str, object]] = [artifact_payload]
+            source = artifact_payload.get("source")
+            if isinstance(source, Mapping):
+                payload_sources.append(source)
+            for payload_source in payload_sources:
+                for name, expected in (("run_id", run_id), ("model_run_id", model_run_id)):
+                    payload_value = payload_source.get(name)
+                    if payload_value is not None and payload_value != expected:
+                        raise EvidenceProjectionError(
+                            "EVIDENCE_RUN_ID_MISMATCH",
+                            f"artifact payload {name} differs from the indexed run identity",
+                        )
+
+        if type(authoritative_persistence) is not ServerOwnedReportEvidencePersistenceV1:
+            raise EvidenceProjectionError(
+                "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+                "Report evidence requires the server-owned persistence capability",
+            )
+
+        candidate_binding: EvidenceCommitBindingV1 | None = None
+        if binding_raw is not None:
+            if not isinstance(binding_raw, Mapping):
+                raise EvidenceProjectionError(
+                    "PROJECTION_WIRE_INVALID",
+                    "canonical binding must be an object",
+                )
+            candidate_binding = EvidenceCommitBindingV1.from_dict(dict(binding_raw))
+            if candidate_binding.commit_id != commit_ref:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_COMMIT_REF_MISMATCH",
+                    "indexed commit ref differs from the canonical binding",
+                )
+            if candidate_binding.artifact_admission_ref != admission_ref:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_ARTIFACT_ADMISSION_MISMATCH",
+                    "indexed artifact admission ref differs from the canonical binding",
+                )
+            if envelope_raw is not None:
+                if not isinstance(envelope_raw, Mapping):
+                    raise EvidenceProjectionError(
+                        "PROJECTION_WIRE_INVALID",
+                        "canonical envelope must be an object",
+                    )
+                candidate_envelope = EvidenceEnvelopeV1.from_dict(dict(envelope_raw))
+                if candidate_binding.envelope_digest != sha256_canonical(candidate_envelope.to_dict()):
+                    raise EvidenceProjectionError(
+                        "PROJECTION_DIGEST_MISMATCH",
+                        "indexed envelope does not match its canonical binding",
+                    )
+        elif envelope_raw is not None:
+            raise EvidenceProjectionError(
+                "EVIDENCE_COMMIT_BINDING_REQUIRED",
+                "a canonical envelope cannot be used without its binding",
+            )
+
+        persisted_record = authoritative_persistence.read_bound(
+            commit_ref,
+            artifact_id=indexed_artifact_ref,
+            run_id=run_id,
+            model_run_id=model_run_id,
+            content_hash=indexed_content_hash,
+            admission_ref=admission_ref,
+            envelope_digest=(candidate_binding.envelope_digest if candidate_binding is not None else None),
         )
         projection = default_projection_registry().project(
-            record,
+            persisted_record,
             consumer_id="report",
             destination="local",
         )
@@ -678,22 +848,6 @@ def build_report_evidence_bundle(
         return None
     if len(views) == 1:
         return dict(views[0])
-    available = [view for view in views if view.get("status") == "available"]
-    facts = [
-        fact
-        for view in available
-        for fact in view.get("facts", [])
-        if isinstance(fact, Mapping)
-    ][:80]
-    statuses = {str(view.get("status")) for view in views}
-    if statuses == {"available"}:
-        status = "available"
-    elif facts:
-        status = "degraded"
-    elif "blocked" in statuses:
-        status = "blocked"
-    else:
-        status = "unavailable"
     first = views[0]
     provenance = {
         "projections": [view.get("provenance") for view in views],
@@ -707,11 +861,11 @@ def build_report_evidence_bundle(
         "envelopeRef": "UNAVAILABLE",
         "commitId": "UNAVAILABLE",
         "envelopeDigest": "UNAVAILABLE",
-        "status": status,
+        "status": "blocked",
         "executionStatus": str(first.get("executionStatus", "unavailable")),
-        "availability": status,
-        "completenessStatus": status,
-        "facts": facts,
+        "availability": "unavailable",
+        "completenessStatus": "unavailable",
+        "facts": [],
         "sections": [
             {
                 "key": f"projection-{index}",
@@ -721,7 +875,6 @@ def build_report_evidence_bundle(
             for index, view in enumerate(views)
         ],
         "provenance": provenance,
+        "reasonCode": "REPORT_EVIDENCE_BUNDLE_IDENTITY_UNBOUND",
     }
-    if status != "available":
-        result["reasonCode"] = "REPORT_EVIDENCE_BUNDLE_PARTIAL"
     return result

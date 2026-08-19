@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import hashlib
+from contextlib import contextmanager
 from pathlib import Path
+from collections.abc import Iterator
 
 from fastapi.testclient import TestClient
 
@@ -18,12 +20,15 @@ from workbench.evidence.consumer_adapters import (
     PersistedEvidenceEnvelopeV1,
     default_projection_registry,
 )
+from workbench.evidence.contracts import ArtifactAdmissionV1
 from workbench.api import app
 from workbench.http import runs_routes
 from workbench.report_view_model import (
     build_indexed_report_evidence,
     build_persisted_evidence_report_view,
+    build_report_evidence_bundle,
 )
+from workbench.services.results_service import ServerOwnedReportEvidencePersistenceV1
 
 
 _ROOT = Path(__file__).parents[1]
@@ -85,6 +90,76 @@ def _indexed_artifact(**updates: object) -> dict[str, object]:
     }
 
 
+def _canonical_indexed_artifact(
+    record: ArtifactAdmissionV1,
+    binding: EvidenceCommitBindingV1,
+    *,
+    artifact_id: str | None = None,
+    run_id: str = "run-1",
+    model_run_id: str = "run-1",
+    raw_payload: bytes | None = None,
+) -> tuple[dict[str, object], dict[str, object], str]:
+    resolved_artifact_id = artifact_id or record.artifact_id
+    payload: dict[str, object] = {
+        "source": {"run_id": run_id, "model_run_id": model_run_id},
+        "result": {"committed": True},
+    }
+    content = raw_payload or json.dumps(
+        payload,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    index = _indexed_artifact(
+        artifact_id=resolved_artifact_id,
+        sha256=hashlib.sha256(content).hexdigest(),
+        run_id=run_id,
+        model_run_id=model_run_id,
+        content_hash=record.content_hash,
+        evidence_content_hash=record.content_hash,
+        evidence_commit_ref=binding.commit_id,
+        evidence_commit_binding=binding.to_dict(),
+        evidence_envelope=record.envelope.to_dict(),
+        evidence_envelope_ref=f"evidence-envelope:{record.envelope_digest}",
+        evidence_artifact_ref=resolved_artifact_id,
+        evidence_artifact_admission_ref=record.artifact_id,
+        evidence_run_id=run_id,
+        evidence_model_run_id=model_run_id,
+    )
+    return index, payload, hashlib.sha256(content).hexdigest()
+
+
+@contextmanager
+def _server_owned_evidence(
+    tmp_path: Path,
+    *,
+    run_id: str = "run-1",
+    model_run_id: str = "run-1",
+) -> Iterator[tuple[ArtifactAdmissionV1, EvidenceCommitBindingV1, ServerOwnedReportEvidencePersistenceV1]]:
+    """Build the same C0 registry/store/receipt capability as the owner seam."""
+
+    from tests.test_v189_evidence_envelope import _admit, _admit_store, _authorized_registry
+
+    registry, _host = _authorized_registry("scope:project:1")
+    record = _admit(
+        registry,
+        json.loads(_FIXTURE.read_text(encoding="utf-8")),
+        artifact_id="artifact-1",
+        scope_ref="scope:project:1",
+        execution_ref=f"execution:{run_id}",
+    )
+    with _admit_store(tmp_path, registry) as store:
+        receipt = registry.persistence_receipt(record)
+        binding = store.commit(record, receipt=receipt)
+        capability = ServerOwnedReportEvidencePersistenceV1(
+            store,
+            registry,
+            receipt,
+            run_id=run_id,
+            model_run_id=model_run_id,
+        )
+        yield record, binding, capability
+
+
 def test_indexed_post_estimation_without_committed_binding_is_unavailable_and_not_scalarized() -> None:
     view = build_indexed_report_evidence(
         _indexed_artifact(),
@@ -104,19 +179,19 @@ def test_indexed_post_estimation_without_committed_binding_is_unavailable_and_no
     assert "secret_scalar" not in json.dumps(view, sort_keys=True)
 
 
-def test_tampered_committed_envelope_is_blocked_without_facts() -> None:
-    record = _persisted_record()
-    tampered_envelope = record.envelope.to_dict()
-    tampered_envelope["numeric_facts"][0]["value"] = 999.0  # type: ignore[index]
+def test_tampered_committed_envelope_is_blocked_without_facts(tmp_path: Path) -> None:
+    with _server_owned_evidence(tmp_path) as (record, binding, capability):
+        tampered_envelope = record.envelope.to_dict()
+        tampered_envelope["numeric_facts"][0]["value"] = 999.0  # type: ignore[index]
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["evidence_envelope"] = tampered_envelope
 
-    view = build_indexed_report_evidence(
-        _indexed_artifact(
-            evidence_commit_binding=record.binding.to_dict(),
-            evidence_envelope=tampered_envelope,
-            evidence_envelope_ref=record.envelope_ref,
-            evidence_sensitivity=record.sensitivity,
-        ),
-    )
+        view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=capability,
+        )
 
     assert view["status"] == "blocked"
     assert view["reasonCode"] == "PROJECTION_DIGEST_MISMATCH"
@@ -147,20 +222,183 @@ def test_committed_projection_exposes_digest_provenance_and_bounded_facts() -> N
     assert [fact["value"] for fact in view["facts"]] == [2.0, 0.2]
 
 
-def test_indexed_canonical_commit_is_the_only_path_that_admits_report_facts() -> None:
+def test_indexed_canonical_commit_is_the_only_path_that_admits_report_facts(tmp_path: Path) -> None:
+    with _server_owned_evidence(tmp_path) as (record, binding, capability):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=capability,
+        )
+
+        assert view["status"] == "available"
+        assert view["envelopeDigest"] == record.envelope_digest
+        assert [fact["value"] for fact in view["facts"]] == [2.0, 0.2]
+
+
+def test_foreign_artifact_cannot_reuse_a_valid_committed_pair(tmp_path: Path) -> None:
+    with _server_owned_evidence(tmp_path) as (record, binding, capability):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["artifact_id"] = "foreign-artifact"
+
+        view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=capability,
+        )
+
+        assert view["status"] == "blocked"
+        assert view["reasonCode"] == "EVIDENCE_ARTIFACT_ID_MISMATCH"
+        assert view["facts"] == []
+
+
+def test_registry_rejects_a_self_consistent_foreign_copy_of_a_committed_pair(tmp_path: Path) -> None:
+    with _server_owned_evidence(tmp_path) as (record, binding, capability):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        foreign_payload = dict(payload)
+        foreign_raw = json.dumps(
+            foreign_payload,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        foreign = dict(indexed_artifact)
+        foreign.update(
+            {
+                "artifact_id": "artifact-foreign",
+                "evidence_artifact_ref": "artifact-foreign",
+                "sha256": hashlib.sha256(foreign_raw).hexdigest(),
+            }
+        )
+
+        view = build_indexed_report_evidence(
+            foreign,
+            foreign_payload,
+            artifact_content_sha256=hashlib.sha256(foreign_raw).hexdigest(),
+            authoritative_persistence=capability,
+        )
+
+    assert view["status"] in {"unavailable", "blocked"}
+    assert view["facts"] == []
+    assert view["reasonCode"] == "EVIDENCE_ADMISSION_NOT_FOUND"
+
+
+def test_foreign_run_cannot_reuse_a_valid_committed_pair(tmp_path: Path) -> None:
+    with _server_owned_evidence(tmp_path) as (record, binding, capability):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["run_id"] = "foreign-run"
+        indexed_artifact["model_run_id"] = "foreign-run"
+        indexed_artifact["evidence_run_id"] = "foreign-run"
+        indexed_artifact["evidence_model_run_id"] = "foreign-run"
+
+        view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=capability,
+        )
+
+        assert view["status"] == "blocked"
+        assert view["reasonCode"] == "EVIDENCE_RUN_ID_MISMATCH"
+        assert view["facts"] == []
+
+
+def test_foreign_content_hash_and_admission_ref_cannot_reuse_a_pair(tmp_path: Path) -> None:
+    with _server_owned_evidence(tmp_path) as (record, binding, capability):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["content_hash"] = "f" * 64
+
+        hash_view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=capability,
+        )
+
+        assert hash_view["status"] == "blocked"
+        assert hash_view["reasonCode"] == "EVIDENCE_ARTIFACT_CONTENT_HASH_MISMATCH"
+        assert hash_view["facts"] == []
+
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["sha256"] = "f" * 64
+        file_hash_view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=capability,
+        )
+
+        assert file_hash_view["status"] == "blocked"
+        assert file_hash_view["reasonCode"] == "EVIDENCE_ARTIFACT_FILE_HASH_MISMATCH"
+        assert file_hash_view["facts"] == []
+
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["evidence_artifact_admission_ref"] = "foreign-admission"
+        admission_view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=capability,
+        )
+
+        assert admission_view["status"] == "blocked"
+        assert admission_view["reasonCode"] == "EVIDENCE_ARTIFACT_ADMISSION_MISMATCH"
+        assert admission_view["facts"] == []
+
+
+def test_multi_artifact_bundle_fails_closed_without_a_single_canonical_identity() -> None:
     record = _persisted_record()
-    view = build_indexed_report_evidence(
-        _indexed_artifact(
-            evidence_commit_binding=record.binding.to_dict(),
-            evidence_envelope=record.envelope.to_dict(),
-            evidence_envelope_ref=record.envelope_ref,
-            evidence_artifact_ref=record.artifact_ref,
-            evidence_sensitivity=record.sensitivity,
-        ),
+    projection = default_projection_registry().project(
+        record,
+        consumer_id="report",
+        destination="local",
     )
+    first = build_persisted_evidence_report_view(projection)
+    second = dict(first)
+    second["projectionId"] = "report:evidence-commit-2"
+    second["artifactRef"] = "artifact-2"
+
+    bundle = build_report_evidence_bundle([first, second])
+
+    assert bundle is not None
+    assert bundle["status"] == "blocked"
+    assert bundle["reasonCode"] == "REPORT_EVIDENCE_BUNDLE_IDENTITY_UNBOUND"
+    assert bundle["commitId"] == "UNAVAILABLE"
+    assert bundle["envelopeDigest"] == "UNAVAILABLE"
+    assert bundle["facts"] == []
+
+
+def test_runs_route_injects_the_server_owned_projection_capability(tmp_path: Path, monkeypatch) -> None:
+    run_root = tmp_path / "run-1"
+    artifact_path = run_root / "artifacts" / "post_estimation" / "result.json"
+    artifact_path.parent.mkdir(parents=True)
+
+    owner_root = tmp_path / "owner-store"
+    owner_root.mkdir()
+    with _server_owned_evidence(owner_root) as (record, binding, capability):
+        indexed_artifact, payload, _content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["path"] = "artifacts/post_estimation/result.json"
+        indexed_artifact.pop("evidence_commit_binding")
+        indexed_artifact.pop("evidence_envelope")
+        artifact_path.write_bytes(
+            json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        )
+        (run_root / "artifacts_index.json").write_text(
+            json.dumps({"schema_version": 1, "artifacts": [indexed_artifact]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            runs_routes,
+            "current_report_evidence_persistence",
+            lambda *, run_id: capability if run_id == "run-1" else None,
+        )
+
+        view = runs_routes._report_evidence_for_run(run_root, [])
 
     assert view["status"] == "available"
-    assert view["envelopeDigest"] == record.binding.envelope_digest
+    assert view["commitId"] == binding.commit_id
+    assert view["envelopeDigest"] == record.envelope_digest
     assert [fact["value"] for fact in view["facts"]] == [2.0, 0.2]
 
 

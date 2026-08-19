@@ -169,6 +169,14 @@ from ..evidence.consumer_adapters import (
     EvidenceProjectionError,
     PersistedEvidenceEnvelopeV1,
 )
+from ..evidence.contracts import ArtifactAdmissionV1
+from ..evidence.persistence import EvidencePacketStoreV1, EvidencePersistenceError
+from ..evidence.registry import (
+    EvidenceRegistryError,
+    EvidenceRegistryReceiptV1,
+    EvidenceRegistryV1,
+    validate_registry_persistence_receipt,
+)
 
 
 class PersistedEvidenceEnvelopeStoreV1(Protocol):
@@ -213,7 +221,181 @@ class PersistedEvidenceResultsFacadeV1:
         return record
 
 
+class ServerOwnedReportEvidencePersistenceV1:
+    """Read Report evidence through the real C0 store, registry, and receipt."""
+
+    def __init__(
+        self,
+        evidence_store: EvidencePacketStoreV1,
+        registry: EvidenceRegistryV1,
+        receipt: EvidenceRegistryReceiptV1,
+        *,
+        run_id: str,
+        model_run_id: str,
+    ) -> None:
+        if type(evidence_store) is not EvidencePacketStoreV1:
+            raise EvidenceProjectionError(
+                "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+                "Report evidence requires the server-owned EvidencePacketStoreV1",
+            )
+        if type(registry) is not EvidenceRegistryV1 or type(receipt) is not EvidenceRegistryReceiptV1:
+            raise EvidenceProjectionError(
+                "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+                "Report evidence requires a registry-issued persistence receipt",
+            )
+        if type(run_id) is not str or not run_id.strip():
+            raise EvidenceProjectionError(
+                "EVIDENCE_RUN_ID_REQUIRED",
+                "Report evidence requires a server-owned run identity",
+            )
+        if type(model_run_id) is not str or not model_run_id.strip():
+            raise EvidenceProjectionError(
+                "EVIDENCE_MODEL_RUN_ID_REQUIRED",
+                "Report evidence requires a server-owned model run identity",
+            )
+        self._evidence_store = evidence_store
+        self._registry = registry
+        self._receipt = receipt
+        self._run_id = run_id
+        self._model_run_id = model_run_id
+
+    @property
+    def run_id(self) -> str:
+        return self._run_id
+
+    @property
+    def model_run_id(self) -> str:
+        return self._model_run_id
+
+    def read_bound(
+        self,
+        commit_id: str,
+        *,
+        artifact_id: str,
+        run_id: str,
+        model_run_id: str,
+        content_hash: str,
+        admission_ref: str,
+        envelope_digest: str | None = None,
+    ) -> PersistedEvidenceEnvelopeV1:
+        """Load only the registry-owned artifact bound to this commit context."""
+
+        if run_id != self._run_id or model_run_id != self._model_run_id:
+            raise EvidenceProjectionError(
+                "EVIDENCE_RUN_ID_MISMATCH",
+                "the requested run identity is outside the owner capability scope",
+            )
+        try:
+            # Resolve the requested identity first.  A copied pair must not be
+            # allowed to select the canonical packet merely because its fields
+            # are self-consistent; the registry must have admitted this exact
+            # artifact and the receipt must be for that admission.
+            requested = self._registry.get(
+                artifact_id,
+                scope_ref=self._registry.scope_ref,
+            )
+            validate_registry_persistence_receipt(
+                requested,
+                self._receipt,
+                registry=self._registry,
+            )
+            binding = self._evidence_store.load(
+                commit_id,
+                registry=self._registry,
+                receipt=self._receipt,
+            )
+            artifact = self._evidence_store.load_packet(
+                commit_id,
+                registry=self._registry,
+                receipt=self._receipt,
+            )
+            if type(artifact) is not ArtifactAdmissionV1:
+                raise ValueError("stored evidence packet did not return an admitted artifact")
+            admitted = self._registry.resolve(
+                artifact.artifact_id,
+                scope_ref=artifact.scope_ref,
+            )
+            validate_registry_persistence_receipt(
+                admitted,
+                self._receipt,
+                registry=self._registry,
+            )
+            if binding.commit_id != commit_id or binding.artifact_admission_ref != artifact.artifact_id:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_ADMISSION_NOT_FOUND",
+                    "commit is not bound to the requested server-owned artifact admission",
+                )
+            if requested.to_dict() != artifact.to_dict() or artifact.artifact_id != artifact_id:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_ADMISSION_NOT_FOUND",
+                    "commit is not bound to the requested server-owned artifact admission",
+                )
+            if artifact.content_hash != content_hash:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_ARTIFACT_CONTENT_HASH_MISMATCH",
+                    "requested content hash differs from the registry-owned artifact",
+                )
+            if admission_ref != binding.artifact_admission_ref:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_ARTIFACT_ADMISSION_MISMATCH",
+                    "requested admission ref differs from the committed binding",
+                )
+            envelope = artifact.envelope.envelope
+            record = PersistedEvidenceEnvelopeV1(
+                commit_id=binding.commit_id,
+                artifact_ref=artifact.artifact_id,
+                envelope_ref=f"evidence-envelope:{artifact.envelope_digest}",
+                sensitivity="public",
+                binding=binding,
+                envelope=envelope,
+            )
+            if envelope_digest is not None and record.envelope_digest != envelope_digest:
+                raise EvidenceProjectionError(
+                    "PROJECTION_DIGEST_MISMATCH",
+                    "persisted envelope digest differs from the requested commit",
+                )
+            return record
+        except EvidenceProjectionError:
+            raise
+        except (EvidencePersistenceError, EvidenceRegistryError, TypeError, ValueError, KeyError) as exc:
+            raise EvidenceProjectionError(
+                "EVIDENCE_ADMISSION_NOT_FOUND",
+                "the requested Report evidence is not bound to the server-owned registry",
+            ) from exc
+
+
+_REPORT_EVIDENCE_PERSISTENCE: ServerOwnedReportEvidencePersistenceV1 | None = None
+
+
+def configure_report_evidence_persistence(
+    persistence: ServerOwnedReportEvidencePersistenceV1 | None,
+) -> None:
+    """Install the owner-issued Report persistence capability at server bootstrap."""
+
+    if persistence is not None and type(persistence) is not ServerOwnedReportEvidencePersistenceV1:
+        raise TypeError("persistence must be ServerOwnedReportEvidencePersistenceV1 or None")
+    global _REPORT_EVIDENCE_PERSISTENCE
+    _REPORT_EVIDENCE_PERSISTENCE = persistence
+
+
+def current_report_evidence_persistence(
+    *,
+    run_id: str | None = None,
+) -> ServerOwnedReportEvidencePersistenceV1 | None:
+    """Return the configured owner capability; absence or wrong run fails closed."""
+
+    capability = _REPORT_EVIDENCE_PERSISTENCE
+    if capability is None:
+        return None
+    if run_id is not None and capability.run_id != run_id:
+        return None
+    return capability
+
+
 __all__ = [
     "PersistedEvidenceEnvelopeStoreV1",
     "PersistedEvidenceResultsFacadeV1",
+    "ServerOwnedReportEvidencePersistenceV1",
+    "configure_report_evidence_persistence",
+    "current_report_evidence_persistence",
 ]
