@@ -1,0 +1,28 @@
+{
+  "schema_version": "workbench.provider.workflow-post-estimation/v1",
+  "provider_id": "builtin.workflow_post_estimation",
+  "authority": "declaration_only",
+  "execution_authority": false,
+  "model_families": [
+    {
+      "model_family": "ols",
+      "operations": [
+        {
+          "operation_id": "model.joint_f_test",
+          "output_id": "result",
+          "adapter_key": "ols.joint_f_test"
+        },
+        {
+          "operation_id": "model.white_test",
+          "output_id": "result",
+          "adapter_key": "ols.white_test"
+        },
+        {
+          "operation_id": "model.quadratic_stationary_point",
+          "output_id": "result",
+          "adapter_key": "ols.quadratic_stationary_point"
+        }
+      ]
+    }
+  ]
+}

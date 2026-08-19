@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -11,9 +12,6 @@ from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
-from .artifacts import register_artifact
-
-
 def export_pdf(
     report: Mapping[str, Any],
     run_root: Path,
@@ -21,45 +19,75 @@ def export_pdf(
     filename: str = "report.pdf",
     artifact_id: str = "report_pdf",
     inputs: Sequence[str] = (),
+    evidence_port: Any = None,
+    admission_receipt: Any = None,
 ) -> Path:
-    reports_dir = run_root / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = reports_dir / filename
+    from .agent.workflow_runtime import (
+        prepare_formal_workflow_output,
+        record_formal_workflow_artifact,
+    )
 
-    pdf = canvas.Canvas(str(pdf_path), pagesize=letter, pageCompression=0)
-    _, height = letter
-    y = height - 72
-    if report.get("report_kind") == "arma_garch":
-        _draw_arma_garch_pdf(pdf, report, y)
-    else:
-        pdf.setFont("Helvetica-Bold", 14)
-        pdf.drawString(72, y, str(report.get("title", "Report")))
-        y -= 32
+    output = prepare_formal_workflow_output(
+        evidence_port,
+        admission_receipt,
+        run_root=run_root,
+        directory_name="reports",
+        filename=filename,
+    )
+    try:
+        with output.open_binary() as stream:
+            pdf = canvas.Canvas(stream, pagesize=letter, pageCompression=0)
+            _, height = letter
+            y = height - 72
+            if report.get("report_kind") == "arma_garch":
+                _draw_arma_garch_pdf(pdf, report, y)
+            else:
+                pdf.setFont("Helvetica-Bold", 14)
+                pdf.drawString(72, y, str(report.get("title", "Report")))
+                y -= 32
 
-        y = _draw_section(pdf, "Facts", report.get("facts", []), y)
-        y = _draw_section(pdf, "Descriptive statistics", report.get("descriptive_stats", []), y)
-        regression_table = report.get("regression_table")
-        if isinstance(regression_table, Mapping):
-            y = _draw_section(
-                pdf,
-                "Regression table",
-                _regression_pdf_items(regression_table),
-                y,
-            )
-        y = _draw_section(pdf, "Interpretation", report.get("claims", []), y)
-        st = report.get("statistical_tests")
-        if isinstance(st, Mapping):
-            y = _draw_section(pdf, "Statistical tests (outcome-related)", st.get("y_related", []), y)
-            other = st.get("other", [])
-            truncated = st.get("other_truncated", 0)
-            if other:
-                y = _draw_section(pdf, f"Other tests (+{truncated} truncated)", other, y)
-        else:
-            y = _draw_section(pdf, "Statistical tests", st or [], y)
-        _draw_section(pdf, "Warnings", report.get("warnings", []), y)
-    pdf.save()
-
-    register_artifact(run_root, artifact_id, pdf_path, "report", "export", list(inputs))
+                y = _draw_section(pdf, "Facts", report.get("facts", []), y)
+                y = _draw_section(pdf, "Descriptive statistics", report.get("descriptive_stats", []), y)
+                regression_table = report.get("regression_table")
+                if isinstance(regression_table, Mapping):
+                    y = _draw_section(
+                        pdf,
+                        "Regression table",
+                        _regression_pdf_items(regression_table),
+                        y,
+                    )
+                y = _draw_section(pdf, "Interpretation", report.get("claims", []), y)
+                st = report.get("statistical_tests")
+                if isinstance(st, Mapping):
+                    y = _draw_section(pdf, "Statistical tests (outcome-related)", st.get("y_related", []), y)
+                    other = st.get("other", [])
+                    truncated = st.get("other_truncated", 0)
+                    if other:
+                        y = _draw_section(pdf, f"Other tests (+{truncated} truncated)", other, y)
+                else:
+                    y = _draw_section(pdf, "Statistical tests", st or [], y)
+                _draw_section(pdf, "Warnings", report.get("warnings", []), y)
+            pdf.save()
+            stream.flush()
+            os.fsync(stream.fileno())
+        pdf_path = output.commit()
+    except Exception:
+        output.abort()
+        raise
+    try:
+        record_formal_workflow_artifact(
+            evidence_port,
+            admission_receipt,
+            run_root=run_root,
+            artifact_id=artifact_id,
+            path=pdf_path,
+            artifact_type="report",
+            producer_step="export",
+            inputs=inputs,
+            output_target=output,
+        )
+    finally:
+        output.close()
     return pdf_path
 
 
@@ -70,34 +98,65 @@ def export_xlsx(
     filename: str = "tables.xlsx",
     artifact_id: str = "tables_xlsx",
     inputs: Sequence[str] = (),
+    evidence_port: Any = None,
+    admission_receipt: Any = None,
 ) -> Path:
-    exports_dir = run_root / "exports"
-    exports_dir.mkdir(parents=True, exist_ok=True)
-    xlsx_path = exports_dir / filename
+    from .agent.workflow_runtime import (
+        prepare_formal_workflow_output,
+        record_formal_workflow_artifact,
+    )
 
-    workbook = Workbook()
-    default_sheet = workbook.active
-    workbook.remove(default_sheet)
-    for name, rows in tables.items():
-        worksheet = workbook.create_sheet(title=_sheet_title(name))
-        normalized_rows = list(rows)
-        headers = _headers(normalized_rows)
-        worksheet.append(headers)
-        worksheet.freeze_panes = "A2"
-        for cell in worksheet[1]:
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = PatternFill("solid", fgColor="1F4E78")
-        for row in normalized_rows:
-            worksheet.append([_excel_value(row.get(header, "")) for header in headers])
-        worksheet.auto_filter.ref = worksheet.dimensions
-        for index, header in enumerate(headers, start=1):
-            values = [str(header)] + [str(row.get(header, "")) for row in normalized_rows[:200]]
-            worksheet.column_dimensions[get_column_letter(index)].width = min(48, max(12, max(map(len, values)) + 2))
-    if not workbook.worksheets:
-        workbook.create_sheet(title="tables")
-    workbook.save(xlsx_path)
+    output = prepare_formal_workflow_output(
+        evidence_port,
+        admission_receipt,
+        run_root=run_root,
+        directory_name="exports",
+        filename=filename,
+    )
 
-    register_artifact(run_root, artifact_id, xlsx_path, "table_export", "export", list(inputs))
+    try:
+        workbook = Workbook()
+        default_sheet = workbook.active
+        workbook.remove(default_sheet)
+        for name, rows in tables.items():
+            worksheet = workbook.create_sheet(title=_sheet_title(name))
+            normalized_rows = list(rows)
+            headers = _headers(normalized_rows)
+            worksheet.append(headers)
+            worksheet.freeze_panes = "A2"
+            for cell in worksheet[1]:
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill("solid", fgColor="1F4E78")
+            for row in normalized_rows:
+                worksheet.append([_excel_value(row.get(header, "")) for header in headers])
+            worksheet.auto_filter.ref = worksheet.dimensions
+            for index, header in enumerate(headers, start=1):
+                values = [str(header)] + [str(row.get(header, "")) for row in normalized_rows[:200]]
+                worksheet.column_dimensions[get_column_letter(index)].width = min(48, max(12, max(map(len, values)) + 2))
+        if not workbook.worksheets:
+            workbook.create_sheet(title="tables")
+        with output.open_binary() as stream:
+            workbook.save(stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        xlsx_path = output.commit()
+    except Exception:
+        output.abort()
+        raise
+    try:
+        record_formal_workflow_artifact(
+            evidence_port,
+            admission_receipt,
+            run_root=run_root,
+            artifact_id=artifact_id,
+            path=xlsx_path,
+            artifact_type="table_export",
+            producer_step="export",
+            inputs=inputs,
+            output_target=output,
+        )
+    finally:
+        output.close()
     return xlsx_path
 
 
