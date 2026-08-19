@@ -1,28 +1,92 @@
 {
-  "schema_version": "workbench.provider.workflow-post-estimation/v1",
-  "provider_id": "builtin.workflow_post_estimation",
-  "authority": "declaration_only",
-  "execution_authority": false,
-  "model_families": [
+  "provider_id": "workflow.post_estimation",
+  "semantic_version": "1.0",
+  "contracts": [
+    {"kind": "capability", "logical_id": "workflow.post_estimation.capability", "semantic_version": "1.0", "contract_digest": "0262a790d6bcf04eb4e8f1e6bf4d54ce7847015c4ef2b20ed3bad0f6d3838aed"},
+    {"kind": "family", "logical_id": "workflow.post_estimation.family.ols", "semantic_version": "1.0", "contract_digest": "f8d039e041f7c7a726bbfb7ff1b03575df84a16c6591f76a00694e68e31acdee"},
+    {"kind": "operation", "logical_id": "workflow.post_estimation.model.joint_f_test", "semantic_version": "1.0", "contract_digest": "f3da2a6216d81a57bf421c3a29a96a5c056aaaf03f33370ad7dce787683631da"},
+    {"kind": "operation", "logical_id": "workflow.post_estimation.model.white_test", "semantic_version": "1.0", "contract_digest": "6b6ee4027364b15cc2374d8528a42f3364a8d71b618b333cb3399887b64e2f5b"},
+    {"kind": "operation", "logical_id": "workflow.post_estimation.model.quadratic_stationary_point", "semantic_version": "1.0", "contract_digest": "25b846a5816641bdfbd48f679d4b8b6a5621a05aa23df069b03b99d6fe4f8b4e"},
+    {"kind": "step", "logical_id": "workflow.post_estimation.step", "semantic_version": "1.0", "contract_digest": "b3c2d1011d3ea1ea6d1242b0dc9db07eeaeb5de098a53508da5ba987be032b74"},
+    {"kind": "schema", "logical_id": "workflow.post_estimation.request", "semantic_version": "1.0", "contract_digest": "ac5bee9a1a17518ebf18721bb45c7eb3bde39c7071ba88dee779e66320df0527"},
+    {"kind": "validator", "logical_id": "workflow.post_estimation.result", "semantic_version": "1.0", "contract_digest": "a4c2d5492d0b82c8a5a2b6b9ccd35580c5846e422e878f956fbf54b0f8c2927e"},
+    {"kind": "adapter", "logical_id": "workflow.post_estimation.joint_f_test", "semantic_version": "1.0", "contract_digest": "ed89903376020559cb970502e0a0ef23a3e009e426b0ba48582eafdeca5bccb9"},
+    {"kind": "adapter", "logical_id": "workflow.post_estimation.white_test", "semantic_version": "1.0", "contract_digest": "e93a7938acb14f2a8445b8653dfd16cf4ca477601686c2c422b69d4008bceba5"},
+    {"kind": "adapter", "logical_id": "workflow.post_estimation.quadratic_stationary_point", "semantic_version": "1.0", "contract_digest": "3c2c041692df172672a74decc6601420313b0c26470bdc23a7591a3ff16f9ee2"},
+    {"kind": "output", "logical_id": "workflow.post_estimation.output", "semantic_version": "1.0", "contract_digest": "e66da07820df85974691be4fc3f5eae795a16a08a397f530313d0e3511d53699"},
+    {"kind": "evidence", "logical_id": "workflow.post_estimation.evidence", "semantic_version": "1.0", "contract_digest": "cc05024da39f1b0304993e12d5e02e9a8d0e76dfae490ee0cee7a40acf97f871"},
+    {"kind": "projection", "logical_id": "workflow.post_estimation.projection", "semantic_version": "1.0", "contract_digest": "cf69309126cbd0aa575f8e18fc561a1f30ff7406685bbaa55c92e0c0cc3efab1"},
+    {"kind": "renderer", "logical_id": "workflow.post_estimation.renderer", "semantic_version": "1.0", "contract_digest": "ecd2d4f77b29ef18d91a12cbbb25520c6c7a6855ea5ebadc4e1b0ddc9f8141ee"},
+    {"kind": "policy", "logical_id": "workflow.post_estimation.policy", "semantic_version": "1.0", "contract_digest": "ed18c6f3f5d6ae05296b572b31b53c87da86734de387bcf8ae3f2138de5eb43d"}
+  ],
+  "exposure_paths": [
     {
-      "model_family": "ols",
-      "operations": [
-        {
-          "operation_id": "model.joint_f_test",
-          "output_id": "result",
-          "adapter_key": "ols.joint_f_test"
-        },
-        {
-          "operation_id": "model.white_test",
-          "output_id": "result",
-          "adapter_key": "ols.white_test"
-        },
-        {
-          "operation_id": "model.quadratic_stationary_point",
-          "output_id": "result",
-          "adapter_key": "ols.quadratic_stationary_point"
-        }
-      ]
+      "path_id": "workflow.post_estimation.joint_f_test",
+      "semantic_version": "1.0",
+      "exposure": "composition",
+      "capability_ref": {"kind": "capability", "logical_id": "workflow.post_estimation.capability", "semantic_version": "1.0", "contract_digest": "0262a790d6bcf04eb4e8f1e6bf4d54ce7847015c4ef2b20ed3bad0f6d3838aed"},
+      "operation_ref": {"kind": "operation", "logical_id": "workflow.post_estimation.model.joint_f_test", "semantic_version": "1.0", "contract_digest": "f3da2a6216d81a57bf421c3a29a96a5c056aaaf03f33370ad7dce787683631da"},
+      "step_contract_ref": {"kind": "step", "logical_id": "workflow.post_estimation.step", "semantic_version": "1.0", "contract_digest": "b3c2d1011d3ea1ea6d1242b0dc9db07eeaeb5de098a53508da5ba987be032b74"},
+      "family_contract_ref": {"kind": "family", "logical_id": "workflow.post_estimation.family.ols", "semantic_version": "1.0", "contract_digest": "f8d039e041f7c7a726bbfb7ff1b03575df84a16c6591f76a00694e68e31acdee"},
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "workflow.post_estimation.joint_f_test", "semantic_version": "1.0", "contract_digest": "ed89903376020559cb970502e0a0ef23a3e009e426b0ba48582eafdeca5bccb9"},
+      "result_contract_refs": [{"kind": "output", "logical_id": "workflow.post_estimation.output", "semantic_version": "1.0", "contract_digest": "e66da07820df85974691be4fc3f5eae795a16a08a397f530313d0e3511d53699"}],
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workflow.post_estimation.evidence", "semantic_version": "1.0", "contract_digest": "cc05024da39f1b0304993e12d5e02e9a8d0e76dfae490ee0cee7a40acf97f871"}],
+      "projection_refs": {"agent": {"kind": "projection", "logical_id": "workflow.post_estimation.projection", "semantic_version": "1.0", "contract_digest": "cf69309126cbd0aa575f8e18fc561a1f30ff7406685bbaa55c92e0c0cc3efab1"}}
+    },
+    {
+      "path_id": "workflow.post_estimation.white_test",
+      "semantic_version": "1.0",
+      "exposure": "composition",
+      "capability_ref": {"kind": "capability", "logical_id": "workflow.post_estimation.capability", "semantic_version": "1.0", "contract_digest": "0262a790d6bcf04eb4e8f1e6bf4d54ce7847015c4ef2b20ed3bad0f6d3838aed"},
+      "operation_ref": {"kind": "operation", "logical_id": "workflow.post_estimation.model.white_test", "semantic_version": "1.0", "contract_digest": "6b6ee4027364b15cc2374d8528a42f3364a8d71b618b333cb3399887b64e2f5b"},
+      "step_contract_ref": {"kind": "step", "logical_id": "workflow.post_estimation.step", "semantic_version": "1.0", "contract_digest": "b3c2d1011d3ea1ea6d1242b0dc9db07eeaeb5de098a53508da5ba987be032b74"},
+      "family_contract_ref": {"kind": "family", "logical_id": "workflow.post_estimation.family.ols", "semantic_version": "1.0", "contract_digest": "f8d039e041f7c7a726bbfb7ff1b03575df84a16c6591f76a00694e68e31acdee"},
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "workflow.post_estimation.white_test", "semantic_version": "1.0", "contract_digest": "e93a7938acb14f2a8445b8653dfd16cf4ca477601686c2c422b69d4008bceba5"},
+      "result_contract_refs": [{"kind": "output", "logical_id": "workflow.post_estimation.output", "semantic_version": "1.0", "contract_digest": "e66da07820df85974691be4fc3f5eae795a16a08a397f530313d0e3511d53699"}],
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workflow.post_estimation.evidence", "semantic_version": "1.0", "contract_digest": "cc05024da39f1b0304993e12d5e02e9a8d0e76dfae490ee0cee7a40acf97f871"}],
+      "projection_refs": {"agent": {"kind": "projection", "logical_id": "workflow.post_estimation.projection", "semantic_version": "1.0", "contract_digest": "cf69309126cbd0aa575f8e18fc561a1f30ff7406685bbaa55c92e0c0cc3efab1"}}
+    },
+    {
+      "path_id": "workflow.post_estimation.quadratic_stationary_point",
+      "semantic_version": "1.0",
+      "exposure": "composition",
+      "capability_ref": {"kind": "capability", "logical_id": "workflow.post_estimation.capability", "semantic_version": "1.0", "contract_digest": "0262a790d6bcf04eb4e8f1e6bf4d54ce7847015c4ef2b20ed3bad0f6d3838aed"},
+      "operation_ref": {"kind": "operation", "logical_id": "workflow.post_estimation.model.quadratic_stationary_point", "semantic_version": "1.0", "contract_digest": "25b846a5816641bdfbd48f679d4b8b6a5621a05aa23df069b03b99d6fe4f8b4e"},
+      "step_contract_ref": {"kind": "step", "logical_id": "workflow.post_estimation.step", "semantic_version": "1.0", "contract_digest": "b3c2d1011d3ea1ea6d1242b0dc9db07eeaeb5de098a53508da5ba987be032b74"},
+      "family_contract_ref": {"kind": "family", "logical_id": "workflow.post_estimation.family.ols", "semantic_version": "1.0", "contract_digest": "f8d039e041f7c7a726bbfb7ff1b03575df84a16c6591f76a00694e68e31acdee"},
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "workflow.post_estimation.quadratic_stationary_point", "semantic_version": "1.0", "contract_digest": "3c2c041692df172672a74decc6601420313b0c26470bdc23a7591a3ff16f9ee2"},
+      "result_contract_refs": [{"kind": "output", "logical_id": "workflow.post_estimation.output", "semantic_version": "1.0", "contract_digest": "e66da07820df85974691be4fc3f5eae795a16a08a397f530313d0e3511d53699"}],
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workflow.post_estimation.evidence", "semantic_version": "1.0", "contract_digest": "cc05024da39f1b0304993e12d5e02e9a8d0e76dfae490ee0cee7a40acf97f871"}],
+      "projection_refs": {"agent": {"kind": "projection", "logical_id": "workflow.post_estimation.projection", "semantic_version": "1.0", "contract_digest": "cf69309126cbd0aa575f8e18fc561a1f30ff7406685bbaa55c92e0c0cc3efab1"}}
     }
-  ]
+  ],
+  "adapter_declarations": [
+    {
+      "adapter_id": "workflow.post_estimation.joint_f_test",
+      "semantic_version": "1.0",
+      "request_schema_ref": {"kind": "schema", "logical_id": "workflow.post_estimation.request", "semantic_version": "1.0", "contract_digest": "ac5bee9a1a17518ebf18721bb45c7eb3bde39c7071ba88dee779e66320df0527"},
+      "executor_ref": "executor:workflow.post_estimation.joint_f_test",
+      "result_validator_ref": {"kind": "validator", "logical_id": "workflow.post_estimation.result", "semantic_version": "1.0", "contract_digest": "a4c2d5492d0b82c8a5a2b6b9ccd35580c5846e422e878f956fbf54b0f8c2927e"},
+      "output_refs": [{"kind": "output", "logical_id": "workflow.post_estimation.output", "semantic_version": "1.0", "contract_digest": "e66da07820df85974691be4fc3f5eae795a16a08a397f530313d0e3511d53699"}, {"kind": "evidence", "logical_id": "workflow.post_estimation.evidence", "semantic_version": "1.0", "contract_digest": "cc05024da39f1b0304993e12d5e02e9a8d0e76dfae490ee0cee7a40acf97f871"}]
+    },
+    {
+      "adapter_id": "workflow.post_estimation.white_test",
+      "semantic_version": "1.0",
+      "request_schema_ref": {"kind": "schema", "logical_id": "workflow.post_estimation.request", "semantic_version": "1.0", "contract_digest": "ac5bee9a1a17518ebf18721bb45c7eb3bde39c7071ba88dee779e66320df0527"},
+      "executor_ref": "executor:workflow.post_estimation.white_test",
+      "result_validator_ref": {"kind": "validator", "logical_id": "workflow.post_estimation.result", "semantic_version": "1.0", "contract_digest": "a4c2d5492d0b82c8a5a2b6b9ccd35580c5846e422e878f956fbf54b0f8c2927e"},
+      "output_refs": [{"kind": "output", "logical_id": "workflow.post_estimation.output", "semantic_version": "1.0", "contract_digest": "e66da07820df85974691be4fc3f5eae795a16a08a397f530313d0e3511d53699"}, {"kind": "evidence", "logical_id": "workflow.post_estimation.evidence", "semantic_version": "1.0", "contract_digest": "cc05024da39f1b0304993e12d5e02e9a8d0e76dfae490ee0cee7a40acf97f871"}]
+    },
+    {
+      "adapter_id": "workflow.post_estimation.quadratic_stationary_point",
+      "semantic_version": "1.0",
+      "request_schema_ref": {"kind": "schema", "logical_id": "workflow.post_estimation.request", "semantic_version": "1.0", "contract_digest": "ac5bee9a1a17518ebf18721bb45c7eb3bde39c7071ba88dee779e66320df0527"},
+      "executor_ref": "executor:workflow.post_estimation.quadratic_stationary_point",
+      "result_validator_ref": {"kind": "validator", "logical_id": "workflow.post_estimation.result", "semantic_version": "1.0", "contract_digest": "a4c2d5492d0b82c8a5a2b6b9ccd35580c5846e422e878f956fbf54b0f8c2927e"},
+      "output_refs": [{"kind": "output", "logical_id": "workflow.post_estimation.output", "semantic_version": "1.0", "contract_digest": "e66da07820df85974691be4fc3f5eae795a16a08a397f530313d0e3511d53699"}, {"kind": "evidence", "logical_id": "workflow.post_estimation.evidence", "semantic_version": "1.0", "contract_digest": "cc05024da39f1b0304993e12d5e02e9a8d0e76dfae490ee0cee7a40acf97f871"}]
+    }
+  ],
+  "projection_refs": [{"kind": "projection", "logical_id": "workflow.post_estimation.projection", "semantic_version": "1.0", "contract_digest": "cf69309126cbd0aa575f8e18fc561a1f30ff7406685bbaa55c92e0c0cc3efab1"}],
+  "renderer_refs": [{"kind": "renderer", "logical_id": "workflow.post_estimation.renderer", "semantic_version": "1.0", "contract_digest": "ecd2d4f77b29ef18d91a12cbbb25520c6c7a6855ea5ebadc4e1b0ddc9f8141ee"}],
+  "policy_refs": [{"kind": "policy", "logical_id": "workflow.post_estimation.policy", "semantic_version": "1.0", "contract_digest": "ed18c6f3f5d6ae05296b572b31b53c87da86734de387bcf8ae3f2138de5eb43d"}]
 }

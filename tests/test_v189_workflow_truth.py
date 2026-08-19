@@ -457,14 +457,23 @@ def test_post_estimation_registry_is_family_and_output_strict() -> None:
 
 
 def test_provider_manifest_is_declaration_only() -> None:
+    from workbench.contracts.common.provider import ProviderContributionV1
+
     manifest = json.loads(
         (
             Path(__file__).parents[1]
             / "backend/workbench/providers/builtin/workflow_post_estimation.json"
         ).read_text(encoding="utf-8")
     )
-    assert manifest["authority"] == "declaration_only"
-    assert manifest["execution_authority"] is False
+    contribution = ProviderContributionV1.from_dict(manifest)
+    assert contribution.provider_id == "workflow.post_estimation"
+    assert {path.family_contract_ref.logical_id for path in contribution.exposure_paths} == {
+        "workflow.post_estimation.family.ols"
+    }
+    assert all(
+        adapter.executor_ref.startswith("executor:workflow.post_estimation.")
+        for adapter in contribution.adapter_declarations
+    )
 
 
 def _evidence_result(

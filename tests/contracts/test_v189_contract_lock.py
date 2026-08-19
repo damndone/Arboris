@@ -3229,6 +3229,30 @@ def test_catalog_load_order_and_digest_are_deterministic() -> None:
     assert first.catalog_digest == sha256_canonical(first.digest_payload())
 
 
+def test_workflow_post_estimation_declaration_is_catalog_admissible() -> None:
+    _, _, _, _, load_builtin_catalog = _provider_contract_api()
+
+    catalog = load_builtin_catalog()
+    provider = next(
+        item for item in catalog.providers if item.provider_id == "workflow.post_estimation"
+    )
+
+    assert {path.path_id for path in provider.exposure_paths} == {
+        "workflow.post_estimation.joint_f_test",
+        "workflow.post_estimation.white_test",
+        "workflow.post_estimation.quadratic_stationary_point",
+    }
+    assert {
+        path.family_contract_ref.logical_id
+        for path in provider.exposure_paths
+        if path.family_contract_ref is not None
+    } == {"workflow.post_estimation.family.ols"}
+    assert all(
+        adapter.executor_ref.startswith("executor:workflow.post_estimation.")
+        for adapter in provider.adapter_declarations
+    )
+
+
 def test_duplicate_versionless_unresolved_or_path_like_refs_fail_closed(
     tmp_path: Path,
 ) -> None:
