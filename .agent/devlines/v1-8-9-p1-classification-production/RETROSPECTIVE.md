@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 5/22 (22.7%; 22.7 per 100 events)
+- Failure frequency: 5/27 (18.5%; 18.5 per 100 events)
 - Repeat rate: 0/5 (0.0%)
 - Recurrence rate: 0/5 (0.0%)
 - MTTR: median=0 ms (sample=2; unresolved=3)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/1 (0.0%)
+- Gate waste rate: 0/2 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -64,6 +64,7 @@ COMPLETED
 
 - Exercise each authority, split, policy, and evidence boundary before implementing its smallest green path.
 - Expose only typed production seams and fail closed before any helper-only fitting can run.
+- Keep consumer fixtures at the same typed identity boundary as production packets; do not weaken the validator to accommodate stale tests.
 - Keep each reviewer blocker as a behavior-level RED probe and implement the missing production boundary instead of weakening the assertion.
 - Keep the package-local runtime join typed and explicit, and leave host bootstrap composition as a separate integration boundary.
 - Make the typed task split profile drive the executable manifest before any model fit.
@@ -94,3 +95,8 @@ COMPLETED
 - #20: `ab6e58d7-3f2a-44d0-a742-0bcdf1d69b1c` | 2026-08-19T18:14:28.000Z | REVIEW/classification_production_red_probes | incident=`3d8f45b1-30a4-49c6-99f0-7d1ea09d13c4` | lesson_key=`classification-production-review-red` | event_sha256=`92d80e39cbb939eb886c1c65b0cc425de9daa6773cbbdf564dfa727c5a511df1`
 - #21: `bd2f8a9e-2ca0-46a6-9b7b-f8bdf4d7e591` | 2026-08-19T18:15:50.000Z | GATE/classification_production_local_verification_green | incident=`0e7bcf4f-6eb8-4b31-9a40-711789c8a630` | lesson_key=`classification-production-local-gate` | event_sha256=`b51e54637a207d48b052588422c3f3ae2e632dc372829196c5326945153bab21`
 - #22: `c1e4a6b3-6d7f-4c88-8c7c-7f51a4f8e213` | 2026-08-19T18:16:30.000Z | STATE_CHANGE/classification_production_scope_complete | incident=`1a5f2f2c-fb9c-4d0e-83e0-62af0e63d02a` | lesson_key=`classification-production-scope-complete` | event_sha256=`b485b1a4324e804f72f9b0a5e581111dd6e06038edb75d3baac65d06e7b6214e`
+- #23: `82566738-51ae-44f4-8d7f-eff629fe33c7` | 2026-08-19T18:21:42.757Z | STATE_CHANGE/context_rescope_required | incident=`f3b7db84-83ea-455a-8ac5-1a970fd7ddbc` | lesson_key=`context-pack-rescope` | event_sha256=`d76e2c95ef3dfabba8715153a2b34a7b082e09b065cc7c3800742a31062811e1`
+- #24: `9453bc52-19e1-4263-850e-91fa71baced7` | 2026-08-19T18:21:42.768Z | STATE_CHANGE/context_rescoped | incident=`836d8f7b-4d27-4542-84c9-d8006a898197` | lesson_key=`context-pack-rescope` | event_sha256=`be06613ccfe41c6e7f72a421d84c42ace0750b36dc5377b8bed19349a34fa415`
+- #25: `d4b6c2ef-4d1e-4c9f-8d61-2a19bb4c7e80` | 2026-08-19T18:23:06.000Z | REVIEW/workspace_context_typed_fixture_red | incident=`4f2d8e76-1fbb-4a77-9c88-11a8efbb0ce5` | lesson_key=`workspace-context-typed-fixture-red` | event_sha256=`f4004bb7873d5242ab89babd2b57ff0ed3eddce9ac3f7cf33b36162600f3a179`
+- #26: `e7a1c3d2-7b54-4f8e-9a60-6c1d2e5f8b93` | 2026-08-19T18:23:30.000Z | GATE/workspace_context_typed_fixture_green | incident=`5e4a1d7c-91f0-4b2e-8d36-0af3c9b7e2a1` | lesson_key=`workspace-context-typed-fixture-green` | event_sha256=`dbc215358f9a1e9980892cc66f2aefe6bb913c7037be34be774289113b557fe5`
+- #27: `f8c2a7d1-5e49-4b63-91f0-2d7e8a4c6b35` | 2026-08-19T18:24:00.000Z | STATE_CHANGE/workspace_context_fixture_scope_complete | incident=`6a3d1f8b-2e74-4c90-a5b1-7f0d9e2c4a68` | lesson_key=`workspace-context-fixture-scope-complete` | event_sha256=`a3fcb031aa3383cc99d196f27716a676a2327026adae6cec6d9a63cdb450a951`

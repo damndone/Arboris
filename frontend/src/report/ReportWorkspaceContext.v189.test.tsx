@@ -43,7 +43,13 @@ const CLASSIFICATION_EVIDENCE_SCHEMA = "workbench.prediction.classification-evid
 const evidencePacket = {
   payload_schema: CLASSIFICATION_EVIDENCE_SCHEMA,
   schema_version: 1,
-  task: { task_type: "binary", positive_class: "yes", class_support: { no: 4, yes: 4 } },
+  status: "validated",
+  task: {
+    task_type: "binary",
+    positive_class: "yes",
+    class_support: { no: 4, yes: 4 },
+    task_hash: "sha256:" + "t".repeat(64),
+  },
   split: { profile: "iid_stratified", split_hash: "sha256:split" },
   metrics: { accuracy: { point_estimate: 0.75, validation_level: "validated" } },
   calibration: { status: "descriptive" },
@@ -55,7 +61,33 @@ const evidencePacket = {
   shift: { status: "descriptive" },
   decision_policy: { selection_status: "SCENARIOS_ONLY" },
   blocked_reasons: [],
-  evidence_refs: { holdout: "classification-holdout:1" },
+  evidence_refs: {
+    task: "classification-task:sha256:" + "t".repeat(64),
+    split: "classification-split:sha256:split",
+    holdout: "classification-holdout:sha256:" + "c".repeat(64),
+    release_plan: "classification-release-plan:sha256:" + "c".repeat(64),
+  },
+  holdout: {
+    status: "sealed",
+    release_plan_hash: "sha256:" + "c".repeat(64),
+    release_count: 0,
+    release_plan: {
+      plan_hash: "sha256:" + "c".repeat(64),
+      task_hash: "sha256:" + "t".repeat(64),
+      split_hash: "sha256:split",
+      model_id: "logistic_regression",
+      calibration_hash: "sha256:calibration",
+      policy_hash: "sha256:policy",
+    },
+  },
+  c0_evidence_envelope: {},
+  c0_consumer_projection: {},
+  foundation_status: {
+    execution_status: "completed",
+    availability: "available",
+    completeness_status: "complete",
+    producer_status: "validated",
+  },
 } as const;
 
 function indexedClassificationItem(overrides: Record<string, unknown> = {}): Record<string, unknown> {
