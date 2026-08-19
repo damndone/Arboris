@@ -9,7 +9,7 @@ import {
   type ReportEvidenceProjection,
 } from "./factTable";
 import { readReportEvidenceProjection } from "./factTable";
-import { FamilyEvidence, type FamilyModelResult } from "./FamilyEvidence";
+import { FamilyEvidence } from "./FamilyEvidence";
 import { ReportViewContent } from "./ReportView";
 
 const mockForest = vi.hoisted(() => ({ current: null as unknown }));
@@ -27,12 +27,6 @@ vi.mock("./ReportWorkspaceContext", () => ({
   useReportWorkspaceOptional: () => mockWorkspace.current,
 }));
 
-const rawFamilyResult = {
-  model_id: "ordinal_logit_1",
-  model_type: "ordinal_logit",
-  odds_ratios: { leaked_scalar: 9.9 },
-} as unknown as FamilyModelResult;
-
 const rawRegressionResult = {
   model_id: "raw_ols_1",
   model_type: "ols",
@@ -45,7 +39,7 @@ const rawRegressionResult = {
       ci_upper: 123.7,
     },
   },
-} as unknown as FamilyModelResult;
+};
 
 const committedProjection: ReportEvidenceProjection = {
   schemaVersion: 1,
@@ -155,8 +149,6 @@ describe("Report evidence boundary v1.8.9", () => {
     expect(buildReportEvidenceFacts(unavailable)).toEqual([]);
     render(
       <FamilyEvidence
-        modelResults={[rawFamilyResult]}
-        artifacts={{ raw: { leaked_scalar: 9.9 } }}
         evidence={unavailable}
       />,
     );
@@ -173,8 +165,6 @@ describe("Report evidence boundary v1.8.9", () => {
   it("does not render raw family packets when the typed report boundary is omitted", () => {
     render(
       <FamilyEvidence
-        modelResults={[rawFamilyResult]}
-        artifacts={{ raw: { leaked_scalar: 9.9 } }}
       />,
     );
 
@@ -193,8 +183,6 @@ describe("Report evidence boundary v1.8.9", () => {
 
     render(
       <FamilyEvidence
-        modelResults={[rawFamilyResult]}
-        artifacts={{ raw: { leaked_scalar: 9.9 } }}
         evidence={committedProjection}
       />,
     );
@@ -220,7 +208,6 @@ describe("Report evidence boundary v1.8.9", () => {
 
     render(
       <FamilyEvidence
-        modelResults={[rawFamilyResult]}
         evidence={validatedProjection}
       />,
     );
@@ -261,7 +248,7 @@ describe("Report evidence boundary v1.8.9", () => {
       resultTableExporting: false,
       postEstimationLoadError: null,
       predictionEvidence: null,
-      modelResults: [rawRegressionResult, rawFamilyResult],
+      modelResults: [rawRegressionResult],
       familyEvidenceArtifacts: { raw: { leaked_scalar: 9.9 } },
       reportEvidenceProjection: committedProjection,
       reportExportAllowed: true,

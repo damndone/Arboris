@@ -113,7 +113,32 @@ describe("TableView", () => {
     expect(artifactCalls.current[0]).toEqual(["/tmp/from-slug", "run-slug"]);
   });
 
-  it("renders a coefficient table from model_results", async () => {
+  it("does not display raw model/post-estimation fields or load artifact JSON", async () => {
+    mockDetail.current = {
+      model_results: [{
+        model_id: "forged-model",
+        model_type: "ols",
+        coefficients: { leaked: { estimate: 999.0 } },
+      }],
+      post_estimation_results: [{
+        artifact_id: "forged-post-estimation",
+        artifact_type: "post_estimation",
+        payload: { leaked: 888.0 },
+      }],
+      artifact_counts: {},
+    } as unknown as RunDetail;
+
+    renderTable();
+
+    expect(await screen.findByTestId("typed-evidence-unavailable")).toBeInTheDocument();
+    expect(screen.queryByTestId("table-view-coefficients")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("table-view-post-estimation")).not.toBeInTheDocument();
+    expect(screen.queryByText("999")).not.toBeInTheDocument();
+    expect(screen.queryByText("888")).not.toBeInTheDocument();
+    expect(artifactJsonMock).not.toHaveBeenCalled();
+  });
+
+  it.skip("legacy raw model_results coefficient table is retired", async () => {
     mockDetail.current = {
       model_results: [
         {
@@ -146,7 +171,7 @@ describe("TableView", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
-  it("renders multiple model_results side-by-side with configurable stars, labels, CI, and source ids", async () => {
+  it.skip("legacy raw model_results regression table is retired", async () => {
     mockDetail.current = {
       model_results: [
         {
@@ -211,7 +236,7 @@ describe("TableView", () => {
     });
   });
 
-  it("consumes typed model-family evidence in the Table view", async () => {
+  it.skip("legacy model-family packets are retired from the Table view", async () => {
     mockDetail.current = {
       model_results: [
         {
@@ -241,7 +266,7 @@ describe("TableView", () => {
     expect(evidence).toHaveTextContent("Predicted probabilities");
   });
 
-  it("states when Table 1, statistical evidence, and labels are not provided by RunDetail", async () => {
+  it.skip("legacy RunDetail table extensions are retired from the Table view", async () => {
     mockDetail.current = {
       model_results: [
         {
@@ -260,7 +285,7 @@ describe("TableView", () => {
     expect(status).toHaveTextContent("Variable labels: not provided; using variable names");
   });
 
-  it("consumes the persisted statistical evidence packet when the artifact is present", async () => {
+  it.skip("legacy artifact JSON statistical evidence is retired from the Table view", async () => {
     mockDetail.current = {
       model_results: [
         {
@@ -317,7 +342,7 @@ describe("TableView", () => {
     );
   });
 
-  it("renders declared post-estimation results so the answer is on screen", async () => {
+  it.skip("legacy raw post-estimation results are retired from the Table view", async () => {
     mockDetail.current = {
       model_results: [],
       artifact_counts: {},
@@ -372,7 +397,7 @@ describe("TableView", () => {
     expect(screen.queryByTestId("table-view-post-estimation")).toBeNull();
   });
 
-  it("renders the canonical LMM packet coefficient and diagnostic", async () => {
+  it.skip("legacy raw LMM packets are retired from the Table view", async () => {
     mockDetail.current = {
       model_results: [completePublicModelResult()],
       artifact_counts: {},
@@ -467,7 +492,7 @@ describe("TableView", () => {
     expect(screen.getByText(/1 chart artifacts loaded · 2 displayed panels/)).toBeInTheDocument();
   });
 
-  it("renders grouped statistical exploration results as a readable table", async () => {
+  it.skip("legacy statistical-exploration artifact JSON is retired from the Table view", async () => {
     mockArtifacts.current = {
       groups: [
         {
@@ -527,7 +552,7 @@ describe("TableView", () => {
       .toHaveAttribute("tabindex", "0");
   });
 
-  it("renders a pooled correlation matrix with variable names, not a download hint", async () => {
+  it.skip("legacy correlation artifact JSON is retired from the Table view", async () => {
     // `corr` returns `variables` as a list; the mapping/group branches skipped
     // it and the whole matrix reached the user as
     // "Result is available as the downloadable artifact."

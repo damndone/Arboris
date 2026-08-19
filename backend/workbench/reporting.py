@@ -8,7 +8,11 @@ from dataclasses import dataclass, field
 from jinja2 import Environment, FileSystemLoader
 
 from .artifacts import register_artifact, write_bytes_durable
-from .report_export import EvidenceProjectionV1, _REPORT_FACTORY_TOKEN
+from .report_export import (
+    EvidenceProjectionV1,
+    _REPORT_FACTORY_TOKEN,
+    _freeze_wire_value,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +39,7 @@ class ReportDocumentWriterV1:
             raise TypeError("ReportDocumentWriterV1 requires a typed report payload")
         if type(projection) is not EvidenceProjectionV1 or getattr(projection, "_owner", None) is not _owner:
             raise TypeError("ReportDocumentWriterV1 requires an owner-issued projection")
-        object.__setattr__(self, "view_model", dict(view_model))
+        object.__setattr__(self, "view_model", _freeze_wire_value(dict(view_model)))
         object.__setattr__(self, "projection", projection)
         object.__setattr__(self, "canonical_run_root", canonical_run_root.expanduser().resolve(strict=False))
         object.__setattr__(self, "_owner", _owner)
@@ -59,6 +63,9 @@ class ReportDocumentWriterV1:
         owner: object,
         canonical_run_root: Path,
     ) -> "ReportDocumentWriterV1":
+        if not isinstance(view_model, Mapping):
+            raise TypeError("ReportDocumentWriterV1 requires a bound typed report payload")
+        _validate_bound_report_view_model(view_model, projection)
         return cls(
             view_model=dict(view_model),
             projection=projection,
@@ -67,12 +74,54 @@ class ReportDocumentWriterV1:
             _owner=owner,
         )
 
+
+def _validate_bound_report_view_model(
+    view_model: Mapping[str, Any],
+    projection: EvidenceProjectionV1,
+) -> None:
+    """Require citable report fields to be an exact owner-issued projection."""
+
+    wire = projection.wire
+    for key in (
+        "schemaVersion",
+        "projectionId",
+        "consumerId",
+        "consumerVersion",
+        "artifactRef",
+        "commitId",
+        "envelopeDigest",
+        "status",
+        "validationStatus",
+        "projectionDigest",
+    ):
+        if view_model.get(key) != wire.get(key):
+            raise TypeError("Report document payload is not bound to the owner-issued projection")
+    if view_model.get("facts") != list(wire.get("facts", ())):
+        raise TypeError("Report document facts are not bound to the owner-issued projection")
+    provenance = view_model.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raise TypeError("Report document provenance is required")
+    for key in ("artifactRef", "commitId", "envelopeRef"):
+        if provenance.get(key) != wire.get(key):
+            raise TypeError("Report document provenance is not bound to the owner-issued projection")
+    for key in (
+        "actorRef",
+        "projectRef",
+        "sessionRef",
+        "scopeRef",
+        "runId",
+        "modelRunId",
+        "confirmationRef",
+    ):
+        if view_model.get(key) != wire.get(key):
+            raise TypeError("Report document identity is not bound to the owner-issued projection")
+
 def _normalize_to_view_model(data: dict[str, Any]) -> dict[str, Any]:
     if "critical_errors" in data:
         return data
     return {
         "title": data.get("title", "Econometrics Report"),
-        "facts": data.get("facts", []),
+        "facts": data.get("presentation_facts", data.get("facts", [])),
         "critical_errors": [
             {"text": i.get("message", str(i)), "code": i.get("code", ""), "severity": i.get("severity", "")}
             for i in data.get("warnings", []) if isinstance(i, dict) and i.get("severity") == "BLOCKER"

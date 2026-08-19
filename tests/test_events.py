@@ -4,7 +4,57 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from fastapi.responses import StreamingResponse
+
+
+def test_devline_verify_rejects_reverse_event_timestamps() -> None:
+    from workbench.development_control.events import (
+        EventValidationError,
+        ZERO_SHA256,
+        _verify_events,
+        validate_event,
+    )
+
+    common = {
+        "schema_version": 1,
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "type": "REVIEW",
+        "subtype": "timestamp_order",
+        "stage": "review",
+        "cause_status": "known",
+        "cause": "test",
+        "evidence": {
+            "kind": "review",
+            "ref": "tests/test_events.py",
+            "sha256": "a" * 64,
+            "observed_at": "2026-08-19T22:40:00.000Z",
+        },
+        "impact": {"status": "invalid_order"},
+        "preventability": "preventable",
+        "resolution": "open",
+        "lesson": "verify event order",
+        "incident_id": "22222222-2222-4222-8222-222222222222",
+        "lesson_key": "timestamp-order",
+        "links": ["tests/test_events.py"],
+    }
+    first = validate_event(
+        {**common, "timestamp": "2026-08-19T22:41:00.000Z"},
+        previous_sha256=ZERO_SHA256,
+    )
+    second = validate_event(
+        {
+            **common,
+            "event_id": "33333333-3333-4333-8333-333333333333",
+            "incident_id": "44444444-4444-4444-8444-444444444444",
+            "timestamp": "2026-08-19T22:40:59.999Z",
+        },
+        previous_sha256=first["event_sha256"],
+    )
+
+    with pytest.raises(EventValidationError, match="timestamp"):
+        _verify_events([first, second])
 
 
 def test_event_manager_rehydrates_durable_run_history_after_memory_reset(tmp_path: Path) -> None:

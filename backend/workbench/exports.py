@@ -42,7 +42,7 @@ def export_pdf(
         pdf.setFont("Helvetica-Bold", 14)
         pdf.drawString(72, y, str(report.get("title", "Report")))
         y -= 32
-        y = _draw_section(pdf, "Facts", report.get("facts", []), y)
+        y = _draw_section(pdf, "Facts", report.get("presentation_facts", report.get("facts", [])), y)
         y = _draw_section(pdf, "Descriptive statistics", report.get("descriptive_stats", []), y)
         regression_table = report.get("regression_table")
         if isinstance(regression_table, Mapping):

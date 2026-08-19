@@ -18,7 +18,6 @@ import {
 } from "./RegressionTable";
 import {
   FamilyEvidence,
-  type FamilyModelResult,
 } from "./FamilyEvidence";
 import {
   ClassificationEvidence,
@@ -277,7 +276,6 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         Legacy model_results: NON-AUTHORITATIVE / UNAVAILABLE for citable Report results.
       </p>
       <FamilyEvidence
-        modelResults={[] as FamilyModelResult[]}
         evidence={workspace.reportEvidenceProjection}
       />
       {classificationEvidenceArtifact !== undefined && (

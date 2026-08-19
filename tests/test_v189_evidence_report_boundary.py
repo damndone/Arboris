@@ -6,6 +6,7 @@ import json
 import copy
 from contextlib import contextmanager
 from pathlib import Path
+from uuid import uuid4
 from collections.abc import Iterator
 
 from fastapi.testclient import TestClient
@@ -181,7 +182,7 @@ def _server_owned_evidence(
             separators=(",", ":"),
             sort_keys=True,
         ).encode("utf-8")
-        capability = ServerOwnedReportEvidencePersistenceV1(
+        capability = ServerOwnedReportEvidencePersistenceV1._from_host(
             store,
             registry,
             receipt,
@@ -230,12 +231,8 @@ def _report_projection_wire() -> dict[str, object]:
 
 
 def _owner_wire(owner: ServerOwnedReportEvidencePersistenceV1, wire: dict[str, object]) -> dict[str, object]:
-    wire["commitId"] = owner.commit_id
-    wire["projectionId"] = f"report:{owner.commit_id}"
-    provenance = wire.get("provenance")
-    if isinstance(provenance, dict):
-        provenance["commitId"] = owner.commit_id
-    return wire
+    del wire
+    return dict(owner._canonical_report_wire())  # type: ignore[attr-defined]
 
 
 def _owner_issued_projection(tmp_path: Path):
@@ -250,12 +247,47 @@ def _owner_issued_document_writer(
     report: dict[str, object],
     run_root: Path,
 ):
-    with _server_owned_evidence(tmp_path / "owner-store") as (record, _binding, owner):
+    with _server_owned_evidence(
+        tmp_path / f"owner-store-{uuid4().hex}",
+        run_id=run_root.name,
+        model_run_id=run_root.name,
+        canonical_project_root=run_root.parent.parent,
+    ) as (record, _binding, owner):
         wire = _owner_wire(owner, _report_projection_wire())
         wire["envelopeDigest"] = record.envelope_digest
         projection = owner.issue_report_projection(wire)
+        authority_fields = {
+            "schemaVersion",
+            "projectionId",
+            "consumerId",
+            "consumerVersion",
+            "artifactRef",
+            "envelopeRef",
+            "commitId",
+            "envelopeDigest",
+            "status",
+            "executionStatus",
+            "availability",
+            "completenessStatus",
+            "validationStatus",
+            "validationSummary",
+            "facts",
+            "sections",
+            "provenance",
+            "projectionDigest",
+            "actorRef",
+            "projectRef",
+            "sessionRef",
+            "scopeRef",
+            "runId",
+            "modelRunId",
+            "confirmationRef",
+        }
+        bound_report = dict(wire)
+        bound_report["presentation_facts"] = report.get("facts", [])
+        bound_report.update({key: value for key, value in report.items() if key not in authority_fields and key != "facts"})
         return owner.issue_report_document_writer(
-            report,
+            bound_report,
             projection,
             canonical_run_root=run_root,
         )
@@ -892,6 +924,94 @@ def test_round_three_owner_factory_rejects_forged_commit_digest_and_identity(
             candidate[key] = forged
             with pytest.raises(EvidenceProjectionError, match="OWNER_CONTEXT_MISMATCH|owner|projection"):
                 owner.issue_report_projection(candidate)
+
+
+def test_round_four_owner_rejects_forged_facts_and_projection_digest(
+    tmp_path: Path,
+) -> None:
+    with _server_owned_evidence(tmp_path / "owner-store") as (record, _binding, owner):
+        valid_wire = _owner_wire(owner, _report_projection_wire())
+        valid_wire["envelopeDigest"] = record.envelope_digest
+        for mutation in (
+            {"facts": [{"factId": "fact-forged", "statisticId": "estimate", "value": 999.0}]},
+            {"projectionDigest": "f" * 64},
+        ):
+            candidate = dict(valid_wire)
+            candidate.update(mutation)
+            with pytest.raises(EvidenceProjectionError, match="PROJECTION|FACT|DIGEST|CANONICAL|canonical|owner"):
+                owner.issue_report_projection(candidate)
+
+
+def test_round_four_projection_wire_is_deeply_immutable(tmp_path: Path) -> None:
+    projection = _owner_issued_projection(tmp_path)
+
+    with pytest.raises(TypeError):
+        projection.wire["commitId"] = "forged"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        projection.wire["facts"][0]["value"] = 999.0  # type: ignore[index]
+
+
+def test_round_four_writer_factory_rejects_raw_tables_and_unbound_view_model(
+    tmp_path: Path,
+) -> None:
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        canonical_project_root=tmp_path / "canonical-project",
+    ) as (record, _binding, owner):
+        valid_wire = _owner_wire(owner, _report_projection_wire())
+        valid_wire["envelopeDigest"] = record.envelope_digest
+        projection = owner.issue_report_projection(valid_wire)
+        with pytest.raises(TypeError, match="raw|typed|server-owned|capability"):
+            owner.issue_report_evidence_writer(
+                projection,
+                sections=("facts",),
+                table_rows={"facts": [{"value": 999.0}]},
+            )
+        with pytest.raises(TypeError, match="bound|typed|server-owned|projection"):
+            owner.issue_report_document_writer(
+                {"title": "forged"},
+                projection,
+                canonical_run_root=tmp_path / "canonical-project" / "runs" / "run-1",
+            )
+
+
+def test_round_four_document_writer_rejects_a_foreign_run_root(tmp_path: Path) -> None:
+    canonical_root = tmp_path / "canonical-project"
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        canonical_project_root=canonical_root,
+    ) as (record, _binding, owner):
+        valid_wire = _owner_wire(owner, _report_projection_wire())
+        valid_wire["envelopeDigest"] = record.envelope_digest
+        projection = owner.issue_report_projection(valid_wire)
+        with pytest.raises(TypeError, match="root|owner|canonical"):
+            owner.issue_report_document_writer(
+                {"title": "forged"},
+                projection,
+                canonical_run_root=tmp_path / "foreign-project" / "runs" / "run-1",
+            )
+
+
+def test_round_four_index_cannot_synchronize_forged_facts_or_digest(
+    tmp_path: Path,
+) -> None:
+    with _server_owned_evidence(tmp_path) as (record, binding, capability):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["facts"] = [{"factId": "fact-forged", "statisticId": "estimate", "value": 999.0}]
+        indexed_artifact["projectionDigest"] = "f" * 64
+        payload["facts"] = [{"factId": "fact-forged", "statisticId": "estimate", "value": 999.0}]
+        payload["projectionDigest"] = "f" * 64
+
+        view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=capability,
+        )
+
+    assert view["status"] == "blocked"
+    assert view["reasonCode"] in {"REPORT_EVIDENCE_FACTS_MISMATCH", "REPORT_EVIDENCE_PROJECTION_DIGEST_MISMATCH"}
+    assert view["facts"] == []
 
 
 def test_copied_valid_report_pair_in_foreign_project_root_is_typed_rejected(

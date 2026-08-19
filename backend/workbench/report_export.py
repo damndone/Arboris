@@ -23,6 +23,7 @@ from typing import Any
 from xml.sax.saxutils import escape as xml_escape
 
 from .artifacts import read_json
+from .canonical import sha256_canonical
 
 FIGURE_MARKER = re.compile(r"\[\[fig:([A-Za-z0-9._-]+)\]\]")
 _HEADING = re.compile(r"^(#{1,4})\s+(.*)$")
@@ -37,11 +38,52 @@ class ReportExportError(ValueError):
 _REPORT_FACTORY_TOKEN = object()
 
 
+class _ImmutableDict(dict[str, Any]):
+    """JSON-compatible recursively immutable mapping used at the report wire."""
+
+    __slots__ = ()
+
+    def _reject(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("report evidence wire is immutable")
+
+    __setitem__ = _reject
+    __delitem__ = _reject
+    clear = _reject
+    pop = _reject
+    popitem = _reject
+    setdefault = _reject
+    update = _reject
+    __ior__ = _reject
+
+
+def _freeze_wire_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        frozen = _ImmutableDict()
+        dict.update(
+            frozen,
+            {key: _freeze_wire_value(item) for key, item in value.items()},
+        )
+        return frozen
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_wire_value(item) for item in value)
+    return value
+
+
+def report_projection_digest(wire: Mapping[str, Any]) -> str:
+    """Hash every canonical projection field except the digest itself."""
+
+    if not isinstance(wire, Mapping):
+        raise TypeError("report projection digest requires a mapping")
+    return sha256_canonical(
+        {key: value for key, value in wire.items() if key != "projectionDigest"}
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceProjectionV1:
     """Admitted, immutable Report projection used by every export writer."""
 
-    wire: dict[str, Any]
+    wire: Mapping[str, Any]
     _owner: object | None = field(init=False, repr=False, compare=False, default=None)
 
     def __init__(
@@ -55,7 +97,7 @@ class EvidenceProjectionV1:
             raise TypeError("EvidenceProjectionV1 is server-owned; use the owner capability factory")
         if not isinstance(wire, Mapping):
             raise TypeError("EvidenceProjectionV1 requires a mapping at its typed admission seam")
-        object.__setattr__(self, "wire", dict(wire))
+        object.__setattr__(self, "wire", _freeze_wire_value(wire))
         object.__setattr__(self, "_owner", _owner)
 
     @classmethod
@@ -131,12 +173,14 @@ class EvidenceProjectionV1:
             if isinstance(provenance.get(key), str) and provenance[key] != wire[key]:
                 raise ReportExportError("REPORT_EVIDENCE_PROVENANCE_MISMATCH")
         projection_digest = wire.get("projectionDigest")
-        if projection_digest is not None and (
+        if (
             not isinstance(projection_digest, str)
             or len(projection_digest) != 64
             or any(char not in "0123456789abcdef" for char in projection_digest)
         ):
             raise ReportExportError("REPORT_EVIDENCE_PROJECTION_DIGEST_INVALID")
+        if projection_digest != report_projection_digest(wire):
+            raise ReportExportError("REPORT_EVIDENCE_PROJECTION_DIGEST_MISMATCH")
         return cls(wire=wire, _factory_token=_REPORT_FACTORY_TOKEN, _owner=owner)
 
 
@@ -147,12 +191,6 @@ class ReportEvidenceWriterV1:
     projection: EvidenceProjectionV1
     sections: tuple[str, ...] = ("facts",)
     tables_override: dict[str, tuple[dict[str, Any], ...]] | None = None
-    _server_table_rows: dict[str, tuple[dict[str, Any], ...]] | None = field(
-        init=False,
-        repr=False,
-        compare=False,
-        default=None,
-    )
 
     def __init__(
         self,
@@ -167,14 +205,13 @@ class ReportEvidenceWriterV1:
             raise TypeError("ReportEvidenceWriterV1 is server-owned; use the owner capability factory")
         if type(projection) is not EvidenceProjectionV1:
             raise TypeError("ReportEvidenceWriterV1 requires EvidenceProjectionV1")
-        if tables_override is not None:
+        if tables_override is not None or _server_table_rows is not None:
             raise TypeError("ReportEvidenceWriterV1 rejects caller-owned raw tables")
         if not sections or any(type(section) is not str or not section.strip() for section in sections):
             raise TypeError("ReportEvidenceWriterV1 requires named typed sections")
         object.__setattr__(self, "projection", projection)
         object.__setattr__(self, "sections", tuple(sections))
         object.__setattr__(self, "tables_override", None)
-        object.__setattr__(self, "_server_table_rows", _server_table_rows)
 
     @classmethod
     def from_projection(
@@ -199,36 +236,14 @@ class ReportEvidenceWriterV1:
             raise TypeError("ReportEvidenceWriterV1 requires an owner-issued projection")
         normalized_rows: dict[str, tuple[dict[str, Any], ...]] | None = None
         if table_rows is not None:
-            if not isinstance(table_rows, Mapping):
-                raise TypeError("server table rows must be a mapping")
-            normalized_rows = {}
-            for name, rows in table_rows.items():
-                if not isinstance(name, str) or not name.strip() or not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
-                    raise TypeError("server table rows must be bounded named sequences")
-                copied_rows: list[dict[str, Any]] = []
-                for row in rows:
-                    if not isinstance(row, Mapping):
-                        raise TypeError("server table rows must contain mappings")
-                    copied_rows.append(dict(row))
-                normalized_rows[name] = tuple(copied_rows)
+            raise TypeError("ReportEvidenceWriterV1 rejects caller-owned raw tables")
         return cls(
             projection=projection,
             sections=sections,
             _factory_token=_REPORT_FACTORY_TOKEN,
-            _server_table_rows=normalized_rows,
         )
 
     def tables(self) -> dict[str, list[dict[str, Any]]]:
-        if self._server_table_rows is not None:
-            return {
-                name: [dict(row) for row in rows]
-                for name, rows in self._server_table_rows.items()
-            }
-        if self.tables_override is not None:
-            return {
-                name: [dict(row) for row in rows]
-                for name, rows in self.tables_override.items()
-            }
         facts = self.projection.wire["facts"]
         rows = [
             {
@@ -686,6 +701,7 @@ __all__ = [
     "EvidenceProjectionV1",
     "ReportEvidenceWriterV1",
     "ReportExportError",
+    "report_projection_digest",
     "export_report",
     "render_report_html",
     "render_report_docx",

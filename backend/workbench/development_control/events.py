@@ -430,6 +430,7 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def _verify_events(events: list[dict[str, Any]]) -> None:
     seen_ids: set[str] = set()
     previous_sha256 = ZERO_SHA256
+    previous_timestamp: datetime | None = None
     for index, event in enumerate(events, start=1):
         event_id = event.get("event_id")
         if event_id in seen_ids:
@@ -437,8 +438,14 @@ def _verify_events(events: list[dict[str, Any]]) -> None:
         validated = validate_event(event, previous_sha256=previous_sha256)
         if validated != event:
             raise EventValidationError(f"events.jsonl line {index} changed during validation")
+        timestamp = datetime.fromisoformat(validated["timestamp"].replace("Z", "+00:00"))
+        if previous_timestamp is not None and timestamp <= previous_timestamp:
+            raise EventValidationError(
+                f"event timestamps must be strictly increasing at line {index}"
+            )
         seen_ids.add(event_id)
         previous_sha256 = validated["event_sha256"]
+        previous_timestamp = timestamp
 
 
 def _write_all(fd: int, content: bytes) -> None:

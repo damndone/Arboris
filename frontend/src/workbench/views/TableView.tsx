@@ -24,35 +24,25 @@ import { useForest } from "../ForestContext";
 import { useProjectRootOptional } from "../ProjectRootContext";
 import {
   artifactDownloadUrl,
-  fetchArtifactJson,
   fetchRunArtifacts,
   fetchRunDetail,
 } from "../../api";
 import type {
   ArtifactGroup,
   ArtifactItem,
-  ModelResult,
-  PostEstimationResult,
   RunDetail,
 } from "../../api";
-import { buildRepeatedMeasuresViewModel } from "../repeatedMeasures/repeatedMeasuresViewModel";
 import { askAiAboutFigure, fetchFigureAiContext, figureAsDataUrl } from "./figureAi";
 import { fetchLlmConfig } from "../../llm/llmApi";
 import type { LlmConfigInfo } from "../../llm/llmTypes";
 import { renderMarkdown } from "../../report/markdown";
-import {
-  buildRegressionTablePacket,
-  DEFAULT_SIGNIFICANCE_LEVELS,
-  RegressionTable,
-} from "../../report/RegressionTable";
-import type { SignificanceLevels } from "../../report/RegressionTable";
-import { FamilyEvidence, type FamilyModelResult } from "../../report/FamilyEvidence";
+import { FamilyEvidence } from "../../report/FamilyEvidence";
+import { readReportEvidenceProjection } from "../../report/factTable";
 import { ArmaGarchChartGallery } from "../../runResult/ArmaGarchChartGallery";
 import {
   ARMA_GARCH_CHART_IDS,
   useArmaGarchCharts,
 } from "../../runResult/useArmaGarchCharts";
-import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
 import { resolveTableRunScope } from "./tableRunScope";
 import { PredictionResearchEvidenceCard } from "../../runResult/PredictionResearchEvidenceCard";
 
@@ -63,513 +53,10 @@ function shortRunId(id: string): string {
   return tail.slice(0, 8);
 }
 
-function fmt(n: number | null | undefined): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  return String(Number(n.toPrecision(4)));
-}
-
-function confidenceIntervalText(coefficient: {
-  ci_lower?: number | null;
-  ci_upper?: number | null;
-  confidence_interval?: readonly [number, number] | null;
-}): string {
-  const lower = typeof coefficient.ci_lower === "number" ? coefficient.ci_lower : coefficient.confidence_interval?.[0];
-  const upper = typeof coefficient.ci_upper === "number" ? coefficient.ci_upper : coefficient.confidence_interval?.[1];
-  if (typeof lower !== "number" || typeof upper !== "number") return "—";
-  return `[${fmt(lower)}, ${fmt(upper)}]`;
-}
-
 /** "correlation_heatmap" → "Correlation heatmap" for captions/alt text. */
 function humanize(id: string): string {
   const s = id.replace(/[_-]+/g, " ").trim();
   return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-/** Reader-facing names for the declared post-estimation operations.
- *
- * An unknown operation still renders — it falls back to its id — because a
- * missing label is a cosmetic gap, while hiding a computed result would put
- * us back where this section started: evidence nobody sees. */
-const POST_ESTIMATION_LABELS: Record<string, string> = {
-  "model.quadratic_stationary_point": "Quadratic stationary point",
-  "model.joint_f_test": "Joint F test",
-  "model.white_test": "White test",
-};
-
-/** Keys that identify the payload format rather than tell the reader anything. */
-const POST_ESTIMATION_HIDDEN_KEYS = new Set(["schema_version"]);
-
-/**
- * The current GET /runs/{id} response only exposes model_results. Keep the
- * optional report-facing fields local until that API has a durable contract;
- * their absence is rendered explicitly below instead of being treated as
- * empty evidence.
- */
-type TableViewRunDetailExtensions = {
-  significance_levels?: SignificanceLevels;
-  variable_labels?: Readonly<Record<string, string>>;
-  labels?: { variable_labels?: Readonly<Record<string, string>> };
-  table_1?: unknown;
-  statistical_evidence?: unknown;
-};
-
-const EMPTY_VARIABLE_LABELS: Readonly<Record<string, string>> = {};
-const STAR_MARKERS = ["***", "**", "*"] as const;
-
-type TableOneRow = {
-  column: string;
-  label: string;
-  count?: number | null;
-  missing?: number | null;
-  mean?: number | null;
-  std?: number | null;
-  value_labels?: Record<string, string>;
-};
-
-type StatisticalEvidenceResult = {
-  test_id?: string;
-  test_type?: string;
-  nobs?: number;
-  statistic?: number | null;
-  p_value?: number | null;
-  effect_size?: unknown;
-  source_id?: string;
-};
-
-type StatisticalEvidencePacket = {
-  payload_schema: "workbench.statistics.evidence-packet";
-  schema_version: 1;
-  results: StatisticalEvidenceResult[];
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function finiteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function normalizeSignificanceLevels(value: unknown): SignificanceLevels {
-  const normalized: SignificanceLevels = { ...DEFAULT_SIGNIFICANCE_LEVELS };
-  if (!isRecord(value)) return normalized;
-  for (const marker of STAR_MARKERS) {
-    const cutoff = finiteNumber(value[marker]);
-    if (cutoff !== null && cutoff >= 0 && cutoff <= 1) normalized[marker] = cutoff;
-  }
-  return normalized;
-}
-
-function normalizeVariableLabels(value: unknown): Readonly<Record<string, string>> {
-  if (!isRecord(value)) return EMPTY_VARIABLE_LABELS;
-  const labels: Record<string, string> = {};
-  for (const [column, label] of Object.entries(value)) {
-    if (column.trim() && typeof label === "string" && label.trim()) labels[column] = label;
-  }
-  return labels;
-}
-
-function normalizeTableOne(value: unknown): TableOneRow[] {
-  const rows = Array.isArray(value)
-    ? value
-    : isRecord(value) && Array.isArray(value.rows)
-      ? value.rows
-      : [];
-  return rows.flatMap((candidate) => {
-    if (!isRecord(candidate)) return [];
-    const column = typeof candidate.column === "string"
-      ? candidate.column
-      : typeof candidate.variable === "string"
-        ? candidate.variable
-        : "";
-    if (!column) return [];
-    const label = typeof candidate.label === "string" ? candidate.label : column;
-    const valueLabels = isRecord(candidate.value_labels)
-      ? Object.fromEntries(
-        Object.entries(candidate.value_labels)
-          .filter(([, item]) => typeof item === "string")
-          .map(([key, item]) => [key, item as string]),
-      )
-      : undefined;
-    return [{
-      column,
-      label,
-      count: finiteNumber(candidate.count),
-      missing: finiteNumber(candidate.missing),
-      mean: finiteNumber(candidate.mean),
-      std: finiteNumber(candidate.std),
-      value_labels: valueLabels,
-    }];
-  });
-}
-
-function normalizeStatisticalEvidence(value: unknown): StatisticalEvidencePacket | null {
-  const candidate = isRecord(value) && isRecord(value.payload) && !Array.isArray(value.results)
-    ? value.payload
-    : value;
-  if (
-    !isRecord(candidate)
-    || candidate.payload_schema !== "workbench.statistics.evidence-packet"
-    || candidate.schema_version !== 1
-    || !Array.isArray(candidate.results)
-  ) {
-    return null;
-  }
-  return {
-    payload_schema: "workbench.statistics.evidence-packet",
-    schema_version: 1,
-    results: candidate.results.filter(isRecord).map((result) => ({
-      test_id: typeof result.test_id === "string" ? result.test_id : undefined,
-      test_type: typeof result.test_type === "string" ? result.test_type : undefined,
-      nobs: finiteNumber(result.nobs) ?? undefined,
-      statistic: finiteNumber(result.statistic),
-      p_value: finiteNumber(result.p_value),
-      effect_size: result.effect_size,
-      source_id: typeof result.source_id === "string" ? result.source_id : undefined,
-    })),
-  };
-}
-
-function evidenceTestLabel(testType: string | undefined): string {
-  return ({
-    anova_posthoc: "ANOVA post-hoc",
-    bartlett: "Bartlett test",
-    cohens_d: "Cohen's d",
-    eta_squared: "Eta squared",
-    levene: "Levene test",
-    omega_squared: "Omega squared",
-    paired_t_test: "Paired t test",
-    shapiro_wilk: "Shapiro-Wilk test",
-    wilcoxon_signed_rank: "Wilcoxon signed-rank test",
-  } as Record<string, string>)[testType ?? ""] ?? humanize(testType ?? "statistical test");
-}
-
-function evidenceEffectValue(effectSize: unknown): string {
-  if (finiteNumber(effectSize) !== null) return fmt(effectSize as number);
-  if (isRecord(effectSize)) {
-    const value = finiteNumber(effectSize.value);
-    if (value !== null) return fmt(value);
-  }
-  return "—";
-}
-
-function tableViewExtensions(detail: RunDetail | null): TableViewRunDetailExtensions {
-  return (detail ?? {}) as RunDetail & TableViewRunDetailExtensions;
-}
-
-function variableLabelsForTable(detail: RunDetail | null): Readonly<Record<string, string>> {
-  const extensions = tableViewExtensions(detail);
-  return extensions.variable_labels
-    ?? extensions.labels?.variable_labels
-    ?? EMPTY_VARIABLE_LABELS;
-}
-
-function TableViewEvidenceStatus({
-  detail,
-  tableOne,
-  statisticalEvidence,
-}: {
-  detail: RunDetail;
-  tableOne: readonly TableOneRow[];
-  statisticalEvidence: StatisticalEvidencePacket | null;
-}) {
-  const variableLabels = variableLabelsForTable(detail);
-  const tableOneAvailable = tableOne.length > 0;
-  const statisticalEvidenceAvailable = statisticalEvidence !== null;
-
-  return (
-    <section
-      data-testid="table-view-evidence-status"
-      aria-label="Additional table evidence status"
-      style={{ fontSize: 12, color: "var(--label-secondary)" }}
-    >
-      <h3 style={{ fontSize: 14, margin: "0 0 6px", color: "var(--label)" }}>
-        Additional evidence
-      </h3>
-      <ul style={{ margin: 0, paddingLeft: 18 }}>
-        <li>
-          Table 1: {tableOneAvailable
-            ? "consumed from RunDetail"
-            : "not provided by RunDetail; see Report/export"}
-        </li>
-        <li>
-          Statistical evidence: {statisticalEvidenceAvailable
-            ? "consumed from RunDetail or the persisted evidence artifact"
-            : "not provided by RunDetail or the evidence artifact; see Report/export"}
-        </li>
-        <li>
-          Variable labels: {Object.keys(variableLabels).length > 0
-            ? `consumed (${Object.keys(variableLabels).length} label${Object.keys(variableLabels).length === 1 ? "" : "s"})`
-            : "not provided; using variable names (raw column names)"}
-        </li>
-      </ul>
-    </section>
-  );
-}
-
-function SignificanceControls({
-  levels,
-  onChange,
-}: {
-  levels: SignificanceLevels;
-  onChange: (marker: string, value: number) => void;
-}) {
-  const labels: Record<string, string> = {
-    "***": "Three-star cutoff",
-    "**": "Two-star cutoff",
-    "*": "One-star cutoff",
-  };
-  return (
-    <div
-      data-testid="table-view-regression-stars"
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 8,
-        alignItems: "center",
-        fontSize: 11,
-        color: "var(--label-secondary)",
-        marginBottom: 8,
-      }}
-    >
-      <span>Significance stars:</span>
-      {STAR_MARKERS.map((marker) => (
-        <label key={marker} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-          {marker} p &lt;
-          <input
-            aria-label={labels[marker]}
-            type="number"
-            min="0"
-            max="1"
-            step="0.01"
-            value={levels[marker] ?? ""}
-            onChange={(event) => {
-              const next = Number(event.target.value);
-              if (Number.isFinite(next) && next >= 0 && next <= 1) onChange(marker, next);
-            }}
-            style={{ width: 54, fontSize: 11 }}
-          />
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function TableOnePreview({ rows }: { rows: readonly TableOneRow[] }) {
-  if (rows.length === 0) return null;
-  return (
-    <section data-testid="table-view-table-1">
-      <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>Table 1</h3>
-      <div
-        className="wb-result-table-scroll"
-        data-testid="table-view-table-1-scroll"
-        tabIndex={0}
-        aria-label="Table 1 scroll region"
-      >
-        <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
-          <thead>
-            <tr style={{ textAlign: "left", color: "var(--label-secondary)" }}>
-              <th style={{ padding: "2px 8px" }}>Variable</th>
-              <th style={{ padding: "2px 8px" }}>N</th>
-              <th style={{ padding: "2px 8px" }}>Missing</th>
-              <th style={{ padding: "2px 8px" }}>Mean</th>
-              <th style={{ padding: "2px 8px" }}>SD</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.column} style={{ borderTop: "1px solid var(--separator)" }}>
-                <td style={{ padding: "2px 8px" }}>{row.label} ({row.column})</td>
-                <td style={{ padding: "2px 8px" }}>{row.count ?? "—"}</td>
-                <td style={{ padding: "2px 8px" }}>{row.missing ?? "—"}</td>
-                <td style={{ padding: "2px 8px" }}>{row.mean == null ? "—" : fmt(row.mean)}</td>
-                <td style={{ padding: "2px 8px" }}>{row.std == null ? "—" : fmt(row.std)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function StatisticalEvidenceTable({ packet }: { packet: StatisticalEvidencePacket }) {
-  if (packet.results.length === 0) return null;
-  return (
-    <section data-testid="table-view-statistical-evidence">
-      <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>
-        Statistical evidence
-      </h3>
-      <div
-        className="wb-result-table-scroll"
-        data-testid="table-view-statistical-evidence-scroll"
-        tabIndex={0}
-        aria-label="Statistical evidence scroll region"
-      >
-        <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
-          <thead>
-            <tr style={{ textAlign: "left", color: "var(--label-secondary)" }}>
-              <th style={{ padding: "2px 8px" }}>Test</th>
-              <th style={{ padding: "2px 8px" }}>N</th>
-              <th style={{ padding: "2px 8px" }}>Statistic</th>
-              <th style={{ padding: "2px 8px" }}>p-value</th>
-              <th style={{ padding: "2px 8px" }}>Effect</th>
-              <th style={{ padding: "2px 8px" }}>Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {packet.results.map((result, index) => (
-              <tr key={result.test_id ?? `${result.test_type ?? "test"}-${index}`} style={{ borderTop: "1px solid var(--separator)" }}>
-                <td style={{ padding: "2px 8px" }}>{evidenceTestLabel(result.test_type)}</td>
-                <td style={{ padding: "2px 8px" }}>{result.nobs ?? "—"}</td>
-                <td style={{ padding: "2px 8px" }}>{result.statistic == null ? "—" : fmt(result.statistic)}</td>
-                <td style={{ padding: "2px 8px" }}>{result.p_value == null ? "—" : fmt(result.p_value)}</td>
-                <td style={{ padding: "2px 8px" }}>{evidenceEffectValue(result.effect_size)}</td>
-                <td style={{ padding: "2px 8px", whiteSpace: "nowrap" }}>{result.source_id ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function postEstimationValue(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "boolean") return value ? "yes" : "no";
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return "—";
-    return Number.isInteger(value) ? String(value) : value.toFixed(4);
-  }
-  if (Array.isArray(value)) return value.map(postEstimationValue).join(", ");
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
-
-function PostEstimationResultTable({ entry }: { entry: PostEstimationResult }) {
-  const rows = Object.entries(entry.result).filter(
-    ([key]) => !POST_ESTIMATION_HIDDEN_KEYS.has(key),
-  );
-  return (
-    <div style={{ marginBottom: 12 }} data-testid={`post-estimation-${entry.artifact_id}`}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
-        {POST_ESTIMATION_LABELS[entry.operation_id] ?? entry.operation_id}
-      </div>
-      <div style={{ fontSize: 11, color: "var(--label)", marginBottom: 6 }}>
-        step {entry.workflow_step_id} · model run {entry.model_run_id}
-      </div>
-      <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
-        <tbody>
-          {rows.map(([key, value]) => (
-            <tr key={key}>
-              <td style={{ padding: "2px 12px 2px 0", color: "var(--label)" }}>
-                {key.replace(/_/g, " ")}
-              </td>
-              <td style={{ padding: "2px 0", fontVariantNumeric: "tabular-nums" }}>
-                {postEstimationValue(value)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function CoefficientTable({ model }: { model: ModelResult }) {
-  const repeatedMeasures = buildRepeatedMeasuresViewModel(model);
-  const rows = repeatedMeasures.kind === "complete"
-    ? [[repeatedMeasures.primaryCoefficient.result_id, repeatedMeasures.primaryCoefficient] as const]
-    : Object.entries(model.coefficients ?? {});
-  const diagnostics = repeatedMeasures.kind === "complete"
-    ? repeatedMeasures.diagnostics.map((diagnostic) => diagnostic.code)
-    : [];
-  return (
-    <div style={{ marginBottom: 20 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--label)", marginBottom: 4 }}>
-        {model.model_id}
-        {model.model_type ? ` · ${model.model_type}` : ""}
-      </div>
-      <div style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
-        {model.nobs !== undefined ? `n=${model.nobs}` : null}
-        {model.r_squared != null ? ` · R²=${fmt(model.r_squared)}` : null}
-        {model.r_squared_adj != null ? ` · adj. R²=${fmt(model.r_squared_adj)}` : null}
-      </div>
-      <div
-        className="wb-result-table-scroll"
-        data-testid="table-view-coefficient-scroll"
-        tabIndex={0}
-        aria-label="Coefficient table scroll region"
-      >
-      <table className="wb-result-table" style={{ borderCollapse: "collapse", fontSize: 12 }}>
-        <thead>
-          <tr style={{ textAlign: "left", color: "var(--label-secondary)" }}>
-            <th style={{ padding: "2px 8px" }}>term</th>
-            <th style={{ padding: "2px 8px" }}>estimate</th>
-            <th style={{ padding: "2px 8px" }}>std. error</th>
-            <th style={{ padding: "2px 8px" }}>p-value</th>
-            <th style={{ padding: "2px 8px" }}>95% CI</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([term, c]) => (
-            <tr key={term} style={{ borderTop: "1px solid var(--separator)" }}>
-              <td style={{ padding: "2px 8px", fontFamily: "var(--font-mono, monospace)" }}>{term}</td>
-              <td style={{ padding: "2px 8px" }}>{fmt(c.estimate)}</td>
-              <td style={{ padding: "2px 8px" }}>{fmt(c.std_error)}</td>
-              <td style={{ padding: "2px 8px" }}>
-                {("p_value_display" in c ? c.p_value_display : undefined) ?? fmt(c.p_value)}
-              </td>
-              <td style={{ padding: "2px 8px", whiteSpace: "nowrap" }}>{confidenceIntervalText(c)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      </div>
-      {diagnostics.length > 0 && (
-        <div
-          data-testid="table-view-lmm-diagnostics"
-          style={{ marginTop: 8, fontSize: 11, color: "var(--orange, #b35c00)" }}
-        >
-          Diagnostic: {diagnostics.join(", ")}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RegressionTablePreview({
-  models,
-  significanceLevels,
-  variableLabels,
-}: {
-  models: readonly ModelResult[];
-  significanceLevels: SignificanceLevels;
-  variableLabels: Readonly<Record<string, string>>;
-}) {
-  const packet = buildRegressionTablePacket(
-    models,
-    significanceLevels,
-    variableLabels,
-  );
-  if (packet.rows.length === 0) return null;
-
-  return (
-    <section data-testid="table-view-regression-table">
-      <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>
-        Regression table
-      </h3>
-      <div
-        className="wb-result-table-scroll"
-        data-testid="table-view-regression-table-scroll"
-        tabIndex={0}
-        aria-label="Regression table scroll region"
-      >
-        <RegressionTable packet={packet} />
-      </div>
-    </section>
-  );
 }
 
 function FigureCard({
@@ -919,12 +406,7 @@ function RunResultsPanel({
 }) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
-  const [explorations, setExplorations] = useState<Array<{ item: ArtifactItem; payload: unknown }>>([]);
   const [artifactGroups, setArtifactGroups] = useState<ArtifactGroup[] | undefined>(undefined);
-  const [statisticalEvidence, setStatisticalEvidence] = useState<StatisticalEvidencePacket | null>(null);
-  const [significanceLevels, setSignificanceLevels] = useState<SignificanceLevels>(
-    DEFAULT_SIGNIFICANCE_LEVELS,
-  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -942,45 +424,15 @@ function RunResultsPanel({
     setLoading(true);
     setError(null);
     setArtifactGroups(undefined);
-    setExplorations([]);
-    setStatisticalEvidence(null);
-    setSignificanceLevels(DEFAULT_SIGNIFICANCE_LEVELS);
     Promise.all([
       fetchRunDetail(projectRoot, runId),
       fetchRunArtifacts(projectRoot, runId),
     ])
-      .then(async ([d, a]) => {
-        const explorationItems = a.groups
-          .filter((group) => group.artifact_type === "statistical_exploration")
-          .flatMap((group) => group.items);
-        const statisticalEvidenceItem = a.groups
-          .filter((group) => group.artifact_type === "statistical_test")
-          .flatMap((group) => group.items)
-          .find((item) => item.artifact_id === "statistical_tests_evidence");
-        const explorationResults = (await Promise.all(
-          explorationItems.map(async (item) => {
-            try {
-              return { item, payload: await fetchArtifactJson(projectRoot, runId, item.artifact_id) };
-            } catch {
-              return null;
-            }
-          }),
-        )).filter((entry): entry is { item: ArtifactItem; payload: unknown } => entry !== null);
-        const artifactEvidence = statisticalEvidenceItem
-          ? await fetchArtifactJson(projectRoot, runId, statisticalEvidenceItem.artifact_id)
-            .then(normalizeStatisticalEvidence)
-            .catch(() => null)
-          : null;
+      .then(([d, a]) => {
         if (cancelled) return;
         setDetail(d);
         setArtifactGroups(a.groups);
         setArtifacts(a.groups.flatMap((g) => g.items));
-        setExplorations(explorationResults);
-        const extensions = tableViewExtensions(d);
-        setSignificanceLevels(normalizeSignificanceLevels(extensions.significance_levels));
-        setStatisticalEvidence(
-          normalizeStatisticalEvidence(extensions.statistical_evidence) ?? artifactEvidence,
-        );
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -993,29 +445,10 @@ function RunResultsPanel({
     };
   }, [runId, projectRoot]);
 
-  const models = detail?.model_results ?? [];
-  const familyModels = models.filter((model) =>
-    ["ordinal_logit", "multinomial_logit", "survival_cox", "quantile_regression"]
-      .includes(model.model_type ?? ""),
-  );
-  const familyEvidenceModels = familyModels.length > 0
-    ? familyModels
-    : detail?.model_family_evidence && typeof detail.model_family_evidence.model_type === "string"
-      ? [detail.model_family_evidence as unknown as ModelResult]
-      : [];
-  const extensions = tableViewExtensions(detail);
-  const variableLabels = variableLabelsForTable(detail);
-  const tableOne = normalizeTableOne(extensions.table_1);
-  const postEstimation = detail?.post_estimation_results ?? [];
+  const typedEvidence = readReportEvidenceProjection(detail?.report_evidence);
   const figures = artifacts.filter((a) => a.artifact_type === "figure");
-  const loadedExplorationIds = new Set(explorations.map(({ item }) => item.artifact_id));
-  const statisticalEvidenceArtifactId = artifacts.find(
-    (artifact) => artifact.artifact_id === "statistical_tests_evidence",
-  )?.artifact_id;
   const otherArtifacts = artifacts.filter((a) =>
-    a.artifact_type !== "figure"
-      && !loadedExplorationIds.has(a.artifact_id)
-      && a.artifact_id !== statisticalEvidenceArtifactId,
+    a.artifact_type !== "figure",
   );
   const chartArtifactIds = new Set<string>(Object.values(ARMA_GARCH_CHART_IDS));
   const hasArmaGarchChartArtifacts = artifacts.some((artifact) =>
@@ -1024,10 +457,7 @@ function RunResultsPanel({
   const isEmpty =
     !loading &&
     !error &&
-    models.length === 0 &&
-    tableOne.length === 0 &&
-    statisticalEvidence === null &&
-    explorations.length === 0 &&
+    typedEvidence === null &&
     figures.length === 0 &&
     otherArtifacts.length === 0;
 
@@ -1076,67 +506,8 @@ function RunResultsPanel({
         </div>
       )}
 
-      {!loading && !error && detail && models.length > 1 && (
-        <section data-testid="table-view-regression">
-          <SignificanceControls
-            levels={significanceLevels}
-            onChange={(marker, value) => {
-              setSignificanceLevels((current) => ({ ...current, [marker]: value }));
-            }}
-          />
-          <RegressionTablePreview
-            models={models}
-            significanceLevels={significanceLevels}
-            variableLabels={variableLabels}
-          />
-        </section>
-      )}
-
-      {!loading && !error && models.length === 1 && (
-        <section data-testid="table-view-coefficients">
-          <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>Coefficients</h3>
-          {models.map((m) => (
-            <CoefficientTable key={m.model_id} model={m} />
-          ))}
-        </section>
-      )}
-
-      {!loading && !error && tableOne.length > 0 && (
-        <TableOnePreview rows={tableOne} />
-      )}
-
-      {!loading && !error && statisticalEvidence && (
-        <StatisticalEvidenceTable packet={statisticalEvidence} />
-      )}
-
-      {!loading && !error && familyEvidenceModels.length > 0 && (
-        <FamilyEvidence
-          modelResults={familyEvidenceModels as unknown as FamilyModelResult[]}
-          allowLegacyPresentation
-        />
-      )}
-
-      {!loading && !error && detail && (models.length > 0 || tableOne.length > 0 || statisticalEvidence !== null) && (
-        <TableViewEvidenceStatus
-          detail={detail}
-          tableOne={tableOne}
-          statisticalEvidence={statisticalEvidence}
-        />
-      )}
-
-      {!loading && !error && postEstimation.length > 0 && (
-        <section data-testid="table-view-post-estimation" style={{ marginTop: 16 }}>
-          <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>
-            Post-estimation
-          </h3>
-          {postEstimation.map((entry) => (
-            <PostEstimationResultTable key={entry.artifact_id} entry={entry} />
-          ))}
-        </section>
-      )}
-
-      {!loading && !error && explorations.length > 0 && (
-        <StatisticalExplorationTable explorations={explorations} />
+      {!loading && !error && detail && (
+        <FamilyEvidence evidence={typedEvidence} />
       )}
 
       {!loading && !error && figures.length > 0 && (
@@ -1196,7 +567,7 @@ function RunResultsPanel({
           data-testid="table-view-empty"
           style={{ color: "var(--label-tertiary)", fontSize: 13 }}
         >
-          This run produced no model results or artifacts yet.
+          This run produced no typed report evidence or artifacts yet.
         </div>
       )}
     </div>

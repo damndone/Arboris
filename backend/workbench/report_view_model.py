@@ -649,6 +649,9 @@ def build_persisted_evidence_report_view(
             "confirmationRef": request_identity.confirmation_ref if request_identity else "UNAVAILABLE",
         }
     )
+    from .report_export import report_projection_digest
+
+    view["projectionDigest"] = report_projection_digest(view)
     return view
 
 
@@ -1040,10 +1043,31 @@ def build_indexed_report_evidence(
             model_run_id=model_run_id,
             confirmation_ref=confirmation_ref,
         )
-        return build_persisted_evidence_report_view(
+        canonical_view = build_persisted_evidence_report_view(
             projection,
             request_identity=identity,
         )
+        # Some historical index/payload writers copied the projected facts and
+        # digest into their outer records.  If those optional fields are
+        # present, they are assertions about the canonical server-owned view,
+        # never alternate sources of facts.  Reject even a synchronized forged
+        # pair instead of allowing the outer records to shadow the envelope.
+        for source_name, source in (
+            ("index", indexed_artifact),
+            ("payload", artifact_payload if isinstance(artifact_payload, Mapping) else None),
+        ):
+            if source is None:
+                continue
+            for field, reason_code in (
+                ("facts", "REPORT_EVIDENCE_FACTS_MISMATCH"),
+                ("projectionDigest", "REPORT_EVIDENCE_PROJECTION_DIGEST_MISMATCH"),
+            ):
+                if field in source and source[field] != canonical_view.get(field):
+                    raise EvidenceProjectionError(
+                        reason_code,
+                        f"{source_name} {field} differs from the canonical server-owned evidence view",
+                    )
+        return canonical_view
     except EvidenceProjectionError as exc:
         return _unavailable_report_evidence(
             artifact_id=artifact_id,

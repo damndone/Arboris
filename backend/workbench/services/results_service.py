@@ -206,6 +206,9 @@ class ReportEvidenceRequestIdentityV1:
     confirmation_ref: str
 
 
+_REPORT_OWNER_FACTORY_TOKEN = object()
+
+
 class ServerOwnedReportEvidencePersistenceV1:
     """Read Report evidence through the real C0 store, registry, and receipt."""
 
@@ -225,6 +228,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         "_confirmation_ref",
         "_artifact_file_sha256",
         "_canonical_project_root",
+        "_canonical_record",
     )
 
     def __init__(
@@ -244,7 +248,13 @@ class ServerOwnedReportEvidencePersistenceV1:
         confirmation_ref: str,
         artifact_file_sha256: str,
         canonical_project_root: Path | str | None = None,
+        _factory_token: object | None = None,
     ) -> None:
+        if _factory_token is not _REPORT_OWNER_FACTORY_TOKEN:
+            raise EvidenceProjectionError(
+                "EVIDENCE_HOST_AUTHORITY_REQUIRED",
+                "Report evidence owner construction requires a host-issued factory capability",
+            )
         if type(evidence_store) is not EvidencePacketStoreV1:
             raise EvidenceProjectionError(
                 "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
@@ -320,6 +330,14 @@ class ServerOwnedReportEvidencePersistenceV1:
                     "EVIDENCE_ADMISSION_NOT_FOUND",
                     "owner capability is not bound to the requested canonical commit and admission",
                 )
+            canonical_record = PersistedEvidenceEnvelopeV1(
+                commit_id=binding.commit_id,
+                artifact_ref=artifact.artifact_id,
+                envelope_ref=f"evidence-envelope:{artifact.envelope_digest}",
+                sensitivity="public",
+                binding=binding,
+                envelope=artifact.envelope.envelope,
+            )
         except EvidenceProjectionError:
             raise
         except (EvidencePersistenceError, EvidenceRegistryError, TypeError, ValueError, KeyError) as exc:
@@ -346,6 +364,14 @@ class ServerOwnedReportEvidencePersistenceV1:
             if canonical_project_root is not None
             else None
         )
+        self._canonical_record = canonical_record
+
+    @classmethod
+    def _from_host(cls, *args: object, **kwargs: object) -> "ServerOwnedReportEvidencePersistenceV1":
+        """Host-only constructor; the public constructor cannot mint authority."""
+
+        kwargs["_factory_token"] = _REPORT_OWNER_FACTORY_TOKEN
+        return cls(*args, **kwargs)  # type: ignore[arg-type]
 
     @property
     def project_ref(self) -> str:
@@ -401,6 +427,39 @@ class ServerOwnedReportEvidencePersistenceV1:
         except (OSError, RuntimeError, TypeError, ValueError):
             return False
 
+    def accepts_canonical_run_root(self, run_root: Path | str) -> bool:
+        """Check the server-owned project root plus this exact run identity."""
+
+        if self._canonical_project_root is None:
+            return False
+        try:
+            expected = self._canonical_project_root / "runs" / self._run_id
+            return Path(run_root).expanduser().resolve(strict=False) == expected.resolve(strict=False)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return False
+
+    def _canonical_report_wire(self) -> dict[str, object]:
+        from ..evidence.consumer_adapters import default_projection_registry
+        from ..report_view_model import build_persisted_evidence_report_view
+
+        projection = default_projection_registry().project(
+            self._canonical_record,
+            consumer_id="report",
+            destination="local",
+        )
+        return build_persisted_evidence_report_view(
+            projection,
+            request_identity=ReportEvidenceRequestIdentityV1(
+                actor_ref=self._actor_ref,
+                project_ref=self._project_ref,
+                session_ref=self._session_ref,
+                scope_ref=self._scope_ref,
+                run_id=self._run_id,
+                model_run_id=self._model_run_id,
+                confirmation_ref=self._confirmation_ref,
+            ),
+        )
+
     def issue_report_projection(self, wire: Mapping[str, object]):
         """Issue an opaque Report projection only for this exact C0 owner."""
 
@@ -425,6 +484,12 @@ class ServerOwnedReportEvidencePersistenceV1:
                 "EVIDENCE_OWNER_CONTEXT_MISMATCH",
                 "Report projection identity is not owned by this server capability",
             )
+        canonical_wire = self._canonical_report_wire()
+        if dict(wire) != canonical_wire:
+            raise EvidenceProjectionError(
+                "REPORT_EVIDENCE_CANONICAL_MISMATCH",
+                "Report projection facts and digest must match the server-owned evidence envelope",
+            )
         return EvidenceProjectionV1._from_server_wire(wire, owner=self)
 
     def issue_report_evidence_writer(
@@ -440,11 +505,12 @@ class ServerOwnedReportEvidencePersistenceV1:
 
         if type(projection) is not EvidenceProjectionV1:
             raise TypeError("Report writer requires an owner-issued projection")
+        if table_rows is not None:
+            raise TypeError("ReportEvidenceWriterV1 rejects caller-owned raw tables")
         return ReportEvidenceWriterV1._from_server_projection(
             projection,
             owner=self,
             sections=sections,
-            table_rows=table_rows,
         )
 
     def issue_report_document_writer(
@@ -463,6 +529,10 @@ class ServerOwnedReportEvidencePersistenceV1:
             raise TypeError("Report document payload must be server-produced")
         if type(projection) is not EvidenceProjectionV1:
             raise TypeError("Report document requires an owner-issued projection")
+        if getattr(projection, "_owner", None) is not self:
+            raise TypeError("Report document requires an owner-issued projection")
+        if not self.accepts_canonical_run_root(canonical_run_root):
+            raise TypeError("Report document canonical run root is not bound to this owner")
         return ReportDocumentWriterV1._from_server_view_model(
             view_model,
             projection,
