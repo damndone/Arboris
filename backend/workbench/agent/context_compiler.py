@@ -799,3 +799,87 @@ def notebook_planning_workbench_context(
             if key not in {"omissions", "artifact_type_counts", "budget_report"}
         },
     }
+
+
+@dataclass(frozen=True)
+class AgentCompilerContextV1:
+    """Bounded shadow projection; it contains no execution authority."""
+
+    scope_ref: str
+    intent_ref: str
+    capability_ids: tuple[str, ...]
+    manifest_digest: str
+    bounded: bool
+    shadow_equivalent: bool
+    context_digest: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": "agent-compiler-context.v1",
+            "scope_ref": self.scope_ref,
+            "intent_ref": self.intent_ref,
+            "capability_ids": list(self.capability_ids),
+            "manifest_digest": self.manifest_digest,
+            "bounded": self.bounded,
+            "shadow_equivalent": self.shadow_equivalent,
+            "context_digest": self.context_digest,
+        }
+
+
+def compile_agent_compiler_context(
+    manifest: object,
+    *,
+    scope_ref: str,
+    intent_ref: str,
+    selected_capability_ids: tuple[str, ...],
+    max_capabilities: int = 32,
+) -> AgentCompilerContextV1:
+    """Compile the deterministic shadow context without touching runtime routes."""
+
+    from .capability_manifest import CapabilityManifestV1, build_capability_manifest
+    from .failure_contract import failure
+    from .operations import OperationRegistry
+
+    if type(manifest) is not CapabilityManifestV1:
+        raise TypeError("manifest must be CapabilityManifestV1")
+    if (
+        type(scope_ref) is not str
+        or not scope_ref
+        or any(token in scope_ref for token in ("/", "\\", "..", "://"))
+    ):
+        raise failure("PATH_LIKE_INPUT", stage="context")
+    if type(intent_ref) is not str or not intent_ref.startswith("intent:"):
+        raise failure("DRAFT_INVALID", stage="context")
+    if type(max_capabilities) is not int or not 1 <= max_capabilities <= 256:
+        raise failure("INPUT_LIMIT", stage="context")
+    if not isinstance(selected_capability_ids, (tuple, list)):
+        raise failure("DRAFT_INVALID", stage="context")
+    capability_ids = tuple(selected_capability_ids)
+    if len(capability_ids) > max_capabilities or len(set(capability_ids)) != len(capability_ids):
+        raise failure("INPUT_LIMIT", stage="context")
+    for capability_id in capability_ids:
+        try:
+            manifest.require(capability_id)
+        except KeyError as exc:
+            raise failure("UNKNOWN_CAPABILITY", stage="context") from exc
+    capability_ids = tuple(sorted(capability_ids))
+    live_manifest = build_capability_manifest(registry=OperationRegistry())
+    shadow_equivalent = manifest.to_dict() == live_manifest.to_dict()
+    payload = {
+        "schema_version": "agent-compiler-context.v1",
+        "scope_ref": scope_ref,
+        "intent_ref": intent_ref,
+        "capability_ids": list(capability_ids),
+        "manifest_digest": manifest.manifest_digest,
+        "bounded": True,
+        "shadow_equivalent": shadow_equivalent,
+    }
+    return AgentCompilerContextV1(
+        scope_ref=scope_ref,
+        intent_ref=intent_ref,
+        capability_ids=capability_ids,
+        manifest_digest=manifest.manifest_digest,
+        bounded=True,
+        shadow_equivalent=shadow_equivalent,
+        context_digest=sha256_canonical(payload),
+    )
