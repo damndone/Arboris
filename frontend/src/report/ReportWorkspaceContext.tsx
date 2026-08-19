@@ -82,11 +82,20 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
-  try {
-    return JSON.stringify(left) === JSON.stringify(right);
-  } catch {
-    return false;
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((item, index) => sameJsonValue(item, right[index]));
   }
+  const leftRecord = asRecord(left);
+  const rightRecord = asRecord(right);
+  if (leftRecord === null || rightRecord === null) return false;
+  const keys = new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)]);
+  return keys.size === Object.keys(leftRecord).length
+    && keys.size === Object.keys(rightRecord).length
+    && [...keys].every((key) => sameJsonValue(leftRecord[key], rightRecord[key]));
 }
 
 function indexedClassificationArtifactId(value: unknown): string | null {
@@ -139,14 +148,23 @@ export function readClassificationEvidencePacket(
 ): ClassificationArtifactsWrapper | null {
   if (!isPersistedClassificationArtifact(value)) return null;
   const item = asRecord(indexedArtifact);
+  const contract = asRecord(item?.payload_contract);
+  const indexedSchema = item?.payload_schema ?? contract?.payload_schema;
+  const indexedVersion = item?.schema_version ?? contract?.schema_version;
   if (
-    item !== null
-    && (
-      item.artifact_id !== value.artifact_id
-      || item.payload_schema !== CLASSIFICATION_ARTIFACTS_SCHEMA
-      || item.schema_version !== 1
-      || !sameJsonValue(item.server_identity, value.server_identity)
-    )
+    item === null
+    || item.artifact_type !== "classification_artifacts"
+    || contract === null
+    || contract.payload_schema !== CLASSIFICATION_ARTIFACTS_SCHEMA
+    || contract.schema_version !== 1
+    || item.artifact_id !== value.artifact_id
+    || indexedSchema !== CLASSIFICATION_ARTIFACTS_SCHEMA
+    || indexedVersion !== 1
+    || item.path !== value.artifact_path
+    || item.sha256 !== value.artifact_sha256
+    || item.receipt_path !== value.receipt_path
+    || item.receipt_sha256 !== value.receipt_sha256
+    || !sameJsonValue(item.server_identity, value.server_identity)
   ) return null;
   return value as unknown as ClassificationArtifactsWrapper;
 }

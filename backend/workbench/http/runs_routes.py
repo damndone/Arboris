@@ -1021,7 +1021,27 @@ def list_ai_reports_endpoint(run_id: str, project_root: str) -> dict[str, Any]:
 def list_artifacts_endpoint(run_id: str, project_root: str) -> dict:
     run_root = _resolve_run_root(project_root, run_id)
     records = _read_artifact_records(run_root)
-    return {"groups": _group_artifacts(records)}
+    groups = _group_artifacts(records)
+    # The generic grouping projection intentionally exposes only the common
+    # artifact fields.  ReportWorkspace needs the server-owned classification
+    # index join fields as well; preserve those exact indexed values without
+    # changing the generic artifact envelope or selecting a second authority.
+    classification_records = {
+        record.get("artifact_id"): record
+        for record in records
+        if isinstance(record, dict)
+        and record.get("artifact_type") == "classification_artifacts"
+        and isinstance(record.get("artifact_id"), str)
+    }
+    for group in groups:
+        for item in group.get("items", []):
+            record = classification_records.get(item.get("artifact_id"))
+            if record is None:
+                continue
+            for field in ("payload_contract", "payload_schema", "schema_version", "receipt_path", "receipt_sha256", "server_identity"):
+                if field in record:
+                    item[field] = record[field]
+    return {"groups": groups}
 
 
 @router.get("/runs/{run_id}/artifacts/{artifact_id}")
@@ -1049,19 +1069,27 @@ def download_artifact_endpoint(
         and all(character in string.hexdigits for character in expected_sha256)
     )
     artifact_type = matched.get("artifact_type")
-    is_classification_evidence = (
-        artifact_type in {"classification_evidence", "classification_artifacts"}
-        or artifact_id in {"classification_evidence", "classification_artifacts"}
+    is_classification_artifacts = (
+        artifact_type == "classification_artifacts"
+        or artifact_id == "classification_artifacts"
         or (
             isinstance(matched.get("payload_contract"), dict)
             and matched["payload_contract"].get("payload_schema")
             in {
-                "workbench.prediction.classification-evidence",
                 "workbench.prediction.classification-artifacts",
             }
         )
     )
-    if is_classification_evidence:
+    is_generic_typed_evidence = (
+        artifact_type == "classification_evidence"
+        or artifact_id == "classification_evidence"
+        or (
+            isinstance(matched.get("payload_contract"), dict)
+            and matched["payload_contract"].get("payload_schema")
+            == "workbench.prediction.classification-evidence"
+        )
+    )
+    if is_classification_artifacts:
         try:
             wrapper = read_classification_artifacts_wrapper_from_run_root(run_root)
         except (PayloadContractError, PredictiveContractError, OSError, ValueError) as exc:
@@ -1075,7 +1103,7 @@ def download_artifact_endpoint(
     # Legacy non-evidence indexes occasionally contain placeholder digests;
     # preserve their read compatibility, but never expose a typed
     # classification packet without a verifiable content hash.
-    if not is_valid_sha256 and is_classification_evidence:
+    if not is_valid_sha256 and (is_classification_artifacts or is_generic_typed_evidence):
         raise WorkbenchAPIError(
             status_code=409,
             code="ARTIFACT_INTEGRITY_UNVERIFIED",

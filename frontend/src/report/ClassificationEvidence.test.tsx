@@ -99,10 +99,10 @@ const packet = {
 
 const serverIdentity = {
   schema_version: 1,
-  project_id: "project:test",
+  project_id: "project:sha256:" + "1".repeat(64),
   run_id: "run:test",
   namespace: "workbench.prediction.classification-artifacts.v1",
-  digest: "sha256:" + "b".repeat(64),
+  digest: "sha256:e5044e243c6bdcb2a927d17b6e6dc8aaa5ee4366d0181520ffbd4b9a9934a5b0",
 };
 const foldReceipt = {
   fold: 0,
@@ -217,9 +217,11 @@ function sharedClassificationArtifactsWrapper(
     index: {
       artifact_id: artifact.artifact_id,
       path: "classification_artifacts.json",
+      artifact_type: "classification_artifacts",
       sha256: "a".repeat(64),
       receipt_path: "classification_receipt.json",
       receipt_sha256: "c".repeat(64),
+      payload_contract: { payload_schema: "workbench.prediction.classification-artifacts", schema_version: 1 },
       server_identity: serverIdentity,
     },
     artifact,
@@ -255,6 +257,20 @@ describe("ClassificationEvidence", () => {
 
   it("rejects a complete raw persisted artifact when the shared server receipt wrapper is absent", () => {
     render(<ClassificationEvidence evidence={persistedClassificationArtifact() as never} />);
+
+    expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
+  });
+
+  it("rejects a fake sha256-shaped server identity without a verifiable provenance digest", () => {
+    const wrapper = sharedClassificationArtifactsWrapper();
+    const fakeIdentity = { ...wrapper.server_identity, digest: "sha256:" + "b".repeat(64) };
+    render(<ClassificationEvidence evidence={{
+      ...wrapper,
+      server_identity: fakeIdentity,
+      index: { ...wrapper.index, server_identity: fakeIdentity },
+      receipt: { ...wrapper.receipt, server_identity: fakeIdentity },
+      artifact: { ...wrapper.artifact, server_identity: fakeIdentity },
+    } as never} />);
 
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
   });

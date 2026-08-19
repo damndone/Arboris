@@ -791,6 +791,21 @@ def test_runs_artifact_route_serves_classification_only_as_validated_wrapper(tmp
     assert served["receipt"]["receipt_digest"] == served["receipt_digest"]
     assert served["content_digests"]["evidence.metrics"]
 
+    listed = runs_routes.list_artifacts_endpoint("run-classification", str(project_root))
+    listed_item = next(
+        item
+        for group in listed["groups"]
+        for item in group["items"]
+        if item.get("artifact_id") == artifact_id
+    )
+    assert listed_item["payload_contract"] == {
+        "payload_schema": "workbench.prediction.classification-artifacts",
+        "schema_version": 1,
+    }
+    assert listed_item["receipt_path"] == "classification_receipt.json"
+    assert listed_item["receipt_sha256"] == served["receipt_sha256"]
+    assert listed_item["server_identity"] == served["server_identity"]
+
 
 def test_shared_wrapper_rejects_metrics_tamper_even_when_raw_artifact_index_hash_is_rewritten(tmp_path) -> None:
     frame = _ordered_frame([period for period in range(8) for _ in range(2)])

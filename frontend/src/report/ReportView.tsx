@@ -35,12 +35,21 @@ import type { ReportRecord } from "./reportHistory";
 import "./report.css";
 
 /** Resolve only known classification evidence envelopes; never dump unknown JSON. */
-export function readTypedClassificationEvidence(value: unknown): ClassificationArtifactsWrapper | null {
-  return readClassificationEvidencePacket(value) as ClassificationArtifactsWrapper | null;
+export function readTypedClassificationEvidence(
+  value: unknown,
+  indexedArtifact?: unknown,
+): ClassificationArtifactsWrapper | null {
+  return readClassificationEvidencePacket(value, indexedArtifact) as ClassificationArtifactsWrapper | null;
 }
 
-export function ReportClassificationEvidenceMount({ evidence }: { evidence: unknown }) {
-  const packet = readTypedClassificationEvidence(evidence);
+export function ReportClassificationEvidenceMount({
+  evidence,
+  indexedArtifact,
+}: {
+  evidence: unknown;
+  indexedArtifact?: unknown;
+}) {
+  const packet = readTypedClassificationEvidence(evidence, indexedArtifact);
   return (
     <section
       aria-label="Classification evidence"
@@ -93,6 +102,13 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
   };
   const regressionTable = buildRegressionTablePacket(workspace.modelResults);
   const classificationEvidenceArtifact = workspace.familyEvidenceArtifacts.classification_evidence;
+  const classificationEvidenceIndex = (
+    classificationEvidenceArtifact !== null
+    && typeof classificationEvidenceArtifact === "object"
+    && !Array.isArray(classificationEvidenceArtifact)
+  )
+    ? (classificationEvidenceArtifact as { index?: unknown }).index
+    : undefined;
   const resultFamilies = [...new Set(
     workspace.modelResults.map((result) => result.model_type?.trim() || "unknown model"),
   )];
@@ -271,7 +287,10 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         artifacts={workspace.familyEvidenceArtifacts}
       />
       {classificationEvidenceArtifact !== undefined && (
-        <ReportClassificationEvidenceMount evidence={classificationEvidenceArtifact} />
+        <ReportClassificationEvidenceMount
+          evidence={classificationEvidenceArtifact}
+          indexedArtifact={classificationEvidenceIndex}
+        />
       )}
 
       <div data-testid="report-evidence-divider" className="report-evidence-divider">

@@ -140,15 +140,26 @@ function isHexDigest(value: unknown): value is string {
 
 function isServerIdentity(value: unknown): value is EvidenceRecord {
   const identity = asRecord(value);
+  const base = identity === null
+    ? null
+    : {
+      schema_version: identity.schema_version,
+      project_id: identity.project_id,
+      run_id: identity.run_id,
+      namespace: identity.namespace,
+    };
   return (
     identity !== null
+    && Object.keys(identity).sort().join("|") === "digest|namespace|project_id|run_id|schema_version"
     && identity.schema_version === 1
     && typeof identity.project_id === "string"
-    && identity.project_id.length > 0
+    && /^project:sha256:[0-9a-f]{64}$/.test(identity.project_id)
     && typeof identity.run_id === "string"
-    && identity.run_id.length > 0
+    && /^[^/\\]+$/.test(identity.run_id)
     && identity.namespace === "workbench.prediction.classification-artifacts.v1"
     && isDigest(identity.digest)
+    && base !== null
+    && identity.digest === `sha256:${canonicalDigest(base)}`
   );
 }
 
