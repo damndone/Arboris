@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 26/45 (57.8%; 57.8 per 100 events)
+- Failure frequency: 26/58 (44.8%; 44.8 per 100 events)
 - Repeat rate: 1/26 (3.8%)
 - Recurrence rate: 1/25 (4.0%)
-- MTTR: median=0 ms (sample=16; unresolved=10)
+- MTTR: median=0 ms (sample=24; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/16 (0.0%)
+- Gate waste rate: 0/29 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -196,3 +196,16 @@ COMPLETED
 - #43: `a0b1c2d3-e4f5-4678-9012-3456789abcde` | 2026-08-19T22:19:00.000Z | FAILURE/red_probe_confirmed_current_defects | incident=`b1c2d3e4-f5a6-4789-0123-456789abcdef` | lesson_key=`data-consumer-red-probes-confirmed` | event_sha256=`a7ca5d8bf1e0c9ca4be349665b871332f8d3f0d56c7b27400f4f01437df0bb42`
 - #44: `c2d3e4f5-a6b7-4890-1234-56789abcdef0` | 2026-08-19T22:38:00.000Z | ERROR/unconfirmed_sidecar_authority_regression | incident=`d3e4f5a6-b7c8-4901-2345-6789abcdef01` | lesson_key=`metadata-evidence-sidecar-not-registry` | event_sha256=`114a85ce8927b5a9b2f8d6df5893152ad7d9e2046e57d3ae17e4cab098964225`
 - #45: `e4f5a6b7-c8d9-4012-3456-789abcdef012` | 2026-08-19T22:43:00.000Z | GATE/data_consumer_remediation_final_verification | incident=`f5a6b7c8-d9e0-4123-4567-89abcdef0123` | lesson_key=`data-consumer-remediation-final-gate` | event_sha256=`87b481f2ab786e3e0131986526834d1a37126088660a228c64ff48cb17e50285`
+- #46: `af5bfb61-db24-42e3-b496-2345a1727eec` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`d2a4f6c8-1e30-4b72-9f5a-7c8d0e2b4a61` | lesson_key=`data-consumer-manifest-live-surface` | event_sha256=`24cdb0e6d8b17138e175b3d0df47b2a1a57960ebe0b76185cd1cc3c8bc392f6e`
+- #47: `9a1cd7e8-3698-487b-ae37-1173969cb1de` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`e8c6f5a4-9b2d-4e71-8c03-6a1f0d9b2e84` | lesson_key=`data-consumer-server-artifact-probes` | event_sha256=`bf11a2c130377aaa79ee4363269a86bc903180e1bdcba60c348587c0cf0389dd`
+- #48: `ad0c9e22-5070-4393-9c0e-9733919d3edf` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`e7d6c5b4-a3f2-4e1d-9c80-7b6a5d4c3e2f` | lesson_key=`data-consumer-adversarial-red` | event_sha256=`568a5ef0bb74f0332ffc535d01a18a9a8b1915ad75c47fb5560c07f1010451da`
+- #49: `6aa119e2-07ea-4fb3-9892-3d4f5d3181a5` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`d2f4a6c8-1b3e-4d70-9f52-6a8c0e1b3d5f` | lesson_key=`c0-evidence-socket-sandbox` | event_sha256=`e9b87a1ece9769355f20e3f3d824af8b902bac4be72f7ccef6421e3a0020fdaf`
+- #50: `459194d3-ef48-4587-a647-813d4a1d96fa` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`c8e0f2a4-1b3d-4f70-9a52-6c8e0b1d3f5a` | lesson_key=`unconfirmed-sidecar-chain-boundary` | event_sha256=`a4f4712eb92b3fb79af99a780e95373829a2ba0f955011b3edbde37fb829f931`
+- #51: `9f623d6c-8595-4cc3-b93f-733893c9a238` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`2e1d0c9b-8a7f-6e5d-4c3b-2a1908171615` | lesson_key=`data-consumer-third-round-adversarial-red` | event_sha256=`3eb21fd4cbfd9fb8f9ae0749299b3de265edbc2b29b0d7afc7448f8161366a3f`
+- #52: `8f39e0cd-6f50-46c6-b3f8-840413c13ceb` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`7f2c9a4e-1b6d-4e80-9a53-2c7d8e1f0b4a` | lesson_key=`data-consumer-reviewer-blockers-round4` | event_sha256=`41a441e21abef19d6d7ad2cf429352b1ef6b4d179cb885def3fe7386a69d7a68`
+- #53: `c6e2e2e8-dda5-4690-a7c7-e6d20cbc4c68` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`5f2a9c7e-1b4d-4e80-9a63-2c7d8e1f0b5a` | lesson_key=`data-consumer-reviewer-blockers-round5` | event_sha256=`40c8015acd70db15832677659d1efdf16e51f504d10b77c851aedcd57b1ee855`
+- #54: `5ef1cc18-5064-4eed-bf3d-a17df0be77f2` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`7c1e4a92-6d3f-4b80-a5e7-2f9c1d6b8a33` | lesson_key=`data-consumer-metadata-sha-self-reference-round5` | event_sha256=`7df3106de70c470b2eefe3f1d2f3c017cba2a3414fa28e5ebb29144365438c7b`
+- #55: `dc343dbf-64d0-41ab-b652-7816c17b1707` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`c5d7e9f1-2a3b-4c5d-6e7f-8a9b0c1d2e3f` | lesson_key=`data-consumer-reviewer-not-compliant` | event_sha256=`d1bd6a5c6409cef3e097e5bc2079b8b9b2d0c2eab22a2f9873ea1b906524b76f`
+- #56: `b539ee54-8084-4526-ab6e-4b7893ae3771` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`e7f9a1b3-4c5d-6e7f-8a9b-0c1d2e3f4a5b` | lesson_key=`data-consumer-reviewer-evidence-reconciliation` | event_sha256=`00dac8a7f9eb50288ddc7888e7b857a8aededb2e8034e0c37c21be5967fa61c9`
+- #57: `5f38bf7a-c3ff-42e1-ae0b-f6813817f8ec` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`a9b1c3d5-6e7f-8a9b-0c1d-2e3f4a5b6c7d` | lesson_key=`data-consumer-authority-gap-red-first` | event_sha256=`e26b6fab16be576491354c91e208bff5809f405f645f58dcbc6fef7f8ddd587f`
+- #58: `b721faaf-1744-4bd2-9f8c-00a2e9d86179` | 2026-08-19T23:17:03.000Z | GATE/formal_blocker_resolution | incident=`b1c2d3e4-f5a6-4789-0123-456789abcdef` | lesson_key=`data-consumer-red-probes-confirmed` | event_sha256=`c2305c47ff60bd9c3ba8e7a13b1f825bd09b82e3eb1c5fa0204bc0b58acd71e7`
