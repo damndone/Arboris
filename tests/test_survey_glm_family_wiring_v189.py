@@ -186,6 +186,35 @@ def test_fpc_without_sampling_weight_cannot_fall_back_to_naive_ols(tmp_path: Pat
     assert not (run_root / "model_results" / "ols_1.json").exists()
 
 
+def test_unsupported_survey_family_cannot_emit_a_naive_model_artifact(tmp_path: Path):
+    """A design declaration must be applied or rejected, never relabelled by omission."""
+    frame = _survey_frame(with_replicates=False)
+    source = tmp_path / "unsupported-family.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "unsupported-family")
+
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="negative_binomial",
+        y="count_y",
+        x=["x1", "x2"],
+        sampling_weight="weight",
+        survey_strata_col="stratum",
+        survey_psu_col="psu",
+    )
+
+    assert outcome["status"] == "failed", outcome
+    run_root = project.root / "runs" / outcome["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(
+        issue["code"] == "SURVEY_GLM_FAMILY_UNSUPPORTED"
+        for issue in errors["issues"]
+    )
+    assert not (run_root / "model_results" / "negative_binomial_1.json").exists()
+
+
 @pytest.mark.parametrize(
     ("invalid_value", "reason"),
     [

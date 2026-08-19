@@ -6,18 +6,18 @@
 
 ## Final status
 
-COMPLETED
+CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 14/53 (26.4%; 26.4 per 100 events)
-- Repeat rate: 0/14 (0.0%)
-- Recurrence rate: 0/14 (0.0%)
-- MTTR: median=0 ms (sample=7; unresolved=7)
+- Failure frequency: 18/81 (22.2%; 22.2 per 100 events)
+- Repeat rate: 1/18 (5.6%)
+- Recurrence rate: 1/17 (5.9%)
+- MTTR: median=0 ms (sample=9; unresolved=9)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/10 (0.0%)
+- Gate waste rate: 0/12 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -28,6 +28,7 @@ COMPLETED
 - #18 2026-08-19T17:56:49.000Z `invalid_survey_inputs_red`; cause_status: `known`; cause: The new real-entry probes show that SurveyDesign accepts negative, non-finite, and all-zero sampling weights, the engine accepts a mutated all-zero weight frame, and Poisson exposure values can be treated as ordinary predictors or raise an untyped overflow instead of a stable typed failure.; resolution: `open`; lesson: Probe mutable real entry points and invalid family inputs before trusting downstream numerical failures or capability declarations.
 - #35 2026-08-19T18:59:35.000Z `large_object_weight_red`; cause_status: `known`; cause: The new object-sized sampling-weight probes reproduced pandas' raw OverflowError during float conversion in the SurveyDesign/engine path and before the typed guard in the source-to-workflow CSV path; the initial Report consumer probes also dropped survey coefficient and replicate provenance.; resolution: `resolved`; lesson: Validate object-sized survey inputs before any lossy numeric conversion and test every consumer at its typed projection seam.
 - #44 2026-08-19T19:24:00.000Z `second_repair_review_red`; cause_status: `known`; cause: Reviewer-directed RED probes reproduced five spec failures: FPC without sampling_weight completed a naive OLS run, Poisson exposure validation leaked OverflowError and accepted bool, subpopulation expressions leaked pandas/parser errors, Report coefficient and replicate projections copied unbounded values, and Agent coefficient projection leaked OverflowError.; resolution: `open`; lesson: Turn every reviewer finding into a real output-level RED probe before changing production boundaries.
+- #74 2026-08-19T20:01:00.000Z `third_repair_real_entry_red`; cause_status: `known`; cause: Reviewer-directed real source-to-workflow probes showed that partial survey declarations and replicate columns without a method completed ordinary OLS, an unsupported survey family failed without the required typed survey code, and the named Agent coefficient inspector added variance_source=None/warnings=[] while omitting persisted survey design metadata.; resolution: `open`; lesson: Make every survey declaration fail closed or reach the shared adapter before estimation, and preserve optional persisted provenance without inventing defaults.
 
 ## All errors
 
@@ -35,6 +36,7 @@ COMPLETED
 - #8 2026-08-19T16:59:10.000Z `formal_event_schema_probe`; cause_status: `known`; cause: The first core verification event source used preventability=not_applicable, which the formal event schema correctly rejected before append.; resolution: `resolved`; lesson: Validate formal event vocabulary before submitting gate evidence.
 - #23 2026-08-19T18:08:03.000Z `formal_event_schema_probe`; cause_status: `known`; cause: The first append attempt supplied two SHA-256 digests in one evidence.sha256 field, and the formal CLI rejected the event before it entered the chain.; resolution: `resolved`; lesson: Submit one digest per formal evidence block and let the CLI validate the event before treating it as recorded.
 - #41 2026-08-19T19:02:35.000Z `formal_duplicate_event_id_probe`; cause_status: `known`; cause: The first final-state append used an event UUID already present in the formal log and the CLI rejected it with duplicate event_id before writing; a unique UUID was then appended successfully.; resolution: `resolved`; lesson: Let the formal CLI reject duplicate identities and record the corrected append rather than hand-editing the event chain.
+- #75 2026-08-19T20:20:00.000Z `third_repair_rescope_replacement_probe`; cause_status: `known`; cause: The first third-repair rescope invocation supplied one affected path at a time, while the formal command replaces the full affected-path snapshot rather than accumulating paths.; resolution: `resolved`; lesson: Treat rescope-context affected-path arguments as a complete replacement and verify the manifest immediately.
 
 ## All gaps
 
@@ -43,6 +45,8 @@ COMPLETED
 - #27 2026-08-19T18:10:52.000Z `external_acceptance_boundaries_not_verified`; cause_status: `known`; cause: The survey package gate does not establish Report HTML/admitted-receipt content, a raw clean-process build_capabilities bootstrap, an R oracle rerun, browser acceptance, provider evidence, or the full release gate.; resolution: `accepted`; lesson: Keep package-local survey verification separate from Report admission, browser, provider, external-oracle, full-gate, and release claims.
 - #38 2026-08-19T19:01:05.000Z `report_admission_gate_not_verified`; cause_status: `external`; cause: The expanded Report command reached the existing write-capable Report and result-table route helpers without an admitted workflow receipt, so those helpers returned WORKFLOW_ADMISSION_RECEIPT_REQUIRED before producing their files.; resolution: `accepted`; lesson: Do not convert a protected write-admission failure into a survey green claim; retain typed projection evidence and leave the consumer gate with its owning line.
 - #51 2026-08-19T19:44:00.000Z `second_repair_external_boundaries`; cause_status: `external`; cause: The survey line does not own admitted Report HTML/XLSX/PDF routing, browser acceptance, provider evidence, external survey oracle comparison, full-gate, or release integration, and protected paths remain unchanged.; resolution: `accepted`; lesson: Keep package-local typed projection evidence separate from admitted Report, browser, provider, oracle, full-gate, and release acceptance.
+- #78 2026-08-19T20:23:00.000Z `third_repair_report_admission_not_verified`; cause_status: `external`; cause: Direct Report export tests run without the admitted server receipt required by the protected write-capable workflow helper.; resolution: `accepted`; lesson: Keep protected report admission and browser acceptance separate from package-local survey projection evidence.
+- #80 2026-08-19T20:25:00.000Z `third_repair_report_admission_not_verified`; cause_status: `external`; cause: Direct Report export tests run without the admitted server receipt required by the protected write-capable workflow helper.; resolution: `accepted`; lesson: Keep protected report admission and browser acceptance separate from package-local survey projection evidence.
 
 ## All waste
 
@@ -57,18 +61,25 @@ COMPLETED
 - `large-object-survey-input-red`: occurrences=1; cause_status: `known`; root cause: The new object-sized sampling-weight probes reproduced pandas' raw OverflowError during float conversion in the SurveyDesign/engine path and before the typed guard in the source-to-workflow CSV path; the initial Report consumer probes also dropped survey coefficient and replicate provenance.; solution: `resolved`
 - `real-entry-invalid-input-red`: occurrences=1; cause_status: `known`; root cause: The new real-entry probes show that SurveyDesign accepts negative, non-finite, and all-zero sampling weights, the engine accepts a mutated all-zero weight frame, and Poisson exposure values can be treated as ordinary predictors or raise an untyped overflow instead of a stable typed failure.; solution: `open`
 - `report-admission-boundary-not-verified`: occurrences=1; cause_status: `external`; root cause: The expanded Report command reached the existing write-capable Report and result-table route helpers without an admitted workflow receipt, so those helpers returned WORKFLOW_ADMISSION_RECEIPT_REQUIRED before producing their files.; solution: `accepted`
+- `rescope-replacement-is-total`: occurrences=1; cause_status: `known`; root cause: The first third-repair rescope invocation supplied one affected path at a time, while the formal command replaces the full affected-path snapshot rather than accumulating paths.; solution: `resolved`
 - `reviewer-spec-red-probes`: occurrences=1; cause_status: `known`; root cause: The reviewer-directed RED probes showed that auto count falls through to the OLS fallback instead of the weighted poisson_rate handler, the clean capability helper is absent while build_capabilities hits the central import cycle, and both direct report HTML assertions still encounter a missing report artifact.; solution: `open`
 - `second-repair-external-boundaries`: occurrences=1; cause_status: `external`; root cause: The survey line does not own admitted Report HTML/XLSX/PDF routing, browser acceptance, provider evidence, external survey oracle comparison, full-gate, or release integration, and protected paths remain unchanged.; solution: `accepted`
 - `second-repair-review-red-probes`: occurrences=1; cause_status: `known`; root cause: Reviewer-directed RED probes reproduced five spec failures: FPC without sampling_weight completed a naive OLS run, Poisson exposure validation leaked OverflowError and accepted bool, subpopulation expressions leaked pandas/parser errors, Report coefficient and replicate projections copied unbounded values, and Agent coefficient projection leaked OverflowError.; solution: `open`
 - `separate-capability-bootstrap-gate`: occurrences=1; cause_status: `known`; root cause: A clean-process direct build_capabilities probe failed in the pre-existing StatisticalTestsStage and orchestrator circular import before reaching the survey capability projection; the scoped capability composition tests pass through their established harness.; solution: `accepted`
 - `separate-report-receipt-gate`: occurrences=1; cause_status: `known`; root cause: The existing survey report visibility tests reach run completion, but HTML report rendering is refused by the protected report helper because this direct test workflow has no admitted server receipt.; solution: `accepted`
+- `third-repair-real-entry-red`: occurrences=1; cause_status: `known`; root cause: Reviewer-directed real source-to-workflow probes showed that partial survey declarations and replicate columns without a method completed ordinary OLS, an unsupported survey family failed without the required typed survey code, and the named Agent coefficient inspector added variance_source=None/warnings=[] while omitting persisted survey design metadata.; solution: `open`
+- `third-repair-report-admission-boundary`: occurrences=2; cause_status: `external`; root cause: Direct Report export tests run without the admitted server receipt required by the protected write-capable workflow helper.; solution: `accepted`
 - `validate-event-vocabulary`: occurrences=1; cause_status: `known`; root cause: The first core verification event source used preventability=not_applicable, which the formal event schema correctly rejected before append.; solution: `resolved`
 - `verify-formal-cli-surface`: occurrences=1; cause_status: `known`; root cause: An unsupported devline-control subcommand and an unavailable interpreter path were used during an early status probe before the formal CLI command surface was checked.; solution: `resolved`
 
 ## Added tests
 
+- `backend/workbench/engine/stages/estimation.py`
+- `tests/test_agent_context_tools.py`
 - `tests/test_reporting_exports.py`
 - `tests/test_survey_design_engine_v187.py`
+- `tests/test_survey_design_wiring_v187.py`
+- `tests/test_survey_design_wiring_v187.py; tests/test_survey_glm_family_wiring_v189.py; tests/test_agent_context_tools.py`
 - `tests/test_survey_glm_family_wiring_v189.py`
 - `tests/test_survey_report_visibility_v187.py`
 
@@ -81,16 +92,20 @@ COMPLETED
 - `large-object-survey-input-red`: line experience occurrence(s)=1
 - `real-entry-invalid-input-red`: line experience occurrence(s)=1
 - `report-admission-boundary-not-verified`: line experience occurrence(s)=1
+- `rescope-replacement-is-total`: line experience occurrence(s)=1
 - `reviewer-spec-red-probes`: line experience occurrence(s)=1
 - `second-repair-external-boundaries`: line experience occurrence(s)=1
 - `second-repair-review-red-probes`: line experience occurrence(s)=1
 - `separate-capability-bootstrap-gate`: line experience occurrence(s)=1
 - `separate-report-receipt-gate`: line experience occurrence(s)=1
+- `third-repair-real-entry-red`: line experience occurrence(s)=1
+- `third-repair-report-admission-boundary`: line experience occurrence(s)=2
 - `validate-event-vocabulary`: line experience occurrence(s)=1
 - `verify-formal-cli-surface`: line experience occurrence(s)=1
 
 ## Future guidance
 
+- Close reviewer RED incidents with the same incident identity used by the original probe.
 - Do not convert a protected write-admission failure into a survey green claim; retain typed projection evidence and leave the consumer gate with its owning line.
 - Instrument real family workflows before trusting capability declarations.
 - Keep Report facts and presentation exports downstream of the same typed projection used by Agent consumers; do not re-read or recompute model results in a consumer.
@@ -100,11 +115,15 @@ COMPLETED
 - Keep package-local survey evidence separate from the protected admission-receipt and browser acceptance boundary.
 - Keep package-local survey verification separate from Report admission, browser, provider, external-oracle, full-gate, and release claims.
 - Keep package-local typed projection evidence separate from admitted Report, browser, provider, oracle, full-gate, and release acceptance.
+- Keep protected report admission and browser acceptance separate from package-local survey projection evidence.
 - Keep reviewer repairs at the earliest typed boundary and preserve provenance through the same bounded consumer projection.
 - Let the formal CLI reject duplicate identities and record the corrected append rather than hand-editing the event chain.
+- Make every survey declaration fail closed or reach the shared adapter before estimation, and preserve optional persisted provenance without inventing defaults.
 - Probe mutable real entry points and invalid family inputs before trusting downstream numerical failures or capability declarations.
 - Report capability projection tests with their actual bootstrap context and keep unrelated import-cycle gates out of the survey implementation scope.
+- Review survey declarations at the real workflow entry and assert output artifacts, not only capability labels or helper return values.
 - Submit one digest per formal evidence block and let the CLI validate the event before treating it as recorded.
+- Treat rescope-context affected-path arguments as a complete replacement and verify the manifest immediately.
 - Turn every reviewer finding into a real output-level RED probe before changing production boundaries.
 - Turn reviewer findings into output-level red probes before changing production wiring or acceptance scope.
 - Use the worktree interpreter and inspect the formal CLI command surface before appending line evidence.
@@ -166,3 +185,31 @@ COMPLETED
 - #51: `5e6f7081-92a3-b4c5-d6e7-f8091a2b3c42` | 2026-08-19T19:44:00.000Z | GAP/second_repair_external_boundaries | incident=`6f708192-a3b4-c5d6-e7f8-091a2b3c4d53` | lesson_key=`second-repair-external-boundaries` | event_sha256=`093281ea4bcdae2017c32eaaf183da414b1b2bc17dabcc728c2c97c789c29b13`
 - #52: `7f8091a2-b3c4-d5e6-f708-192a3b4c5d64` | 2026-08-19T19:46:00.000Z | GATE/second_repair_mechanical_gate | incident=`8091a2b3-c4d5-e6f7-0819-2a3b4c5d6e75` | lesson_key=`second-repair-mechanical-gate` | event_sha256=`58eb8edcd57ed32fcd3b3e38d05b822660e96b0d0778dd7c0693b8b8cb2ab029`
 - #53: `9a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9` | 2026-08-19T19:48:00.000Z | STATE_CHANGE/line_completed_second_repair | incident=`a2b3c4d5-e6f7-0819-2a3b-4c5d6e7f8091` | lesson_key=`second-repair-close-with-boundaries` | event_sha256=`259c751712de6170ef6a56768ab920c335c4ca171a7f86ddf4c4cad71b6ab315`
+- #54: `ab29545b-4667-4dfa-ac5f-fcd9febb9d3b` | 2026-08-19T19:54:32.998Z | STATE_CHANGE/context_rescope_required | incident=`0b6773e0-04e3-442d-a611-8c0c8237b910` | lesson_key=`context-pack-rescope` | event_sha256=`164ce0cdb4a7330b0ba8fcf2f748ccb3e84797de01478abfcfeab8c377f1a63e`
+- #55: `af7028bf-6599-4980-a7d9-217ad7c5cb11` | 2026-08-19T19:54:33.022Z | STATE_CHANGE/context_rescoped | incident=`a4110772-54bb-420a-b7eb-5805e3dc37e4` | lesson_key=`context-pack-rescope` | event_sha256=`ee7dad5f1a77aca9196a2256eb8d9346afbe3efbafecb55bcf684881d2a5309e`
+- #56: `346dedec-2f5e-43c4-ae0c-263b4be98d6b` | 2026-08-19T19:54:33.163Z | STATE_CHANGE/context_rescope_required | incident=`93ceb360-6e32-459f-a455-821678083b32` | lesson_key=`context-pack-rescope` | event_sha256=`2e94bd295970c57c639ef1cc4809e95ed4be134d4202af396caa938e43e6658b`
+- #57: `d3f5c5c1-0704-46d5-b205-20f39f973bba` | 2026-08-19T19:54:33.187Z | STATE_CHANGE/context_rescoped | incident=`e83e6c44-549c-427e-abb5-2df885d81fcb` | lesson_key=`context-pack-rescope` | event_sha256=`8273be75ef8dd76a0caea5ad5dc0cde370fe85a19a76d0445e0852b017b20c6d`
+- #58: `e41275b0-9798-46b7-b40f-81b51cd3fa37` | 2026-08-19T19:54:33.331Z | STATE_CHANGE/context_rescope_required | incident=`4c4495e7-ea48-4c58-968d-ff9767a55070` | lesson_key=`context-pack-rescope` | event_sha256=`d491328f3cc7fffd9f7e50064cba86b04fa590c337a5840de354000a8fa6cda5`
+- #59: `bd67e137-1fc1-4a51-bb82-fa8a47bdc5bb` | 2026-08-19T19:54:33.356Z | STATE_CHANGE/context_rescoped | incident=`ec9b7031-9dba-448d-8310-dc14c07e580f` | lesson_key=`context-pack-rescope` | event_sha256=`6a798badd9590ab804d07a3b8ee905535ab58e4ac3e95b31a8dd8ae930121b3c`
+- #60: `d5e44c80-eb9f-486a-8b6e-a59dada37699` | 2026-08-19T19:54:33.507Z | STATE_CHANGE/context_rescope_required | incident=`84369bfa-c290-44cb-92f0-382f6d6b228c` | lesson_key=`context-pack-rescope` | event_sha256=`a68fd24cbf89d7dfdaf51a57bede58851d1d7639e2fb74b8bd06182f820db613`
+- #61: `9742b9b1-8888-4b03-addc-69928702c557` | 2026-08-19T19:54:33.533Z | STATE_CHANGE/context_rescoped | incident=`84d076c7-9006-4bc1-8092-f69dca60327d` | lesson_key=`context-pack-rescope` | event_sha256=`9d71574c6f622a30b6912c32dd9f358968737a9a45768a0237ea9ec717f3314e`
+- #62: `cc693ee7-296b-44b0-b831-bae710d96799` | 2026-08-19T19:54:33.683Z | STATE_CHANGE/context_rescope_required | incident=`f32f315a-0d74-4654-bc8d-15c528cc7c54` | lesson_key=`context-pack-rescope` | event_sha256=`f414ebd7c1fa8029160b8ad270936a24d510f9fcce6925a3381ad528dbe4e4e4`
+- #63: `331399ad-cc43-4e3c-af0d-40ff1ade9bad` | 2026-08-19T19:54:33.709Z | STATE_CHANGE/context_rescoped | incident=`47b83331-7909-4f2d-b08c-27b39381518b` | lesson_key=`context-pack-rescope` | event_sha256=`2be407aa77497b76b83af1664d29463cb2d045f11004c9eb5be668ecdcb82960`
+- #64: `6414182a-c1e1-46fc-a9bf-de88cb54deea` | 2026-08-19T19:54:33.860Z | STATE_CHANGE/context_rescope_required | incident=`151134fd-ac74-4415-a6ce-0ef02c8cedfa` | lesson_key=`context-pack-rescope` | event_sha256=`69c795268ae313c61dc1835c300566b7e6a430bbd7fbea38e778871cc7f568ec`
+- #65: `1c930585-14d9-4106-9aac-8faf5ff73279` | 2026-08-19T19:54:33.886Z | STATE_CHANGE/context_rescoped | incident=`51b9e597-1899-496c-b6ba-7039ee4ac41e` | lesson_key=`context-pack-rescope` | event_sha256=`c62387bfe3e7b2f789a37f9111c741357df9b55c89307458cfcd9ae612e48bbe`
+- #66: `ea89d30c-8d08-4bcc-a8a2-f8fcf0d90e47` | 2026-08-19T19:54:34.031Z | STATE_CHANGE/context_rescope_required | incident=`5ef240bb-fa83-441c-abc7-95772ad8d909` | lesson_key=`context-pack-rescope` | event_sha256=`ebf9b69d45bb1497c0588a314a7fb8c221f12dc576af5048cad94b48400b778b`
+- #67: `a75b83fa-8eab-4f9a-b4d6-7ff230e17c32` | 2026-08-19T19:54:34.057Z | STATE_CHANGE/context_rescoped | incident=`1aff18ed-fb63-43dc-9f55-5459d1b72003` | lesson_key=`context-pack-rescope` | event_sha256=`77ed24fb8ae320b81e8509c954565d868d59be61b293df2f1859d2b6bd22567e`
+- #68: `142485a2-1626-4bde-9e4a-6083ba289c7c` | 2026-08-19T19:54:34.202Z | STATE_CHANGE/context_rescope_required | incident=`87d3133d-774c-4c70-8713-6b2ae21d1183` | lesson_key=`context-pack-rescope` | event_sha256=`0ed3667cd7570e4021e46ef9c80faba2cfabc547f89315e4909922f7d6534d68`
+- #69: `18eedd60-d141-4af8-b23c-e58ca0495f26` | 2026-08-19T19:54:34.229Z | STATE_CHANGE/context_rescoped | incident=`b8bd72b8-1c32-4063-833c-36372a14a6bc` | lesson_key=`context-pack-rescope` | event_sha256=`d714b671c853cb485a280f40bf57045d6b44686bfd91059816487da8ef39102e`
+- #70: `ad33b189-3ea7-42e6-b3ff-bf6e40ee6e9d` | 2026-08-19T19:55:12.218Z | STATE_CHANGE/context_rescope_required | incident=`88789628-510f-41f2-96ce-02493b47dc10` | lesson_key=`context-pack-rescope` | event_sha256=`fa12be850c77082d4f755ba8d44dc265cbd6b10c3397ffcf9c43f8c1d541b11b`
+- #71: `80ce2cd0-d12b-4a86-96d4-fa61fb4c9d84` | 2026-08-19T19:55:12.247Z | STATE_CHANGE/context_rescoped | incident=`aa110967-5269-482e-af90-ad7b8cc3d9db` | lesson_key=`context-pack-rescope` | event_sha256=`6f8a6955d9153331ad642840d9d342c158c4f5a2dfa0fb8c2fde5750ac70d52d`
+- #72: `4642a9c7-1c7c-45e9-be10-4450858a0408` | 2026-08-19T19:58:10.246Z | STATE_CHANGE/context_rescope_required | incident=`a0547422-e1b3-4193-b89e-efaaf06c472d` | lesson_key=`context-pack-rescope` | event_sha256=`fed8d5ba72757347d123cc4edb88917a17c6a0fc9d115f83fa35200c4bcece36`
+- #73: `25c8dd50-0708-4830-944f-e0b7ecde1a6f` | 2026-08-19T19:58:10.277Z | STATE_CHANGE/context_rescoped | incident=`a0b37172-cca0-4bd2-9bfa-eb0af87f2e23` | lesson_key=`context-pack-rescope` | event_sha256=`8295456eb2fa7fd71326935bb01df8579e11c99b45a1c8a2641f1c3009eaee2e`
+- #74: `b4c7d2e1-6f38-4a90-8c15-2d7e9b5f6041` | 2026-08-19T20:01:00.000Z | FAILURE/third_repair_real_entry_red | incident=`d5a8c3e7-1f62-4b90-9d35-7e2a6c8f1043` | lesson_key=`third-repair-real-entry-red` | event_sha256=`170d2531ab673c3bbd179673f833fd66e9391291b0b06be27165be4cbb47eb00`
+- #75: `4e6f8a10-b2c4-4d6e-8f90-1a2b3c4d5e60` | 2026-08-19T20:20:00.000Z | ERROR/third_repair_rescope_replacement_probe | incident=`5f709b21-c3d5-4e7f-9012-3b4c5d6e7f81` | lesson_key=`rescope-replacement-is-total` | event_sha256=`2040d1e08fe8ef7272948debde622fd5f0c4ddb3cc8f56dbef9d4a7e7916e881`
+- #76: `6a8c0e12-b4d6-4f80-9214-3b5c7d9e1f23` | 2026-08-19T20:21:00.000Z | REVIEW/third_repair_review_resolved | incident=`7b9d1f23-c5e7-4081-a325-4c6e8f90a2b4` | lesson_key=`third-repair-fail-closed-review` | event_sha256=`8c576688d5e8460d8bfbbf0a1e6b8f183765c1519c7bf1b6ebe28149da609211`
+- #77: `8c0e2a34-d6f8-41a3-b527-5d7f9b1c3e45` | 2026-08-19T20:22:00.000Z | GATE/third_repair_survey_agent_green | incident=`9d1f3b45-e7f9-42a5-c637-6e8f0a2b4c56` | lesson_key=`third-repair-local-green-gate` | event_sha256=`1e98a766bdde8115985e84038ce25933d677e0feacb353cb5368a3a032017f90`
+- #78: `0e2a4c56-f8a0-43c7-d961-7f9b1d3e5a68` | 2026-08-19T20:23:00.000Z | GAP/third_repair_report_admission_not_verified | incident=`1f3b5d67-a9c1-45e8-0a2b-4c6e8f90d1f3` | lesson_key=`third-repair-report-admission-boundary` | event_sha256=`eff648494fbf66994c17e9ccc6bc5ca6ad4da5d1b4a8cc0006e45f095bb5266c`
+- #79: `2a4c6e78-b0d2-45f9-1a3b-5c7d9e0f2a46` | 2026-08-19T20:24:00.000Z | GATE/third_repair_mechanical_checks_green | incident=`3b5d7f90-c1e3-47a9-2b4d-6e8f0a1c3e57` | lesson_key=`third-repair-mechanical-gate` | event_sha256=`01fa1b8b85f0ae5ae5c836e78de09f294fc138b2ab216c81e37758bb1ae15615`
+- #80: `4c6e8f90-d2f4-49b1-3c5e-7f0a2b4d6e81` | 2026-08-19T20:25:00.000Z | GAP/third_repair_report_admission_not_verified | incident=`5d7f9b1c-e3f5-40a2-4c6e-8f90b1d3e5a7` | lesson_key=`third-repair-report-admission-boundary` | event_sha256=`c4aafe892e6bba14eb47bfcdf8f46072c40169ac68deaba9d595281cff15619a`
+- #81: `6e8f0a2b-4c6d-49e1-3f5a-7b9d1c2e4f60` | 2026-08-19T20:26:00.000Z | REVIEW/third_repair_real_entry_red_resolved | incident=`d5a8c3e7-1f62-4b90-9d35-7e2a6c8f1043` | lesson_key=`third-repair-red-incident-closure` | event_sha256=`ce83da4a24c18ffcc6572be60e9561b2b97f9f34962496743c3c88caf4f22996`

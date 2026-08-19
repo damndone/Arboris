@@ -205,6 +205,11 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
     psu = str(artifacts.get("_survey_psu_col") or "").strip()
     weight = str(artifacts.get("_sampling_weight") or "").strip()
     fpc = str(artifacts.get("_survey_fpc_col") or "").strip()
+    replicate_columns = list(artifacts.get("_survey_replicate_weights") or [])
+    replicate_type = str(artifacts.get("_survey_replicate_type") or "").strip()
+    lonely_psu = str(artifacts.get("_survey_lonely_psu") or "").strip()
+    subpopulation = str(artifacts.get("_survey_subpop") or "").strip()
+    weight_frame = str(artifacts.get("_survey_weight_frame") or "").strip()
     if fpc:
         raise SurveyEngineError(
             "SURVEY_FPC_UNSUPPORTED",
@@ -214,6 +219,25 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
             fpc_column=fpc,
         )
     if not weight:
+        declared_fields = [
+            name for name, value in (
+                ("survey_strata_col", strata),
+                ("survey_psu_col", psu),
+                ("survey_replicate_weights", replicate_columns),
+                ("survey_replicate_type", replicate_type),
+                ("survey_lonely_psu", lonely_psu),
+                ("survey_subpop", subpopulation),
+                ("survey_weight_frame", weight_frame),
+            ) if value
+        ]
+        if declared_fields:
+            raise SurveyEngineError(
+                "SURVEY_DESIGN_INCOMPLETE",
+                "survey design declarations require sampling_weight before "
+                "estimation; no declared design field may be silently ignored",
+                missing=["sampling_weight"],
+                declared_fields=declared_fields,
+            )
         return None
     if not (strata or psu):
         raise SurveyEngineError(
@@ -229,15 +253,20 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
             ],
         )
 
-    replicate_columns = list(artifacts.get("_survey_replicate_weights") or [])
+    if replicate_columns and not replicate_type:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_TYPE_REQUIRED",
+            "replicate weight columns require survey_replicate_type",
+            replicate_weight_columns=replicate_columns[:16],
+        )
     return SurveyDesign(
         frame=frame,
         weight=weight,
         strata=strata or None,
         psu=psu or None,
-        lonely_psu=str(artifacts.get("_survey_lonely_psu") or "").strip() or "fail",
-        subpop=str(artifacts.get("_survey_subpop") or "").strip() or None,
-        replicate_type=str(artifacts.get("_survey_replicate_type") or "").strip() or None,
+        lonely_psu=lonely_psu or "fail",
+        subpop=subpopulation or None,
+        replicate_type=replicate_type or None,
         replicate_weight_columns=replicate_columns,
     )
 

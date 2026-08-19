@@ -1665,6 +1665,26 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                     "confidence_level": 0.95,
                     "confidence_interval_method": "normal_z",
                 },
+                "survey_design": {
+                    "strata_column": "stratum",
+                    "psu_column": "psu",
+                    "weight_column": "weight",
+                    "subpopulation": "region == 'north'",
+                    "n_obs": 100,
+                    "n_strata": 4,
+                    "n_psu": 8,
+                    "degf": 4,
+                    "residual_degf": 3,
+                    "variance_method": "linearization",
+                    "replicate_type": None,
+                    "lonely_psu_policy": "adjust",
+                    "design_effect": 2.5,
+                    "effective_sample_size": 40.0,
+                    "replicates_attempted": None,
+                    "replicates_succeeded": None,
+                    "replicates_failed": None,
+                    "replicate_failure_reasons": None,
+                },
                 "coefficients": {
                     "share": {
                         "estimate": 1.2,
@@ -1672,7 +1692,9 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                         "p_value": 0.001,
                         "ci_lower": 0.61,
                         "ci_upper": 1.79,
+                        "variance_source": "survey_design",
                         "source_id": "model_results.ols_1.coefficients.share",
+                        "warnings": ["SURVEY_REPLICATE_FAILURES"],
                     },
                     "control": {"estimate": 0.4},
                 },
@@ -1722,6 +1744,25 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                     "cluster_count": None,
                     "cluster_entity": None,
                 },
+                "survey_design": {
+                    "n_obs": 100,
+                    "n_strata": 4,
+                    "n_psu": 8,
+                    "degf": 4,
+                    "residual_degf": 3,
+                    "design_effect": 2.5,
+                    "effective_sample_size": 40.0,
+                    "variance_method": "linearization",
+                    "strata_column": "stratum",
+                    "psu_column": "psu",
+                    "weight_column": "weight",
+                    "subpopulation": "region == 'north'",
+                    "lonely_psu_policy": "adjust",
+                    "replicates_attempted": None,
+                    "replicates_succeeded": None,
+                    "replicates_failed": None,
+                    "replicate_failure_reasons": None,
+                },
                 "coefficients": [
                     {
                         "term": "share",
@@ -1730,7 +1771,9 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                         "p_value": 0.001,
                         "ci_lower": 0.61,
                         "ci_upper": 1.79,
+                        "variance_source": "survey_design",
                         "source_id": "model_results.ols_1.coefficients.share",
+                        "warnings": ["SURVEY_REPLICATE_FAILURES"],
                     }
                 ],
                 "missing_terms": [],
@@ -1744,6 +1787,26 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
         "omitted_sections": ["raw_model_results", "raw_rows"],
     }
     assert "99" not in json.dumps(result.output)
+
+
+def test_global_coefficient_inspector_does_not_invent_optional_survey_provenance():
+    from workbench.agent.context_tools import _public_requested_model_coefficients
+
+    projected = _public_requested_model_coefficients(
+        run_id="run-a",
+        result={
+            "model_id": "ols_1",
+            "model_type": "ols_robust",
+            "coefficients": {"share": {"estimate": 1.2}},
+        },
+        requested_terms=("share",),
+    )
+
+    assert projected is not None
+    coefficient = projected["coefficients"][0]
+    assert "variance_source" not in coefficient
+    assert "warnings" not in coefficient
+    assert "survey_design" not in projected
 
 
 def test_global_dataset_schema_inspector_exposes_only_bounded_column_metadata(

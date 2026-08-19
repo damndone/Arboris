@@ -264,6 +264,68 @@ def test_sampling_weight_fails_closed_without_a_declared_design(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    "survey_declaration",
+    [
+        {"survey_strata_col": "region"},
+        {"survey_psu_col": "cluster"},
+        {"survey_subpop": "region == 'north'"},
+        {"survey_lonely_psu": "adjust"},
+        {
+            "survey_replicate_type": "provided",
+            "survey_replicate_weights": ["rw1"],
+        },
+    ],
+    ids=["strata", "psu", "subpopulation", "lonely-psu", "provided-replicates"],
+)
+def test_partial_survey_declarations_fail_closed_at_real_workflow_entry(
+    tmp_path, survey_declaration
+):
+    """A survey declaration must not disappear into an ordinary model run."""
+    project, source = _project(tmp_path, f"partial-{next(iter(survey_declaration))}")
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="ols",
+        y="y",
+        x=["x"],
+        **survey_declaration,
+    )
+
+    assert outcome["status"] == "failed", outcome
+    run_root = project.root / "runs" / outcome["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(issue["code"] == "SURVEY_DESIGN_INCOMPLETE" for issue in errors["issues"])
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+
+
+def test_replicate_weight_columns_without_a_method_fail_closed(tmp_path):
+    """Replicate columns are not allowed to be silently ignored by Taylor variance."""
+    project, source = _project(tmp_path, "replicate-columns-without-type")
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="ols",
+        y="y",
+        x=["x"],
+        sampling_weight="rw1",
+        survey_strata_col="region",
+        survey_psu_col="cluster",
+        survey_replicate_weights=["rw1"],
+    )
+
+    assert outcome["status"] == "failed", outcome
+    run_root = project.root / "runs" / outcome["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(
+        issue["code"] == "SURVEY_REPLICATE_TYPE_REQUIRED"
+        for issue in errors["issues"]
+    )
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+
+
 # --------------------------------------------------------------------------
 # 4. measurement_level rides the existing labels channel
 # --------------------------------------------------------------------------

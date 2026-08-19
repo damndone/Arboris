@@ -3158,7 +3158,7 @@ def _public_requested_model_coefficients(
     confidence_level = _public_probability(covariance_evidence.get("confidence_level"))
     cluster_variable = covariance_evidence.get("cluster_variable")
     cluster_count = _public_positive_int(covariance_evidence.get("cluster_count"))
-    return {
+    public_model = {
         "run_id": run_id,
         "model_id": model_id,
         "model_type": result.get("model_type") if isinstance(result.get("model_type"), str) else None,
@@ -3203,6 +3203,10 @@ def _public_requested_model_coefficients(
             "result_ref": f"model_results:{model_id}",
         },
     }
+    survey_design = _bounded_survey_design([result])
+    if survey_design is not None:
+        public_model["survey_design"] = survey_design
+    return public_model
 
 
 def _public_stat_number(value: Any) -> int | float | None:
@@ -3671,9 +3675,12 @@ def _bounded_agent_coefficient(
         projected[field] = value
         if coefficient.get(field) is not None and value is None:
             invalid_numeric = True
-    projected["variance_source"] = _bounded_label(coefficient.get("variance_source"))
-    projected["source_id"] = _bounded_label(coefficient.get("source_id"))
-    projected["warnings"] = _bounded_labels(coefficient.get("warnings"))
+    for field in ("variance_source", "source_id"):
+        if field not in coefficient:
+            continue
+        projected[field] = _bounded_label(coefficient.get(field))
+    if "warnings" in coefficient:
+        projected["warnings"] = _bounded_labels(coefficient.get("warnings"))
     if invalid_numeric:
         projected.update(
             {
@@ -5042,7 +5049,7 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
             string_fields=(
                 "variance_method", "strata_column", "psu_column",
                 "weight_column", "replicate_type", "lonely_psu_policy",
-                "subpopulation",
+                "subpopulation", "weight_frame",
             ),
         )
         for field in (

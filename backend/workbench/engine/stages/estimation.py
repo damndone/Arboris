@@ -522,7 +522,11 @@ def _apply_survey_design_variance(
         exposure=ctx.exposure_col,
     )
     if estimator is None:
-        return
+        raise SurveyEngineError(
+            "SURVEY_GLM_FAMILY_UNSUPPORTED",
+            f"model family {model_type!r} has no live survey adapter path",
+            model_type=model_type,
+        )
 
     declared_replicate = str(ctx.artifacts.get("_survey_replicate_type") or "").strip()
     method = "replicate" if declared_replicate else "linearization"
@@ -609,6 +613,7 @@ def _apply_survey_design_variance(
         "replicates_succeeded": summary.succeeded if summary else None,
         "replicates_failed": summary.failed if summary else None,
         "replicate_failure_reasons": summary.failure_reasons if summary else None,
+        "weight_frame": str(ctx.artifacts.get("_survey_weight_frame") or "").strip() or None,
     }
 
 
@@ -960,6 +965,17 @@ class EstimationStage:
             # weight-support gate so an incoherent pairing is reported as such,
             # rather than as a family that has not been wired up yet.
             _check_survey_composition(ctx, handler.model_type, sampling_weight)
+            if _survey_design_declared(ctx) and _survey_estimator_for(
+                handler.model_type,
+                normalized_y,
+                normalized_x,
+                exposure=ctx.exposure_col,
+            ) is None:
+                raise SurveyEngineError(
+                    "SURVEY_GLM_FAMILY_UNSUPPORTED",
+                    f"model family {handler.model_type!r} has no live survey adapter path",
+                    model_type=handler.model_type,
+                )
             try:
                 _validate_model_family_weights(
                     handler.model_type,
