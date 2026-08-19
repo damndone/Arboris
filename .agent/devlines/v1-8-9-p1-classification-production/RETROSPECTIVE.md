@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 8/36 (22.2%; 22.2 per 100 events)
-- Repeat rate: 0/8 (0.0%)
-- Recurrence rate: 0/8 (0.0%)
-- MTTR: median=0 ms (sample=3; unresolved=4)
+- Failure frequency: 10/40 (25.0%; 25.0 per 100 events)
+- Repeat rate: 0/10 (0.0%)
+- Recurrence rate: 0/10 (0.0%)
+- MTTR: median=0 ms (sample=5; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/6 (0.0%)
+- Gate waste rate: 0/7 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -34,6 +34,8 @@ COMPLETED
 - #29 2026-08-19T18:30:30.000Z `formal_cli_surface_misread`; cause_status: `known`; cause: The first attempt used nonexistent formal control subcommands append-event and status instead of the existing append interface.; resolution: `resolved`; lesson: Check the formal CLI help before appending line evidence and never bypass the control surface with direct .agent edits.
 - #31 2026-08-19T19:20:00.000Z `formal_retrospective_stale`; cause_status: `known`; cause: Formal verification correctly rejected the pre-existing generated retrospective because the new RED, CLI correction, and GREEN gate events had been appended afterward.; resolution: `open`; lesson: Regenerate the formal retrospective immediately after appending material events and before treating formal verification as current.
 - #34 2026-08-19T20:12:00.000Z `classification_reportview_fixture_missing_family`; cause_status: `known`; cause: The stricter frontend classification family validator exposed a pre-existing ReportView v1.8.9 test fixture without family_evidence.classification.; resolution: `resolved`; lesson: Keep every consumer fixture aligned with the complete typed family evidence contract.
+- #38 2026-08-19T15:56:10.000Z `formal_append_event_path_error`; cause_status: `known`; cause: The formal append command rejected an external temporary event path because event files must be repository-relative.; resolution: `resolved`; lesson: Use the formal CLI with a repository-relative temporary event file and never edit .agent records directly.
+- #40 2026-08-19T16:08:30.000Z `verification_frontend_wrong_workdir`; cause_status: `known`; cause: The initial npm frontend focused and typecheck commands were launched from the worktree root, which has no package.json; the actual package root is the allowlisted frontend directory.; resolution: `resolved`; lesson: Resolve the package root before running frontend verification commands in a multi-package worktree.
 
 ## All gaps
 
@@ -46,8 +48,10 @@ COMPLETED
 ## Root causes and solutions
 
 - `compile-after-protocol-edit`: occurrences=1; cause_status: `known`; root cause: The first production-path patch left a metadata local uninitialized and then introduced an indentation error while adding weighted threshold inputs.; solution: `accepted`
+- `formal-append-repo-relative-event-file`: occurrences=1; cause_status: `known`; root cause: The formal append command rejected an external temporary event path because event files must be repository-relative.; solution: `resolved`
 - `formal-cli-surface-check`: occurrences=1; cause_status: `known`; root cause: The first attempt used nonexistent formal control subcommands append-event and status instead of the existing append interface.; solution: `resolved`
 - `formal-retrospective-regeneration`: occurrences=1; cause_status: `known`; root cause: Formal verification correctly rejected the pre-existing generated retrospective because the new RED, CLI correction, and GREEN gate events had been appended afterward.; solution: `open`
+- `frontend-verification-package-root`: occurrences=1; cause_status: `known`; root cause: The initial npm frontend focused and typecheck commands were launched from the worktree root, which has no package.json; the actual package root is the allowlisted frontend directory.; solution: `resolved`
 - `production-contracts-red`: occurrences=1; cause_status: `known`; root cause: The additive entrypoint rejects declared weights, has no preprocessing seam, and coerces numeric strings through the helper-only path.; solution: `accepted`
 - `task-split-profile-red`: occurrences=1; cause_status: `known`; root cause: The production classification entrypoint still fixed every task to the iid_stratified split profile.; solution: `accepted`
 - `typed-classification-catalog-projection`: occurrences=1; cause_status: `known`; root cause: Binding the complete builtin provider catalog with only the classification contribution correctly failed because unrelated provider contributions were absent from this package-local runtime.; solution: `resolved`
@@ -61,8 +65,10 @@ COMPLETED
 ## New rules
 
 - `compile-after-protocol-edit`: line experience occurrence(s)=1
+- `formal-append-repo-relative-event-file`: line experience occurrence(s)=1
 - `formal-cli-surface-check`: line experience occurrence(s)=1
 - `formal-retrospective-regeneration`: line experience occurrence(s)=1
+- `frontend-verification-package-root`: line experience occurrence(s)=1
 - `production-contracts-red`: line experience occurrence(s)=1
 - `task-split-profile-red`: line experience occurrence(s)=1
 - `typed-classification-catalog-projection`: line experience occurrence(s)=1
@@ -83,7 +89,10 @@ COMPLETED
 - Make the typed task split profile drive the executable manifest before any model fit.
 - Regenerate the formal retrospective immediately after appending material events and before treating formal verification as current.
 - Resolve repository-owned contract test paths before claiming C0 verification evidence.
+- Resolve the package root before running frontend verification commands in a multi-package worktree.
 - Run compileall immediately after surgical protocol edits and keep branch-local evidence green before adding the next contract.
+- Treat server-owned persisted artifact reload as a separate boundary from a green runtime return; every consumer must validate the same fold receipt contract and status/identity joins.
+- Use the formal CLI with a repository-relative temporary event file and never edit .agent records directly.
 
 ## Event index
 
@@ -123,3 +132,7 @@ COMPLETED
 - #34: `a7c1e4f9-2b6d-4a8e-9c03-f5d7b1e2a644` | 2026-08-19T20:12:00.000Z | ERROR/classification_reportview_fixture_missing_family | incident=`d9f2a7b4-6c81-40e5-93f0-1a8d6b2c4e75` | lesson_key=`typed-family-fixtures` | event_sha256=`631204a20f73bf297bb091a621de6266cdb15e8db979b155ba1a0ac9929c65ae`
 - #35: `b8e2f5a1-6c3d-4f79-9a02-d7e1c5b8f644` | 2026-08-19T20:16:00.000Z | GATE/classification_production_second_round_focused_green | incident=`e1a7c4d9-2f6b-48e0-9c53-b7d1a5f8e244` | lesson_key=`classification-second-round-green` | event_sha256=`072a912946ae162ed1b7a3570c90563dc43abeaa66b68361132879af19b6e518`
 - #36: `c9f4a7d2-6e1b-48f0-9a53-b7d5c2e8f144` | 2026-08-19T20:22:00.000Z | GATE/classification_production_final_verification | incident=`f2a8c5e1-7d39-4b60-9c24-d6f1a7e5b842` | lesson_key=`final-focused-verification` | event_sha256=`45d68ea71de36ce228a5797ca5f92d8a1b5af6d8eaf03d072629c10cec4f3f8a`
+- #37: `5a1e7c3d-9b42-4f68-8d20-6c3b7e1a5f94` | 2026-08-19T15:55:44.000Z | REVIEW/classification_production_persistence_third_round_red | incident=`1f6b3d8a-2c57-4e90-b731-9d5a0c6f2e84` | lesson_key=`classification-persistence-third-round-red` | event_sha256=`f1fc184772ebce7602982b8461546a3af8314a5e21daecb3b239d3034084d00a`
+- #38: `3c8f1d2a-7b64-4e90-a531-6d2f8b9c0e17` | 2026-08-19T15:56:10.000Z | ERROR/formal_append_event_path_error | incident=`8d2f6a1c-4b79-45e0-9c31-7a5d2e8f6b04` | lesson_key=`formal-append-repo-relative-event-file` | event_sha256=`4b4946f74042a53e73fc9d996a42f3437b68e11d9a3c34108f32f64a644f99ee`
+- #39: `7b2e5d9a-4c61-48f0-a3d7-1e9b6c2f5a84` | 2026-08-19T16:06:30.000Z | GATE/classification_production_persistence_third_round_green | incident=`6f1c8a3d-5b72-4e90-9d24-7a0e3c6b1f58` | lesson_key=`classification-production-persistence-third-round-green` | event_sha256=`23ddebc8d7ba0186829d27a95db8b853c522e041f23699af37cb0b33681befbb`
+- #40: `9d4f2b7c-6a18-4e50-b3d9-1c7a8f2e5b64` | 2026-08-19T16:08:30.000Z | ERROR/verification_frontend_wrong_workdir | incident=`4a8e1c6f-2b73-49d0-a5e1-7c3b9f6d2a80` | lesson_key=`frontend-verification-package-root` | event_sha256=`9972d32427d56e059b395ccce0877e0aa2ec72472239212e320d926be657531f`

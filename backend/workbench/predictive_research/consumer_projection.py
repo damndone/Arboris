@@ -7,12 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from ..artifacts import read_json, sha256_file
+from ..canonical import sha256_canonical
 from workbench.contracts.evidence.envelope import (
     ConsumerProjectionV1,
     EvidenceEnvelopeV1,
 )
 from .schema import PayloadContractError, default_v1_prediction_registry
 from .contracts import ContractError
+from .persistence import classification_artifact_id
 
 
 _REQUIRED = {
@@ -95,6 +97,44 @@ def read_prediction_evidence_from_run_root(
             consumer=consumer,
         )
     return project_prediction_evidence(payloads, consumer=consumer)
+
+
+def read_classification_evidence_from_run_root(
+    run_root: Path,
+    *,
+    consumer: str,
+) -> dict[str, Any]:
+    """Reload the indexed server-owned classification artifact before projection."""
+
+    index = read_json(run_root / "artifacts_index.json")
+    if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
+        raise PayloadContractError("ARTIFACT_INDEX_INVALID", "artifacts_index.json has no artifact list")
+    records = [
+        record
+        for record in index["artifacts"]
+        if isinstance(record, Mapping) and record.get("artifact_type") == "classification_artifacts"
+    ]
+    if len(records) != 1:
+        raise ContractError("CLASSIFICATION_PERSISTED_ARTIFACT_REQUIRED", "exactly one indexed classification artifact is required")
+    record = records[0]
+    contract = record.get("payload_contract")
+    if contract != {"payload_schema": _PERSISTED_CLASSIFICATION_SCHEMA, "schema_version": 1}:
+        raise ContractError("CLASSIFICATION_PERSISTED_ARTIFACT_CONTRACT_INVALID", "indexed classification artifact contract is invalid")
+    relative_path = Path(str(record.get("path", "")))
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise PayloadContractError("ARTIFACT_PATH_INVALID", "classification evidence path must stay inside run root")
+    resolved_root = Path(run_root).resolve()
+    path = (Path(run_root) / relative_path).resolve()
+    try:
+        path.relative_to(resolved_root)
+    except ValueError as error:
+        raise PayloadContractError("ARTIFACT_PATH_INVALID", "classification evidence path escapes run root") from error
+    if not path.is_file() or sha256_file(path) != record.get("sha256"):
+        raise PayloadContractError("ARTIFACT_PAYLOAD_HASH_MISMATCH", "classification evidence hash does not match index")
+    payload = read_json(path)
+    if not isinstance(payload, Mapping) or payload.get("artifact_id") != record.get("artifact_id"):
+        raise ContractError("CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID", "indexed classification artifact identity is stale")
+    return project_classification_evidence(payload, consumer=consumer)
 
 
 def _has_payload_contract(value: Any) -> bool:
@@ -245,6 +285,223 @@ _CLASSIFICATION_C0_STATUS = {
 _CLASSIFICATION_FAMILY_ISSUER = "workbench.server"
 _CLASSIFICATION_FAMILY_PRODUCER = "workbench.prediction.run_classification_model_v189"
 _CLASSIFICATION_FAMILY_METHOD = {"id": "classification-production-v1", "version": "1.0"}
+_PERSISTED_CLASSIFICATION_SCHEMA = "workbench.prediction.classification-artifacts"
+_PERSISTED_CLASSIFICATION_IDENTITY_FIELDS = frozenset(
+    {
+        "schema_version",
+        "artifact_id",
+        "parts",
+        "task_hash",
+        "split_hash",
+        "model_id",
+        "model_hash",
+        "holdout_hash",
+        "release_plan_hash",
+        "fit_digest",
+        "evaluation_digest",
+    }
+)
+
+
+def _persisted_classification_error(code: str, message: str) -> ContractError:
+    return ContractError(code, message)
+
+
+def _validate_persisted_fold_receipts(
+    artifact: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    *,
+    split_hash: str,
+) -> None:
+    fit = artifact.get("fit")
+    models = artifact.get("models")
+    task = evidence.get("task")
+    if not isinstance(fit, Mapping) or not isinstance(models, Mapping) or not isinstance(task, Mapping):
+        raise _persisted_classification_error(
+            "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+            "persisted classification fit and model structures are required",
+        )
+    fit_models = fit.get("models")
+    overall_support = task.get("class_support")
+    if fit.get("schema_version") != 1 or not isinstance(fit_models, Mapping) or not isinstance(overall_support, Mapping):
+        raise _persisted_classification_error(
+            "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+            "persisted classification fit schema and task support are required",
+        )
+    labels = list(overall_support)
+    if len(labels) < 2 or len(set(labels)) != len(labels):
+        raise _persisted_classification_error(
+            "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+            "persisted task class support must contain unique class labels",
+        )
+    for label, count in overall_support.items():
+        if type(label) is not str or type(count) is not int or count < 0:
+            raise _persisted_classification_error(
+                "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+                "persisted task class support counts must be non-negative integers",
+            )
+    if set(fit_models) != set(models):
+        raise _persisted_classification_error(
+            "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+            "persisted fit models must match persisted model candidates",
+        )
+    for model_id, fit_model in fit_models.items():
+        model = models.get(model_id)
+        if not isinstance(model_id, str) or not isinstance(fit_model, Mapping) or not isinstance(model, Mapping):
+            raise _persisted_classification_error(
+                "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+                "persisted model fit records must be objects",
+            )
+        preprocessing = model.get("preprocessing")
+        fold_receipts = fit_model.get("fold_receipts")
+        if (
+            not isinstance(preprocessing, Mapping)
+            or preprocessing.get("folds") != fold_receipts
+            or not isinstance(fold_receipts, list)
+            or not fold_receipts
+        ):
+            raise _persisted_classification_error(
+                "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+                f"persisted model {model_id!r} has no complete fold receipts",
+            )
+        seen_folds: set[int] = set()
+        for fold in fold_receipts:
+            if not isinstance(fold, Mapping):
+                raise _persisted_classification_error(
+                    "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+                    "persisted fold receipt must be an object",
+                )
+            fold_number = fold.get("fold")
+            training_refs = fold.get("training_row_refs")
+            validation_refs = fold.get("validation_row_refs")
+            receipt = fold.get("receipt")
+            support = receipt.get("class_support") if isinstance(receipt, Mapping) else None
+            if (
+                type(fold_number) is not int
+                or fold_number < 0
+                or fold_number in seen_folds
+                or not isinstance(training_refs, list)
+                or not isinstance(validation_refs, list)
+                or not training_refs
+                or not validation_refs
+                or not isinstance(receipt, Mapping)
+                or receipt.get("schema_version") != 1
+                or receipt.get("split_hash") != split_hash
+                or receipt.get("fit_row_refs") != training_refs
+                or not isinstance(support, Mapping)
+            ):
+                raise _persisted_classification_error(
+                    "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+                    f"persisted fold receipt {fold_number!r} is incomplete or stale",
+                )
+            seen_folds.add(fold_number)
+            class_labels = support.get("class_labels")
+            if class_labels != labels or len(set(class_labels)) != len(class_labels):
+                raise _persisted_classification_error(
+                    "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+                    "persisted fold receipt class labels are incomplete or reordered",
+                )
+            for scope, refs in (("training", training_refs), ("validation", validation_refs)):
+                counts = support.get(scope)
+                if not isinstance(counts, Mapping) or set(counts) != set(labels):
+                    raise _persisted_classification_error(
+                        "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+                        f"persisted {scope} class support is incomplete",
+                    )
+                if any(type(counts[label]) is not int or counts[label] < 0 or counts[label] > overall_support[label] for label in labels):
+                    raise _persisted_classification_error(
+                        "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+                        f"persisted {scope} class support exceeds task bounds",
+                    )
+                if sum(counts.values()) != len(refs) or len(set(refs)) != len(refs):
+                    raise _persisted_classification_error(
+                        "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
+                        f"persisted {scope} class support does not cover its row refs",
+                    )
+
+
+def _unwrap_persisted_classification_artifact(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    if payload.get("payload_schema") != _PERSISTED_CLASSIFICATION_SCHEMA:
+        return payload
+    if payload.get("schema_version") != 1:
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_ARTIFACT_CONTRACT_INVALID", "persisted classification artifact schema is unsupported")
+    evidence = payload.get("evidence")
+    identity = payload.get("identity")
+    fit = payload.get("fit")
+    evaluation = payload.get("evaluation")
+    models = payload.get("models")
+    if (
+        not isinstance(evidence, Mapping)
+        or not isinstance(identity, Mapping)
+        or not isinstance(fit, Mapping)
+        or not isinstance(evaluation, Mapping)
+        or not isinstance(models, Mapping)
+    ):
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_ARTIFACT_CONTRACT_INVALID", "persisted classification artifact is incomplete")
+    evidence_task = evidence.get("task")
+    evidence_split = evidence.get("split")
+    evidence_holdout = evidence.get("holdout")
+    comparison = evidence.get("comparison")
+    release_plan = evidence_holdout.get("release_plan") if isinstance(evidence_holdout, Mapping) else None
+    task_hash = evidence_task.get("task_hash") if isinstance(evidence_task, Mapping) else None
+    split_hash = evidence_split.get("split_hash") if isinstance(evidence_split, Mapping) else None
+    selected_model = comparison.get("selected_model") if isinstance(comparison, Mapping) else None
+    release_plan_hash = release_plan.get("plan_hash") if isinstance(release_plan, Mapping) else None
+    expected_identity = {
+        "task_hash": task_hash,
+        "split_hash": split_hash,
+        "model_id": selected_model,
+        "model_hash": release_plan.get("model_hash") if isinstance(release_plan, Mapping) else None,
+        "holdout_hash": release_plan_hash,
+        "release_plan_hash": release_plan_hash,
+    }
+    _validate_persisted_fold_receipts(payload, evidence, split_hash=split_hash if isinstance(split_hash, str) else "")
+    if (
+        set(identity) != _PERSISTED_CLASSIFICATION_IDENTITY_FIELDS
+        or identity.get("schema_version") != 1
+        or identity.get("artifact_id") != payload.get("artifact_id")
+        or any(identity.get(key) != value for key, value in expected_identity.items())
+        or identity.get("fit_digest") != fit.get("digest")
+        or identity.get("evaluation_digest") != evaluation.get("digest")
+    ):
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID", "persisted classification identity is stale or inconsistent")
+    parts = identity.get("parts")
+    if not isinstance(parts, Mapping) or any(type(key) is not str or type(value) is not str for key, value in parts.items()):
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID", "persisted artifact identity parts are invalid")
+    try:
+        expected_artifact_id = classification_artifact_id(**dict(parts))
+    except ContractError as exc:
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID", "persisted artifact identity parts are invalid") from exc
+    if expected_artifact_id != payload.get("artifact_id"):
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID", "persisted artifact digest binding is stale")
+    fit_identity = fit.get("identity")
+    evaluation_identity = evaluation.get("identity")
+    if fit.get("schema_version") != 1 or evaluation.get("schema_version") != 1 or fit_identity != expected_identity or evaluation_identity != expected_identity:
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID", "persisted fit/evaluation identity is stale")
+    fit_base = {"schema_version": 1, "identity": dict(expected_identity), "models": fit.get("models")}
+    evaluation_base = {
+        "schema_version": 1,
+        "identity": dict(expected_identity),
+        "comparison": evaluation.get("comparison"),
+        "metrics": evaluation.get("metrics"),
+        "holdout": evaluation.get("holdout"),
+        "decision_policy": evaluation.get("decision_policy"),
+    }
+    selected_model_payload = models.get(selected_model) if isinstance(selected_model, str) else None
+    expected_metrics = (
+        {"oof": selected_model_payload.get("oof_metrics"), "holdout": selected_model_payload.get("holdout")}
+        if isinstance(selected_model_payload, Mapping)
+        else None
+    )
+    if (
+        fit.get("digest") != sha256_canonical(fit_base)
+        or evaluation.get("digest") != sha256_canonical(evaluation_base)
+        or evaluation.get("comparison") != evidence.get("comparison")
+        or expected_metrics is None
+        or evaluation.get("metrics") != expected_metrics
+    ):
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID", "persisted fit/evaluation digest binding is stale")
+    return evidence
 
 
 def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str) -> dict[str, Any]:
@@ -252,6 +509,9 @@ def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str
 
     if consumer not in _CONSUMERS:
         raise ContractError("CLASSIFICATION_CONSUMER_UNSUPPORTED", f"unsupported consumer {consumer!r}")
+    if not isinstance(payload, Mapping):
+        raise ContractError("CLASSIFICATION_EVIDENCE_CONTRACT_INVALID", "classification evidence contract is invalid")
+    payload = _unwrap_persisted_classification_artifact(payload)
     if not isinstance(payload, Mapping) or payload.get("payload_schema") != "workbench.prediction.classification-evidence" or payload.get("schema_version") != 1:
         raise ContractError("CLASSIFICATION_EVIDENCE_CONTRACT_INVALID", "classification evidence contract is invalid")
     missing = _CLASSIFICATION_REQUIRED - set(payload)

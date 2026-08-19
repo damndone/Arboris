@@ -16,7 +16,10 @@ from workbench.predictive_research.classification_contracts import (
 from workbench.predictive_research.contracts import StructureSpecV1
 from workbench.predictive_research.preprocessing import ClassificationPreprocessingStepV1
 from workbench.predictive_research.contracts import ContractError
-from workbench.predictive_research.consumer_projection import project_classification_evidence
+from workbench.predictive_research.consumer_projection import (
+    project_classification_evidence,
+    read_classification_evidence_from_run_root,
+)
 
 
 def _production_dependencies(*, include_holdout: bool = True) -> dict[str, object]:
@@ -596,6 +599,82 @@ def test_each_persisted_cv_fold_receipt_contains_auditable_class_support(tmp_pat
             for ref in fold[ref_key]:
                 expected["positive" if labels[ref] == 1 else "negative"] += 1
             assert support[scope] == expected
+
+
+def test_persisted_classification_artifact_reloads_auditable_models_fit_and_evaluation(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    result = run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+
+    persisted = json.loads((tmp_path / "classification_artifacts.json").read_text(encoding="utf-8"))
+    assert set(persisted) >= {"artifact_id", "identity", "models", "fit", "evaluation", "evidence"}
+    assert persisted["artifact_id"] == result["artifact"]["artifact_id"]
+    assert persisted["models"]["logistic_regression"] == result["models"]["logistic_regression"]
+    assert persisted["fit"]["models"]["logistic_regression"]["fold_receipts"]
+    assert persisted["evaluation"]["comparison"] == result["comparison"]
+    assert persisted["evidence"]["task"]["task_hash"] == result["task_hash"]
+
+    projected = project_classification_evidence(persisted, consumer="report")
+    assert projected["status"] == result["evidence"]["status"]
+    assert projected["comparison"]["selected_model"] == "logistic_regression"
+    reloaded = read_classification_evidence_from_run_root(tmp_path, consumer="report")
+    assert reloaded["comparison"]["selected_model"] == "logistic_regression"
+
+
+def test_persisted_classification_artifact_rejects_tampered_fold_support(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+    persisted = json.loads((tmp_path / "classification_artifacts.json").read_text(encoding="utf-8"))
+    persisted["fit"]["models"]["logistic_regression"]["fold_receipts"][0]["receipt"]["class_support"]["training"]["positive"] += 1
+
+    with pytest.raises(ContractError) as exc_info:
+        project_classification_evidence(persisted, consumer="report")
+
+    assert exc_info.value.code == "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID"
+
+
+def test_persisted_classification_artifact_rejects_degraded_evidence_promoted_to_validated(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+    persisted = json.loads((tmp_path / "classification_artifacts.json").read_text(encoding="utf-8"))
+    persisted["evidence"]["status"] = "validated"
+
+    with pytest.raises(ContractError) as exc_info:
+        project_classification_evidence(persisted, consumer="report")
+
+    assert exc_info.value.code in {"CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID", "CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID"}
 
 
 def test_group_validation_fold_red_probe_rejects_single_class_validation_support(tmp_path) -> None:

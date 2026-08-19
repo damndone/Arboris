@@ -773,6 +773,7 @@ def _production_fit_transform(
     if not steps:
         _production_numeric_frame(features.loc[list(fit_refs)])
         receipt = {
+            "schema_version": 1,
             "fit_scope": "identity_no_fit",
             "fit_row_refs": list(fit_refs),
             "recipe_hash": _production_hash([]),
@@ -804,6 +805,7 @@ def _production_fit_transform(
         sample_weight=sample_weight,
     )
     receipt = {
+        "schema_version": 1,
         **fitted.receipt,
         "split_hash": split_hash,
         "recipe_hash": _production_hash(fitted.receipt),

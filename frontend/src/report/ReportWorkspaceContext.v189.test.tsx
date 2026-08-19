@@ -218,6 +218,34 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     expect(screen.getByTestId("classification-context")).toHaveTextContent(CLASSIFICATION_EVIDENCE_SCHEMA);
   });
 
+  it("marks an indexed classification artifact unavailable when persisted fold receipts are missing", async () => {
+    mockArtifacts.current = {
+      groups: [{
+        artifact_type: "classification_artifacts",
+        items: [indexedClassificationItem({
+          artifact_id: "sha256:" + "a".repeat(64),
+          artifact_type: "classification_artifacts",
+          payload_contract: { payload_schema: "workbench.prediction.classification-artifacts", schema_version: 1 },
+          payload_schema: "workbench.prediction.classification-artifacts",
+        })],
+      }],
+    };
+    mockArtifactJson.current.mockResolvedValue({
+      payload_schema: "workbench.prediction.classification-artifacts",
+      schema_version: 1,
+      artifact_id: "sha256:" + "a".repeat(64),
+      models: { logistic_regression: { preprocessing: { folds: [] } } },
+      fit: { schema_version: 1, models: { logistic_regression: { fold_receipts: [] } } },
+      evaluation: {},
+      evidence: evidencePacket,
+    });
+
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE"));
+    expect(screen.getByTestId("classification-context")).toHaveTextContent("classification-evidence.unavailable");
+  });
+
   it("keeps the classification projection unavailable when no indexed artifact exists", async () => {
     renderWorkspace();
 

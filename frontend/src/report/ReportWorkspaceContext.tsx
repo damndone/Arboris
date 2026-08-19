@@ -56,6 +56,7 @@ import type { ModelResult, PostEstimationResult, PredictionResearchEvidence } fr
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
 import {
+  isPersistedClassificationArtifact,
   isTypedClassificationEvidencePacket,
   type ClassificationEvidencePacket,
 } from "./ClassificationEvidence";
@@ -135,6 +136,8 @@ function indexedClassificationArtifactId(value: unknown): string | null {
 
 /** Return only the typed evidence packet, including its server-owned family identity. */
 export function readClassificationEvidencePacket(value: unknown): ClassificationEvidencePacket | null {
+  if (isPersistedClassificationArtifact(value)) return value.evidence;
+  if (asRecord(value)?.payload_schema === CLASSIFICATION_ARTIFACTS_SCHEMA) return null;
   if (isTypedClassificationEvidencePacket(value)) return value;
   const envelope = asRecord(value);
   for (const nested of [envelope?.evidence, envelope?.payload]) {

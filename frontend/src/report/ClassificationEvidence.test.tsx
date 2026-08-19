@@ -131,4 +131,80 @@ describe("ClassificationEvidence", () => {
 
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
   });
+
+  it("accepts a persisted artifact only when its fold receipt contract is present", () => {
+    const foldReceipt = {
+      fold: 0,
+      training_row_refs: ["r1", "r2", "r3", "r4"],
+      validation_row_refs: ["r5", "r6"],
+      receipt: {
+        schema_version: 1,
+        split_hash: splitHash,
+        fit_row_refs: ["r1", "r2", "r3", "r4"],
+        class_support: {
+          class_labels: ["no", "yes"],
+          training: { no: 2, yes: 2 },
+          validation: { no: 1, yes: 1 },
+        },
+      },
+    };
+    const persisted = {
+      payload_schema: "workbench.prediction.classification-artifacts",
+      schema_version: 1,
+      artifact_id: "sha256:" + "a".repeat(64),
+      identity: {
+        schema_version: 1,
+        artifact_id: "sha256:" + "a".repeat(64),
+        task_hash: taskHash,
+        split_hash: splitHash,
+        model_id: "random_forest",
+        model_hash: modelHash,
+        holdout_hash: releasePlanHash,
+        release_plan_hash: releasePlanHash,
+        parts: { task_hash: taskHash, split_hash: splitHash, model_hash: modelHash, evaluation_hash: "e", policy_hash: "p" },
+        fit_digest: "sha256:" + "f".repeat(64),
+        evaluation_digest: "sha256:" + "e".repeat(64),
+      },
+      models: { random_forest: { oof_metrics: {}, holdout: {}, preprocessing: { folds: [foldReceipt] } } },
+      fit: {
+        schema_version: 1,
+        digest: "sha256:" + "f".repeat(64),
+        identity: { task_hash: taskHash, split_hash: splitHash, model_id: "random_forest", model_hash: modelHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash },
+        models: {
+          random_forest: {
+            fold_receipts: [foldReceipt],
+          },
+        },
+      },
+      evaluation: {
+        schema_version: 1,
+        digest: "sha256:" + "e".repeat(64),
+        identity: { task_hash: taskHash, split_hash: splitHash, model_id: "random_forest", model_hash: modelHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash },
+        metrics: { oof: {}, holdout: {} },
+        comparison: packet.comparison,
+      },
+      evidence: packet,
+    };
+
+    render(<ClassificationEvidence evidence={persisted as never} />);
+
+    expect(screen.getByTestId("classification-evidence")).toHaveTextContent("Binary classification");
+  });
+
+  it("does not render an in-memory packet when persisted fold receipts are missing", () => {
+    const persisted = {
+      payload_schema: "workbench.prediction.classification-artifacts",
+      schema_version: 1,
+      artifact_id: "sha256:" + "a".repeat(64),
+      models: { random_forest: { preprocessing: { folds: [] } } },
+      fit: { schema_version: 1, models: { random_forest: { fold_receipts: [] } } },
+      evaluation: {},
+      evidence: packet,
+    };
+
+    render(<ClassificationEvidence evidence={persisted as never} />);
+
+    expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
+    expect(screen.getByTestId("classification-evidence")).not.toHaveTextContent("Binary classification");
+  });
 });

@@ -271,6 +271,25 @@ def test_artifact_identity_changes_when_task_model_or_policy_changes(tmp_path) -
     assert json.loads((tmp_path / "classification_artifacts.json").read_text())["evidence"]["task"]["task_type"] == "binary"
 
 
+def test_projection_requires_persisted_models_fit_evaluation_and_fold_receipts() -> None:
+    packet = _packet_with_c0(_evidence_packet())
+    persisted = {
+        "payload_schema": "workbench.prediction.classification-artifacts",
+        "schema_version": 1,
+        "artifact_id": "sha256:" + "a" * 64,
+        "identity": {"task_hash": packet["task"]["task_hash"]},
+        "models": {"logistic_regression": {}},
+        "fit": {"models": {"logistic_regression": {"fold_receipts": []}}},
+        "evaluation": {"comparison": packet["comparison"]},
+        "evidence": packet,
+    }
+
+    with pytest.raises(ContractError) as exc_info:
+        project_classification_evidence(persisted, consumer="report")
+
+    assert exc_info.value.code == "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID"
+
+
 def test_graph_projection_has_separate_selection_and_holdout_operation_records() -> None:
     nodes = classification_graph_nodes(
         task_ref="task-1",

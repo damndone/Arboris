@@ -102,8 +102,135 @@ const CLASSIFICATION_REQUIRED_FIELDS = [
   "holdout", "c0_evidence_envelope", "c0_consumer_projection", "foundation_status",
 ] as const;
 
+const PERSISTED_CLASSIFICATION_SCHEMA = "workbench.prediction.classification-artifacts";
+
 function isFiniteNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
+}
+
+function isDigest(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
+export function isPersistedClassificationArtifact(value: unknown): value is EvidenceRecord & { evidence: ClassificationEvidencePacket } {
+  const persistedInvalid = (): false => false;
+  const artifact = asRecord(value);
+  if (artifact === null || artifact.payload_schema !== PERSISTED_CLASSIFICATION_SCHEMA || artifact.schema_version !== 1) return persistedInvalid();
+  const evidence = asRecord(artifact.evidence);
+  const identity = asRecord(artifact.identity);
+  const fit = asRecord(artifact.fit);
+  const evaluation = asRecord(artifact.evaluation);
+  const models = asRecord(artifact.models);
+  if (
+    evidence === null
+    || identity === null
+    || fit === null
+    || evaluation === null
+    || models === null
+    || !isTypedClassificationEvidencePacket(evidence)
+    || typeof artifact.artifact_id !== "string"
+    || identity.artifact_id !== artifact.artifact_id
+    || identity.schema_version !== 1
+    || asRecord(identity.parts) === null
+    || !Object.values(asRecord(identity.parts) as EvidenceRecord).every((item) => typeof item === "string" && item.length > 0)
+    || typeof identity.task_hash !== "string"
+    || typeof identity.split_hash !== "string"
+    || typeof identity.model_id !== "string"
+    || typeof identity.model_hash !== "string"
+    || typeof identity.holdout_hash !== "string"
+    || typeof identity.release_plan_hash !== "string"
+    || !isDigest(identity.fit_digest)
+    || !isDigest(identity.evaluation_digest)
+    || fit.schema_version !== 1
+    || evaluation.schema_version !== 1
+    || fit.digest !== identity.fit_digest
+    || evaluation.digest !== identity.evaluation_digest
+  ) return persistedInvalid();
+
+  const task = asRecord(evidence.task);
+  const split = asRecord(evidence.split);
+  const holdout = asRecord(evidence.holdout);
+  const releasePlan = asRecord(holdout?.release_plan);
+  const comparison = asRecord(evidence.comparison);
+  const expectedIdentity = {
+    task_hash: task?.task_hash,
+    split_hash: split?.split_hash,
+    model_id: comparison?.selected_model,
+    model_hash: releasePlan?.model_hash,
+    holdout_hash: releasePlan?.plan_hash,
+    release_plan_hash: releasePlan?.plan_hash,
+  };
+  if (
+    Object.entries(expectedIdentity).some(([key, expected]) => identity[key] !== expected)
+    || !sameJson(fit.identity, expectedIdentity)
+    || !sameJson(evaluation.identity, expectedIdentity)
+  ) return persistedInvalid();
+
+  const fitModels = asRecord(fit.models);
+  const evaluationComparison = evaluation.comparison;
+  const selectedModel = comparison?.selected_model;
+  const selected = typeof selectedModel === "string" ? asRecord(models[selectedModel]) : null;
+  const selectedFit = typeof selectedModel === "string" ? asRecord(fitModels?.[selectedModel]) : null;
+  if (
+    fitModels === null
+    || selected === null
+    || selectedFit === null
+    || !sameJson(evaluationComparison, evidence.comparison)
+    || !sameJson(evaluation.metrics, { oof: selected.oof_metrics, holdout: selected.holdout })
+    || new Set(Object.keys(fitModels)).size !== Object.keys(models).length
+    || Object.keys(fitModels).some((modelId) => !Object.prototype.hasOwnProperty.call(models, modelId))
+  ) return persistedInvalid();
+
+  const overallSupport = asRecord(task?.class_support);
+  if (overallSupport === null || Object.keys(overallSupport).length < 2) return persistedInvalid();
+  const labels = Object.keys(overallSupport);
+  for (const modelId of Object.keys(models)) {
+    const model = asRecord(models[modelId]);
+    const fitModel = asRecord(fitModels[modelId]);
+    const preprocessing = asRecord(model?.preprocessing);
+    const folds = preprocessing?.folds;
+    const foldReceipts = fitModel?.fold_receipts;
+    if (!Array.isArray(folds) || folds.length === 0 || !Array.isArray(foldReceipts) || !sameJson(folds, foldReceipts)) return persistedInvalid();
+    const seenFolds = new Set<number>();
+    for (const rawFold of foldReceipts) {
+      const fold = asRecord(rawFold);
+      const receipt = asRecord(fold?.receipt);
+      const support = asRecord(receipt?.class_support);
+      const trainingRefs = fold?.training_row_refs;
+      const validationRefs = fold?.validation_row_refs;
+      if (
+        fold === null
+        || receipt === null
+        || support === null
+        || !isFiniteNonNegativeInteger(fold.fold)
+        || seenFolds.has(fold.fold)
+        || !Array.isArray(trainingRefs)
+        || !Array.isArray(validationRefs)
+        || trainingRefs.length === 0
+        || validationRefs.length === 0
+        || receipt.schema_version !== 1
+        || receipt.split_hash !== split?.split_hash
+        || !sameJson(receipt.fit_row_refs, trainingRefs)
+        || !sameJson(support.class_labels, labels)
+      ) return persistedInvalid();
+      seenFolds.add(fold.fold);
+      for (const [scope, refs] of [["training", trainingRefs], ["validation", validationRefs]] as const) {
+        const counts = asRecord(support[scope]);
+        if (counts === null || Object.keys(counts).sort().join("|") !== labels.slice().sort().join("|") || !Object.values(counts).every(isFiniteNonNegativeInteger)) return persistedInvalid();
+        if (Object.entries(counts).some(([label, count]) => typeof count !== "number" || count > Number(overallSupport[label]))) return persistedInvalid();
+        if (Object.values(counts).reduce<number>((sum, count) => sum + (count as number), 0) !== refs.length || new Set(refs).size !== refs.length) return persistedInvalid();
+      }
+    }
+  }
+  return true;
 }
 
 function isStringRecord(value: unknown): value is EvidenceRecord {
@@ -113,6 +240,7 @@ function isStringRecord(value: unknown): value is EvidenceRecord {
 
 /** Validate the complete server-owned packet before any report rendering. */
 export function isTypedClassificationEvidencePacket(value: unknown): value is ClassificationEvidencePacket {
+  if (isPersistedClassificationArtifact(value)) return true;
   const packet = asRecord(value);
   if (
     packet === null
@@ -379,7 +507,7 @@ export function ClassificationEvidence({ evidence }: { evidence: ClassificationE
       </div>
     );
   }
-  const packet = evidence;
+  const packet = isPersistedClassificationArtifact(evidence) ? evidence.evidence : evidence;
   const task = asRecord(packet.task);
   const split = asRecord(packet.split);
   const policy = asRecord(packet.decision_policy);

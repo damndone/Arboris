@@ -413,7 +413,9 @@ def _run_classification_model_v189(
         holdout_principal_ref=holdout_principal_ref,
         holdout_access_id=holdout_access_id,
     )
-    class_support: dict[str, int] = {}
+    class_support: dict[str, int] = {
+        str(label): 0 for label in dict.fromkeys(str(label) for label in task.class_mapping.values())
+    }
     for raw_value in target.tolist():
         label = task.class_mapping.get(raw_value, str(raw_value))
         class_support[str(label)] = class_support.get(str(label), 0) + 1
@@ -499,21 +501,78 @@ def _run_classification_model_v189(
         "completeness_status": c0_envelope["completeness_status"],
         "producer_status": result_status,
     }
-    identity = classification_artifact_id(
-        task_hash=task.content_hash,
-        split_hash=split_hash,
-        preprocessing_hash=sha256_canonical(selected["preprocessing"]),
-        model_hash=sha256_canonical(protocol["models"]),
-        prediction_hash=sha256_canonical(model_metrics),
-        evaluation_hash=sha256_canonical(protocol["holdout"]),
-        control_hash=sha256_canonical(evidence["controls"]),
-        comparison_hash=sha256_canonical(protocol["comparison"]),
-        explanation_hash=sha256_canonical(evidence["explanations"]),
-        policy_hash=sha256_canonical(policy_payload),
-    )
+    release_plan = protocol["holdout"]["release_plan"]
+    fit_identity = {
+        "task_hash": task.content_hash,
+        "split_hash": split_hash,
+        "model_id": selected_model,
+        "model_hash": release_plan["model_hash"],
+        "holdout_hash": protocol["holdout"]["release_plan_hash"],
+        "release_plan_hash": protocol["holdout"]["release_plan_hash"],
+    }
+    fit_models = {
+        model_id: {
+            "model_id": model_id,
+            "fold_receipts": list(model["preprocessing"]["folds"]),
+            "final_receipt": model["preprocessing"].get("final"),
+        }
+        for model_id, model in protocol["models"].items()
+    }
+    fit_base = {
+        "schema_version": 1,
+        "identity": fit_identity,
+        "models": fit_models,
+    }
+    fit_digest = sha256_canonical(fit_base)
+    fit_payload = {**fit_base, "digest": fit_digest}
+    evaluation_identity = dict(fit_identity)
+    evaluation_base = {
+        "schema_version": 1,
+        "identity": evaluation_identity,
+        "comparison": protocol["comparison"],
+        "metrics": model_metrics,
+        "holdout": protocol["holdout"],
+        "decision_policy": policy_payload,
+    }
+    evaluation_digest = sha256_canonical(evaluation_base)
+    evaluation_payload = {**evaluation_base, "digest": evaluation_digest}
+    identity_parts = {
+        "task_hash": task.content_hash,
+        "split_hash": split_hash,
+        "preprocessing_hash": fit_digest,
+        "model_hash": sha256_canonical(protocol["models"]),
+        "prediction_hash": sha256_canonical(model_metrics),
+        "evaluation_hash": evaluation_digest,
+        "control_hash": sha256_canonical(evidence["controls"]),
+        "comparison_hash": sha256_canonical(protocol["comparison"]),
+        "explanation_hash": sha256_canonical(evidence["explanations"]),
+        "policy_hash": sha256_canonical(policy_payload),
+    }
+    identity = classification_artifact_id(**identity_parts)
+    artifact_identity = {
+        "schema_version": 1,
+        "artifact_id": identity,
+        "parts": identity_parts,
+        "task_hash": task.content_hash,
+        "split_hash": split_hash,
+        "model_id": selected_model,
+        "model_hash": release_plan["model_hash"],
+        "holdout_hash": protocol["holdout"]["release_plan_hash"],
+        "release_plan_hash": protocol["holdout"]["release_plan_hash"],
+        "fit_digest": fit_digest,
+        "evaluation_digest": evaluation_digest,
+    }
     artifact = persist_classification_artifacts(
         Path(run_root),
-        {"artifact_id": identity, "task": {**task.to_dict(), "task_hash": task.content_hash}, "evidence": evidence},
+        {
+            "artifact_id": identity,
+            "identity": artifact_identity,
+            "task": {**task.to_dict(), "task_hash": task.content_hash},
+            "models": protocol["models"],
+            "fit": fit_payload,
+            "evaluation": evaluation_payload,
+            "evidence": evidence,
+        },
     )
     artifact_sha256 = artifact.get("sha256")
     if type(artifact_sha256) is not str or len(artifact_sha256) != 64:
@@ -530,7 +589,12 @@ def _run_classification_model_v189(
             relative_parts=("classification_artifacts.json",),
             artifact_type="classification_artifacts",
             step="classification",
-            inputs=[task.content_hash, split_hash],
+            inputs=[
+                task.content_hash,
+                split_hash,
+                f"classification-model:{selected_model}:{release_plan['model_hash']}",
+                f"classification-release-plan:{protocol['holdout']['release_plan_hash']}",
+            ],
             sha256=artifact_sha256,
             payload_contract={
                 "payload_schema": "workbench.prediction.classification-artifacts",
