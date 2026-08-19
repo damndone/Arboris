@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -20,9 +21,16 @@ from workbench.predictive_research.classification_contracts import (
     LabelDefinitionV1,
     build_classification_clarification,
 )
-from workbench.predictive_research.consumer_projection import project_classification_evidence
+from workbench.predictive_research.consumer_projection import (
+    _project_classification_evidence,
+    project_classification_evidence,
+)
 from workbench.predictive_research.graph_persistence import classification_graph_nodes
-from workbench.predictive_research.persistence import classification_artifact_id, persist_classification_artifacts
+from workbench.predictive_research.persistence import (
+    classification_artifact_id,
+    classification_server_identity,
+    persist_classification_artifacts,
+)
 from workbench.predictive_research.schema import default_v1_prediction_registry
 from workbench.predictive_research.contracts import ContractError, StructureSpecV1
 
@@ -159,7 +167,7 @@ def test_shift_summary_is_descriptive_and_subgroup_support_is_bounded() -> None:
 
 
 def test_classification_projection_exposes_evidence_without_recomputing() -> None:
-    projection = project_classification_evidence(_packet_with_c0(_evidence_packet()), consumer="report")
+    projection = _project_classification_evidence(_packet_with_c0(_evidence_packet()), consumer="report")
 
     assert projection["status"] == "validated"
     assert projection["metrics"]["accuracy"]["point_estimate"] == 0.75
@@ -172,14 +180,14 @@ def test_classification_projection_rejects_missing_evidence_instead_of_fabricati
     packet.pop("calibration")
 
     with pytest.raises(ContractError) as exc_info:
-        project_classification_evidence(packet, consumer="agent")
+        _project_classification_evidence(packet, consumer="agent")
 
     assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_INCOMPLETE"
 
 
 def test_classification_projection_requires_explicit_c0_envelope_and_projection() -> None:
     with pytest.raises(ContractError) as exc_info:
-        project_classification_evidence(_evidence_packet(), consumer="report")
+        _project_classification_evidence(_evidence_packet(), consumer="report")
 
     assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_C0_REQUIRED"
 
@@ -192,7 +200,7 @@ def test_classification_projection_rejects_stale_task_split_model_holdout_and_re
     packet["evidence_refs"] = refs
 
     with pytest.raises(ContractError) as exc_info:
-        project_classification_evidence(packet, consumer="report")
+        _project_classification_evidence(packet, consumer="report")
 
     assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_IDENTITY_INVALID"
 
@@ -202,7 +210,7 @@ def test_classification_projection_rejects_validated_status_when_c0_is_degraded(
     packet["status"] = "validated"
 
     with pytest.raises(ContractError) as exc_info:
-        project_classification_evidence(packet, consumer="report")
+        _project_classification_evidence(packet, consumer="report")
 
     assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID"
 
@@ -214,7 +222,7 @@ def test_classification_projection_rejects_unavailable_c0_with_available_project
     packet["c0_consumer_projection"] = projection
 
     with pytest.raises(ContractError) as exc_info:
-        project_classification_evidence(packet, consumer="report")
+        _project_classification_evidence(packet, consumer="report")
 
     assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID"
 
@@ -243,7 +251,7 @@ def test_classification_projection_requires_typed_classification_family_evidence
     packet["c0_evidence_envelope"] = envelope
 
     with pytest.raises(ContractError) as exc_info:
-        project_classification_evidence(packet, consumer="report")
+        _project_classification_evidence(packet, consumer="report")
 
     assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_FAMILY_INVALID"
 
@@ -277,6 +285,7 @@ def test_projection_requires_persisted_models_fit_evaluation_and_fold_receipts()
         "payload_schema": "workbench.prediction.classification-artifacts",
         "schema_version": 1,
         "artifact_id": "sha256:" + "a" * 64,
+        "server_identity": classification_server_identity(Path("/tmp/project/runs/run-test")),
         "identity": {"task_hash": packet["task"]["task_hash"]},
         "models": {"logistic_regression": {}},
         "fit": {"models": {"logistic_regression": {"fold_receipts": []}}},

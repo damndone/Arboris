@@ -109,7 +109,21 @@ function isFiniteNonNegativeInteger(value: unknown): value is number {
 }
 
 function isDigest(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
+  return typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value);
+}
+
+function isServerIdentity(value: unknown): value is EvidenceRecord {
+  const identity = asRecord(value);
+  return (
+    identity !== null
+    && identity.schema_version === 1
+    && typeof identity.project_id === "string"
+    && identity.project_id.length > 0
+    && typeof identity.run_id === "string"
+    && identity.run_id.length > 0
+    && identity.namespace === "workbench.prediction.classification-artifacts.v1"
+    && isDigest(identity.digest)
+  );
 }
 
 function sameJson(left: unknown, right: unknown): boolean {
@@ -129,6 +143,8 @@ export function isPersistedClassificationArtifact(value: unknown): value is Evid
   const fit = asRecord(artifact.fit);
   const evaluation = asRecord(artifact.evaluation);
   const models = asRecord(artifact.models);
+  const serverIdentity = asRecord(artifact.server_identity);
+  const identityServerIdentity = asRecord(identity?.server_identity);
   if (
     evidence === null
     || identity === null
@@ -139,6 +155,11 @@ export function isPersistedClassificationArtifact(value: unknown): value is Evid
     || typeof artifact.artifact_id !== "string"
     || identity.artifact_id !== artifact.artifact_id
     || identity.schema_version !== 1
+    || serverIdentity === null
+    || identityServerIdentity === null
+    || !isServerIdentity(serverIdentity)
+    || !isServerIdentity(identityServerIdentity)
+    || !sameJson(identityServerIdentity, serverIdentity)
     || asRecord(identity.parts) === null
     || !Object.values(asRecord(identity.parts) as EvidenceRecord).every((item) => typeof item === "string" && item.length > 0)
     || typeof identity.task_hash !== "string"
@@ -149,6 +170,7 @@ export function isPersistedClassificationArtifact(value: unknown): value is Evid
     || typeof identity.release_plan_hash !== "string"
     || !isDigest(identity.fit_digest)
     || !isDigest(identity.evaluation_digest)
+    || asRecord(identity.parts)?.server_identity_digest !== serverIdentity.digest
     || fit.schema_version !== 1
     || evaluation.schema_version !== 1
     || fit.digest !== identity.fit_digest
@@ -170,8 +192,8 @@ export function isPersistedClassificationArtifact(value: unknown): value is Evid
   };
   if (
     Object.entries(expectedIdentity).some(([key, expected]) => identity[key] !== expected)
-    || !sameJson(fit.identity, expectedIdentity)
-    || !sameJson(evaluation.identity, expectedIdentity)
+    || !sameJson(fit.identity, { ...expectedIdentity, server_identity: serverIdentity })
+    || !sameJson(evaluation.identity, { ...expectedIdentity, server_identity: serverIdentity })
   ) return persistedInvalid();
 
   const fitModels = asRecord(fit.models);
@@ -497,7 +519,7 @@ function classificationTitle(task: unknown): string {
 }
 
 export function ClassificationEvidence({ evidence }: { evidence: ClassificationEvidencePacket }) {
-  if (!isTypedClassificationEvidencePacket(evidence)) {
+  if (!isPersistedClassificationArtifact(evidence)) {
     return (
       <div data-testid="classification-evidence" style={{ fontSize: 13 }}>
         <strong>UNAVAILABLE</strong>
@@ -507,7 +529,7 @@ export function ClassificationEvidence({ evidence }: { evidence: ClassificationE
       </div>
     );
   }
-  const packet = isPersistedClassificationArtifact(evidence) ? evidence.evidence : evidence;
+  const packet = evidence.evidence;
   const task = asRecord(packet.task);
   const split = asRecord(packet.split);
   const policy = asRecord(packet.decision_policy);

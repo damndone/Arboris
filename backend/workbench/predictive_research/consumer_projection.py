@@ -14,7 +14,11 @@ from workbench.contracts.evidence.envelope import (
 )
 from .schema import PayloadContractError, default_v1_prediction_registry
 from .contracts import ContractError
-from .persistence import classification_artifact_id
+from .persistence import (
+    classification_artifact_id,
+    validate_classification_server_identity,
+    validate_classification_server_identity_shape,
+)
 
 
 _REQUIRED = {
@@ -25,6 +29,7 @@ _REQUIRED = {
     "workbench.prediction.negative-control-packet",
 }
 _CONSUMERS = frozenset({"agent", "report", "table", "compare"})
+_CLASSIFICATION_CONSUMERS = frozenset({"agent", "notebook", "report"})
 _LEGACY_MESSAGE = (
     "Legacy evaluation — split protocol was not persisted. The result remains "
     "readable but is not comparable with v1.8.6 predictive-research results."
@@ -134,7 +139,12 @@ def read_classification_evidence_from_run_root(
     payload = read_json(path)
     if not isinstance(payload, Mapping) or payload.get("artifact_id") != record.get("artifact_id"):
         raise ContractError("CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID", "indexed classification artifact identity is stale")
-    return project_classification_evidence(payload, consumer=consumer)
+    expected_server_identity = validate_classification_server_identity(record.get("server_identity"), Path(run_root))
+    if index.get("classification_server_identity") != expected_server_identity:
+        raise ContractError("CLASSIFICATION_SERVER_IDENTITY_MISMATCH", "classification index server identity is stale")
+    if payload.get("server_identity") != expected_server_identity:
+        raise ContractError("CLASSIFICATION_SERVER_IDENTITY_MISMATCH", "classification artifact server identity is stale")
+    return _project_classification_evidence(payload, consumer=consumer)
 
 
 def _has_payload_contract(value: Any) -> bool:
@@ -299,6 +309,7 @@ _PERSISTED_CLASSIFICATION_IDENTITY_FIELDS = frozenset(
         "release_plan_hash",
         "fit_digest",
         "evaluation_digest",
+        "server_identity",
     }
 )
 
@@ -396,7 +407,12 @@ def _validate_persisted_fold_receipts(
                 )
             seen_folds.add(fold_number)
             class_labels = support.get("class_labels")
-            if class_labels != labels or len(set(class_labels)) != len(class_labels):
+            if (
+                not isinstance(class_labels, list)
+                or any(type(label) is not str for label in class_labels)
+                or class_labels != labels
+                or len(set(class_labels)) != len(class_labels)
+            ):
                 raise _persisted_classification_error(
                     "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
                     "persisted fold receipt class labels are incomplete or reordered",
@@ -413,7 +429,11 @@ def _validate_persisted_fold_receipts(
                         "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
                         f"persisted {scope} class support exceeds task bounds",
                     )
-                if sum(counts.values()) != len(refs) or len(set(refs)) != len(refs):
+                if (
+                    any(type(ref) is not str for ref in refs)
+                    or sum(counts.values()) != len(refs)
+                    or len(set(refs)) != len(refs)
+                ):
                     raise _persisted_classification_error(
                         "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
                         f"persisted {scope} class support does not cover its row refs",
@@ -454,7 +474,13 @@ def _unwrap_persisted_classification_artifact(payload: Mapping[str, Any]) -> Map
         "model_hash": release_plan.get("model_hash") if isinstance(release_plan, Mapping) else None,
         "holdout_hash": release_plan_hash,
         "release_plan_hash": release_plan_hash,
+        "server_identity": payload.get("server_identity"),
     }
+    try:
+        server_identity = validate_classification_server_identity_shape(payload.get("server_identity"))
+    except ContractError as exc:
+        raise _persisted_classification_error("CLASSIFICATION_SERVER_IDENTITY_INVALID", "persisted classification server identity is invalid") from exc
+    expected_identity["server_identity"] = server_identity
     _validate_persisted_fold_receipts(payload, evidence, split_hash=split_hash if isinstance(split_hash, str) else "")
     if (
         set(identity) != _PERSISTED_CLASSIFICATION_IDENTITY_FIELDS
@@ -505,12 +531,24 @@ def _unwrap_persisted_classification_artifact(payload: Mapping[str, Any]) -> Map
 
 
 def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str) -> dict[str, Any]:
+    """Project only an indexed persisted classification-artifacts wrapper."""
+
+    if not isinstance(payload, Mapping) or payload.get("payload_schema") != _PERSISTED_CLASSIFICATION_SCHEMA:
+        raise ContractError(
+            "CLASSIFICATION_PERSISTED_RECEIPT_REQUIRED",
+            "classification consumers must read the server-indexed persisted receipt",
+        )
+    return _project_classification_evidence(payload, consumer=consumer)
+
+
+def _project_classification_evidence(payload: Mapping[str, Any], *, consumer: str) -> dict[str, Any]:
     """Project a classification packet without recomputing or inventing facts."""
 
-    if consumer not in _CONSUMERS:
+    if consumer not in _CLASSIFICATION_CONSUMERS:
         raise ContractError("CLASSIFICATION_CONSUMER_UNSUPPORTED", f"unsupported consumer {consumer!r}")
     if not isinstance(payload, Mapping):
         raise ContractError("CLASSIFICATION_EVIDENCE_CONTRACT_INVALID", "classification evidence contract is invalid")
+    persisted_server_identity = payload.get("server_identity")
     payload = _unwrap_persisted_classification_artifact(payload)
     if not isinstance(payload, Mapping) or payload.get("payload_schema") != "workbench.prediction.classification-evidence" or payload.get("schema_version") != 1:
         raise ContractError("CLASSIFICATION_EVIDENCE_CONTRACT_INVALID", "classification evidence contract is invalid")
@@ -593,6 +631,7 @@ def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str
         "decision_policy": payload["decision_policy"],
         "blocked_reasons": list(payload["blocked_reasons"]),
         "evidence_refs": dict(refs),
+        "server_identity": dict(persisted_server_identity or {}),
         "holdout": dict(holdout),
         "release_plan_identity": dict(release_plan),
         "c0_evidence_envelope": envelope.to_dict(),

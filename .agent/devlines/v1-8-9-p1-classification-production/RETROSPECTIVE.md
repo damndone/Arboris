@@ -6,18 +6,18 @@
 
 ## Final status
 
-COMPLETED
+CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 10/40 (25.0%; 25.0 per 100 events)
+- Failure frequency: 10/45 (22.2%; 22.2 per 100 events)
 - Repeat rate: 0/10 (0.0%)
 - Recurrence rate: 0/10 (0.0%)
 - MTTR: median=0 ms (sample=5; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/7 (0.0%)
+- Gate waste rate: 0/8 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -85,7 +85,9 @@ COMPLETED
 - Keep consumer fixtures at the same typed identity boundary as production packets; do not weaken the validator to accommodate stale tests.
 - Keep each reviewer blocker as a behavior-level RED probe and implement the missing production boundary instead of weakening the assertion.
 - Keep every consumer fixture aligned with the complete typed family evidence contract.
+- Keep foreign-copy, memory-bypass, raw-frontend, Notebook, tamper, stale, and status probes ahead of implementation and require one server-indexed wrapper at every consumer boundary.
 - Keep the package-local runtime join typed and explicit, and leave host bootstrap composition as a separate integration boundary.
+- Keep the server-indexed wrapper as the only production consumer boundary and retain Notebook as a first-class persisted projection.
 - Make the typed task split profile drive the executable manifest before any model fit.
 - Regenerate the formal retrospective immediately after appending material events and before treating formal verification as current.
 - Resolve repository-owned contract test paths before claiming C0 verification evidence.
@@ -136,3 +138,8 @@ COMPLETED
 - #38: `3c8f1d2a-7b64-4e90-a531-6d2f8b9c0e17` | 2026-08-19T15:56:10.000Z | ERROR/formal_append_event_path_error | incident=`8d2f6a1c-4b79-45e0-9c31-7a5d2e8f6b04` | lesson_key=`formal-append-repo-relative-event-file` | event_sha256=`4b4946f74042a53e73fc9d996a42f3437b68e11d9a3c34108f32f64a644f99ee`
 - #39: `7b2e5d9a-4c61-48f0-a3d7-1e9b6c2f5a84` | 2026-08-19T16:06:30.000Z | GATE/classification_production_persistence_third_round_green | incident=`6f1c8a3d-5b72-4e90-9d24-7a0e3c6b1f58` | lesson_key=`classification-production-persistence-third-round-green` | event_sha256=`23ddebc8d7ba0186829d27a95db8b853c522e041f23699af37cb0b33681befbb`
 - #40: `9d4f2b7c-6a18-4e50-b3d9-1c7a8f2e5b64` | 2026-08-19T16:08:30.000Z | ERROR/verification_frontend_wrong_workdir | incident=`4a8e1c6f-2b73-49d0-a5e1-7c3b9f6d2a80` | lesson_key=`frontend-verification-package-root` | event_sha256=`9972d32427d56e059b395ccce0877e0aa2ec72472239212e320d926be657531f`
+- #41: `17d179c5-9951-4c6d-b817-9dbe5a10d031` | 2026-08-19T20:26:53.068Z | STATE_CHANGE/context_rescope_required | incident=`caf3788e-cdcf-44d9-9b81-c3b72ed442af` | lesson_key=`context-pack-rescope` | event_sha256=`2ee656d38edad877e52576ea86228a6db6c5d183b0c782cd005e67933f941752`
+- #42: `938163fc-f7e6-488c-ad50-66c1303bf5f5` | 2026-08-19T20:26:53.087Z | STATE_CHANGE/context_rescoped | incident=`dd4e3231-0202-400d-b8a4-89d894aa134c` | lesson_key=`context-pack-rescope` | event_sha256=`3b73d5454a73aafcdf7e5ad6f502bcdc284c3f1b85c65e5eb9fb0a1144fffe3d`
+- #43: `a4c9e2f7-1b6d-48a3-9f05-c7d2e8b4a619` | 2026-08-19T16:27:57.000Z | REVIEW/classification_reviewer_blockers_red | incident=`9e3a4c8b-6d2f-41a7-9c5e-0b8d2f6a4e19` | lesson_key=`classification-reviewer-blockers-red` | event_sha256=`c7394e50708ebfcfa27299e2be878f42b260c4350b95180cdee450ab81ac166a`
+- #44: `c1d8e7f6-a5b4-4c3d-9e2f-1a0b9c8d7e6f` | 2026-08-19T20:58:00.000Z | GATE/quick_gate_backend_full_fallback_failed | incident=`e2f1a0b9-c8d7-4e6f-a5b4-3c2d1e0f9a8b` | lesson_key=`classification-host-gate-boundary` | event_sha256=`959911cc09687e16829b102206c2a16e3f3713ea8a43ac6831bec581aac511d6`
+- #45: `d4e3f2a1-b0c9-48d7-6e5f-4a3b2c1d0e9f` | 2026-08-19T21:05:00.000Z | REVIEW/classification_reviewer_blockers_green | incident=`f5e4d3c2-b1a0-49f8-7e6d-5c4b3a2d1e0f` | lesson_key=`classification-reviewer-blockers-green` | event_sha256=`d36a494dbbc57d16ddd2b02aff249668d4c65e5cc3c28b7b5ce32052feaef1c8`

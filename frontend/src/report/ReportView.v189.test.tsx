@@ -90,15 +90,76 @@ const packet = {
   },
 } as const;
 
+const persistedPacket = {
+  payload_schema: "workbench.prediction.classification-artifacts",
+  schema_version: 1,
+  artifact_id: "sha256:" + "a".repeat(64),
+  server_identity: {
+    schema_version: 1,
+    project_id: "project:test",
+    run_id: "run:test",
+    namespace: "workbench.prediction.classification-artifacts.v1",
+    digest: "sha256:" + "b".repeat(64),
+  },
+  identity: {
+    schema_version: 1,
+    artifact_id: "sha256:" + "a".repeat(64),
+    task_hash: taskHash,
+    split_hash: splitHash,
+    model_id: "logistic_regression",
+    model_hash: modelHash,
+    holdout_hash: releasePlanHash,
+    release_plan_hash: releasePlanHash,
+    server_identity: {
+      schema_version: 1,
+      project_id: "project:test",
+      run_id: "run:test",
+      namespace: "workbench.prediction.classification-artifacts.v1",
+      digest: "sha256:" + "b".repeat(64),
+    },
+    parts: { task_hash: taskHash, split_hash: splitHash, model_hash: modelHash, evaluation_hash: "e", policy_hash: "p", server_identity_digest: "sha256:" + "b".repeat(64) },
+    fit_digest: "sha256:" + "f".repeat(64),
+    evaluation_digest: "sha256:" + "e".repeat(64),
+  },
+  models: {
+    logistic_regression: {
+      oof_metrics: {},
+      holdout: {},
+      preprocessing: {
+        folds: [{
+          fold: 0,
+          training_row_refs: ["r1", "r2"],
+          validation_row_refs: ["r3", "r4"],
+          receipt: { schema_version: 1, split_hash: splitHash, fit_row_refs: ["r1", "r2"], class_support: { class_labels: ["no", "yes"], training: { no: 1, yes: 1 }, validation: { no: 1, yes: 1 } } },
+        }],
+      },
+    },
+  },
+  fit: {
+    schema_version: 1,
+    digest: "sha256:" + "f".repeat(64),
+    identity: { task_hash: taskHash, split_hash: splitHash, model_id: "logistic_regression", model_hash: modelHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash, server_identity: { schema_version: 1, project_id: "project:test", run_id: "run:test", namespace: "workbench.prediction.classification-artifacts.v1", digest: "sha256:" + "b".repeat(64) } },
+    models: { logistic_regression: { fold_receipts: [{ fold: 0, training_row_refs: ["r1", "r2"], validation_row_refs: ["r3", "r4"], receipt: { schema_version: 1, split_hash: splitHash, fit_row_refs: ["r1", "r2"], class_support: { class_labels: ["no", "yes"], training: { no: 1, yes: 1 }, validation: { no: 1, yes: 1 } } } }] } },
+  },
+  evaluation: {
+    schema_version: 1,
+    digest: "sha256:" + "e".repeat(64),
+    identity: { task_hash: taskHash, split_hash: splitHash, model_id: "logistic_regression", model_hash: modelHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash, server_identity: { schema_version: 1, project_id: "project:test", run_id: "run:test", namespace: "workbench.prediction.classification-artifacts.v1", digest: "sha256:" + "b".repeat(64) } },
+    metrics: { oof: {}, holdout: {} },
+    comparison: packet.comparison,
+  },
+  evidence: packet,
+};
+
 describe("ReportView v1.8.9 evidence mounts", () => {
   it("accepts only the typed classification evidence schema", () => {
-    expect(readTypedClassificationEvidence(packet)).toEqual(packet);
-    expect(readTypedClassificationEvidence({ artifact_id: "classification:1", payload: packet })).toEqual(packet);
+    expect(readTypedClassificationEvidence(packet)).toBeNull();
+    expect(readTypedClassificationEvidence(persistedPacket)).toEqual(persistedPacket);
     expect(readTypedClassificationEvidence({ metrics: { accuracy: 0.8 } })).toBeNull();
   });
 
   it("mounts the typed packet without recalculating or dumping unknown payloads", () => {
-    render(<ReportClassificationEvidenceMount evidence={packet} />);
+    render(<ReportClassificationEvidenceMount evidence={persistedPacket} />);
 
     expect(screen.getByTestId("report-classification-evidence")).toHaveTextContent("Binary classification");
     expect(screen.getByTestId("report-classification-evidence")).toHaveTextContent("Accuracy");

@@ -57,7 +57,6 @@ import { fetchFigureAiContext } from "../workbench/views/figureAi";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
 import {
   isPersistedClassificationArtifact,
-  isTypedClassificationEvidencePacket,
   type ClassificationEvidencePacket,
 } from "./ClassificationEvidence";
 
@@ -75,12 +74,19 @@ const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
 
 const CLASSIFICATION_EVIDENCE_SCHEMA = "workbench.prediction.classification-evidence";
 const CLASSIFICATION_ARTIFACTS_SCHEMA = "workbench.prediction.classification-artifacts";
-const CLASSIFICATION_ARTIFACT_TYPES = new Set(["classification_evidence", "classification_artifacts"]);
-const CLASSIFICATION_ARTIFACT_IDS = new Set(["classification_evidence", "classification_artifacts"]);
+const CLASSIFICATION_ARTIFACT_TYPES = new Set(["classification_artifacts"]);
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
 }
 
 function indexedClassificationArtifactId(value: unknown): string | null {
@@ -122,35 +128,27 @@ function indexedClassificationArtifactId(value: unknown): string | null {
     || (contractVersion !== undefined && indexedVersion !== undefined && contractVersion !== indexedVersion)
   ) return null;
 
-  // The current artifact-list endpoint exposes the server-owned artifact type,
-  // id, path and hash but older deployments omit payload_contract. In that
-  // narrow compatibility case, only the two canonical ids or the
-  // content-addressed classification id are eligible; arbitrary ids/titles
-  // never become a report input. When the contract is present, it is checked
-  // above and the id remains an opaque server-issued identity.
-  if (schemas.length === 0 && !CLASSIFICATION_ARTIFACT_IDS.has(artifactId) && !/^sha256:[0-9a-f]{64}$/.test(artifactId)) {
-    return null;
-  }
+  if (schemas.length === 0 || contractSchema !== CLASSIFICATION_ARTIFACTS_SCHEMA) return null;
   return artifactId;
 }
 
 /** Return only the typed evidence packet, including its server-owned family identity. */
-export function readClassificationEvidencePacket(value: unknown): ClassificationEvidencePacket | null {
-  if (isPersistedClassificationArtifact(value)) return value.evidence;
-  if (asRecord(value)?.payload_schema === CLASSIFICATION_ARTIFACTS_SCHEMA) return null;
-  if (isTypedClassificationEvidencePacket(value)) return value;
-  const envelope = asRecord(value);
-  for (const nested of [envelope?.evidence, envelope?.payload]) {
-    if (isTypedClassificationEvidencePacket(nested)) return nested;
-  }
+export function readClassificationEvidencePacket(
+  value: unknown,
+  indexedArtifact?: unknown,
+): ClassificationEvidencePacket | null {
+  if (!isPersistedClassificationArtifact(value)) return null;
+  const item = asRecord(indexedArtifact);
   if (
-    envelope?.payload_schema === CLASSIFICATION_ARTIFACTS_SCHEMA
-    && envelope.schema_version === 1
-    && isTypedClassificationEvidencePacket(envelope.evidence)
-  ) {
-    return envelope.evidence;
-  }
-  return null;
+    item !== null
+    && (
+      item.artifact_id !== value.artifact_id
+      || item.payload_schema !== CLASSIFICATION_ARTIFACTS_SCHEMA
+      || item.schema_version !== 1
+      || !sameJsonValue(item.server_identity, value.server_identity)
+    )
+  ) return null;
+  return value as unknown as ClassificationEvidencePacket;
 }
 
 type FactTable = ReturnType<typeof buildFactTable>;
@@ -472,6 +470,7 @@ export function ReportWorkspaceProvider({
           try {
             return readClassificationEvidencePacket(
               await fetchArtifactJson(projectRoot, runId, item.artifact_id),
+              item,
             );
           } catch {
             return null;

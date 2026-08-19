@@ -96,9 +96,85 @@ const packet = {
   },
 } as const;
 
+const serverIdentity = {
+  schema_version: 1,
+  project_id: "project:test",
+  run_id: "run:test",
+  namespace: "workbench.prediction.classification-artifacts.v1",
+  digest: "sha256:" + "b".repeat(64),
+};
+const foldReceipt = {
+  fold: 0,
+  training_row_refs: ["r1", "r2"],
+  validation_row_refs: ["r3", "r4"],
+  receipt: {
+    schema_version: 1,
+    split_hash: splitHash,
+    fit_row_refs: ["r1", "r2"],
+    class_support: {
+      class_labels: ["no", "yes"],
+      training: { no: 1, yes: 1 },
+      validation: { no: 1, yes: 1 },
+    },
+  },
+};
+
+function persistedClassificationArtifact(
+  evidence: Record<string, unknown> = packet as unknown as Record<string, unknown>,
+) {
+  const comparison = evidence.comparison as { selected_model: string };
+  const identity = {
+    task_hash: taskHash,
+    split_hash: splitHash,
+    model_id: comparison.selected_model,
+    model_hash: modelHash,
+    holdout_hash: releasePlanHash,
+    release_plan_hash: releasePlanHash,
+    server_identity: serverIdentity,
+  };
+  const models = {
+    [comparison.selected_model]: {
+      oof_metrics: {},
+      holdout: {},
+      preprocessing: { folds: [foldReceipt] },
+    },
+  };
+  return {
+    payload_schema: "workbench.prediction.classification-artifacts",
+    schema_version: 1,
+    artifact_id: "sha256:" + "a".repeat(64),
+    server_identity: serverIdentity,
+    identity: {
+      schema_version: 1,
+      artifact_id: "sha256:" + "a".repeat(64),
+      ...identity,
+      parts: { task_hash: taskHash, split_hash: splitHash, model_hash: modelHash, evaluation_hash: "e", policy_hash: "p", server_identity_digest: serverIdentity.digest },
+      fit_digest: "sha256:" + "f".repeat(64),
+      evaluation_digest: "sha256:" + "e".repeat(64),
+    },
+    models,
+    fit: { schema_version: 1, digest: "sha256:" + "f".repeat(64), identity, models: Object.fromEntries(Object.keys(models).map((modelId) => [modelId, { fold_receipts: [foldReceipt] }])) },
+    evaluation: {
+      schema_version: 1,
+      digest: "sha256:" + "e".repeat(64),
+      identity,
+      metrics: { oof: {}, holdout: {} },
+      comparison,
+    },
+    evidence,
+  };
+}
+
 describe("ClassificationEvidence", () => {
+  it("rejects a raw in-memory classification packet without the persisted wrapper", () => {
+    render(<ClassificationEvidence evidence={packet as never} />);
+
+    expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
+    expect(screen.getByTestId("classification-evidence")).not.toHaveTextContent("Binary classification");
+  });
+
   it("renders typed classification evidence sections without recomputing statistics", () => {
-    render(<ClassificationEvidence evidence={packet} />);
+    render(<ClassificationEvidence evidence={persistedClassificationArtifact() as never} />);
 
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("Binary classification");
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("Class support");
@@ -111,7 +187,7 @@ describe("ClassificationEvidence", () => {
   });
 
   it("shows blocked reasons instead of rendering a synthetic metric", () => {
-    render(<ClassificationEvidence evidence={{ ...packet, metrics: {}, blocked_reasons: ["CLASSIFICATION_INFORMATION_SET_INCOMPLETE"] }} />);
+    render(<ClassificationEvidence evidence={persistedClassificationArtifact({ ...packet, metrics: {}, blocked_reasons: ["CLASSIFICATION_INFORMATION_SET_INCOMPLETE"] }) as never} />);
 
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("Blocked");
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("CLASSIFICATION_INFORMATION_SET_INCOMPLETE");
@@ -119,7 +195,7 @@ describe("ClassificationEvidence", () => {
   });
 
   it("discloses an unavailable renderer when the C0 envelope is not typed", () => {
-    render(<ClassificationEvidence evidence={{ ...packet, c0_evidence_envelope: {} }} />);
+    render(<ClassificationEvidence evidence={persistedClassificationArtifact({ ...packet, c0_evidence_envelope: {} }) as never} />);
 
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
     expect(screen.getByTestId("classification-evidence")).not.toHaveTextContent("Binary classification");
@@ -127,7 +203,7 @@ describe("ClassificationEvidence", () => {
 
   it.each(["issuer", "producer", "method", "identity"])("rejects forged classification family %s semantics", (field) => {
     const forgedFamily = { ...classificationFamilyEvidence, [field]: field === "identity" ? { ...classificationFamilyEvidence.identity, task_hash: "sha256:stale" } : "forged" };
-    render(<ClassificationEvidence evidence={{ ...packet, c0_evidence_envelope: { ...packet.c0_evidence_envelope, family_evidence: { classification: forgedFamily } } }} />);
+    render(<ClassificationEvidence evidence={persistedClassificationArtifact({ ...packet, c0_evidence_envelope: { ...packet.c0_evidence_envelope, family_evidence: { classification: forgedFamily } } }) as never} />);
 
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
   });
@@ -152,6 +228,7 @@ describe("ClassificationEvidence", () => {
       payload_schema: "workbench.prediction.classification-artifacts",
       schema_version: 1,
       artifact_id: "sha256:" + "a".repeat(64),
+      server_identity: serverIdentity,
       identity: {
         schema_version: 1,
         artifact_id: "sha256:" + "a".repeat(64),
@@ -161,7 +238,8 @@ describe("ClassificationEvidence", () => {
         model_hash: modelHash,
         holdout_hash: releasePlanHash,
         release_plan_hash: releasePlanHash,
-        parts: { task_hash: taskHash, split_hash: splitHash, model_hash: modelHash, evaluation_hash: "e", policy_hash: "p" },
+        server_identity: serverIdentity,
+        parts: { task_hash: taskHash, split_hash: splitHash, model_hash: modelHash, evaluation_hash: "e", policy_hash: "p", server_identity_digest: serverIdentity.digest },
         fit_digest: "sha256:" + "f".repeat(64),
         evaluation_digest: "sha256:" + "e".repeat(64),
       },
@@ -169,7 +247,7 @@ describe("ClassificationEvidence", () => {
       fit: {
         schema_version: 1,
         digest: "sha256:" + "f".repeat(64),
-        identity: { task_hash: taskHash, split_hash: splitHash, model_id: "random_forest", model_hash: modelHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash },
+        identity: { task_hash: taskHash, split_hash: splitHash, model_id: "random_forest", model_hash: modelHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash, server_identity: serverIdentity },
         models: {
           random_forest: {
             fold_receipts: [foldReceipt],
@@ -179,7 +257,7 @@ describe("ClassificationEvidence", () => {
       evaluation: {
         schema_version: 1,
         digest: "sha256:" + "e".repeat(64),
-        identity: { task_hash: taskHash, split_hash: splitHash, model_id: "random_forest", model_hash: modelHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash },
+        identity: { task_hash: taskHash, split_hash: splitHash, model_id: "random_forest", model_hash: modelHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash, server_identity: serverIdentity },
         metrics: { oof: {}, holdout: {} },
         comparison: packet.comparison,
       },

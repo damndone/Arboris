@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportWorkspaceProvider, useReportWorkspace } from "./ReportWorkspaceContext";
 
+const CLASSIFICATION_ARTIFACTS_SCHEMA = "workbench.prediction.classification-artifacts";
 const mockForest = vi.hoisted(() => ({ current: null as unknown }));
 const mockArtifacts = vi.hoisted(() => ({
   current: { groups: [] as Array<{ artifact_type: string; items: Array<Record<string, unknown>> }> },
@@ -132,19 +133,82 @@ const evidencePacket = {
   },
 } as const;
 
+const persistedClassificationArtifact = {
+  payload_schema: "workbench.prediction.classification-artifacts",
+  schema_version: 1,
+  artifact_id: "sha256:" + "a".repeat(64),
+  server_identity: {
+    schema_version: 1,
+    project_id: "project:test",
+    run_id: "run:test",
+    namespace: "workbench.prediction.classification-artifacts.v1",
+    digest: "sha256:" + "b".repeat(64),
+  },
+  identity: {
+    schema_version: 1,
+    artifact_id: "sha256:" + "a".repeat(64),
+    task_hash: taskHash,
+    split_hash: splitHash,
+    model_id: "logistic_regression",
+    model_hash: modelHash,
+    holdout_hash: releasePlanHash,
+    release_plan_hash: releasePlanHash,
+    server_identity: {
+      schema_version: 1,
+      project_id: "project:test",
+      run_id: "run:test",
+      namespace: "workbench.prediction.classification-artifacts.v1",
+      digest: "sha256:" + "b".repeat(64),
+    },
+    parts: { task_hash: taskHash, split_hash: splitHash, model_hash: modelHash, evaluation_hash: "e", policy_hash: "p", server_identity_digest: "sha256:" + "b".repeat(64) },
+    fit_digest: "sha256:" + "f".repeat(64),
+    evaluation_digest: "sha256:" + "e".repeat(64),
+  },
+  models: {
+    logistic_regression: {
+      oof_metrics: {},
+      holdout: {},
+      preprocessing: {
+        folds: [{
+          fold: 0,
+          training_row_refs: ["r1", "r2"],
+          validation_row_refs: ["r3", "r4"],
+          receipt: { schema_version: 1, split_hash: splitHash, fit_row_refs: ["r1", "r2"], class_support: { class_labels: ["no", "yes"], training: { no: 1, yes: 1 }, validation: { no: 1, yes: 1 } },
+          },
+        }],
+      },
+    },
+  },
+  fit: {
+    schema_version: 1,
+    digest: "sha256:" + "f".repeat(64),
+    identity: { task_hash: taskHash, split_hash: splitHash, model_id: "logistic_regression", model_hash: modelHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash, server_identity: { schema_version: 1, project_id: "project:test", run_id: "run:test", namespace: "workbench.prediction.classification-artifacts.v1", digest: "sha256:" + "b".repeat(64) } },
+    models: { logistic_regression: { fold_receipts: [{ fold: 0, training_row_refs: ["r1", "r2"], validation_row_refs: ["r3", "r4"], receipt: { schema_version: 1, split_hash: splitHash, fit_row_refs: ["r1", "r2"], class_support: { class_labels: ["no", "yes"], training: { no: 1, yes: 1 }, validation: { no: 1, yes: 1 } } } }] } },
+  },
+  evaluation: {
+    schema_version: 1,
+    digest: "sha256:" + "e".repeat(64),
+    identity: { task_hash: taskHash, split_hash: splitHash, model_id: "logistic_regression", model_hash: modelHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash, server_identity: { schema_version: 1, project_id: "project:test", run_id: "run:test", namespace: "workbench.prediction.classification-artifacts.v1", digest: "sha256:" + "b".repeat(64) } },
+    metrics: { oof: {}, holdout: {} },
+    comparison: evidencePacket.comparison,
+  },
+  evidence: evidencePacket,
+};
+
 function indexedClassificationItem(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    artifact_id: "classification_evidence",
-    path: "classification/classification_evidence.json",
-    artifact_type: "classification_evidence",
+    artifact_id: "sha256:" + "a".repeat(64),
+    path: "classification/classification_artifacts.json",
+    artifact_type: "classification_artifacts",
     step: "classification",
     sha256: "a".repeat(64),
     payload_contract: {
-      payload_schema: CLASSIFICATION_EVIDENCE_SCHEMA,
+      payload_schema: CLASSIFICATION_ARTIFACTS_SCHEMA,
       schema_version: 1,
     },
-    payload_schema: CLASSIFICATION_EVIDENCE_SCHEMA,
+    payload_schema: CLASSIFICATION_ARTIFACTS_SCHEMA,
     schema_version: 1,
+    server_identity: persistedClassificationArtifact.server_identity,
     ...overrides,
   };
 }
@@ -155,7 +219,7 @@ function WorkspaceProbe() {
   const isTypedPacket = Boolean(
     packet
     && typeof packet === "object"
-    && (packet as Record<string, unknown>).payload_schema === CLASSIFICATION_EVIDENCE_SCHEMA
+    && (packet as Record<string, unknown>).payload_schema === CLASSIFICATION_ARTIFACTS_SCHEMA
     && (packet as Record<string, unknown>).schema_version === 1,
   );
   return (
@@ -191,7 +255,7 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
   it("loads only a server-indexed typed classification artifact", async () => {
     mockArtifacts.current = {
       groups: [{
-        artifact_type: "classification_evidence",
+        artifact_type: "classification_artifacts",
         items: [
           indexedClassificationItem(),
           indexedClassificationItem({
@@ -204,7 +268,7 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
         ],
       }],
     };
-    mockArtifactJson.current.mockResolvedValue(evidencePacket);
+    mockArtifactJson.current.mockResolvedValue(persistedClassificationArtifact);
 
     renderWorkspace();
 
@@ -212,7 +276,7 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     expect(mockArtifactJson.current).toHaveBeenCalledWith(
       "/tmp/report-project",
       "run-classification",
-      "classification_evidence",
+      "sha256:" + "a".repeat(64),
     );
     expect(mockArtifactJson.current).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("classification-context")).toHaveTextContent(CLASSIFICATION_EVIDENCE_SCHEMA);
@@ -259,9 +323,9 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     ["unsupported schema version", { ...evidencePacket, schema_version: 2, secret: "unsupported-secret" }],
   ])("does not expose %s", async (_label, packet) => {
     mockArtifacts.current = {
-      groups: [{ artifact_type: "classification_evidence", items: [indexedClassificationItem()] }],
+      groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
     };
-    mockArtifactJson.current.mockResolvedValue(packet);
+    mockArtifactJson.current.mockResolvedValue({ ...persistedClassificationArtifact, evidence: packet });
 
     renderWorkspace();
 
@@ -271,10 +335,12 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
 
   it("rejects a stale C0 envelope identity instead of exposing the packet", async () => {
     mockArtifacts.current = {
-      groups: [{ artifact_type: "classification_evidence", items: [indexedClassificationItem()] }],
+      groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
     };
     mockArtifactJson.current.mockResolvedValue({
-      ...evidencePacket,
+      ...persistedClassificationArtifact,
+      evidence: {
+        ...evidencePacket,
       c0_evidence_envelope: {
         result_identity: {
           result_ref: "classification-evidence:stale",
@@ -283,6 +349,7 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
           holdout_hash: evidencePacket.holdout.release_plan_hash,
           release_plan_hash: evidencePacket.holdout.release_plan_hash,
         },
+      },
       },
     });
 
@@ -294,12 +361,15 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
 
   it("rejects unavailable C0 evidence when the projection claims available", async () => {
     mockArtifacts.current = {
-      groups: [{ artifact_type: "classification_evidence", items: [indexedClassificationItem()] }],
+      groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
     };
     mockArtifactJson.current.mockResolvedValue({
-      ...evidencePacket,
+      ...persistedClassificationArtifact,
+      evidence: {
+        ...evidencePacket,
       c0_evidence_envelope: { availability: "not_available" },
       c0_consumer_projection: { payload: { projection_status: "available" } },
+      },
     });
 
     renderWorkspace();
@@ -309,13 +379,16 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
 
   it("rejects a forged classification family before ReportWorkspaceContext exposes it", async () => {
     mockArtifacts.current = {
-      groups: [{ artifact_type: "classification_evidence", items: [indexedClassificationItem()] }],
+      groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
     };
     mockArtifactJson.current.mockResolvedValue({
-      ...evidencePacket,
+      ...persistedClassificationArtifact,
+      evidence: {
+        ...evidencePacket,
       c0_evidence_envelope: {
         ...evidencePacket.c0_evidence_envelope,
         family_evidence: { classification: { ...classificationFamilyEvidence, producer: "forged-producer" } },
+      },
       },
     });
 
@@ -327,7 +400,7 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
 
   it("treats a failed artifact download as unavailable without surfacing the error payload", async () => {
     mockArtifacts.current = {
-      groups: [{ artifact_type: "classification_evidence", items: [indexedClassificationItem()] }],
+      groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
     };
     mockArtifactJson.current.mockRejectedValue(new Error("download-secret"));
 

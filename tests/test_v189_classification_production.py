@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import replace
 
 import pandas as pd
@@ -369,7 +370,7 @@ def test_production_calibration_threshold_and_evidence_consumer_are_explicitly_s
     assert plan["policy_hash"].startswith("sha256:")
     assert result["holdout"]["status"] == "sealed"
     assert result["holdout"]["release_count"] == 0
-    projected = project_classification_evidence(result["evidence"], consumer="report")
+    projected = read_classification_evidence_from_run_root(tmp_path, consumer="report")
     assert projected["status"] == "degraded"
     assert isinstance(projected["baselines"], list)
     assert projected["explanations"]["shap"]["status"] == "unavailable"
@@ -631,6 +632,112 @@ def test_persisted_classification_artifact_reloads_auditable_models_fit_and_eval
     assert reloaded["comparison"]["selected_model"] == "logistic_regression"
 
 
+def test_persisted_classification_artifact_rejects_copy_into_foreign_project_run(tmp_path) -> None:
+    source_root = tmp_path / "project-source" / "runs" / "run-source"
+    foreign_root = tmp_path / "project-foreign" / "runs" / "run-foreign"
+    source_root.mkdir(parents=True)
+    foreign_root.mkdir(parents=True)
+    (source_root / "artifacts_index.json").write_text(
+        json.dumps({"schema_version": 1, "artifacts": []}),
+        encoding="utf-8",
+    )
+
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    run_classification_model_v189(
+        frame,
+        source_root,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+    shutil.copy2(source_root / "classification_artifacts.json", foreign_root / "classification_artifacts.json")
+    shutil.copy2(source_root / "artifacts_index.json", foreign_root / "artifacts_index.json")
+
+    with pytest.raises(ContractError) as exc_info:
+        read_classification_evidence_from_run_root(foreign_root, consumer="report")
+
+    assert exc_info.value.code in {
+        "CLASSIFICATION_SERVER_IDENTITY_MISMATCH",
+        "CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID",
+    }
+
+
+def test_classification_consumer_rejects_in_memory_evidence_bypass(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(
+        json.dumps({"schema_version": 1, "artifacts": []}),
+        encoding="utf-8",
+    )
+    result = run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+
+    with pytest.raises(ContractError) as exc_info:
+        project_classification_evidence(result["evidence"], consumer="agent")
+
+    assert exc_info.value.code == "CLASSIFICATION_PERSISTED_RECEIPT_REQUIRED"
+
+
+def test_classification_notebook_consumer_reads_the_same_persisted_receipt(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(
+        json.dumps({"schema_version": 1, "artifacts": []}),
+        encoding="utf-8",
+    )
+    run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+
+    projection = read_classification_evidence_from_run_root(tmp_path, consumer="notebook")
+
+    assert projection["consumer"] == "notebook"
+    assert projection["comparison"]["selected_model"] == "logistic_regression"
+
+
+def test_agent_and_notebook_classification_consumers_share_the_indexed_wrapper(tmp_path) -> None:
+    from workbench.agent.context_tools import read_classification_evidence_for_agent
+    from workbench.agent.notebook.evidence import read_classification_evidence_for_notebook
+
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(
+        json.dumps({"schema_version": 1, "artifacts": []}),
+        encoding="utf-8",
+    )
+    run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+
+    agent_projection = read_classification_evidence_for_agent(tmp_path)
+    notebook_projection = read_classification_evidence_for_notebook(tmp_path)
+
+    assert agent_projection["server_identity"] == notebook_projection["server_identity"]
+    assert agent_projection["comparison"] == notebook_projection["comparison"]
+
+
 def test_persisted_classification_artifact_rejects_tampered_fold_support(tmp_path) -> None:
     frame = _ordered_frame([period for period in range(8) for _ in range(2)])
     (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
@@ -806,7 +913,7 @@ def test_threshold_red_probe_uses_log_loss_and_precision_constraint() -> None:
 
 
 def test_c0_evidence_red_probe_preserves_degraded_status_and_required_identity() -> None:
-    from workbench.predictive_research.consumer_projection import project_classification_evidence
+    from workbench.predictive_research.consumer_projection import _project_classification_evidence
 
     payload = {
         "payload_schema": "workbench.prediction.classification-evidence",
@@ -864,7 +971,7 @@ def test_c0_evidence_red_probe_preserves_degraded_status_and_required_identity()
         "producer_status": "degraded",
     }
 
-    projected = project_classification_evidence(payload, consumer="report")
+    projected = _project_classification_evidence(payload, consumer="report")
     assert projected["status"] == "degraded"
     assert projected["task_hash"] == payload["task"]["task_hash"]
     assert projected["split_hash"] == payload["split"]["split_hash"]

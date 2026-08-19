@@ -45,6 +45,7 @@ from .predictive_research.preprocessing import ClassificationPreprocessingStepV1
 from .predictive_research.persistence import (
     PredictionPersistenceAdmission,
     classification_artifact_id,
+    classification_server_identity,
     persist_classification_artifacts,
 )
 from .predictive_research.feature_recipe import apply_feature_recipe
@@ -502,6 +503,7 @@ def _run_classification_model_v189(
         "producer_status": result_status,
     }
     release_plan = protocol["holdout"]["release_plan"]
+    server_identity = classification_server_identity(Path(run_root))
     fit_identity = {
         "task_hash": task.content_hash,
         "split_hash": split_hash,
@@ -509,6 +511,7 @@ def _run_classification_model_v189(
         "model_hash": release_plan["model_hash"],
         "holdout_hash": protocol["holdout"]["release_plan_hash"],
         "release_plan_hash": protocol["holdout"]["release_plan_hash"],
+        "server_identity": server_identity,
     }
     fit_models = {
         model_id: {
@@ -547,6 +550,7 @@ def _run_classification_model_v189(
         "comparison_hash": sha256_canonical(protocol["comparison"]),
         "explanation_hash": sha256_canonical(evidence["explanations"]),
         "policy_hash": sha256_canonical(policy_payload),
+        "server_identity_digest": server_identity["digest"],
     }
     identity = classification_artifact_id(**identity_parts)
     artifact_identity = {
@@ -561,6 +565,7 @@ def _run_classification_model_v189(
         "release_plan_hash": protocol["holdout"]["release_plan_hash"],
         "fit_digest": fit_digest,
         "evaluation_digest": evaluation_digest,
+        "server_identity": server_identity,
     }
     artifact = persist_classification_artifacts(
         Path(run_root),
@@ -600,6 +605,7 @@ def _run_classification_model_v189(
                 "payload_schema": "workbench.prediction.classification-artifacts",
                 "schema_version": 1,
             },
+            server_identity=server_identity,
         )
     return {
         **protocol,

@@ -25,7 +25,10 @@ from ..analysis_loop.time_series_compare import read_time_series_artifacts as _r
 from ..analysis_loop.plan import PlanDiff
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
-from ..predictive_research.consumer_projection import read_prediction_evidence_from_run_root
+from ..predictive_research.consumer_projection import (
+    read_classification_evidence_from_run_root,
+    read_prediction_evidence_from_run_root,
+)
 from ..data_operations import _read_frame
 from ..graph_model import NodeKind
 from .context_compiler import resolve_registered_artifact
@@ -4838,6 +4841,12 @@ def read_prediction_research_evidence(
     """Read v1.8.6 prediction evidence through the shared projection."""
 
     return read_prediction_evidence_from_run_root(run_root, consumer=consumer)
+
+
+def read_classification_evidence_for_agent(run_root: Path) -> dict[str, Any]:
+    """Read Agent classification evidence only from the indexed persisted receipt."""
+
+    return read_classification_evidence_from_run_root(run_root, consumer="agent")
 
 
 @dataclass(frozen=True)
