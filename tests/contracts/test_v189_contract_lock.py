@@ -3222,7 +3222,10 @@ def test_catalog_load_order_and_digest_are_deterministic() -> None:
 
     assert first.to_dict() == second.to_dict()
     assert first.catalog_digest == second.catalog_digest
-    assert first.provider_ids == tuple(sorted(first.provider_ids))
+    assert first.source_filenames == tuple(sorted(first.source_filenames))
+    assert tuple(zip(first.source_filenames, first.provider_ids, strict=True)) == tuple(
+        sorted(zip(first.source_filenames, first.provider_ids, strict=True))
+    )
     assert first.catalog_digest == sha256_canonical(first.digest_payload())
 
 
@@ -3882,15 +3885,13 @@ def test_task5_injected_family_is_visible_then_denominator_recovers(
     exposure: str,
     variant: int,
 ) -> None:
-    import workbench.providers.catalog as catalog_module
-
     load_catalog_from_root = _private_provider_catalog_loader()
     base = _provider_fixture_payload()
-    baseline = catalog_module.load_builtin_catalog()
     from workbench.agent.workflow_capability_registry import workflow_capability_registry
 
     operations_before = workflow_capability_registry().operation_ids()
     _write_provider_manifest(tmp_path, "contract_fixture.json", base)
+    baseline = load_catalog_from_root(tmp_path)
     injected = _new_family_provider_payload(
         base, provider_id=provider_id, exposure=exposure, variant=variant
     )

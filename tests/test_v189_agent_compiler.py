@@ -138,17 +138,11 @@ class _TestHostCompiler:
             expires_at=(created + timedelta(hours=1)).isoformat(),
         )
         self._records[(record.record_id, record.record_digest)] = record
-        try:
-            reference = ServerCompilationRecordReferenceV1(
-                record_id=record.record_id,
-                record_digest=record.record_digest,
-                semantic_plan_hash=record.semantic_plan_hash,
-            )
-        except TypeError:
-            reference = ServerCompilationRecordReferenceV1._issue(
-                record.reference,
-                self._store.raw_store._issuer_token,
-            )
+        reference = ServerCompilationRecordReferenceV1(
+            record_id=record.record_id,
+            record_digest=record.record_digest,
+            semantic_plan_hash=record.semantic_plan_hash,
+        )
         return HostCompilationResultV1(
             compiled_plan=compiled,
             record=record,
@@ -1393,9 +1387,10 @@ def test_compiler_rejects_host_record_that_does_not_bind_to_workflow_snapshots()
                 record_digest=sha256_canonical(record_payload),
             )
             compiler.store.record_store.resolve = lambda _reference: record  # type: ignore[method-assign]
-            reference = ServerCompilationRecordReferenceV1._issue(
-                record.reference,
-                compiler.store.raw_store._issuer_token,
+            reference = ServerCompilationRecordReferenceV1(
+                record_id=record.record_id,
+                record_digest=record.record_digest,
+                semantic_plan_hash=record.semantic_plan_hash,
             )
             return HostCompilationResultV1(
                 compiled_plan=result.compiled_plan,
