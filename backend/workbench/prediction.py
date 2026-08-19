@@ -606,6 +606,8 @@ def _run_classification_model_v189(
                 "schema_version": 1,
             },
             server_identity=server_identity,
+            receipt_path=artifact["receipt_path"],
+            receipt_sha256=artifact["receipt_sha256"],
         )
     return {
         **protocol,

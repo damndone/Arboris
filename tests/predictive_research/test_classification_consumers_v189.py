@@ -294,7 +294,7 @@ def test_projection_requires_persisted_models_fit_evaluation_and_fold_receipts()
     }
 
     with pytest.raises(ContractError) as exc_info:
-        project_classification_evidence(persisted, consumer="report")
+        _project_classification_evidence(persisted, consumer="report")
 
     assert exc_info.value.code == "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID"
 

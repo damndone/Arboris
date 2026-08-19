@@ -15,6 +15,8 @@ from workbench.contracts.evidence.envelope import (
 from .schema import PayloadContractError, default_v1_prediction_registry
 from .contracts import ContractError
 from .persistence import (
+    _CLASSIFICATION_RECEIPT_PATH,
+    _CLASSIFICATION_RECEIPT_SCHEMA,
     classification_artifact_id,
     validate_classification_server_identity,
     validate_classification_server_identity_shape,
@@ -144,6 +146,26 @@ def read_classification_evidence_from_run_root(
         raise ContractError("CLASSIFICATION_SERVER_IDENTITY_MISMATCH", "classification index server identity is stale")
     if payload.get("server_identity") != expected_server_identity:
         raise ContractError("CLASSIFICATION_SERVER_IDENTITY_MISMATCH", "classification artifact server identity is stale")
+    receipt_path = record.get("receipt_path")
+    receipt_sha256 = record.get("receipt_sha256")
+    if receipt_path != _CLASSIFICATION_RECEIPT_PATH or type(receipt_sha256) is not str:
+        raise ContractError("CLASSIFICATION_PERSISTED_RECEIPT_REQUIRED", "classification artifact has no server-owned indexed receipt")
+    receipt_file = (Path(run_root) / receipt_path).resolve()
+    try:
+        receipt_file.relative_to(resolved_root)
+    except ValueError as error:
+        raise PayloadContractError("ARTIFACT_PATH_INVALID", "classification receipt path escapes run root") from error
+    if not receipt_file.is_file() or sha256_file(receipt_file) != receipt_sha256:
+        raise ContractError("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification server receipt hash does not match the index")
+    receipt = read_json(receipt_file)
+    _validate_classification_receipt(
+        receipt,
+        payload=payload,
+        record=record,
+        run_root=Path(run_root),
+        artifact_sha256=str(record.get("sha256")),
+        server_identity=expected_server_identity,
+    )
     return _project_classification_evidence(payload, consumer=consumer)
 
 
@@ -318,6 +340,82 @@ def _persisted_classification_error(code: str, message: str) -> ContractError:
     return ContractError(code, message)
 
 
+def _classification_content_digests(payload: Mapping[str, Any], *, artifact_sha256: str) -> dict[str, str]:
+    evidence = payload.get("evidence")
+    evaluation = payload.get("evaluation")
+    models = payload.get("models")
+    fit = payload.get("fit")
+    if not isinstance(evidence, Mapping) or not isinstance(evaluation, Mapping) or not isinstance(models, Mapping) or not isinstance(fit, Mapping):
+        raise _persisted_classification_error(
+            "CLASSIFICATION_PERSISTED_RECEIPT_INVALID",
+            "classification receipt cannot bind an incomplete artifact",
+        )
+    model_metadata = {
+        str(model_id): model.get("metadata")
+        for model_id, model in models.items()
+        if isinstance(model_id, str) and isinstance(model, Mapping)
+    }
+    model_warnings = {
+        model_id: metadata.get("warnings")
+        for model_id, metadata in model_metadata.items()
+        if isinstance(metadata, Mapping)
+    }
+    return {
+        "artifact": artifact_sha256,
+        "evidence": sha256_canonical(evidence),
+        "evidence.metrics": sha256_canonical(evidence.get("metrics")),
+        "evaluation": sha256_canonical(evaluation),
+        "evaluation.metrics": sha256_canonical(evaluation.get("metrics")),
+        "models": sha256_canonical(models),
+        "models.metadata": sha256_canonical(model_metadata),
+        "models.warnings": sha256_canonical(model_warnings),
+        "fit": sha256_canonical(fit),
+        "fold_receipts": sha256_canonical(
+            {
+                str(model_id): model.get("fold_receipts")
+                for model_id, model in fit.get("models", {}).items()
+                if isinstance(model_id, str) and isinstance(model, Mapping)
+            }
+        ),
+    }
+
+
+def _validate_classification_receipt(
+    receipt: Any,
+    *,
+    payload: Mapping[str, Any],
+    record: Mapping[str, Any],
+    run_root: Path,
+    artifact_sha256: str,
+    server_identity: Mapping[str, Any],
+) -> None:
+    if not isinstance(receipt, Mapping):
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification server receipt must be an object")
+    required = {
+        "payload_schema", "schema_version", "receipt_id", "artifact_path", "artifact_id",
+        "artifact_sha256", "payload_contract", "server_identity", "content_digests", "issuer", "receipt_digest",
+    }
+    if set(receipt) != required or receipt.get("payload_schema") != _CLASSIFICATION_RECEIPT_SCHEMA or receipt.get("schema_version") != 1:
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification server receipt schema is invalid")
+    if (
+        type(receipt.get("receipt_id")) is not str
+        or not receipt["receipt_id"]
+        or receipt.get("artifact_path") != record.get("path")
+        or receipt.get("artifact_id") != payload.get("artifact_id")
+        or receipt.get("artifact_id") != record.get("artifact_id")
+        or receipt.get("artifact_sha256") != artifact_sha256
+        or receipt.get("payload_contract") != record.get("payload_contract")
+        or receipt.get("server_identity") != dict(server_identity)
+        or receipt.get("issuer") != "workbench.server.classification-persistence"
+    ):
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification server receipt identity is stale")
+    base = {key: receipt[key] for key in required if key != "receipt_digest"}
+    if receipt.get("receipt_digest") != sha256_canonical(base):
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification server receipt digest is invalid")
+    if receipt.get("content_digests") != _classification_content_digests(payload, artifact_sha256=artifact_sha256):
+        raise _persisted_classification_error("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification content receipt is stale")
+
+
 def _validate_persisted_fold_receipts(
     artifact: Mapping[str, Any],
     evidence: Mapping[str, Any],
@@ -346,7 +444,7 @@ def _validate_persisted_fold_receipts(
             "persisted task class support must contain unique class labels",
         )
     for label, count in overall_support.items():
-        if type(label) is not str or type(count) is not int or count < 0:
+        if type(label) is not str or type(count) is not int or count <= 0:
             raise _persisted_classification_error(
                 "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
                 "persisted task class support counts must be non-negative integers",
@@ -424,7 +522,7 @@ def _validate_persisted_fold_receipts(
                         "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
                         f"persisted {scope} class support is incomplete",
                     )
-                if any(type(counts[label]) is not int or counts[label] < 0 or counts[label] > overall_support[label] for label in labels):
+                if any(type(counts[label]) is not int or counts[label] <= 0 or counts[label] > overall_support[label] for label in labels):
                     raise _persisted_classification_error(
                         "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
                         f"persisted {scope} class support exceeds task bounds",
@@ -530,15 +628,20 @@ def _unwrap_persisted_classification_artifact(payload: Mapping[str, Any]) -> Map
     return evidence
 
 
-def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str) -> dict[str, Any]:
-    """Project only an indexed persisted classification-artifacts wrapper."""
+def project_classification_evidence(run_root: Path, *, consumer: str) -> dict[str, Any]:
+    """Project only a server-owned run root with an indexed receipt.
 
-    if not isinstance(payload, Mapping) or payload.get("payload_schema") != _PERSISTED_CLASSIFICATION_SCHEMA:
+    Raw packets and even apparently complete persisted mappings are not an
+    authority boundary.  The mapping validator remains private and is reached
+    only after the indexed payload and server-owned receipt have been loaded.
+    """
+
+    if not isinstance(run_root, Path):
         raise ContractError(
             "CLASSIFICATION_PERSISTED_RECEIPT_REQUIRED",
-            "classification consumers must read the server-indexed persisted receipt",
+            "classification consumers require a server-owned run root or capability",
         )
-    return _project_classification_evidence(payload, consumer=consumer)
+    return read_classification_evidence_from_run_root(run_root, consumer=consumer)
 
 
 def _project_classification_evidence(payload: Mapping[str, Any], *, consumer: str) -> dict[str, Any]:

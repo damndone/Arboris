@@ -10,14 +10,14 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 10/45 (22.2%; 22.2 per 100 events)
-- Repeat rate: 0/10 (0.0%)
-- Recurrence rate: 0/10 (0.0%)
-- MTTR: median=0 ms (sample=5; unresolved=4)
+- Failure frequency: 11/48 (22.9%; 22.9 per 100 events)
+- Repeat rate: 0/11 (0.0%)
+- Recurrence rate: 0/11 (0.0%)
+- MTTR: median=0 ms (sample=6; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/8 (0.0%)
+- Gate waste rate: 0/9 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -36,6 +36,7 @@ CONTEXT_RESCOPED
 - #34 2026-08-19T20:12:00.000Z `classification_reportview_fixture_missing_family`; cause_status: `known`; cause: The stricter frontend classification family validator exposed a pre-existing ReportView v1.8.9 test fixture without family_evidence.classification.; resolution: `resolved`; lesson: Keep every consumer fixture aligned with the complete typed family evidence contract.
 - #38 2026-08-19T15:56:10.000Z `formal_append_event_path_error`; cause_status: `known`; cause: The formal append command rejected an external temporary event path because event files must be repository-relative.; resolution: `resolved`; lesson: Use the formal CLI with a repository-relative temporary event file and never edit .agent records directly.
 - #40 2026-08-19T16:08:30.000Z `verification_frontend_wrong_workdir`; cause_status: `known`; cause: The initial npm frontend focused and typecheck commands were launched from the worktree root, which has no package.json; the actual package root is the allowlisted frontend directory.; resolution: `resolved`; lesson: Resolve the package root before running frontend verification commands in a multi-package worktree.
+- #47 2026-08-19T21:30:30.000Z `classification_fourth_remediation_formal_append_error`; cause_status: `known`; cause: The first formal append attempt omitted the required event_id field and was rejected before changing the formal log.; resolution: `resolved`; lesson: Check the append event schema before invoking the formal CLI and preserve the CLI as the only formal write path.
 
 ## All gaps
 
@@ -47,6 +48,7 @@ CONTEXT_RESCOPED
 
 ## Root causes and solutions
 
+- `classification-fourth-remediation-cli-error`: occurrences=1; cause_status: `known`; root cause: The first formal append attempt omitted the required event_id field and was rejected before changing the formal log.; solution: `resolved`
 - `compile-after-protocol-edit`: occurrences=1; cause_status: `known`; root cause: The first production-path patch left a metadata local uninitialized and then introduced an indentation error while adding weighted threshold inputs.; solution: `accepted`
 - `formal-append-repo-relative-event-file`: occurrences=1; cause_status: `known`; root cause: The formal append command rejected an external temporary event path because event files must be repository-relative.; solution: `resolved`
 - `formal-cli-surface-check`: occurrences=1; cause_status: `known`; root cause: The first attempt used nonexistent formal control subcommands append-event and status instead of the existing append interface.; solution: `resolved`
@@ -64,6 +66,7 @@ CONTEXT_RESCOPED
 
 ## New rules
 
+- `classification-fourth-remediation-cli-error`: line experience occurrence(s)=1
 - `compile-after-protocol-edit`: line experience occurrence(s)=1
 - `formal-append-repo-relative-event-file`: line experience occurrence(s)=1
 - `formal-cli-surface-check`: line experience occurrence(s)=1
@@ -77,6 +80,7 @@ CONTEXT_RESCOPED
 
 ## Future guidance
 
+- Check the append event schema before invoking the formal CLI and preserve the CLI as the only formal write path.
 - Check the formal CLI help before appending line evidence and never bypass the control surface with direct .agent edits.
 - Exercise each authority, split, policy, and evidence boundary before implementing its smallest green path.
 - Expose only typed production seams and fail closed before any helper-only fitting can run.
@@ -86,6 +90,7 @@ CONTEXT_RESCOPED
 - Keep each reviewer blocker as a behavior-level RED probe and implement the missing production boundary instead of weakening the assertion.
 - Keep every consumer fixture aligned with the complete typed family evidence contract.
 - Keep foreign-copy, memory-bypass, raw-frontend, Notebook, tamper, stale, and status probes ahead of implementation and require one server-indexed wrapper at every consumer boundary.
+- Keep public consumer APIs capability-only and bind every consumed classification field to a server-owned persisted receipt before trusting outer artifact or index digests.
 - Keep the package-local runtime join typed and explicit, and leave host bootstrap composition as a separate integration boundary.
 - Keep the server-indexed wrapper as the only production consumer boundary and retain Notebook as a first-class persisted projection.
 - Make the typed task split profile drive the executable manifest before any model fit.
@@ -143,3 +148,6 @@ CONTEXT_RESCOPED
 - #43: `a4c9e2f7-1b6d-48a3-9f05-c7d2e8b4a619` | 2026-08-19T16:27:57.000Z | REVIEW/classification_reviewer_blockers_red | incident=`9e3a4c8b-6d2f-41a7-9c5e-0b8d2f6a4e19` | lesson_key=`classification-reviewer-blockers-red` | event_sha256=`c7394e50708ebfcfa27299e2be878f42b260c4350b95180cdee450ab81ac166a`
 - #44: `c1d8e7f6-a5b4-4c3d-9e2f-1a0b9c8d7e6f` | 2026-08-19T20:58:00.000Z | GATE/quick_gate_backend_full_fallback_failed | incident=`e2f1a0b9-c8d7-4e6f-a5b4-3c2d1e0f9a8b` | lesson_key=`classification-host-gate-boundary` | event_sha256=`959911cc09687e16829b102206c2a16e3f3713ea8a43ac6831bec581aac511d6`
 - #45: `d4e3f2a1-b0c9-48d7-6e5f-4a3b2c1d0e9f` | 2026-08-19T21:05:00.000Z | REVIEW/classification_reviewer_blockers_green | incident=`f5e4d3c2-b1a0-49f8-7e6d-5c4b3a2d1e0f` | lesson_key=`classification-reviewer-blockers-green` | event_sha256=`d36a494dbbc57d16ddd2b02aff249668d4c65e5cc3c28b7b5ce32052feaef1c8`
+- #46: `4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c5e` | 2026-08-19T21:30:00.000Z | REVIEW/classification_fourth_remediation_red | incident=`4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c5d` | lesson_key=`classification-fourth-remediation-red` | event_sha256=`f2d28c1f50713c24643a7e7aaa765ebe2a3db80d357c03a4fe5f5fff278f94ad`
+- #47: `4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c5f` | 2026-08-19T21:30:30.000Z | ERROR/classification_fourth_remediation_formal_append_error | incident=`4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c60` | lesson_key=`classification-fourth-remediation-cli-error` | event_sha256=`5407beb5ebd4c7d4186151dfdcf9adf5b510425e13d585c9fb006d814eb1f831`
+- #48: `4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c61` | 2026-08-19T21:45:00.000Z | GATE/classification_fourth_remediation_green | incident=`4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c62` | lesson_key=`classification-fourth-remediation-green` | event_sha256=`4f083b1c21f04a9019aa2845d746996afc6248c2ecff9a82d9b5526b3564cb4e`
