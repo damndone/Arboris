@@ -91,7 +91,10 @@ class ReportStage:
         from ...report_view_model import (
             build_regression_table,
         )
-        render_html_report = _orch.render_html_report
+        # The normal run-stage artifact retains the historical presentation
+        # semantics.  It is not the Report-page writer boundary: exports on
+        # that page require a committed server-owned projection.
+        from ...reporting import render_legacy_html_report
 
         run_root = env.run_root
         run_id = env.run_id
@@ -339,17 +342,7 @@ class ReportStage:
                     # surface, while the public `facts` field remains empty
                     # until a typed committed projection is admitted.
                     view_model["facts"] = list(view_model.get("presentation_facts", []))
-            from ...report_export import EvidenceProjectionV1
-            from ...reporting import ReportDocumentWriterV1
-
-            render_html_report(
-                ReportDocumentWriterV1.from_view_model(
-                    view_model,
-                    EvidenceProjectionV1.unavailable("EVIDENCE_COMMIT_BINDING_REQUIRED"),
-                    canonical_run_root=run_root,
-                ),
-                run_root,
-            )
+            render_legacy_html_report(view_model, run_root)
             report_render_status = "complete"
             report_available = (run_root / "reports" / "report.html").is_file()
             env.step("reporting", "complete", "Rendered HTML report")

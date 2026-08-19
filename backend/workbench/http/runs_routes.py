@@ -44,7 +44,7 @@ from ..repository.run_repository import (
     _resolve_run_root,
     _summarize_manifest,
 )
-from ..report_export import EvidenceProjectionV1, ReportEvidenceWriterV1, ReportExportError, export_report
+from ..report_export import EvidenceProjectionV1, ReportExportError, export_report
 from ..report_contract import ReportContractError, validate_report_packet
 from ..report_quality import validate_report_response_quality
 from ..report_view_model import (
@@ -237,6 +237,67 @@ def _report_identity_for_request(
         model_run_id=persistence.model_run_id,
         confirmation_ref=persistence.confirmation_ref,
     )
+
+
+def _report_owner_for_export(
+    run_root: Path,
+    projection: dict[str, object],
+    request_identity: ReportEvidenceRequestIdentityV1 | None,
+    *,
+    project_root: Path | str,
+) -> ServerOwnedReportEvidencePersistenceV1:
+    """Resolve the owner bound to the indexed artifact before any export."""
+
+    artifact_id = projection.get("artifactRef")
+    if not isinstance(artifact_id, str) or not artifact_id.strip():
+        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_REQUIRED")
+    try:
+        records = _read_artifact_records(run_root)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError) as exc:
+        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_INDEX_UNAVAILABLE") from exc
+    record = next(
+        (item for item in records if isinstance(item, dict) and item.get("artifact_id") == artifact_id),
+        None,
+    )
+    if record is None:
+        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_NOT_INDEXED")
+    try:
+        artifact_path = _resolve_artifact_path(run_root, record)
+        artifact_file_sha256 = sha256_file(artifact_path)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError) as exc:
+        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_INTEGRITY_UNAVAILABLE") from exc
+    owner = current_report_evidence_persistence(
+        actor_ref=(request_identity.actor_ref if request_identity else projection.get("actorRef")),
+        run_id=projection.get("runId"),
+        project_ref=projection.get("projectRef"),
+        session_ref=projection.get("sessionRef"),
+        scope_ref=projection.get("scopeRef"),
+        model_run_id=projection.get("modelRunId"),
+        artifact_id=artifact_id,
+        commit_id=projection.get("commitId"),
+        confirmation_ref=(request_identity.confirmation_ref if request_identity else projection.get("confirmationRef")),
+        artifact_file_sha256=artifact_file_sha256,
+        project_root=project_root,
+    )
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        raise ReportExportError("REPORT_EVIDENCE_OWNER_UNAVAILABLE")
+    return owner
+
+
+def _issue_report_projection_for_export(
+    run_root: Path,
+    projection: dict[str, object],
+    request_identity: ReportEvidenceRequestIdentityV1 | None,
+    *,
+    project_root: Path | str,
+) -> EvidenceProjectionV1:
+    owner = _report_owner_for_export(
+        run_root,
+        projection,
+        request_identity,
+        project_root=project_root,
+    )
+    return owner.issue_report_projection(projection)
 
 
 class ResultTableExportRequest(BaseModel):
@@ -832,7 +893,12 @@ def export_report_endpoint(
             markdown=markdown,
             figures=figures,
             format=format,
-            evidence_projection=EvidenceProjectionV1.from_wire(projection),
+            evidence_projection=_issue_report_projection_for_export(
+                run_root,
+                projection,
+                _report_identity_for_request(http_request, run_id),
+                project_root=project_root,
+            ),
         )
     except ReportExportError as exc:
         raise WorkbenchAPIError(
@@ -903,8 +969,15 @@ def export_result_table_endpoint(
     slug = "-".join(sections)
     filename = f"result-table-{slug}.xlsx"
     try:
-        writer = ReportEvidenceWriterV1.from_projection(
-            EvidenceProjectionV1.from_wire(projection),
+        owner = _report_owner_for_export(
+            run_root,
+            projection,
+            _report_identity_for_request(http_request, run_id),
+            project_root=project_root,
+        )
+        typed_projection = owner.issue_report_projection(projection)
+        writer = owner.issue_report_evidence_writer(
+            typed_projection,
             sections=tuple(sections),
         )
         xlsx_payload = render_typed_xlsx(writer)
@@ -1147,7 +1220,12 @@ def get_report_endpoint(run_id: str, project_root: str, request: Request) -> Res
             markdown="\n".join(lines),
             figures=[],
             format="html",
-            evidence_projection=EvidenceProjectionV1.from_wire(projection),
+            evidence_projection=_issue_report_projection_for_export(
+                run_root,
+                projection,
+                _report_identity_for_request(request, run_id),
+                project_root=project_root,
+            ),
         )
     except ReportExportError as exc:
         raise WorkbenchAPIError(

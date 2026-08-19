@@ -41,7 +41,6 @@ const figures: ReportFigure[] = [
     artifact_id: "figure:coef",
     chart_type: "coefficient plot",
     path: "figures/coef.png",
-    source: { preview_json: '{"estimate":1.25}' },
   },
 ];
 
@@ -55,10 +54,7 @@ function record(overrides: Partial<ReportRecord> = {}): ReportRecord {
     scope: { ...scope, node_keys: [...scope.node_keys] },
     facts: facts.map((fact) => ({ ...fact })),
     excluded_fact_ids: ["c2"],
-    figures: figures.map((figure) => ({
-      ...figure,
-      source: figure.source ? { ...figure.source } : figure.source,
-    })),
+    figures: figures.map((figure) => ({ ...figure })),
     ...overrides,
   };
 }

@@ -17,7 +17,7 @@ import mimetypes
 import re
 import zipfile
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape as xml_escape
@@ -34,11 +34,29 @@ class ReportExportError(ValueError):
     """A user-visible report export validation or materialisation error."""
 
 
+_REPORT_FACTORY_TOKEN = object()
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceProjectionV1:
     """Admitted, immutable Report projection used by every export writer."""
 
     wire: dict[str, Any]
+    _owner: object | None = field(init=False, repr=False, compare=False, default=None)
+
+    def __init__(
+        self,
+        wire: Mapping[str, Any],
+        *,
+        _factory_token: object | None = None,
+        _owner: object | None = None,
+    ) -> None:
+        if _factory_token is not _REPORT_FACTORY_TOKEN:
+            raise TypeError("EvidenceProjectionV1 is server-owned; use the owner capability factory")
+        if not isinstance(wire, Mapping):
+            raise TypeError("EvidenceProjectionV1 requires a mapping at its typed admission seam")
+        object.__setattr__(self, "wire", dict(wire))
+        object.__setattr__(self, "_owner", _owner)
 
     @classmethod
     def unavailable(cls, reason_code: str) -> "EvidenceProjectionV1":
@@ -57,11 +75,21 @@ class EvidenceProjectionV1:
                 "facts": [],
                 "provenance": {},
                 "reasonCode": reason_code,
-            }
+            },
+            _factory_token=_REPORT_FACTORY_TOKEN,
         )
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "EvidenceProjectionV1":
+        raise TypeError("EvidenceProjectionV1.from_wire is not a public trust boundary; use the server-owned owner factory")
+
+    @classmethod
+    def _from_server_wire(
+        cls,
+        value: Mapping[str, Any],
+        *,
+        owner: object,
+    ) -> "EvidenceProjectionV1":
         if not isinstance(value, Mapping):
             raise TypeError("EvidenceProjectionV1 requires a mapping at its typed admission seam")
         wire = dict(value)
@@ -109,7 +137,7 @@ class EvidenceProjectionV1:
             or any(char not in "0123456789abcdef" for char in projection_digest)
         ):
             raise ReportExportError("REPORT_EVIDENCE_PROJECTION_DIGEST_INVALID")
-        return cls(wire=wire)
+        return cls(wire=wire, _factory_token=_REPORT_FACTORY_TOKEN, _owner=owner)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +147,34 @@ class ReportEvidenceWriterV1:
     projection: EvidenceProjectionV1
     sections: tuple[str, ...] = ("facts",)
     tables_override: dict[str, tuple[dict[str, Any], ...]] | None = None
+    _server_table_rows: dict[str, tuple[dict[str, Any], ...]] | None = field(
+        init=False,
+        repr=False,
+        compare=False,
+        default=None,
+    )
+
+    def __init__(
+        self,
+        projection: EvidenceProjectionV1,
+        sections: tuple[str, ...] = ("facts",),
+        tables_override: dict[str, tuple[dict[str, Any], ...]] | None = None,
+        *,
+        _factory_token: object | None = None,
+        _server_table_rows: dict[str, tuple[dict[str, Any], ...]] | None = None,
+    ) -> None:
+        if _factory_token is not _REPORT_FACTORY_TOKEN:
+            raise TypeError("ReportEvidenceWriterV1 is server-owned; use the owner capability factory")
+        if type(projection) is not EvidenceProjectionV1:
+            raise TypeError("ReportEvidenceWriterV1 requires EvidenceProjectionV1")
+        if tables_override is not None:
+            raise TypeError("ReportEvidenceWriterV1 rejects caller-owned raw tables")
+        if not sections or any(type(section) is not str or not section.strip() for section in sections):
+            raise TypeError("ReportEvidenceWriterV1 requires named typed sections")
+        object.__setattr__(self, "projection", projection)
+        object.__setattr__(self, "sections", tuple(sections))
+        object.__setattr__(self, "tables_override", None)
+        object.__setattr__(self, "_server_table_rows", _server_table_rows)
 
     @classmethod
     def from_projection(
@@ -128,31 +184,46 @@ class ReportEvidenceWriterV1:
         sections: tuple[str, ...] = ("facts",),
         tables: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
     ) -> "ReportEvidenceWriterV1":
-        if type(projection) is not EvidenceProjectionV1:
-            raise TypeError("ReportEvidenceWriterV1 requires EvidenceProjectionV1")
-        if not sections or any(type(section) is not str or not section.strip() for section in sections):
-            raise TypeError("ReportEvidenceWriterV1 requires named typed sections")
-        normalized_tables: dict[str, tuple[dict[str, Any], ...]] | None = None
-        if tables is not None:
-            if not isinstance(tables, Mapping):
-                raise TypeError("typed writer tables must be a mapping")
-            normalized_tables = {}
-            for name, rows in tables.items():
-                if not isinstance(name, str) or not name.strip() or not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
-                    raise TypeError("typed writer tables must contain named row sequences")
-                normalized_rows = []
+        raise TypeError("ReportEvidenceWriterV1.from_projection is not a public trust boundary; use the owner capability factory")
+
+    @classmethod
+    def _from_server_projection(
+        cls,
+        projection: EvidenceProjectionV1,
+        *,
+        owner: object,
+        sections: tuple[str, ...],
+        table_rows: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+    ) -> "ReportEvidenceWriterV1":
+        if type(projection) is not EvidenceProjectionV1 or getattr(projection, "_owner", None) is not owner:
+            raise TypeError("ReportEvidenceWriterV1 requires an owner-issued projection")
+        normalized_rows: dict[str, tuple[dict[str, Any], ...]] | None = None
+        if table_rows is not None:
+            if not isinstance(table_rows, Mapping):
+                raise TypeError("server table rows must be a mapping")
+            normalized_rows = {}
+            for name, rows in table_rows.items():
+                if not isinstance(name, str) or not name.strip() or not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
+                    raise TypeError("server table rows must be bounded named sequences")
+                copied_rows: list[dict[str, Any]] = []
                 for row in rows:
                     if not isinstance(row, Mapping):
-                        raise TypeError("typed writer rows must be mappings")
-                    normalized_rows.append(dict(row))
-                normalized_tables[name] = tuple(normalized_rows)
+                        raise TypeError("server table rows must contain mappings")
+                    copied_rows.append(dict(row))
+                normalized_rows[name] = tuple(copied_rows)
         return cls(
             projection=projection,
-            sections=tuple(sections),
-            tables_override=normalized_tables,
+            sections=sections,
+            _factory_token=_REPORT_FACTORY_TOKEN,
+            _server_table_rows=normalized_rows,
         )
 
     def tables(self) -> dict[str, list[dict[str, Any]]]:
+        if self._server_table_rows is not None:
+            return {
+                name: [dict(row) for row in rows]
+                for name, rows in self._server_table_rows.items()
+            }
         if self.tables_override is not None:
             return {
                 name: [dict(row) for row in rows]

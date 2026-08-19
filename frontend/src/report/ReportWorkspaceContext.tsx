@@ -48,11 +48,7 @@ import {
   createReportRevision,
   editReportRevision,
 } from "./reportDocument";
-import {
-  fetchArtifactJson,
-  fetchRunArtifacts,
-  fetchRunDetail,
-} from "../api";
+import { fetchArtifactJson, fetchRunArtifacts, fetchRunDetail } from "../api";
 import type {
   ModelResult,
   PostEstimationResult,
@@ -60,18 +56,6 @@ import type {
 } from "../api";
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
-
-const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
-  "ts.analysis_contract",
-  "ts.data_audit",
-  "ts.arma_selection",
-  "ts.volatility_selection",
-  "ts.final_model",
-  "ts.parameters",
-  "ts.final_diagnostics",
-  "ts.forecast_metrics",
-  "ts.next_forecast",
-]);
 
 const CLASSIFICATION_EVIDENCE_SCHEMA = "workbench.prediction.classification-evidence";
 const CLASSIFICATION_ARTIFACTS_SCHEMA = "workbench.prediction.classification-artifacts";
@@ -630,37 +614,26 @@ export function ReportWorkspaceProvider({
       .then(async (response) => {
         const allItems = response.groups.flatMap((group) => group.items);
         const items = allItems.filter((item) => item.artifact_type === "figure");
-        const timeSeriesItems = allItems.filter((item) => REPORT_TIME_SERIES_ARTIFACT_IDS.has(item.artifact_id));
-        const [resolved, resolvedTimeSeries] = await Promise.all([
-          Promise.all(items.map(async (item) => {
+        const resolved = await Promise.all(items.map(async (item) => {
             try {
               const context = await fetchFigureAiContext(projectRoot, runId, item.artifact_id);
               return {
                 artifact_id: item.artifact_id,
                 chart_type: context.figure.chart_type,
                 path: context.figure.path,
-                source: context.source,
               } satisfies ReportFigure;
             } catch {
               return {
                 artifact_id: item.artifact_id,
                 chart_type: item.artifact_id,
-                source: null,
               } satisfies ReportFigure;
             }
-          })),
-          Promise.all(timeSeriesItems.map(async (item) => {
-            try {
-              const value = await fetchArtifactJson(projectRoot, runId, item.artifact_id);
-              return [item.artifact_id, value] as const;
-            } catch {
-              return null;
-            }
-          })),
-        ]);
+          }));
         if (!cancelled) {
           setReportFigures(resolved);
-          setTimeSeriesArtifacts(Object.fromEntries(resolvedTimeSeries.filter((item) => item !== null)));
+          // Raw time-series JSON is never loaded into Report state. Typed
+          // facts arrive only through report_evidence above.
+          setTimeSeriesArtifacts({});
         }
       })
       .catch(() => {

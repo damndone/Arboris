@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -175,3 +176,27 @@ def test_agent_notebook_and_report_contributions_share_the_same_fact_values() ->
     assert [row["value"] for row in agent["facts"]] == [row["value"] for row in report["facts"]]
     assert agent["artifact_ref"] == notebook["artifact_ref"] == report["artifactRef"] == "artifact-1"
     assert agent["envelope_digest"] == notebook["envelope_digest"] == report["envelopeDigest"]
+
+
+def test_agent_notebook_report_projection_replay_is_stable_under_concurrency() -> None:
+    record = _persisted_record()
+    registry = default_projection_registry()
+
+    def project_all() -> tuple[dict[str, object], ...]:
+        return tuple(
+            registry.project(record, consumer_id=consumer_id, destination="local").to_dict()
+            for consumer_id in ("agent", "notebook", "report")
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        replays = list(pool.map(lambda _index: project_all(), range(8)))
+
+    assert all(replay == replays[0] for replay in replays)
+    assert {
+        replay[0]["artifact_ref"]
+        for replay in replays
+    } == {"artifact-1"}
+    assert {
+        replay[2]["envelope_digest"]
+        for replay in replays
+    } == {record.binding.envelope_digest}

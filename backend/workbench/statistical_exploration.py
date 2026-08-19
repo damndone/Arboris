@@ -412,93 +412,11 @@ def _persist_exploration_exports(
     views of that bounded result, each keyed by the same exploration
     fingerprint so repeated confirmation cannot overwrite another action.
     """
-    from .exports import export_pdf, export_xlsx
-
-    stem = f"statistical_exploration_{fingerprint[:24]}"
-    report = _exploration_report(spec, result)
-    inputs = [artifact_id]
-
-    html_rel = f"reports/{stem}.html"
-    html_path = run_root / html_rel
-    html_artifact_id = f"{stem}_html"
-    from .report_export import EvidenceProjectionV1, ReportEvidenceWriterV1
-    from .reporting import ReportDocumentWriterV1, render_html_report
-    typed_projection = EvidenceProjectionV1.unavailable("EVIDENCE_COMMIT_BINDING_REQUIRED")
-    document_writer = ReportDocumentWriterV1.from_view_model(
-        report,
-        typed_projection,
-        canonical_run_root=run_root,
-    )
-    table_writer = ReportEvidenceWriterV1.from_projection(
-        typed_projection,
-        sections=tuple(_exploration_tables(result)),
-        tables=_exploration_tables(result),
-    )
-    if not _artifact_is_registered(run_root, html_artifact_id):
-        render_html_report(
-            document_writer,
-            run_root,
-            filename=f"{stem}.html",
-            artifact_id=html_artifact_id,
-            inputs=inputs,
-        )
-    else:
-        _ensure_exploration_artifact(
-            run_root,
-            artifact_id=html_artifact_id,
-            path=html_path,
-            artifact_type="report",
-            step="statistical_exploration.export",
-            inputs=inputs,
-        )
-
-    pdf_rel = f"reports/{stem}.pdf"
-    pdf_path = run_root / pdf_rel
-    pdf_artifact_id = f"{stem}_pdf"
-    if not _artifact_is_registered(run_root, pdf_artifact_id):
-        export_pdf(
-            document_writer,
-            run_root,
-            filename=f"{stem}.pdf",
-            artifact_id=pdf_artifact_id,
-            inputs=inputs,
-        )
-    else:
-        _ensure_exploration_artifact(
-            run_root,
-            artifact_id=pdf_artifact_id,
-            path=pdf_path,
-            artifact_type="report",
-            step="statistical_exploration.export",
-            inputs=inputs,
-        )
-
-    xlsx_rel = f"exports/{stem}.xlsx"
-    xlsx_path = run_root / xlsx_rel
-    xlsx_artifact_id = f"{stem}_xlsx"
-    if not _artifact_is_registered(run_root, xlsx_artifact_id):
-        export_xlsx(
-            table_writer,
-            run_root,
-            filename=f"{stem}.xlsx",
-            artifact_id=xlsx_artifact_id,
-            inputs=inputs,
-        )
-    else:
-        _ensure_exploration_artifact(
-            run_root,
-            artifact_id=xlsx_artifact_id,
-            path=xlsx_path,
-            artifact_type="table_export",
-            step="statistical_exploration.export",
-            inputs=inputs,
-        )
-
-    return [
-        {"format": "html", "artifact_id": html_artifact_id, "path": html_rel},
-        {"format": "pdf", "artifact_id": pdf_artifact_id, "path": pdf_rel},
-        {"format": "xlsx", "artifact_id": xlsx_artifact_id, "path": xlsx_rel},
-    ]
+    # The exploration JSON remains the authoritative durable result.  A raw
+    # exploration dict cannot cross any Report writer seam; a later explicit
+    # export action must first receive a host-issued committed projection.
+    del run_root, artifact_id, fingerprint, spec, result
+    return []
 
 
 def _artifact_is_registered(run_root: Path, artifact_id: str) -> bool:

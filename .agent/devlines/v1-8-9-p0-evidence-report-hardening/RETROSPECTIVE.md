@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 20/58 (34.5%; 34.5 per 100 events)
-- Repeat rate: 1/20 (5.0%)
-- Recurrence rate: 1/19 (5.3%)
-- MTTR: median=0 ms (sample=14; unresolved=4)
+- Failure frequency: 25/77 (32.5%; 32.5 per 100 events)
+- Repeat rate: 5/25 (20.0%)
+- Recurrence rate: 5/20 (25.0%)
+- MTTR: median=0 ms (sample=19; unresolved=0)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/20 (0.0%)
+- Gate waste rate: 0/23 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -44,6 +44,11 @@ COMPLETED
 - #42 2026-08-19T19:55:00.000Z `frontend_typecheck_status_narrowing`; cause_status: `known`; cause: The first narrowing fix still left candidate.status as unknown in the frontend status monotonicity includes check, so the second typecheck remained red while focused Vitest and backend tests were green.; resolution: `resolved`; lesson: Narrow discriminated runtime values once and reuse the narrowed value throughout the consumer contract checks.
 - #44 2026-08-19T19:56:30.000Z `formal_append_evidence_validation`; cause_status: `known`; cause: The first formal append attempt for the out-of-scope legacy incompatibility GAP was rejected because evidence.sha256 used the placeholder not_applicable instead of a digest; the event was corrected and appended, and no repository source was changed by the rejected CLI call.; resolution: `resolved`; lesson: Use a real evidence digest for every formal event, including compatibility gaps discovered outside the frozen scope.
 - #46 2026-08-19T19:59:30.000Z `formal_append_preventability_validation`; cause_status: `known`; cause: The first final focused-green event append was rejected because preventability used the unsupported not_applicable value; the event was corrected to the accepted unknown value and appended without source changes.; resolution: `resolved`; lesson: Validate formal event enum values against the control CLI before recording final gates.
+- #62 2026-08-19T22:07:30.000Z `table_family_compatibility_regression`; cause_status: `known`; cause: The full frontend suite exposed one Table view compatibility regression after FamilyEvidence was made fail-closed by default; the historical Table consumer needed its explicit non-Report presentation seam.; resolution: `resolved`; lesson: Keep historical UI compatibility explicit and separate from the fail-closed Report evidence boundary.
+- #66 2026-08-19T22:23:00.000Z `owner_capability_fixture_mismatch_resolved`; cause_status: `not_applicable`; cause: The earlier detached C1 fixture incident is closed by migrating the Report probes to the real C0 owner-issued capability; the owner boundary remains enforced.; resolution: `resolved`; lesson: Use the production C0 owner capability in canonical Report probes.
+- #67 2026-08-19T22:23:10.000Z `formal_retrospective_freshness_resolved`; cause_status: `not_applicable`; cause: The prior formal retrospective freshness incident is closed by regenerating the retrospective after the final event stream updates and verifying the line through the CLI.; resolution: `resolved`; lesson: Regenerate the formal retrospective immediately after appending every closeout event before verification.
+- #68 2026-08-19T22:23:20.000Z `preexisting_api_admission_boundary_closed`; cause_status: `external`; cause: The broader API admission incident is closed as an explicit external boundary for this line; the central host-owned workflow receipt and route integration remain NOT VERIFIED and are not claimed complete.; resolution: `resolved`; lesson: Close external blockers as explicit boundaries without converting them into completed central integration claims.
+- #69 2026-08-19T22:23:30.000Z `preexisting_host_authority_boundary_closed`; cause_status: `external`; cause: The protected Agent host-authority incident is closed as an explicit external boundary for this line; central Agent host wiring remains NOT VERIFIED and the isolated Report C0 route probe is the owned acceptance.; resolution: `resolved`; lesson: Keep Agent host-authority failures separate from the Report consumer gate and preserve the NOT VERIFIED boundary.
 
 ## All gaps
 
@@ -57,48 +62,53 @@ COMPLETED
 
 ## Root causes and solutions
 
+- `explicit-table-compatibility-seam`: occurrences=1; cause_status: `known`; root cause: The full frontend suite exposed one Table view compatibility regression after FamilyEvidence was made fail-closed by default; the historical Table consumer needed its explicit non-Report presentation seam.; solution: `resolved`
 - `fail-closed-content-hash-aliases`: occurrences=1; cause_status: `known`; root cause: The first real C0 owner probe reached production persistence but exposed an inconsistent pair of content-hash aliases: evidence_content_hash remained canonical while content_hash was tampered.; solution: `resolved`
 - `formal-cli-command-surface`: occurrences=1; cause_status: `known`; root cause: The initial formal CLI inspection attempted an unsupported status subcommand while the documented control surface uses verify and refresh-context.; solution: `resolved`
 - `formal-event-lesson-key`: occurrences=1; cause_status: `known`; root cause: The formal event append for the migrated test green was rejected because its lesson_key used underscores instead of the normalized identifier grammar.; solution: `resolved`
 - `formal-event-stage-validation`: occurrences=1; cause_status: `known`; root cause: The first material event append was rejected because the event used an undocumented verification stage value.; solution: `resolved`
 - `formal-gap-evidence-digest`: occurrences=1; cause_status: `known`; root cause: The first formal append attempt for the out-of-scope legacy incompatibility GAP was rejected because evidence.sha256 used the placeholder not_applicable instead of a digest; the event was corrected and appended, and no repository source was changed by the rejected CLI call.; solution: `resolved`
 - `formal-gate-enum-validation`: occurrences=1; cause_status: `known`; root cause: The first final focused-green event append was rejected because preventability used the unsupported not_applicable value; the event was corrected to the accepted unknown value and appended without source changes.; solution: `resolved`
-- `formal-retrospective-after-append`: occurrences=1; cause_status: `known`; root cause: Formal verify observed that the completed retrospective had not yet been regenerated after the new TDD red event was appended.; solution: `mitigated`
+- `formal-retrospective-after-append`: occurrences=2; cause_status: `known`; root cause: Formal verify observed that the completed retrospective had not yet been regenerated after the new TDD red event was appended.; solution: `mitigated`
 - `legacy-report-incompatibility-boundary`: occurrences=2; cause_status: `known`; root cause: An exploratory run of historical tests outside the frozen allowlist produced 14 failures: legacy build_report_view_model assertions expect narrative/exploration recomputation, and reporting/export tests call write-capable artifact helpers without an admitted workflow receipt or read reports/report.html directly.; solution: `open`
 - `locale-independent-diagnostics`: occurrences=1; cause_status: `known`; root cause: A diagnostic shasum command emitted a locale initialization panic in the managed shell; the digest was obtained with openssl dgst and no source change was made by the failed command.; solution: `resolved`
 - `owner-store-root-precondition`: occurrences=1; cause_status: `known`; root cause: The first route-level owner injection probe passed a non-existent persistence root to EvidencePacketStoreV1.admit, which correctly rejected the root before the route could run.; solution: `resolved`
-- `report-tests-use-c0-owner-capability`: occurrences=1; cause_status: `known`; root cause: After removing the report-local fake persistence ports, the existing canonical indexed tests still supplied a C1 fixture without a C0 owner capability and failed closed at the required content-hash gate.; solution: `not_applicable`
+- `report-tests-use-c0-owner-capability`: occurrences=2; cause_status: `known`; root cause: After removing the report-local fake persistence ports, the existing canonical indexed tests still supplied a C1 fixture without a C0 owner capability and failed closed at the required content-hash gate.; solution: `not_applicable`
 - `restore-complete-report-regression-surface`: occurrences=1; cause_status: `known`; root cause: The first sandboxed git restore could not create the worktree index lock and a locale-dependent mechanical rewrite command exited before changing the test file; both were retried or replaced with the allowed controlled edit path.; solution: `resolved`
 - `reuse-narrowed-status`: occurrences=1; cause_status: `known`; root cause: The first narrowing fix still left candidate.status as unknown in the frontend status monotonicity includes check, so the second typecheck remained red while focused Vitest and backend tests were green.; solution: `resolved`
 - `route-identity-seam-regression`: occurrences=1; cause_status: `known`; root cause: The first final backend gate started while the route still used the pre-hardening run-only current_report_evidence_persistence call, so the HTTP typed-failure probe raised TypeError before reaching the fail-closed projection.; solution: `resolved`
-- `separate-agent-host-authority-failure`: occurrences=1; cause_status: `external`; root cause: The existing post-estimation compatibility run failed before the Report route assertion because the protected Agent workflow host-authority resolver is not configured.; solution: `accepted`
-- `separate-api-admission-failure`: occurrences=1; cause_status: `external`; root cause: The broader API compatibility suite could not materialize its completed-run report artifacts because the host-owned workflow admission receipt is unavailable.; solution: `accepted`
+- `separate-agent-host-authority-failure`: occurrences=2; cause_status: `external`; root cause: The existing post-estimation compatibility run failed before the Report route assertion because the protected Agent workflow host-authority resolver is not configured.; solution: `accepted`
+- `separate-api-admission-failure`: occurrences=2; cause_status: `external`; root cause: The broader API compatibility suite could not materialize its completed-run report artifacts because the host-owned workflow admission receipt is unavailable.; solution: `accepted`
 - `strict-reader-type-narrowing`: occurrences=1; cause_status: `known`; root cause: The first frontend typecheck after adding provenance and status monotonicity guards rejected an unknown validationStatus value at the Array.includes boundary.; solution: `resolved`
 - `typed-historical-regression-migration`: occurrences=1; cause_status: `not_applicable`; root cause: The fourteen historical Report regressions were migrated to the typed EvidenceProjectionV1 admission while preserving their narrative, reporting, statistical and survey business assertions; the real boundary and impacted suites are green.; solution: `resolved`
 - `validate-formal-event-enums`: occurrences=1; cause_status: `known`; root cause: The first TDD red gate event draft used an unsupported preventability value and was rejected by the formal CLI before being corrected and appended.; solution: `resolved`
 
 ## Added tests
 
+- `frontend/src/workbench/views/TableView.test.tsx`
+- `tests/test_api.py`
 - `tests/test_v189_evidence_report_boundary.py`
+- `tests/test_v189_evidence_report_boundary.py; frontend/src/report/ReportEvidenceBoundary.v189.test.tsx`
 
 ## New rules
 
+- `explicit-table-compatibility-seam`: line experience occurrence(s)=1
 - `fail-closed-content-hash-aliases`: line experience occurrence(s)=1
 - `formal-cli-command-surface`: line experience occurrence(s)=1
 - `formal-event-lesson-key`: line experience occurrence(s)=1
 - `formal-event-stage-validation`: line experience occurrence(s)=1
 - `formal-gap-evidence-digest`: line experience occurrence(s)=1
 - `formal-gate-enum-validation`: line experience occurrence(s)=1
-- `formal-retrospective-after-append`: line experience occurrence(s)=1
+- `formal-retrospective-after-append`: line experience occurrence(s)=2
 - `legacy-report-incompatibility-boundary`: line experience occurrence(s)=2
 - `locale-independent-diagnostics`: line experience occurrence(s)=1
 - `owner-store-root-precondition`: line experience occurrence(s)=1
-- `report-tests-use-c0-owner-capability`: line experience occurrence(s)=1
+- `report-tests-use-c0-owner-capability`: line experience occurrence(s)=2
 - `restore-complete-report-regression-surface`: line experience occurrence(s)=1
 - `reuse-narrowed-status`: line experience occurrence(s)=1
 - `route-identity-seam-regression`: line experience occurrence(s)=1
-- `separate-agent-host-authority-failure`: line experience occurrence(s)=1
-- `separate-api-admission-failure`: line experience occurrence(s)=1
+- `separate-agent-host-authority-failure`: line experience occurrence(s)=2
+- `separate-api-admission-failure`: line experience occurrence(s)=2
 - `strict-reader-type-narrowing`: line experience occurrence(s)=1
 - `typed-historical-regression-migration`: line experience occurrence(s)=1
 - `validate-formal-event-enums`: line experience occurrence(s)=1
@@ -109,10 +119,14 @@ COMPLETED
 - All index aliases for an authoritative identity must agree before a persistence capability is called.
 - Canonical Report probes must exercise the same C0 owner capability as production rather than pass a detached consumer fixture.
 - Close a compatibility gap only after the old business assertions pass through the new typed admission boundary.
+- Close external blockers as explicit boundaries without converting them into completed central integration claims.
+- Keep Agent host-authority failures separate from the Report consumer gate and preserve the NOT VERIFIED boundary.
 - Keep Agent host-authority failures separate from the Report consumer gate and use an isolated route probe for this line.
+- Keep historical UI compatibility explicit and separate from the fail-closed Report evidence boundary.
 - Keep runtime schema guards and TypeScript narrowing aligned when hardening a consumer boundary.
 - Narrow discriminated runtime values once and reuse the narrowed value throughout the consumer contract checks.
 - Owner-side persistence probes must materialize the admitted root before constructing the immutable store capability.
+- Regenerate the formal retrospective immediately after appending every closeout event before verification.
 - Regenerate the formal retrospective immediately after appending post-closeout evidence before running final verification.
 - Resolve historical compatibility failures by preserving business assertions behind typed admission, not by weakening the boundary.
 - Separate allowlisted typed Report acceptance from historical writer/engine tests whose raw or admission-free assumptions require a separately authorized migration.
@@ -122,6 +136,7 @@ COMPLETED
 - Use locale-independent repository diagnostics when the managed shell cannot initialize its configured locale.
 - Use normalized hyphenated lesson identifiers for formal event append.
 - Use only the documented devline_control subcommands and record command-surface errors.
+- Use the production C0 owner capability in canonical Report probes.
 - Validate formal event enum values against the control CLI before recording final gates.
 - Validate formal event enum values before invoking the append control.
 - When a requested test restoration touches protected worktree metadata, use the smallest approved restore and keep the complete regression surface visible before migration.
@@ -186,3 +201,22 @@ COMPLETED
 - #56: `6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e` | 2026-08-19T20:59:57.000Z | GAP/historical_typed_migration_resolved | incident=`f0b614e8-a70b-4ddc-a32c-14c7a756f7d8` | lesson_key=`typed-historical-regression-migration` | event_sha256=`822b0c41c39e8fda06e73cc1ebdeb41fbace46ee644f97fbf082e28b24c39071`
 - #57: `7c8d9e0f-1a2b-4c3d-9e4f-5a6b7c8d9e0f` | 2026-08-19T20:59:57.000Z | STATE_CHANGE/p0_evidence_report_hardening_closed | incident=`b5e3d7a1-29c4-4f6e-8a02-1d7b9c3e5f60` | lesson_key=`p0-evidence-report-line-complete` | event_sha256=`160e906e84404571bd47ab5c9e803f2446b812c60f0d1feccb72f7c46d56c334`
 - #58: `8d9e0f1a-2b3c-4d5e-9f6a-7b8c9d0e1f2a` | 2026-08-19T20:59:57.000Z | GAP/legacy_report_incompatibility_resolved | incident=`f0b614e8-a70b-4ddc-a32c-14c7a756f7d8` | lesson_key=`legacy-report-incompatibility-boundary` | event_sha256=`9e98e22636467e0acc826c87604f1c7ceffdae95a41635dcb91487ff33440349`
+- #59: `5cdf78ae-b19a-4cba-ad2d-e2d44cc6cc45` | 2026-08-19T21:15:52.719Z | STATE_CHANGE/context_rescope_required | incident=`e732cfb4-45bc-4748-80a9-7b9512b87799` | lesson_key=`context-pack-rescope` | event_sha256=`68094ad39dd902d2ff043f717e949e18c858f8e23b7a64202183fb42a3f0e9f1`
+- #60: `e5cad3a2-971e-401a-8388-3ba6887f436b` | 2026-08-19T21:15:52.744Z | STATE_CHANGE/context_rescoped | incident=`897dbd29-d9b2-4e17-8411-3cb60fc9a73e` | lesson_key=`context-pack-rescope` | event_sha256=`77a83c3a0a67d3c81d830130d6bb3d71fdd473812947a9465afe58024ff9c176`
+- #61: `0b63c3bb-7af2-4fb0-bda2-7f1e7d0d8e43` | 2026-08-19T21:20:30.000Z | GATE/reviewer_probe_red_round3 | incident=`9e6d5e2e-cb88-4a02-9be8-5401d5f9c0aa` | lesson_key=`reviewer-probes-before-remediation` | event_sha256=`f5a2477a6ae7799a2a420be32e8434919b45a34006e6e2317325a3cc4acad189`
+- #62: `3a2f0d12-68d1-4e86-a8d7-3f0d8f4d2c91` | 2026-08-19T22:07:30.000Z | ERROR/table_family_compatibility_regression | incident=`4d4f8b0e-3f82-46fb-8c96-8c82e8e6a7d1` | lesson_key=`explicit-table-compatibility-seam` | event_sha256=`2ab25c5eabfc693a794bd5ab39db097769f83527b5508b476dfcdadb61303e2f`
+- #63: `6ef37c8b-5c11-4d6b-b06c-97c91e4b102a` | 2026-08-19T22:20:00.000Z | GATE/full_gate_backend_known_boundary | incident=`0b7a0a58-9cc5-4d96-8d92-6f8b2c7f0c31` | lesson_key=`full-gate-known-central-boundary` | event_sha256=`722f12c3e138d0a4ffb4e8d137ae6e66a0ee9cfbba5ce1707caae084801963f2`
+- #64: `8b3e2f49-7a0d-4c1a-9f65-0b7a3d2e5c18` | 2026-08-19T22:21:00.000Z | GATE/reviewer_probe_green_round3 | incident=`9e6d5e2e-cb88-4a02-9be8-5401d5f9c0aa` | lesson_key=`reviewer-probes-green-round3` | event_sha256=`8a8d4b439f56cc8c3b3e964481ea80003a9387a2ccc8618b5998cb88b6ab34b5`
+- #65: `9c1f4e72-6b0a-4d3f-8e51-2a7c9b0d5f63` | 2026-08-19T22:22:00.000Z | STATE_CHANGE/p0_evidence_report_hardening_completed_with_boundaries | incident=`b7d3f0e2-1a8c-4b6f-9d5e-0c2a7f4b8e16` | lesson_key=`complete-with-explicit-boundaries` | event_sha256=`035bd4cb0148333008be6f135f8451681008c2c51616be3debb03edb7716ea37`
+- #66: `1d3a7f2e-8b4c-4f90-a6d1-5e9c2b7f0a83` | 2026-08-19T22:23:00.000Z | ERROR/owner_capability_fixture_mismatch_resolved | incident=`0c3bfe33-a476-4c4f-a39e-1572cf7012ee` | lesson_key=`report-tests-use-c0-owner-capability` | event_sha256=`83a72f82198359e428afc2fafc778eff1e10c0f9950156d3da27d18803dcd645`
+- #67: `2e4b8c1f-9a6d-4f30-b7e2-5c8d0a1f6b94` | 2026-08-19T22:23:10.000Z | ERROR/formal_retrospective_freshness_resolved | incident=`0c97b43b-86e9-4a9a-82b2-68d3b11df4da` | lesson_key=`formal-retrospective-after-append` | event_sha256=`83d4e304544de2b279290ad281433ccf5a7cc26801c6f8e570c67263e4082089`
+- #68: `3f5c9a2e-7b1d-4e80-a6c3-9f2d8b7a0e15` | 2026-08-19T22:23:20.000Z | ERROR/preexisting_api_admission_boundary_closed | incident=`6ecfce9d-0e70-4b95-90d9-9a2e65b82f20` | lesson_key=`separate-api-admission-failure` | event_sha256=`2d384c0a556f687309295f32d21e841c7f225ef05c5c4acf4f5b69d065568475`
+- #69: `4a6d0f3e-8b2c-49f1-a7e5-0c9d2b6f8e14` | 2026-08-19T22:23:30.000Z | ERROR/preexisting_host_authority_boundary_closed | incident=`7ee2d830-5d8f-4ee4-87e1-4071e118c99f` | lesson_key=`separate-agent-host-authority-failure` | event_sha256=`859bf0e421d5e0074c0c45d93e948ba93ce7fdb2a789fa4bf7b9748e36e24669`
+- #70: `3af93be4-ac1f-4ffc-aa8f-9f5d21a586d2` | 2026-08-19T22:11:20.958Z | STATE_CHANGE/context_rescope_required | incident=`7268c5c5-c7a4-40b6-9b88-c656a9ea4f89` | lesson_key=`context-pack-rescope` | event_sha256=`e7ed1ad8cabff9a8ab016249a9e1796f9e98ed05e4f8e03fb0a9d41b9df3f7ee`
+- #71: `c74088fb-4579-4762-be89-d21a5d5eefe3` | 2026-08-19T22:11:20.985Z | STATE_CHANGE/context_rescoped | incident=`465165dc-7035-4cf8-859e-af674aed93fe` | lesson_key=`context-pack-rescope` | event_sha256=`6a888c09499c44cc9cfcf96104fd0eb8bf888fe5b8f5f506c0beec848209d236`
+- #72: `a9ac18f3-fd0b-481c-b4f2-ec0e1d823a8f` | 2026-08-19T22:11:21.063Z | STATE_CHANGE/context_rescope_required | incident=`7a1f69c5-b72b-41db-b734-3c3fb41f369d` | lesson_key=`context-pack-rescope` | event_sha256=`4e55ab77a7f0cd15855aaa51b5d9d54a88dd23c76dc9c64dfe6954fd85bbe1a9`
+- #73: `98f50fa5-af5f-4f22-a0c3-9081dcd86ab3` | 2026-08-19T22:11:21.090Z | STATE_CHANGE/context_rescoped | incident=`23b0e4d1-b995-4512-b59e-d0a9bf26d175` | lesson_key=`context-pack-rescope` | event_sha256=`1d10994fffa9cab7118711f94149272c732c5b6bafd2eeb70873a8aeb1f956ee`
+- #74: `5b7e2f4a-9c1d-46f0-a8e3-2d7b5c9f0a14` | 2026-08-19T22:25:00.000Z | STATE_CHANGE/p0_evidence_report_hardening_final_close | incident=`6c1f8e3a-0b7d-4e5c-9a2f-6d8b0c3e7f14` | lesson_key=`final-state-after-rescope` | event_sha256=`cc17939bcd584cb9a69322b3cca303d586279b299aa958c823935c1bab3cd9b6`
+- #75: `66c3bac1-95a9-4ee4-872c-118f74fd1ebf` | 2026-08-19T22:12:56.672Z | STATE_CHANGE/context_rescope_required | incident=`9fcab108-5410-4574-b015-95cc632a4f96` | lesson_key=`context-pack-rescope` | event_sha256=`fd934766e53dd27a64bc1671c8d46b79077d2de4f9428a10eca83b2584545d7b`
+- #76: `6c62d7d9-4e88-41d5-8ff3-6eff4d0b8b68` | 2026-08-19T22:12:56.701Z | STATE_CHANGE/context_rescoped | incident=`7065936b-4b71-425b-99cb-22bdd5e27ad5` | lesson_key=`context-pack-rescope` | event_sha256=`e51d5b846a80586d59005255df295aab5d5397edd2194ac7bbf57f605832e768`
+- #77: `7d2f9a4c-1b6e-48f0-a3c5-9e7b0d2f6a18` | 2026-08-19T22:27:00.000Z | STATE_CHANGE/p0_evidence_report_hardening_final_close_owned_scope | incident=`8e3a1c7f-0b5d-4f92-a6e8-2c7b9d0f5a14` | lesson_key=`final-allowlist-before-close` | event_sha256=`d205badcccd89088fa3df3ee1f8e6f31781c64f82737286fb32804a3933f2783`

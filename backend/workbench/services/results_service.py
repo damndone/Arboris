@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -221,6 +221,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         "_model_run_id",
         "_artifact_id",
         "_commit_id",
+        "_envelope_digest",
         "_confirmation_ref",
         "_artifact_file_sha256",
         "_canonical_project_root",
@@ -337,6 +338,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         self._model_run_id = model_run_id
         self._artifact_id = artifact_id
         self._commit_id = commit_id
+        self._envelope_digest = binding.envelope_digest
         self._confirmation_ref = confirmation_ref
         self._artifact_file_sha256 = artifact_file_sha256
         self._canonical_project_root = (
@@ -398,6 +400,75 @@ class ServerOwnedReportEvidencePersistenceV1:
             return Path(project_root).expanduser().resolve(strict=False) == self._canonical_project_root
         except (OSError, RuntimeError, TypeError, ValueError):
             return False
+
+    def issue_report_projection(self, wire: Mapping[str, object]):
+        """Issue an opaque Report projection only for this exact C0 owner."""
+
+        from ..report_export import EvidenceProjectionV1
+
+        if not isinstance(wire, Mapping):
+            raise TypeError("Report projection wire must be a server-produced mapping")
+        expected = {
+            "actorRef": self._actor_ref,
+            "projectRef": self._project_ref,
+            "sessionRef": self._session_ref,
+            "scopeRef": self._scope_ref,
+            "runId": self._run_id,
+            "modelRunId": self._model_run_id,
+            "artifactRef": self._artifact_id,
+            "commitId": self._commit_id,
+            "confirmationRef": self._confirmation_ref,
+            "envelopeDigest": self._envelope_digest,
+        }
+        if any(wire.get(key) != value for key, value in expected.items()):
+            raise EvidenceProjectionError(
+                "EVIDENCE_OWNER_CONTEXT_MISMATCH",
+                "Report projection identity is not owned by this server capability",
+            )
+        return EvidenceProjectionV1._from_server_wire(wire, owner=self)
+
+    def issue_report_evidence_writer(
+        self,
+        projection: object,
+        *,
+        sections: tuple[str, ...] = ("facts",),
+        table_rows: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
+    ):
+        """Construct the opaque XLSX writer from this owner-issued projection."""
+
+        from ..report_export import EvidenceProjectionV1, ReportEvidenceWriterV1
+
+        if type(projection) is not EvidenceProjectionV1:
+            raise TypeError("Report writer requires an owner-issued projection")
+        return ReportEvidenceWriterV1._from_server_projection(
+            projection,
+            owner=self,
+            sections=sections,
+            table_rows=table_rows,
+        )
+
+    def issue_report_document_writer(
+        self,
+        view_model: Mapping[str, object],
+        projection: object,
+        *,
+        canonical_run_root: Path,
+    ):
+        """Construct the HTML document writer only inside the C0 owner seam."""
+
+        from ..report_export import EvidenceProjectionV1
+        from ..reporting import ReportDocumentWriterV1
+
+        if not isinstance(view_model, Mapping):
+            raise TypeError("Report document payload must be server-produced")
+        if type(projection) is not EvidenceProjectionV1:
+            raise TypeError("Report document requires an owner-issued projection")
+        return ReportDocumentWriterV1._from_server_view_model(
+            view_model,
+            projection,
+            owner=self,
+            canonical_run_root=canonical_run_root,
+        )
 
     def read_bound(
         self,

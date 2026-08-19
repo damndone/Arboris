@@ -15,7 +15,7 @@ from reportlab.pdfgen import canvas
 
 from .artifacts import register_artifact, write_bytes_durable
 from .report_export import ReportEvidenceWriterV1
-from .reporting import ReportDocumentWriterV1
+from .reporting import ReportDocumentWriterV1, _assert_report_output_path
 
 def export_pdf(
     writer: ReportDocumentWriterV1,
@@ -59,6 +59,7 @@ def export_pdf(
         _draw_section(pdf, "Warnings", report.get("warnings", []), y)
     pdf.save()
     pdf_path = run_root / "reports" / filename
+    _assert_report_output_path(run_root, pdf_path)
     write_bytes_durable(pdf_path, output.getvalue())
     register_artifact(run_root, artifact_id, pdf_path, "report", "export", list(inputs))
     return pdf_path
@@ -76,6 +77,7 @@ def export_xlsx(
 ) -> Path:
     xlsx_bytes = render_typed_xlsx(writer)
     xlsx_path = run_root / "exports" / filename
+    _assert_report_output_path(run_root, xlsx_path)
     write_bytes_durable(xlsx_path, xlsx_bytes)
     register_artifact(run_root, artifact_id, xlsx_path, "table_export", "export", list(inputs))
     return xlsx_path

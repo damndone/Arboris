@@ -39,6 +39,8 @@ from workbench.services.results_service import (
     ServerOwnedReportEvidencePersistenceV1,
     UnavailableReportEvidenceCapabilityV1,
 )
+from workbench.report_export import EvidenceProjectionV1, ReportEvidenceWriterV1
+from workbench.reporting import ReportDocumentWriterV1
 
 
 _ROOT = Path(__file__).parents[1]
@@ -158,6 +160,7 @@ def _server_owned_evidence(
 
     from tests.test_v189_evidence_envelope import _admit, _admit_store, _authorized_registry
 
+    tmp_path.mkdir(parents=True, exist_ok=True)
     registry, _host = _authorized_registry("scope:project:1")
     record = _admit(
         registry,
@@ -195,6 +198,83 @@ def _server_owned_evidence(
             canonical_project_root=canonical_project_root,
         )
         yield record, binding, capability
+
+
+def _report_projection_wire() -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "projectionId": "report:evidence-commit-1",
+        "consumerId": "report",
+        "consumerVersion": "1.0",
+        "actorRef": "actor:1",
+        "projectRef": "project:1",
+        "sessionRef": "session:1",
+        "scopeRef": "scope:project:1",
+        "runId": "run-1",
+        "modelRunId": "run-1",
+        "artifactRef": "artifact-1",
+        "commitId": "evidence-commit-1",
+        "confirmationRef": "confirmation:run-1",
+        "envelopeRef": "evidence-envelope:1",
+        "envelopeDigest": "a" * 64,
+        "status": "available",
+        "executionStatus": "completed",
+        "availability": "available",
+        "completenessStatus": "complete",
+        "validationStatus": "met",
+        "validationSummary": {"requirement_status": "met"},
+        "facts": [{"factId": "fact-1", "statisticId": "estimate", "value": 1.25}],
+        "sections": [],
+        "provenance": {"artifactRef": "artifact-1", "commitId": "evidence-commit-1"},
+    }
+
+
+def _owner_wire(owner: ServerOwnedReportEvidencePersistenceV1, wire: dict[str, object]) -> dict[str, object]:
+    wire["commitId"] = owner.commit_id
+    wire["projectionId"] = f"report:{owner.commit_id}"
+    provenance = wire.get("provenance")
+    if isinstance(provenance, dict):
+        provenance["commitId"] = owner.commit_id
+    return wire
+
+
+def _owner_issued_projection(tmp_path: Path):
+    with _server_owned_evidence(tmp_path / "owner-store") as (record, _binding, owner):
+        wire = _owner_wire(owner, _report_projection_wire())
+        wire["envelopeDigest"] = record.envelope_digest
+        return owner.issue_report_projection(wire)
+
+
+def _owner_issued_document_writer(
+    tmp_path: Path,
+    report: dict[str, object],
+    run_root: Path,
+):
+    with _server_owned_evidence(tmp_path / "owner-store") as (record, _binding, owner):
+        wire = _owner_wire(owner, _report_projection_wire())
+        wire["envelopeDigest"] = record.envelope_digest
+        projection = owner.issue_report_projection(wire)
+        return owner.issue_report_document_writer(
+            report,
+            projection,
+            canonical_run_root=run_root,
+        )
+
+
+def _owner_issued_evidence_writer(
+    tmp_path: Path,
+    sections: tuple[str, ...],
+    table_rows: dict[str, list[dict[str, object]]] | None = None,
+):
+    with _server_owned_evidence(tmp_path / "owner-store") as (record, _binding, owner):
+        wire = _owner_wire(owner, _report_projection_wire())
+        wire["envelopeDigest"] = record.envelope_digest
+        projection = owner.issue_report_projection(wire)
+        return owner.issue_report_evidence_writer(
+            projection,
+            sections=sections,
+            table_rows=table_rows,
+        )
 
 
 class _ObjectWithLoad:
@@ -695,6 +775,7 @@ def test_default_app_lifespan_uses_the_server_owned_report_capability(tmp_path: 
 
     assert response.status_code == 200, response.text
     assert response.json()["report_evidence"]["status"] == "available"
+    app.state.report_evidence_persistence = None
 
 
 def test_default_app_lifespan_never_leaves_report_owner_as_none() -> None:
@@ -706,6 +787,111 @@ def test_default_app_lifespan_never_leaves_report_owner_as_none() -> None:
         ServerOwnedReportEvidencePersistenceV1,
         UnavailableReportEvidenceCapabilityV1,
     }
+
+
+def test_round_three_default_lifespan_installs_a_real_c0_owner_without_manual_configuration(
+    tmp_path: Path,
+) -> None:
+    """A host-injected owner crosses real HTTP without the legacy configure helper."""
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    artifact_path = run_root / "artifacts" / "post_estimation" / "result.json"
+    artifact_path.parent.mkdir(parents=True)
+    (run_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "run-1", "status": "completed", "mode": "auto", "lineage": []}),
+        encoding="utf-8",
+    )
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        canonical_project_root=project_root,
+    ) as (record, binding, capability):
+        index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
+        index["path"] = "artifacts/post_estimation/result.json"
+        index.pop("evidence_commit_binding")
+        index.pop("evidence_envelope")
+        artifact_path.write_bytes(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
+        (run_root / "artifacts_index.json").write_text(
+            json.dumps({"schema_version": 1, "artifacts": [index]}),
+            encoding="utf-8",
+        )
+        # This is the deployment host injection; no configure helper is used.
+        app.state.report_evidence_persistence = capability
+        try:
+            with TestClient(app) as client:
+                assert type(app.state.report_evidence_persistence) is ServerOwnedReportEvidencePersistenceV1
+                response = client.get("/runs/run-1", params={"project_root": str(project_root)})
+        finally:
+            app.state.report_evidence_persistence = None
+
+    assert response.status_code == 200, response.text
+    assert response.json()["report_evidence"]["status"] == "available"
+
+
+def test_round_three_public_projection_and_writer_seams_reject_forged_inputs() -> None:
+    wire = {
+        "schemaVersion": 1,
+        "projectionId": "report:commit-1",
+        "consumerId": "report",
+        "consumerVersion": "1.0",
+        "actorRef": "actor:1",
+        "projectRef": "project:1",
+        "sessionRef": "session:1",
+        "scopeRef": "scope:project:1",
+        "runId": "run-1",
+        "modelRunId": "run-1",
+        "artifactRef": "artifact-1",
+        "commitId": "commit-1",
+        "confirmationRef": "confirmation:run-1",
+        "envelopeDigest": "a" * 64,
+        "status": "available",
+        "validationStatus": "met",
+        "facts": [{"factId": "fact-1", "statisticId": "estimate", "value": 1.25}],
+        "provenance": {"artifactRef": "artifact-1", "commitId": "commit-1"},
+    }
+
+    with pytest.raises(TypeError, match="server-owned|capability|factory"):
+        EvidenceProjectionV1(wire)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="server-owned|capability|factory"):
+        EvidenceProjectionV1.from_wire(wire)
+    with pytest.raises(TypeError, match="server-owned|capability|factory"):
+        ReportEvidenceWriterV1.from_projection(object())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="server-owned|capability|factory"):
+        ReportDocumentWriterV1.from_view_model(
+            {"title": "forged"}, object(), canonical_run_root=Path("/tmp/forged")  # type: ignore[arg-type]
+        )
+
+
+def test_round_three_writer_rejects_raw_tables_and_raw_report_payloads() -> None:
+    with pytest.raises(TypeError, match="server-owned|capability|factory"):
+        ReportEvidenceWriterV1.from_projection(  # type: ignore[arg-type]
+            object(),
+            sections=("facts",),
+            tables={"facts": ({"value": 99},)},
+        )
+    with pytest.raises(TypeError, match="server-owned|capability|factory"):
+        ReportDocumentWriterV1.from_view_model(  # type: ignore[arg-type]
+            {"facts": [{"value": 99}]},
+            object(),
+            canonical_run_root=Path("/tmp/forged"),
+        )
+
+
+def test_round_three_owner_factory_rejects_forged_commit_digest_and_identity(
+    tmp_path: Path,
+) -> None:
+    with _server_owned_evidence(tmp_path / "owner-store") as (record, _binding, owner):
+        valid_wire = _owner_wire(owner, _report_projection_wire())
+        valid_wire["envelopeDigest"] = record.envelope_digest
+        for key, forged in (
+            ("commitId", "commit:forged"),
+            ("envelopeDigest", "b" * 64),
+            ("projectRef", "project:forged"),
+        ):
+            candidate = dict(valid_wire)
+            candidate[key] = forged
+            with pytest.raises(EvidenceProjectionError, match="OWNER_CONTEXT_MISMATCH|owner|projection"):
+                owner.issue_report_projection(candidate)
 
 
 def test_copied_valid_report_pair_in_foreign_project_root_is_typed_rejected(

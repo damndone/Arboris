@@ -12,7 +12,7 @@ import pytest
 from workbench.app import app
 from workbench.artifacts import write_json
 from workbench.projects import create_project, create_run
-from workbench.report_export import EvidenceProjectionV1, ReportExportError, export_report
+from workbench.report_export import ReportExportError, export_report
 from workbench.exports import render_typed_xlsx
 
 
@@ -41,33 +41,10 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
     return project.root, run.run_id
 
 
-def _typed_projection() -> EvidenceProjectionV1:
-    return EvidenceProjectionV1.from_wire({
-        "schemaVersion": 1,
-        "projectionId": "report:evidence-commit-1",
-        "consumerId": "report",
-        "consumerVersion": "1.0",
-        "actorRef": "actor:1",
-        "projectRef": "project:1",
-        "sessionRef": "session:1",
-        "scopeRef": "scope:project:1",
-        "runId": "run-1",
-        "modelRunId": "run-1",
-        "artifactRef": "artifact-1",
-        "commitId": "evidence-commit-1",
-        "confirmationRef": "confirmation:run-1",
-        "envelopeRef": "evidence-envelope:1",
-        "envelopeDigest": "a" * 64,
-        "status": "available",
-        "executionStatus": "completed",
-        "availability": "available",
-        "completenessStatus": "complete",
-        "validationStatus": "met",
-        "validationSummary": {"requirement_status": "met"},
-        "facts": [{"factId": "fact-1", "statisticId": "estimate", "value": 1.25}],
-        "sections": [],
-        "provenance": {"artifactRef": "artifact-1", "commitId": "evidence-commit-1"},
-    })
+def _typed_projection(tmp_path: Path):
+    from tests.test_v189_evidence_report_boundary import _owner_issued_projection
+
+    return _owner_issued_projection(tmp_path)
 
 
 def test_report_export_embeds_figures_in_html_and_print_html(tmp_path: Path) -> None:
@@ -77,7 +54,7 @@ def test_report_export_embeds_figures_in_html_and_print_html(tmp_path: Path) -> 
 
     run_root = project_root / "runs" / run_id
     html, media, filename = export_report(
-        run_root, markdown=markdown, figures=figures, format="html", evidence_projection=_typed_projection()
+        run_root, markdown=markdown, figures=figures, format="html", evidence_projection=_typed_projection(tmp_path)
     )
     text = html.decode("utf-8")
     assert media == "text/html"
@@ -87,7 +64,7 @@ def test_report_export_embeds_figures_in_html_and_print_html(tmp_path: Path) -> 
     assert "Coefficient plot" in text
 
     printed, _, print_name = export_report(
-        run_root, markdown=markdown, figures=figures, format="pdf-print", evidence_projection=_typed_projection()
+        run_root, markdown=markdown, figures=figures, format="pdf-print", evidence_projection=_typed_projection(tmp_path)
     )
     assert print_name == "report-print.html"
     assert b"@media print" in printed
@@ -100,7 +77,7 @@ def test_report_export_produces_docx_and_latex_zip_without_new_dependencies(tmp_
     figures = [{"artifact_id": "coef_plot", "chart_type": "Coefficient plot"}]
 
     docx, media, _ = export_report(
-        run_root, markdown=markdown, figures=figures, format="docx", evidence_projection=_typed_projection()
+        run_root, markdown=markdown, figures=figures, format="docx", evidence_projection=_typed_projection(tmp_path)
     )
     assert media.startswith("application/vnd.openxmlformats")
     with zipfile.ZipFile(io.BytesIO(docx)) as archive:
@@ -115,7 +92,7 @@ def test_report_export_produces_docx_and_latex_zip_without_new_dependencies(tmp_
         assert "• one".encode() in document
 
     tex_zip, media, filename = export_report(
-        run_root, markdown=markdown, figures=figures, format="tex", evidence_projection=_typed_projection()
+        run_root, markdown=markdown, figures=figures, format="tex", evidence_projection=_typed_projection(tmp_path)
     )
     assert media == "application/zip"
     assert filename == "report.tex.zip"
@@ -139,7 +116,7 @@ def test_report_export_rejects_an_artifact_index_hash_mismatch(tmp_path: Path) -
             markdown="# Results [[fig:coef_plot]]",
             figures=[{"artifact_id": "coef_plot", "chart_type": "Coefficient plot"}],
             format="html",
-            evidence_projection=_typed_projection(),
+            evidence_projection=_typed_projection(tmp_path),
         )
 
 

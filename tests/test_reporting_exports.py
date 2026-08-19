@@ -4,7 +4,6 @@ from workbench.artifacts import read_json
 from workbench.exports import export_pdf, export_xlsx
 from workbench.narrative import build_claims
 from workbench.projects import create_project, create_run
-from workbench.report_export import EvidenceProjectionV1, ReportEvidenceWriterV1
 from workbench.reporting import ReportDocumentWriterV1, render_html_report
 from workbench.report_view_model import (
     build_regression_table,
@@ -12,41 +11,10 @@ from workbench.report_view_model import (
 )
 
 
-def _typed_projection() -> EvidenceProjectionV1:
-    return EvidenceProjectionV1.from_wire(
-        {
-            "schemaVersion": 1,
-            "projectionId": "report:evidence-commit-1",
-            "consumerId": "report",
-            "consumerVersion": "1.0",
-            "actorRef": "actor:1",
-            "projectRef": "project:1",
-            "sessionRef": "session:1",
-            "scopeRef": "scope:project:1",
-            "runId": "run-1",
-            "modelRunId": "run-1",
-            "artifactRef": "artifact-1",
-            "commitId": "evidence-commit-1",
-            "confirmationRef": "confirmation:run-1",
-            "envelopeRef": "evidence-envelope:1",
-            "envelopeDigest": "a" * 64,
-            "status": "available",
-            "executionStatus": "completed",
-            "availability": "available",
-            "completenessStatus": "complete",
-            "validationStatus": "met",
-            "validationSummary": {"requirement_status": "met"},
-            "facts": [{"factId": "fact-1", "statisticId": "estimate", "value": 1.25}],
-            "sections": [],
-            "provenance": {"artifactRef": "artifact-1", "commitId": "evidence-commit-1"},
-        }
-    )
-
-
 def _document(report: dict, run_root: Path) -> ReportDocumentWriterV1:
-    return ReportDocumentWriterV1.from_view_model(
-        report, _typed_projection(), canonical_run_root=run_root
-    )
+    from tests.test_v189_evidence_report_boundary import _owner_issued_document_writer
+
+    return _owner_issued_document_writer(run_root.parent, report, run_root)
 
 
 def _render(report: dict, run_root: Path):
@@ -58,9 +26,9 @@ def _pdf(report: dict, run_root: Path):
 
 
 def _xlsx(tables: dict, run_root: Path):
-    writer = ReportEvidenceWriterV1.from_projection(
-        _typed_projection(), sections=tuple(tables), tables=tables
-    )
+    from tests.test_v189_evidence_report_boundary import _owner_issued_evidence_writer
+
+    writer = _owner_issued_evidence_writer(run_root.parent, tuple(tables), tables)
     return export_xlsx(writer, run_root)
 
 

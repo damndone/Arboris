@@ -1,7 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildFigureFacts,
+  buildPostEstimationFacts,
   buildReportEvidenceFacts,
+  buildTimeSeriesFacts,
   unavailableReportEvidence,
   type ReportEvidenceProjection,
 } from "./factTable";
@@ -285,5 +288,26 @@ describe("Report evidence boundary v1.8.9", () => {
     expect(screen.getByTestId("typed-evidence-provenance")).toHaveTextContent("operation-1");
     expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
     expect(screen.queryByText("123.456")).not.toBeInTheDocument();
+  });
+
+  it("fail-closes every legacy raw fact helper instead of feeding the Report writer", () => {
+    expect(buildFigureFacts([{
+      artifact_id: "figure-raw",
+      chart_type: "raw",
+      source: { preview_json: JSON.stringify({ leaked_scalar: 9.9 }) },
+    }])).toEqual([]);
+    expect(buildPostEstimationFacts([{
+      artifact_id: "post-raw",
+      artifact_type: "post_estimation",
+      operation_id: "model.quadratic_stationary_point",
+      run_id: "run-1",
+      model_run_id: "run-1",
+      workflow_id: "workflow-1",
+      workflow_step_id: "step-1",
+      result: { stationary_point: 211.5 },
+    }])).toEqual([]);
+    expect(buildTimeSeriesFacts({
+      "ts.final_model": { payload: { validation_fit: { rmse: 7.4 } } },
+    })).toEqual([]);
   });
 });

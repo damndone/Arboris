@@ -1112,6 +1112,7 @@ function RunResultsPanel({
       {!loading && !error && familyEvidenceModels.length > 0 && (
         <FamilyEvidence
           modelResults={familyEvidenceModels as unknown as FamilyModelResult[]}
+          allowLegacyPresentation
         />
       )}
 
