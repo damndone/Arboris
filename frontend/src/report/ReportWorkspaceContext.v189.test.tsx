@@ -39,6 +39,12 @@ vi.mock("../api", async (importOriginal) => {
 });
 
 const CLASSIFICATION_EVIDENCE_SCHEMA = "workbench.prediction.classification-evidence";
+const taskHash = "sha256:" + "t".repeat(64);
+const splitHash = "sha256:split";
+const releasePlanHash = "sha256:" + "c".repeat(64);
+const modelHash = "sha256:model";
+const classificationResultRef = `classification-evidence:${taskHash}:${splitHash}:${releasePlanHash}`;
+const classificationFacets = ["classification", "task", "split", "holdout", "release_plan"];
 
 const evidencePacket = {
   payload_schema: CLASSIFICATION_EVIDENCE_SCHEMA,
@@ -48,9 +54,9 @@ const evidencePacket = {
     task_type: "binary",
     positive_class: "yes",
     class_support: { no: 4, yes: 4 },
-    task_hash: "sha256:" + "t".repeat(64),
+    task_hash: taskHash,
   },
-  split: { profile: "iid_stratified", split_hash: "sha256:split" },
+  split: { profile: "iid_stratified", split_hash: splitHash },
   metrics: { accuracy: { point_estimate: 0.75, validation_level: "validated" } },
   calibration: { status: "descriptive" },
   baselines: [{ model_id: "majority", accuracy: 0.5 }],
@@ -62,26 +68,46 @@ const evidencePacket = {
   decision_policy: { selection_status: "SCENARIOS_ONLY" },
   blocked_reasons: [],
   evidence_refs: {
-    task: "classification-task:sha256:" + "t".repeat(64),
-    split: "classification-split:sha256:split",
-    holdout: "classification-holdout:sha256:" + "c".repeat(64),
-    release_plan: "classification-release-plan:sha256:" + "c".repeat(64),
+    task: `classification-task:${taskHash}`,
+    split: `classification-split:${splitHash}`,
+    model: `classification-model:logistic_regression:${modelHash}`,
+    holdout: `classification-holdout:${releasePlanHash}`,
+    release_plan: `classification-release-plan:${releasePlanHash}`,
   },
   holdout: {
     status: "sealed",
-    release_plan_hash: "sha256:" + "c".repeat(64),
+    model_id: "logistic_regression",
+    release_plan_hash: releasePlanHash,
     release_count: 0,
     release_plan: {
-      plan_hash: "sha256:" + "c".repeat(64),
-      task_hash: "sha256:" + "t".repeat(64),
-      split_hash: "sha256:split",
+      plan_hash: releasePlanHash,
+      task_hash: taskHash,
+      split_hash: splitHash,
       model_id: "logistic_regression",
+      model_hash: modelHash,
       calibration_hash: "sha256:calibration",
       policy_hash: "sha256:policy",
     },
   },
-  c0_evidence_envelope: {},
-  c0_consumer_projection: {},
+  c0_evidence_envelope: {
+    result_identity: { result_ref: classificationResultRef, task_hash: taskHash, split_hash: splitHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash },
+    execution_status: "completed",
+    availability: "available",
+    completeness_status: "complete",
+    input_provenance: { task_hash: taskHash, split_hash: splitHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash },
+  },
+  c0_consumer_projection: {
+    contract: "consumer-projection",
+    contract_version: "1.0",
+    producer_version: "1.8.9",
+    payload: {
+      projection_id: classificationResultRef,
+      projection_ref: "classification-consumer:test",
+      projection_status: "available",
+      slots: ["agent", "notebook", "report"].map((consumer) => ({ consumer, artifact_facets: classificationFacets, payload_schema_ref: CLASSIFICATION_EVIDENCE_SCHEMA, source_eligible: true })),
+      not_applicable_projection: { status: "not_applicable", reason: "classification evidence is applicable to this result" },
+    },
+  },
   foundation_status: {
     execution_status: "completed",
     availability: "available",
@@ -197,6 +223,44 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
 
     await waitFor(() => expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE"));
     expect(screen.getByTestId("classification-context")).not.toHaveTextContent("secret");
+  });
+
+  it("rejects a stale C0 envelope identity instead of exposing the packet", async () => {
+    mockArtifacts.current = {
+      groups: [{ artifact_type: "classification_evidence", items: [indexedClassificationItem()] }],
+    };
+    mockArtifactJson.current.mockResolvedValue({
+      ...evidencePacket,
+      c0_evidence_envelope: {
+        result_identity: {
+          result_ref: "classification-evidence:stale",
+          task_hash: "sha256:stale",
+          split_hash: evidencePacket.split.split_hash,
+          holdout_hash: evidencePacket.holdout.release_plan_hash,
+          release_plan_hash: evidencePacket.holdout.release_plan_hash,
+        },
+      },
+    });
+
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE"));
+    expect(screen.getByTestId("classification-context")).not.toHaveTextContent("sha256:stale");
+  });
+
+  it("rejects unavailable C0 evidence when the projection claims available", async () => {
+    mockArtifacts.current = {
+      groups: [{ artifact_type: "classification_evidence", items: [indexedClassificationItem()] }],
+    };
+    mockArtifactJson.current.mockResolvedValue({
+      ...evidencePacket,
+      c0_evidence_envelope: { availability: "not_available" },
+      c0_consumer_projection: { payload: { projection_status: "available" } },
+    });
+
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE"));
   });
 
   it("treats a failed artifact download as unavailable without surfacing the error payload", async () => {

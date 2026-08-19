@@ -135,7 +135,22 @@ def _strictly_after(left: Any, right: Any) -> bool:
         raise ContractError("CLASSIFICATION_TIME_ORDER_INVALID", "ordered period values must share a comparable type") from exc
 
 
+def _reject_negative_gap(value: Any | None, *, code: str, label: str) -> None:
+    if value is None:
+        return
+    try:
+        negative = bool(value < (value - value))
+    except (TypeError, ValueError):
+        try:
+            negative = bool(value < 0)
+        except (TypeError, ValueError):
+            return
+    if negative:
+        raise ContractError(code, f"{label} must be non-negative")
+
+
 def _interval_overlaps(left: tuple[Any, Any], right: tuple[Any, Any], gap: Any | None) -> bool:
+    _reject_negative_gap(gap, code="CLASSIFICATION_PURGE_GAP_INVALID", label="purge_gap")
     left_start, left_end = left
     right_start, right_end = right
     if not _ordered_before(left_start, left_end) or not _ordered_before(right_start, right_end):
@@ -187,6 +202,8 @@ def build_classification_split_manifest(
         raise ContractError("CLASSIFICATION_ROW_IDENTITY_INVALID", "row_refs and labels must align and contain unique rows")
     if not 0 < final_holdout_fraction < 1 or not isinstance(cv_folds, int) or cv_folds < 2:
         raise ContractError("CLASSIFICATION_SPLIT_PARAMETERS_INVALID", "holdout fraction and cv_folds are invalid")
+    _reject_negative_gap(purge_gap, code="CLASSIFICATION_PURGE_GAP_INVALID", label="purge_gap")
+    _reject_negative_gap(embargo, code="CLASSIFICATION_EMBARGO_INVALID", label="embargo")
     if embargo is not None and (not isinstance(embargo_basis, str) or not embargo_basis.strip()):
         raise ContractError("CLASSIFICATION_EMBARGO_BASIS_REQUIRED", "embargo requires an explicit serial-dependence basis")
     if embargo is not None and profile not in {"temporal_rolling", "panel_known_entity_future", "panel_new_entity"}:

@@ -690,38 +690,46 @@ def _production_bind_metadata(
                 "CLASSIFICATION_INFORMATION_SET_INCOMPLETE",
                 "feature availability and prediction origins must be supplied together",
             )
-        if supplied_available is None and supplied_origins is None:
-            available_columns = tuple(item.available_at for item in task.feature_availability)
-            origin_columns = tuple(item.prediction_origin for item in task.feature_availability)
-            if not all(column in frame.columns for column in (*available_columns, *origin_columns)):
-                missing = sorted({column for column in (*available_columns, *origin_columns) if column not in frame.columns})
+        available_columns = tuple(item.available_at for item in task.feature_availability)
+        origin_columns = tuple(item.prediction_origin for item in task.feature_availability)
+        if not all(column in frame.columns for column in (*available_columns, *origin_columns)):
+            missing = sorted({column for column in (*available_columns, *origin_columns) if column not in frame.columns})
+            raise ContractError(
+                "CLASSIFICATION_AVAILABILITY_COLUMN_MISSING",
+                f"ordered tasks require row-level availability columns: {missing}",
+            )
+        frame_available_rows: list[Any] = []
+        frame_origin_rows: list[Any] = []
+        for index in range(n):
+            row_available = [frame.iloc[index][column] for column in available_columns]
+            row_origins = [frame.iloc[index][column] for column in origin_columns]
+            if any(_production_missing(value) for value in (*row_available, *row_origins)):
+                raise ContractError("CLASSIFICATION_INFORMATION_SET_VIOLATION", "availability metadata contains missing values")
+            origin = _production_earliest(row_origins)
+            frame_available_rows.append(_production_latest(row_available))
+            frame_origin_rows.append(origin)
+        frame_available = tuple(frame_available_rows)
+        frame_origins = tuple(frame_origin_rows)
+        if supplied_available is not None and supplied_available != frame_available:
+            raise ContractError(
+                "CLASSIFICATION_INFORMATION_SET_METADATA_MISMATCH",
+                "feature_available_at does not match the task-declared frame columns",
+            )
+        if supplied_origins is not None and supplied_origins != frame_origins:
+            raise ContractError(
+                "CLASSIFICATION_INFORMATION_SET_METADATA_MISMATCH",
+                "prediction_origins does not match the task-declared frame columns",
+            )
+        for index, (available, origin) in enumerate(zip(frame_available, frame_origins, strict=True)):
+            if not _production_before(available, origin):
                 raise ContractError(
-                    "CLASSIFICATION_AVAILABILITY_COLUMN_MISSING",
-                    f"ordered tasks require row-level availability columns: {missing}",
+                    "CLASSIFICATION_INFORMATION_SET_VIOLATION",
+                    f"feature availability is unsafe for row {index}",
                 )
-            available_rows: list[Any] = []
-            origin_rows: list[Any] = []
-            for index in range(n):
-                row_available = [frame.iloc[index][column] for column in available_columns]
-                row_origins = [frame.iloc[index][column] for column in origin_columns]
-                if any(_production_missing(value) for value in (*row_available, *row_origins)):
-                    raise ContractError("CLASSIFICATION_INFORMATION_SET_VIOLATION", "availability metadata contains missing values")
-                origin = _production_earliest(row_origins)
-                if any(not _production_before(value, origin) for value in row_available):
-                    raise ContractError("CLASSIFICATION_INFORMATION_SET_VIOLATION", f"feature availability is unsafe for row {index}")
-                available_rows.append(_production_latest(row_available))
-                origin_rows.append(origin)
-            supplied_available = tuple(available_rows)
-            supplied_origins = tuple(origin_rows)
-        if supplied_available is not None and supplied_origins is not None:
-            for index, (available, origin) in enumerate(zip(supplied_available, supplied_origins, strict=True)):
-                if not _production_before(available, origin):
-                    raise ContractError(
-                        "CLASSIFICATION_INFORMATION_SET_VIOLATION",
-                        f"feature availability is unsafe for row {index}",
-                    )
-        if supplied_available is None or supplied_origins is None:
-            raise ContractError("CLASSIFICATION_INFORMATION_SET_INCOMPLETE", "ordered tasks require feature availability and prediction origins")
+        # Downstream split construction receives only the server-derived
+        # values. Caller arrays are checked claims, never the authority.
+        supplied_available = frame_available
+        supplied_origins = frame_origins
     else:
         raise ContractError("CLASSIFICATION_DATA_STRUCTURE_INVALID", f"unsupported classification structure {structure.kind!r}")
 

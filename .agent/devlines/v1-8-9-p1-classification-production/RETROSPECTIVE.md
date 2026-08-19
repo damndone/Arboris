@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 5/27 (18.5%; 18.5 per 100 events)
-- Repeat rate: 0/5 (0.0%)
-- Recurrence rate: 0/5 (0.0%)
-- MTTR: median=0 ms (sample=2; unresolved=3)
+- Failure frequency: 7/32 (21.9%; 21.9 per 100 events)
+- Repeat rate: 0/7 (0.0%)
+- Recurrence rate: 0/7 (0.0%)
+- MTTR: median=0 ms (sample=3; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/2 (0.0%)
+- Gate waste rate: 0/4 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -31,6 +31,8 @@ COMPLETED
 - #4 2026-08-19T17:00:00.000Z `production_protocol_patch_error`; cause_status: `known`; cause: The first production-path patch left a metadata local uninitialized and then introduced an indentation error while adding weighted threshold inputs.; resolution: `accepted`; lesson: Run compileall immediately after surgical protocol edits and keep branch-local evidence green before adding the next contract.
 - #16 2026-08-19T18:20:00.000Z `c0_test_path_probe_error`; cause_status: `known`; cause: The first C0 verification command used guessed test paths that do not exist in this repository.; resolution: `resolved`; lesson: Resolve repository-owned contract test paths before claiming C0 verification evidence.
 - #17 2026-08-19T18:21:00.000Z `classification_catalog_bind_scope_error`; cause_status: `known`; cause: Binding the complete builtin provider catalog with only the classification contribution correctly failed because unrelated provider contributions were absent from this package-local runtime.; resolution: `resolved`; lesson: Keep the package-local runtime join typed and explicit, and leave host bootstrap composition as a separate integration boundary.
+- #29 2026-08-19T18:30:30.000Z `formal_cli_surface_misread`; cause_status: `known`; cause: The first attempt used nonexistent formal control subcommands append-event and status instead of the existing append interface.; resolution: `resolved`; lesson: Check the formal CLI help before appending line evidence and never bypass the control surface with direct .agent edits.
+- #31 2026-08-19T19:20:00.000Z `formal_retrospective_stale`; cause_status: `known`; cause: Formal verification correctly rejected the pre-existing generated retrospective because the new RED, CLI correction, and GREEN gate events had been appended afterward.; resolution: `open`; lesson: Regenerate the formal retrospective immediately after appending material events and before treating formal verification as current.
 
 ## All gaps
 
@@ -43,6 +45,8 @@ COMPLETED
 ## Root causes and solutions
 
 - `compile-after-protocol-edit`: occurrences=1; cause_status: `known`; root cause: The first production-path patch left a metadata local uninitialized and then introduced an indentation error while adding weighted threshold inputs.; solution: `accepted`
+- `formal-cli-surface-check`: occurrences=1; cause_status: `known`; root cause: The first attempt used nonexistent formal control subcommands append-event and status instead of the existing append interface.; solution: `resolved`
+- `formal-retrospective-regeneration`: occurrences=1; cause_status: `known`; root cause: Formal verification correctly rejected the pre-existing generated retrospective because the new RED, CLI correction, and GREEN gate events had been appended afterward.; solution: `open`
 - `production-contracts-red`: occurrences=1; cause_status: `known`; root cause: The additive entrypoint rejects declared weights, has no preprocessing seam, and coerces numeric strings through the helper-only path.; solution: `accepted`
 - `task-split-profile-red`: occurrences=1; cause_status: `known`; root cause: The production classification entrypoint still fixed every task to the iid_stratified split profile.; solution: `accepted`
 - `typed-classification-catalog-projection`: occurrences=1; cause_status: `known`; root cause: Binding the complete builtin provider catalog with only the classification contribution correctly failed because unrelated provider contributions were absent from this package-local runtime.; solution: `resolved`
@@ -55,6 +59,8 @@ COMPLETED
 ## New rules
 
 - `compile-after-protocol-edit`: line experience occurrence(s)=1
+- `formal-cli-surface-check`: line experience occurrence(s)=1
+- `formal-retrospective-regeneration`: line experience occurrence(s)=1
 - `production-contracts-red`: line experience occurrence(s)=1
 - `task-split-profile-red`: line experience occurrence(s)=1
 - `typed-classification-catalog-projection`: line experience occurrence(s)=1
@@ -62,12 +68,15 @@ COMPLETED
 
 ## Future guidance
 
+- Check the formal CLI help before appending line evidence and never bypass the control surface with direct .agent edits.
 - Exercise each authority, split, policy, and evidence boundary before implementing its smallest green path.
 - Expose only typed production seams and fail closed before any helper-only fitting can run.
+- Keep adversarial behavior-level probes ahead of implementation and require server-owned identity, metadata, and evidence joins at every production consumer boundary.
 - Keep consumer fixtures at the same typed identity boundary as production packets; do not weaken the validator to accommodate stale tests.
 - Keep each reviewer blocker as a behavior-level RED probe and implement the missing production boundary instead of weakening the assertion.
 - Keep the package-local runtime join typed and explicit, and leave host bootstrap composition as a separate integration boundary.
 - Make the typed task split profile drive the executable manifest before any model fit.
+- Regenerate the formal retrospective immediately after appending material events and before treating formal verification as current.
 - Resolve repository-owned contract test paths before claiming C0 verification evidence.
 - Run compileall immediately after surgical protocol edits and keep branch-local evidence green before adding the next contract.
 
@@ -100,3 +109,8 @@ COMPLETED
 - #25: `d4b6c2ef-4d1e-4c9f-8d61-2a19bb4c7e80` | 2026-08-19T18:23:06.000Z | REVIEW/workspace_context_typed_fixture_red | incident=`4f2d8e76-1fbb-4a77-9c88-11a8efbb0ce5` | lesson_key=`workspace-context-typed-fixture-red` | event_sha256=`f4004bb7873d5242ab89babd2b57ff0ed3eddce9ac3f7cf33b36162600f3a179`
 - #26: `e7a1c3d2-7b54-4f8e-9a60-6c1d2e5f8b93` | 2026-08-19T18:23:30.000Z | GATE/workspace_context_typed_fixture_green | incident=`5e4a1d7c-91f0-4b2e-8d36-0af3c9b7e2a1` | lesson_key=`workspace-context-typed-fixture-green` | event_sha256=`dbc215358f9a1e9980892cc66f2aefe6bb913c7037be34be774289113b557fe5`
 - #27: `f8c2a7d1-5e49-4b63-91f0-2d7e8a4c6b35` | 2026-08-19T18:24:00.000Z | STATE_CHANGE/workspace_context_fixture_scope_complete | incident=`6a3d1f8b-2e74-4c90-a5b1-7f0d9e2c4a68` | lesson_key=`workspace-context-fixture-scope-complete` | event_sha256=`a3fcb031aa3383cc99d196f27716a676a2327026adae6cec6d9a63cdb450a951`
+- #28: `a1f4c9e2-7b63-4d18-9a05-2c8e6f1b4d70` | 2026-08-19T18:30:00.000Z | REVIEW/classification_production_adversarial_red | incident=`b7e2d9f4-1a63-4c80-95f7-2d6e8a1b0c43` | lesson_key=`classification-production-adversarial-red` | event_sha256=`6ded5d242765a69d773f9e4ece3e3400096588b4e1b787bcf3cb9ad10d21ee3a`
+- #29: `c8d1e6f3-4a70-49b2-85e1-3f6c9d0a2b74` | 2026-08-19T18:30:30.000Z | ERROR/formal_cli_surface_misread | incident=`d9f2a7b4-6c81-40e5-93f0-1a8d6b2c4e75` | lesson_key=`formal-cli-surface-check` | event_sha256=`067bdb21bab2ab7cf1c941bd69957e0c014787db94b5c1a6afacb11c1e629010`
+- #30: `e4b9c2d7-61f0-4a83-95ce-2b7d8f1a6c40` | 2026-08-19T19:19:00.000Z | GATE/classification_production_remediation_green | incident=`f5a8c3e1-7d20-4b96-8f34-1c6e9a2d5b70` | lesson_key=`classification-production-remediation-green` | event_sha256=`9a4396f7d9ea927b1315e922f221db161ecb7cd78d3e360ac092329552aa9211`
+- #31: `b6e1d4f8-2a70-49c3-85fd-1c7b9e0a4d52` | 2026-08-19T19:20:00.000Z | ERROR/formal_retrospective_stale | incident=`c7f2a9e4-1b63-40d5-8f27-6a0e3c9b5d81` | lesson_key=`formal-retrospective-regeneration` | event_sha256=`47e98312dba2b4653ff0443f2ad0c3e66daca0718ef46076b2786a27d1ce27cd`
+- #32: `d2f7a4c9-6e10-4b83-95a1-3c8d0f2e7b64` | 2026-08-19T19:22:00.000Z | GATE/formal_retrospective_current | incident=`e3a8c5f1-7d20-4b96-9f34-1c6e0a2d5b87` | lesson_key=`formal-retrospective-current` | event_sha256=`046e420ec5fde02ca98192cbb7635bd27b07a2d1bb9046937e0412d48607420a`

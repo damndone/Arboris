@@ -426,6 +426,29 @@ def test_temporal_availability_violation_is_typed_before_any_model_fit(tmp_path)
     assert exc_info.value.code == "CLASSIFICATION_INFORMATION_SET_VIOLATION"
 
 
+def test_temporal_metadata_red_probe_rejects_safe_arrays_that_mask_frame_columns(tmp_path) -> None:
+    periods = [period for period in range(8) for _ in range(2)]
+    frame = _ordered_frame(periods)
+    frame.loc[0, "feature_available_at"] = 99
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    with pytest.raises(ContractError) as exc_info:
+        run_classification_model_v189(
+            frame,
+            tmp_path,
+            task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+            row_refs=tuple(f"r{index}" for index in range(len(frame))),
+            model_ids=("logistic_regression",),
+            final_holdout_fraction=0.25,
+            cv_folds=2,
+            feature_available_at=tuple(periods),
+            prediction_origins=tuple(period + 1 for period in periods),
+            **_production_dependencies(),
+        )
+
+    assert exc_info.value.code == "CLASSIFICATION_INFORMATION_SET_METADATA_MISMATCH"
+
+
 def _selectable_policy(*, selected_threshold: float | None = None, method: str = "max_f1") -> DecisionPolicyV1:
     return DecisionPolicyV1(
         cost_matrix={"false_positive": 1.0, "false_negative": 2.0},
@@ -470,6 +493,48 @@ def test_provider_join_red_probe_requires_runtime_contribution_identity() -> Non
     contribution = registry.require("executor:workbench.classification_ml.adapter")
     assert contribution.provider_id == "workbench.classification_ml"
     assert contribution.adapter_id == "workbench.classification_ml.adapter"
+
+
+def test_provider_join_red_probe_rejects_same_identity_malicious_executor_before_dispatch(tmp_path) -> None:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistry
+    from workbench.predictive_research.classification_adapters import classification_runtime_registry
+
+    trusted = classification_runtime_registry()
+    trusted_contribution = trusted.require("executor:workbench.classification_ml.adapter")
+    calls: list[object] = []
+
+    def malicious_executor(context, request):
+        calls.append((context, request))
+        return {
+            "provider_id": trusted_contribution.provider_id,
+            "adapter_id": trusted_contribution.adapter_id,
+            "executor_ref": trusted_contribution.executor_ref,
+            "production_entrypoint": "workbench.prediction.run_classification_model_v189",
+            "model_id": "logistic_regression",
+        }
+
+    fake_registry = TrustedExecutorRegistry((replace(trusted_contribution, executor=malicious_executor),))
+    fake_registry._bound_catalog_digest = trusted._bound_catalog_digest
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    with pytest.raises(ContractError) as exc_info:
+        run_classification_model_v189(
+            frame,
+            tmp_path,
+            task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+            row_refs=tuple(f"r{index}" for index in range(len(frame))),
+            model_ids=("logistic_regression",),
+            final_holdout_fraction=0.25,
+            cv_folds=2,
+            **{
+                **_production_dependencies(),
+                "runtime_registry": fake_registry,
+            },
+        )
+
+    assert exc_info.value.code == "CLASSIFICATION_PROVIDER_RUNTIME_JOIN_MISMATCH"
+    assert calls == []
 
 
 def test_group_validation_fold_red_probe_rejects_single_class_validation_support(tmp_path) -> None:
@@ -612,17 +677,20 @@ def test_c0_evidence_red_probe_preserves_degraded_status_and_required_identity()
         "metrics": {},
         "holdout": {
             "status": "sealed",
+            "model_id": "logistic_regression",
             "release_plan_hash": "sha256:" + "c" * 64,
             "release_plan": {
                 "plan_hash": "sha256:" + "c" * 64,
                 "task_hash": "sha256:" + "a" * 64,
                 "split_hash": "sha256:" + "b" * 64,
+                "model_id": "logistic_regression",
+                "model_hash": "sha256:" + "m" * 64,
             },
         },
         "calibration": {"status": "computed"},
         "baselines": [],
         "controls": [],
-        "comparison": {},
+        "comparison": {"selected_model": "logistic_regression"},
         "explanations": {"status": "unavailable"},
         "stability": {"status": "unavailable"},
         "shift": {"status": "unavailable"},
@@ -631,9 +699,29 @@ def test_c0_evidence_red_probe_preserves_degraded_status_and_required_identity()
         "evidence_refs": {
             "task": "classification-task:sha256:" + "a" * 64,
             "split": "classification-split:sha256:" + "b" * 64,
+            "model": "classification-model:logistic_regression:sha256:" + "m" * 64,
             "holdout": "classification-holdout:sha256:" + "c" * 64,
             "release_plan": "classification-release-plan:sha256:" + "c" * 64,
         },
+    }
+
+    from workbench.prediction import _build_classification_c0_evidence
+
+    envelope, projection = _build_classification_c0_evidence(
+        status="degraded",
+        task_hash=payload["task"]["task_hash"],  # type: ignore[index]
+        split_hash=payload["split"]["split_hash"],  # type: ignore[index]
+        holdout=payload["holdout"],  # type: ignore[arg-type]
+        evidence=payload,
+        blocked_reasons=payload["blocked_reasons"],  # type: ignore[arg-type]
+    )
+    payload["c0_evidence_envelope"] = envelope
+    payload["c0_consumer_projection"] = projection
+    payload["foundation_status"] = {
+        "execution_status": envelope["execution_status"],
+        "availability": envelope["availability"],
+        "completeness_status": envelope["completeness_status"],
+        "producer_status": "degraded",
     }
 
     projected = project_classification_evidence(payload, consumer="report")

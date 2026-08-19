@@ -2,12 +2,19 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ClassificationEvidence } from "./ClassificationEvidence";
 
+const taskHash = "sha256:" + "t".repeat(64);
+const splitHash = "sha256:split";
+const releasePlanHash = "sha256:" + "c".repeat(64);
+const modelHash = "sha256:model";
+const classificationResultRef = `classification-evidence:${taskHash}:${splitHash}:${releasePlanHash}`;
+const classificationFacets = ["classification", "task", "split", "holdout", "release_plan"];
+
 const packet = {
   payload_schema: "workbench.prediction.classification-evidence",
   schema_version: 1,
   status: "validated",
-  task: { task_type: "binary", positive_class: "yes", class_support: { no: 4, yes: 4 }, task_hash: "sha256:" + "t".repeat(64) },
-  split: { profile: "temporal_rolling", split_hash: "sha256:split" },
+  task: { task_type: "binary", positive_class: "yes", class_support: { no: 4, yes: 4 }, task_hash: taskHash },
+  split: { profile: "temporal_rolling", split_hash: splitHash },
   metrics: { accuracy: { point_estimate: 0.75 }, log_loss: { point_estimate: 0.4 } },
   calibration: { status: "descriptive", brier: 0.19 },
   baselines: [{ model_id: "majority", accuracy: 0.5 }],
@@ -20,25 +27,51 @@ const packet = {
   blocked_reasons: [],
   holdout: {
     status: "sealed",
-    release_plan_hash: "sha256:" + "c".repeat(64),
+    model_id: "random_forest",
+    release_plan_hash: releasePlanHash,
     release_count: 0,
     release_plan: {
-      plan_hash: "sha256:" + "c".repeat(64),
-      task_hash: "sha256:" + "t".repeat(64),
-      split_hash: "sha256:split",
+      plan_hash: releasePlanHash,
+      task_hash: taskHash,
+      split_hash: splitHash,
       model_id: "random_forest",
+      model_hash: modelHash,
       calibration_hash: "sha256:calibration",
       policy_hash: "sha256:policy",
     },
   },
   evidence_refs: {
-    task: "classification-task:sha256:" + "t".repeat(64),
-    split: "classification-split:sha256:split",
-    holdout: "holdout-1",
-    release_plan: "classification-release-plan:sha256:" + "c".repeat(64),
+    task: `classification-task:${taskHash}`,
+    split: `classification-split:${splitHash}`,
+    model: `classification-model:random_forest:${modelHash}`,
+    holdout: `classification-holdout:${releasePlanHash}`,
+    release_plan: `classification-release-plan:${releasePlanHash}`,
   },
-  c0_evidence_envelope: {},
-  c0_consumer_projection: {},
+  c0_evidence_envelope: {
+    result_identity: {
+      result_ref: classificationResultRef,
+      task_hash: taskHash,
+      split_hash: splitHash,
+      holdout_hash: releasePlanHash,
+      release_plan_hash: releasePlanHash,
+    },
+    execution_status: "completed",
+    availability: "available",
+    completeness_status: "complete",
+    input_provenance: { task_hash: taskHash, split_hash: splitHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash },
+  },
+  c0_consumer_projection: {
+    contract: "consumer-projection",
+    contract_version: "1.0",
+    producer_version: "1.8.9",
+    payload: {
+      projection_id: classificationResultRef,
+      projection_ref: "classification-consumer:test",
+      projection_status: "available",
+      slots: ["agent", "notebook", "report"].map((consumer) => ({ consumer, artifact_facets: classificationFacets, payload_schema_ref: "workbench.prediction.classification-evidence", source_eligible: true })),
+      not_applicable_projection: { status: "not_applicable", reason: "classification evidence is applicable to this result" },
+    },
+  },
   foundation_status: {
     execution_status: "completed",
     availability: "available",
@@ -58,7 +91,7 @@ describe("ClassificationEvidence", () => {
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("Baselines and controls");
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("Decision policy");
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("SCENARIOS_ONLY");
-    expect(screen.getByTestId("classification-evidence")).toHaveTextContent("holdout-1");
+    expect(screen.getByTestId("classification-evidence")).toHaveTextContent(`classification-holdout:${releasePlanHash}`);
   });
 
   it("shows blocked reasons instead of rendering a synthetic metric", () => {
@@ -67,5 +100,12 @@ describe("ClassificationEvidence", () => {
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("Blocked");
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("CLASSIFICATION_INFORMATION_SET_INCOMPLETE");
     expect(screen.getByTestId("classification-evidence")).not.toHaveTextContent("0.00");
+  });
+
+  it("discloses an unavailable renderer when the C0 envelope is not typed", () => {
+    render(<ClassificationEvidence evidence={{ ...packet, c0_evidence_envelope: {} }} />);
+
+    expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
+    expect(screen.getByTestId("classification-evidence")).not.toHaveTextContent("Binary classification");
   });
 });

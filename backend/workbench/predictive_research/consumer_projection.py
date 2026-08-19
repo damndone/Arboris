@@ -8,12 +8,8 @@ from typing import Any
 
 from ..artifacts import read_json, sha256_file
 from workbench.contracts.evidence.envelope import (
-    ConsumerProjectionNotApplicableV1,
-    ConsumerProjectionPayloadV1,
-    ConsumerProjectionSlotV1,
     ConsumerProjectionV1,
     EvidenceEnvelopeV1,
-    EvidenceReasonV1,
 )
 from .schema import PayloadContractError, default_v1_prediction_registry
 from .contracts import ContractError
@@ -232,6 +228,20 @@ _CLASSIFICATION_REQUIRED = frozenset(
         "holdout",
     }
 )
+_CLASSIFICATION_C0_REQUIRED = frozenset(
+    {
+        "c0_evidence_envelope",
+        "c0_consumer_projection",
+        "foundation_status",
+    }
+)
+_CLASSIFICATION_C0_CONSUMERS = frozenset({"agent", "notebook", "report"})
+_CLASSIFICATION_C0_BASE_FACETS = frozenset({"classification", "task", "split", "holdout", "release_plan"})
+_CLASSIFICATION_C0_STATUS = {
+    "validated": ("completed", "available", "complete", "available", True),
+    "degraded": ("completed", "available", "degraded", "available", False),
+    "unavailable": ("blocked", "not_available", "insufficient", "blocked", False),
+}
 
 
 def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str) -> dict[str, Any]:
@@ -247,31 +257,61 @@ def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str
     if not isinstance(payload["blocked_reasons"], list):
         raise ContractError("CLASSIFICATION_EVIDENCE_CONTRACT_INVALID", "blocked_reasons must be a list")
     status = payload["status"]
-    if status not in {"validated", "degraded", "unavailable"}:
+    if type(status) is not str or status not in _CLASSIFICATION_C0_STATUS:
         raise ContractError("CLASSIFICATION_EVIDENCE_STATUS_INVALID", "producer status is not a classification evidence status")
     task = payload["task"]
     split = payload["split"]
     holdout = payload["holdout"]
     refs = payload["evidence_refs"]
-    if not isinstance(task, Mapping) or not isinstance(split, Mapping) or not isinstance(holdout, Mapping) or not isinstance(refs, Mapping):
+    comparison = payload["comparison"]
+    if (
+        not isinstance(task, Mapping)
+        or not isinstance(split, Mapping)
+        or not isinstance(holdout, Mapping)
+        or not isinstance(refs, Mapping)
+        or not isinstance(comparison, Mapping)
+    ):
         raise ContractError("CLASSIFICATION_EVIDENCE_IDENTITY_INVALID", "task, split, holdout and evidence_refs must be mappings")
     task_hash = task.get("task_hash")
     split_hash = split.get("split_hash")
     release_plan = holdout.get("release_plan")
+    selected_model = comparison.get("selected_model")
     if (
         type(task_hash) is not str
         or type(split_hash) is not str
         or not isinstance(release_plan, Mapping)
         or type(release_plan.get("plan_hash")) is not str
+        or type(release_plan.get("model_id")) is not str
+        or type(release_plan.get("model_hash")) is not str
+        or type(holdout.get("model_id")) is not str
+        or type(selected_model) is not str
         or release_plan.get("task_hash") != task_hash
         or release_plan.get("split_hash") != split_hash
+        or release_plan.get("model_id") != selected_model
+        or holdout.get("model_id") != selected_model
         or holdout.get("release_plan_hash") != release_plan.get("plan_hash")
-        or any(type(refs.get(key)) is not str for key in ("task", "split", "holdout", "release_plan"))
+        or set(refs) != {"task", "split", "model", "holdout", "release_plan"}
     ):
         raise ContractError("CLASSIFICATION_EVIDENCE_IDENTITY_INVALID", "task/split/holdout/release-plan identities are incomplete or inconsistent")
+    release_plan_hash = release_plan["plan_hash"]
+    expected_refs = {
+        "task": f"classification-task:{task_hash}",
+        "split": f"classification-split:{split_hash}",
+        "model": f"classification-model:{selected_model}:{release_plan['model_hash']}",
+        "holdout": f"classification-holdout:{release_plan_hash}",
+        "release_plan": f"classification-release-plan:{release_plan_hash}",
+    }
+    if any(type(refs.get(key)) is not str or refs[key] != expected for key, expected in expected_refs.items()):
+        raise ContractError("CLASSIFICATION_EVIDENCE_IDENTITY_INVALID", "evidence_refs do not match the task, split, model, holdout and release-plan identities")
     if not isinstance(payload["metrics"], Mapping):
         raise ContractError("CLASSIFICATION_EVIDENCE_INCOMPLETE", "metrics must be a mapping")
-    envelope, projection = _classification_c0_contracts(payload, status=status, task_hash=task_hash, split_hash=split_hash, release_plan_hash=release_plan["plan_hash"])
+    envelope, projection = _classification_c0_contracts(
+        payload,
+        status=status,
+        task_hash=task_hash,
+        split_hash=split_hash,
+        release_plan_hash=release_plan_hash,
+    )
     return {
         "status": status,
         "consumer": consumer,
@@ -311,71 +351,76 @@ def _classification_c0_contracts(
     split_hash: str,
     release_plan_hash: str,
 ) -> tuple[EvidenceEnvelopeV1, ConsumerProjectionV1]:
-    """Validate producer C0 contracts, with an explicit legacy packet adapter."""
+    """Validate the producer-owned C0 envelope and consumer projection."""
 
     raw_envelope = payload.get("c0_evidence_envelope")
     raw_projection = payload.get("c0_consumer_projection")
-    if raw_envelope is not None or raw_projection is not None:
-        if not isinstance(raw_envelope, dict) or not isinstance(raw_projection, dict):
-            raise ContractError("CLASSIFICATION_EVIDENCE_C0_INVALID", "C0 envelope and projection must be supplied together")
+    raw_foundation = payload.get("foundation_status")
+    if (
+        not isinstance(raw_envelope, dict)
+        or not isinstance(raw_projection, dict)
+        or not isinstance(raw_foundation, Mapping)
+    ):
+        missing = sorted(_CLASSIFICATION_C0_REQUIRED - set(payload))
+        raise ContractError(
+            "CLASSIFICATION_EVIDENCE_C0_REQUIRED",
+            f"classification evidence requires explicit C0 envelope, projection and foundation status: {missing}",
+        )
+    try:
         envelope = EvidenceEnvelopeV1.from_dict(raw_envelope)
         projection = ConsumerProjectionV1.from_dict(raw_projection)
-    else:
-        reason = EvidenceReasonV1(
-            code="CLASSIFICATION_LEGACY_PACKET_ADAPTER",
-            message="classification packet was adapted into the shared C0 evidence contracts",
-            source_refs=(f"classification-task:{task_hash}", f"classification-split:{split_hash}", f"classification-release-plan:{release_plan_hash}"),
-        ).to_dict()
-        envelope_status = {
-            "validated": ("completed", "available", "complete", [], [], []),
-            "degraded": ("completed", "available", "degraded", [], [], [reason]),
-            "unavailable": ("blocked", "not_available", "insufficient", [reason], [reason], [reason]),
-        }[status]
-        envelope = EvidenceEnvelopeV1.from_dict(
-            {
-                "result_identity": {"result_ref": f"classification-evidence:{task_hash}:{split_hash}:{release_plan_hash}", "task_hash": task_hash, "split_hash": split_hash, "holdout_hash": release_plan_hash, "release_plan_hash": release_plan_hash},
-                "execution_status": envelope_status[0],
-                "availability": envelope_status[1],
-                "completeness_status": envelope_status[2],
-                "execution_reasons": envelope_status[3],
-                "availability_reasons": envelope_status[4],
-                "degradation_reasons": envelope_status[5],
-                "numerical_method": "deterministic_numeric",
-                "inference_basis": "descriptive",
-                "evaluation_design": "nested_cross_validation",
-                "validation_summary": {"levels_present": [], "minimum_required": "none", "requirement_status": "not_applicable"},
-                "method": {"id": "classification-production-v1", "version": "1.0"},
-                "estimand": {"id": "out_of_sample_binary_classification_performance"},
-                "input_provenance": {"task_hash": task_hash, "split_hash": split_hash, "release_plan_hash": release_plan_hash},
-                "assumptions": [],
-                "diagnostics": [],
-                "figures": [],
-                "warnings": [],
-                "dependencies": [],
-                "numeric_facts": [],
-                "family_evidence": {"classification": {"status": status}},
-                "oracle": {},
-                "lineage_refs": [f"classification-task:{task_hash}", f"classification-split:{split_hash}", f"classification-release-plan:{release_plan_hash}"],
-            }
-        )
-        facets = ("classification", "task", "split", "holdout", "release_plan") if status == "validated" else ("classification", "task", "split", "holdout", "release_plan", "degraded")
-        projection = ConsumerProjectionV1(
-            contract="consumer-projection",
-            contract_version="1.0",
-            producer_version="1.8.9",
-            payload=ConsumerProjectionPayloadV1(
-                projection_id=f"classification-evidence:{task_hash}:{split_hash}:{release_plan_hash}",
-                projection_ref=f"classification-legacy-adapter:{task_hash}:{split_hash}:{release_plan_hash}",
-                projection_status="available" if status in {"validated", "degraded"} else "blocked",
-                slots=tuple(ConsumerProjectionSlotV1(consumer=item, artifact_facets=facets, payload_schema_ref="workbench.prediction.classification-evidence", source_eligible=status == "validated") for item in ("agent", "notebook", "report")),
-                not_applicable_projection=ConsumerProjectionNotApplicableV1("not_applicable", "classification evidence is applicable to this result"),
-            ),
-        )
-    if envelope.result_identity.get("task_hash") != task_hash or envelope.result_identity.get("split_hash") != split_hash or envelope.result_identity.get("release_plan_hash") != release_plan_hash:
+    except (TypeError, ValueError) as exc:
+        raise ContractError("CLASSIFICATION_EVIDENCE_C0_INVALID", "C0 envelope or projection is not a valid typed contract") from exc
+
+    expected_execution, expected_availability, expected_completeness, expected_projection, expected_eligible = _CLASSIFICATION_C0_STATUS[status]
+    expected_result_ref = f"classification-evidence:{task_hash}:{split_hash}:{release_plan_hash}"
+    identity = envelope.result_identity
+    if (
+        identity.get("result_ref") != expected_result_ref
+        or identity.get("task_hash") != task_hash
+        or identity.get("split_hash") != split_hash
+        or identity.get("holdout_hash") != release_plan_hash
+        or identity.get("release_plan_hash") != release_plan_hash
+        or envelope.input_provenance.get("task_hash") != task_hash
+        or envelope.input_provenance.get("split_hash") != split_hash
+        or envelope.input_provenance.get("holdout_hash") != release_plan_hash
+        or envelope.input_provenance.get("release_plan_hash") != release_plan_hash
+    ):
         raise ContractError("CLASSIFICATION_EVIDENCE_C0_IDENTITY_INVALID", "C0 evidence envelope identity does not match producer identity")
-    if projection.payload.projection_status == "blocked" and status == "degraded":
-        raise ContractError("CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID", "degraded evidence must remain an available projection")
-    consumers = {slot.consumer for slot in projection.payload.slots}
-    if not {"agent", "notebook", "report"}.issubset(consumers):
-        raise ContractError("CLASSIFICATION_EVIDENCE_C0_PROJECTION_INVALID", "C0 projection must cover Agent, Notebook and Report")
+    if (
+        envelope.execution_status.value != expected_execution
+        or envelope.availability.value != expected_availability
+        or envelope.completeness_status.value != expected_completeness
+        or projection.payload.projection_status != expected_projection
+        or projection.payload.projection_id != expected_result_ref
+    ):
+        raise ContractError("CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID", "producer status is not monotone with C0 envelope and projection status")
+    if (
+        set(raw_foundation) != {"execution_status", "availability", "completeness_status", "producer_status"}
+        or any(
+            raw_foundation.get(key) != expected
+            for key, expected in {
+                "execution_status": expected_execution,
+                "availability": expected_availability,
+                "completeness_status": expected_completeness,
+                "producer_status": status,
+            }.items()
+        )
+    ):
+        raise ContractError("CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID", "foundation status does not match producer status")
+    classification_family = envelope.family_evidence.get("classification")
+    if isinstance(classification_family, Mapping) and classification_family.get("status") != status:
+        raise ContractError("CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID", "classification family status does not match producer status")
+    if projection.contract != "consumer-projection" or projection.contract_version != "1.0" or projection.producer_version != "1.8.9":
+        raise ContractError("CLASSIFICATION_EVIDENCE_C0_PROJECTION_INVALID", "C0 projection contract identity is invalid")
+    if {slot.consumer for slot in projection.payload.slots} != _CLASSIFICATION_C0_CONSUMERS:
+        raise ContractError("CLASSIFICATION_EVIDENCE_C0_PROJECTION_INVALID", "C0 projection must contain exactly Agent, Notebook and Report slots")
+    expected_facets = _CLASSIFICATION_C0_BASE_FACETS | ({"degraded"} if not expected_eligible else set())
+    for slot in projection.payload.slots:
+        if (
+            slot.payload_schema_ref != "workbench.prediction.classification-evidence"
+            or slot.source_eligible is not expected_eligible
+            or set(slot.artifact_facets) != expected_facets
+        ):
+            raise ContractError("CLASSIFICATION_EVIDENCE_C0_PROJECTION_INVALID", "C0 consumer slot is not monotone with producer status")
     return envelope, projection

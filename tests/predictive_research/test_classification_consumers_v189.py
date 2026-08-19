@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 
 import pandas as pd
@@ -46,20 +47,48 @@ def _evidence_packet() -> dict[str, object]:
         "blocked_reasons": [],
         "holdout": {
             "status": "sealed",
+            "model_id": "logistic_regression",
             "release_plan_hash": "sha256:" + "c" * 64,
             "release_plan": {
                 "plan_hash": "sha256:" + "c" * 64,
                 "task_hash": "sha256:" + "t" * 64,
                 "split_hash": "sha256:" + "a" * 64,
+                "model_id": "logistic_regression",
+                "model_hash": "sha256:" + "m" * 64,
             },
         },
         "evidence_refs": {
             "task": "classification-task:sha256:" + "t" * 64,
             "split": "classification-split:sha256:" + "a" * 64,
-            "holdout": "holdout-1",
+            "model": "classification-model:logistic_regression:sha256:" + "m" * 64,
+            "holdout": "classification-holdout:sha256:" + "c" * 64,
             "release_plan": "classification-release-plan:sha256:" + "c" * 64,
         },
     }
+
+
+def _packet_with_c0(packet: dict[str, object], *, status: str = "validated") -> dict[str, object]:
+    from workbench.prediction import _build_classification_c0_evidence
+
+    enriched = deepcopy(packet)
+    enriched["status"] = status
+    envelope, projection = _build_classification_c0_evidence(
+        status=status,
+        task_hash=enriched["task"]["task_hash"],  # type: ignore[index]
+        split_hash=enriched["split"]["split_hash"],  # type: ignore[index]
+        holdout=enriched["holdout"],  # type: ignore[arg-type]
+        evidence=enriched,
+        blocked_reasons=["CLASSIFICATION_EVIDENCE_DEGRADED"] if status != "validated" else [],
+    )
+    enriched["c0_evidence_envelope"] = envelope
+    enriched["c0_consumer_projection"] = projection
+    enriched["foundation_status"] = {
+        "execution_status": envelope["execution_status"],
+        "availability": envelope["availability"],
+        "completeness_status": envelope["completeness_status"],
+        "producer_status": status,
+    }
+    return enriched
 
 
 def _task_spec() -> ClassificationTaskSpecV1:
@@ -131,12 +160,12 @@ def test_shift_summary_is_descriptive_and_subgroup_support_is_bounded() -> None:
 
 
 def test_classification_projection_exposes_evidence_without_recomputing() -> None:
-    projection = project_classification_evidence(_evidence_packet(), consumer="report")
+    projection = project_classification_evidence(_packet_with_c0(_evidence_packet()), consumer="report")
 
     assert projection["status"] == "validated"
     assert projection["metrics"]["accuracy"]["point_estimate"] == 0.75
     assert projection["decision_policy"]["selection_status"] == "SCENARIOS_ONLY"
-    assert projection["evidence_refs"]["holdout"] == "holdout-1"
+    assert projection["evidence_refs"]["holdout"] == "classification-holdout:sha256:" + "c" * 64
 
 
 def test_classification_projection_rejects_missing_evidence_instead_of_fabricating_accuracy() -> None:
@@ -147,6 +176,48 @@ def test_classification_projection_rejects_missing_evidence_instead_of_fabricati
         project_classification_evidence(packet, consumer="agent")
 
     assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_INCOMPLETE"
+
+
+def test_classification_projection_requires_explicit_c0_envelope_and_projection() -> None:
+    with pytest.raises(ContractError) as exc_info:
+        project_classification_evidence(_evidence_packet(), consumer="report")
+
+    assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_C0_REQUIRED"
+
+
+@pytest.mark.parametrize("reference_key", ("task", "split", "model", "holdout", "release_plan"))
+def test_classification_projection_rejects_stale_task_split_model_holdout_and_release_refs(reference_key: str) -> None:
+    packet = _packet_with_c0(_evidence_packet())
+    refs = dict(packet["evidence_refs"])
+    refs[reference_key] = f"stale:{reference_key}"
+    packet["evidence_refs"] = refs
+
+    with pytest.raises(ContractError) as exc_info:
+        project_classification_evidence(packet, consumer="report")
+
+    assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_IDENTITY_INVALID"
+
+
+def test_classification_projection_rejects_validated_status_when_c0_is_degraded() -> None:
+    packet = _packet_with_c0(_evidence_packet(), status="degraded")
+    packet["status"] = "validated"
+
+    with pytest.raises(ContractError) as exc_info:
+        project_classification_evidence(packet, consumer="report")
+
+    assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID"
+
+
+def test_classification_projection_rejects_unavailable_c0_with_available_projection() -> None:
+    packet = _packet_with_c0(_evidence_packet(), status="unavailable")
+    projection = deepcopy(packet["c0_consumer_projection"])
+    projection["payload"]["projection_status"] = "available"  # type: ignore[index]
+    packet["c0_consumer_projection"] = projection
+
+    with pytest.raises(ContractError) as exc_info:
+        project_classification_evidence(packet, consumer="report")
+
+    assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID"
 
 
 def test_artifact_identity_changes_when_task_model_or_policy_changes(tmp_path) -> None:

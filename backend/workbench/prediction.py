@@ -37,10 +37,7 @@ from .predictive_research.contracts import (
     StructureSpecV1,
 )
 from .predictive_research.classification_adapters import (
-    CLASSIFICATION_EXECUTOR_REF,
-    CLASSIFICATION_PRODUCTION_ENTRYPOINT,
-    CLASSIFICATION_PROVIDER_ID,
-    CLASSIFICATION_RUNTIME_ADAPTER_ID,
+    dispatch_classification_runtime_binding,
 )
 from .predictive_research.classification_contracts import ClassificationTaskSpecV1, DecisionPolicyV1
 from .predictive_research.classification_protocol import run_classification_protocol
@@ -293,20 +290,10 @@ def run_classification_model_v189(
             "production classification requires a server-bound TrustedExecutorRegistry",
         )
     try:
-        contribution = runtime_registry.require(CLASSIFICATION_EXECUTOR_REF)
+        dispatch_classification_runtime_binding(runtime_registry, task_hash=task.content_hash)
     except TrustedExecutorRegistryError as exc:
-        raise ContractError("CLASSIFICATION_PROVIDER_RUNTIME_JOIN_REQUIRED", str(exc)) from exc
-    if (
-        contribution.provider_id != CLASSIFICATION_PROVIDER_ID
-        or contribution.adapter_id != CLASSIFICATION_RUNTIME_ADAPTER_ID
-        or contribution.executor_ref != CLASSIFICATION_EXECUTOR_REF
-        or contribution.metadata.get("production_entrypoint") != CLASSIFICATION_PRODUCTION_ENTRYPOINT
-        or not isinstance(getattr(runtime_registry, "_bound_catalog_digest", None), str)
-    ):
-        raise ContractError(
-            "CLASSIFICATION_PROVIDER_RUNTIME_JOIN_MISMATCH",
-            "catalog declaration, trusted contribution, and production entrypoint identities disagree",
-        )
+        code = exc.code if exc.code.startswith("CLASSIFICATION_PROVIDER_RUNTIME_JOIN_") else "CLASSIFICATION_PROVIDER_RUNTIME_JOIN_MISMATCH"
+        raise ContractError(code, str(exc)) from exc
     target = frame.loc[:, task.target_column]
     if target.isna().any():
         raise ContractError("CLASSIFICATION_TARGET_MISSING", "classification target contains missing values")
@@ -399,6 +386,7 @@ def run_classification_model_v189(
         "blocked_reasons": blocked_reasons,
         "evidence_refs": {
             "split": f"classification-split:{split_hash}",
+            "model": f"classification-model:{selected_model}:{protocol['holdout']['release_plan']['model_hash']}",
             "holdout": f"classification-holdout:{protocol['holdout']['release_plan_hash']}",
             "task": f"classification-task:{task.content_hash}",
             "release_plan": f"classification-release-plan:{protocol['holdout']['release_plan_hash']}",
