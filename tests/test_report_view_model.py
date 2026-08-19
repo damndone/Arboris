@@ -3,7 +3,11 @@ from unittest.mock import patch
 
 import pytest
 
-from workbench.report_view_model import build_regression_table, build_report_view_model
+from workbench.report_view_model import (
+    build_regression_table,
+    build_report_view_model,
+    regression_table_export_rows,
+)
 
 
 def test_build_view_model_renders_issues():
@@ -312,6 +316,56 @@ def test_report_projection_fails_closed_on_huge_coefficient_and_replicate_values
     provenance = packet["models"][0]["survey_provenance"]
     assert provenance["projection_status"] == "unavailable"
     assert provenance["unavailable_reason"] == "REPORT_SURVEY_METADATA_INVALID"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("n_obs", -1),
+    ("n_psu", 1.5),
+    ("degf", 10**400),
+    ("residual_degf", -2),
+    ("design_effect", float("inf")),
+    ("effective_sample_size", -1),
+])
+def test_report_design_counts_and_effects_are_typed_unavailable(field, value):
+    survey_design = {
+        "n_obs": 10,
+        "n_strata": 2,
+        "n_psu": 4,
+        "degf": 2,
+        "residual_degf": 1,
+        "design_effect": 1.2,
+        "effective_sample_size": 8,
+    }
+    survey_design[field] = value
+    packet = build_regression_table([
+        (
+            "ols_1",
+            {
+                "model_type": "ols",
+                "nobs": 10,
+                "survey_design": survey_design,
+                "coefficients": {"x": {"estimate": 1.0, "std_error": 0.2, "p_value": 0.1}},
+            },
+        )
+    ])
+    assert packet["models"][0]["survey_provenance"]["projection_status"] == "unavailable"
+    assert packet["models"][0]["survey_provenance"]["unavailable_reason"] == "REPORT_SURVEY_METADATA_INVALID"
+
+
+@pytest.mark.parametrize("field,value", [("std_error", -1), ("p_value", 2), ("ci_lower", float("inf"))])
+def test_report_coefficient_inference_values_are_not_copied(field, value):
+    packet = build_regression_table([
+        ("ols_1", {"model_type": "ols", "coefficients": {"x": {
+            "estimate": 1.0, "std_error": 0.2, "p_value": 0.1,
+            "confidence_interval": [0.5, 1.5],
+        }}})
+    ])
+    source = packet["rows"][0]["models"]["ols_1"]
+    source[field] = value
+    rows = regression_table_export_rows(packet)
+    cell = rows[0]["ols_1 estimate"]
+    assert cell is None
+    assert rows[0]["ols_1 projection_status"] == "unavailable"
 
 
 def test_coeff_render_failure_yields_empty_text():

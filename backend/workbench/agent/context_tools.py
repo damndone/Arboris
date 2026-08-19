@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -25,6 +26,10 @@ from ..analysis_loop.plan import PlanDiff
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
 from ..predictive_research.consumer_projection import read_prediction_evidence_from_run_root
+from ..services.server_run_artifacts import (
+    ServerOwnedArtifactManifestError,
+    read_server_owned_run_artifacts,
+)
 from ..data_operations import _read_frame
 from ..graph_model import NodeKind
 from .context_compiler import resolve_registered_artifact
@@ -4843,19 +4848,17 @@ def _agent_result_unavailable(reason: str) -> dict[str, Any]:
 
 
 def _verified_model_results(run_root: Path) -> tuple[list[dict[str, Any]], str | None]:
-    """Read model results only after index hash and binding verification."""
-    index_path = run_root / "artifacts_index.json"
-    if not index_path.exists():
-        # v1.8.7 runs predate the artifact index. Preserve their read-only
-        # semantics while all indexed current runs take the strict path below.
-        return _read_legacy_model_results(run_root)
+    """Read model results only through the server-owned artifact boundary."""
     try:
-        index = read_json(index_path)
-    except (FileNotFoundError, OSError, ValueError):
+        records = read_server_owned_run_artifacts(
+            run_root.parent.parent,
+            run_root.name,
+            required=True,
+        )
+    except (ServerOwnedArtifactManifestError, OSError, ValueError):
         return [], "AGENT_RESULT_ARTIFACT_INVALID"
-    if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
+    if not records:
         return [], "AGENT_RESULT_ARTIFACT_INVALID"
-    records = [item for item in index["artifacts"] if isinstance(item, dict)]
     by_id = {
         item.get("artifact_id"): item
         for item in records
@@ -4863,7 +4866,7 @@ def _verified_model_results(run_root: Path) -> tuple[list[dict[str, Any]], str |
     }
     model_records = [item for item in records if item.get("artifact_type") == "model_result"]
     if not model_records:
-        return _read_legacy_model_results(run_root)
+        return [], "AGENT_RESULT_ARTIFACT_INVALID"
     model_dir = run_root / "model_results"
     indexed_paths = {
         item.get("path")
@@ -4916,6 +4919,27 @@ def _verified_model_results(run_root: Path) -> tuple[list[dict[str, Any]], str |
             return [], "AGENT_RESULT_ARTIFACT_INVALID"
         if binding.get("source_artifact_ids") != inputs:
             return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        payload_sha256 = binding.get("payload_sha256")
+        if not isinstance(payload_sha256, str) or len(payload_sha256) != 64:
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        unsigned = dict(result)
+        unsigned_binding = dict(binding)
+        unsigned_binding.pop("payload_sha256", None)
+        unsigned["result_binding"] = unsigned_binding
+        try:
+            expected_payload_sha256 = hashlib.sha256(
+                json.dumps(
+                    unsigned,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+        except (TypeError, ValueError, OverflowError):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        if payload_sha256 != expected_payload_sha256:
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
         coefficients = result.get("coefficients")
         source_ids = binding.get("coefficient_source_ids")
         if not isinstance(coefficients, dict) or not isinstance(source_ids, dict):
@@ -4929,27 +4953,6 @@ def _verified_model_results(run_root: Path) -> tuple[list[dict[str, Any]], str |
                 or source_ids.get(term) != expected_source
             ):
                 return [], "AGENT_RESULT_ARTIFACT_INVALID"
-        results.append(result)
-    return results, None
-
-
-def _read_legacy_model_results(run_root: Path) -> tuple[list[dict[str, Any]], str | None]:
-    """Read pre-index model payloads through a narrow compatibility contract."""
-    model_dir = run_root / "model_results"
-    if not model_dir.is_dir():
-        return [], None
-    results: list[dict[str, Any]] = []
-    for path in sorted(model_dir.glob("*.json")):
-        try:
-            result = read_json(path)
-        except (OSError, ValueError):
-            return [], "AGENT_RESULT_ARTIFACT_INVALID"
-        if (
-            not isinstance(result, dict)
-            or result.get("model_id") != path.stem
-            or not isinstance(result.get("coefficients"), dict)
-        ):
-            continue
         results.append(result)
     return results, None
 
@@ -5263,6 +5266,12 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
             "replicates_attempted", "replicates_succeeded", "replicates_failed"
         ):
             bounded[field] = _public_positive_int(design.get(field))
+        for field in ("design_effect", "effective_sample_size"):
+            raw_value = design.get(field)
+            if raw_value is not None and (
+                field not in bounded or bounded[field] < 0
+            ):
+                invalid_contract = True
         reasons = design.get("replicate_failure_reasons")
         if isinstance(reasons, dict):
             bounded_reasons: dict[str, int] = {}

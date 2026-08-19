@@ -25,6 +25,17 @@ def build_replicates(
     design: SurveyDesign, replicate_type: str | None
 ) -> tuple[np.ndarray, list[float]]:
     """Return (n_obs x n_replicates) weights and the per-replicate scale factors."""
+    if (
+        replicate_type is not None
+        and design.replicate_type is not None
+        and replicate_type != design.replicate_type
+    ):
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_DECLARATION_MISMATCH",
+            "the requested replicate method does not match the declared survey design",
+            declared_replicate_type=design.replicate_type,
+            requested_replicate_type=replicate_type,
+        )
     kind = replicate_type or design.replicate_type
     if kind is None:
         raise SurveyEngineError(

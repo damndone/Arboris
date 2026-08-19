@@ -41,27 +41,34 @@ def build_regression_table(
     rows_by_term: dict[str, dict[str, Any]] = {}
     for model_id, model_result in model_results:
         model_key = str(model_id)
-        model_views.append(
-            {
-                "id": model_key,
-                "label": (
-                    model_result.get("model_label")
-                    or model_result.get("model_type")
-                    or model_key
-                ),
-                "model_type": model_result.get("model_type"),
-                "nobs": model_result.get("nobs"),
-                "r_squared": model_result.get("r_squared"),
-                "adjusted_r_squared": model_result.get("adjusted_r_squared"),
-                # The terms every standard error in this column is conditional
-                # on. A table pasted into a paper without them reports a
-                # precision the analysis did not have.
-                "survey_design": _design_summary(model_result.get("survey_design")),
-                "survey_provenance": _bounded_survey_design(
-                    model_result.get("survey_design")
-                ),
-            }
-        )
+        raw_nobs = model_result.get("nobs")
+        model_view = {
+            "id": model_key,
+            "label": (
+                model_result.get("model_label")
+                or model_result.get("model_type")
+                or model_key
+            ),
+            "model_type": model_result.get("model_type"),
+            "nobs": _bounded_report_integer(raw_nobs),
+            "r_squared": model_result.get("r_squared"),
+            "adjusted_r_squared": model_result.get("adjusted_r_squared"),
+            # The terms every standard error in this column is conditional
+            # on. A table pasted into a paper without them reports a
+            # precision the analysis did not have.
+            "survey_design": _design_summary(model_result.get("survey_design")),
+            "survey_provenance": _bounded_survey_design(
+                model_result.get("survey_design")
+            ),
+        }
+        if raw_nobs is not None and model_view["nobs"] is None:
+            model_view.update(
+                {
+                    "projection_status": "unavailable",
+                    "unavailable_reason": "REPORT_MODEL_METADATA_INVALID",
+                }
+            )
+        model_views.append(model_view)
         coefficients = model_result.get("coefficients", {})
         if not isinstance(coefficients, Mapping):
             continue
@@ -114,7 +121,7 @@ def _regression_significance_marker(
         parsed = float(p_value)
     except (OverflowError, TypeError, ValueError):
         return ""
-    if not math.isfinite(parsed):
+    if not math.isfinite(parsed) or not 0 <= parsed <= 1:
         return ""
     for marker, cutoff in ordered_cutoffs:
         if parsed < cutoff:
@@ -169,6 +176,20 @@ def _bounded_report_integer(value: Any) -> int | None:
     return value
 
 
+def _bounded_report_nonnegative_number(value: Any) -> int | float | None:
+    bounded = _bounded_report_number(value)
+    if bounded is None or bounded < 0:
+        return None
+    return bounded
+
+
+def _bounded_report_probability(value: Any) -> int | float | None:
+    bounded = _bounded_report_number(value)
+    if bounded is None or not 0 <= bounded <= 1:
+        return None
+    return bounded
+
+
 def _bounded_report_warnings(value: Any) -> list[str] | None:
     if not isinstance(value, (list, tuple)):
         return None
@@ -183,7 +204,7 @@ def _bounded_report_interval(value: Any) -> list[int | float] | None:
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         return None
     values = [_bounded_report_number(item) for item in value]
-    if any(item is None for item in values):
+    if any(item is None for item in values) or values[0] > values[1]:
         return None
     return [item for item in values if item is not None]
 
@@ -210,11 +231,18 @@ def _bounded_coefficient_projection(values: Mapping[str, Any]) -> dict[str, Any]
             elif values.get(field) is not None:
                 invalid_numeric = True
         else:
-            bounded = _bounded_report_number(values.get(field))
+            if field == "std_error":
+                bounded = _bounded_report_nonnegative_number(values.get(field))
+            elif field == "p_value":
+                bounded = _bounded_report_probability(values.get(field))
+            else:
+                bounded = _bounded_report_number(values.get(field))
             if bounded is not None:
                 cell[field] = bounded
             elif values.get(field) is not None:
                 invalid_numeric = True
+    if "ci_lower" in cell and "ci_upper" in cell and cell["ci_lower"] > cell["ci_upper"]:
+        invalid_numeric = True
     if invalid_numeric:
         safe_cell = {
             key: cell[key]
@@ -250,13 +278,23 @@ def regression_table_export_rows(
             "label": row.get("label", row.get("term", "")),
         }
         for model in models:
-            design = model.get("survey_design")
+            model_id = str(model.get("id", ""))
+            design = _bounded_survey_design(model.get("survey_provenance"))
             if design:
-                export_row[f"{model.get('id', '')} survey design"] = design
+                export_row[f"{model_id} survey design"] = (
+                    design
+                    if design.get("projection_status") == "unavailable"
+                    else model.get("survey_design")
+                )
         cells = row.get("models", {})
         for model in models:
             model_id = str(model.get("id", ""))
             cell = cells.get(model_id) if isinstance(cells, Mapping) else None
+            safe_cell = (
+                _bounded_coefficient_projection(cell)
+                if isinstance(cell, Mapping)
+                else {}
+            )
             for field in (
                 "estimate",
                 "std_error",
@@ -268,8 +306,11 @@ def regression_table_export_rows(
                 "warnings",
             ):
                 export_row[f"{model_id} {field}"] = (
-                    cell.get(field) if isinstance(cell, Mapping) else None
+                    safe_cell.get(field)
                 )
+            for field in ("projection_status", "unavailable_reason"):
+                if field in safe_cell:
+                    export_row[f"{model_id} {field}"] = safe_cell[field]
         export_rows.append(export_row)
     return export_rows
 
@@ -481,7 +522,10 @@ def _bounded_survey_design(design: Any) -> dict[str, Any] | None:
         "design_effect",
         "effective_sample_size",
     ):
-        value = _bounded_report_number(design.get(field))
+        if field in {"n_obs", "n_strata", "n_psu", "degf", "residual_degf"}:
+            value = _bounded_report_integer(design.get(field))
+        else:
+            value = _bounded_report_nonnegative_number(design.get(field))
         if value is not None:
             bounded[field] = value
         elif design.get(field) is not None:

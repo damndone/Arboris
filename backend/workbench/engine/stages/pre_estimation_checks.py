@@ -95,7 +95,11 @@ class PreEstimationChecksStage:
         # turn an object-sized integer into inf/OverflowError.  This keeps the
         # constructor, engine, and real workflow on the same typed boundary.
         survey_declaration = any(
-            str(ctx.artifacts.get(key) or "").strip()
+            (
+                ctx.artifacts.get(key) is not None
+                if key == "_survey_subpop"
+                else bool(str(ctx.artifacts.get(key) or "").strip())
+            )
             for key in (
                 "_sampling_weight",
                 "_survey_strata_col",

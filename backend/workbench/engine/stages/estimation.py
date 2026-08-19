@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -537,6 +539,17 @@ def _attach_result_binding(
         "source_artifact_ids": list(inputs),
         "coefficient_source_ids": source_ids,
     }
+    unsigned = dict(primary)
+    unsigned["result_binding"] = dict(primary["result_binding"])
+    primary["result_binding"]["payload_sha256"] = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _apply_survey_design_variance(
@@ -575,11 +588,11 @@ def _apply_survey_design_variance(
             model_type=model_type,
         )
 
-    declared_replicate = str(ctx.artifacts.get("_survey_replicate_type") or "").strip()
+    declared_replicate = design.replicate_type
     method = "replicate" if declared_replicate else "linearization"
     result = estimate_with_design(
         design, estimator, method=method,
-        replicate_type=declared_replicate or None,
+        replicate_type=declared_replicate,
     )
 
     critical = float(stats.t.ppf(0.975, result.residual_degf))

@@ -218,7 +218,7 @@ def run_workflow(
     survey_replicate_type: str = "",
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
-    survey_subpop: str = "",
+    survey_subpop: str | None = None,
     labels: dict[str, object] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
@@ -546,7 +546,7 @@ def run_batch_y_workflow(
     survey_replicate_type: str = "",
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
-    survey_subpop: str = "",
+    survey_subpop: str | None = None,
 ) -> dict[str, Any]:
     """Run one workflow per outcome column.
 
@@ -639,7 +639,7 @@ def _run_workflow(
     survey_replicate_type: str = "",
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
-    survey_subpop: str = "",
+    survey_subpop: str | None = None,
     labels: dict[str, object] | None = None,
     lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,

@@ -29,6 +29,7 @@ REPLICATE_TYPES = ("brr", "jackknife", "bootstrap", "provided")
 SURVEY_WEIGHT_FRAME_VALUES = ("cross_sectional", "longitudinal")
 _MAX_INVALID_WEIGHT_ROWS = 16
 _MAX_SUBPOP_EXPRESSION_LENGTH = 512
+_MAX_SURVEY_WEIGHT = Decimal("1000000000000")
 SURVEY_INVALID_SAMPLING_WEIGHTS = "SURVEY_INVALID_SAMPLING_WEIGHTS"
 
 
@@ -102,6 +103,7 @@ def _validated_weight_array(
     nonfinite_rows: list[str] = []
     negative_rows: list[str] = []
     nonpositive_rows: list[str] = []
+    absolute_bound_rows: list[str] = []
     for index, raw_value in zip(frame.index, raw_values, strict=True):
         try:
             if isinstance(raw_value, (bool, np.bool_)):
@@ -179,6 +181,8 @@ def _validated_weight_array(
         float_values.append(converted)
         if not np.isfinite(converted):
             float_overflow_rows.append(str(index))
+        elif abs(parsed) > _MAX_SURVEY_WEIGHT:
+            absolute_bound_rows.append(str(index))
     if float_overflow_rows:
         raise _weight_failure(
             code=error_code,
@@ -186,6 +190,14 @@ def _validated_weight_array(
             reason="not_float_representable",
             invalid_rows=float_overflow_rows[:_MAX_INVALID_WEIGHT_ROWS],
             detail=f"weight column {column!r} cannot be represented as finite float values",
+        )
+    if absolute_bound_rows:
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="absolute_bound",
+            invalid_rows=absolute_bound_rows[:_MAX_INVALID_WEIGHT_ROWS],
+            maximum=str(_MAX_SURVEY_WEIGHT),
         )
 
     values = np.asarray(float_values, dtype=float)
@@ -377,7 +389,7 @@ class SurveyDesign:
     # -- subpopulation -----------------------------------------------------
 
     def subpop_mask(self) -> np.ndarray:
-        if not self.subpop:
+        if self.subpop is None:
             return np.ones(len(self.frame), dtype=bool)
         expression = self.subpop
         if not isinstance(expression, str) or not expression.strip():
@@ -498,41 +510,79 @@ class SurveyDesign:
                 "SURVEY_DESIGN_COLUMN_MISSING", f"column {column!r} is not in the frame"
             )
         mask = self.subpop_mask()
-        values = self.frame.loc[mask, column].to_numpy(dtype=float)
+        try:
+            values = self.frame.loc[mask, column].to_numpy(dtype=float)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise SurveyEngineError(
+                "SURVEY_INFERENCE_UNAVAILABLE",
+                "design effects require finite numeric observations",
+                reason="nonfinite_design_effect",
+            ) from exc
         w = self.weights[mask]
-
-        total = w.sum()
-        mean = float((w * values).sum() / total)
-
-        # Design variance of the weighted mean via its influence contributions.
-        infl = w * (values - mean) / total
-        var_design = float(self._design_variance(infl[:, None], mask=mask)[0, 0])
-
-        # The simple-random-sampling reference carries a finite-population
-        # correction in which the summed weights stand in for the population
-        # size:  vsrs = S^2 * (N - n) / (N * n),  N = sum(w), n = observations.
-        # Dividing the weighted variance by an effective sample size instead is
-        # the intuitive guess and lands about 9% low, which looks plausible
-        # enough on screen to go unquestioned.
-        # The population variance estimate is itself design-based: a weighted
-        # *mean* of squared deviations, corrected by n/(n-1) on the observation
-        # count -- not by the summed weights.  Dividing by (sum(w) - 1) is the
-        # natural-looking alternative and lands about 1% out, close enough to
-        # read as rounding.
         n_obs = int(mask.sum())
-        s2 = float((w * (values - mean) ** 2).sum() / total) * n_obs / (n_obs - 1)
-        var_srs = s2 * (total - n_obs) / (total * n_obs)
+        if n_obs <= 1 or not np.isfinite(values).all():
+            raise SurveyEngineError(
+                "SURVEY_INFERENCE_UNAVAILABLE",
+                "design effects require at least two finite observations",
+                reason="nonfinite_design_effect",
+                n_obs=n_obs,
+            )
 
-        # Kish's effective sample size is a separate, weight-only summary: how
-        # many equally-weighted observations this sample behaves like.
-        n_eff = float(total**2 / (w**2).sum())
+        with np.errstate(over="raise", divide="raise", invalid="raise"):
+            try:
+                total = float(w.sum(dtype=float))
+                mean = float((w * values).sum(dtype=float) / total)
+
+                # Design variance of the weighted mean via its influence contributions.
+                infl = w * (values - mean) / total
+                var_design = float(self._design_variance(infl[:, None], mask=mask)[0, 0])
+
+                # The simple-random-sampling reference carries a finite-population
+                # correction in which the summed weights stand in for the population
+                # size:  vsrs = S^2 * (N - n) / (N * n),  N = sum(w), n = observations.
+                # Dividing the weighted variance by an effective sample size instead is
+                # the intuitive guess and lands about 9% low, which looks plausible
+                # enough on screen to go unquestioned.
+                # The population variance estimate is itself design-based: a weighted
+                # *mean* of squared deviations, corrected by n/(n-1) on the observation
+                # count -- not by the summed weights.  Dividing by (sum(w) - 1) is the
+                # natural-looking alternative and lands about 1% out, close enough to
+                # read as rounding.
+                s2 = float((w * (values - mean) ** 2).sum(dtype=float) / total) * n_obs / (n_obs - 1)
+                var_srs = s2 * (total - n_obs) / (total * n_obs)
+
+                # Kish's effective sample size is a separate, weight-only summary: how
+                # many equally-weighted observations this sample behaves like.
+                n_eff = float(total**2 / (w**2).sum(dtype=float))
+            except (FloatingPointError, OverflowError, ZeroDivisionError, ValueError) as exc:
+                raise SurveyEngineError(
+                    "SURVEY_INFERENCE_UNAVAILABLE",
+                    "design effects are not finite and bounded",
+                    reason="nonfinite_design_effect",
+                ) from exc
+
+        deff = var_design / var_srs if var_srs != 0 else float("nan")
+        standard_error = float(np.sqrt(var_design)) if var_design >= 0 else float("nan")
+        outputs = (deff, n_eff, mean, standard_error, var_design, var_srs)
+        if (
+            not all(np.isfinite(value) for value in outputs)
+            or deff < 0
+            or n_eff < 0
+            or standard_error < 0
+        ):
+            raise SurveyEngineError(
+                "SURVEY_INFERENCE_UNAVAILABLE",
+                "design effects are not finite and bounded",
+                reason="nonfinite_design_effect",
+                n_obs=n_obs,
+            )
 
         return DesignEffects(
-            deff=var_design / var_srs,
+            deff=deff,
             kish_n_eff=n_eff,
-            n_obs=int(mask.sum()),
+            n_obs=n_obs,
             mean=mean,
-            standard_error=float(np.sqrt(var_design)),
+            standard_error=standard_error,
         )
 
     # -- linearization -----------------------------------------------------

@@ -236,15 +236,41 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
     Returns None when nothing was declared, which is what keeps every existing
     run byte-identical: no declaration, no design, no change of path.
     """
-    strata = str(artifacts.get("_survey_strata_col") or "").strip()
-    psu = str(artifacts.get("_survey_psu_col") or "").strip()
-    weight = str(artifacts.get("_sampling_weight") or "").strip()
-    fpc = str(artifacts.get("_survey_fpc_col") or "").strip()
-    replicate_columns = list(artifacts.get("_survey_replicate_weights") or [])
-    replicate_type = str(artifacts.get("_survey_replicate_type") or "").strip()
-    lonely_psu = str(artifacts.get("_survey_lonely_psu") or "").strip()
-    subpopulation = str(artifacts.get("_survey_subpop") or "").strip()
-    weight_frame = str(artifacts.get("_survey_weight_frame") or "").strip()
+    def text_value(key: str) -> str:
+        value = artifacts.get(key)
+        return value.strip() if isinstance(value, str) else value
+
+    strata = text_value("_survey_strata_col") or ""
+    psu = text_value("_survey_psu_col") or ""
+    weight = text_value("_sampling_weight") or ""
+    fpc = text_value("_survey_fpc_col") or ""
+    raw_replicate_columns = artifacts.get("_survey_replicate_weights")
+    if raw_replicate_columns is None:
+        replicate_columns = []
+    elif isinstance(raw_replicate_columns, (list, tuple)):
+        replicate_columns = list(raw_replicate_columns)
+    else:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_COLUMNS_INVALID",
+            "replicate weight columns must be a list of column names",
+        )
+    replicate_type = text_value("_survey_replicate_type") or ""
+    lonely_psu = text_value("_survey_lonely_psu") or ""
+    raw_subpopulation = artifacts.get("_survey_subpop")
+    subpopulation = (
+        raw_subpopulation.strip()
+        if isinstance(raw_subpopulation, str)
+        else raw_subpopulation
+    )
+    if raw_subpopulation is not None and (
+        not isinstance(raw_subpopulation, str) or not raw_subpopulation.strip()
+    ):
+        raise SurveyEngineError(
+            "SURVEY_SUBPOP_INVALID",
+            "subpopulation expression must be a non-empty string",
+            reason="declared_value_type",
+        )
+    weight_frame = text_value("_survey_weight_frame") or ""
     if weight_frame and weight_frame not in SURVEY_WEIGHT_FRAME_VALUES:
         raise SurveyEngineError(
             "SURVEY_WEIGHT_FRAME_INVALID",
@@ -267,9 +293,12 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
                 ("survey_replicate_weights", replicate_columns),
                 ("survey_replicate_type", replicate_type),
                 ("survey_lonely_psu", lonely_psu),
-                ("survey_subpop", subpopulation),
+                ("survey_subpop", raw_subpopulation),
                 ("survey_weight_frame", weight_frame),
-            ) if value
+            ) if (
+                (name == "survey_subpop" and raw_subpopulation is not None)
+                or (name != "survey_subpop" and bool(value))
+            )
         ]
         if declared_fields:
             raise SurveyEngineError(
@@ -306,7 +335,7 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
         strata=strata or None,
         psu=psu or None,
         lonely_psu=lonely_psu or "fail",
-        subpop=subpopulation or None,
+        subpop=subpopulation,
         replicate_type=replicate_type or None,
         replicate_weight_columns=replicate_columns,
         weight_frame=weight_frame or None,

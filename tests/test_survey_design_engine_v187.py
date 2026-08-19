@@ -288,6 +288,90 @@ def test_provided_replicate_column_names_are_persisted_in_the_estimate(estimator
     assert result.replicate_weight_columns == columns
 
 
+def test_replicate_columns_cannot_be_ignored_by_linearization_or_missing_method(linearizable_estimator):
+    from workbench.survey import SurveyDesign, SurveyEngineError, estimate_with_design
+
+    frame = pd.read_csv(FIXTURES / "design_with_replicate_weights.csv")
+    columns = sorted(c for c in frame.columns if c.startswith("repw"))
+    design = SurveyDesign(
+        frame=frame,
+        strata="stratum",
+        psu="psu",
+        weight="weight",
+        replicate_weight_columns=columns,
+    )
+
+    with pytest.raises(SurveyEngineError) as missing_method:
+        estimate_with_design(design, linearizable_estimator, method="linearization")
+    assert missing_method.value.code == "SURVEY_REPLICATE_TYPE_REQUIRED"
+
+
+@pytest.mark.parametrize("declared_type", ["brr", "jackknife", "bootstrap"])
+def test_replicate_method_argument_cannot_override_declared_design(declared_type, linearizable_estimator):
+    from workbench.survey import SurveyDesign, SurveyEngineError, estimate_with_design
+
+    frame = _design_frame()
+    kwargs = {"replicate_type": declared_type}
+    if declared_type == "brr":
+        kwargs["hadamard_matrix"] = _oracle()["replicate"]["brr"]["hadamard"]["matrix"]
+    design = SurveyDesign(frame=frame, strata="stratum", psu="psu", weight="weight", **kwargs)
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        estimate_with_design(
+            design,
+            linearizable_estimator,
+            method="replicate",
+            replicate_type="provided",
+        )
+    assert excinfo.value.code == "SURVEY_REPLICATE_DECLARATION_MISMATCH"
+
+
+@pytest.mark.parametrize("subpopulation", [False, 0, [], ""])
+def test_falsey_declared_subpopulation_is_invalid_not_undeclared(subpopulation):
+    from workbench.survey import SurveyDesign, SurveyEngineError
+
+    design = SurveyDesign(
+        frame=_design_frame(),
+        strata="stratum",
+        psu="psu",
+        weight="weight",
+        subpop=subpopulation,
+    )
+    with pytest.raises(SurveyEngineError) as excinfo:
+        design.subpop_mask()
+    assert excinfo.value.code == "SURVEY_SUBPOP_INVALID"
+
+
+@pytest.mark.parametrize("raw_weight", [10**100, 10**300])
+def test_sampling_weight_absolute_bound_is_typed(raw_weight):
+    from workbench.survey import SurveyDesign, SurveyEngineError
+
+    frame = _design_frame()
+    frame["weight"] = [raw_weight] * len(frame)
+    with pytest.raises(SurveyEngineError) as excinfo:
+        SurveyDesign(frame=frame, strata="stratum", psu="psu", weight="weight")
+    assert excinfo.value.code == "SURVEY_INVALID_SAMPLING_WEIGHTS"
+    assert excinfo.value.context["reason"] == "absolute_bound"
+
+
+def test_design_effects_rejects_nonfinite_or_undefined_reference_variance():
+    from workbench.survey import SurveyDesign, SurveyEngineError
+
+    frame = _design_frame()
+    frame["weight"] = 1.0
+    design = SurveyDesign(
+        frame=frame,
+        strata="stratum",
+        psu="psu",
+        weight="weight",
+        lonely_psu="remove",
+    )
+    with pytest.raises(SurveyEngineError) as excinfo:
+        design.design_effects("x1")
+    assert excinfo.value.code == "SURVEY_INFERENCE_UNAVAILABLE"
+    assert excinfo.value.context["reason"] == "nonfinite_design_effect"
+
+
 def test_nonpositive_residual_degf_is_a_typed_unavailable_inference(linearizable_estimator):
     from workbench.survey import SurveyDesign, SurveyEngineError, estimate_with_design
 

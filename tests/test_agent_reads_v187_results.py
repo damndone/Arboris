@@ -14,6 +14,7 @@ the precision of the estimate, and it will have no way to know.
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -134,6 +135,42 @@ def test_agent_rejects_foreign_binding_even_when_index_hash_is_rewritten(tmp_pat
         if record.get("artifact_id") == "ols_1":
             record["sha256"] = sha256_file(result_path)
     write_json(index_path, index)
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    assert summary["available"] is False
+    assert summary["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
+
+
+def test_agent_requires_server_index_and_rejects_synchronized_digest_forgery(tmp_path):
+    project, run_id = _run(
+        tmp_path, "tamper", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    run_root = project.root / "runs" / run_id
+    result_path = run_root / "model_results" / "ols_1.json"
+    payload = json.loads(result_path.read_text())
+    payload["coefficients"]["x1"]["estimate"] = 123.0
+    result_path.write_text(json.dumps(payload))
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text())
+    for record in index["artifacts"]:
+        if record.get("artifact_id") == "ols_1":
+            record["sha256"] = hashlib.sha256(result_path.read_bytes()).hexdigest()
+    index_path.write_text(json.dumps(index))
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    assert summary["available"] is False
+    assert summary["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
+
+
+def test_agent_rejects_legacy_model_results_without_index(tmp_path):
+    project, run_id = _run(
+        tmp_path, "missing-index", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+    )
+    run_root = project.root / "runs" / run_id
+    (run_root / "artifacts_index.json").unlink()
 
     summary = _summary(project, run_id, "model:ols_1")["result_summary"]
     assert summary["available"] is False

@@ -114,6 +114,27 @@ def estimate_with_design(
             method=method,
         )
 
+    if method == "linearization":
+        if design.replicate_weight_columns and design.replicate_type is None:
+            raise SurveyEngineError(
+                "SURVEY_REPLICATE_TYPE_REQUIRED",
+                "replicate_weight_columns require a declared replicate_type",
+                replicate_weight_columns=list(design.replicate_weight_columns)[:16],
+            )
+        if design.replicate_type is not None:
+            raise SurveyEngineError(
+                "SURVEY_REPLICATE_DECLARATION_MISMATCH",
+                "a declared replicate design must use the replicate variance method",
+                declared_replicate_type=design.replicate_type,
+                requested_method=method,
+            )
+    elif method == "replicate" and design.replicate_weight_columns and design.replicate_type is None:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_TYPE_REQUIRED",
+            "replicate_weight_columns require a declared replicate_type",
+            replicate_weight_columns=list(design.replicate_weight_columns)[:16],
+        )
+
     mask = design.subpop_mask()
     design.validate_for_estimation(mask)
     frame = design.frame.loc[mask]
