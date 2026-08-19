@@ -139,6 +139,9 @@ export interface EvidenceViewModel {
   readonly executionStatus: string;
   readonly availability: string;
   readonly completenessStatus: string;
+  /** Validation is an independent axis from execution/availability/completeness. */
+  readonly validationStatus?: string;
+  readonly validationSummary?: Readonly<Record<string, unknown>>;
   readonly facts: readonly EvidenceFactViewModel[];
   readonly sections: readonly EvidenceSectionViewModel[];
 }
@@ -152,6 +155,10 @@ const PROJECTION_STATUSES = new Set<EvidenceProjectionStatus>([
 
 function text(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function status(value: unknown): value is EvidenceProjectionStatus {
@@ -186,6 +193,8 @@ export function readReportEvidence(value: unknown): EvidenceViewModel | null {
     || !text(candidate.executionStatus)
     || !text(candidate.availability)
     || !text(candidate.completenessStatus)
+    || !text(candidate.validationStatus)
+    || !record(candidate.validationSummary)
     || !Array.isArray(candidate.facts)
     || !candidate.facts.every(fact)
     || !Array.isArray(candidate.sections)
@@ -203,6 +212,8 @@ export function readReportEvidence(value: unknown): EvidenceViewModel | null {
     executionStatus: candidate.executionStatus,
     availability: candidate.availability,
     completenessStatus: candidate.completenessStatus,
+    validationStatus: candidate.validationStatus,
+    validationSummary: candidate.validationSummary,
     facts: candidate.facts,
     sections: candidate.sections,
   };

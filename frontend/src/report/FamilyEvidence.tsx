@@ -430,6 +430,16 @@ function TypedEvidenceProjection({ evidence }: { evidence: EvidenceViewModel }) 
         <dt>Envelope digest</dt><dd style={{ margin: 0, wordBreak: "break-all" }}>{evidence.envelopeDigest}</dd>
         <dt>Availability</dt><dd style={{ margin: 0 }}>{evidence.availability.toUpperCase()}</dd>
         <dt>Completeness</dt><dd style={{ margin: 0 }}>{evidence.completenessStatus.toUpperCase()}</dd>
+        {reportEvidence && (
+          <>
+            <dt>Validation</dt>
+            <dd style={{ margin: 0 }}>{reportEvidence.validationStatus.toUpperCase()}</dd>
+            <dt>Validation summary</dt>
+            <dd style={{ margin: 0 }}>
+              {String(reportEvidence.validationSummary.requirement_status ?? reportEvidence.validationSummary.status ?? "UNAVAILABLE").toUpperCase()}
+            </dd>
+          </>
+        )}
         {reportEvidence?.commitId && <><dt>Commit</dt><dd style={{ margin: 0 }}>{reportEvidence.commitId}</dd></>}
         {hasReportProvenance && (
           <>

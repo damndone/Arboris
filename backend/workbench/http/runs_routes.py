@@ -27,6 +27,7 @@ from ..api_errors import (
     ERROR_REPORT_NOT_FOUND,
     WorkbenchAPIError,
 )
+from ..agent.workflow import WorkflowExecutionError
 from ..agent.workflow_runtime import collect_post_estimation_results
 from ..artifacts import read_json, sha256_file
 from ..config import load_config
@@ -122,7 +123,6 @@ def _report_evidence_for_run(
     """Build the typed Report contribution from indexed artifacts only."""
 
     views: list[dict[str, object]] = []
-    authoritative_persistence = current_report_evidence_persistence(run_id=run_root.name)
     try:
         indexed_records = _read_artifact_records(run_root)
     except (OSError, TypeError, ValueError, WorkbenchAPIError):
@@ -132,7 +132,6 @@ def _report_evidence_for_run(
             continue
         if record.get("artifact_type") not in _REPORT_EVIDENCE_ARTIFACT_TYPES:
             continue
-        payload: object | None = None
         artifact_content_sha256: str | None = None
         artifact_path: Path | None = None
         try:
@@ -144,32 +143,45 @@ def _report_evidence_for_run(
                 artifact_content_sha256 = sha256_file(artifact_path)
             except (OSError, TypeError, ValueError):
                 artifact_content_sha256 = None
-            try:
-                payload = read_json(artifact_path)
-            except (OSError, TypeError, ValueError):
-                payload = None
+
+        nested = record.get("evidence")
+        nested_record = nested if isinstance(nested, dict) else {}
+
+        def indexed_text(*keys: str) -> str | None:
+            for source in (record, nested_record):
+                for key in keys:
+                    value = source.get(key)
+                    if isinstance(value, str) and value.strip():
+                        return value
+            return None
+
+        authoritative_persistence = current_report_evidence_persistence(
+            run_id=run_root.name,
+            project_ref=indexed_text("project_ref", "evidence_project_ref"),
+            session_ref=indexed_text("session_ref", "evidence_session_ref"),
+            scope_ref=indexed_text("scope_ref", "evidence_scope_ref"),
+            model_run_id=indexed_text("model_run_id", "evidence_model_run_id"),
+            artifact_id=indexed_text("evidence_artifact_ref", "artifact_ref"),
+            commit_id=indexed_text(
+                "evidence_commit_ref",
+                "commit_ref",
+                "evidence_commit_id",
+                "commit_id",
+            ),
+            artifact_file_sha256=artifact_content_sha256,
+        )
         views.append(
             build_indexed_report_evidence(
                 record,
-                payload,
                 artifact_content_sha256=artifact_content_sha256,
                 authoritative_persistence=authoritative_persistence,
             )
         )
 
-    # A model child may surface a source-run post-estimation entry even when
-    # its own index does not contain that artifact.  Preserve the legacy entry
-    # for compatibility, but give the Report consumer an explicit typed empty
-    # projection instead of treating its result object as evidence.
-    if not views:
-        for entry in post_estimation_results:
-            views.append(
-                build_indexed_report_evidence(
-                    entry,
-                    entry,
-                    authoritative_persistence=authoritative_persistence,
-                )
-            )
+    # ``post_estimation_results`` is a legacy response field.  It is
+    # intentionally not a Report evidence fallback: raw result entries cannot
+    # create a typed projection or citable facts.
+    del post_estimation_results
 
     bundle = build_report_evidence_bundle(views)
     if bundle is not None:
@@ -179,7 +191,6 @@ def _report_evidence_for_run(
             "artifact_id": f"run:{run_root.name}",
             "artifact_type": "report",
         },
-        authoritative_persistence=authoritative_persistence,
     )
 
 
@@ -570,17 +581,11 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
     try:
         model_results = _model_results(run_root)
     except VersionedResultReadError as exc:
-        details = (
-            {"artifact_path": exc.artifact_path}
-            if exc.artifact_path is not None
-            else {}
-        )
-        raise WorkbenchAPIError(
-            status_code=422,
-            code=exc.code,
-            message="The versioned model result cannot be read.",
-            details=details,
-        ) from exc
+        # Model-result JSON is a legacy compatibility field and is explicitly
+        # non-authoritative for Report.  Keep run detail available so the
+        # typed report_evidence projection can disclose the damaged index
+        # without returning a server error or any model facts.
+        model_results = []
     errors = _normalize_issue_stream(errors, model_results)
     preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
     diagnostic_summary = {}
@@ -624,24 +629,37 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
             )
         except (PayloadContractError, OSError, ValueError):
             prediction_evidence = {"status": "unavailable"}
-    post_estimation_results = collect_post_estimation_results(
-        run_root.parent.parent, run_id
-    )
+    try:
+        post_estimation_results = collect_post_estimation_results(
+            run_root.parent.parent, run_id
+        )
+    except (OSError, TypeError, ValueError, WorkflowExecutionError):
+        # The legacy projection is not the Report authority.  A damaged or
+        # rehashed index must leave the endpoint available so report_evidence
+        # can return its typed unavailable/blocked envelope.
+        post_estimation_results = []
     report_evidence = _report_evidence_for_run(
         run_root,
         post_estimation_results,
     )
+    try:
+        artifact_counts = _artifact_counts(run_root)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError):
+        artifact_counts = {}
     return {
         **summary,
         "lineage": manifest.get("lineage", []),
-        "artifact_counts": _artifact_counts(run_root),
+        "artifact_counts": artifact_counts,
         "errors": errors,
         "model_results": model_results,
+        "model_results_authority": "non-authoritative",
+        "model_results_status": "unavailable",
         "diagnostic_summary_preview": preview,
         "table_1": diagnostic_summary.get("table_1", []),
         "statistical_evidence": diagnostic_summary.get("statistical_evidence"),
         "labels": diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
         "model_family_evidence": model_family_evidence,
+        "model_family_evidence_authority": "non-authoritative",
         "prediction_evidence": prediction_evidence,
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the

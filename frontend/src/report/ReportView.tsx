@@ -91,11 +91,14 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
     wb.dispatch.setView("graph");
     wb.dispatch.selectByCanvasClick(nodeKey);
   };
-  const regressionTable = buildRegressionTablePacket(workspace.modelResults);
+  // Legacy model_results remains on the workspace for API compatibility, but
+  // it is not a Report source.  The formal result surface is the typed C0
+  // evidence projection below; an absent projection is explicitly unavailable.
+  const regressionTable = buildRegressionTablePacket([]);
   const classificationEvidenceArtifact = workspace.familyEvidenceArtifacts.classification_evidence;
-  const resultFamilies = [...new Set(
-    workspace.modelResults.map((result) => result.model_type?.trim() || "unknown model"),
-  )];
+  const resultFamilies = workspace.reportEvidenceProjection
+    ? [`${workspace.reportEvidenceProjection.consumerId}:${workspace.reportEvidenceProjection.status}`]
+    : [];
   const hasCurrentReport = workspace.current !== null;
   const promptValue = hasCurrentReport ? workspace.revisionInstruction : workspace.instruction;
   const promptChange = hasCurrentReport
@@ -266,8 +269,14 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
 
       <PredictionResearchReportSections evidence={workspace.predictionEvidence} />
       <RegressionTable packet={regressionTable} />
+      <p
+        data-testid="legacy-report-results-unavailable"
+        style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "0 0 12px" }}
+      >
+        Legacy model_results: NON-AUTHORITATIVE / UNAVAILABLE for citable Report results.
+      </p>
       <FamilyEvidence
-        modelResults={workspace.modelResults as unknown as FamilyModelResult[]}
+        modelResults={[] as FamilyModelResult[]}
         evidence={workspace.reportEvidenceProjection}
       />
       {classificationEvidenceArtifact !== undefined && (
@@ -279,7 +288,7 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
           Report evidence (what the AI may reference)
         </span>
         <span className="report-evidence-divider__note">
-          Regression evidence above is source output; this section is the citable report context.
+          Only the typed server-owned projection in this section is citable; legacy model_results are non-authoritative.
         </span>
       </div>
       <FactTablePreview

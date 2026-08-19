@@ -462,6 +462,10 @@ def build_persisted_evidence_report_view(
         "executionStatus": projection.execution_status,
         "availability": projection.availability,
         "completenessStatus": projection.completeness_status,
+        "validationStatus": str(
+            projection.validation_summary.get("requirement_status", "unavailable")
+        ),
+        "validationSummary": dict(projection.validation_summary),
         "facts": facts,
         "sections": sections,
         "provenance": {
@@ -506,6 +510,11 @@ def _unavailable_report_evidence(
         "executionStatus": "unavailable",
         "availability": "unavailable",
         "completenessStatus": "unavailable",
+        "validationStatus": "unavailable",
+        "validationSummary": {
+            "status": "unavailable",
+            "reasonCode": reason_code,
+        },
         "facts": [],
         "sections": [
             {
@@ -568,6 +577,9 @@ def _evidence_identity_fields(
     object | None,
     bool,
     object | None,
+    object | None,
+    object | None,
+    object | None,
 ]:
     """Read index-owned identity fields used to bind a canonical commit.
 
@@ -610,6 +622,9 @@ def _evidence_identity_fields(
     return (
         first("evidence_commit_ref", "commit_ref", "evidence_commit_id", "commit_id"),
         first("evidence_artifact_admission_ref", "artifact_admission_ref"),
+        first("project_ref", "evidence_project_ref"),
+        first("session_ref", "evidence_session_ref"),
+        first("scope_ref", "evidence_scope_ref"),
         first("run_id", "evidence_run_id"),
         first("model_run_id", "evidence_model_run_id"),
         first("evidence_run_id"),
@@ -654,21 +669,17 @@ def build_indexed_report_evidence(
             reason_code="EVIDENCE_ARTIFACT_ID_REQUIRED",
         )
 
-    candidates: list[Mapping[str, object]] = [indexed_artifact]
-    if isinstance(artifact_payload, Mapping):
-        candidates.append(artifact_payload)
-    binding_raw: object | None = None
-    envelope_raw: object | None = None
-    for candidate in candidates:
-        fields = _evidence_wire_fields(candidate)
-        if binding_raw is None and fields[0] is not None:
-            binding_raw = fields[0]
-        if envelope_raw is None and fields[1] is not None:
-            envelope_raw = fields[1]
+    # The artifact payload is deliberately not a source for identity, binding,
+    # envelope, or facts.  It is an untrusted compatibility input retained in
+    # the function signature so old callers fail closed through the same gate.
+    binding_raw, envelope_raw, *_ = _evidence_wire_fields(indexed_artifact)
 
     (
         commit_ref_raw,
         admission_ref_raw,
+        project_ref_raw,
+        session_ref_raw,
+        scope_ref_raw,
         run_id_raw,
         model_run_id_raw,
         evidence_run_id_raw,
@@ -709,6 +720,9 @@ def build_indexed_report_evidence(
             admission_ref_raw,
             "EVIDENCE_ARTIFACT_ADMISSION_REF_REQUIRED",
         )
+        project_ref = required_text(project_ref_raw, "EVIDENCE_PROJECT_REF_REQUIRED")
+        session_ref = required_text(session_ref_raw, "EVIDENCE_SESSION_REF_REQUIRED")
+        scope_ref = required_text(scope_ref_raw, "EVIDENCE_SCOPE_REF_REQUIRED")
         indexed_artifact_ref = required_text(
             indexed_artifact_ref_raw,
             "EVIDENCE_ARTIFACT_REF_REQUIRED",
@@ -727,11 +741,15 @@ def build_indexed_report_evidence(
                 "EVIDENCE_ARTIFACT_CONTENT_HASH_MISMATCH",
                 "indexed artifact content-hash aliases disagree",
             )
-        if (
-            indexed_raw_sha256 is not None
-            and artifact_content_sha256 is not None
-            and indexed_raw_sha256 != artifact_content_sha256
-        ):
+        indexed_file_sha256 = required_text(
+            indexed_raw_sha256,
+            "EVIDENCE_ARTIFACT_FILE_HASH_REQUIRED",
+        )
+        artifact_file_sha256 = required_text(
+            artifact_content_sha256,
+            "EVIDENCE_ARTIFACT_FILE_HASH_REQUIRED",
+        )
+        if indexed_file_sha256 != artifact_file_sha256:
             raise EvidenceProjectionError(
                 "EVIDENCE_ARTIFACT_FILE_HASH_MISMATCH",
                 "indexed artifact file hash differs from persisted content",
@@ -748,20 +766,6 @@ def build_indexed_report_evidence(
                     "EVIDENCE_RUN_ID_MISMATCH",
                     f"indexed {name} differs from the authoritative run identity",
                     )
-
-        if isinstance(artifact_payload, Mapping):
-            payload_sources: list[Mapping[str, object]] = [artifact_payload]
-            source = artifact_payload.get("source")
-            if isinstance(source, Mapping):
-                payload_sources.append(source)
-            for payload_source in payload_sources:
-                for name, expected in (("run_id", run_id), ("model_run_id", model_run_id)):
-                    payload_value = payload_source.get(name)
-                    if payload_value is not None and payload_value != expected:
-                        raise EvidenceProjectionError(
-                            "EVIDENCE_RUN_ID_MISMATCH",
-                            f"artifact payload {name} differs from the indexed run identity",
-                        )
 
         if type(authoritative_persistence) is not ServerOwnedReportEvidencePersistenceV1:
             raise EvidenceProjectionError(
@@ -807,11 +811,15 @@ def build_indexed_report_evidence(
 
         persisted_record = authoritative_persistence.read_bound(
             commit_ref,
+            project_ref=project_ref,
+            session_ref=session_ref,
+            scope_ref=scope_ref,
             artifact_id=indexed_artifact_ref,
             run_id=run_id,
             model_run_id=model_run_id,
             content_hash=indexed_content_hash,
             admission_ref=admission_ref,
+            artifact_file_sha256=artifact_file_sha256,
             envelope_digest=(candidate_binding.envelope_digest if candidate_binding is not None else None),
         )
         projection = default_projection_registry().project(
@@ -865,6 +873,11 @@ def build_report_evidence_bundle(
         "executionStatus": str(first.get("executionStatus", "unavailable")),
         "availability": "unavailable",
         "completenessStatus": "unavailable",
+        "validationStatus": "unavailable",
+        "validationSummary": {
+            "status": "unavailable",
+            "reasonCode": "REPORT_EVIDENCE_BUNDLE_IDENTITY_UNBOUND",
+        },
         "facts": [],
         "sections": [
             {

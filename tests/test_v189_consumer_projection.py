@@ -75,40 +75,14 @@ def _persisted_record(*, sensitivity: str = "public") -> PersistedEvidenceEnvelo
     )
 
 
-class _BindingStore:
-    def __init__(self, binding: EvidenceCommitBindingV1) -> None:
-        self.binding = binding
-        self.calls: list[str] = []
-
-    def load(self, commit_id: str) -> EvidenceCommitBindingV1 | None:
-        self.calls.append(commit_id)
-        return self.binding if commit_id == self.binding.commit_id else None
+class _FakeLoadPort:
+    def load(self, _commit_id: str) -> object:
+        return {"facts": {"fact-mean": 99}}
 
 
-class _EnvelopeStore:
-    def __init__(self, record: PersistedEvidenceEnvelopeV1) -> None:
-        self.record = record
-        self.calls: list[str] = []
-
-    def load(self, commit_id: str) -> PersistedEvidenceEnvelopeV1 | None:
-        self.calls.append(commit_id)
-        return self.record if commit_id == self.record.commit_id else None
-
-
-def test_results_facade_reads_only_persisted_committed_envelope() -> None:
-    record = _persisted_record()
-    binding_store = _BindingStore(record.binding)
-    envelope_store = _EnvelopeStore(record)
-    facade = PersistedEvidenceResultsFacadeV1(binding_store, envelope_store)
-
-    loaded = facade.read("evidence-commit-1")
-
-    assert loaded.envelope.to_dict() == record.envelope.to_dict()
-    assert loaded.envelope.numeric_facts[0].value == 2.0
-    assert binding_store.calls == ["evidence-commit-1"]
-    assert envelope_store.calls == ["evidence-commit-1"]
-    with pytest.raises(EvidenceProjectionError, match="client facts"):
-        facade.read("evidence-commit-1", client_facts={"fact-mean": 99})
+def test_retired_results_facade_rejects_fake_load_ports() -> None:
+    with pytest.raises(EvidenceProjectionError, match="EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"):
+        PersistedEvidenceResultsFacadeV1(_FakeLoadPort(), _FakeLoadPort())
 
 
 def test_cross_consumer_projection_preserves_identity_values_and_status_axes() -> None:

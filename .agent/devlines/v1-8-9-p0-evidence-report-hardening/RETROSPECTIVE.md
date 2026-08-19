@@ -6,18 +6,18 @@
 
 ## Final status
 
-CONTEXT_RESCOPED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 7/22 (31.8%; 31.8 per 100 events)
-- Repeat rate: 0/7 (0.0%)
-- Recurrence rate: 0/7 (0.0%)
-- MTTR: median=0 ms (sample=3; unresolved=4)
+- Failure frequency: 8/30 (26.7%; 26.7 per 100 events)
+- Repeat rate: 0/8 (0.0%)
+- Recurrence rate: 0/8 (0.0%)
+- MTTR: median=0 ms (sample=4; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/10 (0.0%)
+- Gate waste rate: 0/14 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -34,6 +34,7 @@ CONTEXT_RESCOPED
 - #16 2026-08-19T18:00:00.000Z `owner_capability_fixture_mismatch`; cause_status: `known`; cause: After removing the report-local fake persistence ports, the existing canonical indexed tests still supplied a C1 fixture without a C0 owner capability and failed closed at the required content-hash gate.; resolution: `not_applicable`; lesson: Canonical Report probes must exercise the same C0 owner capability as production rather than pass a detached consumer fixture.
 - #17 2026-08-19T17:59:30.000Z `content_hash_alias_probe_failure`; cause_status: `known`; cause: The first real C0 owner probe reached production persistence but exposed an inconsistent pair of content-hash aliases: evidence_content_hash remained canonical while content_hash was tampered.; resolution: `resolved`; lesson: All index aliases for an authoritative identity must agree before a persistence capability is called.
 - #18 2026-08-19T18:02:00.000Z `route_owner_setup_failure`; cause_status: `known`; cause: The first route-level owner injection probe passed a non-existent persistence root to EvidencePacketStoreV1.admit, which correctly rejected the root before the route could run.; resolution: `resolved`; lesson: Owner-side persistence probes must materialize the admitted root before constructing the immutable store capability.
+- #27 2026-08-19T18:55:40.000Z `route_identity_seam_regression`; cause_status: `known`; cause: The first final backend gate started while the route still used the pre-hardening run-only current_report_evidence_persistence call, so the HTTP typed-failure probe raised TypeError before reaching the fail-closed projection.; resolution: `resolved`; lesson: After tightening an owner-capability selector, rerun the real HTTP route probe immediately rather than relying on an earlier in-flight test process.
 
 ## All gaps
 
@@ -49,6 +50,7 @@ CONTEXT_RESCOPED
 - `formal-retrospective-after-append`: occurrences=1; cause_status: `known`; root cause: Formal verify observed that the completed retrospective had not yet been regenerated after the new TDD red event was appended.; solution: `mitigated`
 - `owner-store-root-precondition`: occurrences=1; cause_status: `known`; root cause: The first route-level owner injection probe passed a non-existent persistence root to EvidencePacketStoreV1.admit, which correctly rejected the root before the route could run.; solution: `resolved`
 - `report-tests-use-c0-owner-capability`: occurrences=1; cause_status: `known`; root cause: After removing the report-local fake persistence ports, the existing canonical indexed tests still supplied a C1 fixture without a C0 owner capability and failed closed at the required content-hash gate.; solution: `not_applicable`
+- `route-identity-seam-regression`: occurrences=1; cause_status: `known`; root cause: The first final backend gate started while the route still used the pre-hardening run-only current_report_evidence_persistence call, so the HTTP typed-failure probe raised TypeError before reaching the fail-closed projection.; solution: `resolved`
 - `separate-agent-host-authority-failure`: occurrences=1; cause_status: `external`; root cause: The existing post-estimation compatibility run failed before the Report route assertion because the protected Agent workflow host-authority resolver is not configured.; solution: `accepted`
 - `separate-api-admission-failure`: occurrences=1; cause_status: `external`; root cause: The broader API compatibility suite could not materialize its completed-run report artifacts because the host-owned workflow admission receipt is unavailable.; solution: `accepted`
 - `validate-formal-event-enums`: occurrences=1; cause_status: `known`; root cause: The first TDD red gate event draft used an unsupported preventability value and was rejected by the formal CLI before being corrected and appended.; solution: `resolved`
@@ -63,12 +65,14 @@ CONTEXT_RESCOPED
 - `formal-retrospective-after-append`: line experience occurrence(s)=1
 - `owner-store-root-precondition`: line experience occurrence(s)=1
 - `report-tests-use-c0-owner-capability`: line experience occurrence(s)=1
+- `route-identity-seam-regression`: line experience occurrence(s)=1
 - `separate-agent-host-authority-failure`: line experience occurrence(s)=1
 - `separate-api-admission-failure`: line experience occurrence(s)=1
 - `validate-formal-event-enums`: line experience occurrence(s)=1
 
 ## Future guidance
 
+- After tightening an owner-capability selector, rerun the real HTTP route probe immediately rather than relying on an earlier in-flight test process.
 - All index aliases for an authoritative identity must agree before a persistence capability is called.
 - Canonical Report probes must exercise the same C0 owner capability as production rather than pass a detached consumer fixture.
 - Keep Agent host-authority failures separate from the Report consumer gate and use an isolated route probe for this line.
@@ -101,3 +105,11 @@ CONTEXT_RESCOPED
 - #20: `f82d9d4b-4e7d-4c3c-bb0d-e82bc73fdc38` | 2026-08-19T18:03:50.000Z | GATE/report_boundary_frontend_final | incident=`2ea3fe37-ecc6-4013-b65e-e49db6c4ea4e` | lesson_key=`frontend-typed-evidence-green` | event_sha256=`487551aecfc8e615bd3eaa31fb0d5f009f8ea3853dc2115296af3599aff38488`
 - #21: `5f1c9fe5-07a8-46f8-88e1-33b66e65782c` | 2026-08-19T18:03:55.000Z | GATE/report_static_gates_final | incident=`a60a2bee-d397-4a08-a6ab-7bcb62e83a63` | lesson_key=`report-static-gates-green` | event_sha256=`0615d4e8e1d166f8732d323e82fea552d382d9bbad26b1984c23d234a4047714`
 - #22: `cb3e2f1c-5276-42a2-aa55-77f8f8c1fda1` | 2026-08-19T18:05:52.000Z | GATE/formal_verify_final | incident=`acb56290-b579-4f57-82af-2de8199473e8` | lesson_key=`formal-final-verify-green` | event_sha256=`e767e527562367ee3d726d2f3f13889363e68284e5240dd6c4bce8afcbbfb031`
+- #23: `2152c23e-b109-4aac-8fc0-6b5119be2002` | 2026-08-19T18:38:54.000Z | GATE/tdd_red_second_round | incident=`e5325584-5d79-4070-adb6-efd6202c7c51` | lesson_key=`tdd-red-second-round-evidence-report` | event_sha256=`33c2273068a0f8c7de12693f54cbc4c99e62eecccac2ff3c3534e1432d6edd08`
+- #24: `fc14466e-aae6-48fd-8e0e-32d52d590cfd` | 2026-08-19T18:43:48.650Z | STATE_CHANGE/context_rescope_required | incident=`d693e33a-d2a0-48e6-8b87-60bb80277d17` | lesson_key=`context-pack-rescope` | event_sha256=`a0299f84b6fb91ef57f58198046b86a7bbef32c892e8aa6dca13cef45cd6a83e`
+- #25: `fd7ab24b-81b5-4909-9049-b85810aafa33` | 2026-08-19T18:43:48.661Z | STATE_CHANGE/context_rescoped | incident=`1ada45b0-c38f-4330-b339-136c123a4662` | lesson_key=`context-pack-rescope` | event_sha256=`cef394e5218abe047d76f412682a142db3244d6ee7cca89abb2dceef57cf1804`
+- #26: `11bc3b06-7558-41ef-a43f-3702968353c8` | 2026-08-19T18:52:45.000Z | GATE/report_hardening_green | incident=`4d8437f9-3d44-4ca4-9a96-da959b82784b` | lesson_key=`report-hardening-green` | event_sha256=`5f9c60f8d72f84acb10335504108d5e9480f851483dff782e39f92dd329e5fda`
+- #27: `6c2f3c56-6ca2-4e0b-bf93-1c4dcf7b7225` | 2026-08-19T18:55:40.000Z | ERROR/route_identity_seam_regression | incident=`0b43c5aa-c86a-4fd5-b0cb-792c7c05e9b1` | lesson_key=`route-identity-seam-regression` | event_sha256=`10b1535f235681be1e473f3cb71ecb095d6dfef9c623fb4a58f1c0b72419808d`
+- #28: `fae7c979-5a4c-46b6-9223-ff952220d685` | 2026-08-19T18:56:11.000Z | GATE/report_static_gates_green | incident=`86b93edd-2903-4fe5-8b9f-68b87b35e616` | lesson_key=`scoped-gates-separate` | event_sha256=`1ec34ac0854f74b5c01687f2c7abbe7508d443b234cac293ad77fe788da880d2`
+- #29: `e3dfcb11-7722-45c0-8840-4bf70c54254f` | 2026-08-19T18:56:19.000Z | GATE/report_hardening_final_gate | incident=`ba6fd4c8-104c-4b5a-bd72-5f49010763b7` | lesson_key=`report-hardening-final-gate` | event_sha256=`852270c84cacfd9d8335a161da5157cc5773524714874c4c4bfbe4922afda4dc`
+- #30: `824db8c5-dade-486b-9562-c893cab40c02` | 2026-08-19T18:56:40.000Z | STATE_CHANGE/report_hardening_completed | incident=`e91149e7-0f40-41f1-8660-d992dbc3bc55` | lesson_key=`report-hardening-complete` | event_sha256=`91bacf390c4ead5ff25fd459dc07a86e313cb60b4b238064d004de0d0bd1ecc2`

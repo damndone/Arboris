@@ -284,7 +284,6 @@ function reportEvidenceFingerprint(input: {
   scope: ReportRecord["scope"];
   facts: CitableFact[];
   figures: ReportFigure[];
-  modelResults: ModelResult[];
   timeSeriesArtifacts: Record<string, unknown>;
   reportEvidence: ReportEvidenceProjection | null;
 }): string {
@@ -711,13 +710,14 @@ export function ReportWorkspaceProvider({
   );
   const includedFigures = includedReportFigures(reportFigures, [...excludedFigureIds]);
   const includedFacts = includedReportFacts(allFacts, [...excludedIds], [...excludedFigureIds]);
-  const resultFamilies = [...new Set(modelResults.map((result) => result.model_type?.trim() || "unknown model"))];
+  const resultFamilies = reportEvidenceProjection
+    ? [`${reportEvidenceProjection.consumerId}:${reportEvidenceProjection.status}`]
+    : [];
   const activeEvidenceFingerprint = table
     ? reportEvidenceFingerprint({
         scope: table.scope,
         facts: allFacts,
         figures: reportFigures,
-        modelResults,
         timeSeriesArtifacts,
         reportEvidence: reportEvidenceProjection,
       })

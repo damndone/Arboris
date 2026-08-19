@@ -46,6 +46,8 @@ export interface ReportEvidenceProvenance {
 }
 
 export type ReportEvidenceProjection = EvidenceViewModel & {
+  readonly validationStatus: string;
+  readonly validationSummary: Readonly<Record<string, unknown>>;
   readonly commitId?: string;
   readonly reasonCode?: string;
   readonly provenance: ReportEvidenceProvenance;
@@ -114,12 +116,17 @@ export function readReportEvidenceProjection(value: unknown): ReportEvidenceProj
   const candidate = asEvidenceRecord(value)!;
   const provenance = readEvidenceProvenance(candidate.provenance);
   if (!provenance) return null;
+  const validationStatus = candidate.validationStatus;
+  const validationSummary = asEvidenceRecord(candidate.validationSummary);
+  if (typeof validationStatus !== "string" || validationStatus.trim().length === 0 || !validationSummary) return null;
   const commitId = candidate.commitId;
   const reasonCode = candidate.reasonCode;
   if (commitId !== undefined && typeof commitId !== "string") return null;
   if (reasonCode !== undefined && typeof reasonCode !== "string") return null;
   return {
     ...base,
+    validationStatus,
+    validationSummary,
     ...(commitId !== undefined ? { commitId } : {}),
     ...(reasonCode !== undefined ? { reasonCode } : {}),
     provenance,
@@ -142,6 +149,11 @@ export function unavailableReportEvidence(
     executionStatus: "unavailable",
     availability: "unavailable",
     completenessStatus: "unavailable",
+    validationStatus: "unavailable",
+    validationSummary: {
+      status: "unavailable",
+      reasonCode,
+    },
     facts: [],
     sections: [{ key: "persisted-evidence", label: "Persisted evidence", status: "unavailable" }],
     reasonCode,

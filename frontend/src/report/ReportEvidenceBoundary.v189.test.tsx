@@ -5,6 +5,7 @@ import {
   unavailableReportEvidence,
   type ReportEvidenceProjection,
 } from "./factTable";
+import { readReportEvidenceProjection } from "./factTable";
 import { FamilyEvidence, type FamilyModelResult } from "./FamilyEvidence";
 import { ReportViewContent } from "./ReportView";
 
@@ -29,6 +30,20 @@ const rawFamilyResult = {
   odds_ratios: { leaked_scalar: 9.9 },
 } as unknown as FamilyModelResult;
 
+const rawRegressionResult = {
+  model_id: "raw_ols_1",
+  model_type: "ols",
+  coefficients: {
+    leaked_term: {
+      estimate: 123.456,
+      std_error: 0.1,
+      p_value: 0.01,
+      ci_lower: 123.2,
+      ci_upper: 123.7,
+    },
+  },
+} as unknown as FamilyModelResult;
+
 const committedProjection: ReportEvidenceProjection = {
   projectionId: "report:evidence-commit-1",
   consumerId: "report",
@@ -40,6 +55,12 @@ const committedProjection: ReportEvidenceProjection = {
   executionStatus: "completed",
   availability: "available",
   completenessStatus: "complete",
+  validationStatus: "met",
+  validationSummary: {
+    levels_present: ["same_library_regression", "independent_implementation"],
+    minimum_required: "same_library_regression",
+    requirement_status: "met",
+  },
   facts: [{ factId: "fact-mean", statisticId: "sample-mean", value: 2, unit: "outcome-unit" }],
   sections: [],
   provenance: {
@@ -49,6 +70,16 @@ const committedProjection: ReportEvidenceProjection = {
     lineageRefs: ["operation-1", "artifact-1"],
   },
 };
+
+const validatedProjection = {
+  ...committedProjection,
+  validationStatus: "met",
+  validationSummary: {
+    levels_present: ["same_library_regression", "independent_implementation"],
+    minimum_required: "same_library_regression",
+    requirement_status: "met",
+  },
+} as ReportEvidenceProjection;
 
 describe("Report evidence boundary v1.8.9", () => {
   it("does not make an indexed uncommitted result citable", () => {
@@ -105,6 +136,27 @@ describe("Report evidence boundary v1.8.9", () => {
     expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
   });
 
+  it("parses and renders validation independently from execution and availability", () => {
+    const parsed = readReportEvidenceProjection(validatedProjection);
+    expect(parsed).toMatchObject({
+      validationStatus: "met",
+      validationSummary: expect.objectContaining({ requirement_status: "met" }),
+      executionStatus: "completed",
+      availability: "available",
+      completenessStatus: "complete",
+    });
+
+    render(
+      <FamilyEvidence
+        modelResults={[rawFamilyResult]}
+        evidence={validatedProjection}
+      />,
+    );
+
+    expect(screen.getByTestId(`typed-evidence-${validatedProjection.projectionId}`)).toHaveTextContent("Validation");
+    expect(screen.getByTestId(`typed-evidence-${validatedProjection.projectionId}`)).toHaveTextContent("MET");
+  });
+
   it("wires the real ReportView path to the typed FamilyEvidence projection", () => {
     mockForest.current = {
       activeRunId: "run-1",
@@ -137,7 +189,7 @@ describe("Report evidence boundary v1.8.9", () => {
       resultTableExporting: false,
       postEstimationLoadError: null,
       predictionEvidence: null,
-      modelResults: [rawFamilyResult],
+      modelResults: [rawRegressionResult, rawFamilyResult],
       familyEvidenceArtifacts: { raw: { leaked_scalar: 9.9 } },
       reportEvidenceProjection: committedProjection,
       reportExportAllowed: true,
@@ -163,5 +215,6 @@ describe("Report evidence boundary v1.8.9", () => {
     expect(screen.getByTestId(`typed-evidence-${committedProjection.projectionId}`)).toHaveTextContent("AVAILABLE");
     expect(screen.getByTestId("typed-evidence-provenance")).toHaveTextContent("operation-1");
     expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
+    expect(screen.queryByText("123.456")).not.toBeInTheDocument();
   });
 });
