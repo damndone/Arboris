@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pandas as pd
@@ -156,3 +160,90 @@ def test_survey_fpc_is_explicitly_blocked_when_not_supported(tmp_path: Path):
     assert outcome["status"] == "failed", outcome
     errors = read_json(project.root / "runs" / outcome["run_id"] / "errors.json")
     assert any(issue["code"] == "SURVEY_FPC_UNSUPPORTED" for issue in errors["issues"])
+
+
+def test_auto_count_workflow_uses_survey_poisson_alias_with_sampling_weight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Auto count routing must execute the same weighted survey Poisson path."""
+    from workbench.agent.workflow_contracts import model_family_contract
+
+    assert model_family_contract("poisson_rate").family == "poisson"
+    frame = _survey_frame(with_replicates=False)
+    source = tmp_path / "auto-count.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "auto-count")
+
+    import workbench.survey.engine as survey_engine
+
+    calls: list[dict[str, object]] = []
+    original = survey_engine.estimate_with_design
+
+    def instrumented(*args, **kwargs):
+        calls.append(
+            {
+                "method": kwargs.get("method"),
+                "replicate_type": kwargs.get("replicate_type"),
+                "estimator": dict(args[1].metadata),
+            }
+        )
+        result = original(*args, **kwargs)
+        calls[-1]["estimates"] = dict(result.estimates)
+        return result
+
+    monkeypatch.setattr(survey_engine, "estimate_with_design", instrumented)
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="auto",
+        y="count_y",
+        x=["x1", "x2"],
+        sampling_weight="weight",
+        survey_strata_col="stratum",
+        survey_psu_col="psu",
+        survey_lonely_psu="remove",
+        survey_subpop="subpop == 1",
+    )
+
+    assert outcome["status"] == "completed", outcome
+    assert len(calls) == 1, "auto count never called the shared survey engine"
+    assert calls[0]["method"] == "linearization"
+    assert calls[0]["estimator"]["glm_family"] == "poisson"
+
+    run_root = project.root / "runs" / outcome["run_id"]
+    result = read_json(run_root / "model_results" / "poisson_1.json")
+    assert result["survey_design"]["weight_column"] == "weight"
+    assert result["survey_design"]["variance_method"] == "linearization"
+    assert all(
+        coefficient["variance_source"] == "survey_design"
+        for coefficient in result["coefficients"].values()
+    )
+
+
+def test_clean_process_capability_bootstrap_returns_typed_survey_status():
+    """A known central import cycle must not become a false survey advertise."""
+    repo_root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_root / "backend")
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json; "
+                "from workbench.engine.capabilities import "
+                "survey_capability_bootstrap_status; "
+                "print(json.dumps(survey_capability_bootstrap_status(), sort_keys=True))"
+            ),
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0, probe.stderr
+    status = json.loads(probe.stdout)
+    assert status["status"] == "blocked"
+    assert status["code"] == "CAPABILITY_BOOTSTRAP_IMPORT_CYCLE"
+    assert status["sampling_weight_families"] == []

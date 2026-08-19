@@ -10,20 +10,21 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 5/10 (50.0%; 50.0 per 100 events)
-- Repeat rate: 0/5 (0.0%)
-- Recurrence rate: 0/5 (0.0%)
-- MTTR: median=0 ms (sample=3; unresolved=2)
+- Failure frequency: 6/17 (35.3%; 35.3 per 100 events)
+- Repeat rate: 0/6 (0.0%)
+- Recurrence rate: 0/6 (0.0%)
+- MTTR: median=0 ms (sample=4; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/2 (0.0%)
+- Gate waste rate: 0/4 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
 ## All failures
 
 - #2 2026-08-19T16:58:00.000Z `survey_glm_wiring_red`; cause_status: `known`; cause: The required RED run showed that Logit, Probit, and Poisson family workflows completed without entering the shared survey variance engine, and the unsupported FPC workflow completed instead of being blocked.; resolution: `resolved`; lesson: Instrument real family workflows before trusting capability declarations.
+- #13 2026-08-19T17:23:50.000Z `reviewer_spec_compliance_red`; cause_status: `known`; cause: The reviewer-directed RED probes showed that auto count falls through to the OLS fallback instead of the weighted poisson_rate handler, the clean capability helper is absent while build_capabilities hits the central import cycle, and both direct report HTML assertions still encounter a missing report artifact.; resolution: `open`; lesson: Turn reviewer findings into output-level red probes before changing production wiring or acceptance scope.
 
 ## All errors
 
@@ -42,6 +43,7 @@ COMPLETED
 ## Root causes and solutions
 
 - `instrument-real-survey-workflows`: occurrences=1; cause_status: `known`; root cause: The required RED run showed that Logit, Probit, and Poisson family workflows completed without entering the shared survey variance engine, and the unsupported FPC workflow completed instead of being blocked.; solution: `resolved`
+- `reviewer-spec-red-probes`: occurrences=1; cause_status: `known`; root cause: The reviewer-directed RED probes showed that auto count falls through to the OLS fallback instead of the weighted poisson_rate handler, the clean capability helper is absent while build_capabilities hits the central import cycle, and both direct report HTML assertions still encounter a missing report artifact.; solution: `open`
 - `separate-capability-bootstrap-gate`: occurrences=1; cause_status: `known`; root cause: A clean-process direct build_capabilities probe failed in the pre-existing StatisticalTestsStage and orchestrator circular import before reaching the survey capability projection; the scoped capability composition tests pass through their established harness.; solution: `accepted`
 - `separate-report-receipt-gate`: occurrences=1; cause_status: `known`; root cause: The existing survey report visibility tests reach run completion, but HTML report rendering is refused by the protected report helper because this direct test workflow has no admitted server receipt.; solution: `accepted`
 - `validate-event-vocabulary`: occurrences=1; cause_status: `known`; root cause: The first core verification event source used preventability=not_applicable, which the formal event schema correctly rejected before append.; solution: `resolved`
@@ -55,6 +57,7 @@ COMPLETED
 ## New rules
 
 - `instrument-real-survey-workflows`: line experience occurrence(s)=1
+- `reviewer-spec-red-probes`: line experience occurrence(s)=1
 - `separate-capability-bootstrap-gate`: line experience occurrence(s)=1
 - `separate-report-receipt-gate`: line experience occurrence(s)=1
 - `validate-event-vocabulary`: line experience occurrence(s)=1
@@ -63,9 +66,11 @@ COMPLETED
 ## Future guidance
 
 - Instrument real family workflows before trusting capability declarations.
+- Keep internal aliases on one family contract and make package-local acceptance distinguish typed external unavailability from successful report rendering.
 - Keep model-specific link and offset details inside the shared estimator adapter, not in a second variance workflow.
 - Keep package-local survey evidence separate from the protected admission-receipt and browser acceptance boundary.
 - Report capability projection tests with their actual bootstrap context and keep unrelated import-cycle gates out of the survey implementation scope.
+- Turn reviewer findings into output-level red probes before changing production wiring or acceptance scope.
 - Use the worktree interpreter and inspect the formal CLI command surface before appending line evidence.
 - Validate formal event vocabulary before submitting gate evidence.
 
@@ -81,3 +86,10 @@ COMPLETED
 - #8: `6f2a8d41-5c70-4e93-b1d6-9a2048c7f3be` | 2026-08-19T16:59:10.000Z | ERROR/formal_event_schema_probe | incident=`c1e7a4d9-2f80-4b63-9d5a-6c1048f7a2b3` | lesson_key=`validate-event-vocabulary` | event_sha256=`b3acf13c9ec1dffd3123b233b1542f21d17edc90c086644bb28d967077540344`
 - #9: `3e8a1d64-7c20-4f95-b6d1-9a5042c7f8be` | 2026-08-19T16:59:20.000Z | GATE/compile_and_diff_check_green | incident=`d4c7a1e9-2f80-4b63-9d5a-6c1048f7a2b3` | lesson_key=`compile-and-diff-gate` | event_sha256=`5c04e25c6ce6f662ec4e1979c7dcb0b6a73aaed62cf88f8b6cc6f8d14267cae8`
 - #10: `1d7a4e92-6c30-4f85-b9e1-2a5078c3d6fb` | 2026-08-19T17:01:00.000Z | STATE_CHANGE/line_completed | incident=`e4a1c7d9-2f60-4b83-9d5a-6c1048f7a2b3` | lesson_key=`explicit-boundary-line-close` | event_sha256=`cc22ffc7fd8c26307534c6cc05cd4111df8778ab42917cc60cfe11190e0f2016`
+- #11: `e420c0f9-b8b2-4137-9621-e1d2e2cd4d25` | 2026-08-19T17:21:27.904Z | STATE_CHANGE/context_rescope_required | incident=`af6c61e4-bd05-4e5f-8471-658507372d64` | lesson_key=`context-pack-rescope` | event_sha256=`6998f2dc3566475f03be7ffad60322c2f1ec3e3a6750a7864682bab50612d147`
+- #12: `f393c24d-4d1f-4f51-89c7-0bb91688cb35` | 2026-08-19T17:21:27.911Z | STATE_CHANGE/context_rescoped | incident=`7b25ca97-6b96-4a0d-9e4a-6476e63fccef` | lesson_key=`context-pack-rescope` | event_sha256=`f2421459d7b3ac1c7c0304a38d7d08d608d6cfaf86ea099a1acc937d4513b719`
+- #13: `2e6f3a91-4d72-4c08-9b15-7f0a6e2d4c83` | 2026-08-19T17:23:50.000Z | FAILURE/reviewer_spec_compliance_red | incident=`b7c4e2a1-6d93-4f08-9c25-7e1a3d5b9f62` | lesson_key=`reviewer-spec-red-probes` | event_sha256=`c88216ff33729dcdf6f46b5194f6ab8f4f8d57105db6c03ed80d982a6c2ae66d`
+- #14: `4a8d2f61-9c37-4e05-b7a2-6f1c9d3e8b54` | 2026-08-19T17:30:06.000Z | REVIEW/reviewer_spec_compliance_resolved | incident=`b7c4e2a1-6d93-4f08-9c25-7e1a3d5b9f62` | lesson_key=`reviewer-spec-red-probes` | event_sha256=`ecabdac2cac2b3bf6766602cadf74b103d2a31d3fe880db798ec60edfb9efddc`
+- #15: `6c1e8b4d-2f79-4a03-9d56-7b0c2e8f1a63` | 2026-08-19T17:30:30.000Z | GATE/survey_focused_verification_green | incident=`c2f7a9e1-4d63-8b05-6f2a-9e1c7d4b8f50` | lesson_key=`focused-gate-boundary` | event_sha256=`d4b67c37c90b376084215e05b2cbd3ef99b969084aa35409d7025f49fa19f707`
+- #16: `8f3a1d6c-5b72-4e09-a8c1-7d2f6b4e9a50` | 2026-08-19T17:30:53.000Z | GATE/compile_and_diff_check_green | incident=`d5a2f8c1-7e49-4b06-9d3f-1a6c8e2b7f50` | lesson_key=`compile-and-diff-check` | event_sha256=`87b6760afc038e3a4bfba6e57622eb094fb107b4d6d5a42476d03e630319bd19`
+- #17: `1b7e4c92-6d35-4a08-9f21-3c7b5e1d8a60` | 2026-08-19T17:31:20.000Z | STATE_CHANGE/line_completed | incident=`e6a1c7d9-4f20-8b35-6c2e-9d7a1f5b3c84` | lesson_key=`explicit-boundary-line-close` | event_sha256=`d7dc1a6283b0128c9606950defe6e2c03e98dcb64b1eff30b47841732c630703`

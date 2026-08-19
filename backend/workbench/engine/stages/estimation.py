@@ -31,9 +31,13 @@ def _validate_model_family_weights(
     future family fail closed unless it explicitly declares the weight kind.
     """
 
-    from ...agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ...agent.workflow_contracts import (
+        MODEL_FAMILY_CONTRACTS,
+        canonical_model_family,
+    )
 
-    contract = MODEL_FAMILY_CONTRACTS.get(model_type)
+    canonical = canonical_model_family(model_type)
+    contract = MODEL_FAMILY_CONTRACTS.get(canonical)
     allowed = frozenset(contract.allows_weights) if contract is not None else frozenset()
     provided = {
         kind: column
@@ -381,15 +385,19 @@ def _survey_estimator_for(
     a family that has not said how it fits under arbitrary weights does not get a
     design-based variance invented on its behalf.
     """
-    from ...agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ...agent.workflow_contracts import (
+        MODEL_FAMILY_CONTRACTS,
+        canonical_model_family,
+    )
     from ...survey.adapters import glm_estimator_spec
 
-    contract = MODEL_FAMILY_CONTRACTS.get(model_type)
+    canonical = canonical_model_family(model_type)
+    contract = MODEL_FAMILY_CONTRACTS.get(canonical)
     glm_family = getattr(contract, "survey_glm_family", None) if contract else None
     if not glm_family:
         return None
     return glm_estimator_spec(
-        family=model_type,
+        family=canonical,
         glm_family=glm_family,
         y=y,
         x=list(x),
@@ -1275,6 +1283,7 @@ def _write_design_precheck(ctx, env, model_results) -> None:
 def _check_survey_composition(ctx, model_type: str, sampling_weight: str) -> None:
     """Surface a survey composition refusal as a typed workflow failure."""
     from ...orchestrator._errors import WorkflowValidationError
+    from ...agent.workflow_contracts import canonical_model_family
     from ...survey.composability import (
         SurveyCompositionRefusal,
         check_design_composition,
@@ -1284,7 +1293,7 @@ def _check_survey_composition(ctx, model_type: str, sampling_weight: str) -> Non
     psu = str(ctx.artifacts.get("_survey_psu_col") or "").strip()
     try:
         check_design_composition(
-            model_type=model_type,
+            model_type=canonical_model_family(model_type),
             has_design=bool(strata or psu),
             has_sampling_weight=bool(sampling_weight),
             entity_column=str(ctx.artifacts.get("_entity_col") or "").strip() or None,

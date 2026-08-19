@@ -932,6 +932,22 @@ def _build_dcdh_model_params(
     }
 
 
+MODEL_FAMILY_ALIASES: dict[str, str] = {
+    # ``poisson_rate`` is the historical auto-routing registry key.  It is
+    # deliberately not a second public family or capability: its contract,
+    # weights, and survey adapter are the canonical Poisson ones.
+    "poisson_rate": "poisson",
+}
+
+
+def canonical_model_family(model_family: Any) -> Any:
+    """Resolve internal model aliases without advertising duplicate families."""
+
+    if not isinstance(model_family, str):
+        return model_family
+    return MODEL_FAMILY_ALIASES.get(model_family, model_family)
+
+
 MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     "anova": ModelFamilyContract(
         family="anova",
@@ -1322,12 +1338,13 @@ def notebook_workflow_capability_ids() -> tuple[str, ...]:
 
 
 def model_family_contract(model_family: Any) -> ModelFamilyContract:
-    if not isinstance(model_family, str) or model_family not in MODEL_FAMILY_CONTRACTS:
+    canonical = canonical_model_family(model_family)
+    if not isinstance(canonical, str) or canonical not in MODEL_FAMILY_CONTRACTS:
         raise OperationValidationError(
             "model.genesis model_family must be a workflow-executable family: "
             + " or ".join(MODEL_FAMILY_CONTRACTS)
         )
-    return MODEL_FAMILY_CONTRACTS[model_family]
+    return MODEL_FAMILY_CONTRACTS[canonical]
 
 
 def family_context_columns(
