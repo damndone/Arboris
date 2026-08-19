@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "event_id": "7f5e3d1c-9b8a-4c6d-2e1f-34567890abcd",
+  "timestamp": "2026-08-16T15:26:30.000Z",
+  "type": "GATE",
+  "subtype": "host_result_binding_hardening_gate",
+  "stage": "gate",
+  "cause_status": "not_applicable",
+  "cause": "The host result cross-object binding hardening passed its targeted red-green test, the complete compiler and manifest focused suites, compileall and diff checks.",
+  "evidence": {
+    "kind": "pytest_compile_diff",
+    "ref": "tests/test_v189_agent_compiler.py tests/test_v189_capability_manifest.py compileall git diff check",
+    "sha256": "f482bc10b5333db19d1d053f3dd42c23199bc1b35fc30fdf4791f5cb760d6f5e",
+    "observed_at": "2026-08-16T15:26:30.000Z"
+  },
+  "impact": {
+    "focused_tests": "73 passed, 14 warnings",
+    "compileall": "passed",
+    "git_diff_check": "passed",
+    "host_compiler_production_wiring": "NOT VERIFIED",
+    "browser_provider_release": "NOT VERIFIED"
+  },
+  "preventability": "not_preventable",
+  "resolution": "accepted",
+  "lesson": "Record the final focused gate again after a security review changes validation logic; earlier green counts and handoff hashes are stale evidence.",
+  "incident_id": "4d3c2b1a-0f9e-4d8c-7b6a-5432109876fe",
+  "lesson_key": "rerun-gate-after-validation-hardening",
+  "links": [
+    "backend/workbench/agent/plan_compiler.py",
+    "tests/test_v189_agent_compiler.py",
+    "docs/superpowers/handoff/2026-08-16-v1.8.9-p0-agent-compiler-legacy-cutover-handoff.md"
+  ]
+}
