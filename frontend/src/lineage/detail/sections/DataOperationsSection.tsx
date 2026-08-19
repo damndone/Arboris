@@ -141,12 +141,33 @@ async function requestSha256(request: Record<string, unknown>): Promise<string> 
   return Array.from(new Uint8Array(digest), (item) => item.toString(16).padStart(2, "0")).join("");
 }
 
+async function optionsSha256(request: Record<string, unknown>): Promise<string> {
+  const {
+    source_run_id: _run,
+    source_node_id: _node,
+    source_artifact_id: _artifact,
+    ...options
+  } = request;
+  return requestSha256(options);
+}
+
+function exactIdentityBindings(effect: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(effect).filter(
+      ([field, value]) => field.endsWith("_id") && typeof value === "string" && value.trim(),
+    ),
+  ) as Record<string, string>;
+}
+
 function confirmedPayloadError(
   payload: ConfirmPayload | null,
+  descriptor: DataOperationDescriptor,
   operationId: string,
   previewFingerprint: string,
   requestDigest: string,
+  optionsDigest: string,
   sourceIdentity: ResolvedSourceIdentity,
+  catalogDigest: string,
 ): string | null {
   if (!payload || payload.status !== "completed") {
     return "CONFIRM_INVALID: confirmation did not return completed status.";
@@ -157,6 +178,8 @@ function confirmedPayloadError(
     responsePreview.status !== "ready" ||
     responsePreview.fingerprint !== previewFingerprint ||
     responsePreview.request_sha256 !== requestDigest ||
+    responsePreview.options_sha256 !== optionsDigest ||
+    responsePreview.catalog_digest !== catalogDigest ||
     responsePreview.source_run_id !== sourceIdentity.source_run_id ||
     responsePreview.source_node_id !== sourceIdentity.source_node_id ||
     responsePreview.source_artifact_id !== sourceIdentity.source_artifact_id
@@ -183,6 +206,7 @@ function confirmedPayloadError(
     typeof operation.record_id !== "string" ||
     !operation.record_id.trim() ||
     operation.operation_id !== operationId ||
+    operation.operation_version !== descriptor.operation_version ||
     operation.status !== "completed"
   ) {
     return "CONFIRM_INVALID: completed operation identity is not server-verified.";
@@ -204,43 +228,100 @@ function confirmedPayloadError(
   if (!isObject(bindings)) {
     return "CONFIRM_INVALID: completed execution bindings are missing.";
   }
-  for (const [field, value] of Object.entries(effect)) {
-    if (!field.endsWith("_id") || typeof value !== "string") continue;
-    if (bindings[field] !== value && !Object.values(bindings).includes(value)) {
+  const expectedBindings = exactIdentityBindings(effect);
+  if (
+    JSON.stringify(Object.keys(bindings).sort()) !==
+    JSON.stringify(Object.keys(expectedBindings).sort())
+  ) {
+    return "CONFIRM_INVALID: completed effect bindings are not field-exact.";
+  }
+  for (const [field, value] of Object.entries(expectedBindings)) {
+    if (bindings[field] !== value) {
       return "CONFIRM_INVALID: completed effect binding does not match the OperationRecord.";
     }
   }
   const outputs = operation.outputs;
   const ports = isObject(outputs) && isObject(outputs.ports) ? outputs.ports : null;
+  const expectedPortNames = descriptor.output_ports.map((port) => port.name).sort();
+  if (
+    !ports ||
+    JSON.stringify(Object.keys(ports).sort()) !== JSON.stringify(expectedPortNames)
+  ) {
+    return "CONFIRM_INVALID: completed output ports do not match the descriptor.";
+  }
   const derived = ports && isObject(ports.derived) ? ports.derived : null;
   const operationRecordPort = ports && isObject(ports.operation_record) ? ports.operation_record : null;
   if (
     !derived ||
     derived.execution_key !== effect.execution_key ||
     derived.child_node_id !== effect.child_node_id ||
-    (typeof effect.artifact_id === "string" && derived.artifact_id !== effect.artifact_id) ||
+    Object.entries(effect).some(([field, value]) => derived[field] !== value) ||
     !operationRecordPort ||
-    operationRecordPort.record_id !== operation.record_id
+    operationRecordPort.record_id !== operation.record_id ||
+    operationRecordPort.operation_id !== operation.operation_id ||
+    operationRecordPort.operation_version !== descriptor.operation_version
   ) {
     return "CONFIRM_INVALID: typed output ports are not bound to the effect and record.";
   }
   const slots = isObject(outputs) && isObject(outputs.consumer_slots) ? outputs.consumer_slots : null;
-  if (!slots) return "CONFIRM_INVALID: typed consumer slots are missing.";
-  for (const slot of ["data.agent", "data.notebook", "data.report"]) {
+  const expectedSlots: Record<string, string> = {
+    "data.agent": "derived",
+    "data.notebook": "derived",
+    "data.report": "evidence",
+  };
+  if (
+    !slots ||
+    JSON.stringify(Object.keys(slots).sort()) !== JSON.stringify(Object.keys(expectedSlots).sort())
+  ) {
+    return "CONFIRM_INVALID: typed consumer slots are incomplete.";
+  }
+  for (const [slot, expectedPort] of Object.entries(expectedSlots)) {
     const value = slots[slot];
-    if (!isObject(value) || value.record_id !== operation.record_id) {
+    if (
+      !isObject(value) ||
+      value.record_id !== operation.record_id ||
+      value.port !== expectedPort
+    ) {
       return "CONFIRM_INVALID: typed consumer slot is not bound to the OperationRecord.";
     }
   }
   const evidence = ports && isObject(ports.evidence) ? ports.evidence : null;
   if (
     !evidence ||
+    typeof evidence.method !== "string" ||
+    !evidence.method.trim() ||
     evidence.record_id !== operation.record_id ||
     evidence.operation_id !== operationId ||
     evidence.execution_key !== effect.execution_key ||
     evidence.child_node_id !== effect.child_node_id
   ) {
     return "CONFIRM_INVALID: typed evidence is not bound to the effect and record.";
+  }
+  const expectedMethod =
+    typeof responsePreview.evidence_method === "string"
+      ? responsePreview.evidence_method
+      : typeof responsePreview.method === "string"
+        ? responsePreview.method
+        : operationId;
+  if (evidence.method !== expectedMethod) {
+    return "CONFIRM_INVALID: evidence method is stale or mismatched.";
+  }
+  const expectedEvidence: Record<string, unknown> = {
+    record_id: operation.record_id,
+    operation_id: operationId,
+    execution_key: effect.execution_key,
+    ...expectedBindings,
+  };
+  if (isObject(responsePreview.evidence)) {
+    Object.assign(expectedEvidence, responsePreview.evidence);
+  }
+  for (const [field, value] of Object.entries(expectedEvidence)) {
+    if (evidence[field] !== value) {
+      return "CONFIRM_INVALID: evidence payload is stale or mismatched.";
+    }
+  }
+  if (!isObject(outputs) || outputs.catalog_digest !== catalogDigest) {
+    return "CONFIRM_INVALID: catalog digest is stale or mismatched.";
   }
   return null;
 }
@@ -539,10 +620,13 @@ function ParsedDataOperationsSection({
       }
       const invalid = confirmedPayloadError(
         result.payload,
+        selectedOperation,
         selectedOperation.operation_id,
         fingerprint,
         await requestSha256(requestWithoutFingerprint),
+        await optionsSha256(requestWithoutFingerprint),
         sourceIdentity,
+        typeof previewPayload?.catalog_digest === "string" ? previewPayload.catalog_digest : "",
       );
       if (invalid) {
         if (result.payload && result.payload.status !== "completed") {

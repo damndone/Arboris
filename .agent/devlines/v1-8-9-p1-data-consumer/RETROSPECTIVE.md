@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 18/34 (52.9%; 52.9 per 100 events)
-- Repeat rate: 1/18 (5.6%)
-- Recurrence rate: 1/17 (5.9%)
-- MTTR: median=0 ms (sample=14; unresolved=4)
+- Failure frequency: 22/39 (56.4%; 56.4 per 100 events)
+- Repeat rate: 1/22 (4.5%)
+- Recurrence rate: 1/21 (4.8%)
+- MTTR: median=0 ms (sample=15; unresolved=7)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/14 (0.0%)
+- Gate waste rate: 0/15 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -30,6 +30,8 @@ COMPLETED
 - #27 2026-08-19T19:52:00.000Z `reviewer_adversarial_red_round3`; cause_status: `known`; cause: The third-round reviewer-directed RED probes reproduced the requested trust, authority, atomicity, live-manifest, runtime-adapter, and frontend completion gaps at the current tip before any production-path edit.; resolution: `open`; lesson: Adversarial tests must cross the server-owned artifact, live descriptor, transaction, typed adapter, and browser response boundaries before a focused green suite can establish compliance.
 - #31 2026-08-19T20:20:00.000Z `reviewer_adversarial_red_round4`; cause_status: `known`; cause: Six reviewer-directed RED probe groups reproduced the remaining metadata authority/provenance, proposal and OperationRecord atomicity, server-owned evidence/adapter capability, frontend transport and request binding, metadata-loss live-manifest, and metadata bounds blockers at the current tip before production-path remediation.; resolution: `open`; lesson: Keep the six adversarial boundaries red until server-owned provenance, transaction rollback, capability factories, real transport, live manifest authority, and reload bounds are each proven green.
 - #33 2026-08-19T21:05:00.000Z `complete_preflight_error_boundary_regression`; cause_status: `known`; cause: The new clone-based complete preflight correctly rejected occupied deterministic paths before writes, but three route handlers did not yet map those preflight exceptions into the public typed HTTP error boundary.; resolution: `resolved`; lesson: Complete write-free preflight must run before proposal and OperationRecord creation and must share the route's typed stale/conflict error mapping.
+- #35 2026-08-19T17:17:00.000Z `reviewer_adversarial_red_round5`; cause_status: `known`; cause: Round-5 reviewer probes reproduced payload-owned metadata SHA/label acceptance across repeated profile reloads and frontend completion after an effect identity matched only a differently named binding field.; resolution: `open`; lesson: Every metadata artifact identity must be independently bound to the server artifact index and bytes, and every frontend effect identity must bind by exact field name.
+- #37 2026-08-19T21:36:00.000Z `legacy_xlsx_idempotency_regression`; cause_status: `known`; cause: The legacy xlsx idempotency test exposed that detached metadata preflight did not reuse the existing derived artifact bytes SHA when xlsx serialization was non-deterministic.; resolution: `resolved`; lesson: When a derived artifact is already present, detached metadata preflight must bind to its existing server-owned bytes SHA before checking deterministic sidecar equality.
 
 ## All errors
 
@@ -43,10 +45,12 @@ COMPLETED
 - #25 2026-08-19T19:53:00.000Z `formal_event_evidence_kind_rejected`; cause_status: `known`; cause: The first third-round RED event append used an evidence.kind value outside the formal controlled identifier set and was rejected before writing.; resolution: `resolved`; lesson: Validate formal event enum fields before invoking devline_control append.
 - #26 2026-08-19T19:53:00.000Z `formal_event_tag_rejected`; cause_status: `known`; cause: The first third-round RED event append used an evidence.kind value outside the formal controlled identifier set and was rejected before writing.; resolution: `resolved`; lesson: Validate formal event enum fields before invoking devline_control append.
 - #28 2026-08-19T20:06:00.000Z `host_socket_sandbox_boundary`; cause_status: `external`; cause: The unprivileged C0/context-egress/evidence-host run could not bind its temporary Unix authority socket; the same command was rerun in the authorized host environment.; resolution: `resolved`; lesson: Run socket-authority evidence suites in the host environment and record the sandbox boundary separately.
+- #39 2026-08-19T21:43:00.000Z `git_stage_sandbox_rejected_round5`; cause_status: `external`; cause: Git could not create the linked worktree index lock under the protected shared repository metadata directory.; resolution: `mitigated`; lesson: When linked-worktree Git metadata is protected, preserve the source state and retry only with explicitly scoped metadata permission.
 
 ## All gaps
 
 - #11 2026-08-19T17:54:04.000Z `spec_compliance_red`; cause_status: `known`; cause: Independent specification probes found that metadata revisions, confirmed missing-value provenance, split children, weight consumption, transform sidecars, runtime adapter joins, and catalog surface evidence were incomplete in the prior tip.; resolution: `open`; lesson: Every advertised data-consumer contract needs a server-owned artifact probe and a child reload probe before the manifest is trusted.
+- #36 2026-08-19T17:22:20.000Z `metadata_sha_contract_regression`; cause_status: `known`; cause: The strict raw-bytes equality required by the reviewer makes every current metadata JSON envelope self-referential: metadata_artifact.sha256 is stored inside the file whose SHA-256 it must equal. The remediation therefore turns the existing metadata reload and operation regression red.; resolution: `open`; lesson: Do not claim a metadata SHA remediation is complete until the artifact representation provides a non-self-referential server-owned digest contract and all existing producers and reload consumers pass together.
 
 ## All waste
 
@@ -57,9 +61,12 @@ COMPLETED
 - `data-consumer-adversarial-red`: occurrences=1; cause_status: `known`; root cause: Reviewer-directed adversarial RED probes reproduced incomplete split/group metadata binding, partial rename confirmation writes, route reachability independent of the live manifest, permissive runtime adapter trust boundaries, and frontend completion on unverified confirmation responses.; solution: `open`
 - `data-consumer-contract-first`: occurrences=1; cause_status: `known`; root cause: New data-consumer contract tests were run at the frozen baseline before implementation and correctly failed for typed metadata mutation, user-defined missing filters, sort/split/batch recode, interchange, manifest reachability, and unavailable UI rendering.; solution: `accepted`
 - `data-consumer-manifest-live-surface`: occurrences=1; cause_status: `known`; root cause: The manifest implementation now includes the authorized local metadata/sort/split/recode descriptors, so the frozen legacy EXPECTED_OPERATION_IDS assertion and builtin provider digest fixture fail until the allowlisted tests and fixture are updated.; solution: `open`
+- `data-consumer-metadata-sha-self-reference-round5`: occurrences=1; cause_status: `known`; root cause: The strict raw-bytes equality required by the reviewer makes every current metadata JSON envelope self-referential: metadata_artifact.sha256 is stored inside the file whose SHA-256 it must equal. The remediation therefore turns the existing metadata reload and operation regression red.; solution: `open`
 - `data-consumer-reviewer-blockers-round4`: occurrences=1; cause_status: `known`; root cause: Six reviewer-directed RED probe groups reproduced the remaining metadata authority/provenance, proposal and OperationRecord atomicity, server-owned evidence/adapter capability, frontend transport and request binding, metadata-loss live-manifest, and metadata bounds blockers at the current tip before production-path remediation.; solution: `open`
+- `data-consumer-reviewer-blockers-round5`: occurrences=1; cause_status: `known`; root cause: Round-5 reviewer probes reproduced payload-owned metadata SHA/label acceptance across repeated profile reloads and frontend completion after an effect identity matched only a differently named binding field.; solution: `open`
 - `data-consumer-server-artifact-probes`: occurrences=1; cause_status: `known`; root cause: Independent specification probes found that metadata revisions, confirmed missing-value provenance, split children, weight consumption, transform sidecars, runtime adapter joins, and catalog surface evidence were incomplete in the prior tip.; solution: `open`
 - `data-consumer-third-round-adversarial-red`: occurrences=1; cause_status: `known`; root cause: The third-round reviewer-directed RED probes reproduced the requested trust, authority, atomicity, live-manifest, runtime-adapter, and frontend completion gaps at the current tip before any production-path edit.; solution: `open`
+- `detached-digest-legacy-replay`: occurrences=1; cause_status: `known`; root cause: The legacy xlsx idempotency test exposed that detached metadata preflight did not reuse the existing derived artifact bytes SHA when xlsx serialization was non-deterministic.; solution: `resolved`
 - `exception-edit-import-check`: occurrences=1; cause_status: `known`; root cause: The first patch for the unconfirmed metadata sidecar branch mis-indented an except clause and Python rejected the module during test collection.; solution: `resolved`
 - `final-handoff-whitespace-gate`: occurrences=1; cause_status: `known`; root cause: The staged handoff Markdown used two trailing spaces for line breaks, so git diff --cached --check correctly rejected the staged closeout even though source and test files were clean.; solution: `resolved`
 - `formal-event-controlled-evidence-kind`: occurrences=2; cause_status: `known`; root cause: The first third-round RED event append used an evidence.kind value outside the formal controlled identifier set and was rejected before writing.; solution: `resolved`
@@ -67,6 +74,7 @@ COMPLETED
 - `formal-event-evidence-digest`: occurrences=1; cause_status: `known`; root cause: The first formal append attempt used a non-digest evidence placeholder and the CLI rejected it before writing the event.; solution: `resolved`
 - `formal-retrospective-refresh-order`: occurrences=1; cause_status: `known`; root cause: After appending the final handoff whitespace event, verify was invoked before the required retrospective regeneration and correctly rejected the stale RETROSPECTIVE.md.; solution: `resolved`
 - `git-metadata-sandbox-stage`: occurrences=1; cause_status: `external`; root cause: The unprivileged staging command could not create the worktree Git index lock under the protected root Git metadata directory.; solution: `resolved`
+- `git-stage-linked-worktree-metadata-boundary`: occurrences=1; cause_status: `external`; root cause: Git could not create the linked worktree index lock under the protected shared repository metadata directory.; solution: `mitigated`
 - `host-socket-environment-boundary`: occurrences=1; cause_status: `external`; root cause: The unprivileged C0/context-egress/evidence-host run could not bind its temporary Unix authority socket; the same command was rerun in the authorized host environment.; solution: `resolved`
 - `preflight-errors-must-use-public-http-boundary`: occurrences=1; cause_status: `known`; root cause: The new clone-based complete preflight correctly rejected occupied deterministic paths before writes, but three route handlers did not yet map those preflight exceptions into the public typed HTTP error boundary.; solution: `resolved`
 - `typed-unavailable-rendering`: occurrences=1; cause_status: `known`; root cause: The first frontend implementation rendered descriptor-level availability through the top-level unavailable shape and omitted reason_code/message; the focused UI test caught the typed boundary losing its reason before the selector was removed.; solution: `resolved`
@@ -81,9 +89,12 @@ COMPLETED
 - `data-consumer-adversarial-red`: line experience occurrence(s)=1
 - `data-consumer-contract-first`: line experience occurrence(s)=1
 - `data-consumer-manifest-live-surface`: line experience occurrence(s)=1
+- `data-consumer-metadata-sha-self-reference-round5`: line experience occurrence(s)=1
 - `data-consumer-reviewer-blockers-round4`: line experience occurrence(s)=1
+- `data-consumer-reviewer-blockers-round5`: line experience occurrence(s)=1
 - `data-consumer-server-artifact-probes`: line experience occurrence(s)=1
 - `data-consumer-third-round-adversarial-red`: line experience occurrence(s)=1
+- `detached-digest-legacy-replay`: line experience occurrence(s)=1
 - `exception-edit-import-check`: line experience occurrence(s)=1
 - `final-handoff-whitespace-gate`: line experience occurrence(s)=1
 - `formal-event-controlled-evidence-kind`: line experience occurrence(s)=2
@@ -91,6 +102,7 @@ COMPLETED
 - `formal-event-evidence-digest`: line experience occurrence(s)=1
 - `formal-retrospective-refresh-order`: line experience occurrence(s)=1
 - `git-metadata-sandbox-stage`: line experience occurrence(s)=1
+- `git-stage-linked-worktree-metadata-boundary`: line experience occurrence(s)=1
 - `host-socket-environment-boundary`: line experience occurrence(s)=1
 - `preflight-errors-must-use-public-http-boundary`: line experience occurrence(s)=1
 - `typed-unavailable-rendering`: line experience occurrence(s)=1
@@ -101,7 +113,9 @@ COMPLETED
 - A metadata sidecar may preserve provenance without becoming a consumer registry unless its confirmed flag is true; chained transforms must distinguish those states.
 - Adversarial tests must cross the server-owned artifact, live descriptor, transaction, typed adapter, and browser response boundaries before a focused green suite can establish compliance.
 - Complete write-free preflight must run before proposal and OperationRecord creation and must share the route's typed stale/conflict error mapping.
+- Do not claim a metadata SHA remediation is complete until the artifact representation provides a non-self-referential server-owned digest contract and all existing producers and reload consumers pass together.
 - Every advertised data-consumer contract needs a server-owned artifact probe and a child reload probe before the manifest is trusted.
+- Every metadata artifact identity must be independently bound to the server artifact index and bytes, and every frontend effect identity must bind by exact field name.
 - Freeze typed data-consumer declarations as red assertions before implementing the runtime and UI seams.
 - Keep descriptor-level and manifest-level unavailable projections explicitly typed at the renderer boundary.
 - Keep the six adversarial boundaries red until server-owned provenance, transaction rollback, capability factories, real transport, live manifest authority, and reload bounds are each proven green.
@@ -114,7 +128,9 @@ COMPLETED
 - Validate formal event enum fields before appending the final gate evidence.
 - Validate formal event enum fields before invoking devline_control append.
 - Validate formal event evidence fields before invoking append.
+- When a derived artifact is already present, detached metadata preflight must bind to its existing server-owned bytes SHA before checking deterministic sidecar equality.
 - When a user-authorized worktree commit is blocked by Git metadata sandboxing, preserve the source state and retry only with scoped metadata permission.
+- When linked-worktree Git metadata is protected, preserve the source state and retry only with explicitly scoped metadata permission.
 
 ## Event index
 
@@ -152,3 +168,8 @@ COMPLETED
 - #32: `6e3a9c1f-4b7d-42e8-a5c0-1f9d7b3e6a2c` | 2026-08-19T20:50:00.000Z | GATE/reviewer_adversarial_green_round4 | incident=`8b4d1f7a-2c6e-49a0-9d3f-5e1b7c8a2f4d` | lesson_key=`data-consumer-reviewer-blockers-round4-closed` | event_sha256=`082087c1dca55153eae442cd97b44ff4d747eef49f2a52dd2d5596314eedcae5`
 - #33: `7f2c9a4e-1b6d-4e80-9a53-2c7d8e1f0b4a` | 2026-08-19T21:05:00.000Z | FAILURE/complete_preflight_error_boundary_regression | incident=`9c5e2a7b-4d1f-48e6-a0c3-7b2d9f5e1a64` | lesson_key=`preflight-errors-must-use-public-http-boundary` | event_sha256=`8b7cb174d0febb8c4f5a27fba0b83029518c96d7c7219e7f9aa25b299252d042`
 - #34: `8a4d1f6c-2b7e-49f0-a5c3-7e1b9d2f6a84` | 2026-08-19T20:53:41.000Z | GATE/reviewer_adversarial_green_round4_final | incident=`8b4d1f7a-2c6e-49a0-9d3f-5e1b7c8a2f4d` | lesson_key=`data-consumer-reviewer-blockers-round4-final` | event_sha256=`158da8371ab52d622706d2287b9a9c6e69e3365758a8200233f057fa368a744b`
+- #35: `5f2a9c7e-1b4d-4e80-9a63-2c7d8e1f0b5b` | 2026-08-19T17:17:00.000Z | FAILURE/reviewer_adversarial_red_round5 | incident=`5f2a9c7e-1b4d-4e80-9a63-2c7d8e1f0b5a` | lesson_key=`data-consumer-reviewer-blockers-round5` | event_sha256=`e8dbefc8cacac5ec73131397df478991e2713df52d91dfbdcbc868108deb4ea0`
+- #36: `7c1e4a92-6d3f-4b80-a5e7-2f9c1d6b8a34` | 2026-08-19T17:22:20.000Z | GAP/metadata_sha_contract_regression | incident=`7c1e4a92-6d3f-4b80-a5e7-2f9c1d6b8a33` | lesson_key=`data-consumer-metadata-sha-self-reference-round5` | event_sha256=`fd81d3c89c2f2dc005d244758ba83e2d11c597c7b110b31413b24b7a8b05a30b`
+- #37: `0c7d8e9f-1a2b-4c3d-8e5f-60718293a4b5` | 2026-08-19T21:36:00.000Z | FAILURE/legacy_xlsx_idempotency_regression | incident=`1d2e3f40-5a6b-4c7d-8e9f-0a1b2c3d4e5f` | lesson_key=`detached-digest-legacy-replay` | event_sha256=`1dd86bab0c6c5259d34059b9f5d8caa4defbd72e98feffb8f29549cdcac28be1`
+- #38: `2e3f4051-6a7b-4c8d-9e0f-1a2b3c4d5e6f` | 2026-08-19T21:40:00.000Z | GATE/detached_digest_final_verification | incident=`3f405162-7a8b-4c9d-0e1f-2a3b4c5d6e7f` | lesson_key=`detached-digest-final-gate` | event_sha256=`2e7a693b7197e7ac3d885cfef02ba7aebd203b37975a09c1076c1a79e49d997b`
+- #39: `4f506172-8394-4a5b-6c7d-8e9f0a1b2c3d` | 2026-08-19T21:43:00.000Z | ERROR/git_stage_sandbox_rejected_round5 | incident=`50617283-94a5-4b6c-7d8e-9f0a1b2c3d4e` | lesson_key=`git-stage-linked-worktree-metadata-boundary` | event_sha256=`35e539c5c50974f7da49871d8111af6a3a7fb030263072848290f0c1ec0ead89`

@@ -233,12 +233,6 @@ def test_metadata_registry_requires_server_owned_content_schema_and_index_proven
             "artifact_id": "schema-artifact",
             "sha256": "e" * 64,
         },
-        "metadata_artifact": {
-            "artifact_id": "metadata-artifact",
-            "path": "metadata/registry.json",
-            "sha256": "d" * 64,
-        },
-        "metadata_index": {"path": "artifacts_index.json", "sha256": "c" * 64},
         "metadata": metadata,
     }
 

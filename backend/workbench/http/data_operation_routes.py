@@ -108,9 +108,48 @@ def _request_sha256(body: BaseModel, *, exclude: set[str] | None = None) -> str:
     ).hexdigest()
 
 
+def _options_sha256(body: BaseModel, *, exclude: set[str] | None = None) -> str:
+    return _request_sha256(
+        body,
+        exclude={
+            "source_run_id",
+            "source_node_id",
+            "source_artifact_id",
+            "preview_fingerprint",
+            "session_id",
+            *(exclude or set()),
+        },
+    )
+
+
+def _data_consumer_catalog_digest() -> str:
+    from ..data_operation_manifest import build_data_consumer_runtime_adapter
+
+    try:
+        return build_data_consumer_runtime_adapter().catalog_digest
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_CONSUMER_RUNTIME_UNAVAILABLE",
+            message="The server-owned data-consumer catalog is unavailable.",
+            details={"reason": str(exc)},
+        ) from exc
+
+
 def _preview_payload(body: BaseModel, preview: Any) -> dict[str, Any]:
     payload = preview.to_dict()
     payload["request_sha256"] = _request_sha256(body)
+    payload["options_sha256"] = _options_sha256(body)
+    payload["catalog_digest"] = _data_consumer_catalog_digest()
+    operation_id = payload.get("operation_id")
+    if isinstance(payload.get("method"), str) and payload["method"]:
+        payload["evidence_method"] = payload["method"]
+    elif operation_id == "data.metadata.update":
+        payload["evidence_method"] = "metadata_update"
+    elif operation_id == "data.feature_recipe":
+        payload["evidence_method"] = "feature_recipe"
+    elif isinstance(operation_id, str) and operation_id.startswith("data."):
+        payload["evidence_method"] = operation_id
     return payload
 
 
@@ -120,6 +159,17 @@ def _confirm_preview_payload(body: BaseModel, preview: Any) -> dict[str, Any]:
         body,
         exclude={"preview_fingerprint", "session_id"},
     )
+    payload["options_sha256"] = _options_sha256(body)
+    payload["catalog_digest"] = _data_consumer_catalog_digest()
+    operation_id = payload.get("operation_id")
+    if isinstance(payload.get("method"), str) and payload["method"]:
+        payload["evidence_method"] = payload["method"]
+    elif operation_id == "data.metadata.update":
+        payload["evidence_method"] = "metadata_update"
+    elif operation_id == "data.feature_recipe":
+        payload["evidence_method"] = "feature_recipe"
+    elif isinstance(operation_id, str) and operation_id.startswith("data."):
+        payload["evidence_method"] = operation_id
     return payload
 
 
@@ -1395,12 +1445,33 @@ def get_metadata_mutation_route(project_root: str, record_id: str) -> dict[str, 
         if not isinstance(source, dict) or not isinstance(artifact, dict):
             raise ValueError("metadata operation record is malformed")
         run_id = source.get("run_id")
-        relative = artifact.get("path")
-        expected_sha = artifact.get("sha256")
-        if not isinstance(run_id, str) or not isinstance(relative, str):
+        artifact_id = artifact.get("artifact_id")
+        record_relative = artifact.get("path")
+        record_sha = artifact.get("sha256")
+        if not isinstance(run_id, str) or not isinstance(artifact_id, str):
             raise ValueError("metadata operation record has invalid artifact identity")
-        artifact_path = (root / "runs" / run_id / relative).resolve()
         run_root = (root / "runs" / run_id).resolve()
+        index = read_json(run_root / "artifacts_index.json")
+        rows = index.get("artifacts")
+        if not isinstance(rows, list):
+            raise ValueError("metadata artifact index is malformed")
+        index_row = next(
+            (row for row in rows if isinstance(row, dict) and row.get("artifact_id") == artifact_id),
+            None,
+        )
+        if not isinstance(index_row, dict):
+            raise ValueError("metadata artifact is not registered")
+        relative = index_row.get("path")
+        expected_sha = index_row.get("sha256")
+        if (
+            index_row.get("artifact_type") != "metadata"
+            or not isinstance(relative, str)
+            or not isinstance(expected_sha, str)
+            or record_relative != relative
+            or record_sha != expected_sha
+        ):
+            raise ValueError("metadata artifact provenance is not index-bound")
+        artifact_path = (run_root / relative).resolve()
         artifact_path.relative_to(run_root)
         if not artifact_path.is_file():
             raise FileNotFoundError("metadata artifact is missing")

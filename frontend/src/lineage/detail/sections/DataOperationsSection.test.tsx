@@ -37,6 +37,16 @@ async function requestDigest(request: Record<string, unknown>): Promise<string> 
   return Array.from(new Uint8Array(bytes), (item) => item.toString(16).padStart(2, "0")).join("");
 }
 
+async function optionsDigest(request: Record<string, unknown>): Promise<string> {
+  const {
+    source_run_id: _run,
+    source_node_id: _node,
+    source_artifact_id: _artifact,
+    ...options
+  } = request;
+  return requestDigest(options);
+}
+
 function rawTransport(value: unknown) {
   return { __rawTransport: value };
 }
@@ -61,13 +71,22 @@ async function testResponse(
   }
   const preview = body.preview;
   if (phase === "preview" && typeof preview === "object" && preview !== null) {
-    body.preview = { ...(preview as Record<string, unknown>), request_sha256: await requestDigest(request) };
+    body.preview = {
+      ...(preview as Record<string, unknown>),
+      request_sha256: await requestDigest(request),
+      options_sha256: await optionsDigest(request),
+      catalog_digest: "c".repeat(64),
+      evidence_method: "data.example",
+    };
   }
   if (phase === "confirm" && typeof preview === "object" && preview !== null) {
     const { preview_fingerprint: _previewFingerprint, ...requestWithoutFingerprint } = request;
     body.preview = {
       ...(preview as Record<string, unknown>),
       request_sha256: await requestDigest(requestWithoutFingerprint),
+      options_sha256: await optionsDigest(requestWithoutFingerprint),
+      catalog_digest: "c".repeat(64),
+      evidence_method: "data.example",
     };
   }
   return new Response(JSON.stringify(body), { status });
@@ -82,6 +101,7 @@ function completedResponse(overrides: Record<string, unknown> = {}) {
       preview: {
         status: "ready",
         fingerprint: "preview-fp-default",
+        catalog_digest: "c".repeat(64),
         source_run_id: SOURCE_IDENTITY.source_run_id,
         source_node_id: SOURCE_IDENTITY.source_node_id,
         source_artifact_id: SOURCE_IDENTITY.source_artifact_id,
@@ -90,10 +110,14 @@ function completedResponse(overrides: Record<string, unknown> = {}) {
         execution_key: "exec-1",
         child_node_id: "child-1",
         artifact_id: "artifact-2",
+        metadata_artifact_id: "metadata-2",
+        recipe_artifact_id: "recipe-2",
+        group_manifest_id: "group-2",
       },
       operation: {
         record_id: "record-1",
         operation_id: "data.example",
+        operation_version: "v1",
         status: "completed",
         target: {
           run_id: SOURCE_IDENTITY.source_run_id,
@@ -104,17 +128,36 @@ function completedResponse(overrides: Record<string, unknown> = {}) {
           execution_key: "exec-1",
           bindings: {
             artifact_id: "artifact-2",
-            data_child_node_id: "child-1",
+            child_node_id: "child-1",
+            metadata_artifact_id: "metadata-2",
+            recipe_artifact_id: "recipe-2",
+            group_manifest_id: "group-2",
           },
         },
         outputs: {
           ports: {
-            derived: { execution_key: "exec-1", artifact_id: "artifact-2", child_node_id: "child-1" },
-            operation_record: { record_id: "record-1" },
+            derived: {
+              execution_key: "exec-1",
+              artifact_id: "artifact-2",
+              metadata_artifact_id: "metadata-2",
+              recipe_artifact_id: "recipe-2",
+              group_manifest_id: "group-2",
+              child_node_id: "child-1",
+            },
+            operation_record: {
+              record_id: "record-1",
+              operation_id: "data.example",
+              operation_version: "v1",
+            },
             evidence: {
+              method: "data.example",
               record_id: "record-1",
               operation_id: "data.example",
               execution_key: "exec-1",
+              artifact_id: "artifact-2",
+              metadata_artifact_id: "metadata-2",
+              recipe_artifact_id: "recipe-2",
+              group_manifest_id: "group-2",
               child_node_id: "child-1",
             },
           },
@@ -123,6 +166,7 @@ function completedResponse(overrides: Record<string, unknown> = {}) {
             "data.notebook": { record_id: "record-1", port: "derived" },
             "data.report": { record_id: "record-1", port: "evidence" },
           },
+          catalog_digest: "c".repeat(64),
         },
       },
       ...overrides,
@@ -182,6 +226,22 @@ function descriptor(overrides: Record<string, unknown> = {}) {
         cardinality: "one",
         required: true,
         identity_fields: [],
+      },
+      {
+        name: "operation_record",
+        port_type: "operation_record",
+        dataset_kind: null,
+        cardinality: "one",
+        required: true,
+        identity_fields: ["record_id"],
+      },
+      {
+        name: "evidence",
+        port_type: "evidence",
+        dataset_kind: null,
+        cardinality: "one",
+        required: true,
+        identity_fields: ["method"],
       },
     ],
     metadata_effect: "preserve source metadata",
@@ -546,6 +606,42 @@ describe("DataOperationsSection", () => {
     expect(await screen.findByTestId("data-operation-error")).toHaveTextContent("CONFIRM_INVALID");
   });
 
+  it("rejects an effect identity that only matches a different binding field", async () => {
+    const valid = completedResponse();
+    const body = (await valid.json()) as {
+      operation: { execution: { bindings: Record<string, string> } };
+      [key: string]: unknown;
+    };
+    body.operation.execution.bindings = {
+      artifact_id: "artifact-2",
+      data_child_node_id: "child-1",
+      metadata_artifact_id: "metadata-2",
+      recipe_artifact_id: "recipe-2",
+      group_manifest_id: "group-2",
+    };
+    confirmMock.mockResolvedValue(body);
+    previewMock.mockResolvedValue({
+      preview: { status: "ready", fingerprint: "preview-fp-default" },
+    });
+
+    render(<DataOperationsSection {...sectionProps()} />);
+    fireEvent.change(screen.getByLabelText("Data operation"), {
+      target: { value: "data.example" },
+    });
+    fireEvent.change(screen.getByLabelText("label"), {
+      target: { value: "binding-mutation" },
+    });
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+    await screen.findByTestId("data-operation-preview-ready");
+    fireEvent.click(screen.getByTestId("data-operation-confirm"));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("data-operation-complete")).toBeNull();
+    expect(await screen.findByTestId("data-operation-error")).toHaveTextContent(
+      "CONFIRM_INVALID",
+    );
+  });
+
   it("requires typed effect and operation identity before showing completed", async () => {
     confirmMock.mockResolvedValue({
       status: "completed",
@@ -569,8 +665,8 @@ describe("DataOperationsSection", () => {
 
     await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId("data-operation-complete")).toBeNull();
-    expect(screen.getByTestId("data-operation-error")).toHaveTextContent(
-      "CONFIRM_INVALID",
+    await waitFor(() =>
+      expect(screen.getByTestId("data-operation-error")).toHaveTextContent("CONFIRM_INVALID"),
     );
   });
 });

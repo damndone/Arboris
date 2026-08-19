@@ -1601,6 +1601,7 @@ def apply_data_transform(
         source_sha256=str(left_artifact.get("sha256") or sha256_file(left_path)),
         operation_id=f"data.{spec.operation}",
         preview_fingerprint=fresh.fingerprint,
+        output_sha256=sha256_file(artifact_path) if artifact_path.exists() else None,
         column_aliases=_metadata_column_aliases(spec),
     )
     recipe_payload = {
@@ -1829,6 +1830,7 @@ def _preflight_split_groups(
             source_sha256=preview.source_sha256,
             operation_id="data.split",
             preview_fingerprint=preview.fingerprint,
+            output_sha256=sha256_file(artifact_path) if artifact_path.exists() else None,
             column_aliases=_metadata_column_aliases(spec),
         )
         _preflight_frame_artifact(artifact_path, group)
@@ -1964,6 +1966,7 @@ def _materialize_split_groups(
             source_sha256=preview.source_sha256,
             operation_id="data.split",
             preview_fingerprint=preview.fingerprint,
+            output_sha256=sha256_file(artifact_path) if artifact_path.exists() else None,
             column_aliases=_metadata_column_aliases(spec),
         )
         _preflight_frame_artifact(artifact_path, group)
@@ -2289,21 +2292,6 @@ def apply_metadata_mutation(
     metadata_rel = (relative_dir / "metadata.json").as_posix()
     record_rel = (relative_dir / "operation.json").as_posix()
     metadata_path = run_root / metadata_rel
-    metadata_artifact_digest = hashlib.sha256(
-        json.dumps(
-            {"schema_revision": fresh.schema_revision, "metadata": fresh.canonical_metadata},
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
-    metadata_index_entry = {
-        "artifact_id": metadata_artifact_id,
-        "path": metadata_rel,
-        "artifact_type": "metadata",
-        "step": "data.metadata.update",
-        "inputs": [spec.source_artifact_id],
-    }
     record_path = run_root / record_rel
     child_node_id = f"metadata-update:{suffix}"
     source_sha = str(source_artifact.get("sha256") or "")
@@ -2328,21 +2316,6 @@ def apply_metadata_mutation(
         "schema_artifact": {
             "artifact_id": metadata_registry.schema_artifact_id,
             "sha256": metadata_registry.schema_artifact_sha256,
-        },
-        "metadata_artifact": {
-            "artifact_id": metadata_artifact_id,
-            "path": metadata_rel,
-            "sha256": metadata_artifact_digest,
-        },
-        "metadata_index": {
-            "entry_sha256": hashlib.sha256(
-                json.dumps(
-                    metadata_index_entry,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest()
         },
         "child_node_id": child_node_id,
         "provenance": {
@@ -2691,6 +2664,7 @@ def apply_feature_recipe_operation(
         source_sha256=str(source_artifact.get("sha256") or sha256_file(source_path)),
         operation_id="data.feature_recipe",
         preview_fingerprint=fresh.fingerprint,
+        output_sha256=sha256_file(artifact_path) if artifact_path.exists() else None,
     )
     recipe_payload = {
         **spec.recipe.to_dict(),
@@ -3003,6 +2977,7 @@ def apply_data_column_cast(
         source_sha256=str(source_artifact.get("sha256") or sha256_file(source_path)),
         operation_id=spec.operation_id,
         preview_fingerprint=fresh.fingerprint,
+        output_sha256=sha256_file(artifact_path) if artifact_path.exists() else None,
     )
     recipe = {
         "schema_version": "data-column-cast.v1",
@@ -3431,6 +3406,7 @@ def apply_data_columns_cast(
         source_sha256=str(source_artifact.get("sha256") or sha256_file(source_path)),
         operation_id=spec.operation_id,
         preview_fingerprint=fresh.fingerprint,
+        output_sha256=sha256_file(artifact_path) if artifact_path.exists() else None,
     )
     recipe = {
         "schema_version": "data-columns-cast.v1",
@@ -3753,7 +3729,10 @@ def _metadata_registry_for_source(
         if not metadata_path.is_file():
             raise DataMetadataUnavailableError("metadata artifact file is missing")
         expected_sha = artifact.get("sha256")
-        if expected_sha and expected_sha != sha256_file(metadata_path):
+        if not isinstance(expected_sha, str) or not expected_sha:
+            raise DataMetadataUnavailableError("metadata artifact has no server-owned SHA-256")
+        actual_sha = sha256_file(metadata_path)
+        if expected_sha != actual_sha:
             raise DataMetadataUnavailableError("metadata artifact fingerprint changed")
         try:
             payload = read_json(metadata_path)
@@ -3761,23 +3740,7 @@ def _metadata_registry_for_source(
                 raise ValueError("metadata artifact must be an object")
             if payload.get("payload_schema") != "workbench.data-metadata":
                 continue
-            metadata_artifact = payload.get("metadata_artifact")
             schema_artifact = payload.get("schema_artifact")
-            metadata_index = payload.get("metadata_index")
-            if not isinstance(metadata_artifact, Mapping) or not isinstance(metadata_index, Mapping):
-                raise MetadataProvenanceError(
-                    "METADATA_REGISTRY_PROVENANCE_MISMATCH",
-                    "metadata artifact and index provenance are required",
-                )
-            if (
-                metadata_artifact.get("artifact_id") != artifact.get("artifact_id")
-                or metadata_artifact.get("path") != artifact.get("path")
-                or metadata_artifact.get("sha256") is None
-            ):
-                raise MetadataProvenanceError(
-                    "METADATA_REGISTRY_PROVENANCE_MISMATCH",
-                    "metadata payload does not bind the selected artifact index row",
-                )
             index_entry = {
                 key: artifact.get(key)
                 for key in ("artifact_id", "path", "artifact_type", "step", "inputs")
@@ -3785,11 +3748,6 @@ def _metadata_registry_for_source(
             expected_entry_sha256 = hashlib.sha256(
                 json.dumps(index_entry, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
             ).hexdigest()
-            if metadata_index.get("entry_sha256") != expected_entry_sha256:
-                raise MetadataProvenanceError(
-                    "METADATA_REGISTRY_PROVENANCE_MISMATCH",
-                    "metadata payload does not bind the selected artifact index entry",
-                )
             if not isinstance(schema_artifact, Mapping):
                 raise MetadataProvenanceError(
                     "METADATA_REGISTRY_PROVENANCE_MISMATCH",
@@ -3835,7 +3793,7 @@ def _metadata_registry_for_source(
                 schema_artifact_sha256=str(schema_artifact_sha256),
                 metadata_artifact_id=str(artifact.get("artifact_id")),
                 metadata_artifact_path=str(artifact.get("path")),
-                metadata_artifact_sha256=str(metadata_artifact.get("sha256")),
+                metadata_artifact_sha256=expected_sha,
                 metadata_index_sha256=expected_entry_sha256,
             )
         except MetadataProvenanceError:
@@ -3984,14 +3942,6 @@ def _metadata_sidecar_payload(
     schema_revision = _schema_revision_for_frame(output_frame)
     schema_artifact_id = schema_revision
     schema_artifact_sha256 = schema_revision.removeprefix("schema:")
-    metadata_artifact_digest = hashlib.sha256(
-        json.dumps(
-            {"schema_revision": schema_revision, "metadata": metadata},
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
     metadata_loss: list[dict[str, str]] = []
     if registry is not None:
         source_metadata = registry.metadata
@@ -4042,27 +3992,6 @@ def _metadata_sidecar_payload(
         "schema_artifact": {
             "artifact_id": schema_artifact_id,
             "sha256": schema_artifact_sha256,
-        },
-        "metadata_artifact": {
-            "artifact_id": f"{artifact_id}_metadata",
-            "path": metadata_artifact_path,
-            "sha256": metadata_artifact_digest,
-        },
-        "metadata_index": {
-            "entry_sha256": hashlib.sha256(
-                json.dumps(
-                    {
-                        "artifact_id": f"{artifact_id}_metadata",
-                        "path": metadata_artifact_path,
-                        "artifact_type": "metadata",
-                        "step": operation_id,
-                        "inputs": [source_artifact_id, artifact_id],
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest()
         },
         "metadata_loss": metadata_loss,
         "provenance": {

@@ -62,22 +62,6 @@ def _seed_confirmed_metadata(
     )
     source_sha256 = source_row["sha256"]
     metadata_artifact_id = "source_metadata_registry"
-    metadata_artifact_path = "metadata/registry.json"
-    metadata_artifact_digest = "b" * 64
-    metadata_index_entry_sha256 = hashlib.sha256(
-        json.dumps(
-            {
-                "artifact_id": metadata_artifact_id,
-                "path": metadata_artifact_path,
-                "artifact_type": "metadata",
-                "step": "fixture.metadata",
-                "inputs": [source_artifact_id],
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
     payload = {
         "payload_schema": "workbench.data-metadata",
         "schema_version": 1,
@@ -98,13 +82,8 @@ def _seed_confirmed_metadata(
                 if item["artifact_id"] == schema_artifact_id
             ),
         },
-        "metadata_artifact": {
-            "artifact_id": metadata_artifact_id,
-            "path": metadata_artifact_path,
-            "sha256": metadata_artifact_digest,
-        },
-        "metadata_index": {"entry_sha256": metadata_index_entry_sha256},
         "metadata": metadata,
+        "provenance": {"fixture": "server-owned"},
     }
     write_json(path, payload)
     register_artifact(
@@ -593,6 +572,91 @@ def test_profile_rejects_metadata_registered_for_a_foreign_graph_node(tmp_path: 
     assert response.json()["error"]["code"] == "DATA_METADATA_UNAVAILABLE"
 
 
+def test_profile_reload_rejects_forged_metadata_bytes_and_provenance_on_every_attempt(
+    tmp_path: Path,
+) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {"columns": {"score": {"variable_label": "server label"}}},
+    )
+
+    metadata_path = project / "runs" / run_id / "metadata" / "registry.json"
+    canonical_payload = json.loads(metadata_path.read_text())
+    assert "metadata_artifact" not in canonical_payload
+    assert "metadata_index" not in canonical_payload
+
+    with TestClient(app) as client:
+        initial = client.get(
+            "/data-operations/profile",
+            params={
+                "project_root": str(project),
+                "source_run_id": run_id,
+                "source_node_id": "stage:source",
+                "source_artifact_id": artifact_id,
+            },
+        )
+        canonical_payload["metadata"]["columns"]["score"]["variable_label"] = "caller forged"
+        write_json(metadata_path, canonical_payload)
+        responses = [
+            client.get(
+                "/data-operations/profile",
+                params={
+                    "project_root": str(project),
+                    "source_run_id": run_id,
+                    "source_node_id": "stage:source",
+                    "source_artifact_id": artifact_id,
+                },
+            )
+            for _ in range(2)
+        ]
+
+    assert initial.status_code == 200
+    assert [response.status_code for response in responses] == [422, 422]
+    assert [response.json()["error"]["code"] for response in responses] == [
+        "DATA_METADATA_UNAVAILABLE",
+        "DATA_METADATA_UNAVAILABLE",
+    ]
+
+
+def test_profile_reload_rejects_server_index_sha_tamper(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {"columns": {"score": {"variable_label": "server label"}}},
+    )
+    index_path = project / "runs" / run_id / "artifacts_index.json"
+    index = json.loads(index_path.read_text())
+    metadata_row = next(
+        row for row in index["artifacts"] if row["artifact_id"] == "source_metadata_registry"
+    )
+    metadata_row["sha256"] = "0" * 64
+    write_json(index_path, index)
+
+    response = TestClient(app).get(
+        "/data-operations/profile",
+        params={
+            "project_root": str(project),
+            "source_run_id": run_id,
+            "source_node_id": "stage:source",
+            "source_artifact_id": artifact_id,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_METADATA_UNAVAILABLE"
+
+
 def test_metadata_mutation_without_server_owned_registry_is_typed_unavailable(tmp_path: Path) -> None:
     project, run_id, artifact_id = _source_project(
         tmp_path,
@@ -753,6 +817,51 @@ def test_metadata_mutation_replay_is_idempotent_and_stale_source_is_blocked(tmp_
     )
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "DATA_OPERATION_STALE"
+
+
+def test_metadata_mutation_reload_rejects_index_sha_tamper(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    _seed_confirmed_metadata(project, run_id, artifact_id, {"columns": {}})
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "metadata": {"score": {"variable_label": "Score"}},
+    }
+
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/metadata/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+        confirmed = client.post(
+            "/data-operations/metadata/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+        assert confirmed.status_code == 200
+        record_id = confirmed.json()["operation"]["record_id"]
+
+        index_path = project / "runs" / run_id / "artifacts_index.json"
+        index = json.loads(index_path.read_text())
+        metadata_row = next(
+            row
+            for row in index["artifacts"]
+            if row["artifact_id"] == confirmed.json()["effect"]["metadata_artifact_id"]
+        )
+        metadata_row["sha256"] = "0" * 64
+        write_json(index_path, index)
+        reloaded = client.get(
+            f"/data-operations/metadata/{record_id}",
+            params={"project_root": str(project)},
+        )
+
+    assert reloaded.status_code == 404
+    assert reloaded.json()["error"]["code"] == "DATA_OPERATION_NOT_FOUND"
 
 
 def test_metadata_confirm_preflights_record_conflict_without_partial_artifacts(tmp_path: Path) -> None:

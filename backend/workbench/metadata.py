@@ -463,6 +463,11 @@ class MetadataRegistryV1:
             raise MetadataProvenanceError(
                 "METADATA_REGISTRY_INVALID", "metadata artifact metadata is missing"
             )
+        if "metadata_artifact" in payload or "metadata_index" in payload:
+            raise MetadataProvenanceError(
+                "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                "metadata payload must use detached server-owned artifact provenance",
+            )
         schema_artifact = payload.get("schema_artifact")
         if not isinstance(schema_artifact, Mapping) or {
             "artifact_id": schema_artifact.get("artifact_id") if isinstance(schema_artifact, Mapping) else None,
@@ -471,26 +476,6 @@ class MetadataRegistryV1:
             raise MetadataProvenanceError(
                 "METADATA_REGISTRY_PROVENANCE_MISMATCH",
                 "metadata schema artifact provenance does not match the server-owned schema artifact",
-            )
-        metadata_artifact = payload.get("metadata_artifact")
-        if not isinstance(metadata_artifact, Mapping) or {
-            "artifact_id": metadata_artifact.get("artifact_id") if isinstance(metadata_artifact, Mapping) else None,
-            "path": metadata_artifact.get("path") if isinstance(metadata_artifact, Mapping) else None,
-            "sha256": metadata_artifact.get("sha256") if isinstance(metadata_artifact, Mapping) else None,
-        } != {
-            "artifact_id": metadata_artifact_id,
-            "path": metadata_artifact_path,
-            "sha256": metadata_artifact_sha256,
-        }:
-            raise MetadataProvenanceError(
-                "METADATA_REGISTRY_PROVENANCE_MISMATCH",
-                "metadata artifact provenance does not match the server-owned artifact index",
-            )
-        metadata_index = payload.get("metadata_index")
-        if not isinstance(metadata_index, Mapping) or metadata_index.get("entry_sha256") != metadata_index_sha256:
-            raise MetadataProvenanceError(
-                "METADATA_REGISTRY_PROVENANCE_MISMATCH",
-                "metadata index provenance does not match the server-owned index entry",
             )
         schema_revision = payload.get("schema_revision")
         metadata_revision = payload.get("metadata_revision")
