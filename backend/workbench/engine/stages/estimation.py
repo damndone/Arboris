@@ -121,6 +121,7 @@ def _fit_probit(ctx, env):
         model_id="probit_1",
         categorical_x=ctx.artifacts.get("_categorical_vars"),
     )
+    _apply_survey_design_variance(ctx, "probit", primary)
     return "probit_1", primary, fitted
 
 
@@ -155,6 +156,7 @@ def _fit_logit(ctx, env):
         model_id="logit_1",
         categorical_x=ctx.artifacts.get("_categorical_vars"),
     )
+    _apply_survey_design_variance(ctx, "logit", primary)
     return "logit_1", primary, fitted
 
 
@@ -170,6 +172,7 @@ def _fit_poisson(ctx, env):
         exposure_col=ctx.exposure_col,
         categorical_x=poisson_cat,
     )
+    _apply_survey_design_variance(ctx, "poisson", primary, x=poisson_x)
     return "poisson_1", primary, fitted
 
 
@@ -369,7 +372,9 @@ def _survey_design_declared(ctx) -> bool:
     )
 
 
-def _survey_estimator_for(model_type: str, y: str, x: list[str]):
+def _survey_estimator_for(
+    model_type: str, y: str, x: list[str], *, exposure: str | None = None
+):
     """Build the engine-side estimator from what the family declared.
 
     Returns None when the family declared no link, which is a refusal to guess:
@@ -383,7 +388,13 @@ def _survey_estimator_for(model_type: str, y: str, x: list[str]):
     glm_family = getattr(contract, "survey_glm_family", None) if contract else None
     if not glm_family:
         return None
-    return glm_estimator_spec(family=model_type, glm_family=glm_family, y=y, x=list(x))
+    return glm_estimator_spec(
+        family=model_type,
+        glm_family=glm_family,
+        y=y,
+        x=list(x),
+        exposure=exposure,
+    )
 
 
 def _ols_weight_spec(ctx):
@@ -459,7 +470,9 @@ def _design_term(payload_term: str) -> str:
     return _DESIGN_TERM_ALIASES.get(payload_term, payload_term)
 
 
-def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
+def _apply_survey_design_variance(
+    ctx, model_type: str, primary: dict, *, x: list[str] | None = None
+) -> None:
     """Replace the naive variance with the design-based one, in place.
 
     The point estimate is already right -- weighted least squares gives the same
@@ -469,6 +482,7 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
     first number believes the estimate is twice as sharp as it is.
     """
     from scipy import stats
+    from math import exp
 
     from ...survey.adapters import build_design_from_artifacts
     from ...survey.engine import estimate_with_design
@@ -478,7 +492,10 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
     if design is None:
         return
     estimator = _survey_estimator_for(
-        model_type, ctx.artifacts["_normalized_y"], ctx.artifacts["_normalized_x"]
+        model_type,
+        ctx.artifacts["_normalized_y"],
+        x if x is not None else ctx.artifacts["_normalized_x"],
+        exposure=ctx.exposure_col if model_type == "poisson" else None,
     )
     if estimator is None:
         return
@@ -506,15 +523,39 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
             f"{unmatched}; the engine reported {sorted(result.standard_errors)}"
         )
     for term, entry in coefficients.items():
-        se = result.standard_errors[_design_term(term)]
-        estimate = float(entry.get("estimate", result.estimates[_design_term(term)]))
+        design_term = _design_term(term)
+        se = result.standard_errors[design_term]
+        # The survey adapter owns the weighted point estimate as well as the
+        # design variance.  Keeping the runner's unweighted estimate here
+        # would produce a mixed payload whose SE is survey-based but whose
+        # coefficient is not.
+        estimate = float(result.estimates[design_term])
         entry["std_error"] = se
+        entry["estimate"] = estimate
         entry["ci_lower"] = estimate - critical * se
         entry["ci_upper"] = estimate + critical * se
         entry["p_value"] = float(
             2 * stats.t.sf(abs(estimate / se), result.residual_degf)
         ) if se > 0 else float("nan")
         entry["variance_source"] = "survey_design"
+
+        # Poisson's normalized payload exposes exponentiated coefficient
+        # intervals too.  Keep those derived values on the same weighted,
+        # design-based estimate instead of leaving naive intervals beside the
+        # survey coefficient fields.
+        if model_type == "poisson":
+            entry["irr"] = exp(estimate)
+            entry["irr_ci_lower"] = exp(entry["ci_lower"])
+            entry["irr_ci_upper"] = exp(entry["ci_upper"])
+            irr = primary.get("irr")
+            if isinstance(irr, dict) and isinstance(irr.get(term), dict):
+                irr[term].update(
+                    {
+                        "irr": entry["irr"],
+                        "irr_ci_lower": entry["irr_ci_lower"],
+                        "irr_ci_upper": entry["irr_ci_upper"],
+                    }
+                )
 
     effects = design.design_effects(ctx.artifacts["_normalized_y"])
     summary = result.replicate_summary
@@ -790,6 +831,7 @@ class EstimationStage:
         from ...domain import GuardrailIssue, Severity
         from ...services.pinned_run_directory import LmmPersistenceError
         from ..packs.linear_mixed_effects.input import LmmInputError
+        from ...survey.errors import SurveyEngineError
 
         model_type = ctx.requested_model_type or "auto"
         normalized_y = ctx.artifacts["_normalized_y"]
@@ -1021,7 +1063,7 @@ class EstimationStage:
             # The admitted worker owns the private lifecycle sink.  This stage
             # must never use generic errors.json/manifest fallback.
             raise
-        except ValueError as exc:
+        except (ValueError, SurveyEngineError) as exc:
             # NB: WorkflowValidationError IS-A ValueError but we raised the only
             # pre-check above the try, so any ValueError here is a real fit failure.
             is_model_options_error = isinstance(exc, ModelOptionsValidationError)
@@ -1032,7 +1074,15 @@ class EstimationStage:
                 and bool(structured_code)
                 and isinstance(structured_evidence, Mapping)
             )
-            if is_model_options_error:
+            if isinstance(exc, SurveyEngineError):
+                failure_evidence = {
+                    **exc.context,
+                    "detail": exc.detail,
+                    "y_type": ctx.y_type,
+                    "requested_model_type": model_type,
+                }
+                issue_code = exc.code
+            elif is_model_options_error:
                 failure_evidence = {
                     **exc.evidence,
                     "y_type": ctx.y_type,
@@ -1082,7 +1132,9 @@ class EstimationStage:
                 issue_code = "MODEL_FIT_FAILED"
 
             issue_dicts.append(GuardrailIssue(
-                Severity.BLOCKER if (model_type != "auto" or is_model_options_error) else Severity.WARNING,
+                Severity.BLOCKER
+                if (model_type != "auto" or is_model_options_error or isinstance(exc, SurveyEngineError))
+                else Severity.WARNING,
                 issue_code,
                 str(exc),
                 failure_evidence,
@@ -1090,7 +1142,7 @@ class EstimationStage:
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("estimation", "blocked", f"Model fit failed: {exc}")
 
-            if model_type != "auto" or is_model_options_error:
+            if model_type != "auto" or is_model_options_error or isinstance(exc, SurveyEngineError):
                 # 1.5.3.2 CONTRACT: explicit failure => structured `failed`.
                 # NO silent OLS fallback.
                 _write_manifest(

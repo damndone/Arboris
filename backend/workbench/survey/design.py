@@ -51,6 +51,13 @@ class SurveyDesign:
     hadamard_matrix: list[list[int]] | None = None
 
     def __post_init__(self) -> None:
+        if self.fpc:
+            raise SurveyEngineError(
+                "SURVEY_FPC_UNSUPPORTED",
+                "finite population correction is declared but this survey variance "
+                "engine does not apply FPC",
+                fpc_column=self.fpc,
+            )
         if self.lonely_psu not in LONELY_PSU_POLICIES:
             raise SurveyEngineError(
                 "SURVEY_LONELY_PSU_POLICY_INVALID",

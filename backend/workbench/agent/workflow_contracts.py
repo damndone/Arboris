@@ -975,7 +975,7 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     ),
     "probit": ModelFamilyContract(
         family="probit",
-        survey_glm_family="binomial",
+        survey_glm_family="binomial_probit",
         allows_weights=("sampling",),
         required_spec_fields=(),
         required_spec_field_mode="all",

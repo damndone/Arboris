@@ -32,7 +32,7 @@ def survey_run(tmp_path_factory) -> Path:
         project.root, [source], mode="auto", model_type="ols",
         y="y", x=["x1", "x2"],
         sampling_weight="weight",
-        survey_strata_col="stratum", survey_psu_col="psu", survey_fpc_col="fpc",
+        survey_strata_col="stratum", survey_psu_col="psu",
     )
     assert outcome["status"] == "completed", outcome
     return project.root / "runs" / outcome["run_id"]

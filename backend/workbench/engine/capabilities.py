@@ -547,6 +547,7 @@ def _survey_design_capability() -> dict:
     hard-coded list that silently rots as families are added.
     """
     from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ..survey.adapters import supports_glm_family
     from ..survey.design import LONELY_PSU_POLICIES, REPLICATE_TYPES
     from ..survey.estimator import VARIANCE_METHOD_REQUIREMENTS
     from ..survey.fields import DESIGN_FIELDS
@@ -559,6 +560,7 @@ def _survey_design_capability() -> dict:
             key
             for key, contract in MODEL_FAMILY_CONTRACTS.items()
             if "sampling" in contract.allows_weights
+            and supports_glm_family(contract.survey_glm_family)
         ),
         "variance_methods": sorted(VARIANCE_METHOD_REQUIREMENTS),
         "variance_method_requirements": {
