@@ -55,6 +55,7 @@ import {
 import type { ModelResult, PostEstimationResult, PredictionResearchEvidence } from "../api";
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
+import type { ClassificationEvidencePacket } from "./ClassificationEvidence";
 
 const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
   "ts.analysis_contract",
@@ -73,6 +74,7 @@ const CLASSIFICATION_ARTIFACTS_SCHEMA = "workbench.prediction.classification-art
 const CLASSIFICATION_ARTIFACT_TYPES = new Set(["classification_evidence", "classification_artifacts"]);
 const CLASSIFICATION_ARTIFACT_IDS = new Set(["classification_evidence", "classification_artifacts"]);
 const CLASSIFICATION_EVIDENCE_REQUIRED_FIELDS = [
+  "status",
   "task",
   "split",
   "metrics",
@@ -86,6 +88,10 @@ const CLASSIFICATION_EVIDENCE_REQUIRED_FIELDS = [
   "decision_policy",
   "blocked_reasons",
   "evidence_refs",
+  "holdout",
+  "c0_evidence_envelope",
+  "c0_consumer_projection",
+  "foundation_status",
 ] as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -145,15 +151,24 @@ function indexedClassificationArtifactId(value: unknown): string | null {
   return artifactId;
 }
 
-function isTypedClassificationEvidencePacket(value: unknown): value is Record<string, unknown> {
+function isTypedClassificationEvidencePacket(value: unknown): value is ClassificationEvidencePacket {
   const packet = asRecord(value);
+  const task = asRecord(packet?.task);
+  const split = asRecord(packet?.split);
+  const holdout = asRecord(packet?.holdout);
+  const releasePlan = asRecord(holdout?.release_plan);
+  const evidenceRefs = asRecord(packet?.evidence_refs);
+  const foundationStatus = asRecord(packet?.foundation_status);
   if (
     !packet
     || packet.payload_schema !== CLASSIFICATION_EVIDENCE_SCHEMA
     || packet.schema_version !== 1
+    || !["validated", "degraded", "unavailable"].includes(String(packet.status))
     || CLASSIFICATION_EVIDENCE_REQUIRED_FIELDS.some((field) => !(field in packet))
-    || asRecord(packet.task) === null
-    || asRecord(packet.split) === null
+    || task === null
+    || typeof task.task_hash !== "string"
+    || split === null
+    || typeof split.split_hash !== "string"
     || asRecord(packet.metrics) === null
     || asRecord(packet.calibration) === null
     || !Array.isArray(packet.baselines)
@@ -164,13 +179,27 @@ function isTypedClassificationEvidencePacket(value: unknown): value is Record<st
     || asRecord(packet.shift) === null
     || asRecord(packet.decision_policy) === null
     || !Array.isArray(packet.blocked_reasons)
-    || asRecord(packet.evidence_refs) === null
+    || evidenceRefs === null
+    || typeof evidenceRefs.task !== "string"
+    || typeof evidenceRefs.split !== "string"
+    || typeof evidenceRefs.holdout !== "string"
+    || typeof evidenceRefs.release_plan !== "string"
+    || holdout === null
+    || typeof holdout.release_plan_hash !== "string"
+    || typeof holdout.release_count !== "number"
+    || releasePlan === null
+    || typeof releasePlan.plan_hash !== "string"
+    || releasePlan.plan_hash !== holdout.release_plan_hash
+    || releasePlan.task_hash !== task.task_hash
+    || releasePlan.split_hash !== split.split_hash
+    || foundationStatus === null
+    || foundationStatus.producer_status !== packet.status
   ) return false;
   return true;
 }
 
 /** Return only the typed evidence packet; never retain an unknown outer payload. */
-export function readClassificationEvidencePacket(value: unknown): Record<string, unknown> | null {
+export function readClassificationEvidencePacket(value: unknown): ClassificationEvidencePacket | null {
   if (isTypedClassificationEvidencePacket(value)) return value;
   const envelope = asRecord(value);
   for (const nested of [envelope?.evidence, envelope?.payload]) {
@@ -511,7 +540,7 @@ export function ReportWorkspaceProvider({
           }
         }));
         const validClassificationPackets = loadedClassification.filter(
-          (packet): packet is Record<string, unknown> => packet !== null,
+          (packet): packet is ClassificationEvidencePacket => packet !== null,
         );
         const classificationEntry = classificationItems.length > 0
           ? [[

@@ -9,6 +9,7 @@ import pytest
 from workbench.prediction import run_classification_model_v189
 from workbench.predictive_research.classification_contracts import (
     ClassificationTaskSpecV1,
+    DecisionPolicyV1,
     FeatureAvailabilityContractV1,
     LabelDefinitionV1,
 )
@@ -16,6 +17,22 @@ from workbench.predictive_research.contracts import StructureSpecV1
 from workbench.predictive_research.preprocessing import ClassificationPreprocessingStepV1
 from workbench.predictive_research.contracts import ContractError
 from workbench.predictive_research.consumer_projection import project_classification_evidence
+
+
+def _production_dependencies(*, include_holdout: bool = True) -> dict[str, object]:
+    from workbench.contracts.prediction.holdout import HoldoutMetricBundleStoreV1, HoldoutSealStoreV1
+    from workbench.predictive_research.classification_adapters import classification_runtime_registry
+
+    dependencies: dict[str, object] = {"runtime_registry": classification_runtime_registry()}
+    if include_holdout:
+        dependencies.update(
+            {
+                "holdout_seal_store": HoldoutSealStoreV1(metric_bundle_store=HoldoutMetricBundleStoreV1()),
+                "holdout_principal_ref": "principal:test",
+                "holdout_access_id": "access:test",
+            }
+        )
+    return dependencies
 
 
 def _grouped_task() -> ClassificationTaskSpecV1:
@@ -75,6 +92,7 @@ def test_task_split_profile_drives_group_invariant_without_row_position_fallback
         model_ids=("logistic_regression",),
         final_holdout_fraction=0.25,
         cv_folds=2,
+        **_production_dependencies(),
     )
 
     assert result["split"]["profile"] == "group_holdout"
@@ -121,6 +139,7 @@ def test_task_weight_is_consumed_by_fit_and_metrics_instead_of_rejected(tmp_path
         model_ids=("logistic_regression",),
         final_holdout_fraction=0.25,
         cv_folds=2,
+        **_production_dependencies(),
     )
 
     model = result["models"]["logistic_regression"]
@@ -157,6 +176,7 @@ def test_fold_local_preprocessing_receipt_excludes_validation_and_holdout_rows(t
                 supports_weight=True,
             ),
         ),
+        **_production_dependencies(),
     )
 
     model = result["models"]["logistic_regression"]
@@ -195,6 +215,7 @@ def test_string_features_are_typed_blocked_instead_of_coerced_to_numeric(tmp_pat
             model_ids=("logistic_regression",),
             final_holdout_fraction=0.25,
             cv_folds=2,
+            **_production_dependencies(),
         )
 
     assert exc_info.value.code == "CLASSIFICATION_FEATURE_TYPE_BLOCKED"
@@ -270,6 +291,7 @@ def test_temporal_production_training_roles_are_strictly_before_validation_and_h
         model_ids=("logistic_regression",),
         final_holdout_fraction=0.25,
         cv_folds=2,
+        **_production_dependencies(),
     )
 
     assignments = {item["row_ref"]: item for item in result["split"]["assignments"]}
@@ -305,6 +327,7 @@ def test_panel_new_entity_production_keeps_entity_identity_out_of_holdout_overla
         model_ids=("logistic_regression",),
         final_holdout_fraction=1 / 3,
         cv_folds=2,
+        **_production_dependencies(),
     )
 
     assignments = {item["row_ref"]: item["partition"] for item in result["split"]["assignments"]}
@@ -326,25 +349,34 @@ def test_production_calibration_threshold_and_evidence_consumer_are_explicitly_s
         model_ids=("logistic_regression",),
         final_holdout_fraction=0.25,
         cv_folds=2,
+        **_production_dependencies(),
     )
 
     model = result["models"]["logistic_regression"]
     calibration = model["calibration"]
     assert calibration["status"] == "computed"
     assert set(calibration["fit_row_refs"]).isdisjoint(calibration["evaluation_row_refs"])
-    assert model["threshold"]["scope"] == "development_oof"
-    assert model["threshold"]["input_scope"] == "development_calibration_eval"
-    assert set(model["threshold"]["row_refs"]) == set(calibration["evaluation_row_refs"])
+    assert model["threshold"]["status"] == "unavailable"
+    assert model["selection_threshold"]["status"] == "unavailable"
+    assert "threshold" not in model["threshold"]
     assert set(calibration["fit_row_refs"]).isdisjoint(result["holdout"]["row_refs"])
     plan = result["holdout"]["release_plan"]
     assert plan["task_hash"] == result["task"]["task_hash"]
     assert plan["split_hash"] == result["comparison"]["split_hash"]
     assert plan["calibration_hash"].startswith("sha256:")
     assert plan["policy_hash"].startswith("sha256:")
+    assert result["holdout"]["status"] == "sealed"
+    assert result["holdout"]["release_count"] == 0
     projected = project_classification_evidence(result["evidence"], consumer="report")
-    assert projected["status"] == "blocked"
+    assert projected["status"] == "degraded"
     assert isinstance(projected["baselines"], list)
     assert projected["explanations"]["shap"]["status"] == "unavailable"
+    from workbench.contracts.evidence.envelope import ConsumerProjectionV1, EvidenceEnvelopeV1
+
+    envelope = EvidenceEnvelopeV1.from_dict(result["evidence"]["c0_evidence_envelope"])
+    projection = ConsumerProjectionV1.from_dict(result["evidence"]["c0_consumer_projection"])
+    assert envelope.result_identity["task_hash"] == result["task_hash"]
+    assert projection.payload.projection_status == "available"
 
 
 def test_unimplemented_calibration_mode_is_not_reported_as_calibrated_or_validated(tmp_path) -> None:
@@ -366,6 +398,7 @@ def test_unimplemented_calibration_mode_is_not_reported_as_calibrated_or_validat
         final_holdout_fraction=0.25,
         cv_folds=2,
         calibration_method="none",
+        **_production_dependencies(),
     )
 
     assert result["status"] == "degraded"
@@ -387,6 +420,224 @@ def test_temporal_availability_violation_is_typed_before_any_model_fit(tmp_path)
             model_ids=("logistic_regression",),
             final_holdout_fraction=0.25,
             cv_folds=2,
+            **_production_dependencies(),
         )
 
     assert exc_info.value.code == "CLASSIFICATION_INFORMATION_SET_VIOLATION"
+
+
+def _selectable_policy(*, selected_threshold: float | None = None, method: str = "max_f1") -> DecisionPolicyV1:
+    return DecisionPolicyV1(
+        cost_matrix={"false_positive": 1.0, "false_negative": 2.0},
+        capacity=10,
+        abstain_allowed=False,
+        manual_review_allowed=False,
+        threshold_scope="development_oof",
+        threshold_method=method,
+        policy_version="1.0",
+        population="all",
+        time_validity="declared",
+        selected_threshold=selected_threshold,
+    )
+
+
+def test_production_holdout_red_probe_requires_c0_server_owned_store(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    with pytest.raises(ContractError) as exc_info:
+        run_classification_model_v189(
+            frame,
+            tmp_path,
+            task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+            row_refs=tuple(f"r{index}" for index in range(len(frame))),
+            model_ids=("logistic_regression",),
+            final_holdout_fraction=0.25,
+            cv_folds=2,
+            decision_policy=_selectable_policy(selected_threshold=0.73),
+            **_production_dependencies(include_holdout=False),
+        )
+
+    assert exc_info.value.code == "CLASSIFICATION_HOLDOUT_SERVER_STORE_REQUIRED"
+
+
+def test_provider_join_red_probe_requires_runtime_contribution_identity() -> None:
+    from workbench.predictive_research import classification_adapters
+
+    factory = getattr(classification_adapters, "classification_runtime_registry", None)
+    assert callable(factory)
+    registry = factory()
+    contribution = registry.require("executor:workbench.classification_ml.adapter")
+    assert contribution.provider_id == "workbench.classification_ml"
+    assert contribution.adapter_id == "workbench.classification_ml.adapter"
+
+
+def test_group_validation_fold_red_probe_rejects_single_class_validation_support(tmp_path) -> None:
+    entities = [entity for entity in ("a", "b", "c", "d", "e") for _ in range(2)]
+    labels = [0, 0, 1, 1, 0, 1, 0, 0, 1, 1]
+    frame = pd.DataFrame(
+        {
+            "target": labels,
+            "x1": [float(index) for index in range(len(labels))],
+            "x2": [float(index % 2) for index in range(len(labels))],
+            "entity": entities,
+        }
+    )
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    with pytest.raises(ContractError) as exc_info:
+        run_classification_model_v189(
+            frame,
+            tmp_path,
+            task=_grouped_task(),
+            row_refs=tuple(f"r{index}" for index in range(len(frame))),
+            model_ids=("logistic_regression",),
+            final_holdout_fraction=0.2,
+            cv_folds=3,
+            random_seed=0,
+            **_production_dependencies(),
+        )
+
+    assert exc_info.value.code == "CLASSIFICATION_SPLIT_VALIDATION_CLASS_SUPPORT"
+
+
+def test_temporal_label_window_red_probe_fails_closed_on_development_fold_overlap(tmp_path) -> None:
+    periods = [period for period in range(8) for _ in range(2)]
+    frame = _ordered_frame(periods)
+    label_windows = [
+        (0, 10) if period < 6 else (100 + index, 101 + index)
+        for index, period in enumerate(periods)
+    ]
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    with pytest.raises(ContractError) as exc_info:
+        run_classification_model_v189(
+            frame,
+            tmp_path,
+            task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+            row_refs=tuple(f"r{index}" for index in range(len(frame))),
+            model_ids=("logistic_regression",),
+            final_holdout_fraction=0.25,
+            cv_folds=2,
+            label_windows=label_windows,
+            purge_gap=0,
+            **_production_dependencies(),
+        )
+
+    assert exc_info.value.code == "CLASSIFICATION_PURGE_WINDOW_TRAIN_VALIDATION_OVERLAP"
+
+
+def test_scenarios_only_red_probe_does_not_release_holdout_or_selected_threshold(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    result = run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+
+    assert result["holdout"]["status"] == "sealed"
+    assert result["holdout"]["release_count"] == 0
+    assert result["models"]["logistic_regression"]["threshold"]["status"] == "unavailable"
+
+
+def test_selected_threshold_red_probe_is_consumed_by_final_evaluation(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    result = run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        decision_policy=_selectable_policy(selected_threshold=0.73),
+        **_production_dependencies(),
+    )
+
+    assert result["decision_policy"]["consumed_threshold"] == 0.73
+    assert result["models"]["logistic_regression"]["threshold"]["threshold"] == 0.73
+    assert result["holdout"]["status"] == "released_once"
+    assert result["holdout"]["release_count"] == 1
+    decision = result["holdout"]["c0"]["decision"]
+    assert decision["allowed"] is True
+    assert decision["reason"] == "HOLDOUT_RELEASE_ALLOWED"
+    assert decision["status"] == "closed"
+    assert len(decision["ledger"]) == 1
+    assert result["holdout"]["release_plan"]["task_hash"] == result["task_hash"]
+    assert result["holdout"]["release_plan"]["split_hash"] == result["split_hash"]
+
+
+def test_threshold_red_probe_uses_log_loss_and_precision_constraint() -> None:
+    from workbench.predictive_research.classification_protocol import select_threshold_from_oof
+
+    log_loss_choice = select_threshold_from_oof(
+        actual=[0, 1, 1, 1],
+        probabilities=[0.1, 0.4, 0.6, 0.7],
+        method="min_log_loss",
+        scope="development_oof",
+    )
+    expected = min(log_loss_choice["curve"], key=lambda row: row["log_loss"])
+    assert log_loss_choice["threshold"] == expected["threshold"]
+    assert log_loss_choice["threshold"] != 0.5
+
+    constrained = select_threshold_from_oof(
+        actual=[0, 1, 0, 1],
+        probabilities=[0.8, 0.7, 0.6, 0.5],
+        method="max_recall_at_precision",
+        scope="development_oof",
+        minimum_precision=0.9,
+    )
+    assert constrained["status"] == "unavailable"
+    assert constrained["reason_code"] == "CLASSIFICATION_THRESHOLD_NO_FEASIBLE_CANDIDATE"
+
+
+def test_c0_evidence_red_probe_preserves_degraded_status_and_required_identity() -> None:
+    from workbench.predictive_research.consumer_projection import project_classification_evidence
+
+    payload = {
+        "payload_schema": "workbench.prediction.classification-evidence",
+        "schema_version": 1,
+        "status": "degraded",
+        "task": {"task_hash": "sha256:" + "a" * 64},
+        "split": {"split_hash": "sha256:" + "b" * 64},
+        "metrics": {},
+        "holdout": {
+            "status": "sealed",
+            "release_plan_hash": "sha256:" + "c" * 64,
+            "release_plan": {
+                "plan_hash": "sha256:" + "c" * 64,
+                "task_hash": "sha256:" + "a" * 64,
+                "split_hash": "sha256:" + "b" * 64,
+            },
+        },
+        "calibration": {"status": "computed"},
+        "baselines": [],
+        "controls": [],
+        "comparison": {},
+        "explanations": {"status": "unavailable"},
+        "stability": {"status": "unavailable"},
+        "shift": {"status": "unavailable"},
+        "decision_policy": {"selection_status": "SCENARIOS_ONLY"},
+        "blocked_reasons": ["CLASSIFICATION_POLICY_SCENARIO_ONLY"],
+        "evidence_refs": {
+            "task": "classification-task:sha256:" + "a" * 64,
+            "split": "classification-split:sha256:" + "b" * 64,
+            "holdout": "classification-holdout:sha256:" + "c" * 64,
+            "release_plan": "classification-release-plan:sha256:" + "c" * 64,
+        },
+    }
+
+    projected = project_classification_evidence(payload, consumer="report")
+    assert projected["status"] == "degraded"
+    assert projected["task_hash"] == payload["task"]["task_hash"]
+    assert projected["split_hash"] == payload["split"]["split_hash"]
+    assert projected["holdout"]["release_plan"]["plan_hash"] == payload["holdout"]["release_plan"]["plan_hash"]

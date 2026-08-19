@@ -7,6 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from ..artifacts import read_json, sha256_file
+from workbench.contracts.evidence.envelope import (
+    ConsumerProjectionNotApplicableV1,
+    ConsumerProjectionPayloadV1,
+    ConsumerProjectionSlotV1,
+    ConsumerProjectionV1,
+    EvidenceEnvelopeV1,
+    EvidenceReasonV1,
+)
 from .schema import PayloadContractError, default_v1_prediction_registry
 from .contracts import ContractError
 
@@ -207,6 +215,7 @@ def project_prediction_evidence(
 
 _CLASSIFICATION_REQUIRED = frozenset(
     {
+        "status",
         "task",
         "split",
         "metrics",
@@ -220,6 +229,7 @@ _CLASSIFICATION_REQUIRED = frozenset(
         "decision_policy",
         "blocked_reasons",
         "evidence_refs",
+        "holdout",
     }
 )
 
@@ -236,14 +246,40 @@ def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str
         raise ContractError("CLASSIFICATION_EVIDENCE_INCOMPLETE", f"missing classification evidence: {sorted(missing)}")
     if not isinstance(payload["blocked_reasons"], list):
         raise ContractError("CLASSIFICATION_EVIDENCE_CONTRACT_INVALID", "blocked_reasons must be a list")
-    if not isinstance(payload["metrics"], Mapping) and not payload["blocked_reasons"]:
-        raise ContractError("CLASSIFICATION_EVIDENCE_INCOMPLETE", "metrics must be present unless the packet is blocked")
+    status = payload["status"]
+    if status not in {"validated", "degraded", "unavailable"}:
+        raise ContractError("CLASSIFICATION_EVIDENCE_STATUS_INVALID", "producer status is not a classification evidence status")
+    task = payload["task"]
+    split = payload["split"]
+    holdout = payload["holdout"]
+    refs = payload["evidence_refs"]
+    if not isinstance(task, Mapping) or not isinstance(split, Mapping) or not isinstance(holdout, Mapping) or not isinstance(refs, Mapping):
+        raise ContractError("CLASSIFICATION_EVIDENCE_IDENTITY_INVALID", "task, split, holdout and evidence_refs must be mappings")
+    task_hash = task.get("task_hash")
+    split_hash = split.get("split_hash")
+    release_plan = holdout.get("release_plan")
+    if (
+        type(task_hash) is not str
+        or type(split_hash) is not str
+        or not isinstance(release_plan, Mapping)
+        or type(release_plan.get("plan_hash")) is not str
+        or release_plan.get("task_hash") != task_hash
+        or release_plan.get("split_hash") != split_hash
+        or holdout.get("release_plan_hash") != release_plan.get("plan_hash")
+        or any(type(refs.get(key)) is not str for key in ("task", "split", "holdout", "release_plan"))
+    ):
+        raise ContractError("CLASSIFICATION_EVIDENCE_IDENTITY_INVALID", "task/split/holdout/release-plan identities are incomplete or inconsistent")
+    if not isinstance(payload["metrics"], Mapping):
+        raise ContractError("CLASSIFICATION_EVIDENCE_INCOMPLETE", "metrics must be a mapping")
+    envelope, projection = _classification_c0_contracts(payload, status=status, task_hash=task_hash, split_hash=split_hash, release_plan_hash=release_plan["plan_hash"])
     return {
-        "status": "blocked" if payload["blocked_reasons"] else "validated",
+        "status": status,
         "consumer": consumer,
-        "task": dict(payload["task"]) if isinstance(payload["task"], Mapping) else payload["task"],
-        "split": dict(payload["split"]) if isinstance(payload["split"], Mapping) else payload["split"],
-        "metrics": dict(payload["metrics"]) if isinstance(payload["metrics"], Mapping) else payload["metrics"],
+        "task": dict(task),
+        "task_hash": task_hash,
+        "split": dict(split),
+        "split_hash": split_hash,
+        "metrics": dict(payload["metrics"]),
         "calibration": payload["calibration"],
         "baselines": payload["baselines"],
         "controls": payload["controls"],
@@ -253,5 +289,93 @@ def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str
         "shift": payload["shift"],
         "decision_policy": payload["decision_policy"],
         "blocked_reasons": list(payload["blocked_reasons"]),
-        "evidence_refs": dict(payload["evidence_refs"]) if isinstance(payload["evidence_refs"], Mapping) else payload["evidence_refs"],
+        "evidence_refs": dict(refs),
+        "holdout": dict(holdout),
+        "release_plan_identity": dict(release_plan),
+        "c0_evidence_envelope": envelope.to_dict(),
+        "c0_consumer_projection": projection.to_dict(),
+        "foundation_status": dict(payload.get("foundation_status", {
+            "execution_status": envelope.execution_status.value,
+            "availability": envelope.availability.value,
+            "completeness_status": envelope.completeness_status.value,
+            "producer_status": status,
+        })),
     }
+
+
+def _classification_c0_contracts(
+    payload: Mapping[str, Any],
+    *,
+    status: str,
+    task_hash: str,
+    split_hash: str,
+    release_plan_hash: str,
+) -> tuple[EvidenceEnvelopeV1, ConsumerProjectionV1]:
+    """Validate producer C0 contracts, with an explicit legacy packet adapter."""
+
+    raw_envelope = payload.get("c0_evidence_envelope")
+    raw_projection = payload.get("c0_consumer_projection")
+    if raw_envelope is not None or raw_projection is not None:
+        if not isinstance(raw_envelope, dict) or not isinstance(raw_projection, dict):
+            raise ContractError("CLASSIFICATION_EVIDENCE_C0_INVALID", "C0 envelope and projection must be supplied together")
+        envelope = EvidenceEnvelopeV1.from_dict(raw_envelope)
+        projection = ConsumerProjectionV1.from_dict(raw_projection)
+    else:
+        reason = EvidenceReasonV1(
+            code="CLASSIFICATION_LEGACY_PACKET_ADAPTER",
+            message="classification packet was adapted into the shared C0 evidence contracts",
+            source_refs=(f"classification-task:{task_hash}", f"classification-split:{split_hash}", f"classification-release-plan:{release_plan_hash}"),
+        ).to_dict()
+        envelope_status = {
+            "validated": ("completed", "available", "complete", [], [], []),
+            "degraded": ("completed", "available", "degraded", [], [], [reason]),
+            "unavailable": ("blocked", "not_available", "insufficient", [reason], [reason], [reason]),
+        }[status]
+        envelope = EvidenceEnvelopeV1.from_dict(
+            {
+                "result_identity": {"result_ref": f"classification-evidence:{task_hash}:{split_hash}:{release_plan_hash}", "task_hash": task_hash, "split_hash": split_hash, "holdout_hash": release_plan_hash, "release_plan_hash": release_plan_hash},
+                "execution_status": envelope_status[0],
+                "availability": envelope_status[1],
+                "completeness_status": envelope_status[2],
+                "execution_reasons": envelope_status[3],
+                "availability_reasons": envelope_status[4],
+                "degradation_reasons": envelope_status[5],
+                "numerical_method": "deterministic_numeric",
+                "inference_basis": "descriptive",
+                "evaluation_design": "nested_cross_validation",
+                "validation_summary": {"levels_present": [], "minimum_required": "none", "requirement_status": "not_applicable"},
+                "method": {"id": "classification-production-v1", "version": "1.0"},
+                "estimand": {"id": "out_of_sample_binary_classification_performance"},
+                "input_provenance": {"task_hash": task_hash, "split_hash": split_hash, "release_plan_hash": release_plan_hash},
+                "assumptions": [],
+                "diagnostics": [],
+                "figures": [],
+                "warnings": [],
+                "dependencies": [],
+                "numeric_facts": [],
+                "family_evidence": {"classification": {"status": status}},
+                "oracle": {},
+                "lineage_refs": [f"classification-task:{task_hash}", f"classification-split:{split_hash}", f"classification-release-plan:{release_plan_hash}"],
+            }
+        )
+        facets = ("classification", "task", "split", "holdout", "release_plan") if status == "validated" else ("classification", "task", "split", "holdout", "release_plan", "degraded")
+        projection = ConsumerProjectionV1(
+            contract="consumer-projection",
+            contract_version="1.0",
+            producer_version="1.8.9",
+            payload=ConsumerProjectionPayloadV1(
+                projection_id=f"classification-evidence:{task_hash}:{split_hash}:{release_plan_hash}",
+                projection_ref=f"classification-legacy-adapter:{task_hash}:{split_hash}:{release_plan_hash}",
+                projection_status="available" if status in {"validated", "degraded"} else "blocked",
+                slots=tuple(ConsumerProjectionSlotV1(consumer=item, artifact_facets=facets, payload_schema_ref="workbench.prediction.classification-evidence", source_eligible=status == "validated") for item in ("agent", "notebook", "report")),
+                not_applicable_projection=ConsumerProjectionNotApplicableV1("not_applicable", "classification evidence is applicable to this result"),
+            ),
+        )
+    if envelope.result_identity.get("task_hash") != task_hash or envelope.result_identity.get("split_hash") != split_hash or envelope.result_identity.get("release_plan_hash") != release_plan_hash:
+        raise ContractError("CLASSIFICATION_EVIDENCE_C0_IDENTITY_INVALID", "C0 evidence envelope identity does not match producer identity")
+    if projection.payload.projection_status == "blocked" and status == "degraded":
+        raise ContractError("CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID", "degraded evidence must remain an available projection")
+    consumers = {slot.consumer for slot in projection.payload.slots}
+    if not {"agent", "notebook", "report"}.issubset(consumers):
+        raise ContractError("CLASSIFICATION_EVIDENCE_C0_PROJECTION_INVALID", "C0 projection must cover Agent, Notebook and Report")
+    return envelope, projection

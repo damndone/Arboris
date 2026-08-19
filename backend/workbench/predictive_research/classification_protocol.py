@@ -21,7 +21,18 @@ from .classification_metrics import (
 )
 from .contracts import ContractError
 from .preprocessing import ClassificationFoldPreprocessingV1, ClassificationPreprocessingStepV1
-from .split_kernel import ClassificationSplitManifestV1, build_classification_split_manifest
+from .split_kernel import (
+    ClassificationSplitManifestV1,
+    build_classification_split_manifest,
+    validate_classification_development_fold_windows,
+)
+from ..contracts.prediction.holdout import (
+    HoldoutAccessKindV1,
+    HoldoutAccessRequestV1,
+    HoldoutMetricBundleStoreV1,
+    HoldoutSealStoreV1,
+    HoldoutSealV1,
+)
 
 
 class HoldoutSealGuardV1:
@@ -144,11 +155,18 @@ def select_threshold_from_oof(
     scope: str,
     positive_class: Any = 1,
     sample_weight: Sequence[float] | None = None,
+    minimum_precision: float | None = None,
 ) -> dict[str, Any]:
     if scope not in {"development_oof", "development_calibration_eval"}:
         raise ContractError("CLASSIFICATION_THRESHOLD_SCOPE_INVALID", "threshold selection only accepts development OOF-derived probabilities")
     if method not in {"max_f1", "max_recall_at_precision", "min_log_loss"}:
         raise ContractError("CLASSIFICATION_THRESHOLD_METHOD_INVALID", method)
+    if minimum_precision is not None and (
+        type(minimum_precision) not in {int, float}
+        or not np.isfinite(float(minimum_precision))
+        or not 0 <= float(minimum_precision) <= 1
+    ):
+        raise ContractError("CLASSIFICATION_PRECISION_CONSTRAINT_INVALID", "minimum_precision must be in [0, 1]")
     candidates = np.linspace(0.05, 0.95, 19)
     rows = threshold_curve(
         actual,
@@ -160,10 +178,273 @@ def select_threshold_from_oof(
     if method == "max_f1":
         selected = max(rows, key=lambda row: (row["f1"], -row["threshold"]))
     elif method == "min_log_loss":
-        selected = min(rows, key=lambda row: abs(row["threshold"] - 0.5))
+        selected = min(rows, key=lambda row: (row["log_loss"], row["threshold"]))
     else:
-        selected = max(rows, key=lambda row: (row["recall"], -row["threshold"]))
-    return {"threshold": selected["threshold"], "method": method, "scope": scope, "curve": rows, "status": "frozen_development_choice"}
+        if minimum_precision is None:
+            return {
+                "status": "unavailable",
+                "reason_code": "CLASSIFICATION_THRESHOLD_PRECISION_CONSTRAINT_REQUIRED",
+                "method": method,
+                "scope": scope,
+                "curve": rows,
+            }
+        feasible = [row for row in rows if row["precision"] >= float(minimum_precision)]
+        if not feasible:
+            return {
+                "status": "unavailable",
+                "reason_code": "CLASSIFICATION_THRESHOLD_NO_FEASIBLE_CANDIDATE",
+                "method": method,
+                "scope": scope,
+                "minimum_precision": float(minimum_precision),
+                "curve": rows,
+            }
+        selected = max(feasible, key=lambda row: (row["recall"], -row["threshold"]))
+    return {
+        "threshold": selected["threshold"],
+        "method": method,
+        "scope": scope,
+        "curve": rows,
+        "status": "frozen_development_choice",
+        **({"minimum_precision": float(minimum_precision)} if minimum_precision is not None else {}),
+    }
+
+
+def _policy_minimum_precision(policy: DecisionPolicyV1) -> float | None:
+    if policy.threshold_method != "max_recall_at_precision":
+        return None
+    if not isinstance(policy.cost_matrix, Mapping):
+        return None
+    keys = ("minimum_precision", "min_precision", "precision_constraint")
+    values = [policy.cost_matrix[key] for key in keys if key in policy.cost_matrix]
+    if len(values) > 1 and any(value != values[0] for value in values[1:]):
+        raise ContractError(
+            "CLASSIFICATION_PRECISION_CONSTRAINT_INVALID",
+            "precision constraint aliases must agree",
+        )
+    if not values:
+        return None
+    value = values[0]
+    if type(value) not in {int, float} or not np.isfinite(float(value)) or not 0 <= float(value) <= 1:
+        raise ContractError(
+            "CLASSIFICATION_PRECISION_CONSTRAINT_INVALID",
+            "minimum_precision must be a finite numeric value in [0, 1]",
+        )
+    return float(value)
+
+
+_C0_DEVELOPMENT_HASH_KEYS = (
+    "code",
+    "config",
+    "contract",
+    "data",
+    "split",
+    "feature_recipe",
+    "candidate_search",
+    "calibration",
+    "threshold",
+    "decision_policy",
+)
+_C0_HOLDOUT_METRIC_REFS = tuple(
+    sorted(
+        {
+            "accuracy",
+            "balanced_accuracy",
+            "precision",
+            "recall",
+            "f1",
+            "roc_auc",
+            "pr_auc",
+            "log_loss",
+            "brier_score",
+        }
+    )
+)
+
+
+def _raw_c0_digest(value: Any) -> str:
+    digest = _production_hash(value)
+    return digest.split(":", 1)[1]
+
+
+def _build_c0_development_hashes(
+    *,
+    task: ClassificationTaskSpecV1,
+    development_refs: Sequence[str],
+    development_labels: Sequence[Any],
+    split: Mapping[str, Any],
+    model_ids: Sequence[str],
+    seed: int,
+    preprocessing_steps: Sequence[ClassificationPreprocessingStepV1],
+    selection_scores: Mapping[str, float],
+    calibration: Mapping[str, Any],
+    threshold: Mapping[str, Any],
+    decision_policy: Mapping[str, Any],
+) -> dict[str, str]:
+    values = {
+        "code": {"entrypoint": "workbench.prediction.run_classification_model_v189", "protocol": "classification.production.v1"},
+        "config": {"model_ids": list(model_ids), "seed": seed},
+        "contract": task.to_dict(),
+        "data": {"development_row_refs": list(development_refs), "development_labels": list(development_labels)},
+        "split": split,
+        "feature_recipe": [step.to_dict() for step in preprocessing_steps],
+        "candidate_search": {"selection_scores": dict(selection_scores), "model_ids": list(model_ids)},
+        "calibration": calibration,
+        "threshold": threshold,
+        "decision_policy": decision_policy,
+    }
+    return {key: _raw_c0_digest(values[key]) for key in _C0_DEVELOPMENT_HASH_KEYS}
+
+
+def _release_holdout_with_c0_store(
+    *,
+    holdout_seal_store: HoldoutSealStoreV1 | None,
+    holdout_principal_ref: str | None,
+    holdout_access_id: str | None,
+    task: ClassificationTaskSpecV1,
+    development_refs: Sequence[str],
+    development_labels: Sequence[Any],
+    split: Mapping[str, Any],
+    model_ids: Sequence[str],
+    seed: int,
+    preprocessing_steps: Sequence[ClassificationPreprocessingStepV1],
+    selection_scores: Mapping[str, float],
+    selected_model: str,
+    model_identity: Mapping[str, Any],
+    calibration: Mapping[str, Any],
+    threshold: Mapping[str, Any],
+    policy_payload: Mapping[str, Any],
+    holdout_labels: Sequence[Any],
+    holdout_probabilities: Sequence[float],
+    holdout_predictions: Sequence[Any],
+    positive_class: Any,
+    sample_weight: Sequence[float] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if type(holdout_seal_store) is not HoldoutSealStoreV1:
+        raise ContractError(
+            "CLASSIFICATION_HOLDOUT_SERVER_STORE_REQUIRED",
+            "production holdout release requires C0 HoldoutSealStoreV1",
+        )
+    if type(holdout_principal_ref) is not str or not holdout_principal_ref.strip():
+        raise ContractError(
+            "CLASSIFICATION_HOLDOUT_PRINCIPAL_REQUIRED",
+            "production holdout release requires a typed principal_ref",
+        )
+    if type(holdout_access_id) is not str or not holdout_access_id.strip():
+        raise ContractError(
+            "CLASSIFICATION_HOLDOUT_ACCESS_ID_REQUIRED",
+            "production holdout release requires a typed access_id",
+        )
+    release_plan_base = {
+        "metrics": list(_C0_HOLDOUT_METRIC_REFS),
+        "task_hash": task.content_hash,
+        "split_hash": split["split_hash"],
+        "model_id": selected_model,
+        "model_hash": _production_hash(model_identity),
+        "calibration_hash": _production_hash(calibration),
+        "threshold_hash": _production_hash(threshold),
+        "policy_hash": _production_hash(policy_payload),
+    }
+    release_plan_base["plan_hash"] = _production_hash(release_plan_base)
+    metric_bundle_ref = f"classification.metric-bundle:{release_plan_base['plan_hash']}"
+    metric_bundle_reference = holdout_seal_store.metric_bundle_store.issue(
+        bundle_ref=metric_bundle_ref,
+        metric_refs=_C0_HOLDOUT_METRIC_REFS,
+        declaration={
+            "metrics": [
+                {"ref": metric_ref, "definition_ref": f"workbench.classification.metric.{metric_ref}.v1"}
+                for metric_ref in _C0_HOLDOUT_METRIC_REFS
+            ]
+        },
+    )
+    development_hashes = _build_c0_development_hashes(
+        task=task,
+        development_refs=development_refs,
+        development_labels=development_labels,
+        split=split,
+        model_ids=model_ids,
+        seed=seed,
+        preprocessing_steps=preprocessing_steps,
+        selection_scores=selection_scores,
+        calibration=calibration,
+        threshold=threshold,
+        decision_policy=policy_payload,
+    )
+    seal = HoldoutSealV1(
+        seal_id=f"classification.holdout:{release_plan_base['plan_hash']}",
+        principal_ref=holdout_principal_ref,
+        development_hashes=development_hashes,
+        metric_release_bundle_ref=metric_bundle_reference.bundle_ref,
+        metric_bundle_digest=metric_bundle_reference.content_digest,
+        metric_refs=metric_bundle_reference.metric_refs,
+    )
+    seal_reference = holdout_seal_store.issue(
+        seal,
+        metric_bundle_reference=metric_bundle_reference,
+    )
+    access_request = HoldoutAccessRequestV1(
+        access_id=holdout_access_id,
+        principal_ref=holdout_principal_ref,
+        kind=HoldoutAccessKindV1.DECLARED_EVALUATION,
+        metric_refs=metric_bundle_reference.metric_refs,
+        metric_bundle_digest=metric_bundle_reference.content_digest,
+    )
+    decision = holdout_seal_store.consume(seal_reference, access_request)
+    if not decision.allowed:
+        raise ContractError(
+            "CLASSIFICATION_HOLDOUT_RELEASE_BLOCKED",
+            f"C0 holdout release denied: {decision.reason_code}",
+        )
+    if decision.reason_code != "HOLDOUT_RELEASE_ALLOWED" or decision.seal.status != "closed" or len(decision.seal.access_ledger) != 1:
+        raise ContractError(
+            "CLASSIFICATION_HOLDOUT_RELEASE_INVALID",
+            "C0 holdout decision did not produce one closed ledger release",
+        )
+    release_plan = {
+        **release_plan_base,
+        "metric_bundle_ref": metric_bundle_reference.bundle_ref,
+        "metric_bundle_digest": metric_bundle_reference.content_digest,
+        "seal_id": decision.seal.seal_id,
+        "seal_digest": decision.seal.seal_digest,
+        "access_id": access_request.access_id,
+        "access_request_digest": access_request.request_digest,
+        "principal_ref": access_request.principal_ref,
+    }
+    release_plan["plan_hash"] = _production_hash(release_plan)
+    bundle = classification_metric_bundle(
+        actual=holdout_labels,
+        probabilities=holdout_probabilities,
+        predictions=holdout_predictions,
+        positive_class=positive_class,
+        threshold=threshold["threshold"],
+        sample_scope="final_holdout",
+        evaluation_design="sealed_holdout",
+        numerical_method="same_library_regression",
+        inference_basis="descriptive",
+        validation_level="validated",
+        sample_weight=sample_weight,
+    )
+    released = {
+        "metrics": {name: bundle["metrics"].get(name) for name in _C0_HOLDOUT_METRIC_REFS},
+        "status": "released_once",
+        "release_count": 1,
+        "access_ledger": [entry.to_dict() for entry in decision.seal.access_ledger],
+        "row_count": len(holdout_labels),
+        "weight_sum": float(sum(sample_weight)) if sample_weight is not None else float(len(holdout_labels)),
+        "c0": {
+            "decision": {
+                "allowed": decision.allowed,
+                "reason": decision.reason_code,
+                "status": decision.seal.status,
+                "ledger": [entry.to_dict() for entry in decision.seal.access_ledger],
+            },
+            "metric_bundle": metric_bundle_reference.to_dict(),
+            "seal": decision.seal.to_dict(),
+            "access_request": access_request.to_dict(),
+        },
+        "release_plan": release_plan,
+        "release_plan_hash": release_plan["plan_hash"],
+    }
+    return released, release_plan
 
 
 def _oof_probabilities(
@@ -602,6 +883,9 @@ def _run_production_classification_protocol(
     preprocessing_steps: Sequence[ClassificationPreprocessingStepV1] | None = None,
     calibration_method: str = "platt",
     model_parameters: Mapping[str, Mapping[str, Any]] | None = None,
+    holdout_seal_store: HoldoutSealStoreV1 | None = None,
+    holdout_principal_ref: str | None = None,
+    holdout_access_id: str | None = None,
 ) -> dict[str, Any]:
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         raise ContractError("CLASSIFICATION_DATASET_INVALID", "classification input must be a non-empty DataFrame")
@@ -665,6 +949,7 @@ def _run_production_classification_protocol(
         raise ContractError("CLASSIFICATION_THRESHOLD_SCOPE_INVALID", "threshold policy must use development_oof")
     if decision_policy.threshold_method not in {"max_f1", "max_recall_at_precision", "min_log_loss"}:
         raise ContractError("CLASSIFICATION_THRESHOLD_METHOD_INVALID", decision_policy.threshold_method)
+    minimum_precision = _policy_minimum_precision(decision_policy)
     steps = tuple(preprocessing_steps or ())
     if any(not isinstance(step, ClassificationPreprocessingStepV1) for step in steps):
         raise ContractError("CLASSIFICATION_PREPROCESSING_CONTRACT_INVALID", "preprocessing steps must be typed")
@@ -699,6 +984,11 @@ def _run_production_classification_protocol(
         embargo=embargo,
         embargo_basis=embargo_basis,
     )
+    validate_classification_development_fold_windows(
+        manifest,
+        label_windows=label_windows,
+        purge_gap=effective_purge_gap,
+    )
     split_hash = manifest.content_hash
     feature_frame = work.loc[:, list(task.feature_columns)]
     development_refs = tuple(item.row_ref for item in manifest.assignments if item.partition == "development")
@@ -711,6 +1001,7 @@ def _run_production_classification_protocol(
     candidate_adapters: dict[str, Any] = {}
     candidate_transforms: dict[str, Any] = {}
     candidate_calibrators: dict[str, Any] = {}
+    candidate_thresholds: dict[str, dict[str, Any]] = {}
     for position, model_id in enumerate(model_ids_tuple):
         oof_by_ref: dict[str, float] = {}
         fold_receipts: list[dict[str, Any]] = []
@@ -723,6 +1014,11 @@ def _run_production_classification_protocol(
             training_refs = _production_training_refs(manifest, fold)
             if len(set(target.loc[list(training_refs)].tolist())) < 2:
                 raise ContractError("CLASSIFICATION_SPLIT_CLASS_SUPPORT", f"fold {fold} lacks training class support")
+            if len(set(target.loc[list(validation_refs)].tolist())) < 2:
+                raise ContractError(
+                    "CLASSIFICATION_SPLIT_VALIDATION_CLASS_SUPPORT",
+                    f"fold {fold} lacks validation support for both classes",
+                )
             fitted, receipt = _production_fit_transform(
                 feature_frame,
                 training_refs,
@@ -777,7 +1073,10 @@ def _run_production_classification_protocol(
             scope="development_oof",
             positive_class=positive,
             sample_weight=oof_weight,
+            minimum_precision=minimum_precision,
         )
+        if selection_threshold.get("status") != "frozen_development_choice":
+            blocked_reasons.append(str(selection_threshold.get("reason_code", "CLASSIFICATION_THRESHOLD_UNAVAILABLE")))
         selection_predictions = [positive if probability >= 0.5 else negative for probability in oof_probabilities]
         oof_bundle = classification_metric_bundle(
             actual=oof_actual,
@@ -831,7 +1130,20 @@ def _run_production_classification_protocol(
             scope="development_oof",
             positive_class=positive,
             sample_weight=calibration_eval_weight,
+            minimum_precision=minimum_precision,
         )
+        if threshold.get("status") != "frozen_development_choice":
+            blocked_reasons.append(str(threshold.get("reason_code", "CLASSIFICATION_THRESHOLD_UNAVAILABLE")))
+        if decision_policy.selected_threshold is not None and threshold.get("status") == "frozen_development_choice" and minimum_precision is not None:
+            requested = threshold_curve(
+                calibration_eval_actual,
+                calibration_eval_probabilities.tolist(),
+                thresholds=[float(decision_policy.selected_threshold)],
+                positive_class=positive,
+                sample_weight=calibration_eval_weight,
+            )[0]
+            if requested["precision"] < minimum_precision:
+                blocked_reasons.append("CLASSIFICATION_THRESHOLD_POLICY_CONSTRAINT_UNSATISFIED")
         threshold["row_refs"] = list(calibration_eval_refs)
         threshold["input_scope"] = "development_calibration_eval"
         calibration = compute_calibration_bins(
@@ -873,12 +1185,29 @@ def _run_production_classification_protocol(
         candidate_adapters[model_id] = final_adapter
         candidate_transforms[model_id] = final_transform
         candidate_calibrators[model_id] = calibrator
+        candidate_thresholds[model_id] = threshold
+        reported_threshold = threshold
+        reported_selection_threshold = selection_threshold
+        if decision_policy.selection_status == "SCENARIOS_ONLY":
+            reported_threshold = {
+                "status": "unavailable",
+                "reason_code": "CLASSIFICATION_POLICY_SCENARIO_ONLY",
+                "method": decision_policy.threshold_method,
+                "scope": "development_oof",
+                "curve": [],
+            }
+            reported_selection_threshold = {
+                "status": "unavailable",
+                "reason_code": "CLASSIFICATION_POLICY_SCENARIO_ONLY",
+                "method": decision_policy.threshold_method,
+                "scope": "development_oof",
+            }
         models[model_id] = {
             "metadata": final_adapter.metadata,
             "oof": {"folds": [item["fold"] for item in fold_receipts], "oof_row_refs": list(oof_refs)},
             "oof_metrics": oof_bundle,
-            "threshold": threshold,
-            "selection_threshold": selection_threshold,
+            "threshold": reported_threshold,
+            "selection_threshold": reported_selection_threshold,
             "calibration": calibration,
             "preprocessing": {"folds": fold_receipts, "final": final_receipt},
             "weights": {
@@ -907,45 +1236,116 @@ def _run_production_classification_protocol(
     selected_adapter = candidate_adapters[selected_model]
     selected_transform = candidate_transforms[selected_model]
     selected_calibrator = candidate_calibrators[selected_model]
-    threshold_value = float(models[selected_model]["threshold"]["threshold"])
-    holdout_features = selected_transform.transform(feature_frame.loc[list(holdout_refs)], row_refs=holdout_refs)
-    holdout_probabilities_matrix = selected_adapter.predict_proba(holdout_features)
-    positive_index = list(selected_adapter._classes).index(positive)
-    holdout_raw_probabilities = holdout_probabilities_matrix[:, positive_index]
-    holdout_probabilities = selected_calibrator.transform(holdout_raw_probabilities.tolist())
-    holdout_predictions = np.where(
-        holdout_probabilities >= threshold_value,
-        positive,
-        negative,
+    selected_threshold = candidate_thresholds[selected_model]
+    releasable_threshold = selected_threshold.get("status") == "frozen_development_choice"
+    release_blocker_prefixes = (
+        "CLASSIFICATION_THRESHOLD_",
+        "CLASSIFICATION_CALIBRATION_NOT_APPLIED",
+        "CLASSIFICATION_AVAILABILITY_UNVALIDATED",
     )
-    policy_payload = {**decision_policy.to_dict(), "threshold": models[selected_model]["threshold"]}
+    release_blocked = (
+        decision_policy.selection_status == "SCENARIOS_ONLY"
+        or not releasable_threshold
+        or any(
+            reason == "CLASSIFICATION_CALIBRATION_NOT_APPLIED"
+            or reason == "CLASSIFICATION_AVAILABILITY_UNVALIDATED"
+            or reason.startswith("CLASSIFICATION_THRESHOLD_")
+            for reason in blocked_reasons
+        )
+    )
+    if not release_blocked:
+        threshold_value = float(
+            decision_policy.selected_threshold
+            if decision_policy.selected_threshold is not None
+            else selected_threshold["threshold"]
+        )
+        consumed_threshold = dict(selected_threshold)
+        if decision_policy.selected_threshold is not None:
+            consumed_threshold = {
+                **selected_threshold,
+                "development_selected_threshold": selected_threshold["threshold"],
+                "threshold": threshold_value,
+                "status": "policy_selected_threshold_consumed",
+                "consumed_by": "final_holdout",
+            }
+        models[selected_model]["threshold"] = consumed_threshold
+    else:
+        threshold_value = None
+        consumed_threshold = models[selected_model]["threshold"]
+    policy_payload = {**decision_policy.to_dict(), "threshold": consumed_threshold}
+    if not release_blocked:
+        policy_payload["consumed_threshold"] = threshold_value
+        policy_payload["threshold_source"] = (
+            "policy_selected_threshold"
+            if decision_policy.selected_threshold is not None
+            else "development_calibration_eval"
+        )
     model_identity = {
         "model_id": selected_model,
         "metadata": models[selected_model]["metadata"],
         "preprocessing": models[selected_model]["preprocessing"],
     }
     release_plan = {
-        "metrics": sorted(HoldoutSealGuardV1._ALLOWED_METRICS),
+        "metrics": list(_C0_HOLDOUT_METRIC_REFS),
         "task_hash": task.content_hash,
         "split_hash": split_hash,
         "model_id": selected_model,
         "model_hash": _production_hash(model_identity),
         "calibration_hash": _production_hash(models[selected_model]["calibration"]),
+        "threshold_hash": _production_hash(consumed_threshold),
         "policy_hash": _production_hash(policy_payload),
     }
     release_plan["plan_hash"] = _production_hash(release_plan)
-    guard = HoldoutSealGuardV1(
-        holdout_labels=target.loc[list(holdout_refs)].tolist(),
-        holdout_probabilities=holdout_probabilities.tolist(),
-        holdout_predictions=holdout_predictions.tolist(),
-        positive_class=positive,
-        metric_release_plan=release_plan,
-        sample_weight=None if weights is None else [weight_by_ref[ref] for ref in holdout_refs],
-    )
-    released = guard.release(authorization="one-time")
-    released.update({"release_plan": release_plan, "release_plan_hash": release_plan["plan_hash"], "row_refs": list(holdout_refs)})
+    if release_blocked:
+        released = {
+            "status": "sealed",
+            "access_boundary": "server_store_consume_required",
+            "release_count": 0,
+            "release_plan": release_plan,
+            "release_plan_hash": release_plan["plan_hash"],
+            "row_refs": list(holdout_refs),
+        }
+    else:
+        holdout_features = selected_transform.transform(feature_frame.loc[list(holdout_refs)], row_refs=holdout_refs)
+        holdout_probabilities_matrix = selected_adapter.predict_proba(holdout_features)
+        positive_index = list(selected_adapter._classes).index(positive)
+        holdout_raw_probabilities = holdout_probabilities_matrix[:, positive_index]
+        holdout_probabilities = selected_calibrator.transform(holdout_raw_probabilities.tolist())
+        holdout_predictions = np.where(
+            holdout_probabilities >= threshold_value,
+            positive,
+            negative,
+        )
+        released, release_plan = _release_holdout_with_c0_store(
+            holdout_seal_store=holdout_seal_store,
+            holdout_principal_ref=holdout_principal_ref,
+            holdout_access_id=holdout_access_id,
+            task=task,
+            development_refs=development_refs,
+            development_labels=target.loc[list(development_refs)].tolist(),
+            split={"split_hash": split_hash},
+            model_ids=model_ids_tuple,
+            seed=seed,
+            preprocessing_steps=steps,
+            selection_scores=selection_scores,
+            selected_model=selected_model,
+            model_identity=model_identity,
+            calibration=models[selected_model]["calibration"],
+            threshold=consumed_threshold,
+            policy_payload=policy_payload,
+            holdout_labels=target.loc[list(holdout_refs)].tolist(),
+            holdout_probabilities=holdout_probabilities.tolist(),
+            holdout_predictions=holdout_predictions.tolist(),
+            positive_class=positive,
+            sample_weight=None if weights is None else [weight_by_ref[ref] for ref in holdout_refs],
+        )
+        released["row_refs"] = list(holdout_refs)
     for model_id in model_ids_tuple:
-        models[model_id]["holdout"] = released if model_id == selected_model else {"status": "not_evaluated", "reason": "holdout is reserved for the development-selected model"}
+        models[model_id]["holdout"] = (
+            released
+            if model_id == selected_model
+            else {"status": "not_evaluated", "reason": "holdout is reserved for the development-selected model"}
+        )
     development_labels = target.loc[list(development_refs)].tolist()
     majority_class, majority_count = Counter(development_labels).most_common(1)[0]
     majority_probability = sum(value == positive for value in development_labels) / len(development_labels)
@@ -954,7 +1354,7 @@ def _run_production_classification_protocol(
         probabilities=[majority_probability] * len(development_labels),
         predictions=[majority_class] * len(development_labels),
         positive_class=positive,
-        threshold=threshold_value,
+        threshold=0.5 if threshold_value is None else threshold_value,
         sample_scope="development",
         evaluation_design="majority_baseline",
         numerical_method="known_answer",
@@ -983,10 +1383,7 @@ def _run_production_classification_protocol(
         "split": manifest.to_dict(),
         "holdout": {
             **released,
-            "status": "released_once",
             "model_id": selected_model,
-            "access_boundary": "sealed_until_authorized_release",
-            "release_count": 1,
         },
         "baselines": [
             {
@@ -1028,6 +1425,9 @@ def run_classification_protocol(
     preprocessing_steps: Sequence[ClassificationPreprocessingStepV1] | None = None,
     calibration_method: str = "platt",
     model_parameters: Mapping[str, Mapping[str, Any]] | None = None,
+    holdout_seal_store: HoldoutSealStoreV1 | None = None,
+    holdout_principal_ref: str | None = None,
+    holdout_access_id: str | None = None,
 ) -> dict[str, Any]:
     if task is not None:
         return _run_production_classification_protocol(
@@ -1050,6 +1450,9 @@ def run_classification_protocol(
             preprocessing_steps=preprocessing_steps,
             calibration_method=calibration_method,
             model_parameters=model_parameters,
+            holdout_seal_store=holdout_seal_store,
+            holdout_principal_ref=holdout_principal_ref,
+            holdout_access_id=holdout_access_id,
         )
     if target is None or row_refs is None or not isinstance(frame, pd.DataFrame) or len(frame) != len(target) or len(frame) != len(row_refs):
         raise ContractError("CLASSIFICATION_PROTOCOL_INPUT_INVALID", "frame, target and row_refs must align")

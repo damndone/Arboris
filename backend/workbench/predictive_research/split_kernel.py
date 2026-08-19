@@ -415,6 +415,48 @@ def build_classification_split_manifest(
     )
 
 
+def validate_classification_development_fold_windows(
+    manifest: ClassificationSplitManifestV1,
+    *,
+    label_windows: Sequence[tuple[Any, Any]] | None,
+    purge_gap: Any | None,
+) -> None:
+    """Fail closed when a development training row overlaps its validation fold.
+
+    Holdout-only purge records cannot make a development overlap safe. Every
+    validation fold must be separated from the rows used to fit that fold.
+    """
+
+    if label_windows is None:
+        return
+    index_by_ref = {assignment.row_ref: index for index, assignment in enumerate(manifest.assignments)}
+    folds = sorted(
+        {
+            assignment.cv_fold
+            for assignment in manifest.assignments
+            if assignment.partition == "development" and assignment.cv_fold is not None
+        }
+    )
+    for fold in folds:
+        validation_refs = {
+            assignment.row_ref
+            for assignment in manifest.assignments
+            if assignment.partition == "development" and assignment.cv_fold == fold
+        }
+        training_refs = set(manifest.training_rows_for_fold(fold))
+        for training_ref in sorted(training_refs):
+            for validation_ref in sorted(validation_refs):
+                if _interval_overlaps(
+                    label_windows[index_by_ref[training_ref]],
+                    label_windows[index_by_ref[validation_ref]],
+                    purge_gap,
+                ):
+                    raise ContractError(
+                        "CLASSIFICATION_PURGE_WINDOW_TRAIN_VALIDATION_OVERLAP",
+                        f"fold {fold} has overlapping training/validation label windows: {training_ref}, {validation_ref}",
+                    )
+
+
 def build_split_plan(
     *,
     row_refs: Sequence[str],

@@ -2,7 +2,72 @@ import type { ReactNode } from "react";
 
 type EvidenceRecord = Record<string, unknown>;
 
-export type ClassificationEvidencePacket = Readonly<Record<string, unknown>>;
+export type ClassificationEvidenceStatus = "validated" | "degraded" | "unavailable";
+
+export interface ClassificationEvidenceTaskIdentity {
+  readonly task_type: string;
+  readonly positive_class: unknown;
+  readonly class_support: Readonly<Record<string, number>>;
+  readonly task_hash: string;
+}
+
+export interface ClassificationEvidenceSplitIdentity {
+  readonly profile: string;
+  readonly split_hash: string;
+  readonly [key: string]: unknown;
+}
+
+export interface ClassificationEvidenceReleasePlan {
+  readonly plan_hash: string;
+  readonly task_hash: string;
+  readonly split_hash: string;
+  readonly model_id: string;
+  readonly calibration_hash: string;
+  readonly policy_hash: string;
+  readonly [key: string]: unknown;
+}
+
+export interface ClassificationEvidenceHoldoutIdentity {
+  readonly status: string;
+  readonly release_plan_hash: string;
+  readonly release_count: number;
+  readonly release_plan: ClassificationEvidenceReleasePlan;
+  readonly [key: string]: unknown;
+}
+
+export interface ClassificationEvidencePacket {
+  readonly payload_schema: "workbench.prediction.classification-evidence";
+  readonly schema_version: 1;
+  readonly status: ClassificationEvidenceStatus;
+  readonly task: ClassificationEvidenceTaskIdentity;
+  readonly split: ClassificationEvidenceSplitIdentity;
+  readonly metrics: Readonly<Record<string, unknown>>;
+  readonly calibration: Readonly<Record<string, unknown>>;
+  readonly baselines: readonly unknown[];
+  readonly controls: readonly unknown[];
+  readonly comparison: Readonly<Record<string, unknown>>;
+  readonly explanations: Readonly<Record<string, unknown>>;
+  readonly stability: Readonly<Record<string, unknown>>;
+  readonly shift: Readonly<Record<string, unknown>>;
+  readonly decision_policy: Readonly<Record<string, unknown>>;
+  readonly blocked_reasons: readonly string[];
+  readonly evidence_refs: Readonly<{
+    readonly task: string;
+    readonly split: string;
+    readonly holdout: string;
+    readonly release_plan: string;
+    readonly [key: string]: string;
+  }>;
+  readonly holdout: ClassificationEvidenceHoldoutIdentity;
+  readonly c0_evidence_envelope: Readonly<Record<string, unknown>>;
+  readonly c0_consumer_projection: Readonly<Record<string, unknown>>;
+  readonly foundation_status: Readonly<{
+    readonly execution_status: "completed" | "partial" | "blocked" | "failed";
+    readonly availability: "available" | "not_available" | "not_applicable";
+    readonly completeness_status: "complete" | "degraded" | "insufficient" | "not_applicable";
+    readonly producer_status: ClassificationEvidenceStatus;
+  }>;
+}
 
 const tableStyle = { fontSize: 12, borderCollapse: "collapse" as const };
 const cellStyle = { padding: "2px 10px 2px 0", textAlign: "left" as const };

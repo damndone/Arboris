@@ -5,7 +5,8 @@ import { ClassificationEvidence } from "./ClassificationEvidence";
 const packet = {
   payload_schema: "workbench.prediction.classification-evidence",
   schema_version: 1,
-  task: { task_type: "binary", positive_class: "yes", class_support: { no: 4, yes: 4 } },
+  status: "validated",
+  task: { task_type: "binary", positive_class: "yes", class_support: { no: 4, yes: 4 }, task_hash: "sha256:" + "t".repeat(64) },
   split: { profile: "temporal_rolling", split_hash: "sha256:split" },
   metrics: { accuracy: { point_estimate: 0.75 }, log_loss: { point_estimate: 0.4 } },
   calibration: { status: "descriptive", brier: 0.19 },
@@ -17,7 +18,33 @@ const packet = {
   shift: { status: "descriptive" },
   decision_policy: { selection_status: "SCENARIOS_ONLY", holdout: "sealed" },
   blocked_reasons: [],
-  evidence_refs: { holdout: "holdout-1" },
+  holdout: {
+    status: "sealed",
+    release_plan_hash: "sha256:" + "c".repeat(64),
+    release_count: 0,
+    release_plan: {
+      plan_hash: "sha256:" + "c".repeat(64),
+      task_hash: "sha256:" + "t".repeat(64),
+      split_hash: "sha256:split",
+      model_id: "random_forest",
+      calibration_hash: "sha256:calibration",
+      policy_hash: "sha256:policy",
+    },
+  },
+  evidence_refs: {
+    task: "classification-task:sha256:" + "t".repeat(64),
+    split: "classification-split:sha256:split",
+    holdout: "holdout-1",
+    release_plan: "classification-release-plan:sha256:" + "c".repeat(64),
+  },
+  c0_evidence_envelope: {},
+  c0_consumer_projection: {},
+  foundation_status: {
+    execution_status: "completed",
+    availability: "available",
+    completeness_status: "complete",
+    producer_status: "validated",
+  },
 } as const;
 
 describe("ClassificationEvidence", () => {

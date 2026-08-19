@@ -6,12 +6,14 @@ import pandas as pd
 import pytest
 
 from workbench.canonical import sha256_canonical
+from workbench.contracts.prediction.holdout import HoldoutMetricBundleStoreV1, HoldoutSealStoreV1
 from workbench.prediction import run_classification_model_v189
 from workbench.providers.catalog import load_builtin_catalog
 from workbench.predictive_research.classification_explanations import (
     compute_permutation_explanations,
     summarize_shift,
 )
+from workbench.predictive_research.classification_adapters import classification_runtime_registry
 from workbench.predictive_research.classification_contracts import (
     ClassificationTaskSpecV1,
     FeatureAvailabilityContractV1,
@@ -29,7 +31,8 @@ def _evidence_packet() -> dict[str, object]:
     return {
         "payload_schema": "workbench.prediction.classification-evidence",
         "schema_version": 1,
-        "task": {"task_type": "binary", "positive_class": "yes", "class_support": {"no": 4, "yes": 4}},
+        "status": "validated",
+        "task": {"task_type": "binary", "positive_class": "yes", "class_support": {"no": 4, "yes": 4}, "task_hash": "sha256:" + "t" * 64},
         "split": {"profile": "iid_stratified", "split_hash": "sha256:" + "a" * 64},
         "metrics": {"accuracy": {"point_estimate": 0.75, "validation_level": "validated"}},
         "calibration": {"status": "descriptive", "brier": 0.19},
@@ -41,7 +44,21 @@ def _evidence_packet() -> dict[str, object]:
         "shift": {"status": "descriptive", "features": []},
         "decision_policy": {"selection_status": "SCENARIOS_ONLY", "holdout": "sealed"},
         "blocked_reasons": [],
-        "evidence_refs": {"split": "split-1", "holdout": "holdout-1"},
+        "holdout": {
+            "status": "sealed",
+            "release_plan_hash": "sha256:" + "c" * 64,
+            "release_plan": {
+                "plan_hash": "sha256:" + "c" * 64,
+                "task_hash": "sha256:" + "t" * 64,
+                "split_hash": "sha256:" + "a" * 64,
+            },
+        },
+        "evidence_refs": {
+            "task": "classification-task:sha256:" + "t" * 64,
+            "split": "classification-split:sha256:" + "a" * 64,
+            "holdout": "holdout-1",
+            "release_plan": "classification-release-plan:sha256:" + "c" * 64,
+        },
     }
 
 
@@ -213,6 +230,10 @@ def test_additive_classification_entrypoint_requires_typed_task_and_persists_pac
         model_ids=("logistic_regression", "random_forest"),
         final_holdout_fraction=0.25,
         cv_folds=2,
+        runtime_registry=classification_runtime_registry(),
+        holdout_seal_store=HoldoutSealStoreV1(metric_bundle_store=HoldoutMetricBundleStoreV1()),
+        holdout_principal_ref="principal:test",
+        holdout_access_id="access:test",
     )
 
     assert result["status"] == "degraded"

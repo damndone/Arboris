@@ -330,7 +330,15 @@ def threshold_curve(
         if not 0 <= threshold <= 1:
             raise ContractError("CLASSIFICATION_THRESHOLD_INVALID", "threshold must be in [0, 1]")
         pred = (p >= threshold).astype(int)
-        rows.append({"threshold": float(threshold), "precision": float(sk_metrics.precision_score(binary, pred, zero_division=0, sample_weight=weights)), "recall": float(sk_metrics.recall_score(binary, pred, zero_division=0, sample_weight=weights)), "f1": float(sk_metrics.f1_score(binary, pred, zero_division=0, sample_weight=weights)), "positive_rate": float(np.average(pred, weights=weights)), "weight_sum": float(weights.sum())})
+        rows.append({
+            "threshold": float(threshold),
+            "precision": float(sk_metrics.precision_score(binary, pred, zero_division=0, sample_weight=weights)),
+            "recall": float(sk_metrics.recall_score(binary, pred, zero_division=0, sample_weight=weights)),
+            "f1": float(sk_metrics.f1_score(binary, pred, zero_division=0, sample_weight=weights)),
+            "log_loss": float(sk_metrics.log_loss(binary, pred, labels=[0, 1], sample_weight=weights)),
+            "positive_rate": float(np.average(pred, weights=weights)),
+            "weight_sum": float(weights.sum()),
+        })
     return rows
 
 

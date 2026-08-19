@@ -1,13 +1,31 @@
 from __future__ import annotations
 
 from pathlib import Path
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import pandas as pd
 
 from .artifacts import register_artifact, write_json
 from .canonical import sha256_canonical
+from .contracts.evidence.envelope import (
+    ConsumerProjectionNotApplicableV1,
+    ConsumerProjectionPayloadV1,
+    ConsumerProjectionSlotV1,
+    ConsumerProjectionV1,
+    EvidenceEnvelopeV1,
+    EvidenceReasonV1,
+)
+from .contracts.common.foundation_status import (
+    AvailabilityStatusV1,
+    CompletenessStatusV1,
+    EvaluationDesignV1,
+    ExecutionStatusV1,
+    InferenceBasisV1,
+    NumericalMethodV1,
+    ValidationLevelV1,
+)
+from .contracts.prediction.holdout import HoldoutSealStoreV1
 from .econometrics.optional_deps import require_optional_dependency
 from .predictive_research.contracts import (
     AvailabilitySpecV1,
@@ -17,6 +35,12 @@ from .predictive_research.contracts import (
     SamplingSpecV1,
     SplitPlanV1,
     StructureSpecV1,
+)
+from .predictive_research.classification_adapters import (
+    CLASSIFICATION_EXECUTOR_REF,
+    CLASSIFICATION_PRODUCTION_ENTRYPOINT,
+    CLASSIFICATION_PROVIDER_ID,
+    CLASSIFICATION_RUNTIME_ADAPTER_ID,
 )
 from .predictive_research.classification_contracts import ClassificationTaskSpecV1, DecisionPolicyV1
 from .predictive_research.classification_protocol import run_classification_protocol
@@ -40,6 +64,165 @@ _SUPPORTED_PREDICTION_MODEL_TYPES = {
     "prediction_random_forest",
 }
 _SUPPORTED_SAMPLING_METHODS = {"smote", "oversample", "undersample"}
+
+
+def _classification_c0_reason(code: str, *, task_hash: str, split_hash: str, release_plan_hash: str) -> dict[str, Any]:
+    return EvidenceReasonV1(
+        code=code,
+        message=f"classification evidence is {code}",
+        source_refs=(
+            f"classification-task:{task_hash}",
+            f"classification-split:{split_hash}",
+            f"classification-release-plan:{release_plan_hash}",
+        ),
+    ).to_dict()
+
+
+def _build_classification_c0_evidence(
+    *,
+    status: str,
+    task_hash: str,
+    split_hash: str,
+    holdout: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    blocked_reasons: Sequence[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    release_plan_hash = str(holdout.get("release_plan_hash", ""))
+    if not release_plan_hash:
+        raise ContractError("CLASSIFICATION_RELEASE_PLAN_IDENTITY_REQUIRED", "holdout release plan identity is required")
+    result_ref = f"classification-evidence:{task_hash}:{split_hash}:{release_plan_hash}"
+    reasons = [
+        _classification_c0_reason(
+            reason,
+            task_hash=task_hash,
+            split_hash=split_hash,
+            release_plan_hash=release_plan_hash,
+        )
+        for reason in blocked_reasons
+    ]
+    if status == "validated":
+        execution_status = ExecutionStatusV1.COMPLETED.value
+        availability = AvailabilityStatusV1.AVAILABLE.value
+        completeness = CompletenessStatusV1.COMPLETE.value
+        execution_reasons: list[dict[str, Any]] = []
+        availability_reasons: list[dict[str, Any]] = []
+        degradation_reasons: list[dict[str, Any]] = []
+    elif status == "degraded":
+        execution_status = ExecutionStatusV1.COMPLETED.value
+        availability = AvailabilityStatusV1.AVAILABLE.value
+        completeness = CompletenessStatusV1.DEGRADED.value
+        execution_reasons = []
+        availability_reasons = []
+        degradation_reasons = reasons or [
+            _classification_c0_reason(
+                "CLASSIFICATION_EVIDENCE_DEGRADED",
+                task_hash=task_hash,
+                split_hash=split_hash,
+                release_plan_hash=release_plan_hash,
+            )
+        ]
+    else:
+        execution_status = ExecutionStatusV1.BLOCKED.value
+        availability = AvailabilityStatusV1.NOT_AVAILABLE.value
+        completeness = CompletenessStatusV1.INSUFFICIENT.value
+        execution_reasons = reasons or [
+            _classification_c0_reason(
+                "CLASSIFICATION_EVIDENCE_UNAVAILABLE",
+                task_hash=task_hash,
+                split_hash=split_hash,
+                release_plan_hash=release_plan_hash,
+            )
+        ]
+        availability_reasons = list(execution_reasons)
+        degradation_reasons = list(execution_reasons)
+    envelope = EvidenceEnvelopeV1.from_dict(
+        {
+            "result_identity": {
+                "result_ref": result_ref,
+                "task_hash": task_hash,
+                "split_hash": split_hash,
+                "holdout_hash": release_plan_hash,
+                "release_plan_hash": release_plan_hash,
+            },
+            "execution_status": execution_status,
+            "availability": availability,
+            "completeness_status": completeness,
+            "execution_reasons": execution_reasons,
+            "availability_reasons": availability_reasons,
+            "degradation_reasons": degradation_reasons,
+            "numerical_method": NumericalMethodV1.DETERMINISTIC_NUMERIC.value,
+            "inference_basis": InferenceBasisV1.DESCRIPTIVE.value,
+            "evaluation_design": EvaluationDesignV1.NESTED_CROSS_VALIDATION.value,
+            "validation_summary": {
+                "levels_present": [],
+                "minimum_required": ValidationLevelV1.NONE.value,
+                "requirement_status": "not_applicable",
+            },
+            "method": {
+                "id": "classification-production-v1",
+                "version": "1.0",
+                "model_families": ["logistic_regression", "random_forest"],
+            },
+            "estimand": {
+                "id": "out_of_sample_binary_classification_performance",
+                "population": evidence.get("task", {}).get("task_type", "binary") if isinstance(evidence.get("task"), Mapping) else "binary",
+            },
+            "input_provenance": {
+                "task_hash": task_hash,
+                "split_hash": split_hash,
+                "holdout_hash": release_plan_hash,
+                "release_plan_hash": release_plan_hash,
+            },
+            "assumptions": [],
+            "diagnostics": [],
+            "figures": [],
+            "warnings": [] if status == "validated" else [{"code": "CLASSIFICATION_EVIDENCE_DEGRADED", "message": "classification evidence has unavailable or non-production facets"}],
+            "dependencies": [],
+            "numeric_facts": [],
+            "family_evidence": {
+                "classification": {
+                    "status": status,
+                    "task_hash": task_hash,
+                    "split_hash": split_hash,
+                    "holdout": dict(holdout),
+                }
+            },
+            "oracle": {},
+            "lineage_refs": [
+                f"classification-task:{task_hash}",
+                f"classification-split:{split_hash}",
+                f"classification-release-plan:{release_plan_hash}",
+            ],
+        }
+    )
+    facets = ["classification", "task", "split", "holdout", "release_plan"]
+    if status != "validated":
+        facets.append("degraded")
+    projection_status = "available" if status in {"validated", "degraded"} else "blocked"
+    projection = ConsumerProjectionV1(
+        contract="consumer-projection",
+        contract_version="1.0",
+        producer_version="1.8.9",
+        payload=ConsumerProjectionPayloadV1(
+            projection_id=result_ref,
+            projection_ref=f"classification-consumer:{sha256_canonical(envelope.to_dict())}",
+            projection_status=projection_status,
+            slots=tuple(
+                ConsumerProjectionSlotV1(
+                    consumer=consumer,
+                    artifact_facets=tuple(facets),
+                    payload_schema_ref="workbench.prediction.classification-evidence",
+                    source_eligible=status == "validated",
+                )
+                for consumer in ("agent", "notebook", "report")
+            ),
+            not_applicable_projection=ConsumerProjectionNotApplicableV1(
+                "not_applicable",
+                "classification evidence is applicable to this result",
+            ),
+        ),
+    )
+    return envelope.to_dict(), projection.to_dict()
 
 
 def _prediction_project_root(run_root: Path) -> Path:
@@ -71,6 +254,10 @@ def run_classification_model_v189(
     preprocessing_steps: Sequence[ClassificationPreprocessingStepV1] | None = None,
     calibration_method: str = "platt",
     model_parameters: dict[str, dict[str, Any]] | None = None,
+    runtime_registry: TrustedExecutorRegistry | None = None,
+    holdout_seal_store: HoldoutSealStoreV1 | None = None,
+    holdout_principal_ref: str | None = None,
+    holdout_access_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the additive v1.8.9 classification protocol from typed contracts.
 
@@ -79,6 +266,8 @@ def run_classification_model_v189(
     task; adapters are selected by their package-local registry, never by a
     provider raw dictionary.
     """
+
+    from .agent.trusted_executor_registry import TrustedExecutorRegistry, TrustedExecutorRegistryError
 
     if not isinstance(task, ClassificationTaskSpecV1):
         raise ContractError("CLASSIFICATION_TASK_REQUIRED", "classification entrypoint requires ClassificationTaskSpecV1")
@@ -98,6 +287,26 @@ def run_classification_model_v189(
         if not isinstance(decision_policy, DecisionPolicyV1):
             raise ContractError("CLASSIFICATION_POLICY_INVALID", "decision_policy must be DecisionPolicyV1")
         decision_policy.validate()
+    if type(runtime_registry) is not TrustedExecutorRegistry:
+        raise ContractError(
+            "CLASSIFICATION_PROVIDER_RUNTIME_JOIN_REQUIRED",
+            "production classification requires a server-bound TrustedExecutorRegistry",
+        )
+    try:
+        contribution = runtime_registry.require(CLASSIFICATION_EXECUTOR_REF)
+    except TrustedExecutorRegistryError as exc:
+        raise ContractError("CLASSIFICATION_PROVIDER_RUNTIME_JOIN_REQUIRED", str(exc)) from exc
+    if (
+        contribution.provider_id != CLASSIFICATION_PROVIDER_ID
+        or contribution.adapter_id != CLASSIFICATION_RUNTIME_ADAPTER_ID
+        or contribution.executor_ref != CLASSIFICATION_EXECUTOR_REF
+        or contribution.metadata.get("production_entrypoint") != CLASSIFICATION_PRODUCTION_ENTRYPOINT
+        or not isinstance(getattr(runtime_registry, "_bound_catalog_digest", None), str)
+    ):
+        raise ContractError(
+            "CLASSIFICATION_PROVIDER_RUNTIME_JOIN_MISMATCH",
+            "catalog declaration, trusted contribution, and production entrypoint identities disagree",
+        )
     target = frame.loc[:, task.target_column]
     if target.isna().any():
         raise ContractError("CLASSIFICATION_TARGET_MISSING", "classification target contains missing values")
@@ -122,6 +331,9 @@ def run_classification_model_v189(
         preprocessing_steps=preprocessing_steps,
         calibration_method=calibration_method,
         model_parameters=model_parameters,
+        holdout_seal_store=holdout_seal_store,
+        holdout_principal_ref=holdout_principal_ref,
+        holdout_access_id=holdout_access_id,
     )
     class_support: dict[str, int] = {}
     for raw_value in target.tolist():
@@ -173,6 +385,11 @@ def run_classification_model_v189(
         "split": {"profile": task.split_profile, "split_hash": split_hash},
         "metrics": model_metrics,
         "holdout": protocol["holdout"],
+        "holdout_identity": {
+            "status": protocol["holdout"].get("status"),
+            "release_plan_hash": protocol["holdout"].get("release_plan_hash"),
+            "release_count": protocol["holdout"].get("release_count"),
+        },
         "calibration": protocol["calibration"],
         "baselines": protocol["baselines"],
         "controls": protocol["controls"],
@@ -184,7 +401,24 @@ def run_classification_model_v189(
             "split": f"classification-split:{split_hash}",
             "holdout": f"classification-holdout:{protocol['holdout']['release_plan_hash']}",
             "task": f"classification-task:{task.content_hash}",
+            "release_plan": f"classification-release-plan:{protocol['holdout']['release_plan_hash']}",
         },
+    }
+    c0_envelope, c0_projection = _build_classification_c0_evidence(
+        status=result_status,
+        task_hash=task.content_hash,
+        split_hash=split_hash,
+        holdout=protocol["holdout"],
+        evidence=evidence,
+        blocked_reasons=blocked_reasons,
+    )
+    evidence["c0_evidence_envelope"] = c0_envelope
+    evidence["c0_consumer_projection"] = c0_projection
+    evidence["foundation_status"] = {
+        "execution_status": c0_envelope["execution_status"],
+        "availability": c0_envelope["availability"],
+        "completeness_status": c0_envelope["completeness_status"],
+        "producer_status": result_status,
     }
     identity = classification_artifact_id(
         task_hash=task.content_hash,
@@ -227,6 +461,9 @@ def run_classification_model_v189(
     return {
         **protocol,
         "status": result_status,
+        "task_hash": task.content_hash,
+        "split_hash": split_hash,
+        "release_plan_identity": dict(protocol["holdout"]["release_plan"]),
         "task": {**task.to_dict(), "task_hash": task.content_hash},
         "evidence": evidence,
         "artifact": {**artifact, "artifact_id": identity},
