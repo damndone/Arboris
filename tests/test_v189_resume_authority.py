@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 
 import pytest
 
@@ -107,5 +108,121 @@ def test_resume_rejects_tampered_persisted_bindings_and_lineage_before_callback(
         return WorkflowStepResult(artifact_ids=[])
 
     with pytest.raises(WorkflowExecutionError, match="dependency|binding|lineage"):
+        _execute(tmp_path, draft, resume_pass)
+    assert callback_steps == []
+
+
+def _rewrite_evidence_records(path, mutate):
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    mutate(records)
+    path.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("admission_status", ["revoked", "aborted"])
+def test_resume_requires_exactly_admitted_persisted_admission_before_callback(
+    tmp_path, admission_status
+) -> None:
+    draft = _resume_fixture(f"wf-resume-admission-{admission_status}")
+    _execute(tmp_path, draft, _first_pass)
+    evidence_path = (
+        tmp_path
+        / "workbench"
+        / "workflows"
+        / f"{draft.workflow_id}.evidence.jsonl"
+    )
+
+    def revoke_publish(records):
+        matches = [
+            record
+            for record in records
+            if record.get("record_type") == "workflow_admission"
+            and record.get("step_id") == "publish"
+        ]
+        assert len(matches) == 1
+        matches[0]["status"] = admission_status
+
+    _rewrite_evidence_records(evidence_path, revoke_publish)
+    callback_steps: list[str] = []
+
+    def resume_pass(step, _previous):
+        callback_steps.append(step.step_id)
+        return WorkflowStepResult(artifact_ids=[])
+
+    with pytest.raises(WorkflowExecutionError, match="admission|revoked|aborted|authority"):
+        _execute(tmp_path, draft, resume_pass)
+    assert callback_steps == []
+
+
+def test_resume_rejects_a_missing_persisted_admission_before_callback(tmp_path) -> None:
+    draft = _resume_fixture("wf-resume-admission-missing")
+    _execute(tmp_path, draft, _first_pass)
+    evidence_path = (
+        tmp_path
+        / "workbench"
+        / "workflows"
+        / f"{draft.workflow_id}.evidence.jsonl"
+    )
+
+    def remove_publish_admission(records):
+        records[:] = [
+            record
+            for record in records
+            if not (
+                record.get("record_type") == "workflow_admission"
+                and record.get("step_id") == "publish"
+            )
+        ]
+
+    _rewrite_evidence_records(evidence_path, remove_publish_admission)
+    callback_steps: list[str] = []
+
+    def resume_pass(step, _previous):
+        callback_steps.append(step.step_id)
+        return WorkflowStepResult(artifact_ids=[])
+
+    with pytest.raises(WorkflowExecutionError, match="admission|authority"):
+        _execute(tmp_path, draft, resume_pass)
+    assert callback_steps == []
+
+
+@pytest.mark.parametrize("corrupt_field", ["row_counts", "output_bindings", "lineage"])
+def test_resume_validates_completion_seal_before_rehydrating_corrupt_metadata(
+    tmp_path, corrupt_field
+) -> None:
+    draft = _resume_fixture(f"wf-resume-completion-{corrupt_field}")
+    _execute(tmp_path, draft, _first_pass)
+    evidence_path = (
+        tmp_path
+        / "workbench"
+        / "workflows"
+        / f"{draft.workflow_id}.evidence.jsonl"
+    )
+
+    def corrupt_publish_completion(records):
+        matches = [
+            record
+            for record in records
+            if record.get("record_type") == "workflow_completion"
+            and record.get("step_id") == "publish"
+        ]
+        assert len(matches) == 1
+        if corrupt_field == "row_counts":
+            matches[0]["row_counts"] = {"source": "not-an-int"}
+        elif corrupt_field == "output_bindings":
+            matches[0]["output_bindings"] = "not-an-object"
+        else:
+            matches[0]["lineage"] = "not-an-object"
+
+    _rewrite_evidence_records(evidence_path, corrupt_publish_completion)
+    callback_steps: list[str] = []
+
+    def resume_pass(step, _previous):
+        callback_steps.append(step.step_id)
+        return WorkflowStepResult(artifact_ids=[])
+
+    with pytest.raises(WorkflowExecutionError, match="completion integrity seal"):
         _execute(tmp_path, draft, resume_pass)
     assert callback_steps == []

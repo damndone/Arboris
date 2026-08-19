@@ -1184,6 +1184,128 @@ def test_model_branch_rejects_covariance_forgery_against_compiled_step(tmp_path)
         _validate_persisted_model_branch(tmp_path, draft, model_step.step_id, branch)
 
 
+def _custom_model_branch_fixture(tmp_path, *, bindings=None):
+    draft = compile_fixture_workflow(
+        workflow_id="wf-custom-model-declaration",
+        steps=[
+            {
+                "step_id": "custom-model",
+                "operation_id": "model.custom",
+                "spec": {
+                    "capability_ref": "capability:example",
+                    "binding_ref": "binding:example",
+                    "operation": "fit",
+                },
+            }
+        ],
+    )
+    if bindings is not None:
+        draft = dataclasses.replace(draft, bindings=bindings)
+
+    source_root = tmp_path / "runs" / "run-1"
+    source_root.mkdir(parents=True)
+    source_path = source_root / "data.csv"
+    source_path.write_text("outcome,rate_a\n1,2\n", encoding="utf-8")
+    initialize_artifact_index(source_root)
+    register_artifact(
+        source_root,
+        "raw-1",
+        source_path,
+        "dataset",
+        "ingestion",
+        [],
+    )
+
+    model_root = tmp_path / "runs" / "model-run"
+    model_path = model_root / "model_results" / "ols_1.json"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_text(json.dumps({"model_family": "ols"}), encoding="utf-8")
+    (model_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "model-run", "status": "completed"}),
+        encoding="utf-8",
+    )
+    initialize_artifact_index(model_root)
+    register_artifact(
+        model_root,
+        "ols_1",
+        model_path,
+        "model_result",
+        "model.custom",
+        ["raw-1"],
+    )
+
+    branch = {
+        "branch_id": "m1",
+        "run_id": "model-run",
+        "artifact_ids": ["ols_1"],
+        "model_artifact_id": "ols_1",
+        "workflow_id": draft.workflow_id,
+        "workflow_step_id": "custom-model",
+        "source_run_id": "run-1",
+        "source_artifact_id": "raw-1",
+        "source_sha256": sha256_file(source_path),
+        "branch_spec": {
+            "model_family": "ols",
+            "covariance": "unadjusted",
+            "outcome": "outcome",
+            "predictors": ["rate_a"],
+            "categorical": [],
+            "polynomials": [],
+        },
+        "predictor_columns": ["rate_a"],
+        "term_groups": {
+            "linear": {"rate_a": ["rate_a"]},
+            "polynomial": {},
+            "categorical": {},
+        },
+    }
+    return draft, branch
+
+
+def test_model_custom_branch_requires_a_server_branch_declaration(tmp_path) -> None:
+    draft, branch = _custom_model_branch_fixture(tmp_path)
+
+    with pytest.raises(WorkflowExecutionError, match="server.*declaration|branch-producing"):
+        _validate_persisted_model_branch(tmp_path, draft, "custom-model", branch)
+
+
+@pytest.mark.parametrize(
+    ("field", "forged_value"),
+    (
+        ("model_family", "forged-family"),
+        ("outcome", "rate_b"),
+        ("predictors", ["rate_b"]),
+        ("covariance", "robust"),
+    ),
+)
+def test_model_custom_branch_rejects_forged_server_declaration_fields(
+    tmp_path, field, forged_value
+) -> None:
+    bindings = {
+        "server_model_declarations": {
+            "custom-model": {
+                "operation_id": "model.custom",
+                "branch_producing": True,
+                "model_family": "ols",
+                "branches": [
+                    {
+                        "branch_id": "m1",
+                        "model_family": "ols",
+                        "outcome": "outcome",
+                        "predictors": ["rate_a"],
+                        "covariance": "unadjusted",
+                    }
+                ],
+            }
+        }
+    }
+    draft, branch = _custom_model_branch_fixture(tmp_path, bindings=bindings)
+    branch["branch_spec"][field] = forged_value
+
+    with pytest.raises(WorkflowExecutionError, match="declaration|compiled model step"):
+        _validate_persisted_model_branch(tmp_path, draft, "custom-model", branch)
+
+
 def test_model_branch_rejects_a_symlinked_model_run_ref(tmp_path) -> None:
     draft = compile_fixture_workflow(workflow_id="wf-model-run-symlink")
     runs_root = tmp_path / "runs"

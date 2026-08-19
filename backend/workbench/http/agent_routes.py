@@ -1886,6 +1886,9 @@ async def confirm_agent_proposal(
     # fail-closed.
     cutover = _execute_legacy_agent_proposal_via_server_boundary(
         proposal,
+        proposal_id=proposal_id,
+        root=root,
+        session_id=session_id,
         request=request,
     )
     return {
@@ -2351,7 +2354,7 @@ def _cutover_error(exc: Exception, *, action: str) -> WorkbenchAPIError:
     return WorkbenchAPIError(status_code=status, code=code, message=str(exc))
 
 
-def _legacy_cutover_binding(proposal: Any) -> dict[str, str | None]:
+def _legacy_cutover_binding(proposal: Any) -> dict[str, Any]:
     """Read only the server-handle envelope accepted by legacy proposals.
 
     The values are lookup hints, never execution authority.  The compiler's
@@ -2376,6 +2379,13 @@ def _legacy_cutover_binding(proposal: Any) -> dict[str, str | None]:
                 return value
         return None
 
+    def first_int(*keys: str) -> int | None:
+        for key in keys:
+            value = candidate.get(key)
+            if type(value) is int and value > 0:
+                return value
+        return None
+
     return {
         "compilation_record_id": first_string(
             "compilation_record_id", "server_compilation_record_id"
@@ -2386,21 +2396,69 @@ def _legacy_cutover_binding(proposal: Any) -> dict[str, str | None]:
         "actor_ref": first_string("actor_ref", "principal_ref"),
         "session_ref": first_string("session_ref"),
         "project_ref": first_string("project_ref"),
+        "proposal_id": first_string("proposal_id"),
+        "proposal_revision": first_int("proposal_revision", "revision"),
+        "proposal_fingerprint": first_string("proposal_fingerprint", "fingerprint"),
+        "operation_id": first_string("operation_id", "operation"),
+        "semantic_plan_hash": first_string("semantic_plan_hash", "plan_hash"),
         "data_snapshot_digest": first_string(
             "current_data_snapshot_digest", "data_snapshot_digest"
         ),
     }
 
 
+def _legacy_agent_route_scope(
+    root: Path,
+    session_id: str,
+    *,
+    request: Request | None,
+) -> tuple[str, str, str]:
+    """Resolve the route-owned historical Agent scope before any lookup.
+
+    The proposal is an untrusted compatibility envelope.  Its preconditions
+    may carry a retained server handle, but they never choose the authority
+    used to resolve that handle.
+    """
+
+    project_ref = f"project:{root.resolve()}"
+    actor_ref = f"actor:agent:{session_id}"
+    return _assert_server_identity(
+        request,
+        project_ref=project_ref,
+        claimed_actor_ref=actor_ref,
+        claimed_session_ref=session_id,
+    )
+
+
+def _object_value(value: Any, name: str) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
 def _execute_legacy_agent_proposal_via_server_boundary(
     proposal: Any,
     *,
+    proposal_id: str,
+    root: Path,
+    session_id: str,
     request: Request | None,
 ) -> dict[str, Any]:
     """Execute a legacy proposal only through a retained cutover receipt."""
 
     binding = _legacy_cutover_binding(proposal)
-    required = ("compilation_record_id", "confirmation_id", "actor_ref", "session_ref", "project_ref")
+    required = (
+        "compilation_record_id",
+        "confirmation_id",
+        "proposal_id",
+        "proposal_revision",
+        "proposal_fingerprint",
+        "operation_id",
+        "semantic_plan_hash",
+        "actor_ref",
+        "session_ref",
+        "project_ref",
+    )
     missing = [name for name in required if binding.get(name) is None]
     if missing:
         raise WorkbenchAPIError(
@@ -2413,34 +2471,106 @@ def _execute_legacy_agent_proposal_via_server_boundary(
             details={"missing": missing},
         )
 
+    canonical_actor, canonical_session, canonical_project = _legacy_agent_route_scope(
+        root,
+        session_id,
+        request=request,
+    )
+    expected_proposal = {
+        "proposal_id": proposal_id,
+        "proposal_revision": getattr(proposal, "revision", None),
+        "proposal_fingerprint": getattr(proposal, "fingerprint", None),
+        "operation_id": getattr(proposal, "operation_id", None),
+    }
+    if any(value is None for value in expected_proposal.values()):
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_LEGACY_COMPILATION_REQUIRED",
+            message=(
+                "Historical Agent proposals require a server-owned proposal binding "
+                "with revision, fingerprint, and operation identity."
+            ),
+            details={"missing": [key for key, value in expected_proposal.items() if value is None]},
+        )
+    expected_binding = {
+        **expected_proposal,
+        "actor_ref": canonical_actor,
+        "session_ref": canonical_session,
+        "project_ref": canonical_project,
+    }
+    binding_mismatches = [
+        name
+        for name, expected in expected_binding.items()
+        if binding.get(name) != expected
+    ]
+    if binding_mismatches:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The retained Agent compilation binding does not match the route-owned proposal scope.",
+            details={"fields": binding_mismatches},
+        )
+
     record_id = str(binding["compilation_record_id"])
-    actor_ref = str(binding["actor_ref"])
-    session_ref = str(binding["session_ref"])
-    project_ref = str(binding["project_ref"])
-    compiler = _cutover_authority(project_ref, session_ref, request=request)
+    compiler = _cutover_authority(canonical_project, canonical_session, request=request)
     try:
         record = compiler.record(record_id)
     except Exception as exc:
         raise _cutover_error(exc, action="confirm") from exc
-    if (record.principal_ref, record.session_ref, record.project_ref) != (
-        actor_ref,
-        session_ref,
-        project_ref,
-    ):
+    record_mismatches = []
+    if _object_value(record, "record_id") != record_id:
+        record_mismatches.append("compilation_record_id")
+    if _object_value(record, "principal_ref") != canonical_actor:
+        record_mismatches.append("actor_ref")
+    if _object_value(record, "session_ref") != canonical_session:
+        record_mismatches.append("session_ref")
+    if _object_value(record, "project_ref") != canonical_project:
+        record_mismatches.append("project_ref")
+    if _object_value(record, "semantic_plan_hash") != binding["semantic_plan_hash"]:
+        record_mismatches.append("semantic_plan_hash")
+    record_operation = _object_value(record, "operation_id")
+    if record_operation is None:
+        compiled_workflow = _object_value(record, "compiled_workflow")
+        record_operation = _object_value(compiled_workflow, "operation_id")
+        if record_operation is None:
+            plan_diff = _object_value(compiled_workflow, "plan_diff")
+            record_operation = _object_value(plan_diff, "operation_id")
+    if record_operation is not None and record_operation != binding["operation_id"]:
+        record_mismatches.append("operation_id")
+    if record_mismatches:
         raise WorkbenchAPIError(
             status_code=403,
-            code="CUTOVER_SCOPE_MISMATCH",
-            message="The compilation record is bound to another actor, session or project.",
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The server compilation record is not bound to the canonical Agent proposal.",
+            details={"fields": record_mismatches},
         )
     confirmation = _cutover_store(request=request).confirmations.get(
-        (project_ref, session_ref, record_id)
+        (canonical_project, canonical_session, record_id)
     )
-    if confirmation is None or confirmation.confirmation_id != binding["confirmation_id"]:
+    confirmation_mismatches = []
+    if confirmation is None:
+        confirmation_mismatches.append("confirmation_id")
+    else:
+        for field_name, expected in (
+            ("confirmation_id", binding["confirmation_id"]),
+            ("compilation_record_id", record_id),
+            ("semantic_plan_hash", binding["semantic_plan_hash"]),
+            ("actor_ref", canonical_actor),
+            ("session_ref", canonical_session),
+            ("project_ref", canonical_project),
+        ):
+            if _object_value(confirmation, field_name) != expected:
+                confirmation_mismatches.append(field_name)
+    if confirmation_mismatches:
         raise WorkbenchAPIError(
             status_code=409,
-            code="SERVER_CONFIRMATION_UNKNOWN",
-            message="The legacy proposal has no server-retained confirmation handle.",
-            details={"compilation_record_id": record_id},
+            code=(
+                "SERVER_CONFIRMATION_UNKNOWN"
+                if confirmation is None
+                else "AGENT_LEGACY_BINDING_MISMATCH"
+            ),
+            message="The legacy proposal has no matching server-retained confirmation handle.",
+            details={"compilation_record_id": record_id, "fields": confirmation_mismatches},
         )
     try:
         result = compiler.execute(
@@ -2457,6 +2587,19 @@ def _execute_legacy_agent_proposal_via_server_boundary(
             message="The server compiler returned no typed execution result.",
         )
     result_dict = result.to_dict()
+    if not isinstance(result_dict, Mapping):
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_CUTOVER_RESULT_INVALID",
+            message="The server compiler returned an invalid execution result envelope.",
+        )
+    if result_dict.get("operation_id") != binding["operation_id"]:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The server execution result is not bound to the confirmed proposal operation.",
+            details={"field": "operation_id"},
+        )
     operation = {
         "record_id": record_id,
         "operation_id": result_dict.get("operation_id"),

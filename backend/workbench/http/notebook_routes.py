@@ -1010,7 +1010,7 @@ def _require_historical_notebook_execution_boundary(
     binding_ref = getattr(current, "capability_resolution_binding_ref", None)
     has_server_binding = type(binding_ref) is str and bool(binding_ref.strip())
     operation_id = getattr(proposal, "operation_id", None)
-    if operation_id == "operation.multi_step" or (
+    if not bool(getattr(current, "materializable", False)) or operation_id == "operation.multi_step" or (
         confirm_and_execute and not has_server_binding
     ):
         raise WorkbenchAPIError(
