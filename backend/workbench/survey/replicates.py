@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 from scipy.linalg import hadamard
 
-from .design import SurveyDesign
+from .design import SurveyDesign, _validated_weight_array
 from .errors import SurveyEngineError
 
 
@@ -53,12 +53,27 @@ def _psu_index(design: SurveyDesign) -> tuple[np.ndarray, np.ndarray, dict[str, 
 
 def _provided(design: SurveyDesign) -> tuple[np.ndarray, list[float]]:
     columns = design.replicate_weight_columns
+    if not columns:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_WEIGHTS_MISSING",
+            "replicate_type='provided' requires replicate_weight_columns",
+        )
     missing = [c for c in columns if c not in design.frame.columns]
     if missing:
         raise SurveyEngineError(
             "SURVEY_REPLICATE_WEIGHTS_MISSING", f"missing columns: {', '.join(missing)}"
         )
-    weights = design.frame[columns].to_numpy(dtype=float)
+    weights = np.column_stack(
+        [
+            _validated_weight_array(
+                design.frame,
+                column,
+                allow_zero=True,
+                error_code="SURVEY_REPLICATE_WEIGHT_INVALID",
+            )
+            for column in columns
+        ]
+    )
     # Published replicate weights are combined weights (the sampling weight is
     # already folded in), which is the NHANES/CPS convention.
     scales = [1.0 / weights.shape[1]] * weights.shape[1]

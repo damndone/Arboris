@@ -107,6 +107,46 @@ def test_design_reports_structure_and_degrees_of_freedom(design):
     assert design.degf == oracle["degf"] == design.n_psu - design.n_strata
 
 
+@pytest.mark.parametrize(
+    ("bad_weights", "reason"),
+    [
+        (lambda n: np.full(n, -1.0), "nonpositive"),
+        (lambda n: np.array([np.nan] + [1.0] * (n - 1)), "nonfinite"),
+        (lambda n: np.array([np.inf] + [1.0] * (n - 1)), "nonfinite"),
+        (lambda n: np.zeros(n), "all_zero"),
+    ],
+)
+def test_survey_design_rejects_invalid_sampling_weights_at_real_entry(
+    bad_weights, reason
+):
+    """Sampling weights cannot reach variance math as an unchecked array."""
+    from workbench.survey import SurveyDesign, SurveyEngineError
+
+    frame = _design_frame()
+    frame["weight"] = bad_weights(len(frame))
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        SurveyDesign(frame=frame, strata="stratum", psu="psu", weight="weight")
+
+    assert excinfo.value.code == "SURVEY_WEIGHT_INVALID"
+    assert excinfo.value.context["reason"] == reason
+
+
+def test_survey_engine_revalidates_mutated_sampling_weights_before_estimation(
+    design, linearizable_estimator
+):
+    """The engine entry remains fail-closed even if its mutable frame changes."""
+    from workbench.survey import SurveyEngineError, estimate_with_design
+
+    design.frame.loc[:, "weight"] = 0.0
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        estimate_with_design(design, linearizable_estimator, method="linearization")
+
+    assert excinfo.value.code == "SURVEY_WEIGHT_INVALID"
+    assert excinfo.value.context["reason"] == "all_zero"
+
+
 def test_confidence_intervals_use_the_design_t_not_the_normal(design, linearizable_estimator):
     """The multiplier must come from the design, not from the normal.
 

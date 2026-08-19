@@ -24,6 +24,125 @@ from .estimator import VARIANCE_METHOD_REQUIREMENTS, EstimatorSpec, missing_capa
 
 LONELY_PSU_POLICIES = ("fail", "remove", "adjust", "average", "certainty")
 REPLICATE_TYPES = ("brr", "jackknife", "bootstrap", "provided")
+_MAX_INVALID_WEIGHT_ROWS = 16
+
+
+def _weight_failure(
+    *,
+    code: str,
+    column: str,
+    reason: str,
+    invalid_rows: list[str] | None = None,
+    detail: str | None = None,
+    **context: object,
+) -> SurveyEngineError:
+    return SurveyEngineError(
+        code,
+        detail or f"weight column {column!r} violates the survey weight contract",
+        weight_column=column,
+        reason=reason,
+        invalid_rows=list(invalid_rows or []),
+        **context,
+    )
+
+
+def _validated_weight_array(
+    frame: pd.DataFrame,
+    column: str,
+    *,
+    allow_zero: bool,
+    error_code: str,
+) -> np.ndarray:
+    """Convert and validate one weight vector at a real design boundary."""
+    if column not in frame.columns:
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="missing",
+            detail=f"weight column {column!r} is not in the frame",
+        )
+    try:
+        values = frame[column].to_numpy(dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="non_numeric",
+            detail=f"weight column {column!r} is not numeric",
+        ) from exc
+    if values.ndim != 1 or len(values) != len(frame):
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="shape",
+            detail=f"weight column {column!r} must be one value per row",
+        )
+    if len(values) == 0:
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="empty",
+            detail=f"weight column {column!r} cannot be empty",
+        )
+
+    finite = np.isfinite(values)
+    if not finite.all():
+        rows = [
+            str(index)
+            for index, invalid in zip(frame.index, ~finite, strict=True)
+            if invalid
+        ][:_MAX_INVALID_WEIGHT_ROWS]
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="nonfinite",
+            invalid_rows=rows,
+        )
+
+    if allow_zero:
+        invalid = values < 0
+        if invalid.any():
+            rows = [
+                str(index)
+                for index, bad in zip(frame.index, invalid, strict=True)
+                if bad
+            ][:_MAX_INVALID_WEIGHT_ROWS]
+            raise _weight_failure(
+                code=error_code,
+                column=column,
+                reason="negative",
+                invalid_rows=rows,
+            )
+        total = float(values.sum())
+        if not np.isfinite(total) or total <= 0:
+            reason = "all_zero" if np.all(values == 0) else "nonpositive_sum"
+            raise _weight_failure(code=error_code, column=column, reason=reason)
+        return values
+
+    if np.all(values == 0):
+        raise _weight_failure(code=error_code, column=column, reason="all_zero")
+    invalid = values <= 0
+    if invalid.any():
+        rows = [
+            str(index)
+            for index, bad in zip(frame.index, invalid, strict=True)
+            if bad
+        ][:_MAX_INVALID_WEIGHT_ROWS]
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="nonpositive",
+            invalid_rows=rows,
+        )
+    total = float(values.sum())
+    if not np.isfinite(total) or total <= 0:
+        raise _weight_failure(
+            code=error_code,
+            column=column,
+            reason="nonpositive_sum",
+            total=total,
+        )
+    return values
 
 
 @dataclass(frozen=True)
@@ -80,12 +199,56 @@ class SurveyDesign:
                 "SURVEY_REPLICATE_WEIGHTS_MISSING",
                 "replicate_type='provided' requires replicate_weight_columns",
             )
+        # Sampling weights are part of the executable design, not a declaration
+        # that can be trusted until a later matrix operation.  Validate at
+        # construction and again through ``weights`` because the frame remains
+        # mutable for subpopulation and test workflows.
+        _validated_weight_array(
+            self.frame,
+            self.weight,
+            allow_zero=False,
+            error_code="SURVEY_WEIGHT_INVALID",
+        )
 
     # -- structure ---------------------------------------------------------
 
     @property
     def weights(self) -> np.ndarray:
-        return self.frame[self.weight].to_numpy(dtype=float)
+        return _validated_weight_array(
+            self.frame,
+            self.weight,
+            allow_zero=False,
+            error_code="SURVEY_WEIGHT_INVALID",
+        )
+
+    def validate_for_estimation(self, mask: np.ndarray | None = None) -> None:
+        """Re-check executable design constraints immediately before fitting."""
+        values = self.weights
+        if mask is None:
+            return
+        mask_array = np.asarray(mask, dtype=bool)
+        if mask_array.shape != (len(self.frame),):
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_INVALID",
+                "subpopulation mask must contain one boolean per design row",
+                mask_shape=list(mask_array.shape),
+                n_obs=len(self.frame),
+            )
+        if not mask_array.any():
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_EMPTY",
+                "the declared subpopulation contains no design rows",
+                subpopulation=self.subpop,
+            )
+        selected = values[mask_array]
+        total = float(selected.sum())
+        if not np.isfinite(total) or total <= 0:
+            raise _weight_failure(
+                code="SURVEY_WEIGHT_INVALID",
+                column=self.weight,
+                reason="subpopulation_nonpositive_sum",
+                total=total,
+            )
 
     @property
     def _stratum_key(self) -> pd.Series:

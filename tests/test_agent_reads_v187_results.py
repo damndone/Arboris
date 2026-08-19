@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from workbench.agent.context_tools import (
+    InspectProjectModelCoefficientsRequest,
     InspectResultSummaryRequest,
     NodeOperationContextProvider,
     _bounded_model_family_evidence,
@@ -61,6 +62,36 @@ def test_the_agent_can_see_that_standard_errors_are_design_based(tmp_path):
     assert "survey_design" in payload, "the Agent cannot tell this run had a design"
     for field in ("degf", "variance_method", "design_effect", "effective_sample_size"):
         assert field in payload, f"the Agent cannot read {field}"
+
+
+def test_agent_projection_preserves_survey_provenance_and_replicate_metadata(tmp_path):
+    """A bounded Agent read must retain the survey qualification per coefficient."""
+    replicate_columns = [f"repw{i:02d}" for i in range(1, 13)]
+    project, run_id = _run(
+        tmp_path, "svy-replicate", "survey/design_with_replicate_weights.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+        survey_replicate_type="provided", survey_replicate_weights=replicate_columns,
+    )
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    design = summary["survey_design"]
+    assert design["replicates_attempted"] == 12
+    assert design["replicates_succeeded"] + design["replicates_failed"] == 12
+    assert isinstance(design["replicate_failure_reasons"], dict)
+
+    row = next(row for row in summary["regression_table"]["rows"] if row["term"] == "x1")
+    coefficient = row["models"]["ols_1"]
+    assert coefficient["variance_source"] == "survey_design"
+    assert coefficient["source_id"] == "model_results.ols_1.coefficients.x1"
+    assert isinstance(coefficient["warnings"], list)
+
+    requested = NodeOperationContextProvider(project.root).inspect_project_model_coefficients(
+        InspectProjectModelCoefficientsRequest(run_ids=(run_id,), terms=("x1",))
+    )
+    projected = requested["models"][0]["coefficients"][0]
+    assert projected["variance_source"] == "survey_design"
+    assert projected["source_id"] == "model_results.ols_1.coefficients.x1"
+    assert isinstance(projected["warnings"], list)
 
 
 def test_a_run_without_a_design_says_so_rather_than_omitting_the_field(tmp_path):

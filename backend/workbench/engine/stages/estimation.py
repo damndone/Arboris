@@ -165,7 +165,21 @@ def _fit_logit(ctx, env):
 
 
 def _fit_poisson(ctx, env):
-    poisson_x = ctx.artifacts["_poisson_x"]
+    from ...orchestrator import _detect_exposure_candidates
+    from ...survey.adapters import validate_poisson_exposure
+
+    exposure_candidates = _detect_exposure_candidates(ctx.artifacts["_normalized_x"])
+    for candidate in exposure_candidates:
+        validate_poisson_exposure(ctx.data.frame, candidate)
+    if ctx.exposure_col is None and exposure_candidates:
+        ctx.exposure_col = exposure_candidates[0]
+    validate_poisson_exposure(ctx.data.frame, ctx.exposure_col)
+    poisson_x = [
+        variable
+        for variable in ctx.artifacts["_normalized_x"]
+        if variable != ctx.exposure_col
+    ]
+    ctx.artifacts["_poisson_x"] = poisson_x
     cat_all = ctx.artifacts.get("_categorical_vars") or set()
     poisson_cat = {v for v in cat_all if v in poisson_x}
     primary, fitted = _orch().run_poisson(
@@ -490,9 +504,11 @@ def _apply_survey_design_variance(
     first number believes the estimate is twice as sharp as it is.
     """
     from scipy import stats
-    from math import exp
 
-    from ...survey.adapters import build_design_from_artifacts
+    from ...survey.adapters import (
+        apply_result_postprocessor,
+        build_design_from_artifacts,
+    )
     from ...survey.engine import estimate_with_design
     from ...survey.errors import SurveyEngineError
 
@@ -503,7 +519,7 @@ def _apply_survey_design_variance(
         model_type,
         ctx.artifacts["_normalized_y"],
         x if x is not None else ctx.artifacts["_normalized_x"],
-        exposure=ctx.exposure_col if model_type == "poisson" else None,
+        exposure=ctx.exposure_col,
     )
     if estimator is None:
         return
@@ -546,27 +562,32 @@ def _apply_survey_design_variance(
             2 * stats.t.sf(abs(estimate / se), result.residual_degf)
         ) if se > 0 else float("nan")
         entry["variance_source"] = "survey_design"
-
-        # Poisson's normalized payload exposes exponentiated coefficient
-        # intervals too.  Keep those derived values on the same weighted,
-        # design-based estimate instead of leaving naive intervals beside the
-        # survey coefficient fields.
-        if model_type == "poisson":
-            entry["irr"] = exp(estimate)
-            entry["irr_ci_lower"] = exp(entry["ci_lower"])
-            entry["irr_ci_upper"] = exp(entry["ci_upper"])
-            irr = primary.get("irr")
-            if isinstance(irr, dict) and isinstance(irr.get(term), dict):
-                irr[term].update(
-                    {
-                        "irr": entry["irr"],
-                        "irr_ci_lower": entry["irr_ci_lower"],
-                        "irr_ci_upper": entry["irr_ci_upper"],
-                    }
-                )
+        entry_warnings = entry.get("warnings")
+        entry["warnings"] = (
+            list(entry_warnings) if isinstance(entry_warnings, list) else []
+        )
+        apply_result_postprocessor(
+            estimator,
+            primary=primary,
+            term=term,
+            entry=entry,
+            estimate=estimate,
+            ci_lower=entry["ci_lower"],
+            ci_upper=entry["ci_upper"],
+        )
 
     effects = design.design_effects(ctx.artifacts["_normalized_y"])
     summary = result.replicate_summary
+    primary_warnings = primary.get("warnings")
+    survey_warnings = (
+        list(primary_warnings) if isinstance(primary_warnings, list) else []
+    )
+    if summary and summary.failed:
+        survey_warnings.append("SURVEY_REPLICATE_FAILURES")
+        for entry in coefficients.values():
+            if isinstance(entry, dict):
+                entry["warnings"].append("SURVEY_REPLICATE_FAILURES")
+    primary["warnings"] = survey_warnings
     primary["survey_design"] = {
         "strata_column": design.strata,
         "psu_column": design.psu,

@@ -221,6 +221,89 @@ def test_auto_count_workflow_uses_survey_poisson_alias_with_sampling_weight(
     )
 
 
+@pytest.mark.parametrize(
+    "invalid_exposure",
+    [
+        lambda n: np.array([0.0] + [1.0] * (n - 1)),
+        lambda n: np.array([-1.0] + [1.0] * (n - 1)),
+        lambda n: np.array([np.nan] + [1.0] * (n - 1)),
+        lambda n: np.array([np.inf] + [1.0] * (n - 1)),
+    ],
+    ids=["zero", "negative", "nan", "infinite"],
+)
+def test_survey_poisson_rejects_invalid_exposure_before_predictor_fit(
+    tmp_path: Path, invalid_exposure
+):
+    """An invalid exposure must not fall back to an ordinary predictor."""
+    frame = _survey_frame(with_replicates=False)
+    frame["exposure"] = invalid_exposure(len(frame))
+    source = tmp_path / "invalid-exposure.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "invalid-exposure")
+
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="poisson",
+        y="count_y",
+        x=["exposure", "x1", "x2"],
+        sampling_weight="weight",
+        survey_strata_col="stratum",
+        survey_psu_col="psu",
+        survey_lonely_psu="remove",
+    )
+
+    assert outcome["status"] == "failed", outcome
+    run_root = project.root / "runs" / outcome["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(
+        issue["code"] == "SURVEY_POISSON_EXPOSURE_INVALID"
+        for issue in errors["issues"]
+    )
+    assert not (run_root / "model_results" / "poisson_1.json").exists()
+
+
+def test_poisson_survey_result_postprocessing_lives_in_family_adapter():
+    """Survey variance injection must not grow a model-type branch in estimation."""
+    estimation_source = (
+        Path(__file__).parents[1]
+        / "backend"
+        / "workbench"
+        / "engine"
+        / "stages"
+        / "estimation.py"
+    ).read_text()
+    assert 'if model_type == "poisson"' not in estimation_source
+    assert "if model_type == 'poisson'" not in estimation_source
+
+    from workbench.survey.adapters import (
+        apply_result_postprocessor,
+        glm_estimator_spec,
+    )
+
+    estimator = glm_estimator_spec(
+        family="poisson",
+        glm_family="poisson",
+        y="count_y",
+        x=["x1"],
+    )
+    primary = {"irr": {"x1": {}}}
+    entry: dict[str, float] = {}
+    apply_result_postprocessor(
+        estimator,
+        primary=primary,
+        term="x1",
+        entry=entry,
+        estimate=0.5,
+        ci_lower=0.25,
+        ci_upper=0.75,
+    )
+
+    assert entry["irr"] == pytest.approx(np.exp(0.5))
+    assert primary["irr"]["x1"]["irr_ci_lower"] == pytest.approx(np.exp(0.25))
+
+
 def test_clean_process_capability_bootstrap_returns_typed_survey_status():
     """A known central import cycle must not become a false survey advertise."""
     repo_root = Path(__file__).resolve().parents[1]

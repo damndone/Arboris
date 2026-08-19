@@ -114,6 +114,7 @@ def estimate_with_design(
         )
 
     mask = design.subpop_mask()
+    design.validate_for_estimation(mask)
     frame = design.frame.loc[mask]
     weights = design.weights[mask]
 

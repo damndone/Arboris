@@ -3141,11 +3141,13 @@ def _public_requested_model_coefficients(
                 "p_value": _public_stat_number(coefficient.get("p_value")),
                 "ci_lower": _public_stat_number(coefficient.get("ci_lower")),
                 "ci_upper": _public_stat_number(coefficient.get("ci_upper")),
+                "variance_source": _bounded_label(coefficient.get("variance_source")),
                 "source_id": (
                     coefficient.get("source_id")
                     if isinstance(coefficient.get("source_id"), str)
                     else None
                 ),
+                "warnings": _bounded_labels(coefficient.get("warnings")),
             }
         )
 
@@ -3450,7 +3452,9 @@ def _bounded_regression_table(
                     "ci_lower",
                     "ci_upper",
                     "p_value",
+                    "variance_source",
                     "source_id",
+                    "warnings",
                 )
                 if key in raw_cell
             }
@@ -3985,6 +3989,9 @@ def _bounded_coefficient_row(row: dict[str, Any]) -> dict[str, Any]:
         "ci_lower",
         "ci_upper",
         "significance_label",
+        "variance_source",
+        "source_id",
+        "warnings",
     )
     return {key: row[key] for key in allowed if key in row}
 
@@ -4988,7 +4995,7 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
         design = result.get("survey_design")
         if not isinstance(design, dict):
             continue
-        return _bounded_numeric_fields(
+        bounded = _bounded_numeric_fields(
             design,
             fields=(
                 "n_obs", "n_strata", "n_psu", "degf", "residual_degf",
@@ -5000,6 +5007,21 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
                 "subpopulation",
             ),
         )
+        for field in (
+            "replicates_attempted", "replicates_succeeded", "replicates_failed"
+        ):
+            bounded[field] = _public_positive_int(design.get(field))
+        reasons = design.get("replicate_failure_reasons")
+        if isinstance(reasons, dict):
+            bounded_reasons: dict[str, int] = {}
+            for reason, raw_count in list(reasons.items())[:32]:
+                count = _public_positive_int(raw_count)
+                if isinstance(reason, str) and count is not None:
+                    bounded_reasons[reason[:128]] = count
+            bounded["replicate_failure_reasons"] = bounded_reasons
+        else:
+            bounded["replicate_failure_reasons"] = None
+        return bounded
     return None
 
 

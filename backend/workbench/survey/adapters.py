@@ -30,6 +30,111 @@ _GLM_FAMILIES: dict[str, tuple[str, str | None]] = {
 }
 
 
+def validate_poisson_exposure(frame: pd.DataFrame, exposure: str | None) -> None:
+    """Reject an exposure before a Poisson family can treat it as an input."""
+    if not exposure:
+        return
+    if exposure not in frame.columns:
+        raise SurveyEngineError(
+            "SURVEY_POISSON_EXPOSURE_INVALID",
+            f"exposure column {exposure!r} is not in the modeling frame",
+            exposure_column=exposure,
+            reason="missing",
+            invalid_rows=[],
+        )
+    try:
+        values = pd.to_numeric(frame[exposure], errors="coerce").to_numpy(dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise SurveyEngineError(
+            "SURVEY_POISSON_EXPOSURE_INVALID",
+            f"exposure column {exposure!r} must be numeric",
+            exposure_column=exposure,
+            reason="non_numeric",
+            invalid_rows=[],
+        ) from exc
+    finite = np.isfinite(values)
+    if not finite.all():
+        invalid_rows = [
+            str(index)
+            for index, invalid in zip(frame.index, ~finite, strict=True)
+            if invalid
+        ][:16]
+        raise SurveyEngineError(
+            "SURVEY_POISSON_EXPOSURE_INVALID",
+            f"exposure column {exposure!r} must contain finite values",
+            exposure_column=exposure,
+            reason="nonfinite",
+            invalid_rows=invalid_rows,
+        )
+    invalid = values <= 0
+    if invalid.any():
+        invalid_rows = [
+            str(index)
+            for index, bad in zip(frame.index, invalid, strict=True)
+            if bad
+        ][:16]
+        raise SurveyEngineError(
+            "SURVEY_POISSON_EXPOSURE_INVALID",
+            f"exposure column {exposure!r} must be strictly positive",
+            exposure_column=exposure,
+            reason="nonpositive",
+            invalid_rows=invalid_rows,
+        )
+
+
+def _poisson_result_postprocessor(
+    *,
+    primary: dict[str, object],
+    term: str,
+    entry: dict[str, object],
+    estimate: float,
+    ci_lower: float,
+    ci_upper: float,
+) -> None:
+    """Keep Poisson-derived intervals aligned with the survey coefficient."""
+    from math import exp
+
+    irr = {
+        "irr": exp(estimate),
+        "irr_ci_lower": exp(ci_lower),
+        "irr_ci_upper": exp(ci_upper),
+    }
+    entry.update(irr)
+    primary_irr = primary.get("irr")
+    if isinstance(primary_irr, dict) and isinstance(primary_irr.get(term), dict):
+        primary_irr[term].update(irr)
+
+
+def apply_result_postprocessor(
+    estimator: EstimatorSpec,
+    *,
+    primary: dict[str, object],
+    term: str,
+    entry: dict[str, object],
+    estimate: float,
+    ci_lower: float,
+    ci_upper: float,
+) -> None:
+    """Apply family-owned result decoration through the adapter metadata seam."""
+    callback = estimator.metadata.get("survey_result_postprocessor")
+    if callback is None:
+        return
+    if not callable(callback):
+        raise SurveyEngineError(
+            "SURVEY_ADAPTER_METADATA_INVALID",
+            "survey_result_postprocessor must be callable",
+            estimator=estimator.name,
+        )
+    callback(
+        primary=primary,
+        term=term,
+        entry=entry,
+        estimate=estimate,
+        ci_lower=ci_lower,
+        ci_upper=ci_upper,
+    )
+
+
 def supports_glm_family(glm_family: str | None) -> bool:
     """Return whether a declared survey GLM family has a live adapter path."""
 
@@ -124,14 +229,8 @@ def glm_estimator_spec(
     def _fit(frame: pd.DataFrame, weights: np.ndarray):
         kwargs: dict[str, object] = {"freq_weights": np.asarray(weights, float)}
         if exposure and glm_family == "poisson":
+            validate_poisson_exposure(frame, exposure)
             exposure_values = frame[exposure].to_numpy(dtype=float)
-            if (exposure_values <= 0).any():
-                raise SurveyEngineError(
-                    "SURVEY_POISSON_EXPOSURE_INVALID",
-                    f"exposure column {exposure!r} must be strictly positive "
-                    "for a survey Poisson rate fit",
-                    exposure_column=exposure,
-                )
             kwargs["exposure"] = exposure_values
         return sm.GLM(
             frame[y].to_numpy(dtype=float),
@@ -172,5 +271,8 @@ def glm_estimator_spec(
             "glm_family": glm_family,
             "terms": terms,
             "exposure": exposure,
+            "survey_result_postprocessor": (
+                _poisson_result_postprocessor if glm_family == "poisson" else None
+            ),
         },
     )
