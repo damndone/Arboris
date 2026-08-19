@@ -162,6 +162,60 @@ def test_survey_fpc_is_explicitly_blocked_when_not_supported(tmp_path: Path):
     assert any(issue["code"] == "SURVEY_FPC_UNSUPPORTED" for issue in errors["issues"])
 
 
+def test_fpc_without_sampling_weight_cannot_fall_back_to_naive_ols(tmp_path: Path):
+    """An FPC declaration is survey intent even when the weight is omitted."""
+    frame = _survey_frame(with_replicates=False)
+    source = tmp_path / "fpc-without-weight.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "fpc-without-weight")
+
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="ols",
+        y="y",
+        x=["x1", "x2"],
+        survey_fpc_col="fpc",
+    )
+
+    assert outcome["status"] == "failed", outcome
+    run_root = project.root / "runs" / outcome["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(issue["code"] == "SURVEY_FPC_UNSUPPORTED" for issue in errors["issues"])
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("invalid_value", "reason"),
+    [
+        (10**400, "not_float_representable"),
+        (-1, "nonpositive"),
+        (float("nan"), "nonfinite"),
+        (float("inf"), "nonfinite"),
+        (object(), "non_numeric"),
+        (True, "boolean"),
+    ],
+)
+def test_poisson_exposure_rejects_unrepresentable_values_with_typed_errors(
+    invalid_value, reason
+):
+    """Exposure validation must fail before pandas/numpy float conversion."""
+    from workbench.survey import SurveyEngineError
+    from workbench.survey.adapters import validate_poisson_exposure
+
+    frame = pd.DataFrame(
+        {"exposure": pd.Series([invalid_value, 1], dtype=object)}
+    )
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        validate_poisson_exposure(frame, "exposure")
+
+    assert excinfo.value.code == "SURVEY_POISSON_EXPOSURE_INVALID"
+    assert excinfo.value.context["reason"] == reason
+    assert "OverflowError" not in str(excinfo.value)
+
+
 def test_auto_count_workflow_uses_survey_poisson_alias_with_sampling_weight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

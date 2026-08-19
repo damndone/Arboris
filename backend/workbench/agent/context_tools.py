@@ -3136,18 +3136,7 @@ def _public_requested_model_coefficients(
         public_coefficients.append(
             {
                 "term": term,
-                "estimate": _public_stat_number(coefficient.get("estimate")),
-                "std_error": _public_stat_number(coefficient.get("std_error")),
-                "p_value": _public_stat_number(coefficient.get("p_value")),
-                "ci_lower": _public_stat_number(coefficient.get("ci_lower")),
-                "ci_upper": _public_stat_number(coefficient.get("ci_upper")),
-                "variance_source": _bounded_label(coefficient.get("variance_source")),
-                "source_id": (
-                    coefficient.get("source_id")
-                    if isinstance(coefficient.get("source_id"), str)
-                    else None
-                ),
-                "warnings": _bounded_labels(coefficient.get("warnings")),
+                **_bounded_agent_coefficient(coefficient),
             }
         )
 
@@ -3219,7 +3208,13 @@ def _public_requested_model_coefficients(
 def _public_stat_number(value: Any) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return value if math.isfinite(float(value)) else None
+    try:
+        parsed = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or abs(parsed) > 1_000_000_000_000.0:
+        return None
+    return value
 
 
 def _public_probability(value: Any) -> float | None:
@@ -3230,7 +3225,12 @@ def _public_probability(value: Any) -> float | None:
 
 
 def _public_positive_int(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or value > 1_000_000
+    ):
         return None
     return value
 
@@ -3444,24 +3444,11 @@ def _bounded_regression_table(
                 term_key,
                 {"term": term_key, "label": term_key, "models": {}},
             )
-            cell = {
-                key: _bounded_public_result_value(raw_cell[key], budget=budget)
-                for key in (
-                    "estimate",
-                    "std_error",
-                    "ci_lower",
-                    "ci_upper",
-                    "p_value",
-                    "variance_source",
-                    "source_id",
-                    "warnings",
-                )
-                if key in raw_cell
-            }
+            cell = _bounded_agent_coefficient(raw_cell, budget=budget)
             p_value = raw_cell.get("p_value")
             try:
                 parsed_p = float(p_value)
-            except (TypeError, ValueError):
+            except (OverflowError, TypeError, ValueError):
                 parsed_p = math.nan
             cell["significance"] = next(
                 (marker for marker, cutoff in cutoffs if math.isfinite(parsed_p) and parsed_p < cutoff),
@@ -3668,6 +3655,33 @@ def _bounded_labels(value: Any, *, limit: int = 16) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item[:128] for item in value[:limit] if isinstance(item, str)]
+
+
+def _bounded_agent_coefficient(
+    coefficient: Mapping[str, Any], *, budget: _PublicResultBudget | None = None
+) -> dict[str, Any]:
+    """Project coefficient evidence with bounded numbers and provenance."""
+    numeric_fields = ("estimate", "std_error", "ci_lower", "ci_upper", "p_value")
+    projected: dict[str, Any] = {}
+    invalid_numeric = False
+    for field in numeric_fields:
+        if field not in coefficient:
+            continue
+        value = _public_stat_number(coefficient.get(field))
+        projected[field] = value
+        if coefficient.get(field) is not None and value is None:
+            invalid_numeric = True
+    projected["variance_source"] = _bounded_label(coefficient.get("variance_source"))
+    projected["source_id"] = _bounded_label(coefficient.get("source_id"))
+    projected["warnings"] = _bounded_labels(coefficient.get("warnings"))
+    if invalid_numeric:
+        projected.update(
+            {
+                "projection_status": "unavailable",
+                "unavailable_reason": "AGENT_COEFFICIENT_VALUE_INVALID",
+            }
+        )
+    return projected
 
 
 def _bounded_numeric_list(value: Any, *, limit: int) -> list[int | float]:
@@ -3993,7 +4007,29 @@ def _bounded_coefficient_row(row: dict[str, Any]) -> dict[str, Any]:
         "source_id",
         "warnings",
     )
-    return {key: row[key] for key in allowed if key in row}
+    bounded: dict[str, Any] = {}
+    for key in ("variable", "display_name", "significance_label"):
+        if key in row:
+            label = _bounded_label(row.get(key))
+            if label is not None:
+                bounded[key] = label
+    coefficient = _bounded_agent_coefficient(row)
+    for key in (
+        "estimate",
+        "std_error",
+        "p_value",
+        "ci_lower",
+        "ci_upper",
+        "variance_source",
+        "source_id",
+        "warnings",
+    ):
+        if key in row:
+            bounded[key] = coefficient[key]
+    for key in ("projection_status", "unavailable_reason"):
+        if key in coefficient:
+            bounded[key] = coefficient[key]
+    return bounded
 
 
 def _bounded_artifact_manifest(
@@ -4542,8 +4578,10 @@ def _bounded_public_result_value(
         budget.omitted_items += 1
         return "[omitted: result item budget]"
     budget.remaining_items -= 1
-    if value is None or isinstance(value, (bool, int, float)):
+    if value is None or isinstance(value, bool):
         return value
+    if isinstance(value, (int, float)):
+        return _public_stat_number(value)
     if isinstance(value, str):
         limit = min(300, budget.remaining_string_characters)
         if limit <= 0:

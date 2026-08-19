@@ -94,7 +94,10 @@ class PreEstimationChecksStage:
         # weight.  Validate them before X coercion or any model runner can
         # turn an object-sized integer into inf/OverflowError.  This keeps the
         # constructor, engine, and real workflow on the same typed boundary.
-        if str(ctx.artifacts.get("_sampling_weight") or "").strip():
+        if any(
+            str(ctx.artifacts.get(key) or "").strip()
+            for key in ("_sampling_weight", "_survey_fpc_col")
+        ):
             try:
                 build_design_from_artifacts(cleaned, ctx.artifacts)
             except SurveyEngineError as exc:

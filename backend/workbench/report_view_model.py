@@ -112,7 +112,7 @@ def _regression_significance_marker(
 ) -> str:
     try:
         parsed = float(p_value)
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return ""
     if not math.isfinite(parsed):
         return ""
@@ -136,6 +136,8 @@ _REPORT_COEFFICIENT_FIELDS = (
 _REPORT_STRING_LIMIT = 512
 _REPORT_WARNING_LIMIT = 8
 _REPORT_WARNING_LENGTH = 160
+_REPORT_MAX_NUMERIC_ABS = 1_000_000_000_000.0
+_REPORT_MAX_COUNT = 1_000_000
 
 
 def _bounded_report_string(value: Any, *, limit: int = _REPORT_STRING_LIMIT) -> str | None:
@@ -148,7 +150,8 @@ def _bounded_report_number(value: Any) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     try:
-        if not math.isfinite(float(value)):
+        parsed = float(value)
+        if not math.isfinite(parsed) or abs(parsed) > _REPORT_MAX_NUMERIC_ABS:
             return None
     except (OverflowError, TypeError, ValueError):
         return None
@@ -156,7 +159,12 @@ def _bounded_report_number(value: Any) -> int | float | None:
 
 
 def _bounded_report_integer(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or value > _REPORT_MAX_COUNT
+    ):
         return None
     return value
 
@@ -172,7 +180,7 @@ def _bounded_report_warnings(value: Any) -> list[str] | None:
 
 
 def _bounded_report_interval(value: Any) -> list[int | float] | None:
-    if not isinstance(value, (list, tuple)) or len(value) > 4:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
         return None
     values = [_bounded_report_number(item) for item in value]
     if any(item is None for item in values):
@@ -183,6 +191,7 @@ def _bounded_report_interval(value: Any) -> list[int | float] | None:
 def _bounded_coefficient_projection(values: Mapping[str, Any]) -> dict[str, Any]:
     """Copy only the coefficient fields owned by the Report table contract."""
     cell: dict[str, Any] = {}
+    invalid_numeric = False
     for field in _REPORT_COEFFICIENT_FIELDS:
         if field not in values:
             continue
@@ -198,8 +207,27 @@ def _bounded_coefficient_projection(values: Mapping[str, Any]) -> dict[str, Any]
             bounded = _bounded_report_interval(values.get(field))
             if bounded is not None:
                 cell[field] = bounded
+            elif values.get(field) is not None:
+                invalid_numeric = True
         else:
-            cell[field] = values.get(field)
+            bounded = _bounded_report_number(values.get(field))
+            if bounded is not None:
+                cell[field] = bounded
+            elif values.get(field) is not None:
+                invalid_numeric = True
+    if invalid_numeric:
+        safe_cell = {
+            key: cell[key]
+            for key in ("source_id", "variance_source", "warnings")
+            if key in cell
+        }
+        safe_cell.update(
+            {
+                "projection_status": "unavailable",
+                "unavailable_reason": "REPORT_COEFFICIENT_VALUE_INVALID",
+            }
+        )
+        return safe_cell
     return cell
 
 
@@ -443,6 +471,7 @@ def _bounded_survey_design(design: Any) -> dict[str, Any] | None:
     if not isinstance(design, Mapping):
         return None
     bounded: dict[str, Any] = {}
+    invalid_numeric = False
     for field in (
         "n_obs",
         "n_strata",
@@ -455,6 +484,8 @@ def _bounded_survey_design(design: Any) -> dict[str, Any] | None:
         value = _bounded_report_number(design.get(field))
         if value is not None:
             bounded[field] = value
+        elif design.get(field) is not None:
+            invalid_numeric = True
     for field in (
         "variance_method",
         "strata_column",
@@ -473,7 +504,10 @@ def _bounded_survey_design(design: Any) -> dict[str, Any] | None:
         "replicates_failed",
     ):
         if field in design:
-            bounded[field] = _bounded_report_integer(design.get(field))
+            value = _bounded_report_integer(design.get(field))
+            bounded[field] = value
+            if design.get(field) is not None and value is None:
+                invalid_numeric = True
     if "replicate_failure_reasons" in design:
         raw_reasons = design.get("replicate_failure_reasons")
         if isinstance(raw_reasons, Mapping):
@@ -484,9 +518,20 @@ def _bounded_survey_design(design: Any) -> dict[str, Any] | None:
                 bounded_count = _bounded_report_integer(count)
                 if bounded_count is not None:
                     reasons[reason[:128]] = bounded_count
+                elif count is not None:
+                    invalid_numeric = True
             bounded["replicate_failure_reasons"] = reasons
         else:
             bounded["replicate_failure_reasons"] = None
+            if raw_reasons is not None:
+                invalid_numeric = True
+    if invalid_numeric:
+        bounded.update(
+            {
+                "projection_status": "unavailable",
+                "unavailable_reason": "REPORT_SURVEY_METADATA_INVALID",
+            }
+        )
     return bounded or None
 
 

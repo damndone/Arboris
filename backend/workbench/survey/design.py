@@ -14,6 +14,7 @@ about the result looks wrong.  Stata warns about exactly this (`subpop()` versus
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass, field
 from decimal import Decimal, DecimalException
 
@@ -26,6 +27,7 @@ from .estimator import VARIANCE_METHOD_REQUIREMENTS, EstimatorSpec, missing_capa
 LONELY_PSU_POLICIES = ("fail", "remove", "adjust", "average", "certainty")
 REPLICATE_TYPES = ("brr", "jackknife", "bootstrap", "provided")
 _MAX_INVALID_WEIGHT_ROWS = 16
+_MAX_SUBPOP_EXPRESSION_LENGTH = 512
 SURVEY_INVALID_SAMPLING_WEIGHTS = "SURVEY_INVALID_SAMPLING_WEIGHTS"
 
 
@@ -358,8 +360,104 @@ class SurveyDesign:
     def subpop_mask(self) -> np.ndarray:
         if not self.subpop:
             return np.ones(len(self.frame), dtype=bool)
-        mask = self.frame.eval(self.subpop)
-        return np.asarray(mask, dtype=bool)
+        expression = self.subpop
+        if not isinstance(expression, str) or not expression.strip():
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_INVALID",
+                "subpopulation expression must be a non-empty string",
+            )
+        if len(expression) > _MAX_SUBPOP_EXPRESSION_LENGTH:
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_INVALID",
+                "subpopulation expression exceeds the supported length",
+                expression_length=len(expression),
+            )
+
+        allowed_nodes = (
+            ast.Expression,
+            ast.BoolOp,
+            ast.BinOp,
+            ast.UnaryOp,
+            ast.Compare,
+            ast.Name,
+            ast.Load,
+            ast.Constant,
+            ast.And,
+            ast.Or,
+            ast.Not,
+            ast.Invert,
+            ast.UAdd,
+            ast.USub,
+            ast.Add,
+            ast.Sub,
+            ast.Mult,
+            ast.Div,
+            ast.Mod,
+            ast.BitAnd,
+            ast.BitOr,
+            ast.Eq,
+            ast.NotEq,
+            ast.Lt,
+            ast.LtE,
+            ast.Gt,
+            ast.GtE,
+            ast.In,
+            ast.NotIn,
+        )
+        try:
+            parsed = ast.parse(expression, mode="eval")
+        except (SyntaxError, ValueError, TypeError, MemoryError) as exc:
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_INVALID",
+                "subpopulation expression is not valid",
+                reason="syntax",
+            ) from exc
+
+        names = {
+            node.id
+            for node in ast.walk(parsed)
+            if isinstance(node, ast.Name)
+        }
+        allowed_names = set(self.frame.columns) | {"index"}
+        unknown_names = sorted(names - allowed_names)
+        if unknown_names:
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_INVALID",
+                "subpopulation expression references an unknown column",
+                reason="unknown_column",
+                columns=[name[:128] for name in unknown_names[:16]],
+            )
+        if any(not isinstance(node, allowed_nodes) for node in ast.walk(parsed)):
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_INVALID",
+                "subpopulation expression uses an unsupported operation",
+                reason="unsupported_operation",
+            )
+
+        try:
+            mask = self.frame.eval(expression, engine="python", parser="pandas")
+            mask_array = np.asarray(mask)
+        except Exception as exc:  # noqa: BLE001 - expose one bounded survey error
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_INVALID",
+                "subpopulation expression could not be evaluated safely",
+                reason="evaluation",
+            ) from exc
+        if mask_array.shape != (len(self.frame),):
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_INVALID",
+                "subpopulation expression must produce one boolean per row",
+                reason="shape",
+                mask_shape=list(mask_array.shape),
+            )
+        try:
+            return mask_array.astype(bool, copy=False)
+        except (TypeError, ValueError) as exc:
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_INVALID",
+                "subpopulation expression must produce boolean values",
+                reason="not_boolean",
+            ) from exc
 
     # -- design effect -----------------------------------------------------
 

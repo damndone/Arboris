@@ -276,6 +276,44 @@ def test_report_facts_preserve_bounded_survey_replicate_metadata(tmp_path: Path)
     assert "SURVEY_REPLICATE_FAILURES" in facts_text
 
 
+def test_report_projection_fails_closed_on_huge_coefficient_and_replicate_values():
+    """Report projection must not copy unbounded numeric precision into output."""
+    packet = build_regression_table(
+        [
+            (
+                "ols_1",
+                {
+                    "model_label": "Survey OLS",
+                    "survey_design": {
+                        "replicates_attempted": 10**400,
+                        "replicates_succeeded": 10**400,
+                        "replicates_failed": 10**400,
+                    },
+                    "coefficients": {
+                        "x": {
+                            "estimate": 10**400,
+                            "std_error": 10**400,
+                            "p_value": 10**400,
+                            "confidence_interval": [10**400, 10**400],
+                            "source_id": "model_results." + "x" * 2000,
+                            "variance_source": "survey_design",
+                            "warnings": ["warning"] * 100,
+                        }
+                    },
+                },
+            )
+        ]
+    )
+
+    cell = packet["rows"][0]["models"]["ols_1"]
+    assert cell["projection_status"] == "unavailable"
+    assert cell["unavailable_reason"] == "REPORT_COEFFICIENT_VALUE_INVALID"
+    assert "estimate" not in cell
+    provenance = packet["models"][0]["survey_provenance"]
+    assert provenance["projection_status"] == "unavailable"
+    assert provenance["unavailable_reason"] == "REPORT_SURVEY_METADATA_INVALID"
+
+
 def test_coeff_render_failure_yields_empty_text():
     summary = {
         "schema_version": "1.0",

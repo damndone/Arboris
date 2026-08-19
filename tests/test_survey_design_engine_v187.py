@@ -184,6 +184,33 @@ def test_survey_engine_rejects_mutated_object_integer_weight_before_float_conver
     assert excinfo.value.context["reason"] == "not_float_representable"
 
 
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "missing_column == 1",
+        "x1 +",
+        "__import__('os').system('echo injected')",
+    ],
+)
+def test_invalid_subpopulation_expressions_are_bounded_typed_failures(expression):
+    """Subpopulation expressions must not leak pandas parser errors or execute code."""
+    from workbench.survey import SurveyDesign, SurveyEngineError
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        SurveyDesign(
+            frame=_design_frame(),
+            strata="stratum",
+            psu="psu",
+            weight="weight",
+            subpop=expression,
+        ).subpop_mask()
+
+    assert excinfo.value.code == "SURVEY_SUBPOP_INVALID"
+    assert len(str(excinfo.value)) <= 512
+    assert "UndefinedVariableError" not in str(excinfo.value)
+    assert "SyntaxError" not in str(excinfo.value)
+
+
 def test_confidence_intervals_use_the_design_t_not_the_normal(design, linearizable_estimator):
     """The multiplier must come from the design, not from the normal.
 

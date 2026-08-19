@@ -10,6 +10,7 @@ file, the enumeration matrix would be back, just moved.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from decimal import Decimal, DecimalException
 
 import numpy as np
 import pandas as pd
@@ -29,56 +30,109 @@ _GLM_FAMILIES: dict[str, tuple[str, str | None]] = {
     "poisson": ("Poisson", None),
 }
 
+_MAX_INVALID_EXPOSURE_ROWS = 16
+
+
+def _exposure_failure(
+    *,
+    exposure: str,
+    reason: str,
+    invalid_rows: list[str] | None = None,
+    detail: str | None = None,
+) -> SurveyEngineError:
+    return SurveyEngineError(
+        "SURVEY_POISSON_EXPOSURE_INVALID",
+        detail or f"exposure column {exposure!r} violates the Poisson exposure contract",
+        exposure_column=exposure,
+        reason=reason,
+        invalid_rows=list(invalid_rows or [])[:_MAX_INVALID_EXPOSURE_ROWS],
+    )
+
 
 def validate_poisson_exposure(frame: pd.DataFrame, exposure: str | None) -> None:
     """Reject an exposure before a Poisson family can treat it as an input."""
     if not exposure:
         return
     if exposure not in frame.columns:
-        raise SurveyEngineError(
-            "SURVEY_POISSON_EXPOSURE_INVALID",
-            f"exposure column {exposure!r} is not in the modeling frame",
-            exposure_column=exposure,
+        raise _exposure_failure(
+            exposure=exposure,
             reason="missing",
-            invalid_rows=[],
+            detail=f"exposure column {exposure!r} is not in the modeling frame",
         )
     try:
-        values = pd.to_numeric(frame[exposure], errors="coerce").to_numpy(dtype=float)
-    except (TypeError, ValueError) as exc:
-        raise SurveyEngineError(
-            "SURVEY_POISSON_EXPOSURE_INVALID",
-            f"exposure column {exposure!r} must be numeric",
-            exposure_column=exposure,
+        raw_values = frame[exposure].to_numpy(dtype=object)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise _exposure_failure(
+            exposure=exposure,
             reason="non_numeric",
-            invalid_rows=[],
+            detail=f"exposure column {exposure!r} cannot be read safely",
         ) from exc
-    finite = np.isfinite(values)
-    if not finite.all():
-        invalid_rows = [
-            str(index)
-            for index, invalid in zip(frame.index, ~finite, strict=True)
-            if invalid
-        ][:16]
-        raise SurveyEngineError(
-            "SURVEY_POISSON_EXPOSURE_INVALID",
-            f"exposure column {exposure!r} must contain finite values",
-            exposure_column=exposure,
-            reason="nonfinite",
-            invalid_rows=invalid_rows,
+
+    decimals: list[Decimal] = []
+    non_numeric_rows: list[str] = []
+    boolean_rows: list[str] = []
+    nonfinite_rows: list[str] = []
+    nonpositive_rows: list[str] = []
+    for index, raw_value in zip(frame.index, raw_values, strict=True):
+        row = str(index)
+        if isinstance(raw_value, (bool, np.bool_)):
+            boolean_rows.append(row)
+            continue
+        try:
+            parsed = Decimal(str(raw_value).strip())
+        except (DecimalException, OverflowError, TypeError, ValueError, UnicodeError):
+            non_numeric_rows.append(row)
+            continue
+        decimals.append(parsed)
+        if not parsed.is_finite():
+            nonfinite_rows.append(row)
+        elif parsed <= 0:
+            nonpositive_rows.append(row)
+
+    if boolean_rows:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="boolean",
+            invalid_rows=boolean_rows,
+            detail=f"exposure column {exposure!r} must not contain boolean values",
         )
-    invalid = values <= 0
-    if invalid.any():
-        invalid_rows = [
-            str(index)
-            for index, bad in zip(frame.index, invalid, strict=True)
-            if bad
-        ][:16]
-        raise SurveyEngineError(
-            "SURVEY_POISSON_EXPOSURE_INVALID",
-            f"exposure column {exposure!r} must be strictly positive",
-            exposure_column=exposure,
+    if non_numeric_rows:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="non_numeric",
+            invalid_rows=non_numeric_rows,
+            detail=f"exposure column {exposure!r} contains values that cannot be parsed safely",
+        )
+    if nonfinite_rows:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="nonfinite",
+            invalid_rows=nonfinite_rows,
+            detail=f"exposure column {exposure!r} must contain finite values",
+        )
+    if nonpositive_rows:
+        raise _exposure_failure(
+            exposure=exposure,
             reason="nonpositive",
-            invalid_rows=invalid_rows,
+            invalid_rows=nonpositive_rows,
+            detail=f"exposure column {exposure!r} must be strictly positive",
+        )
+
+    overflow_rows: list[str] = []
+    for index, parsed in zip(frame.index, decimals, strict=True):
+        try:
+            converted = float(parsed)
+        except (DecimalException, OverflowError, TypeError, ValueError):
+            overflow_rows.append(str(index))
+            continue
+        if not np.isfinite(converted):
+            overflow_rows.append(str(index))
+    if overflow_rows:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="not_float_representable",
+            invalid_rows=overflow_rows,
+            detail=f"exposure column {exposure!r} cannot be represented as finite float values",
         )
 
 
@@ -150,8 +204,6 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
     strata = str(artifacts.get("_survey_strata_col") or "").strip()
     psu = str(artifacts.get("_survey_psu_col") or "").strip()
     weight = str(artifacts.get("_sampling_weight") or "").strip()
-    if not weight:
-        return None
     fpc = str(artifacts.get("_survey_fpc_col") or "").strip()
     if fpc:
         raise SurveyEngineError(
@@ -161,6 +213,8 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
             "with explicit FPC support",
             fpc_column=fpc,
         )
+    if not weight:
+        return None
     if not (strata or psu):
         raise SurveyEngineError(
             "SURVEY_DESIGN_INCOMPLETE",

@@ -1,13 +1,12 @@
 """v1.8.7 block 1 — shared input wiring for complex survey design.
 
-This block is deliberately **zero behavior**: the new fields travel from the HTTP
-surface through run_service and the orchestrator into ``ctx.artifacts`` and stop
-there.  Nothing consumes them, nothing validates them, no result changes.
+The new fields travel from the HTTP surface through run_service and the
+orchestrator into ``ctx.artifacts``. Unsupported declarations may stop at the
+typed survey boundary; this file protects that fail-closed behavior.
 
 The load-bearing test in this file is
-``test_survey_design_params_do_not_change_any_result`` — if declaring the fields
-moves a single number, semantics leaked into a wiring block and A1/A2 can no
-longer be developed in parallel on top of it.
+``test_fpc_without_sampling_weight_fails_closed_at_the_wired_entry`` — an FPC
+declaration must never be hidden by an ordinary model fallback.
 """
 
 from __future__ import annotations
@@ -211,15 +210,11 @@ def test_survey_design_params_reach_ctx_artifacts(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# 3. ZERO BEHAVIOR — the load-bearing constraint of this block
+# 3. FAIL-CLOSED SURVEY DECLARATIONS
 # --------------------------------------------------------------------------
 
-def test_survey_design_params_do_not_change_any_result(tmp_path):
-    """Declaring survey design fields must not move a single number in block 1.
-
-    Consuming them is block 2's job.  If this fails, semantics leaked into a
-    wiring block and the A1/A2 parallelism premise is broken.
-    """
+def test_fpc_without_sampling_weight_fails_closed_at_the_wired_entry(tmp_path):
+    """An FPC declaration cannot be carried into a naive model result."""
     bare_project, bare_source = _project(tmp_path, "bare")
     bare = run_workflow(
         bare_project.root, [bare_source], mode="auto", model_type="ols", y="y", x=["x"]
@@ -238,39 +233,12 @@ def test_survey_design_params_do_not_change_any_result(tmp_path):
         survey_subpop="region == 'north'",
     )
 
-    assert bare["status"] == declared["status"] == "completed"
-
-    bare_model = read_json(
-        bare_project.root / "runs" / bare["run_id"] / "model_results" / "ols_1.json"
-    )
-    declared_model = read_json(
-        svy_project.root / "runs" / declared["run_id"] / "model_results" / "ols_1.json"
-    )
-
-    assert declared_model["coefficients"] == bare_model["coefficients"]
-    assert json.dumps(declared_model, sort_keys=True) == json.dumps(
-        bare_model, sort_keys=True
-    ), "declaring survey design changed the model result — semantics leaked into block 1"
-
-    bare_arts = sorted(
-        p.name for p in (bare_project.root / "runs" / bare["run_id"]).rglob("*") if p.is_file()
-    )
-    declared_arts = sorted(
-        p.name for p in (svy_project.root / "runs" / declared["run_id"]).rglob("*") if p.is_file()
-    )
-    # The A2b design pre-check (v1.8.7) writes `design_precheck.json` when a
-    # design was *not* declared -- that is the whole point of it, so the two
-    # artifact sets are expected to differ by exactly that file. Spec §6.5
-    # declares this exception in advance: A2-7 constrains routing and statistical
-    # results, not the artifact set. Everything else must still match, so the
-    # comparison is narrowed rather than dropped.
-    expected_extra = {"design_precheck.json"}
-    assert set(bare_arts) - set(declared_arts) <= expected_extra, (
-        "declaring survey design changed the artifact set beyond the declared exception"
-    )
-    assert not set(declared_arts) - set(bare_arts), (
-        "declaring survey design produced artifacts the bare run did not"
-    )
+    assert bare["status"] == "completed"
+    assert declared["status"] == "failed"
+    run_root = svy_project.root / "runs" / declared["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(issue["code"] == "SURVEY_FPC_UNSUPPORTED" for issue in errors["issues"])
+    assert not (run_root / "model_results" / "ols_1.json").exists()
 
 
 def test_sampling_weight_fails_closed_without_a_declared_design(tmp_path):

@@ -22,7 +22,9 @@ from workbench.agent.context_tools import (
     InspectProjectModelCoefficientsRequest,
     InspectResultSummaryRequest,
     NodeOperationContextProvider,
+    _bounded_regression_table,
     _bounded_model_family_evidence,
+    _public_requested_model_coefficients,
 )
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
@@ -92,6 +94,41 @@ def test_agent_projection_preserves_survey_provenance_and_replicate_metadata(tmp
     assert projected["variance_source"] == "survey_design"
     assert projected["source_id"] == "model_results.ols_1.coefficients.x1"
     assert isinstance(projected["warnings"], list)
+
+
+def test_agent_coefficient_projection_bounds_huge_values_and_provenance():
+    """Agent output must be typed unavailable rather than serializing huge values."""
+    result = {
+        "model_id": "ols_1",
+        "model_label": "Survey OLS",
+        "coefficients": {
+            "x": {
+                "estimate": 10**400,
+                "std_error": 10**400,
+                "p_value": 10**400,
+                "ci_lower": 10**400,
+                "ci_upper": 10**400,
+                "variance_source": "v" * 2000,
+                "source_id": "s" * 2000,
+                "warnings": ["w" * 2000] * 100,
+            }
+        },
+    }
+
+    projected = _public_requested_model_coefficients(
+        run_id="run-1", result=result, requested_terms=("x",)
+    )["coefficients"][0]
+    assert projected["projection_status"] == "unavailable"
+    assert projected["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
+    assert projected["estimate"] is None
+    assert len(projected["source_id"]) <= 128
+    assert len(projected["variance_source"]) <= 128
+    assert len(projected["warnings"]) <= 16
+    assert all(len(item) <= 128 for item in projected["warnings"])
+
+    table_cell = _bounded_regression_table([result])["rows"][0]["models"]["ols_1"]
+    assert table_cell["projection_status"] == "unavailable"
+    assert table_cell["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
 
 
 def test_a_run_without_a_design_says_so_rather_than_omitting_the_field(tmp_path):
