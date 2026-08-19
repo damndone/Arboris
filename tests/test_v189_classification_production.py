@@ -21,8 +21,10 @@ from workbench.predictive_research.contracts import ContractError
 from workbench.predictive_research.consumer_projection import (
     _project_classification_evidence,
     project_classification_evidence,
+    read_classification_artifacts_wrapper_from_run_root,
     read_classification_evidence_from_run_root,
 )
+from workbench.http import runs_routes
 
 
 def _rewrite_indexed_classification_artifact(run_root, mutate, *, update_outer_id: bool = False) -> dict:
@@ -727,6 +729,96 @@ def test_public_classification_consumer_rejects_complete_persisted_mapping(tmp_p
         project_classification_evidence(persisted, consumer="report")
 
     assert exc_info.value.code == "CLASSIFICATION_PERSISTED_RECEIPT_REQUIRED"
+
+
+def test_shared_classification_artifacts_wrapper_contains_server_receipt_and_content_digests(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(
+        json.dumps({"schema_version": 1, "artifacts": []}),
+        encoding="utf-8",
+    )
+    run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+
+    wrapper = read_classification_artifacts_wrapper_from_run_root(tmp_path)
+
+    assert wrapper["payload_schema"] == "workbench.prediction.classification-artifacts-wrapper"
+    assert wrapper["receipt_path"] == "classification_receipt.json"
+    assert wrapper["receipt"]["receipt_digest"] == wrapper["receipt_digest"]
+    assert wrapper["receipt"]["content_digests"] == wrapper["content_digests"]
+    assert wrapper["index"]["artifact_id"] == wrapper["artifact_id"]
+
+
+def test_runs_artifact_route_serves_classification_only_as_validated_wrapper(tmp_path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-classification"
+    run_root.mkdir(parents=True)
+    (run_root / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    run_classification_model_v189(
+        frame,
+        run_root,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+    artifact_id = next(
+        item["artifact_id"]
+        for item in json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))["artifacts"]
+        if item.get("artifact_type") == "classification_artifacts"
+    )
+
+    response = runs_routes.download_artifact_endpoint(
+        "run-classification",
+        artifact_id,
+        str(project_root),
+    )
+
+    assert response.__class__.__name__ == "JSONResponse"
+    served = json.loads(response.body)
+    assert served["payload_schema"] == "workbench.prediction.classification-artifacts-wrapper"
+    assert served["receipt"]["receipt_digest"] == served["receipt_digest"]
+    assert served["content_digests"]["evidence.metrics"]
+
+
+def test_shared_wrapper_rejects_metrics_tamper_even_when_raw_artifact_index_hash_is_rewritten(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(
+        json.dumps({"schema_version": 1, "artifacts": []}),
+        encoding="utf-8",
+    )
+    run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+
+    _rewrite_indexed_classification_artifact(
+        tmp_path,
+        lambda payload: payload["evidence"]["metrics"].update({"forged": 0}),
+        update_outer_id=True,
+    )
+
+    with pytest.raises(ContractError) as exc_info:
+        read_classification_artifacts_wrapper_from_run_root(tmp_path)
+
+    assert exc_info.value.code == "CLASSIFICATION_PERSISTED_RECEIPT_INVALID"
 
 
 @pytest.mark.parametrize(

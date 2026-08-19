@@ -106,12 +106,8 @@ def read_prediction_evidence_from_run_root(
     return project_prediction_evidence(payloads, consumer=consumer)
 
 
-def read_classification_evidence_from_run_root(
-    run_root: Path,
-    *,
-    consumer: str,
-) -> dict[str, Any]:
-    """Reload the indexed server-owned classification artifact before projection."""
+def read_classification_artifacts_wrapper_from_run_root(run_root: Path) -> dict[str, Any]:
+    """Reload raw classification bytes only inside a server-owned wrapper."""
 
     index = read_json(run_root / "artifacts_index.json")
     if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
@@ -166,7 +162,36 @@ def read_classification_evidence_from_run_root(
         artifact_sha256=str(record.get("sha256")),
         server_identity=expected_server_identity,
     )
-    return _project_classification_evidence(payload, consumer=consumer)
+    # The route-facing wrapper is a typed evidence boundary, not a raw file
+    # envelope.  Run the same status, identity, fold, and C0 projection
+    # validation before any consumer can receive it.
+    _project_classification_evidence(payload, consumer="report")
+    return {
+        "payload_schema": _CLASSIFICATION_ARTIFACTS_WRAPPER_SCHEMA,
+        "schema_version": 1,
+        "artifact_id": record["artifact_id"],
+        "artifact_path": record["path"],
+        "artifact_sha256": record["sha256"],
+        "index": dict(record),
+        "artifact": dict(payload),
+        "receipt_path": _CLASSIFICATION_RECEIPT_PATH,
+        "receipt_sha256": receipt_sha256,
+        "receipt": dict(receipt),
+        "receipt_digest": receipt["receipt_digest"],
+        "content_digests": dict(receipt["content_digests"]),
+        "server_identity": dict(expected_server_identity),
+    }
+
+
+def read_classification_evidence_from_run_root(
+    run_root: Path,
+    *,
+    consumer: str,
+) -> dict[str, Any]:
+    """Project evidence only after loading and validating the shared wrapper."""
+
+    wrapper = read_classification_artifacts_wrapper_from_run_root(run_root)
+    return _project_classification_evidence(wrapper["artifact"], consumer=consumer)
 
 
 def _has_payload_contract(value: Any) -> bool:
@@ -318,6 +343,7 @@ _CLASSIFICATION_FAMILY_ISSUER = "workbench.server"
 _CLASSIFICATION_FAMILY_PRODUCER = "workbench.prediction.run_classification_model_v189"
 _CLASSIFICATION_FAMILY_METHOD = {"id": "classification-production-v1", "version": "1.0"}
 _PERSISTED_CLASSIFICATION_SCHEMA = "workbench.prediction.classification-artifacts"
+_CLASSIFICATION_ARTIFACTS_WRAPPER_SCHEMA = "workbench.prediction.classification-artifacts-wrapper"
 _PERSISTED_CLASSIFICATION_IDENTITY_FIELDS = frozenset(
     {
         "schema_version",

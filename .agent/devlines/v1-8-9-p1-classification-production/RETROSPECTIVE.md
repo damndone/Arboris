@@ -6,18 +6,18 @@
 
 ## Final status
 
-CONTEXT_RESCOPED
+COMPLETED_WITH_KNOWN_GATES
 
 ## Metrics
 
-- Failure frequency: 11/48 (22.9%; 22.9 per 100 events)
+- Failure frequency: 11/53 (20.8%; 20.8 per 100 events)
 - Repeat rate: 0/11 (0.0%)
 - Recurrence rate: 0/11 (0.0%)
 - MTTR: median=0 ms (sample=6; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/9 (0.0%)
+- Gate waste rate: 0/10 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -93,6 +93,7 @@ CONTEXT_RESCOPED
 - Keep public consumer APIs capability-only and bind every consumed classification field to a server-owned persisted receipt before trusting outer artifact or index digests.
 - Keep the package-local runtime join typed and explicit, and leave host bootstrap composition as a separate integration boundary.
 - Keep the server-indexed wrapper as the only production consumer boundary and retain Notebook as a first-class persisted projection.
+- Keep the shared server-owned wrapper as the only classification consumer input and bind every rendered field to its receipt.
 - Make the typed task split profile drive the executable manifest before any model fit.
 - Regenerate the formal retrospective immediately after appending material events and before treating formal verification as current.
 - Resolve repository-owned contract test paths before claiming C0 verification evidence.
@@ -151,3 +152,8 @@ CONTEXT_RESCOPED
 - #46: `4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c5e` | 2026-08-19T21:30:00.000Z | REVIEW/classification_fourth_remediation_red | incident=`4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c5d` | lesson_key=`classification-fourth-remediation-red` | event_sha256=`f2d28c1f50713c24643a7e7aaa765ebe2a3db80d357c03a4fe5f5fff278f94ad`
 - #47: `4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c5f` | 2026-08-19T21:30:30.000Z | ERROR/classification_fourth_remediation_formal_append_error | incident=`4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c60` | lesson_key=`classification-fourth-remediation-cli-error` | event_sha256=`5407beb5ebd4c7d4186151dfdcf9adf5b510425e13d585c9fb006d814eb1f831`
 - #48: `4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c61` | 2026-08-19T21:45:00.000Z | GATE/classification_fourth_remediation_green | incident=`4f6a8c1e-2d3b-49a7-8c5e-0f1d2a3b4c62` | lesson_key=`classification-fourth-remediation-green` | event_sha256=`4f083b1c21f04a9019aa2845d746996afc6248c2ecff9a82d9b5526b3564cb4e`
+- #49: `044f40e2-b0fc-4270-bb52-14ce39c0aabd` | 2026-08-19T21:31:32.985Z | STATE_CHANGE/context_rescope_required | incident=`08139993-3cd7-401f-ad22-242dc7f7b2a8` | lesson_key=`context-pack-rescope` | event_sha256=`24760a387c443d1175ea5dcf4881a61b6e9b304216e431111f0bdcf0bdecda05`
+- #50: `3592d200-b4e0-4955-a44b-d7dd46d762b7` | 2026-08-19T21:31:33.006Z | STATE_CHANGE/context_rescoped | incident=`a91b5328-6563-4ade-a0fe-e89e3f500b68` | lesson_key=`context-pack-rescope` | event_sha256=`856433fa43ebdb5ed0e4c143bd82bcd5d443a08cd27a5546044408133fc740cc`
+- #51: `6f5a4c3b-2d1e-49f8-8a7b-6c5d4e3f2a10` | 2026-08-19T21:34:00.000Z | REVIEW/classification_fifth_remediation_red | incident=`6f5a4c3b-2d1e-49f8-8a7b-6c5d4e3f2a11` | lesson_key=`classification-fifth-remediation-red` | event_sha256=`274f5e9b07f9a385776ec67843e7315c4391d992519a18f240897c43c6a16ad1`
+- #52: `6f5a4c3b-2d1e-49f8-8a7b-6c5d4e3f2a12` | 2026-08-19T21:48:00.000Z | GATE/classification_fifth_remediation_green | incident=`6f5a4c3b-2d1e-49f8-8a7b-6c5d4e3f2a13` | lesson_key=`classification-fifth-remediation-green` | event_sha256=`2c45558a1ef383b39b5acf6ebfa6953ad572fa9133d21778c0fbe0b20fa5205a`
+- #53: `6f5a4c3b-2d1e-49f8-8a7b-6c5d4e3f2a14` | 2026-08-19T21:49:00.000Z | STATE_CHANGE/classification_fifth_remediation_complete | incident=`6f5a4c3b-2d1e-49f8-8a7b-6c5d4e3f2a15` | lesson_key=`classification-fifth-remediation-terminal` | event_sha256=`3ffd33c878b7925f0aab11e279a4212e84cfea2c4ff0a35f0098998a958113ce`

@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportWorkspaceProvider, useReportWorkspace } from "./ReportWorkspaceContext";
 
 const CLASSIFICATION_ARTIFACTS_SCHEMA = "workbench.prediction.classification-artifacts";
+const CLASSIFICATION_ARTIFACTS_WRAPPER_SCHEMA = "workbench.prediction.classification-artifacts-wrapper";
 const mockForest = vi.hoisted(() => ({ current: null as unknown }));
 const mockArtifacts = vi.hoisted(() => ({
   current: { groups: [] as Array<{ artifact_type: string; items: Array<Record<string, unknown>> }> },
@@ -195,6 +197,64 @@ const persistedClassificationArtifact = {
   evidence: evidencePacket,
 };
 
+function canonicalJson(value: unknown): string {
+  if (value === undefined || value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") return JSON.stringify(value === undefined ? null : value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+}
+
+function digest(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function sharedClassificationArtifactsWrapper(artifact: Record<string, unknown>) {
+  const models = artifact.models as Record<string, Record<string, unknown>>;
+  const fit = artifact.fit as Record<string, unknown>;
+  const contentDigests = {
+    artifact: "a".repeat(64),
+    evidence: digest(artifact.evidence),
+    "evidence.metrics": digest((artifact.evidence as Record<string, unknown>).metrics),
+    evaluation: digest(artifact.evaluation),
+    "evaluation.metrics": digest((artifact.evaluation as Record<string, unknown>).metrics),
+    models: digest(models),
+    "models.metadata": digest(Object.fromEntries(Object.entries(models).map(([modelId, model]) => [modelId, model.metadata ?? null]))),
+    "models.warnings": digest(Object.fromEntries(Object.entries(models).map(([modelId, model]) => [modelId, (model.metadata as Record<string, unknown> | undefined)?.warnings ?? null]))),
+    fit: digest(fit),
+    fold_receipts: digest(Object.fromEntries(Object.entries((fit.models ?? {}) as Record<string, Record<string, unknown>>).map(([modelId, model]) => [modelId, model.fold_receipts ?? null]))),
+  };
+  const receipt = {
+    payload_schema: "workbench.prediction.classification-receipt",
+    schema_version: 1,
+    receipt_id: "classification-receipt:test",
+    artifact_path: "classification_artifacts.json",
+    artifact_id: artifact.artifact_id,
+    artifact_sha256: "a".repeat(64),
+    payload_contract: { payload_schema: CLASSIFICATION_ARTIFACTS_SCHEMA, schema_version: 1 },
+    server_identity: persistedClassificationArtifact.server_identity,
+    content_digests: contentDigests,
+    issuer: "workbench.server.classification-persistence",
+  };
+  const receiptDigest = digest(receipt);
+  return {
+    payload_schema: "workbench.prediction.classification-artifacts-wrapper",
+    schema_version: 1,
+    artifact_id: artifact.artifact_id,
+    artifact_path: "classification_artifacts.json",
+    artifact_sha256: "a".repeat(64),
+    index: { artifact_id: artifact.artifact_id, path: "classification_artifacts.json", sha256: "a".repeat(64), receipt_path: "classification_receipt.json", receipt_sha256: "c".repeat(64), server_identity: persistedClassificationArtifact.server_identity },
+    artifact,
+    receipt_path: "classification_receipt.json",
+    receipt_sha256: "c".repeat(64),
+    receipt: { ...receipt, receipt_digest: receiptDigest },
+    receipt_digest: receiptDigest,
+    content_digests: contentDigests,
+    server_identity: persistedClassificationArtifact.server_identity,
+  };
+}
+
+const persistedClassificationArtifactsWrapper = sharedClassificationArtifactsWrapper(persistedClassificationArtifact);
+
 function indexedClassificationItem(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     artifact_id: "sha256:" + "a".repeat(64),
@@ -219,7 +279,7 @@ function WorkspaceProbe() {
   const isTypedPacket = Boolean(
     packet
     && typeof packet === "object"
-    && (packet as Record<string, unknown>).payload_schema === CLASSIFICATION_ARTIFACTS_SCHEMA
+    && (packet as Record<string, unknown>).payload_schema === CLASSIFICATION_ARTIFACTS_WRAPPER_SCHEMA
     && (packet as Record<string, unknown>).schema_version === 1,
   );
   return (
@@ -268,7 +328,7 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
         ],
       }],
     };
-    mockArtifactJson.current.mockResolvedValue(persistedClassificationArtifact);
+    mockArtifactJson.current.mockResolvedValue(persistedClassificationArtifactsWrapper);
 
     renderWorkspace();
 
@@ -325,7 +385,7 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     mockArtifacts.current = {
       groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
     };
-    mockArtifactJson.current.mockResolvedValue({ ...persistedClassificationArtifact, evidence: packet });
+    mockArtifactJson.current.mockResolvedValue({ ...persistedClassificationArtifactsWrapper, artifact: { ...persistedClassificationArtifactsWrapper.artifact, evidence: packet } });
 
     renderWorkspace();
 
@@ -338,8 +398,8 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
       groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
     };
     mockArtifactJson.current.mockResolvedValue({
-      ...persistedClassificationArtifact,
-      evidence: {
+      ...persistedClassificationArtifactsWrapper,
+      artifact: { ...persistedClassificationArtifactsWrapper.artifact, evidence: {
         ...evidencePacket,
       c0_evidence_envelope: {
         result_identity: {
@@ -350,7 +410,7 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
           release_plan_hash: evidencePacket.holdout.release_plan_hash,
         },
       },
-      },
+      } },
     });
 
     renderWorkspace();
@@ -364,12 +424,12 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
       groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
     };
     mockArtifactJson.current.mockResolvedValue({
-      ...persistedClassificationArtifact,
-      evidence: {
+      ...persistedClassificationArtifactsWrapper,
+      artifact: { ...persistedClassificationArtifactsWrapper.artifact, evidence: {
         ...evidencePacket,
       c0_evidence_envelope: { availability: "not_available" },
       c0_consumer_projection: { payload: { projection_status: "available" } },
-      },
+      } },
     });
 
     renderWorkspace();
@@ -382,14 +442,14 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
       groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
     };
     mockArtifactJson.current.mockResolvedValue({
-      ...persistedClassificationArtifact,
-      evidence: {
+      ...persistedClassificationArtifactsWrapper,
+      artifact: { ...persistedClassificationArtifactsWrapper.artifact, evidence: {
         ...evidencePacket,
       c0_evidence_envelope: {
         ...evidencePacket.c0_evidence_envelope,
         family_evidence: { classification: { ...classificationFamilyEvidence, producer: "forged-producer" } },
       },
-      },
+      } },
     });
 
     renderWorkspace();

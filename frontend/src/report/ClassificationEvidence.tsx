@@ -71,6 +71,22 @@ export interface ClassificationEvidencePacket {
   }>;
 }
 
+export interface ClassificationArtifactsWrapper {
+  readonly payload_schema: "workbench.prediction.classification-artifacts-wrapper";
+  readonly schema_version: 1;
+  readonly artifact_id: string;
+  readonly artifact_path: string;
+  readonly artifact_sha256: string;
+  readonly index: EvidenceRecord;
+  readonly artifact: EvidenceRecord & { readonly evidence: ClassificationEvidencePacket };
+  readonly receipt_path: "classification_receipt.json";
+  readonly receipt_sha256: string;
+  readonly receipt: EvidenceRecord;
+  readonly receipt_digest: string;
+  readonly content_digests: Readonly<Record<string, string>>;
+  readonly server_identity: EvidenceRecord;
+}
+
 const tableStyle = { fontSize: 12, borderCollapse: "collapse" as const };
 const cellStyle = { padding: "2px 10px 2px 0", textAlign: "left" as const };
 const SAFE_DISPLAY_KEYS = new Set([
@@ -103,6 +119,12 @@ const CLASSIFICATION_REQUIRED_FIELDS = [
 ] as const;
 
 const PERSISTED_CLASSIFICATION_SCHEMA = "workbench.prediction.classification-artifacts";
+const CLASSIFICATION_ARTIFACTS_WRAPPER_SCHEMA = "workbench.prediction.classification-artifacts-wrapper";
+const CLASSIFICATION_RECEIPT_SCHEMA = "workbench.prediction.classification-receipt";
+const CLASSIFICATION_CONTENT_DIGEST_KEYS = [
+  "artifact", "evidence", "evidence.metrics", "evaluation", "evaluation.metrics",
+  "models", "models.metadata", "models.warnings", "fit", "fold_receipts",
+] as const;
 
 function isFiniteNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
@@ -110,6 +132,10 @@ function isFiniteNonNegativeInteger(value: unknown): value is number {
 
 function isDigest(value: unknown): value is string {
   return typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value);
+}
+
+function isHexDigest(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 }
 
 function isServerIdentity(value: unknown): value is EvidenceRecord {
@@ -134,16 +160,166 @@ function sameJson(left: unknown, right: unknown): boolean {
   }
 }
 
-export function isPersistedClassificationArtifact(value: unknown): value is EvidenceRecord & { evidence: ClassificationEvidencePacket } {
+function canonicalJson(value: unknown): string {
+  if (value === undefined) return "null";
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return JSON.stringify(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = asRecord(value);
+  if (!record) throw new Error("unsupported canonical value");
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+}
+
+function sha256(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  const words = new Uint32Array(64);
+  const state = new Uint32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  ]);
+  const constants = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+    0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+    0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+    0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ];
+  const bitLength = bytes.length * 8;
+  const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const lengthOffset = paddedLength - 8;
+  for (let index = 0; index < 8; index += 1) padded[lengthOffset + index] = (bitLength / 2 ** (56 - index * 8)) & 0xff;
+  const rotateRight = (value: number, amount: number) => (value >>> amount) | (value << (32 - amount));
+  for (let offset = 0; offset < padded.length; offset += 64) {
+    for (let index = 0; index < 16; index += 1) {
+      const position = offset + index * 4;
+      words[index] = ((padded[position] << 24) | (padded[position + 1] << 16) | (padded[position + 2] << 8) | padded[position + 3]) >>> 0;
+    }
+    for (let index = 16; index < 64; index += 1) {
+      const s0 = rotateRight(words[index - 15], 7) ^ rotateRight(words[index - 15], 18) ^ (words[index - 15] >>> 3);
+      const s1 = rotateRight(words[index - 2], 17) ^ rotateRight(words[index - 2], 19) ^ (words[index - 2] >>> 10);
+      words[index] = (words[index - 16] + s0 + words[index - 7] + s1) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, h] = state;
+    for (let index = 0; index < 64; index += 1) {
+      const s1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+      const choose = (e & f) ^ (~e & g);
+      const temp1 = (h + s1 + choose + constants[index] + words[index]) >>> 0;
+      const s0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+      const majority = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (s0 + majority) >>> 0;
+      [h, g, f, e, d, c, b, a] = [g, f, e, (d + temp1) >>> 0, c, b, a, (temp1 + temp2) >>> 0];
+    }
+    state[0] = (state[0] + a) >>> 0;
+    state[1] = (state[1] + b) >>> 0;
+    state[2] = (state[2] + c) >>> 0;
+    state[3] = (state[3] + d) >>> 0;
+    state[4] = (state[4] + e) >>> 0;
+    state[5] = (state[5] + f) >>> 0;
+    state[6] = (state[6] + g) >>> 0;
+    state[7] = (state[7] + h) >>> 0;
+  }
+  return [...state].map((word) => word.toString(16).padStart(8, "0")).join("");
+}
+
+function canonicalDigest(value: unknown): string {
+  return sha256(canonicalJson(value));
+}
+
+export function isPersistedClassificationArtifact(value: unknown): value is ClassificationArtifactsWrapper {
   const persistedInvalid = (): false => false;
-  const artifact = asRecord(value);
-  if (artifact === null || artifact.payload_schema !== PERSISTED_CLASSIFICATION_SCHEMA || artifact.schema_version !== 1) return persistedInvalid();
+  const wrapper = asRecord(value);
+  const artifact = asRecord(wrapper?.artifact);
+  const receipt = asRecord(wrapper?.receipt);
+  const index = asRecord(wrapper?.index);
+  const contentDigests = asRecord(wrapper?.content_digests);
+  const serverIdentity = asRecord(wrapper?.server_identity);
+  const receiptServerIdentity = asRecord(receipt?.server_identity);
+  const indexServerIdentity = asRecord(index?.server_identity);
+  if (
+    wrapper === null
+    || wrapper.payload_schema !== CLASSIFICATION_ARTIFACTS_WRAPPER_SCHEMA
+    || wrapper.schema_version !== 1
+    || artifact === null
+    || artifact.payload_schema !== PERSISTED_CLASSIFICATION_SCHEMA
+    || artifact.schema_version !== 1
+    || receipt === null
+    || index === null
+    || contentDigests === null
+    || serverIdentity === null
+    || !isServerIdentity(serverIdentity)
+    || !isServerIdentity(receiptServerIdentity)
+    || !isServerIdentity(indexServerIdentity)
+    || !sameJson(serverIdentity, receiptServerIdentity)
+    || !sameJson(serverIdentity, indexServerIdentity)
+    || typeof wrapper.artifact_id !== "string"
+    || wrapper.artifact_id !== artifact.artifact_id
+    || wrapper.artifact_id !== index.artifact_id
+    || wrapper.artifact_path !== index.path
+    || wrapper.artifact_path !== receipt.artifact_path
+    || wrapper.artifact_path !== "classification_artifacts.json"
+    || !isHexDigest(wrapper.artifact_sha256)
+    || wrapper.artifact_sha256 !== index.sha256
+    || wrapper.artifact_sha256 !== receipt.artifact_sha256
+    || wrapper.receipt_path !== "classification_receipt.json"
+    || wrapper.receipt_path !== index.receipt_path
+    || !isHexDigest(wrapper.receipt_sha256)
+    || wrapper.receipt_sha256 !== index.receipt_sha256
+    || receipt.payload_schema !== CLASSIFICATION_RECEIPT_SCHEMA
+    || receipt.schema_version !== 1
+    || typeof receipt.receipt_id !== "string"
+    || receipt.receipt_id.length === 0
+    || receipt.artifact_id !== wrapper.artifact_id
+    || asRecord(receipt.payload_contract)?.payload_schema !== PERSISTED_CLASSIFICATION_SCHEMA
+    || asRecord(receipt.payload_contract)?.schema_version !== 1
+    || receipt.issuer !== "workbench.server.classification-persistence"
+    || !isHexDigest(receipt.receipt_digest)
+    || wrapper.receipt_digest !== receipt.receipt_digest
+    || !sameJson(contentDigests, receipt.content_digests)
+    || Object.keys(receipt).sort().join("|") !== [
+      "artifact_id", "artifact_path", "artifact_sha256", "content_digests", "issuer",
+      "payload_contract", "payload_schema", "receipt_digest", "receipt_id", "schema_version", "server_identity",
+    ].sort().join("|")
+    || Object.keys(contentDigests).length !== CLASSIFICATION_CONTENT_DIGEST_KEYS.length
+    || CLASSIFICATION_CONTENT_DIGEST_KEYS.some((key) => !isHexDigest(contentDigests[key]))
+  ) return persistedInvalid();
+  const receiptBase = { ...receipt };
+  delete receiptBase.receipt_digest;
+  if (canonicalDigest(receiptBase) !== receipt.receipt_digest) return persistedInvalid();
+  const expectedContentDigests = {
+    artifact: wrapper.artifact_sha256,
+    evidence: canonicalDigest(artifact.evidence),
+    "evidence.metrics": canonicalDigest(asRecord(artifact.evidence)?.metrics),
+    evaluation: canonicalDigest(artifact.evaluation),
+    "evaluation.metrics": canonicalDigest(asRecord(artifact.evaluation)?.metrics),
+    models: canonicalDigest(artifact.models),
+    "models.metadata": canonicalDigest(Object.fromEntries(Object.entries(asRecord(artifact.models) ?? {}).map(([modelId, model]) => [modelId, asRecord(model)?.metadata]))),
+    "models.warnings": canonicalDigest(Object.fromEntries(Object.entries(asRecord(artifact.models) ?? {}).map(([modelId, model]) => [modelId, asRecord(asRecord(model)?.metadata)?.warnings]))),
+    fit: canonicalDigest(artifact.fit),
+    fold_receipts: canonicalDigest(Object.fromEntries(Object.entries(asRecord(artifact.fit)?.models ?? {}).map(([modelId, model]) => [modelId, asRecord(model)?.fold_receipts]))),
+  };
+  if (!sameJson(contentDigests, expectedContentDigests)) return persistedInvalid();
   const evidence = asRecord(artifact.evidence);
   const identity = asRecord(artifact.identity);
   const fit = asRecord(artifact.fit);
   const evaluation = asRecord(artifact.evaluation);
   const models = asRecord(artifact.models);
-  const serverIdentity = asRecord(artifact.server_identity);
+  const artifactServerIdentity = asRecord(artifact.server_identity);
   const identityServerIdentity = asRecord(identity?.server_identity);
   if (
     evidence === null
@@ -151,15 +327,15 @@ export function isPersistedClassificationArtifact(value: unknown): value is Evid
     || fit === null
     || evaluation === null
     || models === null
-    || !isTypedClassificationEvidencePacket(evidence)
+    || !isRawTypedClassificationEvidencePacket(evidence)
     || typeof artifact.artifact_id !== "string"
     || identity.artifact_id !== artifact.artifact_id
     || identity.schema_version !== 1
-    || serverIdentity === null
+    || artifactServerIdentity === null
     || identityServerIdentity === null
-    || !isServerIdentity(serverIdentity)
+    || !isServerIdentity(artifactServerIdentity)
     || !isServerIdentity(identityServerIdentity)
-    || !sameJson(identityServerIdentity, serverIdentity)
+    || !sameJson(artifactServerIdentity, serverIdentity)
     || asRecord(identity.parts) === null
     || !Object.values(asRecord(identity.parts) as EvidenceRecord).every((item) => typeof item === "string" && item.length > 0)
     || typeof identity.task_hash !== "string"
@@ -261,8 +437,7 @@ function isStringRecord(value: unknown): value is EvidenceRecord {
 }
 
 /** Validate the complete server-owned packet before any report rendering. */
-export function isTypedClassificationEvidencePacket(value: unknown): value is ClassificationEvidencePacket {
-  if (isPersistedClassificationArtifact(value)) return true;
+function isRawTypedClassificationEvidencePacket(value: unknown): value is ClassificationEvidencePacket {
   const packet = asRecord(value);
   if (
     packet === null
@@ -426,6 +601,11 @@ export function isTypedClassificationEvidencePacket(value: unknown): value is Cl
   return true;
 }
 
+/** Only the shared server-owned artifact wrapper is a renderable input. */
+export function isTypedClassificationEvidencePacket(value: unknown): value is ClassificationArtifactsWrapper {
+  return isPersistedClassificationArtifact(value);
+}
+
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
@@ -518,7 +698,7 @@ function classificationTitle(task: unknown): string {
   return `${taskType.charAt(0).toUpperCase()}${taskType.slice(1)} classification`;
 }
 
-export function ClassificationEvidence({ evidence }: { evidence: ClassificationEvidencePacket }) {
+export function ClassificationEvidence({ evidence }: { evidence: ClassificationArtifactsWrapper }) {
   if (!isPersistedClassificationArtifact(evidence)) {
     return (
       <div data-testid="classification-evidence" style={{ fontSize: 13 }}>
@@ -529,7 +709,7 @@ export function ClassificationEvidence({ evidence }: { evidence: ClassificationE
       </div>
     );
   }
-  const packet = evidence.evidence;
+  const packet = evidence.artifact.evidence;
   const task = asRecord(packet.task);
   const split = asRecord(packet.split);
   const policy = asRecord(packet.decision_policy);

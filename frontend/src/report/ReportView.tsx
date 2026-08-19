@@ -22,7 +22,7 @@ import {
 } from "./FamilyEvidence";
 import {
   ClassificationEvidence,
-  type ClassificationEvidencePacket,
+  type ClassificationArtifactsWrapper,
 } from "./ClassificationEvidence";
 import {
   ReportWorkspaceProvider,
@@ -35,8 +35,8 @@ import type { ReportRecord } from "./reportHistory";
 import "./report.css";
 
 /** Resolve only known classification evidence envelopes; never dump unknown JSON. */
-export function readTypedClassificationEvidence(value: unknown): ClassificationEvidencePacket | null {
-  return readClassificationEvidencePacket(value) as ClassificationEvidencePacket | null;
+export function readTypedClassificationEvidence(value: unknown): ClassificationArtifactsWrapper | null {
+  return readClassificationEvidencePacket(value) as ClassificationArtifactsWrapper | null;
 }
 
 export function ReportClassificationEvidenceMount({ evidence }: { evidence: unknown }) {

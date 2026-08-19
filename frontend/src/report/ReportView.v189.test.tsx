@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ReportClassificationEvidenceMount, readTypedClassificationEvidence } from "./ReportView";
@@ -151,15 +152,74 @@ const persistedPacket = {
   evidence: packet,
 };
 
+function canonicalJson(value: unknown): string {
+  if (value === undefined || value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") return JSON.stringify(value === undefined ? null : value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+}
+
+function digest(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function sharedClassificationArtifactsWrapper(artifact: Record<string, unknown>) {
+  const models = artifact.models as Record<string, Record<string, unknown>>;
+  const fit = artifact.fit as Record<string, unknown>;
+  const serverIdentity = artifact.server_identity;
+  const contentDigests = {
+    artifact: "a".repeat(64),
+    evidence: digest(artifact.evidence),
+    "evidence.metrics": digest((artifact.evidence as Record<string, unknown>).metrics),
+    evaluation: digest(artifact.evaluation),
+    "evaluation.metrics": digest((artifact.evaluation as Record<string, unknown>).metrics),
+    models: digest(models),
+    "models.metadata": digest(Object.fromEntries(Object.entries(models).map(([modelId, model]) => [modelId, model.metadata ?? null]))),
+    "models.warnings": digest(Object.fromEntries(Object.entries(models).map(([modelId, model]) => [modelId, (model.metadata as Record<string, unknown> | undefined)?.warnings ?? null]))),
+    fit: digest(fit),
+    fold_receipts: digest(Object.fromEntries(Object.entries((fit.models ?? {}) as Record<string, Record<string, unknown>>).map(([modelId, model]) => [modelId, model.fold_receipts ?? null]))),
+  };
+  const receipt = {
+    payload_schema: "workbench.prediction.classification-receipt",
+    schema_version: 1,
+    receipt_id: "classification-receipt:test",
+    artifact_path: "classification_artifacts.json",
+    artifact_id: artifact.artifact_id,
+    artifact_sha256: "a".repeat(64),
+    payload_contract: { payload_schema: "workbench.prediction.classification-artifacts", schema_version: 1 },
+    server_identity: serverIdentity,
+    content_digests: contentDigests,
+    issuer: "workbench.server.classification-persistence",
+  };
+  const receiptDigest = digest(receipt);
+  return {
+    payload_schema: "workbench.prediction.classification-artifacts-wrapper",
+    schema_version: 1,
+    artifact_id: artifact.artifact_id,
+    artifact_path: "classification_artifacts.json",
+    artifact_sha256: "a".repeat(64),
+    index: { artifact_id: artifact.artifact_id, path: "classification_artifacts.json", sha256: "a".repeat(64), receipt_path: "classification_receipt.json", receipt_sha256: "c".repeat(64), server_identity: serverIdentity },
+    artifact,
+    receipt_path: "classification_receipt.json",
+    receipt_sha256: "c".repeat(64),
+    receipt: { ...receipt, receipt_digest: receiptDigest },
+    receipt_digest: receiptDigest,
+    content_digests: contentDigests,
+    server_identity: serverIdentity,
+  };
+}
+
+const persistedWrapper = sharedClassificationArtifactsWrapper(persistedPacket);
+
 describe("ReportView v1.8.9 evidence mounts", () => {
   it("accepts only the typed classification evidence schema", () => {
     expect(readTypedClassificationEvidence(packet)).toBeNull();
-    expect(readTypedClassificationEvidence(persistedPacket)).toEqual(persistedPacket);
+    expect(readTypedClassificationEvidence(persistedWrapper)).toEqual(persistedWrapper);
     expect(readTypedClassificationEvidence({ metrics: { accuracy: 0.8 } })).toBeNull();
   });
 
   it("mounts the typed packet without recalculating or dumping unknown payloads", () => {
-    render(<ReportClassificationEvidenceMount evidence={persistedPacket} />);
+    render(<ReportClassificationEvidenceMount evidence={persistedWrapper} />);
 
     expect(screen.getByTestId("report-classification-evidence")).toHaveTextContent("Binary classification");
     expect(screen.getByTestId("report-classification-evidence")).toHaveTextContent("Accuracy");

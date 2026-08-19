@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..api_errors import (
@@ -57,8 +57,10 @@ from ..report_store import list_ai_reports, save_ai_report
 from ..services.lmm_result_adapter import VersionedResultReadError
 from ..services.results_service import _model_results, _normalize_issue_stream
 from ..predictive_research.consumer_projection import (
+    read_classification_artifacts_wrapper_from_run_root,
     read_prediction_evidence_from_run_root,
 )
+from ..predictive_research.contracts import ContractError as PredictiveContractError
 from ..predictive_research.schema import PayloadContractError
 from ..services.run_deletion import RunDeletionConfirmationError, RunDeletionService
 from ..services.run_service import (
@@ -543,6 +545,20 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
             )
         except (PayloadContractError, OSError, ValueError):
             prediction_evidence = {"status": "unavailable"}
+    classification_evidence = None
+    if any(
+        isinstance(record, dict) and record.get("artifact_type") == "classification_artifacts"
+        for record in _read_artifact_records(run_root)
+    ):
+        try:
+            classification_evidence = read_classification_artifacts_wrapper_from_run_root(run_root)
+        except (PayloadContractError, PredictiveContractError, OSError, ValueError) as exc:
+            classification_evidence = {
+                "payload_schema": "workbench.prediction.classification-artifacts-wrapper.unavailable",
+                "schema_version": 0,
+                "status": "UNAVAILABLE",
+                "reason": getattr(exc, "code", "CLASSIFICATION_EVIDENCE_UNAVAILABLE"),
+            }
     return {
         **summary,
         "lineage": manifest.get("lineage", []),
@@ -555,6 +571,7 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
         "labels": diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
         "model_family_evidence": model_family_evidence,
         "prediction_evidence": prediction_evidence,
+        "classification_evidence": classification_evidence,
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the
         # run surface show that answer instead of leaving it in an artifact.
@@ -1010,7 +1027,7 @@ def list_artifacts_endpoint(run_id: str, project_root: str) -> dict:
 @router.get("/runs/{run_id}/artifacts/{artifact_id}")
 def download_artifact_endpoint(
     run_id: str, artifact_id: str, project_root: str
-) -> FileResponse:
+) -> Response:
     run_root = _resolve_run_root(project_root, run_id)
     records = _read_artifact_records(run_root)
     matched = next(
@@ -1044,6 +1061,17 @@ def download_artifact_endpoint(
             }
         )
     )
+    if is_classification_evidence:
+        try:
+            wrapper = read_classification_artifacts_wrapper_from_run_root(run_root)
+        except (PayloadContractError, PredictiveContractError, OSError, ValueError) as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code=getattr(exc, "code", "CLASSIFICATION_EVIDENCE_UNAVAILABLE"),
+                message="The server-owned classification evidence wrapper is unavailable.",
+                details={"artifact_id": artifact_id, "run_id": run_id},
+            ) from exc
+        return JSONResponse(content=wrapper)
     # Legacy non-evidence indexes occasionally contain placeholder digests;
     # preserve their read compatibility, but never expose a typed
     # classification packet without a verifiable content hash.

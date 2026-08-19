@@ -57,7 +57,7 @@ import { fetchFigureAiContext } from "../workbench/views/figureAi";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
 import {
   isPersistedClassificationArtifact,
-  type ClassificationEvidencePacket,
+  type ClassificationArtifactsWrapper,
 } from "./ClassificationEvidence";
 
 const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
@@ -136,7 +136,7 @@ function indexedClassificationArtifactId(value: unknown): string | null {
 export function readClassificationEvidencePacket(
   value: unknown,
   indexedArtifact?: unknown,
-): ClassificationEvidencePacket | null {
+): ClassificationArtifactsWrapper | null {
   if (!isPersistedClassificationArtifact(value)) return null;
   const item = asRecord(indexedArtifact);
   if (
@@ -148,7 +148,7 @@ export function readClassificationEvidencePacket(
       || !sameJsonValue(item.server_identity, value.server_identity)
     )
   ) return null;
-  return value as unknown as ClassificationEvidencePacket;
+  return value as unknown as ClassificationArtifactsWrapper;
 }
 
 type FactTable = ReturnType<typeof buildFactTable>;
@@ -477,7 +477,7 @@ export function ReportWorkspaceProvider({
           }
         }));
         const validClassificationPackets = loadedClassification.filter(
-          (packet): packet is ClassificationEvidencePacket => packet !== null,
+          (packet): packet is ClassificationArtifactsWrapper => packet !== null,
         );
         const classificationEntry = classificationItems.length > 0
           ? [[
