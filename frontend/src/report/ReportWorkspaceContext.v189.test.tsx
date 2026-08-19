@@ -45,6 +45,21 @@ const releasePlanHash = "sha256:" + "c".repeat(64);
 const modelHash = "sha256:model";
 const classificationResultRef = `classification-evidence:${taskHash}:${splitHash}:${releasePlanHash}`;
 const classificationFacets = ["classification", "task", "split", "holdout", "release_plan"];
+const classificationFamilyEvidence = {
+  status: "validated",
+  issuer: "workbench.server",
+  producer: "workbench.prediction.run_classification_model_v189",
+  method: { id: "classification-production-v1", version: "1.0" },
+  identity: {
+    result_ref: classificationResultRef,
+    task_hash: taskHash,
+    split_hash: splitHash,
+    model_id: "logistic_regression",
+    model_hash: modelHash,
+    holdout_hash: releasePlanHash,
+    release_plan_hash: releasePlanHash,
+  },
+};
 
 const evidencePacket = {
   payload_schema: CLASSIFICATION_EVIDENCE_SCHEMA,
@@ -95,6 +110,7 @@ const evidencePacket = {
     availability: "available",
     completeness_status: "complete",
     input_provenance: { task_hash: taskHash, split_hash: splitHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash },
+    family_evidence: { classification: classificationFamilyEvidence },
   },
   c0_consumer_projection: {
     contract: "consumer-projection",
@@ -261,6 +277,24 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     renderWorkspace();
 
     await waitFor(() => expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE"));
+  });
+
+  it("rejects a forged classification family before ReportWorkspaceContext exposes it", async () => {
+    mockArtifacts.current = {
+      groups: [{ artifact_type: "classification_evidence", items: [indexedClassificationItem()] }],
+    };
+    mockArtifactJson.current.mockResolvedValue({
+      ...evidencePacket,
+      c0_evidence_envelope: {
+        ...evidencePacket.c0_evidence_envelope,
+        family_evidence: { classification: { ...classificationFamilyEvidence, producer: "forged-producer" } },
+      },
+    });
+
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE"));
+    expect(screen.getByTestId("classification-context")).not.toHaveTextContent("forged-producer");
   });
 
   it("treats a failed artifact download as unavailable without surfacing the error payload", async () => {

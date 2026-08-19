@@ -242,6 +242,9 @@ _CLASSIFICATION_C0_STATUS = {
     "degraded": ("completed", "available", "degraded", "available", False),
     "unavailable": ("blocked", "not_available", "insufficient", "blocked", False),
 }
+_CLASSIFICATION_FAMILY_ISSUER = "workbench.server"
+_CLASSIFICATION_FAMILY_PRODUCER = "workbench.prediction.run_classification_model_v189"
+_CLASSIFICATION_FAMILY_METHOD = {"id": "classification-production-v1", "version": "1.0"}
 
 
 def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str) -> dict[str, Any]:
@@ -409,8 +412,30 @@ def _classification_c0_contracts(
     ):
         raise ContractError("CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID", "foundation status does not match producer status")
     classification_family = envelope.family_evidence.get("classification")
-    if isinstance(classification_family, Mapping) and classification_family.get("status") != status:
-        raise ContractError("CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID", "classification family status does not match producer status")
+    if not isinstance(classification_family, Mapping):
+        raise ContractError("CLASSIFICATION_EVIDENCE_FAMILY_INVALID", "classification family evidence is required")
+    family_method = classification_family.get("method")
+    family_identity = classification_family.get("identity")
+    expected_identity = {
+        "result_ref": expected_result_ref,
+        "task_hash": task_hash,
+        "split_hash": split_hash,
+        "model_id": _classification_release_plan_model_id(payload),
+        "model_hash": _classification_release_plan_model_hash(payload),
+        "holdout_hash": release_plan_hash,
+        "release_plan_hash": release_plan_hash,
+    }
+    if (
+        set(classification_family) != {"status", "issuer", "producer", "method", "identity"}
+        or classification_family.get("status") != status
+        or classification_family.get("issuer") != _CLASSIFICATION_FAMILY_ISSUER
+        or classification_family.get("producer") != _CLASSIFICATION_FAMILY_PRODUCER
+        or family_method != _CLASSIFICATION_FAMILY_METHOD
+        or not isinstance(family_identity, Mapping)
+        or set(family_identity) != set(expected_identity)
+        or any(family_identity.get(key) != value for key, value in expected_identity.items())
+    ):
+        raise ContractError("CLASSIFICATION_EVIDENCE_FAMILY_INVALID", "classification family issuer, producer, method or identity is invalid")
     if projection.contract != "consumer-projection" or projection.contract_version != "1.0" or projection.producer_version != "1.8.9":
         raise ContractError("CLASSIFICATION_EVIDENCE_C0_PROJECTION_INVALID", "C0 projection contract identity is invalid")
     if {slot.consumer for slot in projection.payload.slots} != _CLASSIFICATION_C0_CONSUMERS:
@@ -424,3 +449,15 @@ def _classification_c0_contracts(
         ):
             raise ContractError("CLASSIFICATION_EVIDENCE_C0_PROJECTION_INVALID", "C0 consumer slot is not monotone with producer status")
     return envelope, projection
+
+
+def _classification_release_plan_model_id(payload: Mapping[str, Any]) -> Any:
+    holdout = payload.get("holdout")
+    release_plan = holdout.get("release_plan") if isinstance(holdout, Mapping) else None
+    return release_plan.get("model_id") if isinstance(release_plan, Mapping) else None
+
+
+def _classification_release_plan_model_hash(payload: Mapping[str, Any]) -> Any:
+    holdout = payload.get("holdout")
+    release_plan = holdout.get("release_plan") if isinstance(holdout, Mapping) else None
+    return release_plan.get("model_hash") if isinstance(release_plan, Mapping) else None

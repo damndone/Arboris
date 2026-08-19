@@ -21,9 +21,8 @@ from workbench.predictive_research.consumer_projection import project_classifica
 
 def _production_dependencies(*, include_holdout: bool = True) -> dict[str, object]:
     from workbench.contracts.prediction.holdout import HoldoutMetricBundleStoreV1, HoldoutSealStoreV1
-    from workbench.predictive_research.classification_adapters import classification_runtime_registry
 
-    dependencies: dict[str, object] = {"runtime_registry": classification_runtime_registry()}
+    dependencies: dict[str, object] = {}
     if include_holdout:
         dependencies.update(
             {
@@ -497,6 +496,7 @@ def test_provider_join_red_probe_requires_runtime_contribution_identity() -> Non
 
 def test_provider_join_red_probe_rejects_same_identity_malicious_executor_before_dispatch(tmp_path) -> None:
     from workbench.agent.trusted_executor_registry import TrustedExecutorRegistry
+    from workbench.prediction import run_classification_model_v189_test_seam
     from workbench.predictive_research.classification_adapters import classification_runtime_registry
 
     trusted = classification_runtime_registry()
@@ -519,7 +519,7 @@ def test_provider_join_red_probe_rejects_same_identity_malicious_executor_before
     (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
 
     with pytest.raises(ContractError) as exc_info:
-        run_classification_model_v189(
+        run_classification_model_v189_test_seam(
             frame,
             tmp_path,
             task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
@@ -535,6 +535,67 @@ def test_provider_join_red_probe_rejects_same_identity_malicious_executor_before
 
     assert exc_info.value.code == "CLASSIFICATION_PROVIDER_RUNTIME_JOIN_MISMATCH"
     assert calls == []
+
+
+def test_production_entrypoint_has_no_caller_registry_seam_and_never_dispatches_it(tmp_path) -> None:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistry
+    from workbench.predictive_research.classification_adapters import classification_runtime_registry
+
+    trusted = classification_runtime_registry()
+    trusted_contribution = trusted.require("executor:workbench.classification_ml.adapter")
+    calls: list[object] = []
+
+    def malicious_executor(context, request):
+        calls.append((context, request))
+        return {"provider_id": trusted_contribution.provider_id}
+
+    fake_registry = TrustedExecutorRegistry((replace(trusted_contribution, executor=malicious_executor),))
+    fake_registry._bound_catalog_digest = trusted._bound_catalog_digest
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    with pytest.raises(TypeError):
+        run_classification_model_v189(
+            frame,
+            tmp_path,
+            task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+            row_refs=tuple(f"r{index}" for index in range(len(frame))),
+            model_ids=("logistic_regression",),
+            final_holdout_fraction=0.25,
+            cv_folds=2,
+            runtime_registry=fake_registry,
+            **_production_dependencies(),
+        )
+
+    assert calls == []
+
+
+def test_each_persisted_cv_fold_receipt_contains_auditable_class_support(tmp_path) -> None:
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    (tmp_path / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+
+    result = run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+
+    labels = dict(zip((f"r{index}" for index in range(len(frame))), frame["target"], strict=True))
+    for fold in result["models"]["logistic_regression"]["preprocessing"]["folds"]:
+        receipt = fold["receipt"]
+        support = receipt["class_support"]
+        assert set(support) == {"class_labels", "training", "validation"}
+        assert set(support["class_labels"]) == {"negative", "positive"}
+        for scope, ref_key in (("training", "training_row_refs"), ("validation", "validation_row_refs")):
+            expected = {"negative": 0, "positive": 0}
+            for ref in fold[ref_key]:
+                expected["positive" if labels[ref] == 1 else "negative"] += 1
+            assert support[scope] == expected
 
 
 def test_group_validation_fold_red_probe_rejects_single_class_validation_support(tmp_path) -> None:

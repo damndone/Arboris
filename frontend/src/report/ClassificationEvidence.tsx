@@ -185,6 +185,9 @@ export function isTypedClassificationEvidencePacket(value: unknown): value is Cl
   const envelope = asRecord(packet.c0_evidence_envelope);
   const envelopeIdentity = asRecord(envelope?.result_identity);
   const inputProvenance = asRecord(envelope?.input_provenance);
+  const familyEvidence = asRecord(asRecord(envelope?.family_evidence)?.classification);
+  const familyMethod = asRecord(familyEvidence?.method);
+  const familyIdentity = asRecord(familyEvidence?.identity);
   const projection = asRecord(packet.c0_consumer_projection);
   const projectionPayload = asRecord(projection?.payload);
   const resultRef = `classification-evidence:${task.task_hash}:${split.split_hash}:${releasePlan.plan_hash}`;
@@ -204,6 +207,24 @@ export function isTypedClassificationEvidencePacket(value: unknown): value is Cl
     || inputProvenance.split_hash !== split.split_hash
     || inputProvenance.holdout_hash !== releasePlan.plan_hash
     || inputProvenance.release_plan_hash !== releasePlan.plan_hash
+    || familyEvidence === null
+    || Object.keys(familyEvidence).length !== 5
+    || familyEvidence.status !== status
+    || familyEvidence.issuer !== "workbench.server"
+    || familyEvidence.producer !== "workbench.prediction.run_classification_model_v189"
+    || familyMethod === null
+    || Object.keys(familyMethod).length !== 2
+    || familyMethod.id !== "classification-production-v1"
+    || familyMethod.version !== "1.0"
+    || familyIdentity === null
+    || Object.keys(familyIdentity).length !== 7
+    || familyIdentity.result_ref !== resultRef
+    || familyIdentity.task_hash !== task.task_hash
+    || familyIdentity.split_hash !== split.split_hash
+    || familyIdentity.model_id !== comparison.selected_model
+    || familyIdentity.model_hash !== releasePlan.model_hash
+    || familyIdentity.holdout_hash !== releasePlan.plan_hash
+    || familyIdentity.release_plan_hash !== releasePlan.plan_hash
     || projection === null
     || projection.contract !== "consumer-projection"
     || projection.contract_version !== "1.0"

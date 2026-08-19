@@ -61,6 +61,9 @@ _SUPPORTED_PREDICTION_MODEL_TYPES = {
     "prediction_random_forest",
 }
 _SUPPORTED_SAMPLING_METHODS = {"smote", "oversample", "undersample"}
+_CLASSIFICATION_FAMILY_ISSUER = "workbench.server"
+_CLASSIFICATION_FAMILY_PRODUCER = "workbench.prediction.run_classification_model_v189"
+_CLASSIFICATION_FAMILY_METHOD = {"id": "classification-production-v1", "version": "1.0"}
 
 
 def _classification_c0_reason(code: str, *, task_hash: str, split_hash: str, release_plan_hash: str) -> dict[str, Any]:
@@ -179,9 +182,22 @@ def _build_classification_c0_evidence(
             "family_evidence": {
                 "classification": {
                     "status": status,
-                    "task_hash": task_hash,
-                    "split_hash": split_hash,
-                    "holdout": dict(holdout),
+                    "issuer": _CLASSIFICATION_FAMILY_ISSUER,
+                    "producer": _CLASSIFICATION_FAMILY_PRODUCER,
+                    "method": dict(_CLASSIFICATION_FAMILY_METHOD),
+                    "identity": {
+                        "result_ref": result_ref,
+                        "task_hash": task_hash,
+                        "split_hash": split_hash,
+                        "model_id": holdout.get("model_id"),
+                        "model_hash": (
+                            holdout.get("release_plan", {}).get("model_hash")
+                            if isinstance(holdout.get("release_plan"), Mapping)
+                            else None
+                        ),
+                        "holdout_hash": release_plan_hash,
+                        "release_plan_hash": release_plan_hash,
+                    },
                 }
             },
             "oracle": {},
@@ -251,7 +267,82 @@ def run_classification_model_v189(
     preprocessing_steps: Sequence[ClassificationPreprocessingStepV1] | None = None,
     calibration_method: str = "platt",
     model_parameters: dict[str, dict[str, Any]] | None = None,
-    runtime_registry: TrustedExecutorRegistry | None = None,
+    holdout_seal_store: HoldoutSealStoreV1 | None = None,
+    holdout_principal_ref: str | None = None,
+    holdout_access_id: str | None = None,
+) -> dict[str, Any]:
+    """Run classification with a server-owned runtime binding."""
+
+    from .predictive_research.classification_adapters import server_owned_classification_runtime_registry
+
+    return _run_classification_model_v189(
+        frame,
+        run_root,
+        task=task,
+        row_refs=row_refs,
+        model_ids=model_ids,
+        final_holdout_fraction=final_holdout_fraction,
+        cv_folds=cv_folds,
+        random_seed=random_seed,
+        decision_policy=decision_policy,
+        feature_available_at=feature_available_at,
+        prediction_origins=prediction_origins,
+        label_windows=label_windows,
+        entities=entities,
+        periods=periods,
+        purge_gap=purge_gap,
+        embargo=embargo,
+        embargo_basis=embargo_basis,
+        preprocessing_steps=preprocessing_steps,
+        calibration_method=calibration_method,
+        model_parameters=model_parameters,
+        runtime_registry=server_owned_classification_runtime_registry(),
+        holdout_seal_store=holdout_seal_store,
+        holdout_principal_ref=holdout_principal_ref,
+        holdout_access_id=holdout_access_id,
+    )
+
+
+def run_classification_model_v189_test_seam(
+    frame: pd.DataFrame,
+    run_root: Path,
+    *,
+    runtime_registry: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Test-only dependency seam; production callers cannot select a registry."""
+
+    return _run_classification_model_v189(
+        frame,
+        run_root,
+        runtime_registry=runtime_registry,
+        **kwargs,
+    )
+
+
+def _run_classification_model_v189(
+    frame: pd.DataFrame,
+    run_root: Path,
+    *,
+    task: ClassificationTaskSpecV1,
+    row_refs: Sequence[str],
+    model_ids: Sequence[str] = ("logistic_regression", "random_forest"),
+    final_holdout_fraction: float = 0.2,
+    cv_folds: int = 3,
+    random_seed: int | None = None,
+    decision_policy: DecisionPolicyV1 | None = None,
+    feature_available_at: Sequence[Any] | None = None,
+    prediction_origins: Sequence[Any] | None = None,
+    label_windows: Sequence[tuple[Any, Any]] | None = None,
+    entities: Sequence[str] | None = None,
+    periods: Sequence[Any] | None = None,
+    purge_gap: Any | None = None,
+    embargo: Any | None = None,
+    embargo_basis: str | None = None,
+    preprocessing_steps: Sequence[ClassificationPreprocessingStepV1] | None = None,
+    calibration_method: str = "platt",
+    model_parameters: dict[str, dict[str, Any]] | None = None,
+    runtime_registry: TrustedExecutorRegistry,
     holdout_seal_store: HoldoutSealStoreV1 | None = None,
     holdout_principal_ref: str | None = None,
     holdout_access_id: str | None = None,

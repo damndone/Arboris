@@ -14,7 +14,6 @@ from workbench.predictive_research.classification_explanations import (
     compute_permutation_explanations,
     summarize_shift,
 )
-from workbench.predictive_research.classification_adapters import classification_runtime_registry
 from workbench.predictive_research.classification_contracts import (
     ClassificationTaskSpecV1,
     FeatureAvailabilityContractV1,
@@ -220,6 +219,35 @@ def test_classification_projection_rejects_unavailable_c0_with_available_project
     assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID"
 
 
+@pytest.mark.parametrize("mutation", ("missing", "issuer", "producer", "method", "identity"))
+def test_classification_projection_requires_typed_classification_family_evidence(mutation: str) -> None:
+    packet = _packet_with_c0(_evidence_packet())
+    envelope = deepcopy(packet["c0_evidence_envelope"])
+    family_evidence = deepcopy(envelope.get("family_evidence", {}).get("classification", {}))
+    if mutation == "missing":
+        envelope["family_evidence"] = {}
+    elif mutation == "issuer":
+        family_evidence["issuer"] = "forged-issuer"
+        envelope["family_evidence"] = {"classification": family_evidence}
+    elif mutation == "producer":
+        family_evidence["producer"] = "forged-producer"
+        envelope["family_evidence"] = {"classification": family_evidence}
+    elif mutation == "method":
+        family_evidence["method"] = "forged-method"
+        envelope["family_evidence"] = {"classification": family_evidence}
+    else:
+        identity = dict(family_evidence.get("identity", {}))
+        identity["task_hash"] = "sha256:stale"
+        family_evidence["identity"] = identity
+        envelope["family_evidence"] = {"classification": family_evidence}
+    packet["c0_evidence_envelope"] = envelope
+
+    with pytest.raises(ContractError) as exc_info:
+        project_classification_evidence(packet, consumer="report")
+
+    assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_FAMILY_INVALID"
+
+
 def test_artifact_identity_changes_when_task_model_or_policy_changes(tmp_path) -> None:
     base = {
         "task_hash": "task-a",
@@ -301,7 +329,6 @@ def test_additive_classification_entrypoint_requires_typed_task_and_persists_pac
         model_ids=("logistic_regression", "random_forest"),
         final_holdout_fraction=0.25,
         cv_folds=2,
-        runtime_registry=classification_runtime_registry(),
         holdout_seal_store=HoldoutSealStoreV1(metric_bundle_store=HoldoutMetricBundleStoreV1()),
         holdout_principal_ref="principal:test",
         holdout_access_id="access:test",

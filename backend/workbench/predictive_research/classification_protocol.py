@@ -836,6 +836,46 @@ def _production_training_refs(manifest: ClassificationSplitManifestV1, fold: int
     return explicit
 
 
+def _classification_class_support(
+    values: Sequence[Any],
+    *,
+    task: ClassificationTaskSpecV1,
+) -> dict[str, Any]:
+    labels = tuple(dict.fromkeys(str(label) for label in task.class_mapping.values()))
+    counts = {label: 0 for label in labels}
+    for value in values:
+        label = task.class_mapping.get(value)
+        if label is None:
+            raise ContractError("CLASSIFICATION_CLASS_MAPPING_MISMATCH", "fold receipt contains an unmapped class")
+        counts[str(label)] += 1
+    return counts
+
+
+def _validate_class_support_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    task: ClassificationTaskSpecV1,
+    target: pd.Series,
+    training_refs: tuple[str, ...],
+    validation_refs: tuple[str, ...],
+    fold: int,
+) -> None:
+    support = receipt.get("class_support")
+    if not isinstance(support, Mapping) or set(support) != {"class_labels", "training", "validation"}:
+        raise ContractError("CLASSIFICATION_FOLD_SUPPORT_RECEIPT_INVALID", f"fold {fold} lacks typed class-support evidence")
+    expected_labels = list(dict.fromkeys(str(label) for label in task.class_mapping.values()))
+    if support.get("class_labels") != expected_labels:
+        raise ContractError("CLASSIFICATION_FOLD_SUPPORT_RECEIPT_INVALID", f"fold {fold} class labels are not bound to the task")
+    expected = {
+        "training": _classification_class_support(target.loc[list(training_refs)].tolist(), task=task),
+        "validation": _classification_class_support(target.loc[list(validation_refs)].tolist(), task=task),
+    }
+    if support.get("training") != expected["training"] or support.get("validation") != expected["validation"]:
+        raise ContractError("CLASSIFICATION_FOLD_SUPPORT_RECEIPT_INVALID", f"fold {fold} class-support counts do not match persisted row refs")
+    if any(count < 1 for counts in expected.values() for count in counts.values()):
+        raise ContractError("CLASSIFICATION_SPLIT_VALIDATION_CLASS_SUPPORT", f"fold {fold} lacks support for every class")
+
+
 def _production_binary_labels(values: Sequence[Any], *, positive: Any) -> list[int]:
     return [1 if value == positive else 0 for value in values]
 
@@ -1034,6 +1074,22 @@ def _run_production_classification_protocol(
                 split_hash=split_hash,
                 weight_name=task.weights,
                 weights_by_ref=weight_by_ref,
+            )
+            receipt = {
+                **receipt,
+                "class_support": {
+                    "class_labels": list(dict.fromkeys(str(label) for label in task.class_mapping.values())),
+                    "training": _classification_class_support(target.loc[list(training_refs)].tolist(), task=task),
+                    "validation": _classification_class_support(target.loc[list(validation_refs)].tolist(), task=task),
+                },
+            }
+            _validate_class_support_receipt(
+                receipt,
+                task=task,
+                target=target,
+                training_refs=training_refs,
+                validation_refs=validation_refs,
+                fold=fold,
             )
             train_features = fitted.transform(feature_frame.loc[list(training_refs)], row_refs=training_refs)
             validation_features = fitted.transform(feature_frame.loc[list(validation_refs)], row_refs=validation_refs)

@@ -8,6 +8,21 @@ const releasePlanHash = "sha256:" + "c".repeat(64);
 const modelHash = "sha256:model";
 const classificationResultRef = `classification-evidence:${taskHash}:${splitHash}:${releasePlanHash}`;
 const classificationFacets = ["classification", "task", "split", "holdout", "release_plan"];
+const classificationFamilyEvidence = {
+  status: "validated",
+  issuer: "workbench.server",
+  producer: "workbench.prediction.run_classification_model_v189",
+  method: { id: "classification-production-v1", version: "1.0" },
+  identity: {
+    result_ref: classificationResultRef,
+    task_hash: taskHash,
+    split_hash: splitHash,
+    model_id: "random_forest",
+    model_hash: modelHash,
+    holdout_hash: releasePlanHash,
+    release_plan_hash: releasePlanHash,
+  },
+};
 
 const packet = {
   payload_schema: "workbench.prediction.classification-evidence",
@@ -59,6 +74,7 @@ const packet = {
     availability: "available",
     completeness_status: "complete",
     input_provenance: { task_hash: taskHash, split_hash: splitHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash },
+    family_evidence: { classification: classificationFamilyEvidence },
   },
   c0_consumer_projection: {
     contract: "consumer-projection",
@@ -107,5 +123,12 @@ describe("ClassificationEvidence", () => {
 
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
     expect(screen.getByTestId("classification-evidence")).not.toHaveTextContent("Binary classification");
+  });
+
+  it.each(["issuer", "producer", "method", "identity"])("rejects forged classification family %s semantics", (field) => {
+    const forgedFamily = { ...classificationFamilyEvidence, [field]: field === "identity" ? { ...classificationFamilyEvidence.identity, task_hash: "sha256:stale" } : "forged" };
+    render(<ClassificationEvidence evidence={{ ...packet, c0_evidence_envelope: { ...packet.c0_evidence_envelope, family_evidence: { classification: forgedFamily } } }} />);
+
+    expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
   });
 });

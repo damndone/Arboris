@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 7/32 (21.9%; 21.9 per 100 events)
-- Repeat rate: 0/7 (0.0%)
-- Recurrence rate: 0/7 (0.0%)
+- Failure frequency: 8/36 (22.2%; 22.2 per 100 events)
+- Repeat rate: 0/8 (0.0%)
+- Recurrence rate: 0/8 (0.0%)
 - MTTR: median=0 ms (sample=3; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/4 (0.0%)
+- Gate waste rate: 0/6 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -33,6 +33,7 @@ COMPLETED
 - #17 2026-08-19T18:21:00.000Z `classification_catalog_bind_scope_error`; cause_status: `known`; cause: Binding the complete builtin provider catalog with only the classification contribution correctly failed because unrelated provider contributions were absent from this package-local runtime.; resolution: `resolved`; lesson: Keep the package-local runtime join typed and explicit, and leave host bootstrap composition as a separate integration boundary.
 - #29 2026-08-19T18:30:30.000Z `formal_cli_surface_misread`; cause_status: `known`; cause: The first attempt used nonexistent formal control subcommands append-event and status instead of the existing append interface.; resolution: `resolved`; lesson: Check the formal CLI help before appending line evidence and never bypass the control surface with direct .agent edits.
 - #31 2026-08-19T19:20:00.000Z `formal_retrospective_stale`; cause_status: `known`; cause: Formal verification correctly rejected the pre-existing generated retrospective because the new RED, CLI correction, and GREEN gate events had been appended afterward.; resolution: `open`; lesson: Regenerate the formal retrospective immediately after appending material events and before treating formal verification as current.
+- #34 2026-08-19T20:12:00.000Z `classification_reportview_fixture_missing_family`; cause_status: `known`; cause: The stricter frontend classification family validator exposed a pre-existing ReportView v1.8.9 test fixture without family_evidence.classification.; resolution: `resolved`; lesson: Keep every consumer fixture aligned with the complete typed family evidence contract.
 
 ## All gaps
 
@@ -50,6 +51,7 @@ COMPLETED
 - `production-contracts-red`: occurrences=1; cause_status: `known`; root cause: The additive entrypoint rejects declared weights, has no preprocessing seam, and coerces numeric strings through the helper-only path.; solution: `accepted`
 - `task-split-profile-red`: occurrences=1; cause_status: `known`; root cause: The production classification entrypoint still fixed every task to the iid_stratified split profile.; solution: `accepted`
 - `typed-classification-catalog-projection`: occurrences=1; cause_status: `known`; root cause: Binding the complete builtin provider catalog with only the classification contribution correctly failed because unrelated provider contributions were absent from this package-local runtime.; solution: `resolved`
+- `typed-family-fixtures`: occurrences=1; cause_status: `known`; root cause: The stricter frontend classification family validator exposed a pre-existing ReportView v1.8.9 test fixture without family_evidence.classification.; solution: `resolved`
 - `verify-real-c0-test-paths`: occurrences=1; cause_status: `known`; root cause: The first C0 verification command used guessed test paths that do not exist in this repository.; solution: `resolved`
 
 ## Added tests
@@ -64,6 +66,7 @@ COMPLETED
 - `production-contracts-red`: line experience occurrence(s)=1
 - `task-split-profile-red`: line experience occurrence(s)=1
 - `typed-classification-catalog-projection`: line experience occurrence(s)=1
+- `typed-family-fixtures`: line experience occurrence(s)=1
 - `verify-real-c0-test-paths`: line experience occurrence(s)=1
 
 ## Future guidance
@@ -72,8 +75,10 @@ COMPLETED
 - Exercise each authority, split, policy, and evidence boundary before implementing its smallest green path.
 - Expose only typed production seams and fail closed before any helper-only fitting can run.
 - Keep adversarial behavior-level probes ahead of implementation and require server-owned identity, metadata, and evidence joins at every production consumer boundary.
+- Keep authority, typed family identity, and persisted support evidence as behavior-level RED probes before production repair.
 - Keep consumer fixtures at the same typed identity boundary as production packets; do not weaken the validator to accommodate stale tests.
 - Keep each reviewer blocker as a behavior-level RED probe and implement the missing production boundary instead of weakening the assertion.
+- Keep every consumer fixture aligned with the complete typed family evidence contract.
 - Keep the package-local runtime join typed and explicit, and leave host bootstrap composition as a separate integration boundary.
 - Make the typed task split profile drive the executable manifest before any model fit.
 - Regenerate the formal retrospective immediately after appending material events and before treating formal verification as current.
@@ -114,3 +119,7 @@ COMPLETED
 - #30: `e4b9c2d7-61f0-4a83-95ce-2b7d8f1a6c40` | 2026-08-19T19:19:00.000Z | GATE/classification_production_remediation_green | incident=`f5a8c3e1-7d20-4b96-8f34-1c6e9a2d5b70` | lesson_key=`classification-production-remediation-green` | event_sha256=`9a4396f7d9ea927b1315e922f221db161ecb7cd78d3e360ac092329552aa9211`
 - #31: `b6e1d4f8-2a70-49c3-85fd-1c7b9e0a4d52` | 2026-08-19T19:20:00.000Z | ERROR/formal_retrospective_stale | incident=`c7f2a9e4-1b63-40d5-8f27-6a0e3c9b5d81` | lesson_key=`formal-retrospective-regeneration` | event_sha256=`47e98312dba2b4653ff0443f2ad0c3e66daca0718ef46076b2786a27d1ce27cd`
 - #32: `d2f7a4c9-6e10-4b83-95a1-3c8d0f2e7b64` | 2026-08-19T19:22:00.000Z | GATE/formal_retrospective_current | incident=`e3a8c5f1-7d20-4b96-9f34-1c6e0a2d5b87` | lesson_key=`formal-retrospective-current` | event_sha256=`046e420ec5fde02ca98192cbb7635bd27b07a2d1bb9046937e0412d48607420a`
+- #33: `f3d8b2a1-1c4e-4a6f-9b7d-2e8f0c5a6b11` | 2026-08-19T20:05:00.000Z | REVIEW/classification_production_second_round_red | incident=`c4e9a7b2-5d1f-4c8e-9a63-f0b7d2e5c811` | lesson_key=`classification-second-round-red` | event_sha256=`0ce6c06117dffc8e7316ef3f781dce085c9c08fb1b29722396156b27bb4dcea5`
+- #34: `a7c1e4f9-2b6d-4a8e-9c03-f5d7b1e2a644` | 2026-08-19T20:12:00.000Z | ERROR/classification_reportview_fixture_missing_family | incident=`d9f2a7b4-6c81-40e5-93f0-1a8d6b2c4e75` | lesson_key=`typed-family-fixtures` | event_sha256=`631204a20f73bf297bb091a621de6266cdb15e8db979b155ba1a0ac9929c65ae`
+- #35: `b8e2f5a1-6c3d-4f79-9a02-d7e1c5b8f644` | 2026-08-19T20:16:00.000Z | GATE/classification_production_second_round_focused_green | incident=`e1a7c4d9-2f6b-48e0-9c53-b7d1a5f8e244` | lesson_key=`classification-second-round-green` | event_sha256=`072a912946ae162ed1b7a3570c90563dc43abeaa66b68361132879af19b6e518`
+- #36: `c9f4a7d2-6e1b-48f0-9a53-b7d5c2e8f144` | 2026-08-19T20:22:00.000Z | GATE/classification_production_final_verification | incident=`f2a8c5e1-7d39-4b60-9c24-d6f1a7e5b842` | lesson_key=`final-focused-verification` | event_sha256=`45d68ea71de36ce228a5797ca5f92d8a1b5af6d8eaf03d072629c10cec4f3f8a`

@@ -133,7 +133,7 @@ function indexedClassificationArtifactId(value: unknown): string | null {
   return artifactId;
 }
 
-/** Return only the typed evidence packet; never retain an unknown outer payload. */
+/** Return only the typed evidence packet, including its server-owned family identity. */
 export function readClassificationEvidencePacket(value: unknown): ClassificationEvidencePacket | null {
   if (isTypedClassificationEvidencePacket(value)) return value;
   const envelope = asRecord(value);

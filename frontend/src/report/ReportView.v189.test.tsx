@@ -8,6 +8,21 @@ const releasePlanHash = "sha256:" + "c".repeat(64);
 const modelHash = "sha256:model";
 const classificationResultRef = `classification-evidence:${taskHash}:${splitHash}:${releasePlanHash}`;
 const classificationFacets = ["classification", "task", "split", "holdout", "release_plan"];
+const classificationFamilyEvidence = {
+  status: "validated",
+  issuer: "workbench.server",
+  producer: "workbench.prediction.run_classification_model_v189",
+  method: { id: "classification-production-v1", version: "1.0" },
+  identity: {
+    result_ref: classificationResultRef,
+    task_hash: taskHash,
+    split_hash: splitHash,
+    model_id: "logistic_regression",
+    model_hash: modelHash,
+    holdout_hash: releasePlanHash,
+    release_plan_hash: releasePlanHash,
+  },
+};
 
 const packet = {
   payload_schema: "workbench.prediction.classification-evidence",
@@ -53,6 +68,7 @@ const packet = {
     availability: "available",
     completeness_status: "complete",
     input_provenance: { task_hash: taskHash, split_hash: splitHash, holdout_hash: releasePlanHash, release_plan_hash: releasePlanHash },
+    family_evidence: { classification: classificationFamilyEvidence },
   },
   c0_consumer_projection: {
     contract: "consumer-projection",

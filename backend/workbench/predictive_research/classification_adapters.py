@@ -369,6 +369,12 @@ def classification_runtime_registry(catalog: Any | None = None) -> TrustedExecut
     return registry
 
 
+def server_owned_classification_runtime_registry() -> TrustedExecutorRegistry:
+    """Return the only registry seam used by the production entrypoint."""
+
+    return classification_runtime_registry()
+
+
 def dispatch_classification_runtime_binding(
     runtime_registry: Any,
     *,
@@ -481,4 +487,5 @@ __all__ = [
     "classification_runtime_registry",
     "dispatch_classification_runtime_binding",
     "get_classification_adapter",
+    "server_owned_classification_runtime_registry",
 ]
