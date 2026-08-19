@@ -431,6 +431,80 @@ def test_unknown_survey_weight_frame_is_rejected_before_design_construction():
     assert excinfo.value.code == "SURVEY_WEIGHT_FRAME_INVALID"
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "expected_code"),
+    [
+        ("fpc", 0, "SURVEY_FPC_INVALID"),
+        ("fpc", False, "SURVEY_FPC_INVALID"),
+        ("fpc", object(), "SURVEY_FPC_INVALID"),
+        ("weight_frame", 0, "SURVEY_WEIGHT_FRAME_INVALID"),
+        ("weight_frame", False, "SURVEY_WEIGHT_FRAME_INVALID"),
+        ("weight_frame", object(), "SURVEY_WEIGHT_FRAME_INVALID"),
+    ],
+)
+def test_design_rejects_falsey_or_non_string_declarations(field, value, expected_code):
+    """Falsey declarations are still declarations and must fail closed."""
+    from workbench.survey import SurveyDesign, SurveyEngineError
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        SurveyDesign(
+            frame=_design_frame(),
+            strata="stratum",
+            psu="psu",
+            weight="weight",
+            **{field: value},
+        )
+
+    assert excinfo.value.code == expected_code
+
+
+def test_design_entry_preserves_falsey_subpopulation_as_a_typed_failure():
+    from workbench.survey import SurveyEngineError
+    from workbench.survey.adapters import build_design_from_artifacts
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        build_design_from_artifacts(
+            _design_frame(),
+            {
+                "_sampling_weight": "weight",
+                "_survey_strata_col": "stratum",
+                "_survey_psu_col": "psu",
+                "_survey_subpop": False,
+            },
+        )
+
+    assert excinfo.value.code == "SURVEY_SUBPOP_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_code"),
+    [
+        ("_survey_fpc_col", 0, "SURVEY_FPC_INVALID"),
+        ("_survey_fpc_col", False, "SURVEY_FPC_INVALID"),
+        ("_survey_fpc_col", object(), "SURVEY_FPC_INVALID"),
+        ("_survey_weight_frame", 0, "SURVEY_WEIGHT_FRAME_INVALID"),
+        ("_survey_weight_frame", False, "SURVEY_WEIGHT_FRAME_INVALID"),
+        ("_survey_weight_frame", object(), "SURVEY_WEIGHT_FRAME_INVALID"),
+    ],
+)
+def test_adapter_rejects_falsey_or_non_string_declarations(field, value, expected_code):
+    from workbench.survey import SurveyEngineError
+    from workbench.survey.adapters import build_design_from_artifacts
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        build_design_from_artifacts(
+            _design_frame(),
+            {
+                "_sampling_weight": "weight",
+                "_survey_strata_col": "stratum",
+                "_survey_psu_col": "psu",
+                field: value,
+            },
+        )
+
+    assert excinfo.value.code == expected_code
+
+
 def test_confidence_intervals_use_the_design_t_not_the_normal(design, linearizable_estimator):
     """The multiplier must come from the design, not from the normal.
 

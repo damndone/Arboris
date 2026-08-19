@@ -371,6 +371,7 @@ class ReportStage:
             issue_dicts=issue_dicts,
             report_render_status=report_render_status,
             report_available=report_available,
+            run_id=run_id,
         )
         summary_path = run_root / "diagnostic_summary.json"
         write_json(summary_path, diagnostic_summary)

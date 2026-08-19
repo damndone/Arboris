@@ -36,7 +36,10 @@ from ..survey.projection import (
     bounded_survey_integer,
     project_survey_coefficient,
     project_survey_design,
+    project_survey_result_summary,
     project_survey_model_count,
+    survey_payload_sha256,
+    validate_survey_artifact_binding,
 )
 from .context_compiler import resolve_registered_artifact
 from .operations import OperationRecord, OperationRecordStore, OperationRegistry
@@ -1620,6 +1623,32 @@ class NodeOperationContextProvider:
                 **canonical,
                 "node": _bounded_node(node),
                 "diagnostics": _agent_result_unavailable(verification_error),
+                "omitted_sections": ["raw_model_results", "coefficient_risk"],
+            }
+        summary, summary_status = _read_diagnostic_summary(run_root)
+        if summary_status != "complete":
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "diagnostics": _agent_result_unavailable(
+                    "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
+                ),
+                "omitted_sections": ["raw_model_results", "coefficient_risk"],
+            }
+        summary_projection = project_survey_result_summary(
+            summary,
+            summary_status=summary_status,
+            unavailable_reason="AGENT_DIAGNOSTIC_SUMMARY_INVALID",
+            run_id=run_root.name,
+            artifact_id="diagnostic_summary",
+        )
+        if summary_projection.get("projection_status") != "available":
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "diagnostics": _agent_result_unavailable(
+                    "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
+                ),
                 "omitted_sections": ["raw_model_results", "coefficient_risk"],
             }
         preview = build_diagnostic_summary_preview(
@@ -3374,6 +3403,31 @@ def _read_diagnostic_summary(run_root: Path) -> tuple[dict[str, Any] | None, str
         return None, "malformed"
     if not isinstance(value, dict):
         return None, "malformed"
+    try:
+        records = read_server_owned_run_artifacts(
+            run_root.parent.parent,
+            run_root.name,
+            required=True,
+        )
+    except (ServerOwnedArtifactManifestError, OSError, ValueError):
+        return None, "artifact_invalid"
+    matches = [
+        record
+        for record in records
+        if record.get("artifact_id") == "diagnostic_summary"
+        and record.get("artifact_type") == "metadata"
+        and record.get("path") == "diagnostic_summary.json"
+    ]
+    if len(matches) != 1:
+        return None, "artifact_invalid"
+    binding_valid = validate_survey_artifact_binding(
+        value.get("summary_binding"),
+        artifact_id="diagnostic_summary",
+        run_id=run_root.name,
+        expected_payload_sha256=survey_payload_sha256(value),
+    )
+    if not binding_valid:
+        return None, "artifact_invalid"
     return value, "complete"
 
 
@@ -3600,42 +3654,16 @@ def _bounded_result_summary(
     model_results: list[dict[str, Any]],
     run_root: Path,
 ) -> dict[str, Any]:
-    identity = summary.get("model_identity") if isinstance(summary, dict) else None
-    identity = identity if isinstance(identity, dict) else {}
-    x_variables = identity.get("x_variables")
-    if not isinstance(x_variables, list):
-        x_variable_count = identity.get("x_variable_count")
-    else:
-        x_variable_count = len(x_variables)
-
-    model_identity = {
-        key: value
-        for key, value in {
-            "model_family": identity.get("model_family"),
-            "model_label": identity.get("model_label"),
-            "y_variable": identity.get("y_variable"),
-            "n_observations": identity.get("n_observations"),
-            "x_variable_count": x_variable_count,
-        }.items()
-        if value is not None
-    }
-
-    quality = summary.get("model_quality") if isinstance(summary, dict) else None
-    quality = quality if isinstance(quality, dict) else {}
-    raw_metrics = quality.get("metrics")
-    metric_items = raw_metrics.items() if isinstance(raw_metrics, dict) else ()
-    metrics = {
-        str(key): value
-        for key, value in metric_items
-        if isinstance(raw_metrics, dict)
-        and isinstance(key, str)
-        and isinstance(value, (int, float))
-        and not isinstance(value, bool)
-    }
-    primary_metric_keys = quality.get("primary_metric_keys")
-    if not isinstance(primary_metric_keys, list):
-        primary_metric_keys = []
-    primary_metric_keys = [key for key in primary_metric_keys if isinstance(key, str)]
+    summary_projection = project_survey_result_summary(
+        summary,
+        summary_status=summary_status,
+        unavailable_reason="AGENT_RESULT_SUMMARY_INVALID",
+        run_id=run_root.name,
+        artifact_id="diagnostic_summary",
+    )
+    model_identity = summary_projection.get("model_identity", {})
+    metrics = summary_projection.get("metrics", {})
+    primary_metric_keys = summary_projection.get("primary_metric_keys", [])
 
     coefficient_summary = summary.get("coefficients_summary") if isinstance(summary, dict) else None
     coefficient_summary = (
@@ -3656,8 +3684,17 @@ def _bounded_result_summary(
     model_family_evidence = _bounded_model_family_evidence(run_root, model_results)
     regression_table = _bounded_regression_table(model_results)
     return {
-        "available": summary_status == "complete" and preview.get("available") is True,
+        "available": (
+            summary_projection.get("projection_status") == "available"
+            and preview.get("available") is True
+        ),
         "summary_status": summary_status,
+        "summary_projection_status": summary_projection.get("projection_status"),
+        **(
+            {"unavailable_reason": summary_projection["unavailable_reason"]}
+            if "unavailable_reason" in summary_projection
+            else {}
+        ),
         # v1.8.7. Without these an Agent reads a design-based standard error as
         # an ordinary one: it would speak about the precision of the estimate
         # with no way to know the interval uses 8 degrees of freedom rather than
@@ -4840,18 +4877,25 @@ def _bounded_diagnostics(preview: dict[str, Any]) -> tuple[dict[str, Any], list[
 
     identity = preview.get("model_identity")
     if isinstance(identity, dict):
-        diagnostics["model_identity"] = {
-            key: identity[key]
-            for key in (
-                "primary_model_id",
-                "model_label",
-                "model_type",
-                "y_variable",
-                "n_observations",
-                "x_variable_count",
-            )
-            if key in identity
-        }
+        projected_identity: dict[str, Any] = {}
+        for key in (
+            "primary_model_id",
+            "model_label",
+            "model_type",
+            "y_variable",
+        ):
+            label = _bounded_label(identity.get(key))
+            if label is not None:
+                projected_identity[key] = label
+        if "n_observations" in identity:
+            count = bounded_survey_integer(identity.get("n_observations"))
+            if count is not None:
+                projected_identity["n_observations"] = count
+        if "x_variable_count" in identity:
+            count = bounded_survey_integer(identity.get("x_variable_count"))
+            if count is not None:
+                projected_identity["x_variable_count"] = count
+        diagnostics["model_identity"] = projected_identity
 
     for key, limit in (
         ("contract_warnings", 8),

@@ -240,10 +240,28 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
         value = artifacts.get(key)
         return value.strip() if isinstance(value, str) else value
 
+    def declared_text(key: str, *, invalid_code: str, label: str) -> str:
+        """Read a typed declaration without treating falsey values as absent."""
+        value = artifacts.get(key)
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise SurveyEngineError(
+                invalid_code,
+                f"{label} declaration must be a string when supplied",
+                reason="declared_value_type",
+                declared_type=type(value).__name__,
+            )
+        return value.strip()
+
     strata = text_value("_survey_strata_col") or ""
     psu = text_value("_survey_psu_col") or ""
     weight = text_value("_sampling_weight") or ""
-    fpc = text_value("_survey_fpc_col") or ""
+    fpc = declared_text(
+        "_survey_fpc_col",
+        invalid_code="SURVEY_FPC_INVALID",
+        label="survey_fpc_col",
+    )
     raw_replicate_columns = artifacts.get("_survey_replicate_weights")
     if raw_replicate_columns is None:
         replicate_columns = []
@@ -270,7 +288,11 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
             "subpopulation expression must be a non-empty string",
             reason="declared_value_type",
         )
-    weight_frame = text_value("_survey_weight_frame") or ""
+    weight_frame = declared_text(
+        "_survey_weight_frame",
+        invalid_code="SURVEY_WEIGHT_FRAME_INVALID",
+        label="survey_weight_frame",
+    )
     if weight_frame and weight_frame not in SURVEY_WEIGHT_FRAME_VALUES:
         raise SurveyEngineError(
             "SURVEY_WEIGHT_FRAME_INVALID",

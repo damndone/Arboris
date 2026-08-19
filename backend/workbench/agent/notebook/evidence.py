@@ -20,6 +20,10 @@ from ...artifacts import read_json, sha256_file
 from ...canonical import sha256_canonical
 from ...ingestion import read_frame_bounded
 from ...lineage.upload_store import verify_upload
+from ...services.server_run_artifacts import (
+    ServerOwnedArtifactManifestError,
+    read_server_owned_run_artifacts,
+)
 
 
 MAX_SOURCE_ROWS = 100_000
@@ -35,6 +39,20 @@ class EvidenceError(ValueError):
     """Base for typed, fail-closed inspection errors."""
 
     code = "EVIDENCE_ERROR"
+
+    def __init__(self, message: str = "", *, code: str | None = None) -> None:
+        # Source resolution raises compact machine codes directly; preserve
+        # those codes when turning the exception into an EvidenceRecord.
+        inferred_code = (
+            message
+            if isinstance(message, str)
+            and message
+            and message == message.upper()
+            and message.replace("_", "").isalnum()
+            else type(self).code
+        )
+        self.code = code or inferred_code
+        super().__init__(message)
 
 
 class UnsupportedEvidenceSource(EvidenceError):
@@ -183,16 +201,38 @@ def _source_identity(project_root: Path, source: RunSource | DatasetSource) -> _
         run_root = (project_root / "runs" / source.run_id).resolve()
         if not run_root.is_dir():
             raise EvidenceError("RUN_NOT_FOUND")
-        index_path = run_root / "artifacts_index.json"
         try:
-            index = read_json(index_path)
-        except (OSError, ValueError) as exc:
-            raise EvidenceError("RAW_ARTIFACT_INDEX_UNAVAILABLE") from exc
-        artifacts = index.get("artifacts") if isinstance(index, dict) else None
-        matches = [item for item in artifacts or () if isinstance(item, dict) and item.get("artifact_type") == "raw_data"]
+            records = read_server_owned_run_artifacts(
+                project_root,
+                source.run_id,
+                required=True,
+            )
+        except (ServerOwnedArtifactManifestError, OSError, ValueError) as exc:
+            raise EvidenceError("RAW_ARTIFACT_MANIFEST_INVALID") from exc
+        matches = [
+            item for item in records
+            if isinstance(item, dict) and item.get("artifact_type") == "raw_data"
+        ]
         if len(matches) != 1:
             raise EvidenceError("RAW_ARTIFACT_NOT_UNIQUE")
         artifact = matches[0]
+        artifact_id = artifact.get("artifact_id")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise EvidenceError("RAW_ARTIFACT_ID_INVALID")
+        if not isinstance(artifact.get("step"), str) or not artifact.get("step"):
+            raise EvidenceError("RAW_ARTIFACT_PROVENANCE_INVALID")
+        if not isinstance(artifact.get("code_version"), str) or not artifact.get("code_version"):
+            raise EvidenceError("RAW_ARTIFACT_PROVENANCE_INVALID")
+        try:
+            manifest = read_json(run_root / "run_manifest.json")
+        except (OSError, ValueError) as exc:
+            raise EvidenceError("RAW_ARTIFACT_STATUS_UNAVAILABLE") from exc
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("run_id") not in {None, source.run_id}
+            or manifest.get("status") != "completed"
+        ):
+            raise EvidenceError("RAW_ARTIFACT_STATUS_UNAVAILABLE")
         relative = artifact.get("path")
         if not isinstance(relative, str) or not relative or Path(relative).is_absolute():
             raise EvidenceError("RAW_ARTIFACT_PATH_INVALID")
@@ -204,8 +244,19 @@ def _source_identity(project_root: Path, source: RunSource | DatasetSource) -> _
         if not path.is_file():
             raise EvidenceError("RAW_ARTIFACT_MISSING")
         expected_hash = artifact.get("sha256")
-        if expected_hash and sha256_file(path) != expected_hash:
+        if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+            raise EvidenceError("RAW_ARTIFACT_DIGEST_INVALID")
+        actual_hash = sha256_file(path)
+        if actual_hash != expected_hash:
             raise EvidenceError("RAW_ARTIFACT_HASH_MISMATCH")
+        try:
+            run_inputs = read_json(run_root / "run_inputs.json")
+        except (OSError, ValueError) as exc:
+            raise EvidenceError("RAW_ARTIFACT_SOURCE_BINDING_UNAVAILABLE") from exc
+        upload = run_inputs.get("upload") if isinstance(run_inputs, dict) else None
+        upload_hash = upload.get("sha256") if isinstance(upload, dict) else None
+        if not isinstance(upload_hash, str) or upload_hash != actual_hash:
+            raise EvidenceError("RAW_ARTIFACT_SOURCE_BINDING_MISMATCH")
         return _ResolvedSource(f"run:{source.run_id}", path, path.suffix.lower())
     if isinstance(source, DatasetSource):
         path = verify_upload(project_root, source.upload_sha256)

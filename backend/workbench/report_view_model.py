@@ -542,7 +542,7 @@ def _survey_design_facts(regression_table: Mapping[str, Any] | None) -> list[str
         if not isinstance(model, Mapping):
             continue
         bounded = _bounded_survey_design(model.get("survey_provenance"))
-        if bounded is None:
+        if bounded is None or bounded.get("projection_status") == "unavailable":
             continue
 
         facts = [
@@ -585,7 +585,7 @@ def _survey_design_facts(regression_table: Mapping[str, Any] | None) -> list[str
     return []
 
 
-def _design_summary(design: Any) -> str:
+def _design_summary(design: Any) -> str | dict[str, Any]:
     """One cell's worth of design, or nothing.
 
     Compressed to a string rather than nested: this travels into XLSX, where a
@@ -595,6 +595,8 @@ def _design_summary(design: Any) -> str:
     bounded = _bounded_survey_design(design)
     if bounded is None:
         return ""
+    if bounded.get("projection_status") == "unavailable":
+        return bounded
     parts = [
         f"{bounded.get('variance_method', 'linearization')} design-based SE",
         f"strata={bounded.get('strata_column')}",

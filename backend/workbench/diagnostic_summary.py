@@ -4,7 +4,11 @@ from collections.abc import Mapping
 import math
 from typing import Any
 
-from .survey.projection import project_survey_coefficient, project_survey_design
+from .survey.projection import (
+    project_survey_coefficient,
+    project_survey_design,
+    survey_payload_sha256,
+)
 
 
 def build_diagnostic_summary(
@@ -226,6 +230,7 @@ def finalize_diagnostic_summary(
     issue_dicts: list[dict[str, Any]],
     report_render_status: str,
     report_available: bool,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     """Finalize the status fields after report rendering actually runs.
 
@@ -262,6 +267,17 @@ def finalize_diagnostic_summary(
             (summary.get("run_status") or {}).get("model_results_available")
         ),
     }
+    if run_id:
+        result.pop("summary_binding", None)
+        payload_sha256 = survey_payload_sha256(result)
+        if payload_sha256 is not None:
+            result["summary_binding"] = {
+                "artifact_id": "diagnostic_summary",
+                "run_id": run_id,
+                "status": "complete",
+                "provenance": "server",
+                "payload_sha256": payload_sha256,
+            }
     return result
 
 

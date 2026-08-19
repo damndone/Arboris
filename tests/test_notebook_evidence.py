@@ -12,7 +12,7 @@ from workbench.agent.notebook.evidence import (
 )
 from workbench.agent.notebook import NotebookService
 from workbench.agent.notebook.store import NotebookStore
-from workbench.artifacts import register_artifact
+from workbench.artifacts import register_artifact, sha256_file
 from workbench.lineage.upload_store import store_upload_bytes
 
 from tests.test_notebook_support import make_project, make_run, make_trace
@@ -31,6 +31,9 @@ def _raw_run(project: Path, run_id: str = "run_001") -> Path:
     ]
     raw.write_text("\n".join(rows) + "\n", encoding="utf-8")
     register_artifact(run_root, "raw_observations", raw, "raw_data", "ingestion", [])
+    run_inputs = json.loads((run_root / "run_inputs.json").read_text(encoding="utf-8"))
+    run_inputs["upload"] = {"sha256": sha256_file(raw), "filename": raw.name}
+    (run_root / "run_inputs.json").write_text(json.dumps(run_inputs), encoding="utf-8")
     return run_root
 
 
@@ -72,6 +75,9 @@ def test_profile_cap_is_visible_as_partial_omission(tmp_path: Path) -> None:
     # The artifact must be re-registered after changing the fixture bytes.
     (run_root / "artifacts_index.json").write_text(json.dumps({"artifacts": []}))
     register_artifact(run_root, "raw_observations", raw, "raw_data", "ingestion", [])
+    run_inputs = json.loads((run_root / "run_inputs.json").read_text(encoding="utf-8"))
+    run_inputs["upload"] = {"sha256": sha256_file(raw), "filename": raw.name}
+    (run_root / "run_inputs.json").write_text(json.dumps(run_inputs), encoding="utf-8")
 
     record = compile_evidence_pack(
         project,
@@ -174,3 +180,29 @@ def test_dataset_source_uses_verified_upload_identity(tmp_path: Path) -> None:
 
     assert record.status == "completed"
     assert record.source_refs == (f"dataset_profile:{sha}",)
+
+
+def test_run_source_rejects_file_and_index_tampering_against_run_input_digest(tmp_path: Path) -> None:
+    """A synchronized artifact index cannot authorize changed source bytes."""
+    project = make_project(tmp_path)
+    run_root = _raw_run(project)
+    raw = run_root / "raw_snapshot" / "observations.csv"
+    original_digest = sha256_file(raw)
+    run_inputs = json.loads((run_root / "run_inputs.json").read_text(encoding="utf-8"))
+    run_inputs["upload"] = {"sha256": original_digest, "filename": raw.name}
+    (run_root / "run_inputs.json").write_text(json.dumps(run_inputs), encoding="utf-8")
+
+    raw.write_text(raw.read_text(encoding="utf-8") + "p-999,2024-01-05,999,tampered,99\n", encoding="utf-8")
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    record = next(item for item in index["artifacts"] if item["artifact_id"] == "raw_observations")
+    record["sha256"] = sha256_file(raw)
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    pack = compile_evidence_pack(
+        project,
+        source=RunSource("run_001"),
+        requests=(InspectionRequest("profile.v1", "run:active", {}),),
+    )
+    assert pack.records[0].status == "failed"
+    assert pack.records[0].failure_code == "RAW_ARTIFACT_SOURCE_BINDING_MISMATCH"

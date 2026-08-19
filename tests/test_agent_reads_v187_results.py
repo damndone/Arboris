@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from workbench.agent.context_tools import (
+    InspectDiagnosticsRequest,
     InspectProjectModelCoefficientsRequest,
     InspectResultSummaryRequest,
     NodeOperationContextProvider,
@@ -49,6 +50,16 @@ def _summary(project, run_id: str, node: str) -> dict:
     return provider.inspect_result_summary(
         InspectResultSummaryRequest(
             request_id="read-test", owner_run_id=run_id,
+            op_node_id=node, active_head_run_id=run_id,
+        )
+    )
+
+
+def _diagnostics(project, run_id: str, node: str) -> dict:
+    provider = NodeOperationContextProvider(project.root)
+    return provider.inspect_diagnostics(
+        InspectDiagnosticsRequest(
+            request_id="diagnostics-test", owner_run_id=run_id,
             op_node_id=node, active_head_run_id=run_id,
         )
     )
@@ -274,6 +285,152 @@ def test_agent_regression_and_diagnostic_projections_do_not_copy_invalid_survey_
     assert diagnostic["projection_status"] == "unavailable"
     assert diagnostic.get("p_value") is None
     assert diagnostic.get("std_error") is None
+
+
+def test_agent_result_summary_bounds_raw_identity_and_metrics(tmp_path):
+    """Summary metadata must cross the same finite/bounds/status contract."""
+    from workbench.agent.context_tools import _bounded_result_summary
+
+    summary = {
+        "model_identity": {
+            "model_family": "ols",
+            "model_label": "Survey OLS",
+            "y_variable": "y",
+            "n_observations": 10**400,
+            "x_variable_count": -1,
+        },
+        "model_quality": {
+            "metrics": {
+                "aic": 10**400,
+                "p_value": 2,
+                "ok": 1.25,
+            },
+            "primary_metric_keys": ["aic", "p_value", "ok"],
+        },
+    }
+
+    projected = _bounded_result_summary(
+        summary,
+        summary_status="complete",
+        preview={"available": True},
+        model_results=[],
+        run_root=tmp_path,
+    )
+
+    assert projected["available"] is False
+    assert projected["summary_projection_status"] == "unavailable"
+    assert projected["model_identity"].get("n_observations") is None
+    assert projected["metrics"].get("aic") is None
+    assert projected["metrics"].get("p_value") is None
+    assert projected["metrics"]["ok"] == 1.25
+    assert projected["unavailable_reason"] == "AGENT_RESULT_SUMMARY_INVALID"
+
+
+def test_agent_rejects_diagnostic_summary_when_file_and_index_are_tampered_together(tmp_path):
+    """An index rewrite must not make a changed diagnostic payload authoritative."""
+    from workbench.agent.context_tools import _read_diagnostic_summary
+    from workbench.artifacts import sha256_file
+
+    run_root = tmp_path / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    payload = {
+        "run_id": "run-1",
+        "model_identity": {"model_family": "ols", "n_observations": 10},
+        "run_status": {"report_render_status": "complete"},
+    }
+    unsigned = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    payload["summary_binding"] = {
+        "artifact_id": "diagnostic_summary",
+        "run_id": "run-1",
+        "status": "complete",
+        "provenance": "server",
+        "payload_sha256": hashlib.sha256(unsigned.encode()).hexdigest(),
+    }
+    summary_path = run_root / "diagnostic_summary.json"
+    summary_path.write_text(json.dumps(payload), encoding="utf-8")
+    index_path = run_root / "artifacts_index.json"
+    index_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artifacts": [
+                    {
+                        "artifact_id": "diagnostic_summary",
+                        "artifact_type": "metadata",
+                        "path": "diagnostic_summary.json",
+                        "sha256": sha256_file(summary_path),
+                        "step": "diagnostics",
+                        "inputs": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    tampered = dict(payload)
+    tampered["model_identity"] = {"model_family": "ols", "n_observations": 999}
+    summary_path.write_text(json.dumps(tampered), encoding="utf-8")
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["artifacts"][0]["sha256"] = sha256_file(summary_path)
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    summary, status = _read_diagnostic_summary(run_root)
+    assert summary is None
+    assert status == "artifact_invalid"
+
+
+def test_agent_diagnostics_rejects_synchronized_diagnostic_summary_tamper(tmp_path):
+    project, run_id = _run(
+        tmp_path, "diagnostic-tamper", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    run_root = project.root / "runs" / run_id
+    summary_path = run_root / "diagnostic_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["model_identity"]["n_observations"] = 999
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    for record in index["artifacts"]:
+        if record.get("artifact_id") == "diagnostic_summary":
+            record["sha256"] = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    diagnostics = _diagnostics(project, run_id, "model:ols_1")["diagnostics"]
+    assert diagnostics["available"] is False
+    assert diagnostics["status"] == "unavailable"
+    assert diagnostics["unavailable_reason"] == "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
+
+
+def test_agent_diagnostics_rejects_invalid_scalars_even_with_rebound_summary_digest(tmp_path):
+    """A rewritten file, index, and binding still cannot authorize raw scalars."""
+    from workbench.artifacts import sha256_file
+    from workbench.survey.projection import survey_payload_sha256
+
+    project, run_id = _run(
+        tmp_path, "diagnostic-invalid-scalar", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    run_root = project.root / "runs" / run_id
+    summary_path = run_root / "diagnostic_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["model_identity"]["n_observations"] = 10**400
+    summary["summary_binding"]["payload_sha256"] = survey_payload_sha256(summary)
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    for record in index["artifacts"]:
+        if record.get("artifact_id") == "diagnostic_summary":
+            record["sha256"] = sha256_file(summary_path)
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    diagnostics = _diagnostics(project, run_id, "model:ols_1")["diagnostics"]
+    assert diagnostics["available"] is False
+    assert diagnostics["status"] == "unavailable"
+    assert diagnostics["unavailable_reason"] == "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
 
 
 def test_a_run_without_a_design_says_so_rather_than_omitting_the_field(tmp_path):

@@ -7,6 +7,7 @@ from workbench.report_view_model import (
     build_regression_table,
     build_report_view_model,
     regression_table_export_rows,
+    _survey_design_facts,
 )
 
 
@@ -350,6 +351,82 @@ def test_report_design_counts_and_effects_are_typed_unavailable(field, value):
     ])
     assert packet["models"][0]["survey_provenance"]["projection_status"] == "unavailable"
     assert packet["models"][0]["survey_provenance"]["unavailable_reason"] == "REPORT_SURVEY_METADATA_INVALID"
+
+
+def test_report_and_xlsx_propagate_unavailable_design_without_design_claims():
+    result = {
+        "model_type": "ols",
+        "nobs": 10,
+        "survey_design": {
+            "n_obs": -1,
+            "n_strata": 2,
+            "n_psu": 4,
+            "degf": 2,
+            "variance_method": "linearization",
+        },
+        "coefficients": {
+            "x": {"estimate": 1.0, "std_error": 0.2, "p_value": 0.2}
+        },
+    }
+
+    packet = build_regression_table([("ols_1", result)])
+    model = packet["models"][0]
+    assert model["survey_design"]["projection_status"] == "unavailable"
+    assert model["survey_provenance"]["projection_status"] == "unavailable"
+    assert "design-based" not in str(model["survey_design"])
+    assert "design-based" not in " ".join(_survey_design_facts(packet))
+
+    rows = regression_table_export_rows(packet)
+    assert rows[0]["ols_1 survey design"]["projection_status"] == "unavailable"
+
+
+def test_unavailable_survey_design_does_not_copy_invalid_safe_metadata():
+    from workbench.survey.projection import project_survey_design
+
+    projected = project_survey_design(
+        {
+            "projection_status": "unavailable",
+            "unavailable_reason": "upstream_invalid",
+            "variance_method": "linearization",
+            "variance_source": 10**400,
+            "source_id": False,
+            "warnings": [10**400],
+            "provenance": {"run_id": "run-1"},
+        }
+    )
+
+    assert projected["projection_status"] == "unavailable"
+    assert projected["unavailable_reason"] == "upstream_invalid"
+    assert projected["variance_method"] == "linearization"
+    assert "variance_source" not in projected
+    assert "source_id" not in projected
+    assert "warnings" not in projected
+    assert projected["provenance"] == {"run_id": "run-1"}
+
+
+def test_xlsx_preserves_typed_unavailable_coefficient_projection():
+    packet = build_regression_table(
+        [
+            (
+                "ols_1",
+                {
+                    "model_type": "ols",
+                    "coefficients": {
+                        "x": {
+                            "estimate": 1.0,
+                            "std_error": -1,
+                            "p_value": 0.2,
+                        }
+                    },
+                },
+            )
+        ]
+    )
+
+    rows = regression_table_export_rows(packet)
+    assert rows[0]["ols_1 projection_status"] == "unavailable"
+    assert rows[0]["ols_1 unavailable_reason"] == "REPORT_COEFFICIENT_VALUE_INVALID"
+    assert rows[0]["ols_1 std_error"] is None
 
 
 @pytest.mark.parametrize("field,value", [("std_error", -1), ("p_value", 2), ("ci_lower", float("inf"))])

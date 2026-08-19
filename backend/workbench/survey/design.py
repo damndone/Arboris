@@ -239,25 +239,47 @@ class SurveyDesign:
     hadamard_matrix: list[list[int]] | None = None
 
     def __post_init__(self) -> None:
-        if self.fpc:
+        if self.fpc is not None and not isinstance(self.fpc, str):
+            raise SurveyEngineError(
+                "SURVEY_FPC_INVALID",
+                "finite population correction declaration must be a string when supplied",
+                reason="declared_value_type",
+                declared_type=type(self.fpc).__name__,
+            )
+        if isinstance(self.fpc, str) and self.fpc.strip():
             raise SurveyEngineError(
                 "SURVEY_FPC_UNSUPPORTED",
                 "finite population correction is declared but this survey variance "
                 "engine does not apply FPC",
                 fpc_column=self.fpc,
             )
+        if isinstance(self.fpc, str) and not self.fpc.strip():
+            self.fpc = None
         if self.lonely_psu not in LONELY_PSU_POLICIES:
             raise SurveyEngineError(
                 "SURVEY_LONELY_PSU_POLICY_INVALID",
                 f"unknown policy {self.lonely_psu!r}",
                 allowed=list(LONELY_PSU_POLICIES),
             )
-        if self.weight_frame is not None and self.weight_frame not in SURVEY_WEIGHT_FRAME_VALUES:
-            raise SurveyEngineError(
-                "SURVEY_WEIGHT_FRAME_INVALID",
-                f"unknown survey weight frame {self.weight_frame!r}",
-                allowed=list(SURVEY_WEIGHT_FRAME_VALUES),
-            )
+        if self.weight_frame is not None:
+            if not isinstance(self.weight_frame, str):
+                raise SurveyEngineError(
+                    "SURVEY_WEIGHT_FRAME_INVALID",
+                    "survey weight frame declaration must be a string when supplied",
+                    reason="declared_value_type",
+                    declared_type=type(self.weight_frame).__name__,
+                )
+            normalized_weight_frame = self.weight_frame.strip()
+            if not normalized_weight_frame:
+                self.weight_frame = None
+            elif normalized_weight_frame not in SURVEY_WEIGHT_FRAME_VALUES:
+                raise SurveyEngineError(
+                    "SURVEY_WEIGHT_FRAME_INVALID",
+                    f"unknown survey weight frame {self.weight_frame!r}",
+                    allowed=list(SURVEY_WEIGHT_FRAME_VALUES),
+                )
+            else:
+                self.weight_frame = normalized_weight_frame
         if self.replicate_type is not None and self.replicate_type not in REPLICATE_TYPES:
             raise SurveyEngineError(
                 "SURVEY_REPLICATE_TYPE_INVALID",
