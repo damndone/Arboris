@@ -6,11 +6,11 @@
 
 ## Final status
 
-VERIFIED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 3/9 (33.3%; 33.3 per 100 events)
+- Failure frequency: 3/10 (30.0%; 30.0 per 100 events)
 - Repeat rate: 0/3 (0.0%)
 - Recurrence rate: 0/3 (0.0%)
 - MTTR: median=0 ms (sample=1; unresolved=2)
@@ -72,3 +72,4 @@ VERIFIED
 - #7: `6f3a4e68-660f-45da-b5ef-5aa9ec0e0f2a` | 2026-08-19T17:06:10.000Z | GATE/report_boundary_frontend | incident=`e0a994ef-6bb1-48d1-a61a-3f6fc25388df` | lesson_key=`frontend-report-boundary-green` | event_sha256=`3fc0e291acd313fe02100598ce45349a61ebef0916d2421764135adef46ef03f`
 - #8: `f6d4cbd7-5ff4-4cc2-b7bf-9e1cf8de373a` | 2026-08-19T17:06:20.000Z | GATE/frontend_typecheck | incident=`4b5d45c6-480e-4c98-9825-3a7c22414a1c` | lesson_key=`frontend-typecheck-separate-browser` | event_sha256=`d61e6c5404936ebfbfeaba54860c271ab4f16fa545fbd2609b175b1792f3bece`
 - #9: `d84e986a-2d3d-4011-a5e9-37dbd85ee968` | 2026-08-19T17:08:00.000Z | STATE_CHANGE/implementation_verified | incident=`d67651d8-b1e8-4135-ad5b-a43124b964c6` | lesson_key=`report-boundary-implementation-verified` | event_sha256=`87a348d11f05722166c7ff674115081126e88075e6fcfd9089df3d9c7307fdcf`
+- #10: `9d8be3e7-82e6-44dc-8cf0-bbf1b6bc7b12` | 2026-08-19T17:12:00.000Z | STATE_CHANGE/line_completed | incident=`46d65aed-6cba-40d0-93da-4e753caef2b7` | lesson_key=`close-with-evidence-and-deferred-gates` | event_sha256=`b9fe97935143dd24c615fad0f946f9e608401b7a93993805d7a852caab424d80`
