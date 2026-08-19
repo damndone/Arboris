@@ -10,24 +10,57 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
 from tests.test_data_column_cast import _source_project
 from tests.workflow_fixtures import composed_plan
+from workbench.artifacts import register_artifact
 from workbench.agent.workflow import (
     WorkflowExecutor,
     WorkflowStepResult,
     compile_workflow,
 )
 from workbench.agent.workflow_runtime import (
+    _admit_workflow_host_endpoint_from_supervisor,
+    issue_server_evidence_port,
     _execute_ols_branches,
     _execute_workflow_report,
+    _WRITE_CONTEXT,
     build_workflow_step_executor,
     collect_post_estimation_results,
+    prepare_formal_workflow_output,
 )
+
+
+
+def _test_evidence_port(project_root):
+    root = Path(project_root).expanduser().resolve()
+    workflow_directory = root / "workbench" / "workflows"
+    workflow_directory.mkdir(parents=True, exist_ok=True)
+    endpoint_fd = os.open(
+        workflow_directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        import workbench.agent.workflow_runtime as workflow_runtime
+
+        endpoint = _admit_workflow_host_endpoint_from_supervisor(root, endpoint_fd)
+        with patch.object(
+            workflow_runtime,
+            "_deployment_host_endpoint_from_supervisor",
+            return_value=endpoint,
+        ):
+            return issue_server_evidence_port(root)
+    finally:
+        os.close(endpoint_fd)
+
+
+EvidencePersistencePort = _test_evidence_port
 from workbench.lineage.run_inputs import write_run_inputs
 from workbench.lineage.upload_store import store_upload_bytes
 
@@ -269,17 +302,56 @@ def _compile(project_run, frame, *, workflow_id, steps=None):
     )
 
 
+def _complete_report_dependencies(project, draft, report_step, frame):
+    """Build report inputs through the same admitted runtime path as users."""
+
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / str(draft.target["run_id"]),
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="fixture-dag",
+    )
+    port = EvidencePersistencePort(project)
+    execute = build_workflow_step_executor(project, draft, evidence_port=port)
+    previous = {}
+    for dependency in draft.steps:
+        if dependency.step_id == report_step.step_id:
+            break
+        receipt = port.admit(draft, dependency)
+        result = execute(dependency, previous, admission_receipt=receipt)
+        port.complete(receipt, result)
+        previous[dependency.step_id] = result
+    return port, previous
+
+
 def test_native_exploration_steps_materialize_without_code_execution(tmp_path) -> None:
     frame = _frame()
     project, run_id, artifact_id = _source_project(tmp_path, frame)
-    draft = _compile((run_id, artifact_id), frame, workflow_id="wf-runtime")
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-runtime",
+        steps=[
+            step
+            for step in composed_plan()
+            if step["operation_id"] not in {"model.genesis", "report.compose"}
+        ],
+    )
 
-    execute = build_workflow_step_executor(project, draft)
+    port = EvidencePersistencePort(project)
+    execute = build_workflow_step_executor(project, draft, evidence_port=port)
     previous: dict[str, WorkflowStepResult] = {}
     for step in draft.steps:
-        if step.operation_id in {"model.genesis", "report.compose"}:
-            continue
-        result = execute(step, previous)
+        receipt = port.admit(draft, step)
+        result = execute(step, previous, admission_receipt=receipt)
+        port.complete(receipt, result)
         assert result.artifact_ids, f"{step.step_id} produced no artifact"
         previous[step.step_id] = result
 
@@ -295,6 +367,19 @@ def test_native_exploration_steps_materialize_without_code_execution(tmp_path) -
     assert len(previous["scatter"].artifact_ids) >= 2
     # No step may reach execution through the arbitrary-code path.
     assert not list(project.glob("**/code-execute*"))
+
+
+def test_public_workflow_callback_requires_an_admission_receipt(tmp_path) -> None:
+    frame = _frame()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = _compile((run_id, artifact_id), frame, workflow_id="wf-public-callback")
+
+    execute = build_workflow_step_executor(project, draft)
+
+    with pytest.raises(Exception, match="admission receipt"):
+        execute(draft.steps[0], {})
+
+    assert not list(project.glob("**/artifacts/**"))
 
 
 def test_ols_step_uses_native_genesis_and_persists_one_run_per_branch(tmp_path) -> None:
@@ -318,23 +403,51 @@ def test_ols_step_uses_native_genesis_and_persists_one_run_per_branch(tmp_path) 
         step for step in draft.steps if step.operation_id == "model.genesis"
     )
 
-    result = _execute_ols_branches(
-        project,
-        draft,
-        # The lineage the executor resolves for a sourceless step: the
-        # workflow's own target.
-        {
-            "artifact_id": artifact_id,
-            "node_ref": "stage:source",
-            "sha256": upload_sha,
-        },
-        frame,
-        model_step,
-    )
+    port = EvidencePersistencePort(project)
+    execute = build_workflow_step_executor(project, draft, evidence_port=port)
+    receipt = port.admit(draft, model_step)
+    result = execute(model_step, {}, admission_receipt=receipt)
+    port.complete(receipt, result)
 
     assert len(result.payload["branches"]) == 2
     assert all(branch["run_id"] for branch in result.payload["branches"])
     assert all("ols_1" in branch["artifact_ids"] for branch in result.payload["branches"])
+    assert result.lineage["branches"] == result.payload["branches"]
+    assert all(branch["model_artifact_id"] == "ols_1" for branch in result.lineage["branches"])
+    assert all(branch["branch_spec"]["model_family"] == "ols" for branch in result.lineage["branches"])
+
+
+def test_legacy_ols_helper_cannot_write_without_an_admitted_workflow(tmp_path) -> None:
+    """The historical helper is not an alternate model execution authority."""
+
+    frame = _frame(60)
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="fixture-dag",
+    )
+    draft = _compile((run_id, artifact_id), frame, workflow_id="wf-legacy-ols-gate")
+    model_step = next(step for step in draft.steps if step.operation_id == "model.genesis")
+
+    with pytest.raises(Exception, match="WORKFLOW_ADMISSION_RECEIPT_REQUIRED"):
+        _execute_ols_branches(
+            project,
+            draft,
+            {"artifact_id": artifact_id, "node_ref": "stage:source", "sha256": upload_sha},
+            frame,
+            model_step,
+        )
+
+    assert {path.name for path in (project / "runs").iterdir()} == {run_id}
 
 
 def test_ols_step_preserves_each_declared_branch_covariance(tmp_path) -> None:
@@ -362,19 +475,11 @@ def test_ols_step_preserves_each_declared_branch_covariance(tmp_path) -> None:
     draft = _compile((run_id, artifact_id), frame, workflow_id="wf-ols-covariance", steps=steps)
     model_step = next(step for step in draft.steps if step.operation_id == "model.genesis")
 
-    result = _execute_ols_branches(
-        project,
-        draft,
-        # The lineage the executor resolves for a sourceless step: the
-        # workflow's own target.
-        {
-            "artifact_id": artifact_id,
-            "node_ref": "stage:source",
-            "sha256": upload_sha,
-        },
-        frame,
-        model_step,
-    )
+    port = EvidencePersistencePort(project)
+    execute = build_workflow_step_executor(project, draft, evidence_port=port)
+    receipt = port.admit(draft, model_step)
+    result = execute(model_step, {}, admission_receipt=receipt)
+    port.complete(receipt, result)
 
     persisted = {
         branch["branch_id"]: json.loads(
@@ -436,7 +541,9 @@ def test_panel_genesis_step_runs_two_way_fixed_effects_with_entity_clusters(tmp_
     )
 
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed"
@@ -537,7 +644,9 @@ def test_did_model_family_workflow_executes_its_declared_contract(
     )
 
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed"
@@ -635,7 +744,9 @@ def test_twfe_did_workflow_executes_each_declared_treatment_definition(
     )
 
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed", state.steps["estimate_did"].error
@@ -704,7 +815,9 @@ def test_iv_model_family_workflow_executes_its_declared_contract(tmp_path) -> No
     )
 
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed"
@@ -809,7 +922,11 @@ def test_logit_workflow_rejects_a_nonbinary_outcome_before_execution(tmp_path) -
         ],
     )
 
-    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+    state = WorkflowExecutor(project).execute(
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
+    )
 
     assert state.status == "failed"
     assert state.steps["estimate_logit"].error == (
@@ -873,7 +990,9 @@ def test_generalized_model_family_workflow_publishes_its_declared_evidence(
     )
 
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed", state.steps["estimate_generalized"].error
@@ -950,7 +1069,9 @@ def test_composed_panel_and_dummy_fixed_effects_branches_share_point_estimate(tm
     )
 
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed"
@@ -1076,7 +1197,9 @@ def _curved_post_estimation_state(tmp_path, covariance: str):
         ],
     )
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
     )
     assert state.status == "completed", {
         step_id: step.error for step_id, step in state.steps.items() if step.error
@@ -1199,7 +1322,9 @@ def test_declared_post_estimation_steps_materialize_reproducible_model_evidence(
     )
 
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed"
@@ -1364,7 +1489,9 @@ def test_white_test_handles_a_high_scale_polynomial_categorical_design(tmp_path)
     )
 
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed"
@@ -1458,7 +1585,9 @@ def test_numeric_transform_reaches_model_and_declared_joint_test(tmp_path) -> No
     )
 
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        build_workflow_step_executor(project, draft),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed"
@@ -1477,19 +1606,21 @@ def test_numeric_transform_reaches_model_and_declared_joint_test(tmp_path) -> No
 
 
 def test_report_collection_exports_one_complete_artifact_pack(tmp_path) -> None:
-    frame = _frame(6)
+    # The helper now executes the real model.genesis dependency chain instead
+    # of fabricating completed results. Keep enough observations for the
+    # modeling validation gate to pass so this test exercises report evidence,
+    # not the intentional insufficient-sample blocker.
+    frame = _frame(36)
     project, run_id, artifact_id = _source_project(tmp_path, frame)
     draft = _compile((run_id, artifact_id), frame, workflow_id="wf-report-runtime")
-    previous = {
-        step.step_id: WorkflowStepResult(
-            artifact_ids=[f"artifact-{step.step_id}"],
-            row_counts={"source": len(frame)},
-        )
-        for step in draft.steps
-        if step.operation_id != "report.compose"
-    }
-
-    result = _execute_workflow_report(project, draft, previous)
+    report = next(step for step in draft.steps if step.operation_id == "report.compose")
+    port, previous = _complete_report_dependencies(project, draft, report, frame)
+    receipt = port.admit(draft, report)
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, report))
+    try:
+        result = _execute_workflow_report(project, draft, previous, report)
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
 
     assert {
         f"workflow_report_{draft.workflow_id}_{suffix}"
@@ -1501,25 +1632,28 @@ def test_report_collection_exports_one_complete_artifact_pack(tmp_path) -> None:
 
 
 def test_report_collection_uses_the_declared_report_step_id(tmp_path) -> None:
-    frame = _frame(6)
+    frame = _frame(36)
     project, run_id, artifact_id = _source_project(tmp_path, frame)
-    draft = _compile((run_id, artifact_id), frame, workflow_id="wf-report-renamed")
-    report = next(step for step in draft.steps if step.operation_id == "report.compose")
-    renamed_report = dataclasses.replace(report, step_id="final_report")
-    renamed = dataclasses.replace(
-        draft,
-        steps=tuple(renamed_report if step.step_id == report.step_id else step for step in draft.steps),
+    renamed_specs = composed_plan()
+    for spec in renamed_specs:
+        if spec["operation_id"] == "report.compose":
+            spec["step_id"] = "final_report"
+    renamed = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-report-renamed",
+        steps=renamed_specs,
     )
-    previous = {
-        step.step_id: WorkflowStepResult(
-            artifact_ids=[f"artifact-{step.step_id}"],
-            row_counts={"source": len(frame)},
-        )
-        for step in renamed.steps
-        if step.operation_id != "report.compose"
-    }
-
-    result = _execute_workflow_report(project, renamed, previous, renamed_report)
+    renamed_report = next(
+        step for step in renamed.steps if step.operation_id == "report.compose"
+    )
+    port, previous = _complete_report_dependencies(project, renamed, renamed_report, frame)
+    receipt = port.admit(renamed, renamed_report)
+    context_token = _WRITE_CONTEXT.set((port, receipt, renamed, renamed_report))
+    try:
+        result = _execute_workflow_report(project, renamed, previous, renamed_report)
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
 
     assert result.payload["collection_id"]
     collection = json.loads(
@@ -1555,12 +1689,28 @@ def test_runtime_dispatches_on_operation_identity_not_step_naming(tmp_path):
         "statistical.derive_boolean",
         "statistical.derived_group_summarize",
     }
-    plan = dataclasses.replace(
-        draft, steps=tuple(step for step in renamed if step.operation_id in keep)
+    step_specs = [
+        {
+            "step_id": step.step_id,
+            "operation_id": step.operation_id,
+            "depends_on": list(step.depends_on),
+            "spec": dict(step.spec),
+            "expected_artifacts": list(step.expected_artifacts),
+        }
+        for step in renamed
+        if step.operation_id in keep
+    ]
+    plan = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-renumbered",
+        steps=step_specs,
     )
 
     state = WorkflowExecutor(project).execute(
-        plan, build_workflow_step_executor(project, plan)
+        plan,
+        build_workflow_step_executor(project, plan),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed"
@@ -1589,16 +1739,47 @@ def test_model_custom_requires_an_authorized_gateway_and_can_be_injected(tmp_pat
             }
         ],
     )
-    execute_without_gateway = build_workflow_step_executor(project, draft)
+    admission_port = EvidencePersistencePort(project)
+    admission_receipt = admission_port.admit(draft, draft.steps[0])
+    execute_without_gateway = build_workflow_step_executor(
+        project, draft, evidence_port=admission_port
+    )
     with pytest.raises(Exception, match="authorized custom capability gateway"):
-        execute_without_gateway(draft.steps[0], {})
+        execute_without_gateway(
+            draft.steps[0], {}, admission_receipt=admission_receipt
+        )
+    admission_port.abort(admission_receipt, "negative gateway probe")
 
     calls = []
 
-    def authorized_gateway(*, project_root, draft, step, previous):
+    def authorized_gateway(
+        *, project_root, draft, step, previous, admission_receipt, evidence_port
+    ):
         calls.append((project_root, draft.workflow_id, step.step_id, previous))
+        output = prepare_formal_workflow_output(
+            evidence_port,
+            admission_receipt,
+            run_root=project_root / "runs" / run_id,
+            directory_name=".",
+            filename="model_summary.json",
+        )
+        try:
+            output.write_bytes(b'{"status": "completed"}\n')
+            output_path = output.path
+            evidence_port.record_formal_artifact(
+                evidence_port,
+                admission_receipt,
+                run_root=project_root / "runs" / run_id,
+                artifact_id="model_summary",
+                path=output_path,
+                artifact_type="workflow_output",
+                producer_step=step.operation_id,
+                output_target=output,
+            )
+        finally:
+            output.close()
         return WorkflowStepResult(
-            artifact_ids=["custom-result"],
+            artifact_ids=["model_summary"],
             row_counts={"source": len(frame)},
             result_fingerprint="sha256:custom-result",
             payload={"status": "completed"},
@@ -1611,8 +1792,9 @@ def test_model_custom_requires_an_authorized_gateway_and_can_be_injected(tmp_pat
             draft,
             custom_step_executor=authorized_gateway,
         ),
+        evidence_port=EvidencePersistencePort(project),
     )
 
     assert state.status == "completed"
-    assert state.steps["custom_capability"].artifact_ids == ("custom-result",)
+    assert state.steps["custom_capability"].artifact_ids == ("model_summary",)
     assert calls and calls[0][1:3] == ("wf-custom-gateway", "custom_capability")

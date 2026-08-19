@@ -5,9 +5,6 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
-from .artifacts import register_artifact, write_text_durable
-
-
 def _normalize_to_view_model(data: dict[str, Any]) -> dict[str, Any]:
     if "critical_errors" in data:
         return data
@@ -53,21 +50,52 @@ def render_html_report(
     filename: str = "report.html",
     artifact_id: str = "report_html",
     inputs: list[str] | tuple[str, ...] = (),
+    evidence_port: Any = None,
+    admission_receipt: Any = None,
 ) -> Path:
-    reports_dir = run_root / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    html_path = reports_dir / filename
-
-    environment = Environment(
-        loader=FileSystemLoader(Path(__file__).parent / "templates"),
-        autoescape=True,
+    from .agent.workflow_runtime import (
+        prepare_formal_workflow_output,
+        record_formal_workflow_artifact,
     )
-    if view_model.get("report_kind") == "arma_garch":
-        template = environment.get_template("arma_garch_report.html.j2")
-        rendered_view_model = view_model
-    else:
-        template = environment.get_template("report.html.j2")
-        rendered_view_model = _normalize_to_view_model(view_model)
-    write_text_durable(html_path, template.render(view_model=rendered_view_model))
-    register_artifact(run_root, artifact_id, html_path, "report", "reporting", list(inputs))
+
+    output = prepare_formal_workflow_output(
+        evidence_port,
+        admission_receipt,
+        run_root=run_root,
+        directory_name="reports",
+        filename=filename,
+    )
+
+    try:
+        environment = Environment(
+            loader=FileSystemLoader(Path(__file__).parent / "templates"),
+            autoescape=True,
+        )
+        if view_model.get("report_kind") == "arma_garch":
+            template = environment.get_template("arma_garch_report.html.j2")
+            rendered_view_model = view_model
+        else:
+            template = environment.get_template("report.html.j2")
+            rendered_view_model = _normalize_to_view_model(view_model)
+        with output.open_binary() as stream:
+            stream.write(template.render(view_model=rendered_view_model).encode("utf-8"))
+            stream.flush()
+        html_path = output.commit()
+    except Exception:
+        output.abort()
+        raise
+    try:
+        record_formal_workflow_artifact(
+            evidence_port,
+            admission_receipt,
+            run_root=run_root,
+            artifact_id=artifact_id,
+            path=html_path,
+            artifact_type="report",
+            producer_step="reporting",
+            inputs=inputs,
+            output_target=output,
+        )
+    finally:
+        output.close()
     return html_path
