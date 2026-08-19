@@ -45,6 +45,15 @@ interface PreviewPayload {
   [key: string]: unknown;
 }
 
+interface ConfirmPayload {
+  status: string;
+  effect?: Record<string, unknown>;
+  operation?: Record<string, unknown>;
+  reason_code?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
 const EMPTY_VALUE = "";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -84,6 +93,74 @@ function readPreviewPayload(response: unknown): PreviewPayload | null {
   const candidate = isObject(response) && isObject(response.preview) ? response.preview : response;
   if (!isObject(candidate) || typeof candidate.status !== "string") return null;
   return candidate as PreviewPayload;
+}
+
+function isResponseLike(
+  response: unknown,
+): response is { ok?: unknown; status?: unknown; json: () => Promise<unknown> } {
+  return isObject(response) && typeof response.json === "function";
+}
+
+async function readConfirmPayload(response: unknown): Promise<{
+  payload: ConfirmPayload | null;
+  httpStatus: number | null;
+  httpOk: boolean | null;
+}> {
+  if (isResponseLike(response)) {
+    const httpStatus = typeof response.status === "number" ? response.status : null;
+    const httpOk = typeof response.ok === "boolean" ? response.ok : null;
+    const body = await response.json();
+    return {
+      payload: isObject(body) && typeof body.status === "string" ? (body as ConfirmPayload) : null,
+      httpStatus,
+      httpOk,
+    };
+  }
+  return {
+    payload: isObject(response) && typeof response.status === "string" ? (response as ConfirmPayload) : null,
+    httpStatus: null,
+    httpOk: null,
+  };
+}
+
+function confirmedPayloadError(
+  payload: ConfirmPayload | null,
+  operationId: string,
+): string | null {
+  if (!payload || payload.status !== "completed") {
+    return "CONFIRM_INVALID: confirmation did not return completed status.";
+  }
+  const effect = payload.effect;
+  if (
+    !effect ||
+    typeof effect.execution_key !== "string" ||
+    !effect.execution_key.trim() ||
+    typeof effect.child_node_id !== "string" ||
+    !effect.child_node_id.trim() ||
+    !(
+      (typeof effect.artifact_id === "string" && effect.artifact_id.trim()) ||
+      (typeof effect.metadata_artifact_id === "string" && effect.metadata_artifact_id.trim())
+    )
+  ) {
+    return "CONFIRM_INVALID: completed effect is missing typed identity.";
+  }
+  const operation = payload.operation;
+  if (
+    !operation ||
+    typeof operation.record_id !== "string" ||
+    !operation.record_id.trim() ||
+    operation.operation_id !== operationId ||
+    operation.status !== "completed"
+  ) {
+    return "CONFIRM_INVALID: completed operation identity is not server-verified.";
+  }
+  return null;
+}
+
+function confirmResultText(payload: ConfirmPayload): string {
+  return [payload.status, payload.reason_code, payload.message]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" — ");
 }
 
 function readyFingerprint(preview: PreviewPayload | null): string | null {
@@ -258,6 +335,7 @@ function ParsedDataOperationsSection({
   const [selectedOperationId, setSelectedOperationId] = useState("");
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [previewPayload, setPreviewPayload] = useState<PreviewPayload | null>(null);
+  const [confirmPayload, setConfirmPayload] = useState<ConfirmPayload | null>(null);
   const [status, setStatus] = useState<OperationStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const requestRevision = useRef(0);
@@ -278,6 +356,7 @@ function ParsedDataOperationsSection({
   function invalidatePreview() {
     requestRevision.current += 1;
     setPreviewPayload(null);
+    setConfirmPayload(null);
     setError(null);
     setStatus("idle");
   }
@@ -287,6 +366,7 @@ function ParsedDataOperationsSection({
     setSelectedOperationId(operationId);
     setValues({});
     setPreviewPayload(null);
+    setConfirmPayload(null);
     setError(null);
     setStatus("idle");
   }
@@ -309,6 +389,7 @@ function ParsedDataOperationsSection({
 
     const revision = requestRevision.current;
     setPreviewPayload(null);
+    setConfirmPayload(null);
     setError(null);
     setStatus("previewing");
     try {
@@ -338,10 +419,32 @@ function ParsedDataOperationsSection({
     };
     const revision = requestRevision.current;
     setError(null);
+    setConfirmPayload(null);
     setStatus("confirming");
     try {
-      await confirm(projectRoot, selectedOperation, request);
+      const response = await confirm(projectRoot, selectedOperation, request);
       if (requestRevision.current !== revision) return;
+      const result = await readConfirmPayload(response);
+      if (requestRevision.current !== revision) return;
+      setConfirmPayload(result.payload);
+      const httpFailed =
+        result.httpStatus !== null &&
+        (result.httpStatus < 200 || result.httpStatus >= 300 || result.httpOk === false);
+      if (httpFailed) {
+        setError(`HTTP ${result.httpStatus}: ${result.payload ? confirmResultText(result.payload) : "typed confirmation response unavailable."}`);
+        setStatus("error");
+        return;
+      }
+      const invalid = confirmedPayloadError(result.payload, selectedOperation.operation_id);
+      if (invalid) {
+        if (result.payload && result.payload.status !== "completed") {
+          setStatus("error");
+          return;
+        }
+        setError(invalid);
+        setStatus("error");
+        return;
+      }
       setStatus("complete");
     } catch (reason: unknown) {
       if (requestRevision.current !== revision) return;
@@ -425,6 +528,9 @@ function ParsedDataOperationsSection({
       )}
       {previewPayload && previewPayload.status !== "ready" && (
         <div data-testid="data-operation-preview-result">{previewPayload.status}</div>
+      )}
+      {confirmPayload && confirmPayload.status !== "completed" && (
+        <div data-testid="data-operation-result">{confirmResultText(confirmPayload)}</div>
       )}
       {error && <div data-testid="data-operation-error">{error}</div>}
       {status === "complete" && (

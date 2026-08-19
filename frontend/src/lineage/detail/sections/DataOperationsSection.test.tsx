@@ -199,7 +199,19 @@ describe("DataOperationsSection", () => {
   beforeEach(() => {
     previewMock.mockReset();
     confirmMock.mockReset();
-    confirmMock.mockResolvedValue({ status: "completed" });
+    confirmMock.mockResolvedValue({
+      status: "completed",
+      effect: {
+        execution_key: "exec-1",
+        child_node_id: "child-1",
+        artifact_id: "artifact-2",
+      },
+      operation: {
+        record_id: "record-1",
+        operation_id: "data.example",
+        status: "completed",
+      },
+    });
   });
 
   it("displays a typed error when the manifest omits source identity", () => {
@@ -280,6 +292,95 @@ describe("DataOperationsSection", () => {
     );
     expect(screen.getByTestId("data-operation-complete")).toHaveTextContent(
       "completed",
+    );
+  });
+
+  it("does not show completed for a typed non-success confirmation", async () => {
+    confirmMock.mockResolvedValue({
+      status: "blocked",
+      reason_code: "DATA_OPERATION_BLOCKED",
+      message: "The operation is unavailable on this source.",
+    });
+    previewMock.mockResolvedValue({
+      preview: { status: "ready", fingerprint: "preview-fp-2" },
+    });
+
+    render(<DataOperationsSection {...sectionProps()} />);
+    fireEvent.change(screen.getByLabelText("Data operation"), {
+      target: { value: "data.example" },
+    });
+    fireEvent.change(screen.getByLabelText("label"), {
+      target: { value: "blocked" },
+    });
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+    await screen.findByTestId("data-operation-preview-ready");
+    fireEvent.click(screen.getByTestId("data-operation-confirm"));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("data-operation-complete")).toBeNull();
+    expect(screen.getByTestId("data-operation-result")).toHaveTextContent("blocked");
+    expect(screen.getByTestId("data-operation-result")).toHaveTextContent(
+      "DATA_OPERATION_BLOCKED",
+    );
+  });
+
+  it("does not show completed when the HTTP confirmation status is not successful", async () => {
+    confirmMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        status: "error",
+        reason_code: "DATA_OPERATION_STALE",
+        message: "The preview is stale.",
+      }),
+    });
+    previewMock.mockResolvedValue({
+      preview: { status: "ready", fingerprint: "preview-fp-3" },
+    });
+
+    render(<DataOperationsSection {...sectionProps()} />);
+    fireEvent.change(screen.getByLabelText("Data operation"), {
+      target: { value: "data.example" },
+    });
+    fireEvent.change(screen.getByLabelText("label"), {
+      target: { value: "stale" },
+    });
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+    await screen.findByTestId("data-operation-preview-ready");
+    fireEvent.click(screen.getByTestId("data-operation-confirm"));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("data-operation-complete")).toBeNull();
+    expect(screen.getByTestId("data-operation-error")).toHaveTextContent(
+      "HTTP 409",
+    );
+  });
+
+  it("requires typed effect and operation identity before showing completed", async () => {
+    confirmMock.mockResolvedValue({
+      status: "completed",
+      effect: { child_node_id: "child-1" },
+      operation: { record_id: "record-1", operation_id: "data.other", status: "completed" },
+    });
+    previewMock.mockResolvedValue({
+      preview: { status: "ready", fingerprint: "preview-fp-4" },
+    });
+
+    render(<DataOperationsSection {...sectionProps()} />);
+    fireEvent.change(screen.getByLabelText("Data operation"), {
+      target: { value: "data.example" },
+    });
+    fireEvent.change(screen.getByLabelText("label"), {
+      target: { value: "identity-mismatch" },
+    });
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+    await screen.findByTestId("data-operation-preview-ready");
+    fireEvent.click(screen.getByTestId("data-operation-confirm"));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("data-operation-complete")).toBeNull();
+    expect(screen.getByTestId("data-operation-error")).toHaveTextContent(
+      "CONFIRM_INVALID",
     );
   });
 });

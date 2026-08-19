@@ -68,20 +68,6 @@ from ..code_execution import (
 from ..figure_context import FigureContextError, resolve_figure_ai_context
 from ..sandbox import SandboxUnavailableError
 
-# Typed operations that derive a child data node, and whose records the data
-# drawer resolves by child node id for provenance.
-_DATA_OPERATION_IDS = frozenset(
-    {
-        "data.column.cast",
-        "data.columns.cast",
-        "code.execute",
-        "data.metadata.update",
-        "data.sort",
-        "data.split",
-        "data.recode",
-    }
-)
-
 router = APIRouter()
 
 
@@ -100,6 +86,56 @@ def _public_data_operation_manifest() -> dict[str, Any]:
     if not isinstance(payload.get("operations"), list):
         raise ValueError("data operation manifest has no bounded operations projection")
     return payload
+
+
+def _require_live_data_operation_descriptor(
+    operation_id: str,
+    *,
+    preview_ref: str | None = None,
+    confirm_ref: str | None = None,
+):
+    """Resolve route authority from the one server-owned live manifest."""
+
+    from .. import data_operation_manifest
+
+    manifest = data_operation_manifest.build_data_operation_manifest()
+    descriptor = next(
+        (item for item in manifest.operations if item.operation_id == operation_id),
+        None,
+    )
+    if descriptor is None:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_NOT_ADVERTISED",
+            message="The requested data operation is not advertised by the live server manifest.",
+            details={"operation_id": operation_id},
+        )
+    if preview_ref is not None and descriptor.preview_ref != preview_ref:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_ROUTE_IDENTITY_MISMATCH",
+            message="The route does not match the live data-operation descriptor.",
+            details={"operation_id": operation_id, "expected": descriptor.preview_ref},
+        )
+    if confirm_ref is not None and descriptor.confirm_ref != confirm_ref:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_ROUTE_IDENTITY_MISMATCH",
+            message="The route does not match the live data-operation descriptor.",
+            details={"operation_id": operation_id, "expected": descriptor.confirm_ref},
+        )
+    return descriptor
+
+
+def _live_data_operation_ids() -> frozenset[str]:
+    """Return the record lookup allowlist from the live manifest projection."""
+
+    payload = _public_data_operation_manifest()
+    return frozenset(
+        str(item["operation_id"])
+        for item in payload["operations"]
+        if isinstance(item, dict) and isinstance(item.get("operation_id"), str)
+    )
 
 
 def _resolve_profile(
@@ -829,6 +865,21 @@ def _confirm_direct_data_operation(
     committed.
     """
 
+    descriptor = _require_live_data_operation_descriptor(operation_id)
+    from ..data_operation_manifest import build_data_consumer_runtime_adapter
+
+    try:
+        # Validate the server-owned runtime join before the package effect can
+        # be reached.  Completion validates the same join against typed ports.
+        build_data_consumer_runtime_adapter()
+    except (ImportError, OSError, TypeError, ValueError, RuntimeError) as exc:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_CONSUMER_RUNTIME_UNAVAILABLE",
+            message="The server-owned data-consumer runtime is unavailable; execution was blocked.",
+            details={"operation_id": operation_id, "reason": str(exc)},
+        ) from exc
+
     workbench_root = root / "workbench"
     repository = JsonlSessionRepository(workbench_root)
     events = AgentEventStream(workbench_root)
@@ -840,13 +891,12 @@ def _confirm_direct_data_operation(
         chain_id=chain_id,
         active_head_run_id=source_run_id,
     )
-    local_operation = operation_id in {
-        "data.metadata.update",
-        "data.sort",
-        "data.split",
-        "data.recode",
-    }
-    definition = None if local_operation else OperationRegistry().require(operation_id, "v1")
+    local_operation = descriptor.executor_key.startswith("executor:workbench.data_consumer.")
+    definition = (
+        None
+        if local_operation
+        else OperationRegistry().require(operation_id, descriptor.operation_version)
+    )
     target = {
         "run_id": source_run_id,
         "node_ref": source_node_id,
@@ -886,7 +936,7 @@ def _confirm_direct_data_operation(
             session_id=session_id,
             chain_id=chain_id,
             operation_id=operation_id,
-            operation_version="v1",
+            operation_version=descriptor.operation_version,
             target=target,
             preconditions=preconditions,
             changes=changes,
@@ -963,7 +1013,12 @@ def _complete_direct_data_operation(
 ) -> dict[str, Any]:
     """Bind a package effect to OperationRecord and expose bounded evidence ports."""
 
-    from ..data_operation_manifest import build_data_consumer_runtime_adapter
+    from ..data_operation_manifest import (
+        DataConsumerDerivedPortV1,
+        DataConsumerEvidencePortV1,
+        DataConsumerOutputPortsV1,
+        build_data_consumer_runtime_adapter,
+    )
 
     operation_record_payload = confirmation_result.get("operation_record")
     if not isinstance(operation_record_payload, dict):
@@ -993,7 +1048,10 @@ def _complete_direct_data_operation(
             message="The data operation record has no execution claim.",
             details={"record_id": record_id},
         )
-    effect_payload = effect.to_dict()
+    adapter = build_data_consumer_runtime_adapter()
+    derived_port = DataConsumerDerivedPortV1(effect=effect)
+    evidence_port = DataConsumerEvidencePortV1.from_server(method, evidence)
+    effect_payload = derived_port.to_dict()
     bindings = {
         key: str(value)
         for key, value in effect_payload.items()
@@ -1004,34 +1062,13 @@ def _complete_direct_data_operation(
         execution_key=execution_key,
         bindings=bindings,
     )
-    evidence_payload = {
-        "method": method,
-        **(evidence or {}),
-    }
-    derived_port = {
-        key: value
-        for key, value in effect_payload.items()
-        if key not in {"group_artifacts"}
-    }
-    outputs = {
-        "ports": {
-            "derived": derived_port,
-            "operation_record": {"record_id": record_id},
-            "evidence": evidence_payload,
-        },
-        "consumer_slots": {
-            "data.agent": {"record_id": record_id, "port": "derived"},
-            "data.notebook": {"record_id": record_id, "port": "derived"},
-            "data.report": {"record_id": record_id, "port": "evidence"},
-        },
-    }
-    adapter = build_data_consumer_runtime_adapter()
-    adapter.adapt_operation_record(
-        {
-            **record.to_dict(),
-            "outputs": outputs,
-        }
+    output_ports = DataConsumerOutputPortsV1(
+        operation_record=record,
+        derived=derived_port,
+        evidence=evidence_port,
     )
+    adapter.adapt_operation_record(record, output_ports)
+    outputs = output_ports.to_dict(catalog_digest=adapter.catalog_digest)
     record = store.append_status(
         record_id,
         "completed",
@@ -1602,6 +1639,10 @@ def confirm_feature_recipe_route(
 @router.post("/data-operations/transform/preview")
 def preview_data_transform_route(project_root: str, body: DataTransformRequest) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        f"data.{body.operation}",
+        preview_ref="/data-operations/transform/preview",
+    )
     spec = _data_transform_spec(body)
     preview = _data_transform_preview_or_error(root, spec, confirm=False)
     return {"spec": spec.to_dict(), "preview": preview.to_dict()}
@@ -1613,6 +1654,10 @@ def confirm_data_transform_route(
     body: DataTransformConfirmRequest,
 ) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        f"data.{body.operation}",
+        confirm_ref="/data-operations/transform/confirm",
+    )
     spec = _data_transform_spec(body)
     preview = _data_transform_preview_or_error(root, spec, confirm=True)
     if preview.fingerprint != body.preview_fingerprint:
@@ -1971,7 +2016,7 @@ def get_column_cast_operation_by_child_node(
     matches = [
         record
         for record in store.list_records()
-        if record.operation_id in _DATA_OPERATION_IDS
+        if record.operation_id in _live_data_operation_ids()
         and record.execution.get("bindings", {}).get("data_child_node_id") == child_node_id
     ]
     if not matches:
@@ -1997,7 +2042,7 @@ def get_column_cast_operation(record_id: str, project_root: str) -> dict[str, An
             message="The typed data operation record was not found.",
             details={"record_id": record_id},
         ) from exc
-    if record.operation_id not in _DATA_OPERATION_IDS:
+    if record.operation_id not in _live_data_operation_ids():
         raise WorkbenchAPIError(
             status_code=404,
             code="DATA_OPERATION_NOT_FOUND",

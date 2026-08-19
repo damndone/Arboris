@@ -11,8 +11,9 @@ import re
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from workbench.agent.operations import OperationRegistry
+from workbench.agent.operations import OperationRecord, OperationRegistry
 from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+from workbench.canonical import sha256_canonical
 from workbench.contracts.agent.planning import (
     DraftAgentPlanV1,
     PlanEffectV1,
@@ -23,6 +24,7 @@ from workbench.contracts.common.provider import (
     AdapterDeclarationV1,
     ExposurePathRefV1,
     ProviderContributionV1,
+    is_opaque_executor_ref,
 )
 
 
@@ -36,13 +38,14 @@ _DATA_OPERATION_IDS = (
     "data.merge",
     "data.metadata.update",
     "data.recode",
+    "data.rename",
     "data.reshape",
     "data.sort",
     "data.split",
     "data.subset",
 )
 _LOCAL_OPERATION_IDS = frozenset(
-    {"data.metadata.update", "data.sort", "data.split", "data.recode"}
+    {"data.metadata.update", "data.sort", "data.split", "data.recode", "data.rename"}
 )
 _NATIVE_INTERCHANGE_IDS = ("data.interchange.sav", "data.interchange.zsav", "data.interchange.dta")
 _IDENTITY_FIELDS = ("source_run_id", "source_node_id", "source_artifact_id")
@@ -68,6 +71,7 @@ _OPERATION_ROUTES = {
     "data.merge": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.metadata.update": ("/data-operations/metadata/preview", "/data-operations/metadata/confirm"),
     "data.recode": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
+    "data.rename": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.reshape": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.sort": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.split": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
@@ -621,6 +625,7 @@ def _clarifications(operation_id: str) -> tuple[str, ...]:
             "Declare typed variable/value labels, measurement role, missing values, weight, and split/group semantics.",
         ),
         "data.recode": ("Declare bounded batch recode rules and an explicit unmatched-value policy.",),
+        "data.rename": ("Declare a closed source-to-output column mapping without collisions.",),
         "data.reshape": ("Declare the reshape direction and its identity/value columns.",),
         "data.sort": ("Declare stable sort keys and direction for each key.",),
         "data.split": ("Declare split/group columns and whether the result is split-file or grouped.",),
@@ -721,8 +726,116 @@ def build_data_operation_manifest() -> DataOperationManifestV1:
 
 
 @dataclass(frozen=True)
+class DataConsumerDerivedPortV1:
+    """A derived port that can only be created from a server-owned effect."""
+
+    effect: object
+
+    def __post_init__(self) -> None:
+        from workbench.data_operations import (
+            DataColumnCastEffect,
+            DataColumnsCastEffect,
+            FeatureRecipeEffect,
+        )
+        from workbench.metadata import MetadataMutationEffectV1
+
+        allowed_effects = (
+            DataColumnCastEffect,
+            DataColumnsCastEffect,
+            FeatureRecipeEffect,
+            MetadataMutationEffectV1,
+        )
+        if type(self.effect) not in allowed_effects:
+            raise TypeError("derived port requires a server-owned typed effect")
+        payload = self.effect.to_dict()
+        if type(payload) is not dict:
+            raise TypeError("server-owned effect did not produce a typed payload")
+        if not isinstance(payload.get("execution_key"), str) or not payload["execution_key"]:
+            raise ValueError("derived port effect has no execution_key")
+        if not isinstance(payload.get("child_node_id"), str) or not payload["child_node_id"]:
+            raise ValueError("derived port effect has no child_node_id")
+        if not any(
+            isinstance(payload.get(field), str) and payload[field]
+            for field in ("artifact_id", "metadata_artifact_id")
+        ):
+            raise ValueError("derived port effect has no artifact identity")
+
+    @property
+    def execution_key(self) -> str:
+        return str(self.effect.to_dict()["execution_key"])
+
+    def to_dict(self) -> dict[str, object]:
+        return dict(self.effect.to_dict())
+
+
+@dataclass(frozen=True)
+class DataConsumerEvidencePortV1:
+    """Evidence port constructed from the server's bounded evidence object."""
+
+    method: str
+    evidence: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if type(self.method) is not str or not self.method.strip():
+            raise ValueError("evidence port method must be a non-empty string")
+        if not isinstance(self.evidence, Mapping):
+            raise TypeError("evidence port requires a typed evidence mapping")
+        object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
+
+    @classmethod
+    def from_server(cls, method: str, evidence: Mapping[str, object] | None) -> "DataConsumerEvidencePortV1":
+        if evidence is not None and not isinstance(evidence, Mapping):
+            raise TypeError("server evidence must be a mapping")
+        return cls(method=method, evidence=dict(evidence or {}))
+
+    def to_dict(self) -> dict[str, object]:
+        return {"method": self.method, **dict(self.evidence)}
+
+
+@dataclass(frozen=True)
+class DataConsumerOutputPortsV1:
+    """The complete typed output projection for one OperationRecord."""
+
+    operation_record: OperationRecord
+    derived: DataConsumerDerivedPortV1
+    evidence: DataConsumerEvidencePortV1
+
+    def __post_init__(self) -> None:
+        if type(self.operation_record) is not OperationRecord:
+            raise TypeError("output ports require a server-owned typed OperationRecord")
+        if type(self.derived) is not DataConsumerDerivedPortV1:
+            raise TypeError("output ports require a typed derived port")
+        if type(self.evidence) is not DataConsumerEvidencePortV1:
+            raise TypeError("output ports require a typed evidence port")
+        if self.derived.to_dict().get("execution_key") != self.operation_record.execution.get(
+            "execution_key"
+        ):
+            raise ValueError("derived port execution key does not match OperationRecord claim")
+
+    def to_dict(self, *, catalog_digest: str) -> dict[str, object]:
+        record = self.operation_record
+        return {
+            "ports": {
+                "derived": self.derived.to_dict(),
+                "operation_record": {
+                    "record_id": record.record_id,
+                    "operation_id": record.operation_id,
+                    "operation_version": record.operation_version,
+                },
+                "evidence": self.evidence.to_dict(),
+            },
+            "consumer_slots": {
+                "data.agent": {"record_id": record.record_id, "port": "derived"},
+                "data.notebook": {"record_id": record.record_id, "port": "derived"},
+                "data.report": {"record_id": record.record_id, "port": "evidence"},
+            },
+            "catalog_digest": catalog_digest,
+        }
+
+
+@dataclass(frozen=True)
 class DataConsumerRuntimeAdapterV1:
-    """Package-owned execution/evidence adapter joined to the live catalog."""
+    """Package-owned adapter joined only from the server's typed catalog."""
 
     provider_id: str
     adapter_id: str
@@ -732,58 +845,81 @@ class DataConsumerRuntimeAdapterV1:
     output_ports: tuple[str, ...]
     operation_ids: tuple[str, ...]
 
-    def adapt_operation_record(self, record: Mapping[str, object]) -> dict[str, object]:
-        if not isinstance(record, Mapping):
-            raise ValueError("operation record must be an object")
-        record_id = record.get("record_id")
-        operation_id = record.get("operation_id")
-        outputs = record.get("outputs")
-        if not isinstance(record_id, str) or not record_id:
-            raise ValueError("operation record has no record_id")
-        if operation_id not in self.operation_ids:
-            raise ValueError(f"operation record operation is not in the live manifest: {operation_id!r}")
-        if not isinstance(outputs, Mapping):
-            raise ValueError("operation record has no outputs projection")
-        ports = outputs.get("ports")
-        if not isinstance(ports, Mapping):
-            raise ValueError("operation record outputs have no ports")
-        missing_ports = set(self.output_ports) - set(ports)
-        if missing_ports:
-            raise ValueError(f"operation record is missing output ports: {sorted(missing_ports)}")
-        consumer_slots = outputs.get("consumer_slots")
-        if not isinstance(consumer_slots, Mapping) or not set(self.consumer_slots) <= set(consumer_slots):
-            raise ValueError("operation record is missing consumer slot projections")
-        return {
-            "record_id": record_id,
-            "operation_id": operation_id,
-            "catalog_digest": self.catalog_digest,
-            "ports": dict(ports),
-            "consumer_slots": dict(consumer_slots),
-        }
+    def __post_init__(self) -> None:
+        if self.provider_id != "workbench.data_consumer":
+            raise ValueError("runtime adapter provider is not server-owned")
+        if self.adapter_id != "workbench.data_consumer.adapter":
+            raise ValueError("runtime adapter identity is not server-owned")
+        if type(self.catalog_digest) is not str or _SHA256_RE.fullmatch(self.catalog_digest) is None:
+            raise ValueError("catalog digest is not a canonical SHA-256 digest")
+        if not is_opaque_executor_ref(self.executor_ref):
+            raise ValueError("executor reference must be an opaque server-owned executor ID")
+        if self.executor_ref != "executor:workbench.data_consumer.adapter":
+            raise ValueError("executor reference is not the server-owned data-consumer executor")
+        if self.consumer_slots != ("data.agent", "data.notebook", "data.report"):
+            raise ValueError("consumer slots are not the server-owned typed slots")
+        if self.output_ports != ("derived", "operation_record", "evidence"):
+            raise ValueError("output ports are not the server-owned typed ports")
+        if type(self.operation_ids) is not tuple or not self.operation_ids:
+            raise ValueError("runtime adapter operation IDs are invalid")
+        if any(type(operation_id) is not str or not operation_id for operation_id in self.operation_ids):
+            raise ValueError("runtime adapter operation IDs are invalid")
+        if len(set(self.operation_ids)) != len(self.operation_ids):
+            raise ValueError("runtime adapter operation IDs are duplicated")
+
+    def adapt_operation_record(
+        self,
+        record: object,
+        outputs: object | None = None,
+    ) -> DataConsumerOutputPortsV1:
+        if type(record) is not OperationRecord:
+            raise TypeError("server-owned typed OperationRecord is required")
+        if type(outputs) is not DataConsumerOutputPortsV1:
+            raise TypeError("server-owned typed output ports are required")
+        if outputs.operation_record is not record:
+            raise ValueError("output ports are bound to a different OperationRecord")
+        if not record.record_id:
+            raise ValueError("OperationRecord has no record_id")
+        if record.operation_id not in self.operation_ids:
+            raise ValueError(
+                "OperationRecord operation is not in the live server manifest: "
+                f"{record.operation_id!r}"
+            )
+        if outputs.derived.to_dict().get("execution_key") != record.execution.get("execution_key"):
+            raise ValueError("derived output is not bound to the OperationRecord execution")
+        return outputs
 
 
 def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
     """Join the package executor with the server-loaded provider catalog."""
 
-    from workbench.providers.catalog import load_builtin_catalog
+    from workbench.providers.catalog import ProviderCatalogV1, load_builtin_catalog
 
     catalog = load_builtin_catalog()
-    provider = next(
-        (item for item in catalog.providers if item.provider_id == "workbench.data_consumer"),
-        None,
-    )
-    if provider is None:
+    if type(catalog) is not ProviderCatalogV1:
+        raise TypeError("runtime adapter requires the server-owned typed provider catalog")
+    if catalog.catalog_digest != sha256_canonical(catalog.digest_payload()):
+        raise ValueError("server provider catalog digest does not match its typed contents")
+    providers = [
+        item
+        for item in catalog.providers
+        if type(item) is ProviderContributionV1
+        and item.provider_id == "workbench.data_consumer"
+    ]
+    if len(providers) != 1:
+        raise RuntimeError("workbench.data_consumer is absent or duplicated in the live provider catalog")
+    provider = providers[0]
+    declarations = [
+        item
+        for item in provider.adapter_declarations
+        if type(item) is AdapterDeclarationV1
+        and item.adapter_id == "workbench.data_consumer.adapter"
+    ]
+    if len(declarations) != 1:
         raise RuntimeError("workbench.data_consumer is absent from the live provider catalog")
-    declaration = next(
-        (
-            item
-            for item in provider.adapter_declarations
-            if item.adapter_id == "workbench.data_consumer.adapter"
-        ),
-        None,
-    )
-    if declaration is None:
-        raise RuntimeError("workbench.data_consumer runtime adapter declaration is absent")
+    declaration = declarations[0]
+    if declaration.executor_ref != "executor:workbench.data_consumer.adapter":
+        raise ValueError("live provider catalog points at an invalid data-consumer executor")
     manifest = build_data_operation_manifest()
     return DataConsumerRuntimeAdapterV1(
         provider_id=provider.provider_id,
@@ -969,6 +1105,9 @@ __all__ = [
     "DataOperationManifestV1",
     "DataOperationUnavailableV1",
     "DataPortV1",
+    "DataConsumerDerivedPortV1",
+    "DataConsumerEvidencePortV1",
+    "DataConsumerOutputPortsV1",
     "DataConsumerRuntimeAdapterV1",
     "DraftAgentNotebookFixture",
     "ReplayContractV1",

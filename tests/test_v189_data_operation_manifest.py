@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from workbench.agent.operations import OperationRegistry
 from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
 from workbench.contracts.agent.planning import DraftAgentPlanV1
@@ -18,6 +20,7 @@ EXPECTED_OPERATION_IDS = (
     "data.merge",
     "data.metadata.update",
     "data.recode",
+    "data.rename",
     "data.reshape",
     "data.sort",
     "data.split",
@@ -45,7 +48,13 @@ def test_manifest_is_derived_from_the_single_live_data_operation_surface() -> No
     registry = OperationRegistry()
     for operation_id in EXPECTED_OPERATION_IDS:
         descriptor = descriptors[operation_id]
-        if operation_id in {"data.metadata.update", "data.sort", "data.split", "data.recode"}:
+        if operation_id in {
+            "data.metadata.update",
+            "data.sort",
+            "data.split",
+            "data.recode",
+            "data.rename",
+        }:
             assert descriptor.operation_version == "v1"
             assert descriptor.effect_level == "mutation"
             assert descriptor.risk_level == "mutating"
@@ -337,6 +346,69 @@ def test_package_runtime_adapter_joins_live_catalog_and_exposes_record_evidence_
     assert {"data.agent", "data.notebook", "data.report"} <= set(adapter.consumer_slots)
     assert {"derived", "operation_record", "evidence"} <= set(adapter.output_ports)
     assert callable(adapter.adapt_operation_record)
+
+
+def test_package_runtime_adapter_rejects_caller_authored_operation_record_mapping() -> None:
+    from workbench.data_operation_manifest import build_data_consumer_runtime_adapter
+
+    adapter = build_data_consumer_runtime_adapter()
+
+    with pytest.raises((TypeError, ValueError), match="typed|OperationRecord|server"):
+        adapter.adapt_operation_record(
+            {
+                "record_id": "caller-record",
+                "operation_id": "data.sort",
+                "outputs": {
+                    "ports": {
+                        "derived": {"child_node_id": "caller-child"},
+                        "operation_record": {"record_id": "caller-record"},
+                        "evidence": {"method": "caller-authored"},
+                    },
+                    "consumer_slots": {
+                        "data.agent": {"record_id": "caller-record"},
+                        "data.notebook": {"record_id": "caller-record"},
+                        "data.report": {"record_id": "caller-record"},
+                    },
+                },
+            }
+        )
+
+
+def test_package_runtime_adapter_rejects_invalid_executor_identity() -> None:
+    from workbench.data_operation_manifest import DataConsumerRuntimeAdapterV1
+
+    with pytest.raises(ValueError, match="executor"):
+        DataConsumerRuntimeAdapterV1(
+            provider_id="workbench.data_consumer",
+            adapter_id="workbench.data_consumer.adapter",
+            catalog_digest="a" * 64,
+            executor_ref="python:caller.authored",
+            consumer_slots=("data.agent",),
+            output_ports=("derived", "operation_record", "evidence"),
+            operation_ids=("data.sort",),
+        )
+
+
+def test_package_runtime_adapter_rejects_duck_typed_fake_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    import workbench.providers.catalog as catalog_module
+    from workbench.data_operation_manifest import build_data_consumer_runtime_adapter
+
+    class FakeDeclaration:
+        adapter_id = "workbench.data_consumer.adapter"
+        executor_ref = "executor:workbench.data_consumer.adapter"
+
+    class FakeProvider:
+        provider_id = "workbench.data_consumer"
+        adapter_declarations = (FakeDeclaration(),)
+
+    class FakeCatalog:
+        providers = (FakeProvider(),)
+        catalog_digest = "fake-catalog"
+
+    monkeypatch.setattr(catalog_module, "load_builtin_catalog", lambda: FakeCatalog())
+
+    with pytest.raises((TypeError, ValueError), match="catalog|server-owned|typed"):
+        build_data_consumer_runtime_adapter()
 
 
 def test_catalog_fixture_digest_is_recomputed_from_live_provider_catalog() -> None:
