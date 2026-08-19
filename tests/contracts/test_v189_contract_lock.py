@@ -90,6 +90,7 @@ from workbench.contracts.agent.planning import (
     PlanEffectV1,
     PlanRiskLevelV1,
     ServerDraftPlanReferenceV1,
+    ServerCompilationRecordReferenceV1,
     ServerCompilationRecordIssuerV1,
 )
 from workbench.contracts.agent.execution_admission import (
@@ -1241,11 +1242,15 @@ def _task3_record(
     record_id: str = "compilation-record:1",
     policy_snapshot_ref: str = "policy:snapshot:1",
 ) -> CompilationRecordV1:
-    issuer = ServerCompilationRecordIssuerV1()
-    draft_ref = issuer.register_draft(_task3_plan(policy_snapshot_ref=policy_snapshot_ref))
-    compiled = issuer.compile_workflow(draft_ref)
-    return issuer.compile_record(
-        compiled,
+    """Build a non-authoritative record fixture from pure contract data.
+
+    The retired C0 issuer is intentionally not used here.  Tests that need a
+    resolved runtime record install the explicit fixture below; production
+    stores remain fail-closed until a real supervisor-backed host is wired.
+    """
+
+    return CompilationRecordV1.from_compiled(
+        _task3_compiled(policy_snapshot_ref=policy_snapshot_ref),
         record_id=record_id,
         principal_ref="principal:user:1",
         session_ref="session:1",
@@ -1254,6 +1259,40 @@ def _task3_record(
         created_at="2026-08-15T17:00:00+00:00",
         expires_at="2026-08-15T18:00:00+00:00",
     )
+
+
+def _install_non_authoritative_record_fixture(
+    store: CompilationRecordStoreV1,
+    record: CompilationRecordV1,
+) -> ServerCompilationRecordReferenceV1:
+    """Install an in-test record resolver without changing production code.
+
+    This is deliberately a test-only fixture, not a host authority.  It
+    supplies the already-built record to admission-contract tests while the
+    production store rejects all local issuance and resolution attempts.
+    """
+
+    server_ref = ServerCompilationRecordReferenceV1(
+        record_id=record.record_id,
+        record_digest=record.record_digest,
+        semantic_plan_hash=record.semantic_plan_hash,
+    )
+
+    def resolve_client_reference(
+        reference: CompilationRecordReferenceV1,
+    ) -> tuple[CompilationRecordV1, ServerCompilationRecordReferenceV1]:
+        if reference != record.reference:
+            raise ContractError("fixture record is unresolved")
+        return record, server_ref
+
+    def resolve(reference: ServerCompilationRecordReferenceV1) -> CompilationRecordV1:
+        if reference != server_ref:
+            raise ContractError("fixture server reference is unresolved")
+        return record
+
+    store.resolve_client_reference = resolve_client_reference  # type: ignore[method-assign]
+    store.resolve = resolve  # type: ignore[method-assign]
+    return server_ref
 
 
 def _task3_confirmation(record: CompilationRecordV1) -> ConfirmationBindingV1:
@@ -1484,10 +1523,15 @@ def test_confirmation_is_invalid_after_method_risk_or_policy_change() -> None:
 def test_runtime_authority_is_a_server_compilation_record_reference() -> None:
     record = _task3_record()
     store = CompilationRecordStoreV1()
-    server_ref = ServerCompilationRecordIssuerV1(store).issue(record)
+    server_ref = ServerCompilationRecordReferenceV1(
+        record_id=record.record_id,
+        record_digest=record.record_digest,
+        semantic_plan_hash=record.semantic_plan_hash,
+    )
     wire_ref = CompilationRecordReferenceV1.from_dict(server_ref.to_dict())
 
-    assert store.resolve(server_ref) == record
+    with pytest.raises(ContractError, match="host|authority"):
+        store.resolve(server_ref)
     with pytest.raises(ContractError, match="server"):
         store.resolve(wire_ref)
     with pytest.raises(ContractError, match="server"):
@@ -1514,8 +1558,7 @@ def test_runtime_rejects_any_request_without_execution_admission_receipt() -> No
     confirmation = _task3_confirmation(record)
     request = _task3_admission_request(record, confirmation)
     store = CompilationRecordStoreV1()
-    issuer = ServerCompilationRecordIssuerV1(store)
-    issuer.issue(record)
+    _install_non_authoritative_record_fixture(store, record)
     gate = ExecutionAdmissionGateV1(
         store,
         method_snapshot_ref=confirmation.method_snapshot_ref,
@@ -1745,7 +1788,7 @@ def test_admission_receipt_rejects_scope_budget_expiry_and_tampering() -> None:
 
     def gate_for(record_to_issue: CompilationRecordV1 = record) -> tuple[ExecutionAdmissionGateV1, ConfirmationBindingV1]:
         store = CompilationRecordStoreV1()
-        ServerCompilationRecordIssuerV1(store).issue(record_to_issue)
+        _install_non_authoritative_record_fixture(store, record_to_issue)
         gate = ExecutionAdmissionGateV1(
             store,
             method_snapshot_ref=confirmation.method_snapshot_ref,
@@ -1865,7 +1908,7 @@ def test_execution_admission_default_gate_clock_rejects_expired_receipt() -> Non
     confirmation = _task3_confirmation(record)
     request = _task3_admission_request(record, confirmation)
     store = CompilationRecordStoreV1()
-    ServerCompilationRecordIssuerV1(store).issue(record)
+    _install_non_authoritative_record_fixture(store, record)
     gate = ExecutionAdmissionGateV1(
         store,
         method_snapshot_ref=confirmation.method_snapshot_ref,
@@ -1888,7 +1931,7 @@ def test_admission_rejects_pre_confirmation_request_and_changed_server_snapshots
     confirmation = _task3_confirmation(record)
     request = _task3_admission_request(record, confirmation)
     store = CompilationRecordStoreV1()
-    ServerCompilationRecordIssuerV1(store).issue(record)
+    _install_non_authoritative_record_fixture(store, record)
 
     current_gate = ExecutionAdmissionGateV1(
         store,
@@ -1921,7 +1964,7 @@ def test_admission_and_receipt_bind_execution_instance_and_artifact_refs() -> No
     confirmation = _task3_confirmation(record)
     request = _task3_admission_request(record, confirmation)
     store = CompilationRecordStoreV1()
-    ServerCompilationRecordIssuerV1(store).issue(record)
+    _install_non_authoritative_record_fixture(store, record)
     gate = ExecutionAdmissionGateV1(
         store,
         method_snapshot_ref=confirmation.method_snapshot_ref,
@@ -2116,24 +2159,10 @@ def test_compilation_store_rejects_client_record_without_server_compiler_authori
         expires_at="2026-08-15T18:00:00+00:00",
     )
     store = CompilationRecordStoreV1()
-    issuer = ServerCompilationRecordIssuerV1(store)
     with pytest.raises(ContractError, match="authority|compiler"):
         store.issue(client_record)
     with pytest.raises(ContractError, match="authority|compiler"):
-        issuer.issue(client_record)
-    server_draft_ref = issuer.register_draft(_task3_plan())
-    server_compiled = issuer.compile_workflow(server_draft_ref)
-    server_record = issuer.compile_record(
-        server_compiled,
-        record_id="server-record:1",
-        principal_ref="principal:user:1",
-        session_ref="session:1",
-        project_ref="project:1",
-        source_commitments={"dataset": "d" * 64},
-        created_at="2026-08-15T17:00:00+00:00",
-        expires_at="2026-08-15T18:00:00+00:00",
-    )
-    assert store.resolve(issuer.issue(server_record)) == server_record
+        ServerCompilationRecordIssuerV1()
 
 
 def test_compilation_wire_and_private_helper_cannot_mint_server_authority() -> None:
@@ -2155,22 +2184,14 @@ def test_compilation_wire_and_private_helper_cannot_mint_server_authority() -> N
             _compiler_capability=object(),
             **helper_kwargs,
         )
-    issuer = ServerCompilationRecordIssuerV1()
-    assert not hasattr(issuer, "_ServerCompilationRecordIssuerV1__compiler_capability")
+    with pytest.raises(ContractError, match="authority|host|receipt"):
+        ServerCompilationRecordIssuerV1()
+
+    issuer = object.__new__(ServerCompilationRecordIssuerV1)
     with pytest.raises(ContractError, match="authority|compiler|capability"):
         issuer.compile_record(compiled_from_wire, **helper_kwargs)
     with pytest.raises(ContractError, match="authority|compiler|draft|registration"):
         issuer.compile_workflow(compiled_from_wire)
-
-    server_draft_ref = issuer.register_draft(_task3_plan())
-    with pytest.raises(ContractError, match="compiled|input|authority"):
-        issuer.compile_workflow(server_draft_ref, compiled_from_wire)
-    server_compiled = issuer.compile_workflow(server_draft_ref)
-    server_record = issuer.compile_record(server_compiled, **helper_kwargs)
-    assert server_record.semantic_plan_hash == compiled_from_wire.semantic_plan_hash
-    parsed_draft_ref = ServerDraftPlanReferenceV1.from_dict(server_draft_ref.to_dict())
-    with pytest.raises(ContractError, match="authority|draft|registration"):
-        issuer.compile_workflow(parsed_draft_ref)
 
     parsed_record = CompilationRecordV1.from_dict(_fixture("compilation_record.json"))
     with pytest.raises(ContractError, match="authority|compiler"):
@@ -2326,30 +2347,13 @@ def test_server_draft_registration_has_no_reflectable_private_mint_helper() -> N
     assert not hasattr(ServerDraftPlanReferenceV1, "_issue")
 
 
-def test_server_draft_registration_allocates_unique_refs_concurrently() -> None:
-    issuer = ServerCompilationRecordIssuerV1()
-    worker_count = 32
-    barrier = Barrier(worker_count)
-    results: list[ServerDraftPlanReferenceV1 | None] = [None] * worker_count
-    errors: list[BaseException] = []
+def test_retired_server_draft_registration_fails_closed() -> None:
+    with pytest.raises(ContractError, match="authority|host|receipt"):
+        ServerCompilationRecordIssuerV1()
 
-    def register(index: int) -> None:
-        try:
-            barrier.wait()
-            results[index] = issuer.register_draft(_task3_plan())
-        except BaseException as exc:  # pragma: no cover - assertion below reports thread failures
-            errors.append(exc)
-
-    threads = [Thread(target=register, args=(index,)) for index in range(worker_count)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    assert errors == []
-    refs = [result.draft_ref for result in results if result is not None]
-    assert len(refs) == worker_count
-    assert len(set(refs)) == worker_count
+    forged_issuer = object.__new__(ServerCompilationRecordIssuerV1)
+    with pytest.raises(ContractError, match="authority|host|receipt"):
+        forged_issuer.register_draft(_task3_plan())
 
 
 def test_egress_materialization_result_requires_registered_server_store() -> None:
@@ -2430,7 +2434,7 @@ def test_confirmation_admission_requires_current_server_confirmation_authority()
     confirmation = _task3_confirmation(record)
     request = _task3_admission_request(record, confirmation)
     record_store = CompilationRecordStoreV1()
-    ServerCompilationRecordIssuerV1(record_store).issue(record)
+    _install_non_authoritative_record_fixture(record_store, record)
     confirmation_store = ConfirmationBindingStoreV1()
     gate = ExecutionAdmissionGateV1(
         record_store,
@@ -2859,21 +2863,9 @@ def test_egress_rejects_mutated_materialization_projection_even_with_new_digest(
         issuer.issue(gateway)
 
 
-def test_server_compiler_owns_compiler_provenance_and_generates_identity() -> None:
-    issuer = ServerCompilationRecordIssuerV1()
-    draft_reference = issuer.register_draft(_task3_plan())
-    with pytest.raises(ContractError, match="provenance|compiler|identity"):
-        issuer.compile_workflow(
-            draft_reference,
-            compiler_version="attacker-compiler",
-            server_execution_identity="attacker-execution",
-            preview_fingerprint="f" * 64,
-            plan_diff={"effect": "model_fit", "data_impact": "read_dataset"},
-        )
-
-    compiled = issuer.compile_workflow(draft_reference)
-    assert compiled.compiler_version == "compiler:1.8.9"
-    assert compiled.server_execution_identity != "attacker-execution"
+def test_retired_server_compiler_requires_host_compiler_integration() -> None:
+    with pytest.raises(ContractError, match="provenance|compiler|host|authority"):
+        ServerCompilationRecordIssuerV1()
 
 
 def test_plan_wire_requires_intent_ref_namespace_and_allowlisted_effect() -> None:
@@ -2885,16 +2877,15 @@ def test_plan_wire_requires_intent_ref_namespace_and_allowlisted_effect() -> Non
         replace(_task3_plan(), effect="please delete every dataset")
 
 
-def test_server_compiler_rejects_mutated_authorized_compilation_provenance() -> None:
-    issuer = ServerCompilationRecordIssuerV1()
-    draft_reference = issuer.register_draft(_task3_plan())
-    compiled = issuer.compile_workflow(draft_reference)
+def test_server_compiler_rejects_mutated_compilation_without_host_authority() -> None:
+    compiled = _task3_compiled()
     object.__setattr__(compiled, "compiler_version", "attacker-compiler")
     object.__setattr__(compiled, "server_execution_identity", "attacker-execution")
 
     with pytest.raises(ContractError, match="authority|compiler|provenance|mutation"):
-        issuer.compile_record(
+        CompilationRecordV1._from_server_compiled(
             compiled,
+            _compiler_capability=object(),
             record_id="mutation-probe:1",
             principal_ref="principal:user:1",
             session_ref="session:1",
@@ -2914,8 +2905,8 @@ def test_plan_wire_and_register_reject_natural_language_intent_and_effect() -> N
 
     draft = _task3_plan()
     object.__setattr__(draft, "effect", "please delete every dataset")
-    with pytest.raises(ContractError, match="effect|enum|allowlist|draft"):
-        ServerCompilationRecordIssuerV1().register_draft(draft)
+    with pytest.raises(ContractError, match="effect|enum|allowlist|draft|host|authority"):
+        ServerCompilationRecordIssuerV1()
 
 
 def test_holdout_internal_snapshot_reflection_cannot_rollback_canonical_state() -> None:
