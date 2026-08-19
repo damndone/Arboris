@@ -4,6 +4,7 @@ import {
   FamilyEvidence,
   type FamilyModelResult,
 } from "./FamilyEvidence";
+import type { EvidenceViewModel } from "./reportEvidence";
 
 const ordinalResult = {
   contract: "workbench.ordinal_logit.result.v1",
@@ -165,5 +166,28 @@ describe("FamilyEvidence", () => {
     expect(screen.getByTestId("family-evidence-survival_cox_1")).toHaveTextContent(
       "generic coefficient table remains available",
     );
+  });
+
+  it("renders the typed persisted projection status without filling unavailable values", () => {
+    const evidence: EvidenceViewModel = {
+      projectionId: "projection:report:result-1",
+      consumerId: "report",
+      consumerVersion: "1.0",
+      artifactRef: "artifact-1",
+      envelopeRef: "evidence-envelope:result-1",
+      envelopeDigest: "a".repeat(64),
+      status: "degraded",
+      executionStatus: "completed",
+      availability: "available",
+      completenessStatus: "degraded",
+      facts: [{ factId: "fact-mean", statisticId: "sample-mean", value: 2, unit: "outcome-unit" }],
+      sections: [{ key: "missing-interval", label: "Confidence interval", status: "unavailable" }],
+    };
+
+    render(<FamilyEvidence modelResults={[]} evidence={evidence} />);
+
+    expect(screen.getByTestId("typed-evidence-projection:report:result-1")).toHaveTextContent("DEGRADED");
+    expect(screen.getByTestId("typed-evidence-projection:report:result-1")).toHaveTextContent("2");
+    expect(screen.getByTestId("typed-evidence-projection:report:result-1")).toHaveTextContent("UNAVAILABLE");
   });
 });

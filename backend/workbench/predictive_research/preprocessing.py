@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import json
 from typing import Any
 
 import pandas as pd
@@ -114,4 +116,95 @@ class FoldPreprocessingKernel:
             fit_scope=fit_scope,
             state=state,
             transformers=transformers,
+        )
+
+
+@dataclass(frozen=True)
+class ClassificationPreprocessingStepV1:
+    step_id: str
+    kind: str
+    columns: tuple[str, ...]
+    supports_weight: bool
+    seed: int = 0
+    recipe_version: str = "1.0"
+
+
+@dataclass(frozen=True)
+class ClassificationFittedPreprocessorV1:
+    steps: tuple[ClassificationPreprocessingStepV1, ...]
+    fit_row_refs: tuple[str, ...]
+    state: dict[str, dict[str, Any]]
+    receipt: dict[str, Any]
+
+    def transform(self, frame: Any, *, row_refs: tuple[str, ...] | list[str]) -> pd.DataFrame:
+        result = frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame(frame)
+        if len(result) != len(row_refs):
+            raise ContractError("CLASSIFICATION_PREPROCESSING_ALIGNMENT", "row_refs must align with transform rows")
+        for step in self.steps:
+            if step.kind not in {"mean_impute", "standard_scale"}:
+                raise ContractError("CLASSIFICATION_PREPROCESSING_KIND_UNSUPPORTED", step.kind)
+            for column in step.columns:
+                key = f"{step.step_id}:{column}"
+                if key not in self.state or column not in result.columns:
+                    raise ContractError("CLASSIFICATION_PREPROCESSING_STATE_MISSING", key)
+                values = pd.to_numeric(result[column], errors="coerce")
+                if step.kind == "mean_impute":
+                    result[column] = values.fillna(self.state[key]["mean"])
+                else:
+                    result[column] = (values - self.state[key]["mean"]) / (self.state[key]["scale"] or 1.0)
+        return result
+
+
+class ClassificationFoldPreprocessingV1:
+    """A small fold-local transformer with an auditable fit-row receipt."""
+
+    def __init__(self, *, steps: tuple[ClassificationPreprocessingStepV1, ...], seed: int = 0):
+        self.steps = tuple(steps)
+        self.seed = seed
+
+    def fit(
+        self,
+        frame: Any,
+        *,
+        fit_row_refs: tuple[str, ...] | list[str],
+        fit_rows: dict[str, dict[str, Any]],
+        weight_name: str | None = None,
+    ) -> ClassificationFittedPreprocessorV1:
+        refs = tuple(fit_row_refs)
+        if not refs or len(set(refs)) != len(refs) or set(refs) != set(fit_rows):
+            raise ContractError("CLASSIFICATION_PREPROCESSING_FIT_ROWS_INVALID", "fit_row_refs must exactly identify fit_rows")
+        for step in self.steps:
+            if not step.step_id.strip() or not step.columns:
+                raise ContractError("CLASSIFICATION_PREPROCESSING_CONTRACT_INVALID", "step id and columns are required")
+            if weight_name is not None and not step.supports_weight:
+                raise ContractError("CLASSIFICATION_WEIGHT_UNSUPPORTED", f"step {step.step_id!r} ignores weights")
+        fit_frame = pd.DataFrame([fit_rows[ref] for ref in refs])
+        state: dict[str, dict[str, Any]] = {}
+        output_schema: list[str] = []
+        for step in self.steps:
+            if step.kind not in {"mean_impute", "standard_scale"}:
+                raise ContractError("CLASSIFICATION_PREPROCESSING_KIND_UNSUPPORTED", step.kind)
+            for column in step.columns:
+                if column not in fit_frame.columns:
+                    raise ContractError("CLASSIFICATION_PREPROCESSING_COLUMN_MISSING", column)
+                values = pd.to_numeric(fit_frame[column], errors="coerce")
+                if values.isna().all():
+                    raise ContractError("CLASSIFICATION_PREPROCESSING_ALL_MISSING", column)
+                mean = float(values.mean())
+                scale = float(values.std(ddof=0)) if step.kind == "standard_scale" else 0.0
+                state[f"{step.step_id}:{column}"] = {"mean": mean, "scale": scale}
+                output_schema.append(column)
+        receipt = {
+            "fit_scope": "training_fold_only",
+            "fit_row_refs": list(refs),
+            "recipe_hash": hashlib.sha256(json.dumps([step.__dict__ for step in self.steps], sort_keys=True).encode()).hexdigest(),
+            "seed": self.seed,
+            "output_schema": output_schema,
+            "weight_name": weight_name,
+        }
+        return ClassificationFittedPreprocessorV1(
+            steps=self.steps,
+            fit_row_refs=refs,
+            state=state,
+            receipt=receipt,
         )

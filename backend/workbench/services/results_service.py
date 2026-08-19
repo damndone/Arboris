@@ -155,3 +155,65 @@ def _auto_dummy_coded_issue(column: str) -> dict:
         variables=[column],
         template_key="categorical_auto_dummy",
     ).to_dict()
+
+
+# v1.8.9 consumer projection seam.  It is intentionally appended to the
+# legacy results reader: the old run-directory readers remain compatibility
+# code, while this facade accepts only an injected persisted evidence port.
+from typing import Protocol
+
+from ..canonical import sha256_canonical
+from ..contracts.common.foundation_status import TransactionStatusV1
+from ..contracts.evidence.persistence import EvidenceCommitBindingV1
+from ..evidence.consumer_adapters import (
+    EvidenceProjectionError,
+    PersistedEvidenceEnvelopeV1,
+)
+
+
+class PersistedEvidenceEnvelopeStoreV1(Protocol):
+    def load(self, commit_id: str) -> PersistedEvidenceEnvelopeV1 | None: ...
+
+
+class PersistedEvidenceResultsFacadeV1:
+    """Read a committed envelope through ports; never calculate a result."""
+
+    def __init__(self, persistence: object, envelope_store: PersistedEvidenceEnvelopeStoreV1) -> None:
+        self._persistence = persistence
+        self._envelope_store = envelope_store
+
+    def read(
+        self,
+        commit_id: str,
+        *,
+        client_facts: object | None = None,
+    ) -> PersistedEvidenceEnvelopeV1:
+        if client_facts is not None:
+            raise EvidenceProjectionError(
+                "PROJECTION_CLIENT_FACTS_FORBIDDEN",
+                "client facts are not accepted by the persisted evidence facade",
+            )
+        if not isinstance(commit_id, str) or not commit_id.strip():
+            raise EvidenceProjectionError("PROJECTION_COMMIT_INVALID", "commit_id is invalid")
+        load = getattr(self._persistence, "load", None)
+        if not callable(load):
+            raise EvidenceProjectionError("PROJECTION_PERSISTENCE_PORT_REQUIRED", "persistence.load is required")
+        binding = load(commit_id)
+        if type(binding) is not EvidenceCommitBindingV1:
+            raise EvidenceProjectionError("PROJECTION_BINDING_MISSING", "no persisted commit binding was found")
+        if binding.transaction_status is not TransactionStatusV1.COMMITTED:
+            raise EvidenceProjectionError("PROJECTION_NOT_COMMITTED", "only committed evidence may be read")
+        record = self._envelope_store.load(commit_id)
+        if type(record) is not PersistedEvidenceEnvelopeV1:
+            raise EvidenceProjectionError("PROJECTION_ENVELOPE_MISSING", "no persisted envelope was found")
+        if record.binding != binding:
+            raise EvidenceProjectionError("PROJECTION_BINDING_MISMATCH", "envelope binding differs from persistence")
+        if record.envelope_digest != sha256_canonical(record.envelope.to_dict()):
+            raise EvidenceProjectionError("PROJECTION_DIGEST_MISMATCH", "persisted envelope digest differs")
+        return record
+
+
+__all__ = [
+    "PersistedEvidenceEnvelopeStoreV1",
+    "PersistedEvidenceResultsFacadeV1",
+]

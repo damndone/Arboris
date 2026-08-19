@@ -417,3 +417,49 @@ def _design_summary(design: Any) -> str:
     if deff is not None:
         parts.append(f"DEFF={float(deff):.2f}")
     return "; ".join(parts)
+
+
+def build_persisted_evidence_report_view(
+    projection: "EvidenceProjectionV1",
+) -> dict[str, object]:
+    """Expose a bounded report view by copying a typed projection only."""
+
+    from .evidence.consumer_adapters import EvidenceProjectionV1
+
+    if type(projection) is not EvidenceProjectionV1:
+        raise TypeError("projection must be EvidenceProjectionV1")
+    facts: list[dict[str, object]] = []
+    for fact in projection.facts:
+        row: dict[str, object] = {
+            "factId": fact.fact_id,
+            "statisticId": fact.statistic_id,
+            "value": fact.value,
+        }
+        if type(fact.unit) is str:
+            row["unit"] = fact.unit
+        if type(fact.standard_error) is float:
+            row["standardError"] = fact.standard_error
+        if hasattr(fact.confidence_interval, "lower") and hasattr(fact.confidence_interval, "upper"):
+            row["confidenceInterval"] = {
+                "lower": fact.confidence_interval.lower,
+                "upper": fact.confidence_interval.upper,
+            }
+        facts.append(row)
+    status = projection.status.value
+    sections = []
+    if status != "available":
+        sections.append({"key": "persisted-evidence", "label": "Persisted evidence", "status": status})
+    return {
+        "projectionId": f"{projection.consumer_id}:{projection.commit_id}",
+        "consumerId": projection.consumer_id,
+        "consumerVersion": projection.consumer_version,
+        "artifactRef": projection.artifact_ref,
+        "envelopeRef": projection.envelope_ref,
+        "envelopeDigest": projection.envelope_digest,
+        "status": status,
+        "executionStatus": projection.execution_status,
+        "availability": projection.availability,
+        "completenessStatus": projection.completeness_status,
+        "facts": facts,
+        "sections": sections,
+    }

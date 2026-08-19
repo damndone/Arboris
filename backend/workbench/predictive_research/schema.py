@@ -72,4 +72,39 @@ def default_v1_prediction_registry() -> PayloadSchemaRegistry:
         "workbench.statistics.evidence-packet",
     ):
         registry.register(payload_schema, 1, required_fields=envelope)
+    registry.register(
+        "workbench.prediction.classification-task-spec",
+        1,
+        required_fields=envelope,
+    )
+    registry.register(
+        "workbench.prediction.classification-split-manifest",
+        1,
+        required_fields=envelope,
+    )
+    registry.register(
+        "workbench.prediction.classification-artifacts",
+        1,
+        required_fields=envelope,
+    )
+    registry.register(
+        "workbench.prediction.classification-evidence",
+        1,
+        required_fields={
+            *envelope,
+            "task",
+            "split",
+            "metrics",
+            "calibration",
+            "baselines",
+            "controls",
+            "comparison",
+            "explanations",
+            "stability",
+            "shift",
+            "decision_policy",
+            "blocked_reasons",
+            "evidence_refs",
+        },
+    )
     return registry

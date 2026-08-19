@@ -496,3 +496,27 @@ __all__ = [
     "UnsupportedEvidenceSource",
     "compile_evidence_pack",
 ]
+
+
+def project_persisted_evidence_for_notebook(
+    record: object,
+    *,
+    requested_fact_ids: tuple[str, ...] | None = None,
+    registry: object | None = None,
+) -> dict[str, object]:
+    """Bounded Notebook contribution over the same persisted envelope port."""
+
+    from ...evidence.consumer_adapters import (
+        ConsumerProjectionRegistryV1,
+        default_projection_registry,
+    )
+
+    active_registry = default_projection_registry() if registry is None else registry
+    if type(active_registry) is not ConsumerProjectionRegistryV1:
+        raise TypeError("registry must be ConsumerProjectionRegistryV1")
+    return active_registry.project(
+        record,  # type: ignore[arg-type]
+        consumer_id="notebook",
+        destination="local",
+        requested_fact_ids=requested_fact_ids,
+    ).to_dict()

@@ -3222,9 +3222,9 @@ def test_catalog_load_order_and_digest_are_deterministic() -> None:
 
     assert first.to_dict() == second.to_dict()
     assert first.catalog_digest == second.catalog_digest
-    assert first.source_filenames == tuple(sorted(first.source_filenames))
-    assert tuple(zip(first.source_filenames, first.provider_ids, strict=True)) == tuple(
-        sorted(zip(first.source_filenames, first.provider_ids, strict=True))
+    assert first.provider_ids == tuple(sorted(first.provider_ids))
+    assert tuple(zip(first.provider_ids, first.source_filenames, strict=True)) == tuple(
+        sorted(zip(first.provider_ids, first.source_filenames, strict=True))
     )
     assert first.catalog_digest == sha256_canonical(first.digest_payload())
 
@@ -3915,6 +3915,9 @@ def test_task5_injected_family_is_visible_then_denominator_recovers(
 
     operations_before = workflow_capability_registry().operation_ids()
     _write_provider_manifest(tmp_path, "contract_fixture.json", base)
+    # The denominator is the fixture root under test.  Comparing with the
+    # repository builtin catalog would make this regression test fail whenever
+    # a legitimate new builtin provider is added by another development line.
     baseline = load_catalog_from_root(tmp_path)
     injected = _new_family_provider_payload(
         base, provider_id=provider_id, exposure=exposure, variant=variant

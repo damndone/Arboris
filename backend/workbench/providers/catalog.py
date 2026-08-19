@@ -279,7 +279,11 @@ def _load_catalog_from_root(root: Path | str) -> ProviderCatalogV1:
         seen_provider_ids.add(contribution.provider_id)
         candidates.append((_normalized_filename(path), contribution))
 
-    candidates.sort(key=lambda item: (item[0], item[1].provider_id))
+    # Provider identity is the stable consumer-facing order.  Filenames are
+    # only a deterministic tie-breaker for injected fixtures; using them as
+    # the primary key makes adding a manifest reorder an otherwise unchanged
+    # catalog when filenames and provider IDs use different namespaces.
+    candidates.sort(key=lambda item: (item[1].provider_id, item[0]))
     filenames = [filename for filename, _ in candidates]
     providers = [provider for _, provider in candidates]
     declared_refs = [ref for provider in providers for ref in provider.contract_refs]
