@@ -1,0 +1,66 @@
+{
+  "provider_id": "workbench.classification_ml",
+  "semantic_version": "1.0",
+  "contracts": [
+    {"kind": "capability", "logical_id": "workbench.classification_ml.capability", "semantic_version": "1.0", "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    {"kind": "operation", "logical_id": "workbench.classification_ml.operation", "semantic_version": "1.0", "contract_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    {"kind": "step", "logical_id": "workbench.classification_ml.step", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
+    {"kind": "schema", "logical_id": "workbench.classification_ml.schema", "semantic_version": "1.0", "contract_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+    {"kind": "validator", "logical_id": "workbench.classification_ml.validator", "semantic_version": "1.0", "contract_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+    {"kind": "adapter", "logical_id": "workbench.classification_ml.adapter", "semantic_version": "1.0", "contract_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},
+    {"kind": "output", "logical_id": "workbench.classification_ml.output", "semantic_version": "1.0", "contract_digest": "1111111111111111111111111111111111111111111111111111111111111111"},
+    {"kind": "evidence", "logical_id": "workbench.classification_ml.evidence", "semantic_version": "1.0", "contract_digest": "2222222222222222222222222222222222222222222222222222222222222222"},
+    {"kind": "projection", "logical_id": "workbench.classification_ml.agent", "semantic_version": "1.0", "contract_digest": "3333333333333333333333333333333333333333333333333333333333333333"},
+    {"kind": "projection", "logical_id": "workbench.classification_ml.notebook", "semantic_version": "1.0", "contract_digest": "4444444444444444444444444444444444444444444444444444444444444444"},
+    {"kind": "projection", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "5555555555555555555555555555555555555555555555555555555555555555"},
+    {"kind": "renderer", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"},
+    {"kind": "policy", "logical_id": "workbench.classification_ml.policy", "semantic_version": "1.0", "contract_digest": "7777777777777777777777777777777777777777777777777777777777777777"}
+  ],
+  "exposure_paths": [
+    {
+      "path_id": "workbench.classification_ml.direct",
+      "semantic_version": "1.0",
+      "exposure": "composition",
+      "capability_ref": {"kind": "capability", "logical_id": "workbench.classification_ml.capability", "semantic_version": "1.0", "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+      "operation_ref": {"kind": "operation", "logical_id": "workbench.classification_ml.operation", "semantic_version": "1.0", "contract_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+      "step_contract_ref": {"kind": "step", "logical_id": "workbench.classification_ml.step", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
+      "family_contract_ref": null,
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "workbench.classification_ml.adapter", "semantic_version": "1.0", "contract_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},
+      "result_contract_refs": [
+        {"kind": "output", "logical_id": "workbench.classification_ml.output", "semantic_version": "1.0", "contract_digest": "1111111111111111111111111111111111111111111111111111111111111111"}
+      ],
+      "evidence_contract_refs": [
+        {"kind": "evidence", "logical_id": "workbench.classification_ml.evidence", "semantic_version": "1.0", "contract_digest": "2222222222222222222222222222222222222222222222222222222222222222"}
+      ],
+      "projection_refs": {
+        "agent": {"kind": "projection", "logical_id": "workbench.classification_ml.agent", "semantic_version": "1.0", "contract_digest": "3333333333333333333333333333333333333333333333333333333333333333"},
+        "notebook": {"kind": "projection", "logical_id": "workbench.classification_ml.notebook", "semantic_version": "1.0", "contract_digest": "4444444444444444444444444444444444444444444444444444444444444444"},
+        "report": {"kind": "projection", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "5555555555555555555555555555555555555555555555555555555555555555"}
+      }
+    }
+  ],
+  "adapter_declarations": [
+    {
+      "adapter_id": "workbench.classification_ml.adapter",
+      "semantic_version": "1.0",
+      "request_schema_ref": {"kind": "schema", "logical_id": "workbench.classification_ml.schema", "semantic_version": "1.0", "contract_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+      "executor_ref": "executor:workbench.classification_ml.adapter",
+      "result_validator_ref": {"kind": "validator", "logical_id": "workbench.classification_ml.validator", "semantic_version": "1.0", "contract_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+      "output_refs": [
+        {"kind": "output", "logical_id": "workbench.classification_ml.output", "semantic_version": "1.0", "contract_digest": "1111111111111111111111111111111111111111111111111111111111111111"},
+        {"kind": "evidence", "logical_id": "workbench.classification_ml.evidence", "semantic_version": "1.0", "contract_digest": "2222222222222222222222222222222222222222222222222222222222222222"}
+      ]
+    }
+  ],
+  "projection_refs": [
+    {"kind": "projection", "logical_id": "workbench.classification_ml.agent", "semantic_version": "1.0", "contract_digest": "3333333333333333333333333333333333333333333333333333333333333333"},
+    {"kind": "projection", "logical_id": "workbench.classification_ml.notebook", "semantic_version": "1.0", "contract_digest": "4444444444444444444444444444444444444444444444444444444444444444"},
+    {"kind": "projection", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "5555555555555555555555555555555555555555555555555555555555555555"}
+  ],
+  "renderer_refs": [
+    {"kind": "renderer", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"}
+  ],
+  "policy_refs": [
+    {"kind": "policy", "logical_id": "workbench.classification_ml.policy", "semantic_version": "1.0", "contract_digest": "7777777777777777777777777777777777777777777777777777777777777777"}
+  ]
+}

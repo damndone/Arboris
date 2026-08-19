@@ -8,7 +8,7 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Iterable, Literal, Mapping
 
 import pandas as pd
 
@@ -21,6 +21,13 @@ from .artifacts import (
     write_text_durable,
 )
 from .graph_model import BranchRef, Edge, Graph, Node, NodeKind, Stage, Trust
+from .filter_ast import (
+    FilterNode,
+    FilterValidationError,
+    bind_filter_ast,
+    execute_filter_ast,
+    referenced_columns,
+)
 from .predictive_research.contracts import FeatureRecipeV1
 from .predictive_research.feature_recipe import apply_feature_recipe
 
@@ -395,74 +402,24 @@ def _require_nested_keys(
     return value
 
 
-def _subset_filter_mask(series: pd.Series, filter_spec: Mapping[str, Any], name: str) -> pd.Series:
-    filter_keys = _require_nested_keys(
-        filter_spec,
-        name=name,
-        required={"column", "op"},
-        optional={"value"},
-    )
-    column = _require_non_empty_string(filter_keys["column"], f"{name}.column")
-    operator = _require_non_empty_string(filter_keys["op"], f"{name}.op")
-    if operator not in SUBSET_FILTER_OPERATORS:
-        raise DataColumnCastValidationError(
-            f"{name}.op must be one of: {', '.join(sorted(SUBSET_FILTER_OPERATORS))}"
-        )
-    has_value = "value" in filter_keys
-    if operator in {"is_missing", "not_missing"}:
-        if has_value:
-            raise DataColumnCastValidationError(
-                f"{name}.value is not allowed for {operator}"
-            )
-    elif not has_value:
-        raise DataColumnCastValidationError(f"{name}.value is required for {operator}")
-
-    value = filter_keys.get("value")
+def _bind_subset_filter(
+    expression: Any, columns: Iterable[str], name: str
+) -> FilterNode:
     try:
-        if operator == "eq":
-            mask = series.eq(value)
-        elif operator == "ne":
-            mask = series.notna() & series.ne(value)
-        elif operator == "gt":
-            mask = series.notna() & series.gt(value)
-        elif operator == "ge":
-            mask = series.notna() & series.ge(value)
-        elif operator == "lt":
-            mask = series.notna() & series.lt(value)
-        elif operator == "le":
-            mask = series.notna() & series.le(value)
-        elif operator in {"in", "not_in"}:
-            if not isinstance(value, list) or not value:
-                raise DataColumnCastValidationError(
-                    f"{name}.value must be a non-empty list for {operator}"
-                )
-            mask = series.isin(value)
-            if operator == "not_in":
-                mask = series.notna() & ~mask
-        elif operator == "between":
-            if not isinstance(value, list) or len(value) != 2:
-                raise DataColumnCastValidationError(
-                    f"{name}.value must contain exactly two bounds for between"
-                )
-            lower, upper = value
-            if lower > upper:
-                raise DataColumnCastValidationError(
-                    f"{name}.value lower bound must not exceed upper bound"
-                )
-            mask = series.notna() & series.ge(lower) & series.le(upper)
-        elif operator == "is_missing":
-            mask = series.isna()
-        else:
-            mask = series.notna()
-    except DataColumnCastValidationError:
-        raise
-    except (TypeError, ValueError) as exc:
-        raise DataColumnCastValidationError(
-            f"{name} could not be applied to column {column!r}: {exc}"
-        ) from exc
-    if not isinstance(mask, pd.Series):
-        raise DataColumnCastValidationError(f"{name} did not produce a row mask")
-    return mask.fillna(False).astype(bool)
+        return bind_filter_ast(expression, columns)
+    except FilterValidationError as exc:
+        raise DataColumnCastValidationError(f"{name}: {exc}") from exc
+
+
+def _subset_filter_mask(series: pd.Series, filter_spec: Mapping[str, Any], name: str) -> pd.Series:
+    column = filter_spec.get("column") if isinstance(filter_spec, Mapping) else None
+    if not isinstance(column, str):
+        raise DataColumnCastValidationError(f"{name}.column must be a non-empty string")
+    bound = _bind_subset_filter(filter_spec, [column], name)
+    try:
+        return execute_filter_ast(series.to_frame(name=column), bound)
+    except FilterValidationError as exc:
+        raise DataColumnCastValidationError(f"{name}: {exc}") from exc
 
 
 def _execute_data_transform(
@@ -613,7 +570,16 @@ def _execute_data_transform(
     if spec.operation == "subset":
         _reject_unknown_parameters(
             parameters,
-            {"columns", "equals", "filters", "row_indices", "row_index_range", "row_range"},
+            {
+                "columns",
+                "equals",
+                "filters",
+                "filter",
+                "filter_ast",
+                "row_indices",
+                "row_index_range",
+                "row_range",
+            },
             "subset",
         )
         columns = _require_string_list(parameters.get("columns"), "subset.columns")
@@ -629,34 +595,60 @@ def _execute_data_transform(
             filters = []
         if not isinstance(filters, list):
             raise DataColumnCastValidationError("subset.filters must be a list")
-        filter_columns: list[str] = []
-        for index, filter_spec in enumerate(filters):
-            parsed = _require_nested_keys(
-                filter_spec,
-                name=f"subset.filters[{index}]",
-                required={"column", "op"},
-                optional={"value"},
+
+        ast_keys = [key for key in ("filter", "filter_ast") if key in parameters]
+        if len(ast_keys) > 1:
+            raise DataColumnCastValidationError(
+                "subset.filter and subset.filter_ast are aliases and cannot both be declared"
             )
-            filter_column = _require_non_empty_string(
-                parsed["column"], f"subset.filters[{index}].column"
+        ast_expression = parameters.get(ast_keys[0]) if ast_keys else None
+        if filters and ast_keys:
+            raise DataColumnCastValidationError(
+                "subset.filters and subset.filter cannot both be declared"
             )
-            filter_columns.append(filter_column)
-            _require_columns_exist(left, [filter_column], "subset.filters")
-            _subset_filter_mask(left[filter_column], parsed, f"subset.filters[{index}]")
-        overlap = set(legacy_equals) & set(filter_columns)
+
+        bound_filters: list[FilterNode] = []
+        if filters:
+            legacy_filter_expression: Any = filters[0]
+            if len(filters) > 1:
+                legacy_filter_expression = {"op": "and", "children": filters}
+            bound_filters.append(
+                _bind_subset_filter(legacy_filter_expression, left.columns, "subset.filters")
+            )
+        if ast_keys:
+            bound_filters.append(
+                _bind_subset_filter(ast_expression, left.columns, f"subset.{ast_keys[0]}")
+            )
+
+        filter_columns = set(
+            column
+            for bound_filter in bound_filters
+            for column in referenced_columns(bound_filter)
+        )
+        overlap = set(legacy_equals) & filter_columns
         if overlap:
             raise DataColumnCastValidationError(
-                "subset.equals and subset.filters cannot both declare: "
+                "subset.equals and subset filters cannot both declare: "
                 + ", ".join(sorted(overlap))
             )
         mask = pd.Series(True, index=left.index)
         for column, value in legacy_equals.items():
-            mask &= left[column].eq(value).fillna(False)
-        for index, filter_spec in enumerate(filters):
-            column = str(filter_spec["column"])
-            mask &= _subset_filter_mask(
-                left[column], filter_spec, f"subset.filters[{index}]"
+            bound_equals = _bind_subset_filter(
+                {"column": column, "op": "eq", "value": value},
+                left.columns,
+                f"subset.equals[{column}]",
             )
+            try:
+                mask &= execute_filter_ast(left, bound_equals)
+            except FilterValidationError as exc:
+                raise DataColumnCastValidationError(
+                    f"subset.equals[{column}]: {exc}"
+                ) from exc
+        for bound_filter in bound_filters:
+            try:
+                mask &= execute_filter_ast(left, bound_filter)
+            except FilterValidationError as exc:
+                raise DataColumnCastValidationError(f"subset filter: {exc}") from exc
         result = left.loc[mask].loc[:, columns].copy()
         row_indices = parameters.get("row_indices")
         if "row_index_range" in parameters and "row_range" in parameters:
