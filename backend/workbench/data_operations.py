@@ -7,6 +7,7 @@ import json
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any, Iterable, Literal, Mapping
 
@@ -210,6 +211,90 @@ FILL_MISSING_STRATEGIES = frozenset(
 )
 TSSET_FREQUENCIES = frozenset({"D", "W", "M", "Q", "Y"})
 MAX_SPLIT_GROUPS = 128
+
+
+class _DataOperationTransaction:
+    """Scoped rollback seam for package-owned data-operation persistence.
+
+    The existing artifact/index/Graph APIs are individually atomic, but they do
+    not form one multi-file transaction. This seam snapshots only the current
+    operation prefix and its three package-owned identity indexes, restoring
+    them on an unexpected failure after preflight.
+    """
+
+    def __init__(self, run_root: Path, operation_prefix: Path) -> None:
+        self.run_root = run_root
+        self.operation_root = run_root / operation_prefix
+        self.state_paths = (
+            run_root / "artifacts_index.json",
+            run_root / "node_index.json",
+            run_root.parent / run_root.name / "graph.json",
+        )
+        self._files: dict[Path, bytes] = {}
+        self._state_files: dict[Path, bytes] = {}
+
+    def __enter__(self) -> "_DataOperationTransaction":
+        if self.operation_root.is_dir():
+            for path in self.operation_root.rglob("*"):
+                if path.is_file():
+                    self._files[path] = path.read_bytes()
+        for path in self.state_paths:
+            if path.is_file():
+                self._state_files[path] = path.read_bytes()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+        if exc_type is None:
+            return False
+        self._rollback()
+        return False
+
+    def _rollback(self) -> None:
+        if self.operation_root.exists():
+            for path in sorted(self.operation_root.rglob("*"), reverse=True):
+                if path.is_file() and path not in self._files:
+                    path.unlink()
+        for path, data in self._files.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        for path in self.state_paths:
+            if path in self._state_files:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(self._state_files[path])
+            elif path.is_file():
+                path.unlink()
+
+
+def _data_operation_transaction(func):
+    @wraps(func)
+    def wrapped(project_root, spec, preview, *args, **kwargs):
+        run_root = Path(project_root).expanduser().resolve() / "runs" / spec.source_run_id
+        fingerprint = getattr(preview, "fingerprint", None)
+        if not isinstance(fingerprint, str) or not fingerprint:
+            return func(project_root, spec, preview, *args, **kwargs)
+        class_name = type(spec).__name__
+        execution_override = kwargs.get("execution_key_value")
+        suffix = (
+            execution_override.removeprefix("exec_")
+            if isinstance(execution_override, str) and execution_override
+            else fingerprint[:32]
+        )
+        if class_name == "DataTransformSpecV1":
+            operation_prefix = Path("derived") / "data_operations" / spec.operation / suffix
+        elif class_name == "DataColumnCastSpecV1":
+            operation_prefix = Path("derived") / "data_column_cast" / suffix
+        elif class_name == "DataColumnsCastSpecV1":
+            operation_prefix = Path("derived") / "data_columns_cast" / suffix
+        elif class_name == "FeatureRecipeOperationSpecV1":
+            operation_prefix = Path("derived") / "feature_recipe" / suffix
+        elif class_name == "MetadataMutationSpecV1":
+            operation_prefix = Path("derived") / "data_operations" / "metadata_update" / suffix
+        else:
+            return func(project_root, spec, preview, *args, **kwargs)
+        with _DataOperationTransaction(run_root, operation_prefix):
+            return func(project_root, spec, preview, *args, **kwargs)
+
+    return wrapped
 
 
 @dataclass(frozen=True)
@@ -948,6 +1033,7 @@ def _execute_data_transform(
                     left,
                     bound_equals,
                     user_missing_values=declared_user_missing,
+                    metadata_registry=metadata_registry,
                 )
             except FilterValidationError as exc:
                 raise DataColumnCastValidationError(
@@ -959,6 +1045,7 @@ def _execute_data_transform(
                     left,
                     bound_filter,
                     user_missing_values=declared_user_missing,
+                    metadata_registry=metadata_registry,
                 )
             except FilterValidationError as exc:
                 raise DataColumnCastValidationError(f"subset filter: {exc}") from exc
@@ -1380,6 +1467,7 @@ def preview_data_transform(project_root: Path | str, spec: DataTransformSpecV1) 
     )
 
 
+@_data_operation_transaction
 def apply_data_transform(
     project_root: Path | str,
     spec: DataTransformSpecV1,
@@ -1506,6 +1594,29 @@ def apply_data_transform(
         producing_stage=f"data.{spec.operation}",
         create_if_missing=True,
     )
+    _preflight_graph_child(
+        graph,
+        child_node_id=child_node_id,
+        artifact_path=artifact_path,
+        artifact_rel=artifact_rel,
+        operation_id=f"data.{spec.operation}",
+    )
+    if spec.operation == "split":
+        by = spec.parameters.get("by", spec.parameters.get("columns"))
+        if isinstance(by, list):
+            _preflight_split_groups(
+                left_root,
+                graph=graph,
+                spec=spec,
+                preview=fresh,
+                output=output,
+                by=by,
+                relative_dir=relative_dir,
+                parent_artifact_id=artifact_id,
+                parent_child_node_id=child_node_id,
+                source_artifact_id=spec.source_artifact_id,
+                metadata_registry=metadata_registry,
+            )
 
     _write_frame_artifact(artifact_path, output, "csv")
     _write_metadata_sidecar(
@@ -1594,6 +1705,138 @@ def apply_data_transform(
         group_manifest_id=group_manifest_id,
         group_manifest_path=group_manifest_rel,
         group_artifacts=tuple(group_artifacts),
+    )
+
+
+def _preflight_split_groups(
+    run_root: Path,
+    *,
+    graph: Graph,
+    spec: DataTransformSpecV1,
+    preview: DataTransformPreview,
+    output: pd.DataFrame,
+    by: list[str],
+    relative_dir: Path,
+    parent_artifact_id: str,
+    parent_child_node_id: str,
+    source_artifact_id: str,
+    metadata_registry: MetadataRegistryV1 | None,
+) -> None:
+    """Preflight every split child, manifest, index, and graph identity."""
+
+    groups = _split_group_frames(output, by)
+    entries: list[dict[str, Any]] = []
+    for key, group in groups:
+        digest = hashlib.sha256(
+            json.dumps(key, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:16]
+        artifact_id = f"{parent_artifact_id}_group_{digest}"
+        artifact_rel = (relative_dir / "groups" / f"{digest}.csv").as_posix()
+        artifact_path = run_root / artifact_rel
+        child_node_id = f"{parent_child_node_id}:group:{digest}"
+        metadata = _metadata_for_output(
+            metadata_registry, spec=spec, output_columns=group.columns
+        )
+        metadata_artifact_id = f"{artifact_id}_metadata"
+        metadata_rel = (relative_dir / "groups" / f"{digest}.metadata.json").as_posix()
+        metadata_payload = _metadata_sidecar_payload(
+            registry=metadata_registry,
+            metadata=metadata,
+            output_frame=group,
+            run_id=spec.source_run_id,
+            child_node_id=child_node_id,
+            artifact_id=artifact_id,
+            source_run_id=spec.source_run_id,
+            source_node_id=spec.source_node_id,
+            source_artifact_id=source_artifact_id,
+            source_sha256=preview.source_sha256,
+            operation_id="data.split",
+            preview_fingerprint=preview.fingerprint,
+            column_aliases=_metadata_column_aliases(spec),
+        )
+        _preflight_frame_artifact(artifact_path, group)
+        _preflight_json_path(
+            run_root / metadata_rel,
+            metadata_payload,
+            "deterministic split-group metadata sidecar path is occupied",
+        )
+        _preflight_artifact_binding(
+            run_root,
+            artifact_id=artifact_id,
+            path=artifact_path,
+            artifact_type="derived_data",
+            step="data.split.group",
+            inputs=[source_artifact_id, parent_artifact_id],
+        )
+        _preflight_artifact_binding(
+            run_root,
+            artifact_id=metadata_artifact_id,
+            path=run_root / metadata_rel,
+            artifact_type="metadata",
+            step="data.split",
+            inputs=[source_artifact_id, artifact_id],
+        )
+        _preflight_graph_child(
+            graph,
+            child_node_id=child_node_id,
+            artifact_path=artifact_path,
+            artifact_rel=artifact_rel,
+            operation_id="data.split",
+        )
+        _preflight_node_index_entry(
+            run_root,
+            child_node_id=child_node_id,
+            node_hash=sha256_file(artifact_path) if artifact_path.exists() else None,
+            artifact_rel=artifact_rel,
+            producing_stage="data.split.group",
+            create_if_missing=True,
+        )
+        entries.append(
+            {
+                "key": key,
+                "count": len(group),
+                "artifact_id": artifact_id,
+                "path": artifact_rel,
+                "child_node_id": child_node_id,
+                "metadata_artifact_id": metadata_artifact_id,
+                "metadata_artifact_path": metadata_rel,
+                "node_hash": sha256_file(artifact_path) if artifact_path.exists() else None,
+            }
+        )
+    manifest_rel = (relative_dir / "groups.json").as_posix()
+    manifest_payload = {
+        "payload_schema": "workbench.data-split-group",
+        "schema_version": 1,
+        "operation_id": "data.split",
+        "execution_key": f"exec_{parent_child_node_id.rsplit(':', 1)[-1]}",
+        "source": {
+            "run_id": spec.source_run_id,
+            "node_id": spec.source_node_id,
+            "artifact_id": source_artifact_id,
+        },
+        "parent": {"node_id": parent_child_node_id, "artifact_id": parent_artifact_id},
+        "by": list(by),
+        "mode": spec.parameters.get("mode", "split_file"),
+        "group_count": len(entries),
+        "groups": entries,
+        "lineage": {
+            "preview_fingerprint": preview.fingerprint,
+            "source_sha256": preview.source_sha256,
+        },
+    }
+    manifest_path = run_root / manifest_rel
+    _preflight_json_path(
+        manifest_path,
+        manifest_payload,
+        "deterministic split manifest path is occupied",
+    )
+    _preflight_artifact_binding(
+        run_root,
+        artifact_id=f"{parent_artifact_id}_groups",
+        path=manifest_path,
+        artifact_type="metadata",
+        step="data.split.group",
+        inputs=[source_artifact_id, parent_artifact_id, *[entry["artifact_id"] for entry in entries]],
     )
 
 
@@ -1885,6 +2128,10 @@ def preview_metadata_mutation(
     )
     frame = _read_frame(source_path)
     registry = _metadata_registry_for_source(run_root, node, spec.source_artifact_id)
+    if registry is None:
+        raise DataMetadataUnavailableError(
+            "metadata mutation requires a confirmed server-owned metadata registry"
+        )
     canonical = _metadata_mutation_canonical(frame, spec, registry)
     source_sha = str(artifact.get("sha256") or sha256_file(source_path))
     schema_revision = registry.schema_revision if registry is not None else _schema_revision_for_frame(frame)
@@ -1927,6 +2174,7 @@ def preview_metadata_mutation(
     )
 
 
+@_data_operation_transaction
 def apply_metadata_mutation(
     project_root: Path | str,
     spec: MetadataMutationSpecV1,
@@ -1967,7 +2215,7 @@ def apply_metadata_mutation(
         "execution_key": execution,
         "source": {
             "run_id": spec.source_run_id,
-            "node_id": spec.source_node_id,
+            "node_id": child_node_id,
             "artifact_id": spec.source_artifact_id,
             "sha256": source_sha,
         },
@@ -1983,8 +2231,35 @@ def apply_metadata_mutation(
             "parent_metadata_revision": None,
         },
     }
-    if metadata_path.exists() and read_json(metadata_path) != metadata_payload:
-        raise DataColumnCastValidationError("deterministic metadata artifact path is occupied")
+    _preflight_json_path(
+        metadata_path,
+        metadata_payload,
+        "deterministic metadata artifact path is occupied",
+    )
+    _preflight_record_path(record_path, record_id=record_id, execution_key=execution)
+    _preflight_artifact_binding(
+        run_root,
+        artifact_id=metadata_artifact_id,
+        path=metadata_path,
+        artifact_type="metadata",
+        step="data.metadata.update",
+        inputs=[spec.source_artifact_id],
+    )
+    _preflight_node_index_entry(
+        run_root,
+        child_node_id=child_node_id,
+        node_hash=sha256_file(metadata_path) if metadata_path.exists() else None,
+        artifact_rel=str(source_artifact.get("path")),
+        producing_stage="data.metadata.update",
+        create_if_missing=True,
+    )
+    _preflight_graph_child(
+        _graph,
+        child_node_id=child_node_id,
+        artifact_path=metadata_path,
+        artifact_rel=str(source_artifact.get("path")),
+        operation_id=spec.operation_id,
+    )
     if not metadata_path.exists():
         write_json(metadata_path, metadata_payload)
     _ensure_registered_artifact(
@@ -2237,6 +2512,7 @@ def preview_feature_recipe(
     )
 
 
+@_data_operation_transaction
 def apply_feature_recipe_operation(
     project_root: Path | str,
     spec: FeatureRecipeOperationSpecV1,
@@ -2276,6 +2552,39 @@ def apply_feature_recipe_operation(
     artifact_path = run_root / artifact_rel
     recipe_path = run_root / recipe_rel
     child_node_id = f"feature-recipe:{suffix}"
+    metadata_artifact_id = f"{artifact_id}_metadata"
+    metadata_rel = (relative_dir / "metadata.json").as_posix()
+    output_metadata = _metadata_for_output(
+        metadata_registry, spec=spec, output_columns=output.columns
+    )
+    metadata_payload = _metadata_sidecar_payload(
+        registry=metadata_registry,
+        metadata=output_metadata,
+        output_frame=output,
+        run_id=spec.source_run_id,
+        child_node_id=child_node_id,
+        artifact_id=artifact_id,
+        source_run_id=spec.source_run_id,
+        source_node_id=spec.source_node_id,
+        source_artifact_id=spec.source_artifact_id,
+        source_sha256=str(source_artifact.get("sha256") or sha256_file(source_path)),
+        operation_id="data.feature_recipe",
+        preview_fingerprint=fresh.fingerprint,
+    )
+    recipe_payload = {
+        **spec.recipe.to_dict(),
+        "execution_key": execution,
+        "source_sha256": str(source_artifact.get("sha256") or sha256_file(source_path)),
+        "result": {"artifact_id": artifact_id, "path": artifact_rel},
+    }
+    _preflight_frame_artifact(artifact_path, output)
+    _preflight_json_path(run_root / metadata_rel, metadata_payload, "deterministic metadata sidecar path is occupied")
+    _preflight_json_path(recipe_path, recipe_payload, "deterministic feature recipe path is occupied")
+    _preflight_artifact_binding(run_root, artifact_id=artifact_id, path=artifact_path, artifact_type="derived_data", step=spec.recipe.operation_id, inputs=[spec.source_artifact_id])
+    _preflight_artifact_binding(run_root, artifact_id=metadata_artifact_id, path=run_root / metadata_rel, artifact_type="metadata", step="data.feature_recipe", inputs=[spec.source_artifact_id, artifact_id])
+    _preflight_artifact_binding(run_root, artifact_id=recipe_artifact_id, path=recipe_path, artifact_type="metadata", step=spec.recipe.operation_id, inputs=[spec.source_artifact_id, artifact_id])
+    _preflight_graph_child(graph, child_node_id=child_node_id, artifact_path=artifact_path, artifact_rel=artifact_rel, operation_id=spec.recipe.operation_id)
+    _preflight_node_index_entry(run_root, child_node_id=child_node_id, node_hash=sha256_file(artifact_path) if artifact_path.exists() else None, artifact_rel=artifact_rel, producing_stage=spec.recipe.operation_id, create_if_missing=True)
     _write_frame_artifact(artifact_path, output, "csv")
     metadata_artifact_id, metadata_rel, _metadata_payload = _write_metadata_sidecar(
         run_root,
@@ -2292,12 +2601,6 @@ def apply_feature_recipe_operation(
         registry=metadata_registry,
         metadata=_metadata_for_output(metadata_registry, spec=spec, output_columns=output.columns),
     )
-    recipe_payload = {
-        **spec.recipe.to_dict(),
-        "execution_key": execution,
-        "source_sha256": str(source_artifact.get("sha256") or sha256_file(source_path)),
-        "result": {"artifact_id": artifact_id, "path": artifact_rel},
-    }
     if recipe_path.exists() and read_json(recipe_path) != recipe_payload:
         raise DataColumnCastValidationError("deterministic feature recipe path is occupied")
     if not recipe_path.exists():
@@ -2518,6 +2821,7 @@ def data_column_cast_execution_key(
     return f"exec_{digest[:32]}"
 
 
+@_data_operation_transaction
 def apply_data_column_cast(
     project_root: Path | str,
     spec: DataColumnCastSpecV1,
@@ -2561,6 +2865,46 @@ def apply_data_column_cast(
         raise DataColumnCastValidationError("cast preview is blocked")
     output_frame = frame.copy()
     output_frame[spec.column] = converted
+    metadata_artifact_id = f"{artifact_id}_metadata"
+    metadata_rel = (relative_dir / "metadata.json").as_posix()
+    metadata_payload = _metadata_sidecar_payload(
+        registry=metadata_registry,
+        metadata=_metadata_for_output(metadata_registry, spec=spec, output_columns=output_frame.columns),
+        output_frame=output_frame,
+        run_id=spec.source_run_id,
+        child_node_id=child_node_id,
+        artifact_id=artifact_id,
+        source_run_id=spec.source_run_id,
+        source_node_id=spec.source_node_id,
+        source_artifact_id=spec.source_artifact_id,
+        source_sha256=str(source_artifact.get("sha256") or sha256_file(source_path)),
+        operation_id=spec.operation_id,
+        preview_fingerprint=fresh.fingerprint,
+    )
+    recipe = {
+        "schema_version": "data-column-cast.v1",
+        "execution_key": execution,
+        "spec": spec.to_dict(),
+        "preview": fresh.to_dict(),
+        "source": {
+            "artifact_id": spec.source_artifact_id,
+            "sha256": source_artifact.get("sha256"),
+            "path": source_artifact.get("path"),
+        },
+        "result": {
+            "artifact_id": artifact_id,
+            "path": artifact_rel,
+            "schema_fingerprint": fresh.schema_fingerprint_after,
+        },
+    }
+    _preflight_frame_artifact(artifact_path, output_frame)
+    _preflight_json_path(run_root / metadata_rel, metadata_payload, "deterministic metadata sidecar path is occupied")
+    _preflight_json_path(recipe_path, recipe, "deterministic cast recipe path is occupied")
+    _preflight_artifact_binding(run_root, artifact_id=artifact_id, path=artifact_path, artifact_type="derived_data", step="data.column.cast", inputs=[spec.source_artifact_id])
+    _preflight_artifact_binding(run_root, artifact_id=metadata_artifact_id, path=run_root / metadata_rel, artifact_type="metadata", step=spec.operation_id, inputs=[spec.source_artifact_id, artifact_id])
+    _preflight_artifact_binding(run_root, artifact_id=recipe_artifact_id, path=recipe_path, artifact_type="metadata", step="data.column.cast", inputs=[spec.source_artifact_id, artifact_id])
+    _preflight_graph_child(graph, child_node_id=child_node_id, artifact_path=artifact_path, artifact_rel=artifact_rel, operation_id=spec.operation_id)
+    _preflight_node_index_entry(run_root, child_node_id=child_node_id, node_hash=sha256_file(artifact_path) if artifact_path.exists() else None, artifact_rel=artifact_rel, producing_stage="data.column.cast", create_if_missing=True)
     _write_frame_artifact(artifact_path, output_frame, "csv")
     metadata_artifact_id, metadata_rel, _metadata_payload = _write_metadata_sidecar(
         run_root,
@@ -2904,6 +3248,7 @@ def data_columns_cast_execution_key(
     return f"exec_{digest[:32]}"
 
 
+@_data_operation_transaction
 def apply_data_columns_cast(
     project_root: Path | str,
     spec: DataColumnsCastSpecV1,
@@ -2946,6 +3291,47 @@ def apply_data_columns_cast(
         if bool(failures.any()):
             raise DataColumnCastValidationError("cast preview is blocked")
         output_frame[item.column] = converted
+    metadata_artifact_id = f"{artifact_id}_metadata"
+    metadata_rel = (relative_dir / "metadata.json").as_posix()
+    metadata_payload = _metadata_sidecar_payload(
+        registry=metadata_registry,
+        metadata=_metadata_for_output(metadata_registry, spec=spec, output_columns=output_frame.columns),
+        output_frame=output_frame,
+        run_id=spec.source_run_id,
+        child_node_id=child_node_id,
+        artifact_id=artifact_id,
+        source_run_id=spec.source_run_id,
+        source_node_id=spec.source_node_id,
+        source_artifact_id=spec.source_artifact_id,
+        source_sha256=str(source_artifact.get("sha256") or sha256_file(source_path)),
+        operation_id=spec.operation_id,
+        preview_fingerprint=fresh.fingerprint,
+    )
+    recipe = {
+        "schema_version": "data-columns-cast.v1",
+        "execution_key": execution,
+        "spec": spec.to_dict(),
+        "preview": fresh.to_dict(),
+        "casts": [item.to_dict() for item in spec.casts],
+        "source": {
+            "artifact_id": spec.source_artifact_id,
+            "sha256": source_artifact.get("sha256"),
+            "path": source_artifact.get("path"),
+        },
+        "result": {
+            "artifact_id": artifact_id,
+            "path": artifact_rel,
+            "schema_fingerprint": fresh.schema_fingerprint_after,
+        },
+    }
+    _preflight_frame_artifact(artifact_path, output_frame)
+    _preflight_json_path(run_root / metadata_rel, metadata_payload, "deterministic metadata sidecar path is occupied")
+    _preflight_json_path(recipe_path, recipe, "deterministic cast recipe path is occupied")
+    _preflight_artifact_binding(run_root, artifact_id=artifact_id, path=artifact_path, artifact_type="derived_data", step=spec.operation_id, inputs=[spec.source_artifact_id])
+    _preflight_artifact_binding(run_root, artifact_id=metadata_artifact_id, path=run_root / metadata_rel, artifact_type="metadata", step=spec.operation_id, inputs=[spec.source_artifact_id, artifact_id])
+    _preflight_artifact_binding(run_root, artifact_id=recipe_artifact_id, path=recipe_path, artifact_type="metadata", step=spec.operation_id, inputs=[spec.source_artifact_id, artifact_id])
+    _preflight_graph_child(graph, child_node_id=child_node_id, artifact_path=artifact_path, artifact_rel=artifact_rel, operation_id=spec.operation_id)
+    _preflight_node_index_entry(run_root, child_node_id=child_node_id, node_hash=sha256_file(artifact_path) if artifact_path.exists() else None, artifact_rel=artifact_rel, producing_stage=spec.operation_id, create_if_missing=True)
     _write_frame_artifact(artifact_path, output_frame, spec.output_format)
     metadata_artifact_id, metadata_rel, _metadata_payload = _write_metadata_sidecar(
         run_root,
@@ -3246,7 +3632,11 @@ def _metadata_registry_for_source(
             if payload.get("payload_schema") != "workbench.data-metadata":
                 continue
             payload_source = payload.get("source")
-            if isinstance(payload_source, Mapping) and payload_source.get("artifact_id") != source_artifact_id:
+            if isinstance(payload_source, Mapping) and (
+                payload_source.get("run_id") != run_root.name
+                or payload_source.get("node_id") != getattr(node, "id", None)
+                or payload_source.get("artifact_id") != source_artifact_id
+            ):
                 if artifact.get("artifact_id") in candidate_ids:
                     raise DataMetadataUnavailableError(
                         "metadata artifact source does not match the selected dataset"
@@ -3255,11 +3645,7 @@ def _metadata_registry_for_source(
             return MetadataRegistryV1.from_payload(
                 payload,
                 source_run_id=run_root.name,
-                source_node_id=str(
-                    payload.get("source", {}).get("node_id")
-                    if isinstance(payload.get("source"), Mapping)
-                    else ""
-                ),
+                source_node_id=str(getattr(node, "id", "")),
                 source_artifact_id=source_artifact_id,
             )
         except MetadataProvenanceError:
@@ -3539,6 +3925,45 @@ def _preflight_json_path(path: Path, payload: Mapping[str, object], error: str) 
 
     if path.exists() and read_json(path) != dict(payload):
         raise DataColumnCastValidationError(error)
+
+
+def _preflight_record_path(path: Path, *, record_id: str, execution_key: str) -> None:
+    """Reject an occupied operation-record path before any artifact write."""
+
+    if not path.exists():
+        return
+    payload = read_json(path)
+    if not isinstance(payload, Mapping) or (
+        payload.get("record_id") != record_id
+        or payload.get("execution_key") != execution_key
+    ):
+        raise DataColumnCastValidationError("deterministic metadata record path is occupied")
+
+
+def _preflight_graph_child(
+    graph: Graph,
+    *,
+    child_node_id: str,
+    artifact_path: Path,
+    artifact_rel: str,
+    operation_id: str,
+) -> None:
+    """Validate an existing graph child and edge before persistent writes."""
+
+    child = graph.nodes.get(child_node_id)
+    edge = graph.edges.get(f"edge:{child_node_id}")
+    if child is None:
+        if edge is not None:
+            raise DataColumnCastValidationError("deterministic graph edge has no child")
+        return
+    if child.payload_ref != artifact_rel:
+        raise DataColumnCastValidationError("deterministic graph child payload is occupied")
+    if not artifact_path.is_file():
+        raise DataColumnCastValidationError("deterministic graph child artifact is missing")
+    if child.node_hash and child.node_hash != sha256_file(artifact_path):
+        raise DataColumnCastValidationError("deterministic graph child hash is occupied")
+    if edge is None or edge.target_id != child_node_id or edge.op != operation_id:
+        raise DataColumnCastValidationError("deterministic graph edge is occupied")
 
 
 def _preflight_artifact_binding(

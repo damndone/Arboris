@@ -374,6 +374,16 @@ def test_package_runtime_adapter_rejects_caller_authored_operation_record_mappin
         )
 
 
+def test_package_runtime_adapter_rejects_caller_authored_evidence_mapping() -> None:
+    from workbench.data_operation_manifest import DataConsumerEvidencePortV1
+
+    with pytest.raises(TypeError, match="typed|server"):
+        DataConsumerEvidencePortV1.from_server(
+            "caller-authored",
+            {"weight_consumed": True},
+        )
+
+
 def test_package_runtime_adapter_rejects_invalid_executor_identity() -> None:
     from workbench.data_operation_manifest import DataConsumerRuntimeAdapterV1
 

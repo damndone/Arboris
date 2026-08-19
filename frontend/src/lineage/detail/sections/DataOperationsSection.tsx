@@ -105,6 +105,7 @@ async function readConfirmPayload(response: unknown): Promise<{
   payload: ConfirmPayload | null;
   httpStatus: number | null;
   httpOk: boolean | null;
+  isHttpResponse: boolean;
 }> {
   if (isResponseLike(response)) {
     const httpStatus = typeof response.status === "number" ? response.status : null;
@@ -114,21 +115,36 @@ async function readConfirmPayload(response: unknown): Promise<{
       payload: isObject(body) && typeof body.status === "string" ? (body as ConfirmPayload) : null,
       httpStatus,
       httpOk,
+      isHttpResponse: true,
     };
   }
   return {
     payload: isObject(response) && typeof response.status === "string" ? (response as ConfirmPayload) : null,
     httpStatus: null,
     httpOk: null,
+    isHttpResponse: false,
   };
 }
 
 function confirmedPayloadError(
   payload: ConfirmPayload | null,
   operationId: string,
+  previewFingerprint: string,
+  sourceIdentity: ResolvedSourceIdentity,
 ): string | null {
   if (!payload || payload.status !== "completed") {
     return "CONFIRM_INVALID: confirmation did not return completed status.";
+  }
+  const responsePreview = payload.preview;
+  if (
+    !isObject(responsePreview) ||
+    responsePreview.status !== "ready" ||
+    responsePreview.fingerprint !== previewFingerprint ||
+    responsePreview.source_run_id !== sourceIdentity.source_run_id ||
+    responsePreview.source_node_id !== sourceIdentity.source_node_id ||
+    responsePreview.source_artifact_id !== sourceIdentity.source_artifact_id
+  ) {
+    return "CONFIRM_INVALID: completed preview identity is stale or mismatched.";
   }
   const effect = payload.effect;
   if (
@@ -153,6 +169,51 @@ function confirmedPayloadError(
     operation.status !== "completed"
   ) {
     return "CONFIRM_INVALID: completed operation identity is not server-verified.";
+  }
+  const target = operation.target;
+  if (
+    !isObject(target) ||
+    target.run_id !== sourceIdentity.source_run_id ||
+    target.node_ref !== sourceIdentity.source_node_id ||
+    target.artifact_id !== sourceIdentity.source_artifact_id
+  ) {
+    return "CONFIRM_INVALID: completed operation target does not match the request.";
+  }
+  const execution = operation.execution;
+  if (!isObject(execution) || execution.execution_key !== effect.execution_key) {
+    return "CONFIRM_INVALID: completed execution identity does not match the effect.";
+  }
+  const bindings = execution.bindings;
+  if (!isObject(bindings)) {
+    return "CONFIRM_INVALID: completed execution bindings are missing.";
+  }
+  for (const [field, value] of Object.entries(effect)) {
+    if (!field.endsWith("_id") || typeof value !== "string") continue;
+    if (bindings[field] !== value && !Object.values(bindings).includes(value)) {
+      return "CONFIRM_INVALID: completed effect binding does not match the OperationRecord.";
+    }
+  }
+  const outputs = operation.outputs;
+  const ports = isObject(outputs) && isObject(outputs.ports) ? outputs.ports : null;
+  const derived = ports && isObject(ports.derived) ? ports.derived : null;
+  const operationRecordPort = ports && isObject(ports.operation_record) ? ports.operation_record : null;
+  if (
+    !derived ||
+    derived.execution_key !== effect.execution_key ||
+    derived.child_node_id !== effect.child_node_id ||
+    (typeof effect.artifact_id === "string" && derived.artifact_id !== effect.artifact_id) ||
+    !operationRecordPort ||
+    operationRecordPort.record_id !== operation.record_id
+  ) {
+    return "CONFIRM_INVALID: typed output ports are not bound to the effect and record.";
+  }
+  const slots = isObject(outputs) && isObject(outputs.consumer_slots) ? outputs.consumer_slots : null;
+  if (!slots) return "CONFIRM_INVALID: typed consumer slots are missing.";
+  for (const slot of ["data.agent", "data.notebook", "data.report"]) {
+    const value = slots[slot];
+    if (!isObject(value) || value.record_id !== operation.record_id) {
+      return "CONFIRM_INVALID: typed consumer slot is not bound to the OperationRecord.";
+    }
   }
   return null;
 }
@@ -428,14 +489,26 @@ function ParsedDataOperationsSection({
       if (requestRevision.current !== revision) return;
       setConfirmPayload(result.payload);
       const httpFailed =
-        result.httpStatus !== null &&
-        (result.httpStatus < 200 || result.httpStatus >= 300 || result.httpOk === false);
+        !result.isHttpResponse ||
+        result.httpStatus === null ||
+        result.httpStatus < 200 ||
+        result.httpStatus >= 300 ||
+        result.httpOk !== true;
       if (httpFailed) {
-        setError(`HTTP ${result.httpStatus}: ${result.payload ? confirmResultText(result.payload) : "typed confirmation response unavailable."}`);
+        setError(
+          result.isHttpResponse
+            ? `HTTP ${result.httpStatus}: ${result.payload ? confirmResultText(result.payload) : "typed confirmation response unavailable."}`
+            : "CONFIRM_INVALID: confirmation must be a successful HTTP response.",
+        );
         setStatus("error");
         return;
       }
-      const invalid = confirmedPayloadError(result.payload, selectedOperation.operation_id);
+      const invalid = confirmedPayloadError(
+        result.payload,
+        selectedOperation.operation_id,
+        fingerprint,
+        sourceIdentity,
+      );
       if (invalid) {
         if (result.payload && result.payload.status !== "completed") {
           setStatus("error");

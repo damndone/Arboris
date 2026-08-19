@@ -769,6 +769,21 @@ class DataConsumerDerivedPortV1:
 
 
 @dataclass(frozen=True)
+class DataConsumerServerEvidenceV1:
+    """Immutable evidence created by the package-owned execution boundary."""
+
+    method: str
+    payload: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if type(self.method) is not str or not self.method.strip():
+            raise ValueError("server evidence method must be a non-empty string")
+        if type(self.payload) is not dict:
+            raise TypeError("server evidence payload must be a server-owned dict")
+        object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
+
+
+@dataclass(frozen=True)
 class DataConsumerEvidencePortV1:
     """Evidence port constructed from the server's bounded evidence object."""
 
@@ -783,10 +798,12 @@ class DataConsumerEvidencePortV1:
         object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
 
     @classmethod
-    def from_server(cls, method: str, evidence: Mapping[str, object] | None) -> "DataConsumerEvidencePortV1":
-        if evidence is not None and not isinstance(evidence, Mapping):
-            raise TypeError("server evidence must be a mapping")
-        return cls(method=method, evidence=dict(evidence or {}))
+    def from_server(cls, method: str, evidence: DataConsumerServerEvidenceV1) -> "DataConsumerEvidencePortV1":
+        if type(evidence) is not DataConsumerServerEvidenceV1:
+            raise TypeError("server evidence must be a typed server-owned evidence object")
+        if evidence.method != method:
+            raise ValueError("server evidence method does not match the requested method")
+        return cls(method=evidence.method, evidence=evidence.payload)
 
     def to_dict(self) -> dict[str, object]:
         return {"method": self.method, **dict(self.evidence)}
@@ -811,6 +828,16 @@ class DataConsumerOutputPortsV1:
             "execution_key"
         ):
             raise ValueError("derived port execution key does not match OperationRecord claim")
+        expected_bindings = {
+            key: str(value)
+            for key, value in self.derived.to_dict().items()
+            if key.endswith("_id") and value is not None
+        }
+        actual_bindings = self.operation_record.execution.get("bindings")
+        if not isinstance(actual_bindings, Mapping) or {
+            str(key): str(value) for key, value in actual_bindings.items()
+        } != expected_bindings:
+            raise ValueError("derived effect identities do not exactly match OperationRecord bindings")
 
     def to_dict(self, *, catalog_digest: str) -> dict[str, object]:
         record = self.operation_record
@@ -1107,6 +1134,7 @@ __all__ = [
     "DataPortV1",
     "DataConsumerDerivedPortV1",
     "DataConsumerEvidencePortV1",
+    "DataConsumerServerEvidenceV1",
     "DataConsumerOutputPortsV1",
     "DataConsumerRuntimeAdapterV1",
     "DraftAgentNotebookFixture",

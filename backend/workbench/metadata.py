@@ -383,12 +383,23 @@ class MetadataRegistryV1:
             )
         schema_revision = payload.get("schema_revision")
         metadata_revision = payload.get("metadata_revision")
+        normalized_schema_revision = _metadata_text(schema_revision, "schema_revision")
+        normalized_metadata_revision = _metadata_text(metadata_revision, "metadata_revision")
+        expected_metadata_revision = metadata_revision_digest(
+            metadata,
+            schema_revision=normalized_schema_revision,
+        )
+        if normalized_metadata_revision != expected_metadata_revision:
+            raise MetadataProvenanceError(
+                "METADATA_REVISION_MISMATCH",
+                "metadata_revision is not bound to the immutable metadata payload",
+            )
         return cls(
             source_run_id=source_run_id,
             source_node_id=source_node_id,
             source_artifact_id=source_artifact_id,
-            schema_revision=_metadata_text(schema_revision, "schema_revision"),
-            metadata_revision=_metadata_text(metadata_revision, "metadata_revision"),
+            schema_revision=normalized_schema_revision,
+            metadata_revision=normalized_metadata_revision,
             metadata=metadata,
             confirmed=payload.get("confirmed") is True,
         )

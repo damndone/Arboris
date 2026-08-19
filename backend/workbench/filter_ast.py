@@ -17,6 +17,8 @@ from typing import Any, Literal, TypeAlias
 
 import pandas as pd
 
+from .metadata import MetadataRegistryV1
+
 
 FilterOperator = Literal[
     "eq",
@@ -396,20 +398,24 @@ def _ensure_value_compatible(series: pd.Series, value: Any, op: str, name: str) 
 def _resolve_user_missing_values(
     frame: pd.DataFrame,
     declared: Mapping[str, Iterable[Any]] | None,
+    metadata_registry: MetadataRegistryV1 | None,
 ) -> dict[str, tuple[Any, ...]]:
-    raw = declared
-    if raw is None:
-        candidate = frame.attrs.get("user_missing_values", {})
-        raw = candidate if isinstance(candidate, Mapping) else None
-    if raw is None:
-        if "user_missing_values" in frame.attrs:
-            raise FilterValidationError("user_missing_values must be a column mapping")
-        return {}
-    if not raw:
-        return {}
-    if frame.attrs.get("metadata_confirmed") is not True:
+    if declared is not None and metadata_registry is None:
         raise FilterValidationError(
-            "user_missing_values require confirmed metadata from the server-owned registry"
+            "user_missing_values require confirmed metadata from a server-owned registry"
+        )
+    if metadata_registry is None:
+        # DataFrame attrs are caller-controlled execution data, never an
+        # authority source. Ignore them when no server registry is present.
+        if "metadata_confirmed" in frame.attrs or "user_missing_values" in frame.attrs:
+            raise FilterValidationError(
+                "user_missing_values require confirmed metadata from a server-owned registry"
+            )
+        return {}
+    raw = metadata_registry.user_missing_values(tuple(str(column) for column in frame.columns))
+    if declared is not None and dict(declared) != raw:
+        raise FilterValidationError(
+            "user_missing_values must match the confirmed server-owned metadata registry"
         )
     normalized: dict[str, tuple[Any, ...]] = {}
     for column, values in raw.items():
@@ -534,6 +540,7 @@ def execute_filter_ast(
     *,
     limits: FilterLimits | None = None,
     user_missing_values: Mapping[str, Iterable[Any]] | None = None,
+    metadata_registry: MetadataRegistryV1 | None = None,
 ) -> pd.Series:
     """Execute a bound tree using explicit pandas boolean masks."""
 
@@ -545,7 +552,9 @@ def execute_filter_ast(
         bound = bind_filter_ast(expression.to_dict(), frame.columns, limits=limits)
     else:
         raise FilterValidationError("filter execution requires a bound filter AST")
-    declared_user_missing = _resolve_user_missing_values(frame, user_missing_values)
+    declared_user_missing = _resolve_user_missing_values(
+        frame, user_missing_values, metadata_registry
+    )
     return _evaluate_bound(frame, bound, declared_user_missing).reindex(
         frame.index, fill_value=False
     ).astype(bool)

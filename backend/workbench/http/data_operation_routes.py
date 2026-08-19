@@ -1017,6 +1017,7 @@ def _complete_direct_data_operation(
         DataConsumerDerivedPortV1,
         DataConsumerEvidencePortV1,
         DataConsumerOutputPortsV1,
+        DataConsumerServerEvidenceV1,
         build_data_consumer_runtime_adapter,
     )
 
@@ -1050,7 +1051,10 @@ def _complete_direct_data_operation(
         )
     adapter = build_data_consumer_runtime_adapter()
     derived_port = DataConsumerDerivedPortV1(effect=effect)
-    evidence_port = DataConsumerEvidencePortV1.from_server(method, evidence)
+    evidence_port = DataConsumerEvidencePortV1.from_server(
+        method,
+        DataConsumerServerEvidenceV1(method=method, payload=dict(evidence or {})),
+    )
     effect_payload = derived_port.to_dict()
     bindings = {
         key: str(value)
@@ -1130,6 +1134,10 @@ def preview_metadata_mutation_route(
     body: MetadataMutationRequest,
 ) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.metadata.update",
+        preview_ref="/data-operations/metadata/preview",
+    )
     spec = _metadata_mutation_spec(body)
     preview = _metadata_mutation_preview_or_error(root, spec, confirm=False)
     return {"spec": spec.to_dict(), "preview": preview.to_dict()}
@@ -1141,6 +1149,10 @@ def confirm_metadata_mutation_route(
     body: MetadataMutationConfirmRequest,
 ) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.metadata.update",
+        confirm_ref="/data-operations/metadata/confirm",
+    )
     spec = _metadata_mutation_spec(body)
     preview = _metadata_mutation_preview_or_error(root, spec, confirm=True)
     if preview.fingerprint != body.preview_fingerprint:
@@ -1278,6 +1290,10 @@ def get_data_operation_profile(
 @router.post("/data-operations/column-cast/preview")
 def preview_column_cast(project_root: str, body: DataColumnCastRequest) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.column.cast",
+        preview_ref="/data-operations/column-cast/preview",
+    )
     spec = _spec(body)
     preview = _preview_or_error(root, spec, confirm=False)
     return {"spec": spec.to_dict(), "preview": preview.to_dict()}
@@ -1289,6 +1305,10 @@ async def confirm_column_cast(
     body: DataColumnCastConfirmRequest,
 ) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.column.cast",
+        confirm_ref="/data-operations/column-cast/confirm",
+    )
     spec = _spec(body)
     preview = _preview_or_error(root, spec, confirm=True)
     if preview.fingerprint != body.preview_fingerprint:
@@ -1422,6 +1442,10 @@ async def confirm_column_cast(
 @router.post("/data-operations/columns-cast/preview")
 def preview_columns_cast(project_root: str, body: DataColumnsCastRequest) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.columns.cast",
+        preview_ref="/data-operations/columns-cast/preview",
+    )
     spec = _batch_spec(body)
     preview = _batch_preview_or_error(root, spec, confirm=False)
     return {"spec": spec.to_dict(), "preview": preview.to_dict()}
@@ -1433,6 +1457,10 @@ async def confirm_columns_cast(
     body: DataColumnsCastConfirmRequest,
 ) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.columns.cast",
+        confirm_ref="/data-operations/columns-cast/confirm",
+    )
     spec = _batch_spec(body)
     preview = _batch_preview_or_error(root, spec, confirm=True)
     if preview.fingerprint != body.preview_fingerprint:
@@ -1567,6 +1595,10 @@ async def confirm_columns_cast(
 @router.post("/data-operations/feature-recipe/preview")
 def preview_feature_recipe_route(project_root: str, body: FeatureRecipeRequest) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.feature_recipe",
+        preview_ref="/data-operations/feature-recipe/preview",
+    )
     spec = _feature_recipe_spec(body)
     preview = _feature_recipe_preview_or_error(root, spec, confirm=False)
     return {"spec": spec.to_dict(), "preview": preview.to_dict()}
@@ -1578,6 +1610,10 @@ def confirm_feature_recipe_route(
     body: FeatureRecipeConfirmRequest,
 ) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.feature_recipe",
+        confirm_ref="/data-operations/feature-recipe/confirm",
+    )
     spec = _feature_recipe_spec(body)
     preview = _feature_recipe_preview_or_error(root, spec, confirm=True)
     if preview.fingerprint != body.preview_fingerprint:

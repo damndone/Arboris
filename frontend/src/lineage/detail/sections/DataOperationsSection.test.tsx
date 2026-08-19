@@ -18,6 +18,57 @@ const SOURCE_IDENTITY = {
   source_artifact_id: "artifact-1",
 };
 
+function completedResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      status: "completed",
+      preview: {
+        status: "ready",
+        fingerprint: "preview-fp-default",
+        source_run_id: SOURCE_IDENTITY.source_run_id,
+        source_node_id: SOURCE_IDENTITY.source_node_id,
+        source_artifact_id: SOURCE_IDENTITY.source_artifact_id,
+      },
+      effect: {
+        execution_key: "exec-1",
+        child_node_id: "child-1",
+        artifact_id: "artifact-2",
+      },
+      operation: {
+        record_id: "record-1",
+        operation_id: "data.example",
+        status: "completed",
+        target: {
+          run_id: SOURCE_IDENTITY.source_run_id,
+          node_ref: SOURCE_IDENTITY.source_node_id,
+          artifact_id: SOURCE_IDENTITY.source_artifact_id,
+        },
+        execution: {
+          execution_key: "exec-1",
+          bindings: {
+            artifact_id: "artifact-2",
+            data_child_node_id: "child-1",
+          },
+        },
+        outputs: {
+          ports: {
+            derived: { execution_key: "exec-1", artifact_id: "artifact-2", child_node_id: "child-1" },
+            operation_record: { record_id: "record-1" },
+          },
+          consumer_slots: {
+            "data.agent": { record_id: "record-1", port: "derived" },
+            "data.notebook": { record_id: "record-1", port: "derived" },
+            "data.report": { record_id: "record-1", port: "evidence" },
+          },
+        },
+      },
+      ...overrides,
+    }),
+  };
+}
+
 function descriptor(overrides: Record<string, unknown> = {}) {
   return {
     operation_id: "data.example",
@@ -199,19 +250,7 @@ describe("DataOperationsSection", () => {
   beforeEach(() => {
     previewMock.mockReset();
     confirmMock.mockReset();
-    confirmMock.mockResolvedValue({
-      status: "completed",
-      effect: {
-        execution_key: "exec-1",
-        child_node_id: "child-1",
-        artifact_id: "artifact-2",
-      },
-      operation: {
-        record_id: "record-1",
-        operation_id: "data.example",
-        status: "completed",
-      },
-    });
+    confirmMock.mockResolvedValue(completedResponse());
   });
 
   it("displays a typed error when the manifest omits source identity", () => {
@@ -245,7 +284,7 @@ describe("DataOperationsSection", () => {
 
   it("only confirms after a ready preview fingerprint and uses descriptor refs", async () => {
     previewMock.mockResolvedValue({
-      preview: { status: "ready", fingerprint: "preview-fp-1", row_count_after: 2 },
+      preview: { status: "ready", fingerprint: "preview-fp-default", row_count_after: 2 },
     });
 
     render(<DataOperationsSection {...sectionProps()} />);
@@ -287,7 +326,7 @@ describe("DataOperationsSection", () => {
       {
         ...SOURCE_IDENTITY,
         label: "approved",
-        preview_fingerprint: "preview-fp-1",
+        preview_fingerprint: "preview-fp-default",
       },
     );
     expect(screen.getByTestId("data-operation-complete")).toHaveTextContent(
@@ -354,6 +393,52 @@ describe("DataOperationsSection", () => {
     expect(screen.getByTestId("data-operation-error")).toHaveTextContent(
       "HTTP 409",
     );
+  });
+
+  it("does not treat a plain object completion as a verified HTTP success", async () => {
+    confirmMock.mockResolvedValue({
+      status: "completed",
+      effect: { execution_key: "exec-1", child_node_id: "child-1", artifact_id: "artifact-2" },
+      operation: { record_id: "record-1", operation_id: "data.example", status: "completed" },
+    });
+    previewMock.mockResolvedValue({ preview: { status: "ready", fingerprint: "preview-fp-default" } });
+
+    render(<DataOperationsSection {...sectionProps()} />);
+    fireEvent.change(screen.getByLabelText("Data operation"), { target: { value: "data.example" } });
+    fireEvent.change(screen.getByLabelText("label"), { target: { value: "plain-object" } });
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+    await screen.findByTestId("data-operation-preview-ready");
+    fireEvent.click(screen.getByTestId("data-operation-confirm"));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("data-operation-complete")).toBeNull();
+    expect(screen.getByTestId("data-operation-error")).toHaveTextContent("CONFIRM_INVALID");
+  });
+
+  it("does not complete when the response preview or source identity is stale", async () => {
+    confirmMock.mockResolvedValue(
+      completedResponse({
+        preview: {
+          status: "ready",
+          fingerprint: "stale-preview",
+          source_run_id: "foreign-run",
+          source_node_id: SOURCE_IDENTITY.source_node_id,
+          source_artifact_id: SOURCE_IDENTITY.source_artifact_id,
+        },
+      }),
+    );
+    previewMock.mockResolvedValue({ preview: { status: "ready", fingerprint: "preview-fp-default" } });
+
+    render(<DataOperationsSection {...sectionProps()} />);
+    fireEvent.change(screen.getByLabelText("Data operation"), { target: { value: "data.example" } });
+    fireEvent.change(screen.getByLabelText("label"), { target: { value: "stale-identity" } });
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+    await screen.findByTestId("data-operation-preview-ready");
+    fireEvent.click(screen.getByTestId("data-operation-confirm"));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("data-operation-complete")).toBeNull();
+    expect(screen.getByTestId("data-operation-error")).toHaveTextContent("CONFIRM_INVALID");
   });
 
   it("requires typed effect and operation identity before showing completed", async () => {
