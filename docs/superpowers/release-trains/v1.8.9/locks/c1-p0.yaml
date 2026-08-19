@@ -1,0 +1,83 @@
+schema_version: workbench.v1.8.9.candidate-lock.v1
+stage: C1
+status: prepared_before_candidate_commit
+
+# The future C1 candidate SHA is intentionally absent. The lock is included
+# in that future commit and therefore must not self-reference it.
+baseline_commit: f3836408cf15c3e7380823e5c1b303b4467c7aec
+pre_lock_product_tip: 588b881d8ae40badb7dc26106477dc373ed9fd34
+formal_line: v1-8-9-foundation-integration
+formal_context_manifest_sha256: 983e705acfbae2d96c4443e839a7c71da9922cd06360013c17738c3b3cf2e047
+
+merge_order:
+  - c0_contract_lock
+  - p0_legacy_compilation_authority_cutover
+  - p0_agent_compiler
+  - p0_evidence_core
+  - p0_workflow_truth
+merge_order_rationale: legacy authority is retired before the host-only compiler is admitted; all providers are then catalog-verified serially.
+
+merge_inputs:
+  c0_contract_lock: c9f3c4ed3e07faf6f57f795a5e35fa6f8042c749
+  p0_legacy_compilation_authority_cutover: fd54600ed726ed6896c7d13b19e7924320d5c8b8
+  p0_agent_compiler: 8017f6ae6c59a35851a315c3e6a5806c52367f74
+  p0_evidence_core: 9db6815768f881c31928bf5e8cc8c1bac688ed73
+  p0_workflow_truth: e7593dd5788a73ee5bae94236bbdff75bbf62349
+  evaluation_harness_dependency: d6d94798a288e4836ebdb32ba78fcf05ee2b08b4
+  evaluation_harness_merge_policy: sidecar_only_not_in_product_candidate
+
+integration_repairs:
+  test_alignment: 193b8953244ae05dbffc65fa1938a089ff26b1b0
+  workflow_provider_schema_normalization: 588b881d8ae40badb7dc26106477dc373ed9fd34
+  product_runtime_changes: none
+
+contract_lock:
+  c0_commit: c9f3c4ed3e07faf6f57f795a5e35fa6f8042c749
+  c0_formal_manifest_sha256: d3d690e0e2e8b49e7b56db70c140ebcb2087768af2309fe8950abc2d5bec9b79
+
+provider_catalog:
+  catalog_digest: 22114033b056d8cd8c16dff0f450bc1c2be112c7ddcfff791baa9750c24a6695
+  provider_ids:
+    - agent.compiler
+    - fixture.contracts
+    - evidence.core
+    - workflow.post_estimation
+  source_filenames:
+    - agent_compiler.json
+    - contract_fixture.json
+    - evidence_core.json
+    - workflow_post_estimation.json
+  source_sha256:
+    agent_compiler.json: 8e3682b0a9118f62cc2429c73df2ea5589ab8bc0cb3b5537d6f3862de5fc451c
+    contract_fixture.json: d0770b5ade422a73126ec22c369c25a2366758f5ed385433767b98da7e02f7d6
+    evidence_core.json: b700c238baa3cc015d4b0ad6d9e817f86adbb7c1d755059f89de7ac5c3e70343
+    workflow_post_estimation.json: 2b9304533090a1fadf79e6670f56cb8e587e2a0cef8969be2c0410eb9ea47e72
+
+coverage:
+  coverage_input_digest: acb7476cfb46f5cb8281cae21421be7a2770ba6b1d081b272cf87228f9d78470
+  coverage_scope: live provider ids, source filenames, exposure path rows and descriptor inputs
+  acceptance_matrix_status: not_built_in_c1
+
+tests:
+  - command: PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_agent_compiler.py tests/test_v189_capability_manifest.py tests/test_v189_legacy_compilation_authority.py tests/test_v189_evidence_envelope.py tests/test_v189_evidence_host_bootstrap.py tests/test_v189_workflow_truth.py tests/test_workflow_resume.py tests/test_workflow_runtime.py tests/test_reporting.py tests/contracts/test_v189_contract_lock.py -q --disable-warnings
+    status: passed
+    observed: 468 passed, 93 warnings in 64.24s
+  - command: git diff --check
+    status: passed
+  - command: provider catalog load and digest verification
+    status: passed
+    observed: catalog digest 22114033b056d8cd8c16dff0f450bc1c2be112c7ddcfff791baa9750c24a6695
+
+invalidated_evidence:
+  - prior P0 package-local focused results are not candidate-bound after composition and must not be reused as C1 acceptance
+  - prior standalone catalog denominators are invalid after four declaration inputs become visible
+  - browser_acceptance: NOT_VERIFIED
+  - provider_acceptance: NOT_VERIFIED
+  - host_full_gate: NOT_VERIFIED
+  - release_or_tag: NOT_VERIFIED
+
+safety_boundary:
+  catalog_loader_change: none
+  dynamic_import_or_executor_from_json: forbidden
+  runtime_authority_change: none
+  evaluation_harness_in_product_candidate: forbidden
