@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import math
 from typing import Any
 
 
@@ -49,11 +50,11 @@ def build_diagnostic_summary(
     for term, coef in coefficients.items():
         if term == "Intercept" or not isinstance(coef, Mapping):
             continue
-        est = coef.get("estimate")
-        p = coef.get("p_value")
+        est = _bounded_number(coef.get("estimate"))
+        p = _bounded_number(coef.get("p_value"))
         if est is None:
             continue
-        std_err = coef.get("std_error")
+        std_err = _bounded_number(coef.get("std_error"))
         p_label = _significance_label(p)
         interpretation_guide = "standard"
         template_key = "coef_continuous_association"
@@ -83,6 +84,9 @@ def build_diagnostic_summary(
             "std_error": round(float(std_err), 4) if std_err is not None else None,
             "p_value": round(float(p), 4) if p is not None else None,
             "significance_label": p_label,
+            "variance_source": _bounded_string(coef.get("variance_source")),
+            "source_id": _bounded_string(coef.get("source_id")),
+            "warnings": _bounded_strings(coef.get("warnings")),
             "interpretation_guide": interpretation_guide,
             "linked_issues": linked_issues,
             "template_key": template_key,
@@ -160,7 +164,7 @@ def build_diagnostic_summary(
             "model_label": _model_label(primary_type),
             "y_variable": normalized_y,
             "x_variables": normalized_x,
-            "n_observations": profile.get("row_count", 0),
+            "n_observations": _bounded_count(profile.get("row_count", 0)),
             "n_predictors_original": n_original,
             "n_predictors_after_encoding": n_after,
             "dataset_kind": routing.get("kind", "unknown"),
@@ -181,6 +185,8 @@ def build_diagnostic_summary(
             "cautions": cautions,
             "info": infos,
         },
+        "survey_design": _bounded_survey_design(primary_result.get("survey_design")),
+        "warnings": _bounded_strings(primary_result.get("warnings")),
         "coefficients_summary": {
             "interpretation_mode": "associational",
             "rows": coeff_rows,
@@ -256,7 +262,7 @@ def _model_label(primary_type: str) -> str:
 
 
 def _significance_label(p: float | None) -> str:
-    if p is None:
+    if p is None or not math.isfinite(p):
         return "not reported"
     if p < 0.01:
         return "significant at the 1% level"
@@ -265,6 +271,62 @@ def _significance_label(p: float | None) -> str:
     if p < 0.10:
         return "marginally significant"
     return "not statistically significant at conventional levels"
+
+
+def _bounded_number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        parsed = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) and abs(parsed) <= 1_000_000_000_000.0 else None
+
+
+def _bounded_count(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1_000_000:
+        return None
+    return value
+
+
+def _bounded_string(value: Any) -> str | None:
+    return value[:128] if isinstance(value, str) and value else None
+
+
+def _bounded_strings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item[:128] for item in value[:16] if isinstance(item, str) and item]
+
+
+def _bounded_survey_design(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    bounded: dict[str, Any] = {}
+    for field in (
+        "n_obs", "n_strata", "n_psu", "degf", "residual_degf",
+        "replicates_attempted", "replicates_succeeded", "replicates_failed",
+    ):
+        number = _bounded_count(value.get(field))
+        if number is not None:
+            bounded[field] = number
+    for field in ("design_effect", "effective_sample_size"):
+        number = _bounded_number(value.get(field))
+        if number is not None:
+            bounded[field] = number
+    for field in (
+        "variance_method", "strata_column", "psu_column", "weight_column",
+        "replicate_type", "lonely_psu_policy", "subpopulation", "weight_frame",
+    ):
+        string = _bounded_string(value.get(field))
+        if string is not None:
+            bounded[field] = string
+    columns = value.get("replicate_weight_columns")
+    if isinstance(columns, list):
+        bounded["replicate_weight_columns"] = [
+            item[:128] for item in columns[:64] if isinstance(item, str) and item
+        ]
+    return bounded or None
 
 
 def _get_confirmed_roles(roles: dict, role_name: str) -> set[str]:

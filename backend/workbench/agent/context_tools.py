@@ -19,7 +19,6 @@ from ..graph_store import GraphStore, graph_to_json
 from ..lineage.node_write_validation import build_rerun_operation_context
 from ..lineage.op_contract import resolve_operation_contract
 from ..lineage.run_inputs import read_run_inputs
-from ..services.results_service import read_model_results
 from ..analysis_loop.compare import ComparePacket
 from ..analysis_loop.time_series_compare import read_time_series_artifacts as _read_time_series_artifacts
 from ..analysis_loop.plan import PlanDiff
@@ -1604,12 +1603,22 @@ class NodeOperationContextProvider:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
+        model_results, verification_error = _verified_model_results(run_root)
+        if verification_error is not None:
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "diagnostics": _agent_result_unavailable(verification_error),
+                "omitted_sections": ["raw_model_results", "coefficient_risk"],
+            }
         preview = build_diagnostic_summary_preview(
             run_root,
             manifest,
-            read_model_results(run_root),
+            model_results,
         )
         diagnostics, omitted_sections = _bounded_diagnostics(preview)
+        diagnostics["survey_design"] = _bounded_survey_design(model_results)
+        diagnostics["regression_table"] = _bounded_regression_table(model_results)
         return {
             **canonical,
             "node": _bounded_node(node),
@@ -1709,7 +1718,14 @@ class NodeOperationContextProvider:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
-        model_results = read_model_results(run_root)
+        model_results, verification_error = _verified_model_results(run_root)
+        if verification_error is not None:
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "result_summary": _agent_result_unavailable(verification_error),
+                "omitted_sections": ["raw_model_results", "coefficient_rows"],
+            }
         preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
         summary, summary_status = _read_diagnostic_summary(run_root)
         result_summary = _bounded_result_summary(
@@ -1933,7 +1949,15 @@ class NodeOperationContextProvider:
         models: list[dict[str, Any]] = []
         for run_id in request.run_ids:
             run_root = self._project_run_root(run_id)
-            for result in read_model_results(run_root):
+            model_results, verification_error = _verified_model_results(run_root)
+            if verification_error is not None:
+                models.append({
+                    "run_id": run_id,
+                    "projection_status": "unavailable",
+                    "unavailable_reason": verification_error,
+                })
+                continue
+            for result in model_results:
                 public_model = _public_requested_model_coefficients(
                     run_id=run_id,
                     result=result,
@@ -2088,7 +2112,12 @@ class NodeOperationContextProvider:
                 raise ToolVisibleError(
                     "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: requested artifact is not a persisted figure."
                 )
-            models = [result for result in read_model_results(run_root) if isinstance(result, dict)]
+            models, verification_error = _verified_model_results(run_root)
+            if verification_error is not None:
+                raise ToolVisibleError(
+                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: "
+                    f"{verification_error}."
+                )
             if len(models) != 1 or not isinstance(models[0].get("model_id"), str):
                 raise ToolVisibleError(
                     "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: the figure does not resolve to exactly one persisted model."
@@ -2170,7 +2199,13 @@ class NodeOperationContextProvider:
                 )
             run_root = self._project_run_root(run_id)
             matches: list[tuple[str, dict[str, Any]]] = []
-            for result in read_model_results(run_root):
+            model_results, verification_error = _verified_model_results(run_root)
+            if verification_error is not None:
+                raise ToolVisibleError(
+                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: "
+                    f"{verification_error}."
+                )
+            for result in model_results:
                 model_id = result.get("model_id")
                 model_type = result.get("model_type")
                 coefficients = result.get("coefficients")
@@ -2278,7 +2313,13 @@ class NodeOperationContextProvider:
                 )
             run_root = self._project_run_root(run_id)
             matches: list[tuple[str, float]] = []
-            for result in read_model_results(run_root):
+            model_results, verification_error = _verified_model_results(run_root)
+            if verification_error is not None:
+                raise ToolVisibleError(
+                    "PROJECT_COEFFICIENT_TRANSFORM_UNAVAILABLE: "
+                    f"{verification_error}."
+                )
+            for result in model_results:
                 model_id = result.get("model_id")
                 coefficients = result.get("coefficients")
                 coefficient = coefficients.get(term) if isinstance(coefficients, dict) else None
@@ -2591,8 +2632,20 @@ class NodeOperationContextProvider:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
+        model_results, verification_error = _verified_model_results(run_root)
+        if verification_error is not None:
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "artifact_preview": {
+                    "available": False,
+                    "preview_status": "unavailable",
+                    "unavailable_reason": verification_error,
+                },
+                "omitted_sections": ["raw_artifact_payloads", "raw_model_results"],
+            }
         artifact_manifest = _bounded_artifact_manifest(
-            build_artifact_manifest(run_root, read_model_results(run_root))
+            build_artifact_manifest(run_root, model_results)
         )
         lifecycle = str(manifest.get("status") or "completed")
         if lifecycle in {"queued", "running"}:
@@ -3158,11 +3211,25 @@ def _public_requested_model_coefficients(
     confidence_level = _public_probability(covariance_evidence.get("confidence_level"))
     cluster_variable = covariance_evidence.get("cluster_variable")
     cluster_count = _public_positive_int(covariance_evidence.get("cluster_count"))
+    nobs = _public_positive_int(result.get("nobs"))
+    invalid_model_contract = result.get("nobs") is not None and nobs is None
+    exposure_col = result.get("exposure_col")
+    sampling_weight = result.get("sampling_weight")
+    if exposure_col is not None and (
+        not isinstance(exposure_col, str) or not exposure_col or len(exposure_col) > 128
+    ):
+        invalid_model_contract = True
+        exposure_col = None
+    if sampling_weight is not None and (
+        not isinstance(sampling_weight, str) or not sampling_weight or len(sampling_weight) > 128
+    ):
+        invalid_model_contract = True
+        sampling_weight = None
     public_model = {
         "run_id": run_id,
         "model_id": model_id,
         "model_type": result.get("model_type") if isinstance(result.get("model_type"), str) else None,
-        "nobs": _public_positive_int(result.get("nobs")),
+        "nobs": nobs,
         "r_squared": _public_stat_number(result.get("r_squared")),
         "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
         "df_model": _public_stat_number(result.get("df_model")),
@@ -3206,6 +3273,15 @@ def _public_requested_model_coefficients(
     survey_design = _bounded_survey_design([result])
     if survey_design is not None:
         public_model["survey_design"] = survey_design
+    if "exposure_col" in result:
+        public_model["exposure_col"] = exposure_col
+    if "sampling_weight" in result:
+        public_model["sampling_weight"] = sampling_weight
+    if invalid_model_contract:
+        public_model.update({
+            "model_metadata_status": "unavailable",
+            "model_metadata_unavailable_reason": "AGENT_MODEL_METADATA_INVALID",
+        })
     return public_model
 
 
@@ -4321,9 +4397,12 @@ def _bounded_model_figure_numeric_source(
     if not artifact_id.startswith(("residuals_fitted", "residuals_vs_", "qq_residuals")):
         return None
     model_key = node_id.split(":", 1)[1] if node_id.startswith("model:") else ""
+    model_results, verification_error = _verified_model_results(run_root)
+    if verification_error is not None:
+        return None
     candidates = [
         result
-        for result in read_model_results(run_root)
+        for result in model_results
         if isinstance(result, dict)
         and (
             not model_key
@@ -4333,7 +4412,7 @@ def _bounded_model_figure_numeric_source(
     if not candidates and model_key:
         return None
     if not candidates:
-        candidates = [result for result in read_model_results(run_root) if isinstance(result, dict)]
+        candidates = [result for result in model_results if isinstance(result, dict)]
     if len(candidates) != 1:
         return None
     result = candidates[0]
@@ -4751,6 +4830,129 @@ def _bounded_diagnostics(preview: dict[str, Any]) -> tuple[dict[str, Any], list[
 
     return diagnostics, omitted_sections
 
+
+def _agent_result_unavailable(reason: str) -> dict[str, Any]:
+    return {
+        "available": False,
+        "status": "unavailable",
+        "summary_status": "unavailable",
+        "unavailable_reason": reason,
+        "survey_design": None,
+        "regression_table": None,
+    }
+
+
+def _verified_model_results(run_root: Path) -> tuple[list[dict[str, Any]], str | None]:
+    """Read model results only after index hash and binding verification."""
+    index_path = run_root / "artifacts_index.json"
+    if not index_path.exists():
+        # v1.8.7 runs predate the artifact index. Preserve their read-only
+        # semantics while all indexed current runs take the strict path below.
+        return _read_legacy_model_results(run_root)
+    try:
+        index = read_json(index_path)
+    except (FileNotFoundError, OSError, ValueError):
+        return [], "AGENT_RESULT_ARTIFACT_INVALID"
+    if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
+        return [], "AGENT_RESULT_ARTIFACT_INVALID"
+    records = [item for item in index["artifacts"] if isinstance(item, dict)]
+    by_id = {
+        item.get("artifact_id"): item
+        for item in records
+        if isinstance(item.get("artifact_id"), str)
+    }
+    model_records = [item for item in records if item.get("artifact_type") == "model_result"]
+    if not model_records:
+        return _read_legacy_model_results(run_root)
+    model_dir = run_root / "model_results"
+    indexed_paths = {
+        item.get("path")
+        for item in records
+        if item.get("artifact_type") in {"model_result", "model_diagnostic"}
+        and isinstance(item.get("path"), str)
+    }
+    for record in model_records:
+        model_id = record.get("artifact_id")
+        path_text = record.get("path")
+        if not isinstance(model_id, str) or not model_id or path_text != f"model_results/{model_id}.json":
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        indexed_paths.add(path_text)
+    if model_dir.is_dir():
+        actual_paths = {path.relative_to(run_root).as_posix() for path in model_dir.glob("*.json")}
+        if actual_paths != indexed_paths:
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+    elif model_records:
+        return [], "AGENT_RESULT_ARTIFACT_INVALID"
+
+    expected_project = str(run_root.parent.parent.resolve())
+    results: list[dict[str, Any]] = []
+    for record in sorted(model_records, key=lambda item: str(item.get("artifact_id"))):
+        model_id = record["artifact_id"]
+        path = run_root / record["path"]
+        digest = record.get("sha256")
+        inputs = record.get("inputs")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or not isinstance(inputs, list)
+            or not all(isinstance(item, str) and item in by_id for item in inputs)
+        ):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        try:
+            if not path.is_file() or sha256_file(path) != digest:
+                return [], "AGENT_RESULT_ARTIFACT_INVALID"
+            result = read_json(path)
+        except (OSError, ValueError):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        if not isinstance(result, dict) or result.get("model_id") != model_id:
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        binding = result.get("result_binding")
+        if (
+            not isinstance(binding, dict)
+            or binding.get("project_root") != expected_project
+            or binding.get("run_id") != run_root.name
+            or binding.get("model_id") != model_id
+        ):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        if binding.get("source_artifact_ids") != inputs:
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        coefficients = result.get("coefficients")
+        source_ids = binding.get("coefficient_source_ids")
+        if not isinstance(coefficients, dict) or not isinstance(source_ids, dict):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        for term, coefficient in coefficients.items():
+            expected_source = f"model_results.{model_id}.coefficients.{term}"
+            if (
+                not isinstance(term, str)
+                or not isinstance(coefficient, dict)
+                or coefficient.get("source_id") != expected_source
+                or source_ids.get(term) != expected_source
+            ):
+                return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        results.append(result)
+    return results, None
+
+
+def _read_legacy_model_results(run_root: Path) -> tuple[list[dict[str, Any]], str | None]:
+    """Read pre-index model payloads through a narrow compatibility contract."""
+    model_dir = run_root / "model_results"
+    if not model_dir.is_dir():
+        return [], None
+    results: list[dict[str, Any]] = []
+    for path in sorted(model_dir.glob("*.json")):
+        try:
+            result = read_json(path)
+        except (OSError, ValueError):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        if (
+            not isinstance(result, dict)
+            or result.get("model_id") != path.stem
+            or not isinstance(result.get("coefficients"), dict)
+        ):
+            continue
+        results.append(result)
+    return results, None
+
 # v1.7.2 Analysis Loop read-only context seam. This is intentionally appended
 # to preserve the existing provider/request API above.
 _ANALYSIS_LOOP_SCOPES = frozenset({"inspect", "plan", "validation", "compare"})
@@ -5052,6 +5254,11 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
                 "subpopulation", "weight_frame",
             ),
         )
+        invalid_contract = False
+        for field in ("n_obs", "n_strata", "n_psu", "degf", "residual_degf"):
+            raw_value = design.get(field)
+            if raw_value is not None and _public_positive_int(raw_value) is None:
+                invalid_contract = True
         for field in (
             "replicates_attempted", "replicates_succeeded", "replicates_failed"
         ):
@@ -5066,6 +5273,19 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
             bounded["replicate_failure_reasons"] = bounded_reasons
         else:
             bounded["replicate_failure_reasons"] = None
+        raw_columns = design.get("replicate_weight_columns")
+        if isinstance(raw_columns, list):
+            bounded["replicate_weight_columns"] = [
+                item[:128] for item in raw_columns[:64]
+                if isinstance(item, str) and item
+            ]
+        elif raw_columns is not None:
+            invalid_contract = True
+        if invalid_contract:
+            bounded.update({
+                "projection_status": "unavailable",
+                "unavailable_reason": "AGENT_SURVEY_METADATA_INVALID",
+            })
         return bounded
     return None
 

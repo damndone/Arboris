@@ -15,7 +15,7 @@ from decimal import Decimal, DecimalException
 import numpy as np
 import pandas as pd
 
-from .design import SurveyDesign
+from .design import SURVEY_WEIGHT_FRAME_VALUES, SurveyDesign
 from .errors import SurveyEngineError
 from .estimator import EstimatorSpec
 
@@ -146,13 +146,40 @@ def _poisson_result_postprocessor(
     ci_upper: float,
 ) -> None:
     """Keep Poisson-derived intervals aligned with the survey coefficient."""
-    from math import exp
+    from math import exp, isfinite
 
-    irr = {
-        "irr": exp(estimate),
-        "irr_ci_lower": exp(ci_lower),
-        "irr_ci_upper": exp(ci_upper),
-    }
+    max_log = 700.0
+    values = {"estimate": estimate, "ci_lower": ci_lower, "ci_upper": ci_upper}
+    if any(
+        not isfinite(value) or abs(value) > max_log
+        for value in values.values()
+    ):
+        raise SurveyEngineError(
+            "SURVEY_POSTPROCESS_INVALID",
+            "Poisson exp transform is outside the finite bounded range",
+            reason="exponential_out_of_bounds",
+            term=term,
+        )
+    try:
+        irr = {
+            "irr": exp(estimate),
+            "irr_ci_lower": exp(ci_lower),
+            "irr_ci_upper": exp(ci_upper),
+        }
+    except (OverflowError, ValueError) as exc:
+        raise SurveyEngineError(
+            "SURVEY_POSTPROCESS_INVALID",
+            "Poisson exp transform could not be represented safely",
+            reason="exponential_overflow",
+            term=term,
+        ) from exc
+    if any(not isfinite(float(value)) for value in irr.values()):
+        raise SurveyEngineError(
+            "SURVEY_POSTPROCESS_INVALID",
+            "Poisson exp transform returned a non-finite value",
+            reason="nonfinite_transform",
+            term=term,
+        )
     entry.update(irr)
     primary_irr = primary.get("irr")
     if isinstance(primary_irr, dict) and isinstance(primary_irr.get(term), dict):
@@ -179,14 +206,22 @@ def apply_result_postprocessor(
             "survey_result_postprocessor must be callable",
             estimator=estimator.name,
         )
-    callback(
-        primary=primary,
-        term=term,
-        entry=entry,
-        estimate=estimate,
-        ci_lower=ci_lower,
-        ci_upper=ci_upper,
-    )
+    try:
+        callback(
+            primary=primary,
+            term=term,
+            entry=entry,
+            estimate=estimate,
+            ci_lower=ci_lower,
+            ci_upper=ci_upper,
+        )
+    except OverflowError as exc:
+        raise SurveyEngineError(
+            "SURVEY_POSTPROCESS_INVALID",
+            "survey result postprocessor overflowed",
+            reason="overflow",
+            term=term,
+        ) from exc
 
 
 def supports_glm_family(glm_family: str | None) -> bool:
@@ -210,6 +245,12 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
     lonely_psu = str(artifacts.get("_survey_lonely_psu") or "").strip()
     subpopulation = str(artifacts.get("_survey_subpop") or "").strip()
     weight_frame = str(artifacts.get("_survey_weight_frame") or "").strip()
+    if weight_frame and weight_frame not in SURVEY_WEIGHT_FRAME_VALUES:
+        raise SurveyEngineError(
+            "SURVEY_WEIGHT_FRAME_INVALID",
+            f"unknown survey weight frame {weight_frame!r}",
+            allowed=list(SURVEY_WEIGHT_FRAME_VALUES),
+        )
     if fpc:
         raise SurveyEngineError(
             "SURVEY_FPC_UNSUPPORTED",
@@ -268,6 +309,7 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
         subpop=subpopulation or None,
         replicate_type=replicate_type or None,
         replicate_weight_columns=replicate_columns,
+        weight_frame=weight_frame or None,
     )
 
 

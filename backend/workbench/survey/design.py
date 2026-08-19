@@ -26,6 +26,7 @@ from .estimator import VARIANCE_METHOD_REQUIREMENTS, EstimatorSpec, missing_capa
 
 LONELY_PSU_POLICIES = ("fail", "remove", "adjust", "average", "certainty")
 REPLICATE_TYPES = ("brr", "jackknife", "bootstrap", "provided")
+SURVEY_WEIGHT_FRAME_VALUES = ("cross_sectional", "longitudinal")
 _MAX_INVALID_WEIGHT_ROWS = 16
 _MAX_SUBPOP_EXPRESSION_LENGTH = 512
 SURVEY_INVALID_SAMPLING_WEIGHTS = "SURVEY_INVALID_SAMPLING_WEIGHTS"
@@ -217,6 +218,7 @@ class SurveyDesign:
     psu: str | None = None
     fpc: str | None = None
     lonely_psu: str = "fail"
+    weight_frame: str | None = None
     subpop: str | None = None
     replicate_type: str | None = None
     replicate_weight_columns: list[str] = field(default_factory=list)
@@ -238,6 +240,12 @@ class SurveyDesign:
                 f"unknown policy {self.lonely_psu!r}",
                 allowed=list(LONELY_PSU_POLICIES),
             )
+        if self.weight_frame is not None and self.weight_frame not in SURVEY_WEIGHT_FRAME_VALUES:
+            raise SurveyEngineError(
+                "SURVEY_WEIGHT_FRAME_INVALID",
+                f"unknown survey weight frame {self.weight_frame!r}",
+                allowed=list(SURVEY_WEIGHT_FRAME_VALUES),
+            )
         if self.replicate_type is not None and self.replicate_type not in REPLICATE_TYPES:
             raise SurveyEngineError(
                 "SURVEY_REPLICATE_TYPE_INVALID",
@@ -254,6 +262,17 @@ class SurveyDesign:
                 "SURVEY_REPLICATE_WEIGHTS_MISSING",
                 "replicate_type='provided' requires replicate_weight_columns",
             )
+        if self.replicate_type == "provided":
+            missing_replicates = [
+                column for column in self.replicate_weight_columns
+                if column not in self.frame.columns
+            ]
+            if missing_replicates:
+                raise SurveyEngineError(
+                    "SURVEY_REPLICATE_WEIGHTS_MISSING",
+                    "provided replicate weight columns are missing",
+                    columns=missing_replicates[:16],
+                )
         # Sampling weights are part of the executable design, not a declaration
         # that can be trusted until a later matrix operation.  Validate at
         # construction and again through ``weights`` because the frame remains
@@ -450,14 +469,20 @@ class SurveyDesign:
                 reason="shape",
                 mask_shape=list(mask_array.shape),
             )
-        try:
-            return mask_array.astype(bool, copy=False)
-        except (TypeError, ValueError) as exc:
+        if mask_array.dtype != np.dtype(bool):
             raise SurveyEngineError(
                 "SURVEY_SUBPOP_INVALID",
                 "subpopulation expression must produce boolean values",
                 reason="not_boolean",
-            ) from exc
+                dtype=str(mask_array.dtype),
+            )
+        if pd.isna(mask_array).any():
+            raise SurveyEngineError(
+                "SURVEY_SUBPOP_INVALID",
+                "subpopulation expression must not contain missing values",
+                reason="missing_values",
+            )
+        return mask_array
 
     # -- design effect -----------------------------------------------------
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
+
 from ..context import ModelingContext, RunEnv
 from ..pack import AnalysisPack, RerunAction, register_pack
 from ..registry import (
@@ -492,6 +494,51 @@ def _design_term(payload_term: str) -> str:
     return _DESIGN_TERM_ALIASES.get(payload_term, payload_term)
 
 
+def _attach_result_binding(
+    run_root, run_id: str, model_id: str, primary: dict[str, Any], inputs: list[str]
+) -> None:
+    """Bind a persisted model result to its run, project, model, and terms."""
+    if not isinstance(primary, dict):
+        raise ValueError("MODEL_RESULT_INVALID: result payload must be an object")
+    if (
+        not isinstance(inputs, list)
+        or not inputs
+        or not all(isinstance(item, str) and item and len(item) <= 300 for item in inputs)
+    ):
+        raise ValueError("MODEL_RESULT_INVALID: source artifact binding is invalid")
+    for field in ("nobs", "row_count", "n_observations"):
+        value = primary.get(field)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= 1_000_000
+        ):
+            raise ValueError(f"MODEL_RESULT_INVALID: {field} must be a bounded integer")
+    for field in ("sampling_weight", "frequency_weight", "analysis_weight", "exposure_col"):
+        value = primary.get(field)
+        if value is not None and (
+            not isinstance(value, str) or not value or len(value) > 128
+        ):
+            raise ValueError(f"MODEL_RESULT_INVALID: {field} must be a bounded column name")
+    coefficients = primary.get("coefficients")
+    if not isinstance(coefficients, dict) or not coefficients:
+        raise ValueError("MODEL_RESULT_INVALID: result payload has no coefficients")
+    source_ids: dict[str, str] = {}
+    for term, coefficient in coefficients.items():
+        if not isinstance(term, str) or not isinstance(coefficient, dict):
+            raise ValueError("MODEL_RESULT_INVALID: coefficient terms must be objects")
+        source_id = f"model_results.{model_id}.coefficients.{term}"
+        coefficient["source_id"] = source_id
+        source_ids[term] = source_id
+        if not isinstance(coefficient.get("warnings"), list):
+            coefficient["warnings"] = []
+    primary["result_binding"] = {
+        "project_root": str(run_root.parent.parent.resolve()),
+        "run_id": run_id,
+        "model_id": model_id,
+        "source_artifact_ids": list(inputs),
+        "coefficient_source_ids": source_ids,
+    }
+
+
 def _apply_survey_design_variance(
     ctx, model_type: str, primary: dict, *, x: list[str] | None = None
 ) -> None:
@@ -536,6 +583,12 @@ def _apply_survey_design_variance(
     )
 
     critical = float(stats.t.ppf(0.975, result.residual_degf))
+    if not np.isfinite(critical):
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "survey confidence critical value is not finite",
+            reason="nonfinite_confidence_critical",
+        )
     coefficients = primary.get("coefficients") or {}
     unmatched = [
         term for term in coefficients if _design_term(term) not in result.standard_errors
@@ -558,13 +611,32 @@ def _apply_survey_design_variance(
         # would produce a mixed payload whose SE is survey-based but whose
         # coefficient is not.
         estimate = float(result.estimates[design_term])
+        if not np.isfinite(se) or se <= 0:
+            raise SurveyEngineError(
+                "SURVEY_INFERENCE_UNAVAILABLE",
+                "survey standard error must be finite and positive",
+                reason="nonfinite_standard_error" if not np.isfinite(se) else "nonpositive_standard_error",
+                term=term,
+            )
         entry["std_error"] = se
         entry["estimate"] = estimate
         entry["ci_lower"] = estimate - critical * se
         entry["ci_upper"] = estimate + critical * se
-        entry["p_value"] = float(
+        p_value = float(
             2 * stats.t.sf(abs(estimate / se), result.residual_degf)
-        ) if se > 0 else float("nan")
+        )
+        if not all(np.isfinite(value) for value in (estimate, entry["ci_lower"], entry["ci_upper"], p_value)):
+            raise SurveyEngineError(
+                "SURVEY_INFERENCE_UNAVAILABLE",
+                "survey coefficient inference contains a non-finite value",
+                reason="nonfinite_coefficient_inference",
+                term=term,
+            )
+        entry["p_value"] = p_value
+        if round(p_value, 4) < 0.001:
+            entry["p_value_display"] = "< 0.001"
+        else:
+            entry.pop("p_value_display", None)
         entry["variance_source"] = "survey_design"
         entry_warnings = entry.get("warnings")
         entry["warnings"] = (
@@ -613,7 +685,8 @@ def _apply_survey_design_variance(
         "replicates_succeeded": summary.succeeded if summary else None,
         "replicates_failed": summary.failed if summary else None,
         "replicate_failure_reasons": summary.failure_reasons if summary else None,
-        "weight_frame": str(ctx.artifacts.get("_survey_weight_frame") or "").strip() or None,
+        "replicate_weight_columns": result.replicate_weight_columns,
+        "weight_frame": design.weight_frame,
     }
 
 
@@ -1071,6 +1144,7 @@ class EstimationStage:
             # LMM's registered PacketEnvelope is its sole model-result source;
             # never create a competing legacy ``model_results/*.json`` copy.
             if handler.model_type != "linear_mixed_effects":
+                _attach_result_binding(run_root, run_id, model_id, primary, model_input_ids)
                 _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
             if handler.model_type != "linear_mixed_effects":
                 _persist_model_options_execution_binding(
@@ -1261,6 +1335,7 @@ class EstimationStage:
                 return ctx
 
             _robust_se_dp = _ols_robust_se_decision(ctx)
+            _attach_result_binding(run_root, run_id, "ols_1", ols_result, model_input_ids)
             _write_model_result(run_root, "ols_1", ols_result, inputs=model_input_ids)
             _persist_ols_contract_metadata(run_root, ols_result)
             model_results.append(("ols_1", ols_result))

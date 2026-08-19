@@ -494,6 +494,7 @@ def _bounded_survey_design(design: Any) -> dict[str, Any] | None:
         "replicate_type",
         "lonely_psu_policy",
         "subpopulation",
+        "weight_frame",
     ):
         value = _bounded_report_string(design.get(field))
         if value is not None:
@@ -525,6 +526,16 @@ def _bounded_survey_design(design: Any) -> dict[str, Any] | None:
             bounded["replicate_failure_reasons"] = None
             if raw_reasons is not None:
                 invalid_numeric = True
+    if "replicate_weight_columns" in design:
+        raw_columns = design.get("replicate_weight_columns")
+        if isinstance(raw_columns, (list, tuple)):
+            columns = [
+                item[:128] for item in raw_columns[:64]
+                if isinstance(item, str) and item
+            ]
+            bounded["replicate_weight_columns"] = columns
+        elif raw_columns is not None:
+            invalid_numeric = True
     if invalid_numeric:
         bounded.update(
             {

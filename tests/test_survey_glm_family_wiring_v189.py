@@ -421,6 +421,37 @@ def test_poisson_survey_result_postprocessing_lives_in_family_adapter():
     assert primary["irr"]["x1"]["irr_ci_lower"] == pytest.approx(np.exp(0.25))
 
 
+def test_poisson_postprocessor_rejects_unbounded_exponentials_as_typed_failure():
+    from workbench.survey import SurveyEngineError
+    from workbench.survey.adapters import apply_result_postprocessor, glm_estimator_spec
+
+    estimator = glm_estimator_spec(
+        family="poisson", glm_family="poisson", y="count_y", x=["x1"]
+    )
+    with pytest.raises(SurveyEngineError) as excinfo:
+        apply_result_postprocessor(
+            estimator,
+            primary={"irr": {"x1": {}}},
+            term="x1",
+            entry={},
+            estimate=10_000.0,
+            ci_lower=-10_000.0,
+            ci_upper=10_000.0,
+        )
+
+    assert excinfo.value.code == "SURVEY_POSTPROCESS_INVALID"
+
+
+def test_survey_p_value_display_is_regenerated_from_replaced_p_value(tmp_path):
+    run_root, outcome = _run_family(tmp_path, "logit", replicate=False)
+    assert outcome["status"] == "completed", outcome
+    result = read_json(run_root / "model_results" / "logit_1.json")
+    for coefficient in result["coefficients"].values():
+        p_value = coefficient["p_value"]
+        expected = "< 0.001" if round(p_value, 4) < 0.001 else None
+        assert coefficient.get("p_value_display") == expected
+
+
 def test_clean_process_capability_bootstrap_returns_typed_survey_status():
     """A known central import cycle must not become a false survey advertise."""
     repo_root = Path(__file__).resolve().parents[1]

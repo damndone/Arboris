@@ -96,6 +96,50 @@ def test_agent_projection_preserves_survey_provenance_and_replicate_metadata(tmp
     assert isinstance(projected["warnings"], list)
 
 
+def test_agent_rejects_tampered_model_result_before_projection(tmp_path):
+    """A valid JSON file is not valid evidence once its indexed hash changes."""
+    project, run_id = _run(
+        tmp_path, "tampered", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    result_path = project.root / "runs" / run_id / "model_results" / "ols_1.json"
+    payload = json.loads(result_path.read_text())
+    payload["coefficients"]["x1"]["estimate"] = 999.0
+    result_path.write_text(json.dumps(payload))
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    assert summary["available"] is False
+    assert summary["status"] == "unavailable"
+    assert summary["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
+
+
+def test_agent_rejects_foreign_binding_even_when_index_hash_is_rewritten(tmp_path):
+    from workbench.artifacts import sha256_file, write_json
+
+    project, run_id = _run(
+        tmp_path, "foreign-binding", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    run_root = project.root / "runs" / run_id
+    result_path = run_root / "model_results" / "ols_1.json"
+    payload = json.loads(result_path.read_text())
+    payload["result_binding"]["project_root"] = "/foreign/project"
+    write_json(result_path, payload)
+
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text())
+    for record in index["artifacts"]:
+        if record.get("artifact_id") == "ols_1":
+            record["sha256"] = sha256_file(result_path)
+    write_json(index_path, index)
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    assert summary["available"] is False
+    assert summary["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
+
+
 def test_agent_coefficient_projection_bounds_huge_values_and_provenance():
     """Agent output must be typed unavailable rather than serializing huge values."""
     result = {
@@ -113,14 +157,23 @@ def test_agent_coefficient_projection_bounds_huge_values_and_provenance():
                 "warnings": ["w" * 2000] * 100,
             }
         },
+        "nobs": 10**400,
+        "exposure_col": 10**400,
+        "sampling_weight": 10**400,
     }
 
-    projected = _public_requested_model_coefficients(
+    projected_model = _public_requested_model_coefficients(
         run_id="run-1", result=result, requested_terms=("x",)
-    )["coefficients"][0]
+    )
+    projected = projected_model["coefficients"][0]
     assert projected["projection_status"] == "unavailable"
     assert projected["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
     assert projected["estimate"] is None
+    assert projected["projection_status"] == "unavailable"
+    assert projected["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
+    assert projected_model["nobs"] is None
+    assert projected_model["exposure_col"] is None
+    assert projected_model["sampling_weight"] is None
     assert len(projected["source_id"]) <= 128
     assert len(projected["variance_source"]) <= 128
     assert len(projected["warnings"]) <= 16

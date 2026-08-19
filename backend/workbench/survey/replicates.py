@@ -33,6 +33,14 @@ def build_replicates(
         )
     if kind == "provided":
         return _provided(design)
+    if design.replicate_weight_columns:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_COLUMNS_UNSUPPORTED",
+            f"replicate_type={kind!r} generates weights and cannot carry replicate columns; "
+            "use replicate_type='provided' to consume named columns",
+            replicate_type=kind,
+            replicate_weight_columns=list(design.replicate_weight_columns)[:16],
+        )
     if kind == "jackknife":
         return _jackknife(design)
     if kind == "brr":

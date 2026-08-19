@@ -211,6 +211,142 @@ def test_invalid_subpopulation_expressions_are_bounded_typed_failures(expression
     assert "SyntaxError" not in str(excinfo.value)
 
 
+@pytest.mark.parametrize("kind", ["numeric", "object", "nullable_boolean", "undefined"])
+def test_subpopulation_requires_boolean_values_without_missingness(kind):
+    """A subpopulation is a boolean design mask, never truthy coercion."""
+    from workbench.survey import SurveyDesign, SurveyEngineError
+
+    frame = _design_frame()
+    if kind == "numeric":
+        expression = "x1"
+    elif kind == "object":
+        frame["object_flag"] = pd.Series([True] * len(frame), dtype=object)
+        expression = "object_flag"
+    elif kind == "nullable_boolean":
+        frame["nullable_flag"] = pd.Series(
+            [True] + [pd.NA] * (len(frame) - 1), dtype="boolean"
+        )
+        expression = "nullable_flag"
+    else:
+        expression = "undefined_flag == 1"
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        SurveyDesign(
+            frame=frame, strata="stratum", psu="psu", weight="weight", subpop=expression
+        ).subpop_mask()
+
+    assert excinfo.value.code == "SURVEY_SUBPOP_INVALID"
+
+
+def test_non_boolean_subpopulation_expression_is_not_silently_coerced():
+    from workbench.survey import SurveyDesign, SurveyEngineError
+
+    frame = _design_frame()
+    frame["flag"] = pd.Series([True, False] * (len(frame) // 2), dtype=bool)
+    mask = SurveyDesign(
+        frame=frame, strata="stratum", psu="psu", weight="weight", subpop="flag"
+    ).subpop_mask()
+    assert mask.dtype == bool
+    assert mask.tolist() == frame["flag"].tolist()
+
+
+@pytest.mark.parametrize("replicate_type", ["brr", "jackknife", "bootstrap"])
+def test_generated_replicate_types_reject_carried_columns_instead_of_ignoring_them(
+    replicate_type, estimator
+):
+    """Generated methods cannot silently discard publisher-supplied columns."""
+    from workbench.survey import SurveyDesign, SurveyEngineError
+    from workbench.survey.replicates import build_replicates
+
+    kwargs = {"replicate_type": replicate_type, "replicate_weight_columns": ["missing_repw"]}
+    if replicate_type == "brr":
+        kwargs["hadamard_matrix"] = _oracle()["replicate"]["brr"]["hadamard"]["matrix"]
+    design = SurveyDesign(
+        frame=_design_frame(), strata="stratum", psu="psu", weight="weight", **kwargs
+    )
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        build_replicates(design, replicate_type)
+
+    assert excinfo.value.code == "SURVEY_REPLICATE_COLUMNS_UNSUPPORTED"
+
+
+def test_provided_replicate_column_names_are_persisted_in_the_estimate(estimator):
+    from workbench.survey import SurveyDesign, estimate_with_design
+
+    frame = pd.read_csv(FIXTURES / "design_with_replicate_weights.csv")
+    columns = sorted(c for c in frame.columns if c.startswith("repw"))
+    design = SurveyDesign(
+        frame=frame,
+        strata="stratum",
+        psu="psu",
+        weight="weight",
+        replicate_type="provided",
+        replicate_weight_columns=columns,
+    )
+    result = estimate_with_design(design, estimator, method="replicate")
+    assert result.replicate_weight_columns == columns
+
+
+def test_nonpositive_residual_degf_is_a_typed_unavailable_inference(linearizable_estimator):
+    from workbench.survey import SurveyDesign, SurveyEngineError, estimate_with_design
+
+    frame = _design_frame()
+    frame["stratum"] = "only-stratum"
+    frame["psu"] = np.where(np.arange(len(frame)) % 2 == 0, "psu-a", "psu-b")
+    design = SurveyDesign(
+        frame=frame,
+        strata="stratum",
+        psu="psu",
+        weight="weight",
+        lonely_psu="adjust",
+    )
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        estimate_with_design(design, linearizable_estimator, method="linearization")
+
+    assert excinfo.value.code == "SURVEY_INFERENCE_UNAVAILABLE"
+    assert excinfo.value.context["reason"] == "nonpositive_residual_degf"
+
+
+def test_nonfinite_standard_error_is_a_typed_unavailable_inference(design):
+    from workbench.survey import EstimatorSpec, SurveyEngineError, estimate_with_design
+
+    def refit(frame, weights):
+        return {"x": 1.0}
+
+    def influence(frame, weights):
+        return {"x": np.full(len(frame), np.nan)}
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        estimate_with_design(
+            design,
+            EstimatorSpec(name="nonfinite", refit=refit, influence=influence),
+            method="linearization",
+        )
+
+    assert excinfo.value.code == "SURVEY_INFERENCE_UNAVAILABLE"
+    assert excinfo.value.context["reason"] == "nonfinite_covariance"
+
+
+def test_unknown_survey_weight_frame_is_rejected_before_design_construction():
+    from workbench.survey import SurveyEngineError
+    from workbench.survey.adapters import build_design_from_artifacts
+
+    with pytest.raises(SurveyEngineError) as excinfo:
+        build_design_from_artifacts(
+            _design_frame(),
+            {
+                "_sampling_weight": "weight",
+                "_survey_strata_col": "stratum",
+                "_survey_psu_col": "psu",
+                "_survey_weight_frame": "banana",
+            },
+        )
+
+    assert excinfo.value.code == "SURVEY_WEIGHT_FRAME_INVALID"
+
+
 def test_confidence_intervals_use_the_design_t_not_the_normal(design, linearizable_estimator):
     """The multiplier must come from the design, not from the normal.
 
