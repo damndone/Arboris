@@ -215,7 +215,11 @@ def test_additive_classification_entrypoint_requires_typed_task_and_persists_pac
         cv_folds=2,
     )
 
-    assert result["status"] == "validated"
+    assert result["status"] == "degraded"
+    assert result["evidence"]["blocked_reasons"]
+    assert result["evidence"]["calibration"]["status"] == "computed"
+    assert result["evidence"]["baselines"] and isinstance(result["evidence"]["baselines"], list)
+    assert result["evidence"]["explanations"]["shap"]["status"] == "unavailable"
     assert result["task"]["task_hash"] == task.content_hash
     assert result["artifact"]["status"] == "persisted"
     assert (tmp_path / "classification_artifacts.json").is_file()

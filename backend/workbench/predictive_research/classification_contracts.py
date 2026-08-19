@@ -250,6 +250,17 @@ class ClassificationTaskSpecV1:
         if set(names) != set(self.feature_columns) or len(names) != len(set(names)):
             raise ContractError("CLASSIFICATION_INFORMATION_SET_INCOMPLETE", "availability contracts must cover features exactly")
         self.structure.validate()
+        expected_profiles = {
+            "iid": {"iid_stratified"},
+            "grouped": {"group_holdout"},
+            "temporal": {"temporal_rolling"},
+            "panel": {"panel_known_entity_future", "panel_new_entity"},
+        }
+        if self.split_profile not in expected_profiles.get(self.structure.kind, set()):
+            raise ContractError(
+                "CLASSIFICATION_SPLIT_PROFILE_STRUCTURE_MISMATCH",
+                f"split profile {self.split_profile!r} is not valid for {self.structure.kind!r} data",
+            )
         self.label_definition.validate(structure_kind=self.structure.kind)
         for item in self.feature_availability:
             item.validate(structure_kind=self.structure.kind, allow_exploration=self.allow_exploration)
@@ -262,6 +273,10 @@ class ClassificationTaskSpecV1:
             raise ContractError("CLASSIFICATION_SEED_INVALID", "seed must be a non-negative integer")
         if not isinstance(self.resource_budget, Mapping):
             raise ContractError("CLASSIFICATION_RESOURCE_BUDGET_INVALID", "resource_budget must be an object")
+        if self.weights is not None:
+            _text(self.weights, "CLASSIFICATION_WEIGHT_INVALID", "weights")
+            if self.weights in self.feature_columns:
+                raise ContractError("CLASSIFICATION_WEIGHT_FEATURE_OVERLAP", "weight column cannot also be a feature")
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -22,10 +22,23 @@ from .contracts import ContractError
 def _numeric_matrix(frame: pd.DataFrame) -> np.ndarray:
     if not isinstance(frame, pd.DataFrame) or not frame.columns.tolist():
         raise ContractError("CLASSIFICATION_FEATURES_REQUIRED", "adapter features must be a non-empty DataFrame")
-    converted = frame.apply(pd.to_numeric, errors="coerce")
-    if converted.isna().any().any():
-        raise ContractError("CLASSIFICATION_FEATURE_TYPE_BLOCKED", "non-numeric or missing adapter input requires a fold-local recipe")
-    return converted.to_numpy(dtype=float, copy=True)
+    unsupported = [
+        str(column)
+        for column in frame.columns
+        if not pd.api.types.is_numeric_dtype(frame[column])
+    ]
+    if unsupported:
+        raise ContractError(
+            "CLASSIFICATION_FEATURE_TYPE_BLOCKED",
+            f"non-numeric feature columns require an explicit typed preprocessing recipe: {unsupported}",
+        )
+    try:
+        matrix = frame.to_numpy(dtype=float, copy=True)
+    except (TypeError, ValueError) as exc:
+        raise ContractError("CLASSIFICATION_FEATURE_TYPE_BLOCKED", "features must be numeric") from exc
+    if not np.isfinite(matrix).all():
+        raise ContractError("CLASSIFICATION_FEATURE_TYPE_BLOCKED", "missing or non-finite features require a fold-local recipe")
+    return matrix
 
 
 @dataclass(frozen=True)
@@ -100,8 +113,13 @@ class ClassificationAdapterV1:
             raise ContractError("CLASSIFICATION_SINGLE_CLASS", "classification fit requires at least two classes")
         if sample_weight is not None:
             weights = np.asarray(sample_weight, dtype=float)
-            if len(weights) != len(labels) or not np.isfinite(weights).all() or (weights < 0).any():
-                raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "sample_weight must be finite, non-negative and aligned")
+            if (
+                len(weights) != len(labels)
+                or not np.isfinite(weights).all()
+                or (weights < 0).any()
+                or float(weights.sum()) <= 0
+            ):
+                raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "sample_weight must be finite, non-negative, positive and aligned")
         else:
             weights = None
         try:

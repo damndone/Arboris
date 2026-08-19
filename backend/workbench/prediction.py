@@ -20,6 +20,7 @@ from .predictive_research.contracts import (
 )
 from .predictive_research.classification_contracts import ClassificationTaskSpecV1, DecisionPolicyV1
 from .predictive_research.classification_protocol import run_classification_protocol
+from .predictive_research.preprocessing import ClassificationPreprocessingStepV1
 from .predictive_research.persistence import (
     PredictionPersistenceAdmission,
     classification_artifact_id,
@@ -59,6 +60,17 @@ def run_classification_model_v189(
     cv_folds: int = 3,
     random_seed: int | None = None,
     decision_policy: DecisionPolicyV1 | None = None,
+    feature_available_at: Sequence[Any] | None = None,
+    prediction_origins: Sequence[Any] | None = None,
+    label_windows: Sequence[tuple[Any, Any]] | None = None,
+    entities: Sequence[str] | None = None,
+    periods: Sequence[Any] | None = None,
+    purge_gap: Any | None = None,
+    embargo: Any | None = None,
+    embargo_basis: str | None = None,
+    preprocessing_steps: Sequence[ClassificationPreprocessingStepV1] | None = None,
+    calibration_method: str = "platt",
+    model_parameters: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run the additive v1.8.9 classification protocol from typed contracts.
 
@@ -82,11 +94,6 @@ def run_classification_model_v189(
     refs = tuple(row_refs)
     if len(refs) != len(frame) or len(set(refs)) != len(refs) or any(not isinstance(ref, str) or not ref for ref in refs):
         raise ContractError("CLASSIFICATION_ROW_IDENTITY_INVALID", "row_refs must be unique non-empty strings aligned to frame")
-    if task.weights is not None:
-        raise ContractError(
-            "CLASSIFICATION_WEIGHT_UNSUPPORTED",
-            "the additive protocol has no declared weight column consumer",
-        )
     if decision_policy is not None:
         if not isinstance(decision_policy, DecisionPolicyV1):
             raise ContractError("CLASSIFICATION_POLICY_INVALID", "decision_policy must be DecisionPolicyV1")
@@ -95,18 +102,26 @@ def run_classification_model_v189(
     if target.isna().any():
         raise ContractError("CLASSIFICATION_TARGET_MISSING", "classification target contains missing values")
     seed = task.seed if random_seed is None else random_seed
-    raw_positive_class = next(
-        raw_value for raw_value, label in task.class_mapping.items() if label == task.positive_class
-    )
     protocol = run_classification_protocol(
-        frame.loc[:, list(task.feature_columns)].copy(),
-        target,
+        frame.copy(),
         row_refs=refs,
         model_ids=tuple(model_ids),
         final_holdout_fraction=final_holdout_fraction,
         cv_folds=cv_folds,
         seed=seed,
-        positive_class=raw_positive_class,
+        task=task,
+        decision_policy=decision_policy,
+        feature_available_at=feature_available_at,
+        prediction_origins=prediction_origins,
+        label_windows=label_windows,
+        entities=entities,
+        periods=periods,
+        purge_gap=purge_gap,
+        embargo=embargo,
+        embargo_basis=embargo_basis,
+        preprocessing_steps=preprocessing_steps,
+        calibration_method=calibration_method,
+        model_parameters=model_parameters,
     )
     class_support: dict[str, int] = {}
     for raw_value in target.tolist():
@@ -114,22 +129,41 @@ def run_classification_model_v189(
         class_support[str(label)] = class_support.get(str(label), 0) + 1
     split_hash = protocol["comparison"]["split_hash"]
     selected_model = protocol["comparison"]["selected_model"]
-    model_metrics = {selected_model: protocol["models"][selected_model]["holdout"]["metrics"]}
-    policy_payload = (
-        decision_policy.to_dict()
-        if decision_policy is not None
-        else {
-            "selection_status": "SCENARIOS_ONLY",
-            "threshold_scope": "development_oof",
-            "holdout": "sealed",
-            "status": "not_available",
-            "reason": "cost and capacity policy were not supplied",
-        }
+    selected = protocol["models"][selected_model]
+    model_metrics = {
+        "oof": selected["oof_metrics"],
+        "holdout": selected["holdout"],
+    }
+    policy_payload = protocol["decision_policy"]
+    blocked_reasons = list(protocol.get("blocked_reasons", []))
+    unavailable_evidence = {
+        "explanations": {
+            "status": "unavailable",
+            "reason_code": "CLASSIFICATION_EXPLANATION_PROVIDER_UNAVAILABLE",
+            "shap": {"status": "unavailable", "reason_code": "CLASSIFICATION_EXPLANATION_PROVIDER_UNAVAILABLE"},
+        },
+        "stability": {
+            "status": "unavailable",
+            "reason_code": "CLASSIFICATION_STABILITY_UNAVAILABLE",
+        },
+        "shift": {
+            "status": "unavailable",
+            "reason_code": "CLASSIFICATION_SHIFT_UNAVAILABLE",
+        },
+    }
+    blocked_reasons.extend(
+        [
+            unavailable_evidence["explanations"]["reason_code"],
+            unavailable_evidence["stability"]["reason_code"],
+            unavailable_evidence["shift"]["reason_code"],
+        ]
     )
+    blocked_reasons = list(dict.fromkeys(blocked_reasons))
+    result_status = "degraded" if blocked_reasons else protocol["status"]
     evidence = {
         "payload_schema": "workbench.prediction.classification-evidence",
         "schema_version": 1,
-        "status": "degraded",
+        "status": result_status,
         "task": {
             "task_type": task.task_type,
             "positive_class": task.positive_class,
@@ -138,21 +172,24 @@ def run_classification_model_v189(
         },
         "split": {"profile": task.split_profile, "split_hash": split_hash},
         "metrics": model_metrics,
-        "calibration": {"status": "not_available", "reason": "raw calibration receipt is not emitted by this entrypoint slice"},
+        "holdout": protocol["holdout"],
+        "calibration": protocol["calibration"],
         "baselines": protocol["baselines"],
-        "controls": [{"control": "permuted_target", "status": "not_available", "reason": "control execution is outside this additive entrypoint slice"}],
+        "controls": protocol["controls"],
         "comparison": protocol["comparison"],
-        "explanations": {"status": "not_available", "reason": "explanation receipt is not emitted by this entrypoint slice"},
-        "stability": {"status": "not_available", "reason": "fold stability receipt is not emitted by this entrypoint slice"},
-        "shift": {"status": "not_available", "reason": "shift diagnostics are not part of the sealed release plan"},
+        **unavailable_evidence,
         "decision_policy": policy_payload,
-        "blocked_reasons": [],
-        "evidence_refs": {"split": f"classification-split:{split_hash}", "holdout": f"classification-holdout:{split_hash}"},
+        "blocked_reasons": blocked_reasons,
+        "evidence_refs": {
+            "split": f"classification-split:{split_hash}",
+            "holdout": f"classification-holdout:{protocol['holdout']['release_plan_hash']}",
+            "task": f"classification-task:{task.content_hash}",
+        },
     }
     identity = classification_artifact_id(
         task_hash=task.content_hash,
         split_hash=split_hash,
-        preprocessing_hash=sha256_canonical({"status": "not_declared"}),
+        preprocessing_hash=sha256_canonical(selected["preprocessing"]),
         model_hash=sha256_canonical(protocol["models"]),
         prediction_hash=sha256_canonical(model_metrics),
         evaluation_hash=sha256_canonical(protocol["holdout"]),
@@ -189,7 +226,7 @@ def run_classification_model_v189(
         )
     return {
         **protocol,
-        "status": "validated",
+        "status": result_status,
         "task": {**task.to_dict(), "task_hash": task.content_hash},
         "evidence": evidence,
         "artifact": {**artifact, "artifact_id": identity},

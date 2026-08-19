@@ -3,12 +3,97 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 import numpy as np
 from sklearn import metrics as sk_metrics
 
 from .contracts import ContractError
+
+
+@dataclass
+class ProbabilityCalibratorV1:
+    """A fitted probability map with an auditable development-only fit scope."""
+
+    method: str
+    fit_row_refs: tuple[str, ...]
+    _estimator: Any = field(repr=False, default=None)
+
+    def transform(self, probabilities: Sequence[float]) -> np.ndarray:
+        values = np.asarray(probabilities, dtype=float)
+        if values.ndim != 1 or not len(values) or not np.isfinite(values).all() or ((values < 0) | (values > 1)).any():
+            raise ContractError("CLASSIFICATION_CALIBRATION_INPUT_INVALID", "calibrator probabilities must be finite values in [0, 1]")
+        if self.method == "none":
+            return values
+        if self._estimator is None:
+            raise ContractError("CLASSIFICATION_CALIBRATION_STATE_MISSING", "calibrator state is unavailable")
+        if self.method == "platt":
+            clipped = np.clip(values, 1e-7, 1 - 1e-7)
+            logits = np.log(clipped / (1.0 - clipped)).reshape(-1, 1)
+            calibrated = self._estimator.predict_proba(logits)[:, 1]
+        elif self.method == "isotonic":
+            calibrated = self._estimator.predict(values)
+        else:
+            raise ContractError("CLASSIFICATION_CALIBRATION_METHOD_INVALID", self.method)
+        calibrated = np.asarray(calibrated, dtype=float)
+        if not np.isfinite(calibrated).all() or ((calibrated < 0) | (calibrated > 1)).any():
+            raise ContractError("CLASSIFICATION_CALIBRATION_OUTPUT_INVALID", "calibrator returned probabilities outside [0, 1]")
+        return calibrated
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "method": self.method,
+            "fit_scope": "development_oof_calibration_fit" if self.method != "none" else "not_applied",
+            "fit_row_refs": list(self.fit_row_refs),
+            "status": "computed" if self.method != "none" else "not_applied",
+        }
+
+
+def fit_probability_calibrator(
+    *,
+    method: str,
+    probabilities: Sequence[float],
+    actual_binary: Sequence[int],
+    fit_row_refs: Sequence[str],
+    sample_weight: Sequence[float] | None = None,
+) -> ProbabilityCalibratorV1:
+    """Fit Platt or isotonic calibration on a disjoint development OOF slice."""
+
+    if method not in {"none", "platt", "isotonic"}:
+        raise ContractError("CLASSIFICATION_CALIBRATION_METHOD_INVALID", method)
+    refs = tuple(fit_row_refs)
+    values = np.asarray(probabilities, dtype=float)
+    labels = np.asarray(actual_binary, dtype=int)
+    if not refs or len(set(refs)) != len(refs) or len(refs) != len(values) or len(values) != len(labels):
+        raise ContractError("CLASSIFICATION_CALIBRATION_INPUT_INVALID", "calibration fit rows and values must align uniquely")
+    if not np.isfinite(values).all() or ((values < 0) | (values > 1)).any() or not set(labels.tolist()).issubset({0, 1}):
+        raise ContractError("CLASSIFICATION_CALIBRATION_INPUT_INVALID", "calibration inputs are invalid")
+    if set(labels.tolist()) != {0, 1}:
+        raise ContractError("CLASSIFICATION_CALIBRATION_SUPPORT", "calibration fit requires both classes")
+    if method == "none":
+        return ProbabilityCalibratorV1(method="none", fit_row_refs=refs)
+    weights = None
+    if sample_weight is not None:
+        weights = np.asarray(sample_weight, dtype=float)
+        if len(weights) != len(refs) or not np.isfinite(weights).all() or (weights < 0).any() or float(weights.sum()) <= 0:
+            raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "calibration weights are invalid")
+    try:
+        if method == "platt":
+            from sklearn.linear_model import LogisticRegression
+
+            clipped = np.clip(values, 1e-7, 1 - 1e-7)
+            logits = np.log(clipped / (1.0 - clipped)).reshape(-1, 1)
+            estimator = LogisticRegression(C=1.0, solver="lbfgs", max_iter=200, random_state=0)
+            estimator.fit(logits, labels, sample_weight=weights)
+        else:
+            from sklearn.isotonic import IsotonicRegression
+
+            estimator = IsotonicRegression(out_of_bounds="clip")
+            estimator.fit(values, labels, sample_weight=weights)
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise ContractError("CLASSIFICATION_CALIBRATION_FIT_FAILED", "typed probability calibrator fit failed") from exc
+    return ProbabilityCalibratorV1(method=method, fit_row_refs=refs, _estimator=estimator)
 
 
 def _record(
@@ -106,8 +191,8 @@ def classification_metric_bundle(
     if not 0 <= threshold <= 1 or not np.isfinite(y_probability).all():
         raise ContractError("CLASSIFICATION_METRIC_INPUT_INVALID", "probabilities or threshold are invalid")
     weights = np.ones(len(y_true), dtype=float) if sample_weight is None else np.asarray(sample_weight, dtype=float)
-    if len(weights) != len(y_true) or not np.isfinite(weights).all() or (weights < 0).any():
-        raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "metric weights must be finite and non-negative")
+    if len(weights) != len(y_true) or not np.isfinite(weights).all() or (weights < 0).any() or float(weights.sum()) <= 0:
+        raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "metric weights must be finite, non-negative and positive")
     weight_sum = float(weights.sum())
     evidence = {
         "sample_scope": sample_scope,
@@ -196,14 +281,22 @@ def classification_metric_bundle(
 
 
 def compute_calibration_bins(
-    actual: Sequence[Any], probabilities: Sequence[float], *, n_bins: int = 10, sample_scope: str = "development_oof"
+    actual: Sequence[Any],
+    probabilities: Sequence[float],
+    *,
+    n_bins: int = 10,
+    sample_scope: str = "development_oof",
+    sample_weight: Sequence[float] | None = None,
 ) -> dict[str, Any]:
-    if n_bins < 1 or len(actual) != len(probabilities) or not actual:
+    if n_bins < 1 or len(actual) != len(probabilities) or len(actual) == 0:
         raise ContractError("CLASSIFICATION_CALIBRATION_INPUT_INVALID", "calibration inputs are invalid")
     y = np.asarray(actual)
     p = np.asarray(probabilities, dtype=float)
     if not np.isfinite(p).all() or ((p < 0) | (p > 1)).any():
         raise ContractError("CLASSIFICATION_CALIBRATION_INPUT_INVALID", "probabilities must be in [0, 1]")
+    weights = np.ones(len(y), dtype=float) if sample_weight is None else np.asarray(sample_weight, dtype=float)
+    if len(weights) != len(y) or not np.isfinite(weights).all() or (weights < 0).any() or float(weights.sum()) <= 0:
+        raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "calibration weights are invalid")
     bins: list[dict[str, Any]] = []
     edges = np.linspace(0, 1, n_bins + 1)
     for index in range(n_bins):
@@ -211,23 +304,40 @@ def compute_calibration_bins(
         if not mask.any():
             continue
         observed = y[mask].astype(float)
-        bins.append({"bin": index, "lower": float(edges[index]), "upper": float(edges[index + 1]), "count": int(mask.sum()), "mean_predicted": float(p[mask].mean()), "fraction_positive": float(observed.mean())})
+        bin_weights = weights[mask]
+        bins.append({"bin": index, "lower": float(edges[index]), "upper": float(edges[index + 1]), "count": int(mask.sum()), "weight_sum": float(bin_weights.sum()), "mean_predicted": float(np.average(p[mask], weights=bin_weights)), "fraction_positive": float(np.average(observed, weights=bin_weights))})
     return {"method": "uniform_probability_bins", "sample_scope": sample_scope, "n_bins": n_bins, "bins": bins}
 
 
-def threshold_curve(actual: Sequence[Any], probabilities: Sequence[float], *, thresholds: Sequence[float], positive_class: Any = 1) -> list[dict[str, Any]]:
+def threshold_curve(
+    actual: Sequence[Any],
+    probabilities: Sequence[float],
+    *,
+    thresholds: Sequence[float],
+    positive_class: Any = 1,
+    sample_weight: Sequence[float] | None = None,
+) -> list[dict[str, Any]]:
     y = np.asarray(actual)
     p = np.asarray(probabilities, dtype=float)
     if len(y) != len(p) or not len(y):
         raise ContractError("CLASSIFICATION_THRESHOLD_INPUT_INVALID", "threshold inputs are invalid")
+    weights = np.ones(len(y), dtype=float) if sample_weight is None else np.asarray(sample_weight, dtype=float)
+    if len(weights) != len(y) or not np.isfinite(weights).all() or (weights < 0).any() or float(weights.sum()) <= 0:
+        raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "threshold weights are invalid")
     rows: list[dict[str, Any]] = []
     binary = (y == positive_class).astype(int)
     for threshold in thresholds:
         if not 0 <= threshold <= 1:
             raise ContractError("CLASSIFICATION_THRESHOLD_INVALID", "threshold must be in [0, 1]")
         pred = (p >= threshold).astype(int)
-        rows.append({"threshold": float(threshold), "precision": float(sk_metrics.precision_score(binary, pred, zero_division=0)), "recall": float(sk_metrics.recall_score(binary, pred, zero_division=0)), "f1": float(sk_metrics.f1_score(binary, pred, zero_division=0)), "positive_rate": float(pred.mean())})
+        rows.append({"threshold": float(threshold), "precision": float(sk_metrics.precision_score(binary, pred, zero_division=0, sample_weight=weights)), "recall": float(sk_metrics.recall_score(binary, pred, zero_division=0, sample_weight=weights)), "f1": float(sk_metrics.f1_score(binary, pred, zero_division=0, sample_weight=weights)), "positive_rate": float(np.average(pred, weights=weights)), "weight_sum": float(weights.sum())})
     return rows
 
 
-__all__ = ["classification_metric_bundle", "compute_calibration_bins", "threshold_curve"]
+__all__ = [
+    "ProbabilityCalibratorV1",
+    "classification_metric_bundle",
+    "compute_calibration_bins",
+    "fit_probability_calibrator",
+    "threshold_curve",
+]
