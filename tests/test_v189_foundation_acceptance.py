@@ -11,6 +11,7 @@ from workbench.qa.v189_foundation_acceptance import (
     AcceptanceStatus,
     CandidateIdentityError,
     build_acceptance_matrix,
+    candidate_integrity_status,
     inspect_candidate,
     provider_mode_status,
     write_sidecar_once,
@@ -95,6 +96,20 @@ def test_provider_mode_never_promotes_deterministic_fallback() -> None:
     assert "configured" in result.reason
 
 
+def test_post_run_integrity_rejects_new_ignored_source_state(tmp_path: Path) -> None:
+    repo, sha = _candidate_repo(tmp_path)
+
+    clean = candidate_integrity_status(repo, sha, interpreter=sys.executable)
+    assert clean == {"status": AcceptanceStatus.PASS.value, "reason": "candidate remained unchanged"}
+
+    (repo / ".pytest_cache").mkdir()
+    (repo / ".pytest_cache/CACHEDIR.TAG").write_text("generated\n", encoding="utf-8")
+
+    dirty = candidate_integrity_status(repo, sha, interpreter=sys.executable)
+    assert dirty["status"] == AcceptanceStatus.FAIL.value
+    assert "dirty" in dirty["reason"]
+
+
 def test_sidecar_is_write_once(tmp_path: Path) -> None:
     path = tmp_path / "manifest.json"
     payload = {"candidate_sha": "a" * 40, "status": "BLOCKED"}
@@ -104,4 +119,3 @@ def test_sidecar_is_write_once(tmp_path: Path) -> None:
     assert json.loads(path.read_text(encoding="utf-8")) == payload
     with pytest.raises(FileExistsError):
         write_sidecar_once(path, payload)
-

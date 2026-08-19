@@ -301,6 +301,21 @@ def inspect_candidate(worktree: Path, candidate_sha: str, *, interpreter: str | 
     )
 
 
+def candidate_integrity_status(
+    worktree: Path,
+    candidate_sha: str,
+    *,
+    interpreter: str | Path | None = None,
+) -> dict[str, str]:
+    """Return a typed post-command integrity result without hiding failures."""
+
+    try:
+        inspect_candidate(worktree, candidate_sha, interpreter=interpreter)
+    except CandidateIdentityError as error:
+        return {"status": AcceptanceStatus.FAIL.value, "reason": str(error)}
+    return {"status": AcceptanceStatus.PASS.value, "reason": "candidate remained unchanged"}
+
+
 def provider_mode_status(*, provider_requested: bool, provider_configured: bool) -> ProviderModeResult:
     if not provider_requested:
         return ProviderModeResult(AcceptanceStatus.NOT_VERIFIED, False, "provider mode was not requested")
@@ -329,9 +344,9 @@ __all__ = [
     "CandidateIdentityV1",
     "ProviderModeResult",
     "build_acceptance_matrix",
+    "candidate_integrity_status",
     "inspect_candidate",
     "live_acceptance_matrix",
     "provider_mode_status",
     "write_sidecar_once",
 ]
-

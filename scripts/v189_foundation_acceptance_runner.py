@@ -16,6 +16,7 @@ from workbench.qa.v189_foundation_acceptance import (
     AcceptanceStatus,
     CandidateIdentityError,
     CandidateIdentityV1,
+    candidate_integrity_status,
     inspect_candidate,
     live_acceptance_matrix,
     provider_mode_status,
@@ -146,6 +147,16 @@ def run_acceptance(
         frontend_command = (str(node), str(vitest), "run", *FRONTEND_TESTS)
         results.append(_command_result("frontend_evaluation", frontend_command, frontend_root, frontend_environment, (vitest, *frontend_paths)))
 
+    results.append(
+        {
+            "name": "candidate_post_run_integrity",
+            **candidate_integrity_status(
+                identity.worktree,
+                identity.commit_sha,
+                interpreter=identity.interpreter,
+            ),
+        }
+    )
     statuses = [str(result.get("status")) for result in results]
     if any(status == AcceptanceStatus.FAIL.value for status in statuses):
         overall = AcceptanceStatus.FAIL.value
@@ -210,4 +221,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
