@@ -412,16 +412,53 @@ def test_server_evidence_and_derived_ports_cannot_be_caller_constructed() -> Non
         DataConsumerDerivedPortV1(effect=object())
 
 
+def test_from_server_rejects_caller_authored_typed_effect_and_evidence() -> None:
+    from workbench.data_operation_manifest import (
+        DataConsumerDerivedPortV1,
+        DataConsumerServerEvidenceV1,
+    )
+    from workbench.data_operations import DataColumnCastEffect
+
+    effect = DataColumnCastEffect(
+        execution_key="caller-execution",
+        artifact_id="caller-artifact",
+        artifact_path="derived/caller.csv",
+        recipe_artifact_id="caller-recipe",
+        recipe_path="derived/caller.recipe.json",
+        child_node_id="caller-child",
+    )
+    with pytest.raises((TypeError, ValueError), match="server|issuer|factory|capability"):
+        DataConsumerDerivedPortV1.from_server(effect)
+
+    with pytest.raises((TypeError, ValueError), match="server|issuer|factory|capability"):
+        DataConsumerServerEvidenceV1.from_server(
+            "caller-authored",
+            {},
+            record_id="caller-record",
+            operation_id="data.sort",
+            execution_key="caller-execution",
+            bindings={},
+        )
+
+
+def test_public_executor_registry_cannot_be_replaced_by_caller() -> None:
+    import workbench.data_operation_manifest as manifest_module
+
+    with pytest.raises((TypeError, AttributeError), match="immutable|item|mapping|read-only"):
+        manifest_module.SERVER_OWNED_EXECUTOR_REGISTRY[
+            "executor:workbench.data_consumer.adapter"
+        ] = lambda record, outputs: outputs
+
+
 def test_runtime_adapter_rejects_unregistered_executor_ref(monkeypatch: pytest.MonkeyPatch) -> None:
     import workbench.data_operation_manifest as manifest_module
 
-    monkeypatch.setitem(
-        manifest_module.SERVER_OWNED_EXECUTOR_REGISTRY,
-        "executor:workbench.data_consumer.adapter",
-        None,
-    )
-    with pytest.raises((TypeError, ValueError, RuntimeError), match="executor|registered|server"):
-        manifest_module.build_data_consumer_runtime_adapter()
+    with pytest.raises((TypeError, AttributeError), match="immutable|item|mapping|read-only"):
+        manifest_module.SERVER_OWNED_EXECUTOR_REGISTRY[
+            "executor:workbench.data_consumer.adapter"
+        ] = None
+    adapter = manifest_module.build_data_consumer_runtime_adapter()
+    assert adapter.executor_ref == "executor:workbench.data_consumer.adapter"
 
 
 def test_package_runtime_adapter_rejects_duck_typed_fake_catalog(monkeypatch: pytest.MonkeyPatch) -> None:

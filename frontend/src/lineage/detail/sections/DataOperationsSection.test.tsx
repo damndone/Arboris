@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  canonicalRequestSchemaDigest,
   DataOperationManifestError,
   parseDataOperationManifest,
 } from "../../dataOperationManifest";
@@ -175,7 +176,7 @@ function completedResponse(overrides: Record<string, unknown> = {}) {
 }
 
 function descriptor(overrides: Record<string, unknown> = {}) {
-  return {
+  const value = {
     operation_id: "data.example",
     operation_version: "v1",
     effect_level: "mutation",
@@ -266,6 +267,10 @@ function descriptor(overrides: Record<string, unknown> = {}) {
     clarification_requirements: ["Provide the typed operation values."],
     ...overrides,
   };
+  return {
+    ...value,
+    request_schema_digest: canonicalRequestSchemaDigest(value.request_schema),
+  };
 }
 
 function manifest(
@@ -301,6 +306,21 @@ describe("DataOperationManifest parser", () => {
       confirm_requires: ["preview_fingerprint"],
     });
     expect(parsed.operations[0].request_schema.properties.options.type).toBe("object");
+  });
+
+  it("rejects a request schema changed without a matching canonical digest", () => {
+    const invalid = manifest();
+    const operation = (invalid.operations as Array<Record<string, unknown>>)[0];
+    const schema = operation.request_schema as Record<string, unknown>;
+    const properties = schema.properties as Record<string, unknown>;
+    properties.label = { type: "string", minLength: 2 };
+
+    expect(() => parseDataOperationManifest(invalid)).toThrow(DataOperationManifestError);
+    try {
+      parseDataOperationManifest(invalid);
+    } catch (error) {
+      expect(error).toMatchObject({ code: "REQUEST_SCHEMA_DIGEST_MISMATCH" });
+    }
   });
 
   it("rejects an unknown request field type with a typed error", () => {
@@ -378,9 +398,15 @@ describe("DataOperationsSection", () => {
 
   it("displays a typed error when the manifest omits source identity", () => {
     const invalid = JSON.parse(JSON.stringify(manifest())) as {
-      operations: Array<{ request_schema: { properties: Record<string, unknown> } }>;
+      operations: Array<{
+        request_schema: { properties: Record<string, unknown> };
+        request_schema_digest: string;
+      }>;
     };
     delete invalid.operations[0].request_schema.properties.source_artifact_id;
+    invalid.operations[0].request_schema_digest = canonicalRequestSchemaDigest(
+      invalid.operations[0].request_schema,
+    );
 
     render(<DataOperationsSection {...sectionProps(invalid)} />);
 

@@ -64,6 +64,7 @@ _DERIVED_IDENTITY_FIELDS = (
 )
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _SERVER_OWNED_CAPABILITY = object()
+_SERVER_OWNED_ISSUER = object()
 
 
 def _registered_data_consumer_executor(
@@ -72,9 +73,14 @@ def _registered_data_consumer_executor(
     return outputs
 
 
-SERVER_OWNED_EXECUTOR_REGISTRY: dict[str, object] = {
+_SERVER_OWNED_EXECUTOR_REGISTRY = MappingProxyType(
+    {
     "executor:workbench.data_consumer.adapter": _registered_data_consumer_executor,
-}
+    }
+)
+# Read-only compatibility projection. Runtime joins use the private mapping so
+# rebinding this public name cannot replace the executor authority.
+SERVER_OWNED_EXECUTOR_REGISTRY: Mapping[str, object] = _SERVER_OWNED_EXECUTOR_REGISTRY
 _OPERATION_ROUTES = {
     "data.aggregate": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.append": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
@@ -783,7 +789,18 @@ class DataConsumerDerivedPortV1:
             raise TypeError("derived port can only be created by the server-owned factory")
 
     @classmethod
-    def from_server(cls, effect: object) -> "DataConsumerDerivedPortV1":
+    def from_server(
+        cls,
+        effect: object,
+        *,
+        _issuer: object | None = None,
+    ) -> "DataConsumerDerivedPortV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("derived port requires the server-owned issuer")
+        from workbench.data_operations import _is_server_owned_effect
+
+        if not _is_server_owned_effect(effect):
+            raise TypeError("derived port effect was not issued by the server-owned factory")
         return cls(effect=effect, _capability=_SERVER_OWNED_CAPABILITY)
 
     @property
@@ -821,7 +838,10 @@ class DataConsumerServerEvidenceV1:
         operation_id: str,
         execution_key: str,
         bindings: Mapping[str, object],
+        _issuer: object | None = None,
     ) -> "DataConsumerServerEvidenceV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("server evidence requires the server-owned issuer")
         if type(payload) is not dict:
             raise TypeError("server evidence payload must be a server-owned dict")
         expected = {
@@ -856,7 +876,15 @@ class DataConsumerEvidencePortV1:
         object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
 
     @classmethod
-    def from_server(cls, method: str, evidence: DataConsumerServerEvidenceV1) -> "DataConsumerEvidencePortV1":
+    def from_server(
+        cls,
+        method: str,
+        evidence: DataConsumerServerEvidenceV1,
+        *,
+        _issuer: object | None = None,
+    ) -> "DataConsumerEvidencePortV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("evidence port requires the server-owned issuer")
         if type(evidence) is not DataConsumerServerEvidenceV1:
             raise TypeError("server evidence must be a typed server-owned evidence object")
         if evidence.method != method:
@@ -919,7 +947,11 @@ class DataConsumerOutputPortsV1:
         operation_record: OperationRecord,
         derived: DataConsumerDerivedPortV1,
         evidence: DataConsumerEvidencePortV1,
+        *,
+        _issuer: object | None = None,
     ) -> "DataConsumerOutputPortsV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("output ports require the server-owned issuer")
         return cls(
             operation_record=operation_record,
             derived=derived,
@@ -1005,8 +1037,8 @@ class DataConsumerRuntimeAdapterV1:
             )
         if outputs.derived.to_dict().get("execution_key") != record.execution.get("execution_key"):
             raise ValueError("derived output is not bound to the OperationRecord execution")
-        executor = SERVER_OWNED_EXECUTOR_REGISTRY.get(self.executor_ref)
-        if not callable(executor):
+        executor = _SERVER_OWNED_EXECUTOR_REGISTRY.get(self.executor_ref)
+        if executor is not _registered_data_consumer_executor:
             raise RuntimeError("server-owned data-consumer executor is not registered")
         if executor(record, outputs) is not outputs:
             raise RuntimeError("server-owned data-consumer executor returned an invalid output")
@@ -1043,7 +1075,7 @@ def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
     declaration = declarations[0]
     if declaration.executor_ref != "executor:workbench.data_consumer.adapter":
         raise ValueError("live provider catalog points at an invalid data-consumer executor")
-    if not callable(SERVER_OWNED_EXECUTOR_REGISTRY.get(declaration.executor_ref)):
+    if _SERVER_OWNED_EXECUTOR_REGISTRY.get(declaration.executor_ref) is not _registered_data_consumer_executor:
         raise RuntimeError("live data-consumer executor is not registered")
     manifest = build_data_operation_manifest()
     return DataConsumerRuntimeAdapterV1(
@@ -1055,6 +1087,50 @@ def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
         output_ports=("derived", "operation_record", "evidence"),
         operation_ids=tuple(item.operation_id for item in manifest.operations),
         _capability=_SERVER_OWNED_CAPABILITY,
+    )
+
+
+def _issue_data_consumer_derived_port(effect: object) -> DataConsumerDerivedPortV1:
+    return DataConsumerDerivedPortV1.from_server(effect, _issuer=_SERVER_OWNED_ISSUER)
+
+
+def _issue_data_consumer_server_evidence(
+    method: str,
+    payload: Mapping[str, object],
+    *,
+    record_id: str,
+    operation_id: str,
+    execution_key: str,
+    bindings: Mapping[str, object],
+) -> DataConsumerServerEvidenceV1:
+    return DataConsumerServerEvidenceV1.from_server(
+        method,
+        payload,
+        record_id=record_id,
+        operation_id=operation_id,
+        execution_key=execution_key,
+        bindings=bindings,
+        _issuer=_SERVER_OWNED_ISSUER,
+    )
+
+
+def _issue_data_consumer_evidence_port(
+    method: str,
+    evidence: DataConsumerServerEvidenceV1,
+) -> DataConsumerEvidencePortV1:
+    return DataConsumerEvidencePortV1.from_server(method, evidence, _issuer=_SERVER_OWNED_ISSUER)
+
+
+def _issue_data_consumer_output_ports(
+    operation_record: OperationRecord,
+    derived: DataConsumerDerivedPortV1,
+    evidence: DataConsumerEvidencePortV1,
+) -> DataConsumerOutputPortsV1:
+    return DataConsumerOutputPortsV1.from_server(
+        operation_record,
+        derived,
+        evidence,
+        _issuer=_SERVER_OWNED_ISSUER,
     )
 
 

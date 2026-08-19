@@ -8,7 +8,9 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from workbench.agent.proposals import ProposalStore
 from workbench.artifacts import register_artifact, sha256_file, write_json
+from workbench.data_operations import _register_metadata_authority
 from workbench.graph_store import GraphStore
 from workbench.metadata import metadata_revision_digest
 from tests.test_data_column_cast import _source_project
@@ -93,6 +95,12 @@ def _seed_confirmed_metadata(
         "metadata",
         "fixture.metadata",
         [source_artifact_id],
+    )
+    _register_metadata_authority(
+        run_root,
+        metadata_artifact_id=metadata_artifact_id,
+        metadata_path=path,
+        payload=payload,
     )
     return metadata_artifact_id
 
@@ -467,6 +475,131 @@ def test_columns_cast_rejects_duplicate_column(tmp_path: Path) -> None:
         json=_batch_request(run_id, artifact_id, [("age", "numeric"), ("age", "string")]),
     )
     assert resp.status_code == 422
+
+
+def test_profile_rejects_synchronously_resigned_metadata_and_schema_tamper(
+    tmp_path: Path,
+) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {"columns": {"score": {"variable_label": "server label"}}},
+    )
+
+    run_root = project / "runs" / run_id
+    metadata_path = run_root / "metadata" / "registry.json"
+    schema_path = run_root / "metadata" / "schema.json"
+    index_path = run_root / "artifacts_index.json"
+    payload = json.loads(metadata_path.read_text())
+    payload["metadata"]["columns"]["score"]["variable_label"] = "caller forged"
+    payload["schema_revision"] = "schema:caller-forged"
+    payload["metadata_revision"] = metadata_revision_digest(
+        payload["metadata"],
+        schema_revision=payload["schema_revision"],
+    )
+    payload["provenance"] = {"fixture": "caller-forged"}
+    write_json(schema_path, {"schema_revision": payload["schema_revision"]})
+
+    index = json.loads(index_path.read_text())
+    schema_row = next(
+        row for row in index["artifacts"] if row["artifact_id"] == "source_data_schema"
+    )
+    schema_row["sha256"] = sha256_file(schema_path)
+    payload["schema_artifact"]["sha256"] = schema_row["sha256"]
+    write_json(metadata_path, payload)
+    metadata_row = next(
+        row
+        for row in index["artifacts"]
+        if row["artifact_id"] == "source_metadata_registry"
+    )
+    metadata_row["sha256"] = sha256_file(metadata_path)
+    write_json(index_path, index)
+
+    response = TestClient(app).get(
+        "/data-operations/profile",
+        params={
+            "project_root": str(project),
+            "source_run_id": run_id,
+            "source_node_id": "stage:source",
+            "source_artifact_id": artifact_id,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_METADATA_UNAVAILABLE"
+
+
+@pytest.mark.parametrize(
+    ("operation", "request_builder"),
+    [
+        (
+            "data.column.cast",
+            lambda run_id, artifact_id: _request(run_id, artifact_id),
+        ),
+        (
+            "data.columns.cast",
+            lambda run_id, artifact_id: _batch_request(
+                run_id, artifact_id, [("age", "string")]
+            ),
+        ),
+    ],
+)
+def test_cast_stale_conflict_rolls_back_proposal_and_operation_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    request_builder,
+) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"age": ["10", "11"]}),
+    )
+    request = request_builder(run_id, artifact_id)
+    preview_path = (
+        "/data-operations/column-cast/preview"
+        if operation == "data.column.cast"
+        else "/data-operations/columns-cast/preview"
+    )
+    confirm_path = (
+        "/data-operations/column-cast/confirm"
+        if operation == "data.column.cast"
+        else "/data-operations/columns-cast/confirm"
+    )
+    source_path = project / "runs" / run_id / "data.csv"
+    with TestClient(app, raise_server_exceptions=False) as client:
+        preview_response = client.post(
+            preview_path,
+            params={"project_root": str(project)},
+            json=request,
+        )
+        assert preview_response.status_code == 200
+        preview = preview_response.json()["preview"]
+
+        original_create = ProposalStore.create
+
+        def create_then_stale(self, **kwargs):
+            proposal = original_create(self, **kwargs)
+            source_path.write_text(source_path.read_text() + "\n")
+            return proposal
+
+        monkeypatch.setattr(ProposalStore, "create", create_then_stale)
+        response = client.post(
+            confirm_path,
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "DATA_OPERATION_STALE"
+    proposal_dir = project / "workbench" / "proposals"
+    record_dir = project / "workbench" / "operation-records"
+    assert not proposal_dir.exists() or not [path for path in proposal_dir.rglob("*") if path.is_file()]
+    assert not record_dir.exists() or not [path for path in record_dir.rglob("*") if path.is_file()]
 
 
 def test_data_operation_manifest_is_read_only_and_exposes_closed_descriptors() -> None:

@@ -543,6 +543,122 @@ def _batch_preview_or_error(root, spec: DataColumnsCastSpecV1, *, confirm: bool)
         ) from exc
 
 
+async def _confirm_cast_operation(
+    root: Path,
+    body: Any,
+    spec: DataColumnCastSpecV1 | DataColumnsCastSpecV1,
+    preview: Any,
+    *,
+    operation_id: str,
+    proposal_id: str,
+    target: dict[str, Any],
+    preconditions: dict[str, Any],
+    changes: dict[str, Any],
+) -> dict[str, Any]:
+    """Confirm a cast while proposal and OperationRecord share one rollback scope."""
+
+    workbench_root = root / "workbench"
+    with data_operation_transaction(root, spec, preview):
+        repository = JsonlSessionRepository(workbench_root)
+        events = AgentEventStream(workbench_root)
+        chain_id = f"data_chain:{body.source_run_id}"
+        _ensure_data_chain_scope(
+            root,
+            repository,
+            session_id=body.session_id,
+            chain_id=chain_id,
+            active_head_run_id=body.source_run_id,
+        )
+        main_session_id = _ensure_main_session(repository, root)
+        proposal_store = ProposalStore(workbench_root)
+        registry = OperationRegistry()
+        definition = registry.require(operation_id, "v1")
+        try:
+            proposal = proposal_store.latest_revision(proposal_id)
+        except KeyError:
+            proposal = proposal_store.create(
+                session_id=body.session_id,
+                chain_id=chain_id,
+                operation_id=operation_id,
+                operation_version="v1",
+                target=target,
+                preconditions=preconditions,
+                changes=changes,
+                evidence_refs=[f"{operation_id}-preview"],
+                expected_effect=["create one immutable child data artifact"],
+                risks=["downstream model rerun required"],
+                proposal_id=proposal_id,
+            )
+            events.emit(body.session_id, "proposal_ready", proposal.to_dict())
+            events.emit(
+                body.session_id,
+                "needs_confirmation",
+                {"proposal_id": proposal_id, "revision": proposal.revision},
+            )
+        if proposal.target != target or proposal.preconditions != preconditions:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_CONFLICT",
+                message="A different typed proposal already owns this preview fingerprint.",
+                details={"proposal_id": proposal_id},
+            )
+
+        orchestrator = WorkbenchOrchestrator(
+            repository,
+            events,
+            main_session_id=main_session_id,
+            proposal_store=proposal_store,
+            operation_store=OperationRecordStore(workbench_root),
+            operation_registry=registry,
+        )
+        try:
+            confirmation = proposal_store.confirm(
+                proposal_id,
+                revision=proposal.revision,
+                fingerprint=proposal.fingerprint,
+                actor_type="human_ui",
+                current_context_fingerprint=preview.fingerprint,
+                current_active_head_run_id=spec.source_run_id,
+            )
+            record = orchestrator.operation_store.create_pending(
+                confirmation,
+                command_id=confirmation.command_id,
+            )
+            record = await orchestrator.execute_confirmed_operation(
+                record.record_id,
+                project_root=root,
+                current_context_fingerprint=preview.fingerprint,
+                current_active_head_run_id=spec.source_run_id,
+            )
+        except ProposalStaleError as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_STALE",
+                message="The typed data operation became stale before execution.",
+                details={"proposal_id": proposal_id},
+            ) from exc
+        except ProposalConfirmationError as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_CONFLICT",
+                message="The typed data proposal is no longer confirmable.",
+                details={"proposal_id": proposal_id},
+            ) from exc
+        except (DataColumnCastValidationError, FileNotFoundError, KeyError) as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_STALE",
+                message="The typed data operation became stale before execution.",
+                details={"proposal_id": proposal_id, "reason": str(exc)},
+            ) from exc
+
+        return {
+            "proposal": proposal_store.latest_revision(proposal_id).to_dict(),
+            "operation": record.to_dict(),
+            "status": record.status,
+        }
+
+
 def _feature_recipe_spec(body: FeatureRecipeRequest) -> FeatureRecipeOperationSpecV1:
     from ..predictive_research.contracts import FeatureRecipeV1
 
@@ -1136,11 +1252,11 @@ def _complete_direct_data_operation(
     """Bind a package effect to OperationRecord and expose bounded evidence ports."""
 
     from ..data_operation_manifest import (
-        DataConsumerDerivedPortV1,
-        DataConsumerEvidencePortV1,
-        DataConsumerOutputPortsV1,
-        DataConsumerServerEvidenceV1,
         build_data_consumer_runtime_adapter,
+        _issue_data_consumer_derived_port,
+        _issue_data_consumer_evidence_port,
+        _issue_data_consumer_output_ports,
+        _issue_data_consumer_server_evidence,
     )
 
     operation_record_payload = confirmation_result.get("operation_record")
@@ -1263,7 +1379,7 @@ def _complete_direct_data_operation(
                 details={"record_id": record_id, "path_field": path_field},
             )
     adapter = build_data_consumer_runtime_adapter()
-    derived_port = DataConsumerDerivedPortV1.from_server(effect)
+    derived_port = _issue_data_consumer_derived_port(effect)
     effect_payload = derived_port.to_dict()
     bindings = {
         key: str(value)
@@ -1275,9 +1391,9 @@ def _complete_direct_data_operation(
         execution_key=execution_key,
         bindings=bindings,
     )
-    evidence_port = DataConsumerEvidencePortV1.from_server(
+    evidence_port = _issue_data_consumer_evidence_port(
         method,
-        DataConsumerServerEvidenceV1.from_server(
+        _issue_data_consumer_server_evidence(
             method,
             dict(evidence or {}),
             record_id=record.record_id,
@@ -1290,10 +1406,10 @@ def _complete_direct_data_operation(
             },
         ),
     )
-    output_ports = DataConsumerOutputPortsV1.from_server(
-        operation_record=record,
-        derived=derived_port,
-        evidence=evidence_port,
+    output_ports = _issue_data_consumer_output_ports(
+        record,
+        derived_port,
+        evidence_port,
     )
     adapter.adapt_operation_record(record, output_ports)
     outputs = output_ports.to_dict(catalog_digest=adapter.catalog_digest)
@@ -1575,19 +1691,6 @@ async def confirm_column_cast(
         )
     _preflight_or_error(root, spec, preview)
 
-    workbench_root = root / "workbench"
-    repository = JsonlSessionRepository(workbench_root)
-    events = AgentEventStream(workbench_root)
-    chain_id = f"data_chain:{body.source_run_id}"
-    _ensure_data_chain_scope(
-        root,
-        repository,
-        session_id=body.session_id,
-        chain_id=chain_id,
-        active_head_run_id=body.source_run_id,
-    )
-    main_session_id = _ensure_main_session(repository, root)
-    proposal_store = ProposalStore(workbench_root)
     registry = OperationRegistry()
     definition = registry.require("data.column.cast", "v1")
     target = {
@@ -1606,87 +1709,17 @@ async def confirm_column_cast(
     changes = {"column": spec.column, "target_dtype": spec.target_dtype}
     definition.validate(target=target, preconditions=preconditions, changes=changes)
     proposal_id = f"proposal_data_cast_{preview.fingerprint[:24]}"
-    try:
-        proposal = proposal_store.latest_revision(proposal_id)
-    except KeyError:
-        proposal = proposal_store.create(
-            session_id=body.session_id,
-            chain_id=chain_id,
-            operation_id="data.column.cast",
-            operation_version="v1",
-            target=target,
-            preconditions=preconditions,
-            changes=changes,
-            evidence_refs=["data-column-cast-preview"],
-            expected_effect=["create one immutable child data artifact"],
-            risks=["downstream model rerun required"],
-            proposal_id=proposal_id,
-        )
-        events.emit(
-            body.session_id,
-            "proposal_ready",
-            proposal.to_dict(),
-        )
-        events.emit(
-            body.session_id,
-            "needs_confirmation",
-            {"proposal_id": proposal_id, "revision": proposal.revision},
-        )
-    if proposal.target != target or proposal.preconditions != preconditions:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_CONFLICT",
-            message="A different typed proposal already owns this preview fingerprint.",
-            details={"proposal_id": proposal_id},
-        )
-
-    orchestrator = WorkbenchOrchestrator(
-        repository,
-        events,
-        main_session_id=main_session_id,
-        proposal_store=proposal_store,
-        operation_store=OperationRecordStore(workbench_root),
-        operation_registry=registry,
+    return await _confirm_cast_operation(
+        root,
+        body,
+        spec,
+        preview,
+        operation_id="data.column.cast",
+        proposal_id=proposal_id,
+        target=target,
+        preconditions=preconditions,
+        changes=changes,
     )
-    try:
-        with data_operation_transaction(root, spec, preview):
-            confirmation = proposal_store.confirm(
-                proposal_id,
-                revision=proposal.revision,
-                fingerprint=proposal.fingerprint,
-                actor_type="human_ui",
-                current_context_fingerprint=preview.fingerprint,
-                current_active_head_run_id=spec.source_run_id,
-            )
-            record = orchestrator.operation_store.create_pending(
-                confirmation,
-                command_id=confirmation.command_id,
-            )
-            record = await orchestrator.execute_confirmed_operation(
-                record.record_id,
-                project_root=root,
-                current_context_fingerprint=preview.fingerprint,
-                current_active_head_run_id=spec.source_run_id,
-            )
-    except ProposalStaleError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_STALE",
-            message="The typed data operation became stale before execution.",
-            details={"proposal_id": proposal_id},
-        ) from exc
-    except ProposalConfirmationError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_CONFLICT",
-            message="The typed data proposal is no longer confirmable.",
-            details={"proposal_id": proposal_id},
-        ) from exc
-    return {
-        "proposal": proposal_store.latest_revision(proposal_id).to_dict(),
-        "operation": record.to_dict(),
-        "status": record.status,
-    }
 
 
 @router.post("/data-operations/columns-cast/preview")
@@ -1733,19 +1766,6 @@ async def confirm_columns_cast(
         )
     _preflight_or_error(root, spec, preview)
 
-    workbench_root = root / "workbench"
-    repository = JsonlSessionRepository(workbench_root)
-    events = AgentEventStream(workbench_root)
-    chain_id = f"data_chain:{body.source_run_id}"
-    _ensure_data_chain_scope(
-        root,
-        repository,
-        session_id=body.session_id,
-        chain_id=chain_id,
-        active_head_run_id=body.source_run_id,
-    )
-    main_session_id = _ensure_main_session(repository, root)
-    proposal_store = ProposalStore(workbench_root)
     registry = OperationRegistry()
     definition = registry.require("data.columns.cast", "v1")
     casts = [item.to_dict() for item in spec.casts]
@@ -1765,83 +1785,17 @@ async def confirm_columns_cast(
     changes = {"casts": casts, "output_format": spec.output_format}
     definition.validate(target=target, preconditions=preconditions, changes=changes)
     proposal_id = f"proposal_data_casts_{preview.fingerprint[:24]}"
-    try:
-        proposal = proposal_store.latest_revision(proposal_id)
-    except KeyError:
-        proposal = proposal_store.create(
-            session_id=body.session_id,
-            chain_id=chain_id,
-            operation_id="data.columns.cast",
-            operation_version="v1",
-            target=target,
-            preconditions=preconditions,
-            changes=changes,
-            evidence_refs=["data-columns-cast-preview"],
-            expected_effect=["create one immutable child data artifact"],
-            risks=["downstream model rerun required"],
-            proposal_id=proposal_id,
-        )
-        events.emit(body.session_id, "proposal_ready", proposal.to_dict())
-        events.emit(
-            body.session_id,
-            "needs_confirmation",
-            {"proposal_id": proposal_id, "revision": proposal.revision},
-        )
-    if proposal.target != target or proposal.preconditions != preconditions:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_CONFLICT",
-            message="A different typed proposal already owns this preview fingerprint.",
-            details={"proposal_id": proposal_id},
-        )
-
-    orchestrator = WorkbenchOrchestrator(
-        repository,
-        events,
-        main_session_id=main_session_id,
-        proposal_store=proposal_store,
-        operation_store=OperationRecordStore(workbench_root),
-        operation_registry=registry,
+    return await _confirm_cast_operation(
+        root,
+        body,
+        spec,
+        preview,
+        operation_id="data.columns.cast",
+        proposal_id=proposal_id,
+        target=target,
+        preconditions=preconditions,
+        changes=changes,
     )
-    try:
-        with data_operation_transaction(root, spec, preview):
-            confirmation = proposal_store.confirm(
-                proposal_id,
-                revision=proposal.revision,
-                fingerprint=proposal.fingerprint,
-                actor_type="human_ui",
-                current_context_fingerprint=preview.fingerprint,
-                current_active_head_run_id=spec.source_run_id,
-            )
-            record = orchestrator.operation_store.create_pending(
-                confirmation,
-                command_id=confirmation.command_id,
-            )
-            record = await orchestrator.execute_confirmed_operation(
-                record.record_id,
-                project_root=root,
-                current_context_fingerprint=preview.fingerprint,
-                current_active_head_run_id=spec.source_run_id,
-            )
-    except ProposalStaleError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_STALE",
-            message="The typed data operation became stale before execution.",
-            details={"proposal_id": proposal_id},
-        ) from exc
-    except ProposalConfirmationError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_CONFLICT",
-            message="The typed data proposal is no longer confirmable.",
-            details={"proposal_id": proposal_id},
-        ) from exc
-    return {
-        "proposal": proposal_store.latest_revision(proposal_id).to_dict(),
-        "operation": record.to_dict(),
-        "status": record.status,
-    }
 
 
 @router.post("/data-operations/feature-recipe/preview")

@@ -50,6 +50,16 @@ ALLOWED_CAST_TARGETS = frozenset({"numeric", "string", "datetime"})
 DataCastOutputFormat = Literal["csv", "xlsx"]
 ALLOWED_OUTPUT_FORMATS = frozenset({"csv", "xlsx"})
 _SCHEMA_SIDECAR_SUFFIX = ".schema.json"
+_SERVER_OWNED_EFFECTS: dict[int, object] = {}
+
+
+def _mark_server_owned_effect(effect: object) -> object:
+    _SERVER_OWNED_EFFECTS[id(effect)] = effect
+    return effect
+
+
+def _is_server_owned_effect(effect: object) -> bool:
+    return _SERVER_OWNED_EFFECTS.get(id(effect)) is effect
 
 
 class DataColumnCastValidationError(ValueError):
@@ -238,6 +248,7 @@ class _DataOperationTransaction:
         self.workbench_roots = (
             run_root.parent.parent / "workbench" / "proposals",
             run_root.parent.parent / "workbench" / "operation-records",
+            run_root.parent.parent / "workbench" / "data-consumer",
         )
 
     def __enter__(self) -> "_DataOperationTransaction":
@@ -1770,18 +1781,20 @@ def apply_data_transform(
         metadata_artifact_id=metadata_artifact_id,
         metadata_artifact_path=metadata_rel,
     )
-    return FeatureRecipeEffect(
-        execution_key=effect.execution_key,
-        artifact_id=effect.artifact_id,
-        artifact_path=effect.artifact_path,
-        recipe_artifact_id=effect.recipe_artifact_id,
-        recipe_path=effect.recipe_path,
-        child_node_id=effect.child_node_id,
-        metadata_artifact_id=effect.metadata_artifact_id,
-        metadata_artifact_path=effect.metadata_artifact_path,
-        group_manifest_id=group_manifest_id,
-        group_manifest_path=group_manifest_rel,
-        group_artifacts=tuple(group_artifacts),
+    return _mark_server_owned_effect(
+        FeatureRecipeEffect(
+            execution_key=effect.execution_key,
+            artifact_id=effect.artifact_id,
+            artifact_path=effect.artifact_path,
+            recipe_artifact_id=effect.recipe_artifact_id,
+            recipe_path=effect.recipe_path,
+            child_node_id=child_node_id,
+            metadata_artifact_id=metadata_artifact_id,
+            metadata_artifact_path=metadata_rel,
+            group_manifest_id=group_manifest_id,
+            group_manifest_path=group_manifest_rel,
+            group_artifacts=tuple(group_artifacts),
+        )
     )
 
 
@@ -2363,6 +2376,12 @@ def apply_metadata_mutation(
         step="data.metadata.update",
         inputs=[spec.source_artifact_id],
     )
+    _register_metadata_authority(
+        run_root,
+        metadata_artifact_id=metadata_artifact_id,
+        metadata_path=metadata_path,
+        payload=metadata_payload,
+    )
     record_payload = {
         "record_id": record_id,
         "operation_id": spec.operation_id,
@@ -2408,14 +2427,16 @@ def apply_metadata_mutation(
         producing_stage="data.metadata.update",
         create_if_missing=True,
     )
-    return MetadataMutationEffectV1(
-        record_id=record_id,
-        execution_key=execution,
-        metadata_artifact_id=metadata_artifact_id,
-        metadata_artifact_path=metadata_rel,
-        child_node_id=child_node_id,
-        schema_revision=fresh.schema_revision,
-        metadata_revision=fresh.metadata_revision,
+    return _mark_server_owned_effect(
+        MetadataMutationEffectV1(
+            record_id=record_id,
+            execution_key=execution,
+            metadata_artifact_id=metadata_artifact_id,
+            metadata_artifact_path=metadata_rel,
+            child_node_id=child_node_id,
+            schema_revision=fresh.schema_revision,
+            metadata_revision=fresh.metadata_revision,
+        )
     )
 
 
@@ -2740,15 +2761,17 @@ def apply_feature_recipe_operation(
         producing_stage=spec.recipe.operation_id,
         create_if_missing=True,
     )
-    return FeatureRecipeEffect(
-        execution_key=execution,
-        artifact_id=artifact_id,
-        artifact_path=artifact_rel,
-        recipe_artifact_id=recipe_artifact_id,
-        recipe_path=recipe_rel,
-        child_node_id=child_node_id,
-        metadata_artifact_id=metadata_artifact_id,
-        metadata_artifact_path=metadata_rel,
+    return _mark_server_owned_effect(
+        FeatureRecipeEffect(
+            execution_key=execution,
+            artifact_id=artifact_id,
+            artifact_path=artifact_rel,
+            recipe_artifact_id=recipe_artifact_id,
+            recipe_path=recipe_rel,
+            child_node_id=child_node_id,
+            metadata_artifact_id=metadata_artifact_id,
+            metadata_artifact_path=metadata_rel,
+        )
     )
 
 
@@ -3086,15 +3109,17 @@ def apply_data_column_cast(
         artifact_rel=artifact_rel,
     )
 
-    return DataColumnCastEffect(
-        execution_key=execution,
-        artifact_id=artifact_id,
-        artifact_path=artifact_rel,
-        recipe_artifact_id=recipe_artifact_id,
-        recipe_path=recipe_rel,
-        child_node_id=child_node_id,
-        metadata_artifact_id=metadata_artifact_id,
-        metadata_artifact_path=metadata_rel,
+    return _mark_server_owned_effect(
+        DataColumnCastEffect(
+            execution_key=execution,
+            artifact_id=artifact_id,
+            artifact_path=artifact_rel,
+            recipe_artifact_id=recipe_artifact_id,
+            recipe_path=recipe_rel,
+            child_node_id=child_node_id,
+            metadata_artifact_id=metadata_artifact_id,
+            metadata_artifact_path=metadata_rel,
+        )
     )
 
 
@@ -3518,15 +3543,17 @@ def apply_data_columns_cast(
         producing_stage="data.columns.cast",
     )
 
-    return DataColumnsCastEffect(
-        execution_key=execution,
-        artifact_id=artifact_id,
-        artifact_path=artifact_rel,
-        recipe_artifact_id=recipe_artifact_id,
-        recipe_path=recipe_rel,
-        child_node_id=child_node_id,
-        metadata_artifact_id=metadata_artifact_id,
-        metadata_artifact_path=metadata_rel,
+    return _mark_server_owned_effect(
+        DataColumnsCastEffect(
+            execution_key=execution,
+            artifact_id=artifact_id,
+            artifact_path=artifact_rel,
+            recipe_artifact_id=recipe_artifact_id,
+            recipe_path=recipe_rel,
+            child_node_id=child_node_id,
+            metadata_artifact_id=metadata_artifact_id,
+            metadata_artifact_path=metadata_rel,
+        )
     )
 
 
@@ -3674,6 +3701,172 @@ def _node_annotation_value(node: Any, key: str) -> object | None:
     return None
 
 
+_METADATA_AUTHORITY_RELATIVE = Path("workbench") / "data-consumer" / "metadata-authority.json"
+_METADATA_AUTHORITY_CACHE: dict[Path, bytes] = {}
+
+
+def _canonical_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _metadata_index_entry_sha256(artifact: Mapping[str, object]) -> str:
+    return _canonical_sha256(
+        {key: artifact.get(key) for key in ("artifact_id", "path", "artifact_type", "step", "inputs")}
+    )
+
+
+def _metadata_authority_path(run_root: Path) -> Path:
+    return run_root.parent.parent / _METADATA_AUTHORITY_RELATIVE
+
+
+def _load_metadata_authority_entries(
+    run_root: Path,
+    *,
+    missing_ok: bool = False,
+) -> list[Mapping[str, object]]:
+    path = _metadata_authority_path(run_root).resolve()
+    if not path.is_file():
+        if missing_ok:
+            return []
+        raise DataMetadataUnavailableError("server-owned metadata authority index is missing")
+    raw = path.read_bytes()
+    cached = _METADATA_AUTHORITY_CACHE.get(path)
+    if cached is not None and cached != raw:
+        raise DataMetadataUnavailableError("server-owned metadata authority index changed")
+    _METADATA_AUTHORITY_CACHE[path] = raw
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise DataMetadataUnavailableError("server-owned metadata authority index is unreadable") from exc
+    if not isinstance(payload, Mapping) or payload.get("schema_version") != 1:
+        raise DataMetadataUnavailableError("server-owned metadata authority index is invalid")
+    entries = payload.get("entries")
+    if not isinstance(entries, list) or any(not isinstance(entry, Mapping) for entry in entries):
+        raise DataMetadataUnavailableError("server-owned metadata authority entries are invalid")
+    return [entry for entry in entries if isinstance(entry, Mapping)]
+
+
+def _metadata_authority_entry(
+    run_root: Path,
+    *,
+    artifact: Mapping[str, object],
+    payload: Mapping[str, object],
+    metadata_artifact_sha256: str,
+    metadata_index_entry_sha256: str,
+) -> dict[str, object]:
+    source = payload.get("source")
+    schema_artifact = payload.get("schema_artifact")
+    provenance = payload.get("provenance")
+    schema_revision = payload.get("schema_revision")
+    metadata_revision = payload.get("metadata_revision")
+    if (
+        not isinstance(source, Mapping)
+        or not isinstance(schema_artifact, Mapping)
+        or not isinstance(provenance, Mapping)
+        or not isinstance(schema_revision, str)
+        or not isinstance(metadata_revision, str)
+    ):
+        raise DataMetadataUnavailableError("confirmed metadata has incomplete authority fields")
+    fields: dict[str, object] = {
+        "run_id": run_root.name,
+        "metadata_artifact_id": artifact.get("artifact_id"),
+        "metadata_artifact_path": artifact.get("path"),
+        "metadata_artifact_sha256": metadata_artifact_sha256,
+        "metadata_revision": metadata_revision,
+        "schema_revision": schema_revision,
+        "schema_artifact_id": schema_artifact.get("artifact_id"),
+        "schema_artifact_sha256": schema_artifact.get("sha256"),
+        "source": dict(source),
+        "provenance_sha256": _canonical_sha256(dict(provenance)),
+        "metadata_index_entry_sha256": metadata_index_entry_sha256,
+    }
+    fields["envelope_sha256"] = _canonical_sha256(fields)
+    return fields
+
+
+def _register_metadata_authority(
+    run_root: Path,
+    *,
+    metadata_artifact_id: str,
+    metadata_path: Path,
+    payload: Mapping[str, object],
+) -> None:
+    """Issue a detached server-owned metadata envelope and index entry."""
+
+    if payload.get("confirmed") is not True:
+        return
+    index = read_json(run_root / "artifacts_index.json")
+    records = index.get("artifacts", [])
+    artifact = next(
+        (
+            item
+            for item in records
+            if isinstance(item, Mapping) and item.get("artifact_id") == metadata_artifact_id
+        ),
+        None,
+    )
+    if not isinstance(artifact, Mapping) or artifact.get("path") != metadata_path.relative_to(run_root).as_posix():
+        raise DataColumnCastValidationError("metadata authority artifact binding is not registered")
+    actual_sha = sha256_file(metadata_path)
+    if artifact.get("sha256") != actual_sha:
+        raise DataColumnCastValidationError("metadata authority artifact SHA is not registered")
+    entry = _metadata_authority_entry(
+        run_root,
+        artifact=artifact,
+        payload=payload,
+        metadata_artifact_sha256=actual_sha,
+        metadata_index_entry_sha256=_metadata_index_entry_sha256(artifact),
+    )
+    authority_path = _metadata_authority_path(run_root)
+    entries = _load_metadata_authority_entries(run_root, missing_ok=True)
+    key = (run_root.name, metadata_artifact_id)
+    existing = [
+        item
+        for item in entries
+        if (item.get("run_id"), item.get("metadata_artifact_id")) == key
+    ]
+    if existing and existing[0] != entry:
+        raise DataColumnCastValidationError("metadata authority entry is not deterministic")
+    merged = [
+        item
+        for item in entries
+        if (item.get("run_id"), item.get("metadata_artifact_id")) != key
+    ]
+    merged.append(entry)
+    merged.sort(key=lambda item: (str(item.get("run_id")), str(item.get("metadata_artifact_id"))))
+    write_json(authority_path, {"schema_version": 1, "entries": merged})
+    _METADATA_AUTHORITY_CACHE[authority_path.resolve()] = authority_path.read_bytes()
+
+
+def _verify_metadata_authority(
+    run_root: Path,
+    *,
+    artifact: Mapping[str, object],
+    payload: Mapping[str, object],
+    metadata_artifact_sha256: str,
+    metadata_index_entry_sha256: str,
+) -> None:
+    expected = _metadata_authority_entry(
+        run_root,
+        artifact=artifact,
+        payload=payload,
+        metadata_artifact_sha256=metadata_artifact_sha256,
+        metadata_index_entry_sha256=metadata_index_entry_sha256,
+    )
+    matches = [
+        entry
+        for entry in _load_metadata_authority_entries(run_root)
+        if entry.get("run_id") == run_root.name
+        and entry.get("metadata_artifact_id") == artifact.get("artifact_id")
+    ]
+    if len(matches) != 1 or matches[0] != expected:
+        raise DataMetadataUnavailableError(
+            "metadata payload is not bound to the server-owned envelope/index"
+        )
+
+
 def _metadata_registry_for_source(
     run_root: Path,
     node: Any,
@@ -3740,14 +3933,19 @@ def _metadata_registry_for_source(
                 raise ValueError("metadata artifact must be an object")
             if payload.get("payload_schema") != "workbench.data-metadata":
                 continue
+            if payload.get("confirmed") is False:
+                # Transform sidecars preserve evidence even when the source
+                # had no confirmed registry; they are never authority entries.
+                continue
             schema_artifact = payload.get("schema_artifact")
-            index_entry = {
-                key: artifact.get(key)
-                for key in ("artifact_id", "path", "artifact_type", "step", "inputs")
-            }
-            expected_entry_sha256 = hashlib.sha256(
-                json.dumps(index_entry, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()
+            expected_entry_sha256 = _metadata_index_entry_sha256(artifact)
+            _verify_metadata_authority(
+                run_root,
+                artifact=artifact,
+                payload=payload,
+                metadata_artifact_sha256=actual_sha,
+                metadata_index_entry_sha256=expected_entry_sha256,
+            )
             if not isinstance(schema_artifact, Mapping):
                 raise MetadataProvenanceError(
                     "METADATA_REGISTRY_PROVENANCE_MISMATCH",
@@ -3761,6 +3959,31 @@ def _metadata_registry_for_source(
                     raise MetadataProvenanceError(
                         "METADATA_REGISTRY_PROVENANCE_MISMATCH",
                         "schema artifact digest does not match its server-owned index row",
+                    )
+                schema_relative = schema_row.get("path")
+                if not isinstance(schema_relative, str) or not schema_relative:
+                    raise MetadataProvenanceError(
+                        "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                        "schema artifact has no safe path",
+                    )
+                schema_path = (run_root / schema_relative).resolve()
+                try:
+                    schema_path.relative_to(run_root.resolve())
+                except ValueError as exc:
+                    raise MetadataProvenanceError(
+                        "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                        "schema artifact escapes the run root",
+                    ) from exc
+                if not schema_path.is_file() or sha256_file(schema_path) != schema_artifact_sha256:
+                    raise MetadataProvenanceError(
+                        "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                        "schema artifact bytes do not match the server-owned digest",
+                    )
+                schema_payload = read_json(schema_path)
+                if schema_payload.get("schema_revision") != payload.get("schema_revision"):
+                    raise MetadataProvenanceError(
+                        "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                        "schema artifact revision does not match metadata provenance",
                     )
             elif not (
                 isinstance(schema_artifact_id, str)
@@ -4057,6 +4280,12 @@ def _write_metadata_sidecar(
         artifact_type="metadata",
         step=operation_id,
         inputs=[source_artifact_id, artifact_id],
+    )
+    _register_metadata_authority(
+        run_root,
+        metadata_artifact_id=metadata_artifact_id,
+        metadata_path=metadata_path,
+        payload=payload,
     )
     return metadata_artifact_id, metadata_rel, payload
 
