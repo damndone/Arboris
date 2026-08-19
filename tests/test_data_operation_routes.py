@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from workbench.artifacts import register_artifact, write_json
+from workbench.artifacts import register_artifact, sha256_file, write_json
 from workbench.graph_store import GraphStore
 from workbench.metadata import metadata_revision_digest
 from tests.test_data_column_cast import _source_project
@@ -44,6 +44,40 @@ def _seed_confirmed_metadata(
     run_root = project / "runs" / run_id
     path = run_root / "metadata" / "registry.json"
     metadata_revision = metadata_revision_digest(metadata, schema_revision=schema_revision)
+    schema_path = run_root / "metadata" / "schema.json"
+    write_json(schema_path, {"schema_revision": schema_revision})
+    schema_artifact_id = f"{source_artifact_id}_schema"
+    register_artifact(
+        run_root,
+        schema_artifact_id,
+        schema_path,
+        "schema",
+        "fixture.schema",
+        [source_artifact_id],
+    )
+    source_row = next(
+        item
+        for item in json.loads((run_root / "artifacts_index.json").read_text())["artifacts"]
+        if item["artifact_id"] == source_artifact_id
+    )
+    source_sha256 = source_row["sha256"]
+    metadata_artifact_id = "source_metadata_registry"
+    metadata_artifact_path = "metadata/registry.json"
+    metadata_artifact_digest = "b" * 64
+    metadata_index_entry_sha256 = hashlib.sha256(
+        json.dumps(
+            {
+                "artifact_id": metadata_artifact_id,
+                "path": metadata_artifact_path,
+                "artifact_type": "metadata",
+                "step": "fixture.metadata",
+                "inputs": [source_artifact_id],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
     payload = {
         "payload_schema": "workbench.data-metadata",
         "schema_version": 1,
@@ -54,20 +88,34 @@ def _seed_confirmed_metadata(
             "run_id": run_id,
             "node_id": "stage:source",
             "artifact_id": source_artifact_id,
+            "sha256": source_sha256,
         },
+        "schema_artifact": {
+            "artifact_id": schema_artifact_id,
+            "sha256": next(
+                item["sha256"]
+                for item in json.loads((run_root / "artifacts_index.json").read_text())["artifacts"]
+                if item["artifact_id"] == schema_artifact_id
+            ),
+        },
+        "metadata_artifact": {
+            "artifact_id": metadata_artifact_id,
+            "path": metadata_artifact_path,
+            "sha256": metadata_artifact_digest,
+        },
+        "metadata_index": {"entry_sha256": metadata_index_entry_sha256},
         "metadata": metadata,
     }
     write_json(path, payload)
-    artifact_id = "source_metadata_registry"
     register_artifact(
         run_root,
-        artifact_id,
+        metadata_artifact_id,
         path,
         "metadata",
         "fixture.metadata",
         [source_artifact_id],
     )
-    return artifact_id
+    return metadata_artifact_id
 
 
 def test_column_cast_routes_preview_confirm_and_reload_readback(tmp_path: Path) -> None:
@@ -1537,3 +1585,40 @@ def test_split_confirm_preflights_all_group_paths_before_any_child_write(tmp_pat
     assert not (run_root / "derived" / "data_operations" / "split" / suffix / "data.csv").exists()
     assert not (run_root / "derived" / "data_operations" / "split" / suffix / "groups" / f"{digest}.metadata.json").exists()
     assert conflict.read_text(encoding="utf-8") == "group,value\nconflict,999\n"
+
+    record_dir = project / "workbench" / "operation-records"
+    assert not record_dir.exists() or not list(record_dir.glob("*.jsonl")), (
+        "a failed preflight must not leave a submitted OperationRecord"
+    )
+
+
+def test_metadata_loss_preview_is_denied_when_live_manifest_removes_its_surface() -> None:
+    from workbench import data_operation_manifest
+
+    live = data_operation_manifest.build_data_operation_manifest()
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        data_operation_manifest,
+        "build_data_operation_manifest",
+        lambda: data_operation_manifest.DataOperationManifestV1(
+            schema_version=live.schema_version,
+            operations=live.operations,
+            unavailable=tuple(
+                item for item in live.unavailable if item.operation_id != "data.metadata.loss"
+            ),
+        ),
+    )
+    try:
+        response = TestClient(app).post(
+            "/data-operations/metadata-loss/preview",
+            json={
+                "source_format": "workbench-json",
+                "target_format": "csv",
+                "metadata": {"score": {"variable_label": "Outcome"}},
+            },
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_OPERATION_NOT_ADVERTISED"

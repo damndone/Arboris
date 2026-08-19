@@ -399,6 +399,31 @@ def test_package_runtime_adapter_rejects_invalid_executor_identity() -> None:
         )
 
 
+def test_server_evidence_and_derived_ports_cannot_be_caller_constructed() -> None:
+    from workbench.data_operation_manifest import (
+        DataConsumerDerivedPortV1,
+        DataConsumerServerEvidenceV1,
+    )
+
+    with pytest.raises((TypeError, ValueError), match="server|factory|capability"):
+        DataConsumerServerEvidenceV1(method="data.sort", payload={})
+
+    with pytest.raises((TypeError, ValueError), match="server|factory|capability"):
+        DataConsumerDerivedPortV1(effect=object())
+
+
+def test_runtime_adapter_rejects_unregistered_executor_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+    import workbench.data_operation_manifest as manifest_module
+
+    monkeypatch.setitem(
+        manifest_module.SERVER_OWNED_EXECUTOR_REGISTRY,
+        "executor:workbench.data_consumer.adapter",
+        None,
+    )
+    with pytest.raises((TypeError, ValueError, RuntimeError), match="executor|registered|server"):
+        manifest_module.build_data_consumer_runtime_adapter()
+
+
 def test_package_runtime_adapter_rejects_duck_typed_fake_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     import workbench.providers.catalog as catalog_module
     from workbench.data_operation_manifest import build_data_consumer_runtime_adapter

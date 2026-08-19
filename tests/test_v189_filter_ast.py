@@ -175,6 +175,13 @@ def test_filter_ast_uses_declared_user_missing_values_for_missing_predicates() -
         schema_revision="schema:fixture",
         metadata_revision="metadata:fixture",
         metadata={"columns": {"score": {"user_missing_values": [99]}}},
+        source_content_sha256="a" * 64,
+        schema_artifact_id="schema:fixture",
+        schema_artifact_sha256="d" * 64,
+        metadata_artifact_id="metadata:fixture-artifact",
+        metadata_artifact_path="metadata/registry.json",
+        metadata_artifact_sha256="b" * 64,
+        metadata_index_entry_sha256="c" * 64,
     )
     expression = {"op": "is_missing", "column": "score"}
 

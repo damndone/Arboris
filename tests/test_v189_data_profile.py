@@ -211,3 +211,59 @@ def test_metadata_loss_manifest_marks_unknown_target_format_not_supported() -> N
     assert len(manifest.items) == 1
     assert manifest.items[0].status == "not_supported"
     assert "future-format" in manifest.items[0].reason
+
+
+def test_metadata_registry_requires_server_owned_content_schema_and_index_provenance() -> None:
+    from workbench.metadata import MetadataRegistryV1, metadata_revision_digest
+
+    metadata = {"columns": {"score": {"variable_label": "caller forged"}}}
+    payload = {
+        "payload_schema": "workbench.data-metadata",
+        "schema_version": 1,
+        "confirmed": True,
+        "schema_revision": "schema:server",
+        "metadata_revision": metadata_revision_digest(metadata, schema_revision="schema:server"),
+        "source": {
+            "run_id": "run-a",
+            "node_id": "node-a",
+            "artifact_id": "artifact-a",
+            "sha256": "f" * 64,
+        },
+        "schema_artifact": {
+            "artifact_id": "schema-artifact",
+            "sha256": "e" * 64,
+        },
+        "metadata_artifact": {
+            "artifact_id": "metadata-artifact",
+            "path": "metadata/registry.json",
+            "sha256": "d" * 64,
+        },
+        "metadata_index": {"path": "artifacts_index.json", "sha256": "c" * 64},
+        "metadata": metadata,
+    }
+
+    with pytest.raises(Exception, match="server-owned|provenance|source|artifact|index"):
+        MetadataRegistryV1.from_payload(
+            payload,
+            source_run_id="run-a",
+            source_node_id="node-a",
+            source_artifact_id="artifact-a",
+            source_content_sha256="a" * 64,
+            schema_artifact_id="schema-artifact",
+            schema_artifact_sha256="e" * 64,
+            metadata_artifact_id="metadata-artifact",
+            metadata_artifact_path="metadata/registry.json",
+            metadata_artifact_sha256="d" * 64,
+            metadata_index_sha256="c" * 64,
+        )
+
+
+def test_metadata_declarations_reject_value_label_and_total_payload_overflow() -> None:
+    from workbench.metadata import normalize_declared_metadata
+
+    labels = {str(index): "label" for index in range(300)}
+    with pytest.raises(Exception, match="bound|label|size|exceed"):
+        normalize_declared_metadata(
+            {"score": {"value_labels": labels}},
+            columns=("score",),
+        )

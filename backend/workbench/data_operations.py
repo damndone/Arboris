@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import wraps
@@ -232,6 +234,11 @@ class _DataOperationTransaction:
         )
         self._files: dict[Path, bytes] = {}
         self._state_files: dict[Path, bytes] = {}
+        self._workbench_files: dict[Path, bytes] = {}
+        self.workbench_roots = (
+            run_root.parent.parent / "workbench" / "proposals",
+            run_root.parent.parent / "workbench" / "operation-records",
+        )
 
     def __enter__(self) -> "_DataOperationTransaction":
         if self.operation_root.is_dir():
@@ -241,6 +248,11 @@ class _DataOperationTransaction:
         for path in self.state_paths:
             if path.is_file():
                 self._state_files[path] = path.read_bytes()
+        for root in self.workbench_roots:
+            if root.is_dir():
+                for path in root.rglob("*"):
+                    if path.is_file():
+                        self._workbench_files[path] = path.read_bytes()
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
@@ -263,35 +275,97 @@ class _DataOperationTransaction:
                 path.write_bytes(self._state_files[path])
             elif path.is_file():
                 path.unlink()
+        for root in self.workbench_roots:
+            if root.exists():
+                for path in sorted(root.rglob("*"), reverse=True):
+                    if path.is_file() and path not in self._workbench_files:
+                        path.unlink()
+            for path, data in self._workbench_files.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+
+
+def _data_operation_prefix(
+    spec: object,
+    preview: object,
+    *,
+    execution_key_value: str | None = None,
+) -> tuple[str, Path] | None:
+    fingerprint = getattr(preview, "fingerprint", None)
+    if not isinstance(fingerprint, str) or not fingerprint:
+        return None
+    suffix = (
+        execution_key_value.removeprefix("exec_")
+        if isinstance(execution_key_value, str) and execution_key_value
+        else fingerprint[:32]
+    )
+    class_name = type(spec).__name__
+    if class_name == "DataTransformSpecV1":
+        return str(getattr(spec, "source_run_id")), Path("derived") / "data_operations" / spec.operation / suffix
+    if class_name == "DataColumnCastSpecV1":
+        return str(getattr(spec, "source_run_id")), Path("derived") / "data_column_cast" / suffix
+    if class_name == "DataColumnsCastSpecV1":
+        return str(getattr(spec, "source_run_id")), Path("derived") / "data_columns_cast" / suffix
+    if class_name == "FeatureRecipeOperationSpecV1":
+        return str(getattr(spec, "source_run_id")), Path("derived") / "feature_recipe" / suffix
+    if class_name == "MetadataMutationSpecV1":
+        return str(getattr(spec, "source_run_id")), Path("derived") / "data_operations" / "metadata_update" / suffix
+    return None
+
+
+def data_operation_transaction(
+    project_root: Path | str,
+    spec: object,
+    preview: object,
+    *,
+    execution_key_value: str | None = None,
+) -> _DataOperationTransaction:
+    resolved_root = Path(project_root).expanduser().resolve()
+    prefix = _data_operation_prefix(spec, preview, execution_key_value=execution_key_value)
+    if prefix is None:
+        raise ValueError("unsupported data-operation transaction spec")
+    return _DataOperationTransaction(resolved_root / "runs" / prefix[0], prefix[1])
+
+
+def preflight_data_operation(
+    project_root: Path | str,
+    spec: object,
+    preview: object,
+) -> None:
+    """Run the complete materialization preflight on an isolated project copy.
+
+    Confirmation callers invoke this before creating a proposal or
+    OperationRecord.  The real project therefore has no package-owned write
+    until every path, artifact/index binding, sidecar, child node, and Graph
+    mutation has passed the same production implementation.
+    """
+
+    resolved_root = Path(project_root).expanduser().resolve()
+    with tempfile.TemporaryDirectory(prefix="data-operation-preflight-") as temporary_root:
+        probe_root = Path(temporary_root) / resolved_root.name
+        shutil.copytree(resolved_root, probe_root)
+        if type(spec) is DataColumnCastSpecV1:
+            apply_data_column_cast(probe_root, spec, preview)
+        elif type(spec) is DataColumnsCastSpecV1:
+            apply_data_columns_cast(probe_root, spec, preview)
+        elif type(spec) is DataTransformSpecV1:
+            apply_data_transform(probe_root, spec, preview)
+        elif type(spec) is FeatureRecipeOperationSpecV1:
+            apply_feature_recipe_operation(probe_root, spec, preview)
+        elif type(spec) is MetadataMutationSpecV1:
+            apply_metadata_mutation(probe_root, spec, preview)
+        else:
+            raise TypeError("unsupported data-operation preflight spec")
 
 
 def _data_operation_transaction(func):
     @wraps(func)
     def wrapped(project_root, spec, preview, *args, **kwargs):
-        run_root = Path(project_root).expanduser().resolve() / "runs" / spec.source_run_id
-        fingerprint = getattr(preview, "fingerprint", None)
-        if not isinstance(fingerprint, str) or not fingerprint:
+        prefix = _data_operation_prefix(spec, preview, execution_key_value=kwargs.get("execution_key_value"))
+        if prefix is None:
             return func(project_root, spec, preview, *args, **kwargs)
-        class_name = type(spec).__name__
-        execution_override = kwargs.get("execution_key_value")
-        suffix = (
-            execution_override.removeprefix("exec_")
-            if isinstance(execution_override, str) and execution_override
-            else fingerprint[:32]
-        )
-        if class_name == "DataTransformSpecV1":
-            operation_prefix = Path("derived") / "data_operations" / spec.operation / suffix
-        elif class_name == "DataColumnCastSpecV1":
-            operation_prefix = Path("derived") / "data_column_cast" / suffix
-        elif class_name == "DataColumnsCastSpecV1":
-            operation_prefix = Path("derived") / "data_columns_cast" / suffix
-        elif class_name == "FeatureRecipeOperationSpecV1":
-            operation_prefix = Path("derived") / "feature_recipe" / suffix
-        elif class_name == "MetadataMutationSpecV1":
-            operation_prefix = Path("derived") / "data_operations" / "metadata_update" / suffix
-        else:
-            return func(project_root, spec, preview, *args, **kwargs)
-        with _DataOperationTransaction(run_root, operation_prefix):
+        run_root = Path(project_root).expanduser().resolve() / "runs" / prefix[0]
+        with _DataOperationTransaction(run_root, prefix[1]):
             return func(project_root, spec, preview, *args, **kwargs)
 
     return wrapped
@@ -1520,6 +1594,7 @@ def apply_data_transform(
         run_id=spec.source_run_id,
         child_node_id=child_node_id,
         artifact_id=artifact_id,
+        metadata_artifact_path=metadata_rel,
         source_run_id=spec.source_run_id,
         source_node_id=spec.source_node_id,
         source_artifact_id=spec.source_artifact_id,
@@ -1629,6 +1704,7 @@ def apply_data_transform(
         source_node_id=spec.source_node_id,
         source_artifact_id=spec.source_artifact_id,
         source_sha256=str(left_artifact.get("sha256") or sha256_file(left_path)),
+        output_sha256=sha256_file(artifact_path),
         operation_id=f"data.{spec.operation}",
         preview_fingerprint=fresh.fingerprint,
         registry=metadata_registry,
@@ -1746,6 +1822,7 @@ def _preflight_split_groups(
             run_id=spec.source_run_id,
             child_node_id=child_node_id,
             artifact_id=artifact_id,
+            metadata_artifact_path=metadata_rel,
             source_run_id=spec.source_run_id,
             source_node_id=spec.source_node_id,
             source_artifact_id=source_artifact_id,
@@ -1880,6 +1957,7 @@ def _materialize_split_groups(
             run_id=spec.source_run_id,
             child_node_id=child_node_id,
             artifact_id=artifact_id,
+            metadata_artifact_path=metadata_rel,
             source_run_id=spec.source_run_id,
             source_node_id=spec.source_node_id,
             source_artifact_id=source_artifact_id,
@@ -1906,6 +1984,7 @@ def _materialize_split_groups(
             source_node_id=spec.source_node_id,
             source_artifact_id=source_artifact_id,
             source_sha256=preview.source_sha256,
+            output_sha256=sha256_file(artifact_path),
             operation_id="data.split",
             preview_fingerprint=preview.fingerprint,
             registry=metadata_registry,
@@ -2195,6 +2274,13 @@ def apply_metadata_mutation(
             spec.source_artifact_id,
         ),
     )
+    metadata_registry = _metadata_registry_for_source(
+        run_root, source_node, spec.source_artifact_id
+    )
+    if metadata_registry is None:
+        raise DataMetadataUnavailableError(
+            "metadata mutation requires a confirmed server-owned metadata registry"
+        )
     execution = execution_key_value or f"exec_{fresh.fingerprint[:32]}"
     suffix = execution.removeprefix("exec_")
     record_id = f"metadata_update:{spec.source_run_id}:{suffix}"
@@ -2203,6 +2289,21 @@ def apply_metadata_mutation(
     metadata_rel = (relative_dir / "metadata.json").as_posix()
     record_rel = (relative_dir / "operation.json").as_posix()
     metadata_path = run_root / metadata_rel
+    metadata_artifact_digest = hashlib.sha256(
+        json.dumps(
+            {"schema_revision": fresh.schema_revision, "metadata": fresh.canonical_metadata},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    metadata_index_entry = {
+        "artifact_id": metadata_artifact_id,
+        "path": metadata_rel,
+        "artifact_type": "metadata",
+        "step": "data.metadata.update",
+        "inputs": [spec.source_artifact_id],
+    }
     record_path = run_root / record_rel
     child_node_id = f"metadata-update:{suffix}"
     source_sha = str(source_artifact.get("sha256") or "")
@@ -2224,6 +2325,25 @@ def apply_metadata_mutation(
         "metadata_revision": fresh.metadata_revision,
         "metadata_fingerprint": fresh.metadata_fingerprint,
         "metadata": fresh.canonical_metadata,
+        "schema_artifact": {
+            "artifact_id": metadata_registry.schema_artifact_id,
+            "sha256": metadata_registry.schema_artifact_sha256,
+        },
+        "metadata_artifact": {
+            "artifact_id": metadata_artifact_id,
+            "path": metadata_rel,
+            "sha256": metadata_artifact_digest,
+        },
+        "metadata_index": {
+            "entry_sha256": hashlib.sha256(
+                json.dumps(
+                    metadata_index_entry,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+        },
         "child_node_id": child_node_id,
         "provenance": {
             "operation_id": spec.operation_id,
@@ -2564,6 +2684,7 @@ def apply_feature_recipe_operation(
         run_id=spec.source_run_id,
         child_node_id=child_node_id,
         artifact_id=artifact_id,
+        metadata_artifact_path=metadata_rel,
         source_run_id=spec.source_run_id,
         source_node_id=spec.source_node_id,
         source_artifact_id=spec.source_artifact_id,
@@ -2596,6 +2717,7 @@ def apply_feature_recipe_operation(
         source_node_id=spec.source_node_id,
         source_artifact_id=spec.source_artifact_id,
         source_sha256=str(source_artifact.get("sha256") or sha256_file(source_path)),
+        output_sha256=sha256_file(artifact_path),
         operation_id="data.feature_recipe",
         preview_fingerprint=fresh.fingerprint,
         registry=metadata_registry,
@@ -2874,6 +2996,7 @@ def apply_data_column_cast(
         run_id=spec.source_run_id,
         child_node_id=child_node_id,
         artifact_id=artifact_id,
+        metadata_artifact_path=metadata_rel,
         source_run_id=spec.source_run_id,
         source_node_id=spec.source_node_id,
         source_artifact_id=spec.source_artifact_id,
@@ -2916,6 +3039,7 @@ def apply_data_column_cast(
         source_node_id=spec.source_node_id,
         source_artifact_id=spec.source_artifact_id,
         source_sha256=str(source_artifact.get("sha256") or sha256_file(source_path)),
+        output_sha256=sha256_file(artifact_path),
         operation_id=spec.operation_id,
         preview_fingerprint=fresh.fingerprint,
         registry=metadata_registry,
@@ -3300,6 +3424,7 @@ def apply_data_columns_cast(
         run_id=spec.source_run_id,
         child_node_id=child_node_id,
         artifact_id=artifact_id,
+        metadata_artifact_path=metadata_rel,
         source_run_id=spec.source_run_id,
         source_node_id=spec.source_node_id,
         source_artifact_id=spec.source_artifact_id,
@@ -3343,6 +3468,7 @@ def apply_data_columns_cast(
         source_node_id=spec.source_node_id,
         source_artifact_id=spec.source_artifact_id,
         source_sha256=str(source_artifact.get("sha256") or sha256_file(source_path)),
+        output_sha256=sha256_file(artifact_path),
         operation_id=spec.operation_id,
         preview_fingerprint=fresh.fingerprint,
         registry=metadata_registry,
@@ -3588,6 +3714,10 @@ def _metadata_registry_for_source(
         for item in records
         if isinstance(item, Mapping) and isinstance(item.get("artifact_id"), str)
     }
+    source_record = by_id.get(source_artifact_id)
+    if not isinstance(source_record, Mapping) or not isinstance(source_record.get("sha256"), str):
+        raise DataMetadataUnavailableError("source artifact provenance is not server-owned")
+    source_content_sha256 = str(source_record["sha256"])
     candidate_ids: list[str] = []
     annotated_id = _node_annotation_value(node, "metadata_artifact_id")
     if isinstance(annotated_id, str) and annotated_id:
@@ -3631,6 +3761,59 @@ def _metadata_registry_for_source(
                 raise ValueError("metadata artifact must be an object")
             if payload.get("payload_schema") != "workbench.data-metadata":
                 continue
+            metadata_artifact = payload.get("metadata_artifact")
+            schema_artifact = payload.get("schema_artifact")
+            metadata_index = payload.get("metadata_index")
+            if not isinstance(metadata_artifact, Mapping) or not isinstance(metadata_index, Mapping):
+                raise MetadataProvenanceError(
+                    "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                    "metadata artifact and index provenance are required",
+                )
+            if (
+                metadata_artifact.get("artifact_id") != artifact.get("artifact_id")
+                or metadata_artifact.get("path") != artifact.get("path")
+                or metadata_artifact.get("sha256") is None
+            ):
+                raise MetadataProvenanceError(
+                    "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                    "metadata payload does not bind the selected artifact index row",
+                )
+            index_entry = {
+                key: artifact.get(key)
+                for key in ("artifact_id", "path", "artifact_type", "step", "inputs")
+            }
+            expected_entry_sha256 = hashlib.sha256(
+                json.dumps(index_entry, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            if metadata_index.get("entry_sha256") != expected_entry_sha256:
+                raise MetadataProvenanceError(
+                    "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                    "metadata payload does not bind the selected artifact index entry",
+                )
+            if not isinstance(schema_artifact, Mapping):
+                raise MetadataProvenanceError(
+                    "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                    "metadata payload has no schema artifact provenance",
+                )
+            schema_artifact_id = schema_artifact.get("artifact_id")
+            schema_artifact_sha256 = schema_artifact.get("sha256")
+            schema_row = by_id.get(schema_artifact_id)
+            if isinstance(schema_row, Mapping):
+                if schema_row.get("sha256") != schema_artifact_sha256:
+                    raise MetadataProvenanceError(
+                        "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                        "schema artifact digest does not match its server-owned index row",
+                    )
+            elif not (
+                isinstance(schema_artifact_id, str)
+                and schema_artifact_id.startswith("schema:")
+                and isinstance(schema_artifact_sha256, str)
+                and schema_artifact_sha256 == schema_artifact_id.removeprefix("schema:")
+            ):
+                raise MetadataProvenanceError(
+                    "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                    "schema artifact is not server-owned or registered",
+                )
             payload_source = payload.get("source")
             if isinstance(payload_source, Mapping) and (
                 payload_source.get("run_id") != run_root.name
@@ -3647,6 +3830,13 @@ def _metadata_registry_for_source(
                 source_run_id=run_root.name,
                 source_node_id=str(getattr(node, "id", "")),
                 source_artifact_id=source_artifact_id,
+                source_content_sha256=source_content_sha256,
+                schema_artifact_id=str(schema_artifact_id),
+                schema_artifact_sha256=str(schema_artifact_sha256),
+                metadata_artifact_id=str(artifact.get("artifact_id")),
+                metadata_artifact_path=str(artifact.get("path")),
+                metadata_artifact_sha256=str(metadata_artifact.get("sha256")),
+                metadata_index_sha256=expected_entry_sha256,
             )
         except MetadataProvenanceError:
             # Derived transforms always retain a provenance sidecar, even
@@ -3781,15 +3971,27 @@ def _metadata_sidecar_payload(
     run_id: str,
     child_node_id: str,
     artifact_id: str,
+    metadata_artifact_path: str,
     source_run_id: str,
     source_node_id: str,
     source_artifact_id: str,
     source_sha256: str,
     operation_id: str,
     preview_fingerprint: str,
+    output_sha256: str | None = None,
     column_aliases: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     schema_revision = _schema_revision_for_frame(output_frame)
+    schema_artifact_id = schema_revision
+    schema_artifact_sha256 = schema_revision.removeprefix("schema:")
+    metadata_artifact_digest = hashlib.sha256(
+        json.dumps(
+            {"schema_revision": schema_revision, "metadata": metadata},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     metadata_loss: list[dict[str, str]] = []
     if registry is not None:
         source_metadata = registry.metadata
@@ -3834,8 +4036,34 @@ def _metadata_sidecar_payload(
             "run_id": run_id,
             "node_id": child_node_id,
             "artifact_id": artifact_id,
+            "sha256": output_sha256 or source_sha256,
         },
         "metadata": dict(metadata),
+        "schema_artifact": {
+            "artifact_id": schema_artifact_id,
+            "sha256": schema_artifact_sha256,
+        },
+        "metadata_artifact": {
+            "artifact_id": f"{artifact_id}_metadata",
+            "path": metadata_artifact_path,
+            "sha256": metadata_artifact_digest,
+        },
+        "metadata_index": {
+            "entry_sha256": hashlib.sha256(
+                json.dumps(
+                    {
+                        "artifact_id": f"{artifact_id}_metadata",
+                        "path": metadata_artifact_path,
+                        "artifact_type": "metadata",
+                        "step": operation_id,
+                        "inputs": [source_artifact_id, artifact_id],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+        },
         "metadata_loss": metadata_loss,
         "provenance": {
             "source_run_id": source_run_id,
@@ -3862,6 +4090,7 @@ def _write_metadata_sidecar(
     source_node_id: str,
     source_artifact_id: str,
     source_sha256: str,
+    output_sha256: str,
     operation_id: str,
     preview_fingerprint: str,
     registry: MetadataRegistryV1 | None,
@@ -3878,10 +4107,12 @@ def _write_metadata_sidecar(
         run_id=source_run_id,
         child_node_id=child_node_id,
         artifact_id=artifact_id,
+        metadata_artifact_path=metadata_rel,
         source_run_id=source_run_id,
         source_node_id=source_node_id,
         source_artifact_id=source_artifact_id,
         source_sha256=source_sha256,
+        output_sha256=output_sha256,
         operation_id=operation_id,
         preview_fingerprint=preview_fingerprint,
         column_aliases=column_aliases,

@@ -7,6 +7,7 @@ import json
 import math
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
+import re
 
 import pandas as pd
 
@@ -22,6 +23,11 @@ UNKNOWN_METADATA = "unknown"
 MetadataScalar: TypeAlias = str | int | float | bool | None
 MAX_USER_MISSING_VALUES = 64
 MAX_DECLARED_COLUMNS = 500
+MAX_VALUE_LABELS = 256
+MAX_METADATA_STRING_LENGTH = 256
+MAX_METADATA_TOTAL_BYTES = 64 * 1024
+MAX_METADATA_PROVENANCE_BYTES = 8 * 1024
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class MetadataProvenanceError(ValueError):
@@ -62,7 +68,23 @@ def _metadata_text(value: object, field_name: str) -> str:
             "METADATA_DECLARATION_INVALID",
             f"{field_name} must be a non-empty string",
         )
+    if len(value) > MAX_METADATA_STRING_LENGTH:
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_BOUNDS",
+            f"{field_name} exceeds {MAX_METADATA_STRING_LENGTH} characters",
+        )
     return value
+
+
+def _enforce_metadata_total_bytes(value: Mapping[str, object], field_name: str) -> None:
+    encoded_size = len(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+    if encoded_size > MAX_METADATA_TOTAL_BYTES:
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_BOUNDS",
+            f"{field_name} exceeds {MAX_METADATA_TOTAL_BYTES} bytes",
+        )
 
 
 def _metadata_mapping(value: object, field_name: str) -> Mapping[str, object]:
@@ -81,10 +103,26 @@ def _metadata_mapping(value: object, field_name: str) -> Mapping[str, object]:
 
 def _normalize_value_labels(value: object) -> dict[str, str]:
     raw = _metadata_mapping(value, "value_labels")
+    if len(raw) > MAX_VALUE_LABELS:
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_BOUNDS",
+            f"value_labels exceeds {MAX_VALUE_LABELS} entries",
+        )
     normalized: dict[str, str] = {}
     for raw_value, label in raw.items():
-        normalized[_metadata_text(raw_value, "value_labels key")] = _metadata_text(
-            label, "value_labels label"
+        key = _metadata_text(raw_value, "value_labels key")
+        text = _metadata_text(label, "value_labels label")
+        if len(key) > MAX_METADATA_STRING_LENGTH or len(text) > MAX_METADATA_STRING_LENGTH:
+            raise MetadataProvenanceError(
+                "METADATA_DECLARATION_BOUNDS",
+                f"value_labels keys and labels are limited to {MAX_METADATA_STRING_LENGTH} characters",
+            )
+        normalized[key] = text
+    encoded_size = len(json.dumps(normalized, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    if encoded_size > MAX_METADATA_PROVENANCE_BYTES:
+        raise MetadataProvenanceError(
+            "METADATA_DECLARATION_BOUNDS",
+            "value_labels exceeds the bounded metadata byte budget",
         )
     return normalized
 
@@ -316,6 +354,13 @@ class MetadataRegistryV1:
     schema_revision: str
     metadata_revision: str
     metadata: Mapping[str, object]
+    source_content_sha256: str
+    schema_artifact_id: str
+    schema_artifact_sha256: str
+    metadata_artifact_id: str
+    metadata_artifact_path: str
+    metadata_artifact_sha256: str
+    metadata_index_entry_sha256: str
     confirmed: bool = True
 
     def __post_init__(self) -> None:
@@ -325,8 +370,30 @@ class MetadataRegistryV1:
             "source_artifact_id",
             "schema_revision",
             "metadata_revision",
+            "source_content_sha256",
+            "schema_artifact_id",
+            "schema_artifact_sha256",
+            "metadata_artifact_id",
+            "metadata_artifact_path",
+            "metadata_artifact_sha256",
+            "metadata_index_entry_sha256",
         ):
             _metadata_text(getattr(self, field_name), field_name)
+        for field_name in (
+            "source_content_sha256",
+            "schema_artifact_sha256",
+            "metadata_artifact_sha256",
+            "metadata_index_entry_sha256",
+        ):
+            if _SHA256_RE.fullmatch(getattr(self, field_name)) is None:
+                raise MetadataProvenanceError(
+                    "METADATA_PROVENANCE_INVALID",
+                    f"{field_name} must be a lowercase SHA-256 digest",
+                )
+        if len(self.metadata_artifact_path) > MAX_METADATA_STRING_LENGTH:
+            raise MetadataProvenanceError(
+                "METADATA_PROVENANCE_INVALID", "metadata artifact path exceeds the server bound"
+            )
         if self.schema_revision == "v1" or self.metadata_revision == "v1":
             raise MetadataProvenanceError(
                 "METADATA_REVISION_UNAVAILABLE",
@@ -341,6 +408,13 @@ class MetadataRegistryV1:
             raise MetadataProvenanceError(
                 "METADATA_DECLARATION_INVALID", "metadata registry metadata must be an object"
             )
+        metadata_bytes = len(
+            json.dumps(self.metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        )
+        if metadata_bytes > MAX_METADATA_TOTAL_BYTES:
+            raise MetadataProvenanceError(
+                "METADATA_DECLARATION_BOUNDS", "metadata registry exceeds the server byte bound"
+            )
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     @classmethod
@@ -351,6 +425,13 @@ class MetadataRegistryV1:
         source_run_id: str,
         source_node_id: str,
         source_artifact_id: str,
+        source_content_sha256: str,
+        schema_artifact_id: str,
+        schema_artifact_sha256: str,
+        metadata_artifact_id: str,
+        metadata_artifact_path: str,
+        metadata_artifact_sha256: str,
+        metadata_index_sha256: str,
     ) -> "MetadataRegistryV1":
         if payload.get("payload_schema") != "workbench.data-metadata":
             raise MetadataProvenanceError(
@@ -369,6 +450,7 @@ class MetadataRegistryV1:
             "run_id": source_run_id,
             "node_id": source_node_id,
             "artifact_id": source_artifact_id,
+            "sha256": source_content_sha256,
         }
         for key, expected in expected_source.items():
             if source.get(key) != expected:
@@ -380,6 +462,35 @@ class MetadataRegistryV1:
         if not isinstance(metadata, Mapping):
             raise MetadataProvenanceError(
                 "METADATA_REGISTRY_INVALID", "metadata artifact metadata is missing"
+            )
+        schema_artifact = payload.get("schema_artifact")
+        if not isinstance(schema_artifact, Mapping) or {
+            "artifact_id": schema_artifact.get("artifact_id") if isinstance(schema_artifact, Mapping) else None,
+            "sha256": schema_artifact.get("sha256") if isinstance(schema_artifact, Mapping) else None,
+        } != {"artifact_id": schema_artifact_id, "sha256": schema_artifact_sha256}:
+            raise MetadataProvenanceError(
+                "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                "metadata schema artifact provenance does not match the server-owned schema artifact",
+            )
+        metadata_artifact = payload.get("metadata_artifact")
+        if not isinstance(metadata_artifact, Mapping) or {
+            "artifact_id": metadata_artifact.get("artifact_id") if isinstance(metadata_artifact, Mapping) else None,
+            "path": metadata_artifact.get("path") if isinstance(metadata_artifact, Mapping) else None,
+            "sha256": metadata_artifact.get("sha256") if isinstance(metadata_artifact, Mapping) else None,
+        } != {
+            "artifact_id": metadata_artifact_id,
+            "path": metadata_artifact_path,
+            "sha256": metadata_artifact_sha256,
+        }:
+            raise MetadataProvenanceError(
+                "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                "metadata artifact provenance does not match the server-owned artifact index",
+            )
+        metadata_index = payload.get("metadata_index")
+        if not isinstance(metadata_index, Mapping) or metadata_index.get("entry_sha256") != metadata_index_sha256:
+            raise MetadataProvenanceError(
+                "METADATA_REGISTRY_PROVENANCE_MISMATCH",
+                "metadata index provenance does not match the server-owned index entry",
             )
         schema_revision = payload.get("schema_revision")
         metadata_revision = payload.get("metadata_revision")
@@ -401,6 +512,13 @@ class MetadataRegistryV1:
             schema_revision=normalized_schema_revision,
             metadata_revision=normalized_metadata_revision,
             metadata=metadata,
+            source_content_sha256=source_content_sha256,
+            schema_artifact_id=schema_artifact_id,
+            schema_artifact_sha256=schema_artifact_sha256,
+            metadata_artifact_id=metadata_artifact_id,
+            metadata_artifact_path=metadata_artifact_path,
+            metadata_artifact_sha256=metadata_artifact_sha256,
+            metadata_index_entry_sha256=metadata_index_sha256,
             confirmed=payload.get("confirmed") is True,
         )
 
@@ -450,6 +568,17 @@ class MetadataRegistryV1:
             "confirmed": True,
             "schema_revision": self.schema_revision,
             "metadata_revision": self.metadata_revision,
+            "source_content_sha256": self.source_content_sha256,
+            "schema_artifact": {
+                "artifact_id": self.schema_artifact_id,
+                "sha256": self.schema_artifact_sha256,
+            },
+            "metadata_artifact": {
+                "artifact_id": self.metadata_artifact_id,
+                "path": self.metadata_artifact_path,
+                "sha256": self.metadata_artifact_sha256,
+            },
+            "metadata_index": {"entry_sha256": self.metadata_index_entry_sha256},
             "source": {
                 "run_id": self.source_run_id,
                 "node_id": self.source_node_id,
@@ -522,6 +651,7 @@ def normalize_metadata_mutation_payload(
     }
     payload: dict[str, object] = {"columns": column_payload}
     payload.update(dict(normalized.get("__dataset__", {})))
+    _enforce_metadata_total_bytes(payload, "metadata")
     return payload
 
 
@@ -746,6 +876,7 @@ def normalize_declared_metadata(
         }
         if dataset_declarations:
             result["__dataset__"] = dataset_declarations
+        _enforce_metadata_total_bytes(result, "declared_metadata")
         return result
 
     normalized = {}
@@ -758,6 +889,7 @@ def normalize_declared_metadata(
         normalized[column] = _normalize_column_declaration(declaration, column)
     if dataset_declarations:
         normalized["__dataset__"] = dataset_declarations
+    _enforce_metadata_total_bytes(normalized, "declared_metadata")
     return normalized
 
 

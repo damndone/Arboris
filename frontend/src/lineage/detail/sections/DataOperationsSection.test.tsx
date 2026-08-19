@@ -18,6 +18,61 @@ const SOURCE_IDENTITY = {
   source_artifact_id: "artifact-1",
 };
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+async function requestDigest(request: Record<string, unknown>): Promise<string> {
+  const bytes = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(request)),
+  );
+  return Array.from(new Uint8Array(bytes), (item) => item.toString(16).padStart(2, "0")).join("");
+}
+
+function rawTransport(value: unknown) {
+  return { __rawTransport: value };
+}
+
+async function testResponse(
+  value: unknown,
+  request: Record<string, unknown>,
+  phase: "preview" | "confirm",
+): Promise<Response> {
+  if (value instanceof Response) return value;
+  if (typeof value === "object" && value !== null && "__rawTransport" in value) {
+    return (value as { __rawTransport: Response }).__rawTransport;
+  }
+  let body: Record<string, unknown>;
+  let status = 200;
+  if (typeof value === "object" && value !== null && typeof (value as { json?: unknown }).json === "function") {
+    const responseLike = value as { json: () => Promise<unknown>; status?: number };
+    body = (await responseLike.json()) as Record<string, unknown>;
+    status = responseLike.status ?? 200;
+  } else {
+    body = value as Record<string, unknown>;
+  }
+  const preview = body.preview;
+  if (phase === "preview" && typeof preview === "object" && preview !== null) {
+    body.preview = { ...(preview as Record<string, unknown>), request_sha256: await requestDigest(request) };
+  }
+  if (phase === "confirm" && typeof preview === "object" && preview !== null) {
+    const { preview_fingerprint: _previewFingerprint, ...requestWithoutFingerprint } = request;
+    body.preview = {
+      ...(preview as Record<string, unknown>),
+      request_sha256: await requestDigest(requestWithoutFingerprint),
+    };
+  }
+  return new Response(JSON.stringify(body), { status });
+}
+
 function completedResponse(overrides: Record<string, unknown> = {}) {
   return {
     ok: true,
@@ -56,6 +111,12 @@ function completedResponse(overrides: Record<string, unknown> = {}) {
           ports: {
             derived: { execution_key: "exec-1", artifact_id: "artifact-2", child_node_id: "child-1" },
             operation_record: { record_id: "record-1" },
+            evidence: {
+              record_id: "record-1",
+              operation_id: "data.example",
+              execution_key: "exec-1",
+              child_node_id: "child-1",
+            },
           },
           consumer_slots: {
             "data.agent": { record_id: "record-1", port: "derived" },
@@ -161,8 +222,10 @@ function sectionProps(manifestValue: unknown = manifest()) {
     ...SOURCE_IDENTITY,
     projectRoot: "/tmp/project",
     manifest: manifestValue,
-    preview: previewMock,
-    confirm: confirmMock,
+    preview: async (...args: Parameters<typeof previewMock>) =>
+      testResponse(await previewMock(...args), args[2] as Record<string, unknown>, "preview"),
+    confirm: async (...args: Parameters<typeof confirmMock>) =>
+      testResponse(await confirmMock(...args), args[2] as Record<string, unknown>, "confirm"),
   };
 }
 
@@ -329,9 +392,51 @@ describe("DataOperationsSection", () => {
         preview_fingerprint: "preview-fp-default",
       },
     );
-    expect(screen.getByTestId("data-operation-complete")).toHaveTextContent(
+    expect(await screen.findByTestId("data-operation-complete")).toHaveTextContent(
       "completed",
     );
+  });
+
+  it("rejects a plain preview object instead of treating it as server transport", async () => {
+    previewMock.mockResolvedValue(rawTransport({
+      preview: { status: "ready", fingerprint: "preview-fp-default" },
+    }));
+
+    render(<DataOperationsSection {...sectionProps()} />);
+    fireEvent.change(screen.getByLabelText("Data operation"), {
+      target: { value: "data.example" },
+    });
+    fireEvent.change(screen.getByLabelText("label"), {
+      target: { value: "plain-preview" },
+    });
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+
+    await waitFor(() => expect(screen.getByTestId("data-operation-error")).toHaveTextContent("PREVIEW_INVALID"));
+    expect(screen.queryByTestId("data-operation-confirm")).toBeNull();
+  });
+
+  it("rejects a forged Response-like confirmation transport", async () => {
+    const valid = completedResponse();
+    confirmMock.mockResolvedValue(rawTransport({
+      ok: true,
+      status: 200,
+      json: valid.json,
+    }));
+    previewMock.mockResolvedValue({
+      preview: { status: "ready", fingerprint: "preview-fp-default" },
+    });
+
+    render(<DataOperationsSection {...sectionProps()} />);
+    fireEvent.change(screen.getByLabelText("Data operation"), {
+      target: { value: "data.example" },
+    });
+    fireEvent.change(screen.getByLabelText("label"), {
+      target: { value: "forged-response" },
+    });
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+    await screen.findByTestId("data-operation-preview-ready");
+    fireEvent.click(screen.getByTestId("data-operation-confirm"));
+    await waitFor(() => expect(screen.getByTestId("data-operation-error")).toHaveTextContent("CONFIRM_INVALID"));
   });
 
   it("does not show completed for a typed non-success confirmation", async () => {
@@ -396,11 +501,11 @@ describe("DataOperationsSection", () => {
   });
 
   it("does not treat a plain object completion as a verified HTTP success", async () => {
-    confirmMock.mockResolvedValue({
+    confirmMock.mockResolvedValue(rawTransport({
       status: "completed",
       effect: { execution_key: "exec-1", child_node_id: "child-1", artifact_id: "artifact-2" },
       operation: { record_id: "record-1", operation_id: "data.example", status: "completed" },
-    });
+    }));
     previewMock.mockResolvedValue({ preview: { status: "ready", fingerprint: "preview-fp-default" } });
 
     render(<DataOperationsSection {...sectionProps()} />);
@@ -412,7 +517,7 @@ describe("DataOperationsSection", () => {
 
     await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId("data-operation-complete")).toBeNull();
-    expect(screen.getByTestId("data-operation-error")).toHaveTextContent("CONFIRM_INVALID");
+    expect(await screen.findByTestId("data-operation-error")).toHaveTextContent("CONFIRM_INVALID");
   });
 
   it("does not complete when the response preview or source identity is stale", async () => {
@@ -438,7 +543,7 @@ describe("DataOperationsSection", () => {
 
     await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId("data-operation-complete")).toBeNull();
-    expect(screen.getByTestId("data-operation-error")).toHaveTextContent("CONFIRM_INVALID");
+    expect(await screen.findByTestId("data-operation-error")).toHaveTextContent("CONFIRM_INVALID");
   });
 
   it("requires typed effect and operation identity before showing completed", async () => {

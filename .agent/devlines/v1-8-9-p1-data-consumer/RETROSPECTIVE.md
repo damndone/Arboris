@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 16/30 (53.3%; 53.3 per 100 events)
-- Repeat rate: 1/16 (6.2%)
-- Recurrence rate: 1/15 (6.7%)
-- MTTR: median=0 ms (sample=13; unresolved=3)
+- Failure frequency: 18/34 (52.9%; 52.9 per 100 events)
+- Repeat rate: 1/18 (5.6%)
+- Recurrence rate: 1/17 (5.9%)
+- MTTR: median=0 ms (sample=14; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/12 (0.0%)
+- Gate waste rate: 0/14 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -28,6 +28,8 @@ COMPLETED
 - #4 2026-08-19T17:07:39.000Z `unavailable_editor_projection_missing_reason`; cause_status: `known`; cause: The first frontend implementation rendered descriptor-level availability through the top-level unavailable shape and omitted reason_code/message; the focused UI test caught the typed boundary losing its reason before the selector was removed.; resolution: `resolved`; lesson: Keep descriptor-level and manifest-level unavailable projections explicitly typed at the renderer boundary.
 - #15 2026-08-19T15:00:00.000Z `reviewer_adversarial_red`; cause_status: `known`; cause: Reviewer-directed adversarial RED probes reproduced incomplete split/group metadata binding, partial rename confirmation writes, route reachability independent of the live manifest, permissive runtime adapter trust boundaries, and frontend completion on unverified confirmation responses.; resolution: `open`; lesson: Run adversarial probes at artifact, trust-boundary, live-manifest, and browser-response seams before accepting a green focused suite.
 - #27 2026-08-19T19:52:00.000Z `reviewer_adversarial_red_round3`; cause_status: `known`; cause: The third-round reviewer-directed RED probes reproduced the requested trust, authority, atomicity, live-manifest, runtime-adapter, and frontend completion gaps at the current tip before any production-path edit.; resolution: `open`; lesson: Adversarial tests must cross the server-owned artifact, live descriptor, transaction, typed adapter, and browser response boundaries before a focused green suite can establish compliance.
+- #31 2026-08-19T20:20:00.000Z `reviewer_adversarial_red_round4`; cause_status: `known`; cause: Six reviewer-directed RED probe groups reproduced the remaining metadata authority/provenance, proposal and OperationRecord atomicity, server-owned evidence/adapter capability, frontend transport and request binding, metadata-loss live-manifest, and metadata bounds blockers at the current tip before production-path remediation.; resolution: `open`; lesson: Keep the six adversarial boundaries red until server-owned provenance, transaction rollback, capability factories, real transport, live manifest authority, and reload bounds are each proven green.
+- #33 2026-08-19T21:05:00.000Z `complete_preflight_error_boundary_regression`; cause_status: `known`; cause: The new clone-based complete preflight correctly rejected occupied deterministic paths before writes, but three route handlers did not yet map those preflight exceptions into the public typed HTTP error boundary.; resolution: `resolved`; lesson: Complete write-free preflight must run before proposal and OperationRecord creation and must share the route's typed stale/conflict error mapping.
 
 ## All errors
 
@@ -55,6 +57,7 @@ COMPLETED
 - `data-consumer-adversarial-red`: occurrences=1; cause_status: `known`; root cause: Reviewer-directed adversarial RED probes reproduced incomplete split/group metadata binding, partial rename confirmation writes, route reachability independent of the live manifest, permissive runtime adapter trust boundaries, and frontend completion on unverified confirmation responses.; solution: `open`
 - `data-consumer-contract-first`: occurrences=1; cause_status: `known`; root cause: New data-consumer contract tests were run at the frozen baseline before implementation and correctly failed for typed metadata mutation, user-defined missing filters, sort/split/batch recode, interchange, manifest reachability, and unavailable UI rendering.; solution: `accepted`
 - `data-consumer-manifest-live-surface`: occurrences=1; cause_status: `known`; root cause: The manifest implementation now includes the authorized local metadata/sort/split/recode descriptors, so the frozen legacy EXPECTED_OPERATION_IDS assertion and builtin provider digest fixture fail until the allowlisted tests and fixture are updated.; solution: `open`
+- `data-consumer-reviewer-blockers-round4`: occurrences=1; cause_status: `known`; root cause: Six reviewer-directed RED probe groups reproduced the remaining metadata authority/provenance, proposal and OperationRecord atomicity, server-owned evidence/adapter capability, frontend transport and request binding, metadata-loss live-manifest, and metadata bounds blockers at the current tip before production-path remediation.; solution: `open`
 - `data-consumer-server-artifact-probes`: occurrences=1; cause_status: `known`; root cause: Independent specification probes found that metadata revisions, confirmed missing-value provenance, split children, weight consumption, transform sidecars, runtime adapter joins, and catalog surface evidence were incomplete in the prior tip.; solution: `open`
 - `data-consumer-third-round-adversarial-red`: occurrences=1; cause_status: `known`; root cause: The third-round reviewer-directed RED probes reproduced the requested trust, authority, atomicity, live-manifest, runtime-adapter, and frontend completion gaps at the current tip before any production-path edit.; solution: `open`
 - `exception-edit-import-check`: occurrences=1; cause_status: `known`; root cause: The first patch for the unconfirmed metadata sidecar branch mis-indented an except clause and Python rejected the module during test collection.; solution: `resolved`
@@ -65,6 +68,7 @@ COMPLETED
 - `formal-retrospective-refresh-order`: occurrences=1; cause_status: `known`; root cause: After appending the final handoff whitespace event, verify was invoked before the required retrospective regeneration and correctly rejected the stale RETROSPECTIVE.md.; solution: `resolved`
 - `git-metadata-sandbox-stage`: occurrences=1; cause_status: `external`; root cause: The unprivileged staging command could not create the worktree Git index lock under the protected root Git metadata directory.; solution: `resolved`
 - `host-socket-environment-boundary`: occurrences=1; cause_status: `external`; root cause: The unprivileged C0/context-egress/evidence-host run could not bind its temporary Unix authority socket; the same command was rerun in the authorized host environment.; solution: `resolved`
+- `preflight-errors-must-use-public-http-boundary`: occurrences=1; cause_status: `known`; root cause: The new clone-based complete preflight correctly rejected occupied deterministic paths before writes, but three route handlers did not yet map those preflight exceptions into the public typed HTTP error boundary.; solution: `resolved`
 - `typed-unavailable-rendering`: occurrences=1; cause_status: `known`; root cause: The first frontend implementation rendered descriptor-level availability through the top-level unavailable shape and omitted reason_code/message; the focused UI test caught the typed boundary losing its reason before the selector was removed.; solution: `resolved`
 - `unconfirmed-sidecar-chain-boundary`: occurrences=1; cause_status: `known`; root cause: The new derived metadata sidecar binding annotated children whose sidecar was explicitly confirmed=false, and the next chained transform treated that sidecar as an authoritative MetadataRegistryV1.; solution: `open`
 
@@ -77,6 +81,7 @@ COMPLETED
 - `data-consumer-adversarial-red`: line experience occurrence(s)=1
 - `data-consumer-contract-first`: line experience occurrence(s)=1
 - `data-consumer-manifest-live-surface`: line experience occurrence(s)=1
+- `data-consumer-reviewer-blockers-round4`: line experience occurrence(s)=1
 - `data-consumer-server-artifact-probes`: line experience occurrence(s)=1
 - `data-consumer-third-round-adversarial-red`: line experience occurrence(s)=1
 - `exception-edit-import-check`: line experience occurrence(s)=1
@@ -87,6 +92,7 @@ COMPLETED
 - `formal-retrospective-refresh-order`: line experience occurrence(s)=1
 - `git-metadata-sandbox-stage`: line experience occurrence(s)=1
 - `host-socket-environment-boundary`: line experience occurrence(s)=1
+- `preflight-errors-must-use-public-http-boundary`: line experience occurrence(s)=1
 - `typed-unavailable-rendering`: line experience occurrence(s)=1
 - `unconfirmed-sidecar-chain-boundary`: line experience occurrence(s)=1
 
@@ -94,9 +100,11 @@ COMPLETED
 
 - A metadata sidecar may preserve provenance without becoming a consumer registry unless its confirmed flag is true; chained transforms must distinguish those states.
 - Adversarial tests must cross the server-owned artifact, live descriptor, transaction, typed adapter, and browser response boundaries before a focused green suite can establish compliance.
+- Complete write-free preflight must run before proposal and OperationRecord creation and must share the route's typed stale/conflict error mapping.
 - Every advertised data-consumer contract needs a server-owned artifact probe and a child reload probe before the manifest is trusted.
 - Freeze typed data-consumer declarations as red assertions before implementing the runtime and UI seams.
 - Keep descriptor-level and manifest-level unavailable projections explicitly typed at the renderer boundary.
+- Keep the six adversarial boundaries red until server-owned provenance, transaction rollback, capability factories, real transport, live manifest authority, and reload bounds are each proven green.
 - Regenerate the retrospective immediately after every appended event, then run verify.
 - Run adversarial probes at artifact, trust-boundary, live-manifest, and browser-response seams before accepting a green focused suite.
 - Run cached diff-check after the final handoff formatting change, not only before staging.
@@ -140,3 +148,7 @@ COMPLETED
 - #28: `6e4f2a1c-8b7d-4c5e-9f0a-3b2d1c7e6a5f` | 2026-08-19T20:06:00.000Z | ERROR/host_socket_sandbox_boundary | incident=`7f5e3d1c-9b8a-4c6d-2e1f-34567890abce` | lesson_key=`host-socket-environment-boundary` | event_sha256=`778d72347febb8f22c8e0b4fb3ac528d9097c9162edfd2344766e3304e72d5e6`
 - #29: `9a7c5e3d-1f2b-4d6e-8c0a-5b7e9d1f3c2a` | 2026-08-19T20:08:00.000Z | GATE/data_consumer_round3_spec_compliance | incident=`ab8d6f4e-2c1a-4b7e-9d0f-6a5c3e1b8f2d` | lesson_key=`round3-final-data-consumer-gate` | event_sha256=`5f16ce98770b815e6cc2ac3906d695ddd4b8471a491dbb62938d11963c4661fe`
 - #30: `2c8e6a4d-1f0b-4c7e-9a5d-3b6f8d2e1c0a` | 2026-08-19T20:09:00.000Z | GATE/data_consumer_round3_final_rerun | incident=`3d9f7b5e-1a2c-4e6f-8b0d-5c7a9e1f3b2d` | lesson_key=`post-edit-final-rerun` | event_sha256=`edbfdf6bbe214a2bf29db9afd831f4d6d57b524172724b075f0721388fd060d7`
+- #31: `4d9b7e1c-2a83-4f60-9d5e-8b1c6a7f0e2d` | 2026-08-19T20:20:00.000Z | FAILURE/reviewer_adversarial_red_round4 | incident=`7f2c9a4e-1b6d-4e80-9a53-2c7d8e1f0b4a` | lesson_key=`data-consumer-reviewer-blockers-round4` | event_sha256=`cc47ca056b8a4b0a732d67fe00dc2aa60f3aef8a679bf63fc7f03e498b396d85`
+- #32: `6e3a9c1f-4b7d-42e8-a5c0-1f9d7b3e6a2c` | 2026-08-19T20:50:00.000Z | GATE/reviewer_adversarial_green_round4 | incident=`8b4d1f7a-2c6e-49a0-9d3f-5e1b7c8a2f4d` | lesson_key=`data-consumer-reviewer-blockers-round4-closed` | event_sha256=`082087c1dca55153eae442cd97b44ff4d747eef49f2a52dd2d5596314eedcae5`
+- #33: `7f2c9a4e-1b6d-4e80-9a53-2c7d8e1f0b4a` | 2026-08-19T21:05:00.000Z | FAILURE/complete_preflight_error_boundary_regression | incident=`9c5e2a7b-4d1f-48e6-a0c3-7b2d9f5e1a64` | lesson_key=`preflight-errors-must-use-public-http-boundary` | event_sha256=`8b7cb174d0febb8c4f5a27fba0b83029518c96d7c7219e7f9aa25b299252d042`
+- #34: `8a4d1f6c-2b7e-49f0-a5c3-7e1b9d2f6a84` | 2026-08-19T20:53:41.000Z | GATE/reviewer_adversarial_green_round4_final | incident=`8b4d1f7a-2c6e-49a0-9d3f-5e1b7c8a2f4d` | lesson_key=`data-consumer-reviewer-blockers-round4-final` | event_sha256=`158da8371ab52d622706d2287b9a9c6e69e3365758a8200233f057fa368a744b`

@@ -18,7 +18,7 @@ export type DataOperationAction = (
   projectRoot: string,
   descriptor: DataOperationDescriptor,
   request: Record<string, unknown>,
-) => unknown | PromiseLike<unknown>;
+) => Response | PromiseLike<Response>;
 
 export interface DataOperationsSectionProps {
   manifest: unknown;
@@ -89,16 +89,17 @@ function assertSourceIdentity(
   }
 }
 
-function readPreviewPayload(response: unknown): PreviewPayload | null {
-  const candidate = isObject(response) && isObject(response.preview) ? response.preview : response;
-  if (!isObject(candidate) || typeof candidate.status !== "string") return null;
+async function readPreviewPayload(response: unknown): Promise<PreviewPayload | null> {
+  if (typeof Response === "undefined" || !(response instanceof Response)) return null;
+  if (!response.ok || response.status < 200 || response.status >= 300) return null;
+  const body = await response.json();
+  const candidate = isObject(body) && isObject(body.preview) ? body.preview : null;
+  if (!candidate || typeof candidate.status !== "string") return null;
   return candidate as PreviewPayload;
 }
 
-function isResponseLike(
-  response: unknown,
-): response is { ok?: unknown; status?: unknown; json: () => Promise<unknown> } {
-  return isObject(response) && typeof response.json === "function";
+function isRealResponse(response: unknown): response is Response {
+  return typeof Response !== "undefined" && response instanceof Response;
 }
 
 async function readConfirmPayload(response: unknown): Promise<{
@@ -107,9 +108,9 @@ async function readConfirmPayload(response: unknown): Promise<{
   httpOk: boolean | null;
   isHttpResponse: boolean;
 }> {
-  if (isResponseLike(response)) {
-    const httpStatus = typeof response.status === "number" ? response.status : null;
-    const httpOk = typeof response.ok === "boolean" ? response.ok : null;
+  if (isRealResponse(response)) {
+    const httpStatus = response.status;
+    const httpOk = response.ok;
     const body = await response.json();
     return {
       payload: isObject(body) && typeof body.status === "string" ? (body as ConfirmPayload) : null,
@@ -118,18 +119,33 @@ async function readConfirmPayload(response: unknown): Promise<{
       isHttpResponse: true,
     };
   }
-  return {
-    payload: isObject(response) && typeof response.status === "string" ? (response as ConfirmPayload) : null,
-    httpStatus: null,
-    httpOk: null,
-    isHttpResponse: false,
-  };
+  return { payload: null, httpStatus: null, httpOk: null, isHttpResponse: false };
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  if (isObject(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+async function requestSha256(request: Record<string, unknown>): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(request)),
+  );
+  return Array.from(new Uint8Array(digest), (item) => item.toString(16).padStart(2, "0")).join("");
 }
 
 function confirmedPayloadError(
   payload: ConfirmPayload | null,
   operationId: string,
   previewFingerprint: string,
+  requestDigest: string,
   sourceIdentity: ResolvedSourceIdentity,
 ): string | null {
   if (!payload || payload.status !== "completed") {
@@ -140,6 +156,7 @@ function confirmedPayloadError(
     !isObject(responsePreview) ||
     responsePreview.status !== "ready" ||
     responsePreview.fingerprint !== previewFingerprint ||
+    responsePreview.request_sha256 !== requestDigest ||
     responsePreview.source_run_id !== sourceIdentity.source_run_id ||
     responsePreview.source_node_id !== sourceIdentity.source_node_id ||
     responsePreview.source_artifact_id !== sourceIdentity.source_artifact_id
@@ -214,6 +231,16 @@ function confirmedPayloadError(
     if (!isObject(value) || value.record_id !== operation.record_id) {
       return "CONFIRM_INVALID: typed consumer slot is not bound to the OperationRecord.";
     }
+  }
+  const evidence = ports && isObject(ports.evidence) ? ports.evidence : null;
+  if (
+    !evidence ||
+    evidence.record_id !== operation.record_id ||
+    evidence.operation_id !== operationId ||
+    evidence.execution_key !== effect.execution_key ||
+    evidence.child_node_id !== effect.child_node_id
+  ) {
+    return "CONFIRM_INVALID: typed evidence is not bound to the effect and record.";
   }
   return null;
 }
@@ -454,11 +481,17 @@ function ParsedDataOperationsSection({
     setError(null);
     setStatus("previewing");
     try {
+      const requestDigest = await requestSha256(request);
       const response = await preview(projectRoot, selectedOperation, request);
       if (requestRevision.current !== revision) return;
-      const payload = readPreviewPayload(response);
+      const payload = await readPreviewPayload(response);
       if (!payload) {
         setError("PREVIEW_INVALID: preview response is not a typed preview.");
+        setStatus("error");
+        return;
+      }
+      if (payload.request_sha256 !== requestDigest) {
+        setError("PREVIEW_INVALID: preview request digest is stale or mismatched.");
         setStatus("error");
         return;
       }
@@ -478,6 +511,7 @@ function ParsedDataOperationsSection({
       ...requestFor(sourceIdentity, values),
       preview_fingerprint: fingerprint,
     };
+    const requestWithoutFingerprint = requestFor(sourceIdentity, values);
     const revision = requestRevision.current;
     setError(null);
     setConfirmPayload(null);
@@ -507,6 +541,7 @@ function ParsedDataOperationsSection({
         result.payload,
         selectedOperation.operation_id,
         fingerprint,
+        await requestSha256(requestWithoutFingerprint),
         sourceIdentity,
       );
       if (invalid) {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 import importlib.util
 import json
@@ -48,6 +48,7 @@ _LOCAL_OPERATION_IDS = frozenset(
     {"data.metadata.update", "data.sort", "data.split", "data.recode", "data.rename"}
 )
 _NATIVE_INTERCHANGE_IDS = ("data.interchange.sav", "data.interchange.zsav", "data.interchange.dta")
+_METADATA_LOSS_UNAVAILABLE_ID = "data.metadata.loss"
 _IDENTITY_FIELDS = ("source_run_id", "source_node_id", "source_artifact_id")
 _SECONDARY_IDENTITY_FIELDS = (
     "secondary_run_id",
@@ -62,6 +63,18 @@ _DERIVED_IDENTITY_FIELDS = (
     "execution_key",
 )
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_SERVER_OWNED_CAPABILITY = object()
+
+
+def _registered_data_consumer_executor(
+    record: OperationRecord, outputs: object
+) -> object:
+    return outputs
+
+
+SERVER_OWNED_EXECUTOR_REGISTRY: dict[str, object] = {
+    "executor:workbench.data_consumer.adapter": _registered_data_consumer_executor,
+}
 _OPERATION_ROUTES = {
     "data.aggregate": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.append": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
@@ -710,10 +723,7 @@ def build_data_operation_manifest() -> DataOperationManifestV1:
         pyreadstat_available = importlib.util.find_spec("pyreadstat") is not None
     except (ImportError, ModuleNotFoundError, ValueError):
         pyreadstat_available = False
-    if pyreadstat_available:
-        unavailable = ()
-    else:
-        unavailable = tuple(
+    native_unavailable = () if pyreadstat_available else tuple(
             DataOperationUnavailableV1(
                 operation_id=operation_id,
                 operation_version="v1",
@@ -722,6 +732,15 @@ def build_data_operation_manifest() -> DataOperationManifestV1:
             )
             for operation_id in _NATIVE_INTERCHANGE_IDS
         )
+    unavailable = (
+        DataOperationUnavailableV1(
+            operation_id=_METADATA_LOSS_UNAVAILABLE_ID,
+            operation_version="v1",
+            reason_code="not_executable",
+            message="Metadata-loss preview is read-only and is not an executable data operation.",
+        ),
+        *native_unavailable,
+    )
     return DataOperationManifestV1(DATA_OPERATION_MANIFEST_VERSION, tuple(descriptors), unavailable)
 
 
@@ -730,6 +749,7 @@ class DataConsumerDerivedPortV1:
     """A derived port that can only be created from a server-owned effect."""
 
     effect: object
+    _capability: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         from workbench.data_operations import (
@@ -759,6 +779,12 @@ class DataConsumerDerivedPortV1:
             for field in ("artifact_id", "metadata_artifact_id")
         ):
             raise ValueError("derived port effect has no artifact identity")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("derived port can only be created by the server-owned factory")
+
+    @classmethod
+    def from_server(cls, effect: object) -> "DataConsumerDerivedPortV1":
+        return cls(effect=effect, _capability=_SERVER_OWNED_CAPABILITY)
 
     @property
     def execution_key(self) -> str:
@@ -774,13 +800,42 @@ class DataConsumerServerEvidenceV1:
 
     method: str
     payload: Mapping[str, object]
+    _capability: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if type(self.method) is not str or not self.method.strip():
             raise ValueError("server evidence method must be a non-empty string")
         if type(self.payload) is not dict:
             raise TypeError("server evidence payload must be a server-owned dict")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("server evidence can only be created by the server-owned factory")
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
+
+    @classmethod
+    def from_server(
+        cls,
+        method: str,
+        payload: Mapping[str, object],
+        *,
+        record_id: str,
+        operation_id: str,
+        execution_key: str,
+        bindings: Mapping[str, object],
+    ) -> "DataConsumerServerEvidenceV1":
+        if type(payload) is not dict:
+            raise TypeError("server evidence payload must be a server-owned dict")
+        expected = {
+            "record_id": record_id,
+            "operation_id": operation_id,
+            "execution_key": execution_key,
+            **{str(key): str(value) for key, value in bindings.items()},
+        }
+        for key, value in expected.items():
+            if key in payload and str(payload[key]) != str(value):
+                raise ValueError(f"server evidence identity mismatch for {key}")
+        materialized = dict(payload)
+        materialized.update(expected)
+        return cls(method=method, payload=materialized, _capability=_SERVER_OWNED_CAPABILITY)
 
 
 @dataclass(frozen=True)
@@ -789,12 +844,15 @@ class DataConsumerEvidencePortV1:
 
     method: str
     evidence: Mapping[str, object]
+    _capability: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if type(self.method) is not str or not self.method.strip():
             raise ValueError("evidence port method must be a non-empty string")
         if not isinstance(self.evidence, Mapping):
             raise TypeError("evidence port requires a typed evidence mapping")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("evidence port can only be created by the server-owned factory")
         object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
 
     @classmethod
@@ -803,7 +861,11 @@ class DataConsumerEvidencePortV1:
             raise TypeError("server evidence must be a typed server-owned evidence object")
         if evidence.method != method:
             raise ValueError("server evidence method does not match the requested method")
-        return cls(method=evidence.method, evidence=evidence.payload)
+        return cls(
+            method=evidence.method,
+            evidence=evidence.payload,
+            _capability=_SERVER_OWNED_CAPABILITY,
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {"method": self.method, **dict(self.evidence)}
@@ -816,6 +878,7 @@ class DataConsumerOutputPortsV1:
     operation_record: OperationRecord
     derived: DataConsumerDerivedPortV1
     evidence: DataConsumerEvidencePortV1
+    _capability: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if type(self.operation_record) is not OperationRecord:
@@ -838,6 +901,31 @@ class DataConsumerOutputPortsV1:
             str(key): str(value) for key, value in actual_bindings.items()
         } != expected_bindings:
             raise ValueError("derived effect identities do not exactly match OperationRecord bindings")
+        evidence_payload = self.evidence.to_dict()
+        for key, expected in {
+            "record_id": self.operation_record.record_id,
+            "operation_id": self.operation_record.operation_id,
+            "execution_key": self.operation_record.execution.get("execution_key"),
+            "child_node_id": self.derived.to_dict().get("child_node_id"),
+        }.items():
+            if evidence_payload.get(key) != expected:
+                raise ValueError(f"evidence identity does not match OperationRecord for {key}")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("output ports can only be created by the server-owned factory")
+
+    @classmethod
+    def from_server(
+        cls,
+        operation_record: OperationRecord,
+        derived: DataConsumerDerivedPortV1,
+        evidence: DataConsumerEvidencePortV1,
+    ) -> "DataConsumerOutputPortsV1":
+        return cls(
+            operation_record=operation_record,
+            derived=derived,
+            evidence=evidence,
+            _capability=_SERVER_OWNED_CAPABILITY,
+        )
 
     def to_dict(self, *, catalog_digest: str) -> dict[str, object]:
         record = self.operation_record
@@ -871,6 +959,7 @@ class DataConsumerRuntimeAdapterV1:
     consumer_slots: tuple[str, ...]
     output_ports: tuple[str, ...]
     operation_ids: tuple[str, ...]
+    _capability: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.provider_id != "workbench.data_consumer":
@@ -893,6 +982,8 @@ class DataConsumerRuntimeAdapterV1:
             raise ValueError("runtime adapter operation IDs are invalid")
         if len(set(self.operation_ids)) != len(self.operation_ids):
             raise ValueError("runtime adapter operation IDs are duplicated")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("runtime adapter can only be created by the server-owned factory")
 
     def adapt_operation_record(
         self,
@@ -914,6 +1005,11 @@ class DataConsumerRuntimeAdapterV1:
             )
         if outputs.derived.to_dict().get("execution_key") != record.execution.get("execution_key"):
             raise ValueError("derived output is not bound to the OperationRecord execution")
+        executor = SERVER_OWNED_EXECUTOR_REGISTRY.get(self.executor_ref)
+        if not callable(executor):
+            raise RuntimeError("server-owned data-consumer executor is not registered")
+        if executor(record, outputs) is not outputs:
+            raise RuntimeError("server-owned data-consumer executor returned an invalid output")
         return outputs
 
 
@@ -947,6 +1043,8 @@ def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
     declaration = declarations[0]
     if declaration.executor_ref != "executor:workbench.data_consumer.adapter":
         raise ValueError("live provider catalog points at an invalid data-consumer executor")
+    if not callable(SERVER_OWNED_EXECUTOR_REGISTRY.get(declaration.executor_ref)):
+        raise RuntimeError("live data-consumer executor is not registered")
     manifest = build_data_operation_manifest()
     return DataConsumerRuntimeAdapterV1(
         provider_id=provider.provider_id,
@@ -956,6 +1054,7 @@ def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
         consumer_slots=("data.agent", "data.notebook", "data.report"),
         output_ports=("derived", "operation_record", "evidence"),
         operation_ids=tuple(item.operation_id for item in manifest.operations),
+        _capability=_SERVER_OWNED_CAPABILITY,
     )
 
 
