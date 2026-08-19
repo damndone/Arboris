@@ -1,0 +1,104 @@
+schema_version: workbench.v1.8.9.candidate-lock.v1
+stage: C2
+status: prepared_before_candidate_commit
+
+# The future C2 candidate SHA is intentionally absent.  This lock is included
+# in that future commit and therefore must not self-reference it.
+baseline_commit: 993e9de428045c088a4902cfabf3dba632c5bf37
+pre_lock_product_tip: e59602bc9b7441c05b754c7adfa8ddfcc513483d
+formal_line: v1-8-9-foundation-integration
+formal_context_manifest_sha256: 983e705acfbae2d96c4443e839a7c71da9922cd06360013c17738c3b3cf2e047
+gate_evidence:
+  path: docs/superpowers/release-trains/v1.8.9/evidence/c2-p1-gate.md
+  sha256: af1476e7a407870dfe00e0f74127edf2e880bef101605a2c02f503d7c7785995
+
+merge_order:
+  - c1_p0_candidate
+  - p1_provider_catalog_identity_order
+  - p1_data_consumer_core
+  - p1_consumer_projection_core
+  - p1_classification_ml_core
+merge_order_rationale: provider identity ordering is stabilized before the package-local consumer and classification declarations are admitted; all C2 inputs are then tested on the exact C1-derived composition before candidate locking.
+
+merge_inputs:
+  c1_p0_candidate: 993e9de428045c088a4902cfabf3dba632c5bf37
+  c2_p1_candidate: 5fb3fa8280c555129e02e3b8ee1f0de7d94f3456
+  evaluation_harness_dependency: d6d94798a288e4836ebdb32ba78fcf05ee2b08b4
+  evaluation_harness_merge_policy: sidecar_only_not_in_product_candidate
+  source_material_policy: extracted_from_dirty_wave_a_snapshots_and_retested_on_c1
+
+integration_repairs:
+  catalog_ordering: provider_id_primary_filename_tie_breaker
+  catalog_test_alignment: deterministic_assertion_now_matches_provider_identity_order
+  product_runtime_changes: none_central_cutover_deferred_to_c3
+
+provider_catalog:
+  catalog_digest: 19578bf373bf09b8764cc98d8d53221496e5b6d9a78fe60147a86205a627ea6d
+  provider_ids:
+    - agent.compiler
+    - evidence.core
+    - fixture.contracts
+    - workbench.classification_ml
+    - workbench.consumer_projection
+    - workbench.data_consumer
+    - workflow.post_estimation
+  source_filenames:
+    - agent_compiler.json
+    - evidence_core.json
+    - contract_fixture.json
+    - classification_ml.json
+    - consumer_projection.json
+    - data_consumer.json
+    - workflow_post_estimation.json
+  source_sha256:
+    agent_compiler.json: 8e3682b0a9118f62cc2429c73df2ea5589ab8bc0cb3b5537d6f3862de5fc451c
+    classification_ml.json: a15d7d3a637da0ad4f6452c1daf05f150f08cf4193a7835fa5ffb22b891c489f
+    consumer_projection.json: 9c0b5021eceb05b08611b67adcc2ab48989faf4587d613cd6147d13e411a1846
+    contract_fixture.json: d0770b5ade422a73126ec22c369c25a2366758f5ed385433767b98da7e02f7d6
+    data_consumer.json: 32690f5531ada791f38ba43e42df5c3701118d4f68b8aa4b5ccfcd3ec9a218da
+    evidence_core.json: b700c238baa3cc015d4b0ad6d9e817f86adbb7c1d755059f89de7ac5c3e70343
+    workflow_post_estimation.json: 2b9304533090a1fadf79e6670f56cb8e587e2a0cef8969be2c0410eb9ea47e72
+
+coverage:
+  coverage_input_digest: 86161af4d6edf44df5474880375bc1da2733aeb48b0de96a3fe9d8fd9e1f72f9
+  coverage_rows: 15
+  covered_rows: 5
+  blocked_rows: 10
+  coverage_scope: live provider ids, source filenames, exposure paths, contract references and registered consumer projection refs
+  acceptance_matrix_status: package_local_projection_coverage_built_central_mount_deferred_to_c3
+
+tests:
+  - command: PYTHONPATH=backend .venv/bin/python -m pytest tests/predictive_research/test_classification_contracts_v189.py tests/predictive_research/test_classification_protocol_v189.py tests/predictive_research/test_classification_leakage_v189.py tests/predictive_research/test_classification_consumers_v189.py tests/test_v189_consumer_projection.py tests/test_v189_consumer_coverage.py tests/test_v189_context_egress.py tests/test_v189_data_operation_manifest.py tests/test_v189_data_profile.py tests/test_v189_filter_ast.py tests/test_data_operation_routes.py tests/contracts/test_v189_contract_lock.py -q --disable-warnings
+    status: passed
+    observed: 266 passed, 1 warning
+  - command: cd frontend && npm test -- --run src/report/FamilyEvidence.test.tsx src/report/ClassificationEvidence.test.tsx src/lineage/detail/sections/DataOperationsSection.test.tsx
+    status: passed
+    observed: 3 files, 13 tests passed
+  - command: cd frontend && npm run typecheck
+    status: passed
+  - command: PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_agent_compiler.py tests/test_v189_capability_manifest.py tests/test_v189_legacy_compilation_authority.py tests/test_v189_evidence_envelope.py tests/test_v189_evidence_host_bootstrap.py tests/test_v189_workflow_truth.py tests/test_workflow_resume.py tests/test_workflow_runtime.py tests/test_reporting.py tests/contracts/test_v189_contract_lock.py -q --disable-warnings
+    status: passed
+    observed: 468 passed, 93 warnings in 63.91s
+  - command: PYTHONPATH=backend .venv/bin/python -m compileall -q backend/workbench tests
+    status: passed
+  - command: git diff --check
+    status: passed
+  - command: provider catalog load, coverage and digest verification
+    status: passed
+    observed: catalog digest 19578bf373bf09b8764cc98d8d53221496e5b6d9a78fe60147a86205a627ea6d; coverage digest 86161af4d6edf44df5474880375bc1da2733aeb48b0de96a3fe9d8fd9e1f72f9; 5 covered, 10 blocked
+
+invalidated_evidence:
+  - dirty C0-based P1 worktree tests and handoffs are source evidence only and are not C2 candidate-bound acceptance
+  - C1 catalog digest and coverage denominator are invalid after three new provider declarations become visible
+  - C1 E1 admission proves only the C1 candidate and must not be reused as C2 acceptance
+  - browser_acceptance: NOT_VERIFIED
+  - provider_acceptance: NOT_VERIFIED
+  - host_full_gate: NOT_VERIFIED
+  - release_or_tag: NOT_VERIFIED
+
+safety_boundary:
+  central_agent_notebook_cutover: deferred_to_c3
+  report_central_mount: deferred_to_c3
+  dynamic_import_or_executor_from_json: forbidden
+  evidence_consumer_projection: package_local_and_fail_closed
+  evaluation_harness_in_product_candidate: forbidden
