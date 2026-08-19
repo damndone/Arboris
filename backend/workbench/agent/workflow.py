@@ -757,6 +757,20 @@ class WorkflowExecutor:
             if step_state.status == "completed"
         }
 
+        # A persisted state record is only a resume hint.  Before any
+        # dependent callback is admitted, rebind every completed step to its
+        # sealed server completion, unique admission, and frozen artifact
+        # registry rows.  The returned result is rebuilt from that server
+        # record, so tampered state metadata cannot reach a callback.
+        for step in draft.steps:
+            step_state = states[step.step_id]
+            if step_state.status == "completed":
+                completed_results[step.step_id] = evidence_port.validate_resumed_step_state(
+                    draft,
+                    step,
+                    step_state,
+                )
+
         for step in draft.steps:
             current = states[step.step_id]
             if current.status == "completed":

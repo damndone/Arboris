@@ -1978,6 +1978,13 @@ class NotebookService:
                 reason="execution_contract_version",
             )
         proposal = view.current_stored_revision.proposal
+        if current.capability_resolution_binding_ref is None:
+            raise OptionRevisionStale(
+                "historical options cannot execute without a current server capability binding",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="legacy_compilation_required",
+            )
         offered_modes = _execution_modes_for(current.risk_level, proposal.operation_id)
         if len(offered_modes) < 2 or offered_modes[1] not in current.execution_modes:
             raise OptionRevisionStale(
@@ -2581,6 +2588,14 @@ class NotebookService:
         view = self.store.read_option(notebook_id, option_id)
         current = view.current_revision
         proposal = view.current_stored_revision.proposal
+        if proposal.operation_id == "operation.multi_step":
+            raise OptionRevisionStale(
+                "historical composed workflows require an AgentNotebookCompilerV1 "
+                "server compilation record and confirmation",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="legacy_compilation_required",
+            )
         if (option_revision, proposal_id, proposal_revision) != (
             current.option_revision,
             current.typed_proposal_id,

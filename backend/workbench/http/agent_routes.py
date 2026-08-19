@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 from uuid import uuid4
 
 from fastapi import APIRouter, Query, Request, Response
@@ -1851,6 +1851,7 @@ async def confirm_agent_proposal(
     proposal_id: str,
     project_root: str,
     body: AgentProposalConfirmRequest,
+    request: Request = None,
 ) -> dict[str, Any]:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
@@ -1861,116 +1862,37 @@ async def confirm_agent_proposal(
         session_id=session_id,
         chain_id=metadata.get("chain_id"),
     )
-    authoritative_active_head_run_id = _authoritative_active_head(
-        root,
-        chain_id=str(proposal.chain_id),
-        requested_active_head_run_id=body.active_head_run_id,
-    )
-    current_context_fingerprint = _current_proposal_context_fingerprint(
-        root,
-        proposal,
-        active_head_run_id=authoritative_active_head_run_id,
-    )
-    orchestrator = WorkbenchOrchestrator(
-        repository,
-        events,
-        main_session_id=_ensure_main_session(repository, root),
-        context_provider=NodeOperationContextProvider(root),
-    )
-    is_analysis_loop = isinstance(proposal.preconditions.get("analysis_loop"), dict)
-    try:
-        if is_analysis_loop:
-            cluster_variable = proposal.changes.get("entity_col")
-            if type(cluster_variable) is not str or not cluster_variable:
-                raise PlanBindingError(
-                    "analysis-loop proposal has no exact cluster variable",
-                    code="STALE_PLAN",
-                )
-            resolved = resolve_analysis_loop_inputs(
-                root,
-                run_id=str(proposal.target["run_id"]),
-                cluster_variable=cluster_variable,
-            )
-            confirmed_payload_hash = (
-                body.confirmed_payload_hash
-                or proposal.preconditions.get("confirmed_payload_hash")
-            )
-            if type(confirmed_payload_hash) is not str or not confirmed_payload_hash:
-                raise PlanBindingError(
-                    "analysis-loop confirmation has no canonical payload hash",
-                    code="CONFIRMED_PAYLOAD_MISMATCH",
-                )
-            record = confirm_analysis_loop_proposal(
-                orchestrator=orchestrator,
-                plan_store=PlanDiffStore(repository.root, create=False),
-                proposal_id=proposal_id,
-                current_source=resolved.source,
-                current_source_context_fingerprint=current_context_fingerprint,
-                current_active_head_run_id=authoritative_active_head_run_id,
-                revision=body.revision,
-                fingerprint=body.fingerprint,
-                confirmed_payload_hash=confirmed_payload_hash,
-            )
-        else:
-            record = orchestrator.confirm_proposal(
-                proposal_id,
-                revision=body.revision,
-                fingerprint=body.fingerprint,
-                actor_type="user",
-                current_context_fingerprint=current_context_fingerprint,
-                current_active_head_run_id=authoritative_active_head_run_id,
-            )
-    except PlanBindingError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code=exc.code,
-            message=str(exc),
-            details=getattr(exc, "details", {"proposal_id": proposal_id}),
-        ) from exc
-    except ProposalStaleError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="AGENT_PROPOSAL_STALE",
-            message="The proposal is stale and must be regenerated.",
-            details={"proposal_id": proposal_id},
-        ) from exc
-    except (ProposalConfirmationError, KeyError) as exc:
+    proposal_revision = getattr(proposal, "revision", None)
+    if proposal_revision is not None and body.revision != proposal_revision:
         raise WorkbenchAPIError(
             status_code=409,
             code="AGENT_PROPOSAL_CONFLICT",
             message="The proposal revision or fingerprint is no longer confirmable.",
             details={"proposal_id": proposal_id},
-        ) from exc
-    # Design §8.2: the user confirmation IS the execution gate. The registry
-    # selects the request-independent operation handler; no model text
-    # participates in execution.
-    try:
-        record = await orchestrator.execute_confirmed_operation(
-            record.record_id,
-            project_root=root,
-            current_context_fingerprint=current_context_fingerprint,
-            current_active_head_run_id=authoritative_active_head_run_id,
         )
-    except ProposalStaleError as exc:
+    proposal_fingerprint = getattr(proposal, "fingerprint", None)
+    if proposal_fingerprint is not None and body.fingerprint != proposal_fingerprint:
         raise WorkbenchAPIError(
             status_code=409,
-            code="AGENT_PROPOSAL_STALE",
-            message="The proposal became stale before execution.",
+            code="AGENT_PROPOSAL_CONFLICT",
+            message="The proposal revision or fingerprint is no longer confirmable.",
             details={"proposal_id": proposal_id},
-        ) from exc
-    except OperationClaimConflict as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="AGENT_OPERATION_CONFLICT",
-            message="Another confirmed operation is already executing against this Chain head.",
-            details={"proposal_id": proposal_id},
-        ) from exc
+        )
+
+    # Historical Agent proposals are not allowed to instantiate the legacy
+    # WorkbenchOrchestrator.  A proposal may continue only if an earlier
+    # server-owned AgentNotebookCompilerV1 compile and confirmation were
+    # persisted into its opaque binding; otherwise this route is typed
+    # fail-closed.
+    cutover = _execute_legacy_agent_proposal_via_server_boundary(
+        proposal,
+        request=request,
+    )
     return {
         "proposal": _public_proposal(store, proposal_id),
-        "operation": record.to_dict(),
-        "status": record.status,
+        "operation": cutover["operation"],
+        "status": cutover["status"],
     }
-
 
 @router.post("/agent/sessions/{session_id}/operations/{record_id}/reconcile")
 async def reconcile_agent_operation(
@@ -2427,6 +2349,121 @@ def _cutover_error(exc: Exception, *, action: str) -> WorkbenchAPIError:
     if code in {"RUNTIME_CATALOG_NOT_BOUND", "PROVIDER_RUNTIME_NOT_BOUND", "CAPABILITY_BINDING_MISSING"}:
         status = 503
     return WorkbenchAPIError(status_code=status, code=code, message=str(exc))
+
+
+def _legacy_cutover_binding(proposal: Any) -> dict[str, str | None]:
+    """Read only the server-handle envelope accepted by legacy proposals.
+
+    The values are lookup hints, never execution authority.  The compiler's
+    persisted record and the app-owned confirmation store must agree with all
+    scope values before execution is possible.
+    """
+
+    raw_preconditions = getattr(proposal, "preconditions", None)
+    if not isinstance(raw_preconditions, Mapping):
+        raw_preconditions = {}
+    candidate: Mapping[str, Any] = raw_preconditions
+    for key in ("server_compilation", "agent_notebook_cutover", "cutover"):
+        nested = raw_preconditions.get(key)
+        if isinstance(nested, Mapping):
+            candidate = nested
+            break
+
+    def first_string(*keys: str) -> str | None:
+        for key in keys:
+            value = candidate.get(key)
+            if type(value) is str and value and value == value.strip() and "\x00" not in value:
+                return value
+        return None
+
+    return {
+        "compilation_record_id": first_string(
+            "compilation_record_id", "server_compilation_record_id"
+        ),
+        "confirmation_id": first_string(
+            "confirmation_id", "server_confirmation_id"
+        ),
+        "actor_ref": first_string("actor_ref", "principal_ref"),
+        "session_ref": first_string("session_ref"),
+        "project_ref": first_string("project_ref"),
+        "data_snapshot_digest": first_string(
+            "current_data_snapshot_digest", "data_snapshot_digest"
+        ),
+    }
+
+
+def _execute_legacy_agent_proposal_via_server_boundary(
+    proposal: Any,
+    *,
+    request: Request | None,
+) -> dict[str, Any]:
+    """Execute a legacy proposal only through a retained cutover receipt."""
+
+    binding = _legacy_cutover_binding(proposal)
+    required = ("compilation_record_id", "confirmation_id", "actor_ref", "session_ref", "project_ref")
+    missing = [name for name in required if binding.get(name) is None]
+    if missing:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_LEGACY_COMPILATION_REQUIRED",
+            message=(
+                "Historical Agent proposals require a server-owned AgentNotebookCompilerV1 "
+                "compilation record and retained confirmation before execution."
+            ),
+            details={"missing": missing},
+        )
+
+    record_id = str(binding["compilation_record_id"])
+    actor_ref = str(binding["actor_ref"])
+    session_ref = str(binding["session_ref"])
+    project_ref = str(binding["project_ref"])
+    compiler = _cutover_authority(project_ref, session_ref, request=request)
+    try:
+        record = compiler.record(record_id)
+    except Exception as exc:
+        raise _cutover_error(exc, action="confirm") from exc
+    if (record.principal_ref, record.session_ref, record.project_ref) != (
+        actor_ref,
+        session_ref,
+        project_ref,
+    ):
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="CUTOVER_SCOPE_MISMATCH",
+            message="The compilation record is bound to another actor, session or project.",
+        )
+    confirmation = _cutover_store(request=request).confirmations.get(
+        (project_ref, session_ref, record_id)
+    )
+    if confirmation is None or confirmation.confirmation_id != binding["confirmation_id"]:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="SERVER_CONFIRMATION_UNKNOWN",
+            message="The legacy proposal has no server-retained confirmation handle.",
+            details={"compilation_record_id": record_id},
+        )
+    try:
+        result = compiler.execute(
+            record_id,
+            confirmation,
+            current_data_snapshot_digest=binding["data_snapshot_digest"],
+        )
+    except Exception as exc:
+        raise _cutover_error(exc, action="execute") from exc
+    if not hasattr(result, "to_dict"):
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_CUTOVER_RESULT_INVALID",
+            message="The server compiler returned no typed execution result.",
+        )
+    result_dict = result.to_dict()
+    operation = {
+        "record_id": record_id,
+        "operation_id": result_dict.get("operation_id"),
+        "status": result_dict.get("status"),
+        "cutover_execution": result_dict,
+    }
+    return {"operation": operation, "status": result_dict.get("status")}
 
 
 def _assert_cutover_record_scope(

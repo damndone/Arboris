@@ -1126,6 +1126,64 @@ def test_model_branch_rejects_a_path_like_model_run_ref(tmp_path) -> None:
         _validate_persisted_model_branch(tmp_path, draft, draft.steps[0].step_id, branch)
 
 
+def _model_branch_with_forged_declaration(
+    draft, model_step, *, field: str, forged_value: object
+) -> dict[str, object]:
+    branch_spec: dict[str, object] = {
+        "model_family": "ols",
+        "covariance": "unadjusted",
+        "outcome": "outcome",
+        "predictors": ["rate_a"],
+        "categorical": [],
+        "polynomials": [],
+    }
+    branch_spec[field] = forged_value
+    return {
+        "branch_id": "m1",
+        "run_id": "model-run",
+        "artifact_ids": ["ols_1"],
+        "model_artifact_id": "ols_1",
+        "workflow_id": draft.workflow_id,
+        "workflow_step_id": model_step.step_id,
+        "source_run_id": "run-1",
+        "source_artifact_id": "raw-1",
+        "source_sha256": "sha256:source-1",
+        "branch_spec": branch_spec,
+        "predictor_columns": ["rate_a"],
+        "term_groups": {
+            "linear": {"rate_a": ["rate_a"]},
+            "polynomial": {},
+            "categorical": {},
+        },
+    }
+
+
+def test_model_branch_rejects_predictor_forgery_against_compiled_step(tmp_path) -> None:
+    draft = compile_fixture_workflow(workflow_id="wf-model-declaration-binding")
+    model_step = next(
+        step for step in draft.steps if step.operation_id == "model.genesis"
+    )
+    branch = _model_branch_with_forged_declaration(
+        draft, model_step, field="predictors", forged_value=["rate_b"]
+    )
+
+    with pytest.raises(WorkflowExecutionError, match="compiled model step"):
+        _validate_persisted_model_branch(tmp_path, draft, model_step.step_id, branch)
+
+
+def test_model_branch_rejects_covariance_forgery_against_compiled_step(tmp_path) -> None:
+    draft = compile_fixture_workflow(workflow_id="wf-model-declaration-binding")
+    model_step = next(
+        step for step in draft.steps if step.operation_id == "model.genesis"
+    )
+    branch = _model_branch_with_forged_declaration(
+        draft, model_step, field="covariance", forged_value="robust"
+    )
+
+    with pytest.raises(WorkflowExecutionError, match="compiled model step"):
+        _validate_persisted_model_branch(tmp_path, draft, model_step.step_id, branch)
+
+
 def test_model_branch_rejects_a_symlinked_model_run_ref(tmp_path) -> None:
     draft = compile_fixture_workflow(workflow_id="wf-model-run-symlink")
     runs_root = tmp_path / "runs"

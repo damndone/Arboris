@@ -999,6 +999,32 @@ def _notebook_error(exc: NotebookOptionError) -> WorkbenchAPIError:
     )
 
 
+def _require_historical_notebook_execution_boundary(
+    current: Any,
+    proposal: Any,
+    *,
+    confirm_and_execute: bool,
+) -> None:
+    """Refuse legacy execution-shaped options without a server compiler handle."""
+
+    binding_ref = getattr(current, "capability_resolution_binding_ref", None)
+    has_server_binding = type(binding_ref) is str and bool(binding_ref.strip())
+    operation_id = getattr(proposal, "operation_id", None)
+    if operation_id == "operation.multi_step" or (
+        confirm_and_execute and not has_server_binding
+    ):
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="NOTEBOOK_LEGACY_COMPILATION_REQUIRED",
+            message=(
+                "Historical Notebook execution requires an AgentNotebookCompilerV1 "
+                "server compilation record and confirmation; the legacy executor "
+                "path is disabled."
+            ),
+            details={"operation_id": operation_id},
+        )
+
+
 def _record_planning_terminal_error(
     trace: TraceWriter | None,
     *,
@@ -1999,6 +2025,11 @@ def confirm_option_endpoint(
         context, trace = _compile(root, service, notebook_id)
         current = service.store.read_option(notebook_id, option_id).current_revision
         proposal = service.store.read_option(notebook_id, option_id).current_stored_revision.proposal
+        _require_historical_notebook_execution_boundary(
+            current,
+            proposal,
+            confirm_and_execute=False,
+        )
         if proposal.operation_id == "operation.multi_step":
             result = service.confirm_and_execute_workflow(
                 notebook_id,
@@ -2064,6 +2095,12 @@ def confirm_and_execute_option_endpoint(
     try:
         context, trace = _compile(root, service, notebook_id)
         current = service.store.read_option(notebook_id, option_id).current_revision
+        proposal = service.store.read_option(notebook_id, option_id).current_stored_revision.proposal
+        _require_historical_notebook_execution_boundary(
+            current,
+            proposal,
+            confirm_and_execute=True,
+        )
         if (body.option_revision, body.proposal_id, body.proposal_revision) != (
             current.option_revision,
             current.typed_proposal_id,

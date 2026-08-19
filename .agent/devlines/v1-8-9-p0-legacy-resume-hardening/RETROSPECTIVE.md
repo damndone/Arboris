@@ -1,0 +1,67 @@
+# Retrospective — v1-8-9-p0-legacy-resume-hardening
+
+## Goal
+
+# Workbench v1.8.9 P0 Legacy Route and Resume Hardening Objective  Remove the remaining executable authority bypasses and make resume trust the server-owned completion/admission/artifact bindings rather than only persisted plan fingerprints.  Required outcomes:  - historical executable Notebook confirmation paths use the same server   AgentNotebookCompilerV1 compile/confirm/execute boundary as the new cutover; - historical executable Agent proposal confirmation paths cannot call the old   orchestrator directly without a server compilation record and confirmation; - resume revalidates persisted artifact IDs, output bindings and lineage   against the server completion/admission registry before any dependent   callback or new artifact write; - persisted model branches are equal to the current compiled model step's   outcome, predictors, covariance and family declaration, not merely the same   artifact identity; - mismatches fail closed with typed errors and do not execute user code or   write new artifacts.  This line owns legacy Agent/Notebook route adapters and workflow resume/branch validation plus focused regression tests. It does not modify Report consumer code, model estimators, provider implementations, browser fixtures, or release sidecars. Historical response-shape compatibility must remain explicitly separated from the security/correctness gate.
+
+## Final status
+
+COMPLETED
+
+## Metrics
+
+- Failure frequency: 2/5 (40.0%; 40.0 per 100 events)
+- Repeat rate: 0/2 (0.0%)
+- Recurrence rate: 0/2 (0.0%)
+- MTTR: median=0 ms (sample=1; unresolved=1)
+- Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
+- Spec churn: N/A (sample=0)
+- Plan churn: N/A (sample=0)
+- Gate waste rate: 0/1 (0.0%)
+- Same-state retry rate: N/A (sample=0)
+- Token waste: N/A (sample=0)
+
+## All failures
+
+- #2 2026-08-19T16:45:00.000Z `tdd_red_legacy_resume_authority`; cause_status: `known`; cause: The six new authority-boundary tests fail on the baseline: legacy routes still reach old execution authority, Resume accepts forged persisted metadata, and model branch declarations are not compared with the compiled model step.; resolution: `accepted`; lesson: Keep legacy execution routes fail-closed and verify persisted workflow truth before callback or dependent artifact work.
+- #3 2026-08-19T17:08:00.000Z `focused_regression_after_authority_hardening`; cause_status: `known`; cause: The first post-implementation focused run exposed three regressions: aborted evidence sequencing changed and two resume fixtures used the persisted workflow_step_id field rather than the old step_id expectation.; resolution: `resolved`; lesson: Run the inherited focused resume suite after adding persisted admission evidence and preserve abort ordering while rebinding resumed rows to the server schema.
+
+## All errors
+
+- None recorded.
+
+## All gaps
+
+- None recorded.
+
+## All waste
+
+- None recorded.
+
+## Root causes and solutions
+
+- `focused-regression-after-resume-hardening`: occurrences=1; cause_status: `known`; root cause: The first post-implementation focused run exposed three regressions: aborted evidence sequencing changed and two resume fixtures used the persisted workflow_step_id field rather than the old step_id expectation.; solution: `resolved`
+- `legacy-resume-branch-authority-red-first`: occurrences=1; cause_status: `known`; root cause: The six new authority-boundary tests fail on the baseline: legacy routes still reach old execution authority, Resume accepts forged persisted metadata, and model branch declarations are not compared with the compiled model step.; solution: `accepted`
+
+## Added tests
+
+- `tests/test_v189_legacy_route_authority.py; tests/test_v189_resume_authority.py; tests/test_v189_workflow_truth.py`
+- `tests/test_workflow_resume.py`
+
+## New rules
+
+- `focused-regression-after-resume-hardening`: line experience occurrence(s)=1
+- `legacy-resume-branch-authority-red-first`: line experience occurrence(s)=1
+
+## Future guidance
+
+- Keep legacy execution routes fail-closed and verify persisted workflow truth before callback or dependent artifact work.
+- Run the inherited focused resume suite after adding persisted admission evidence and preserve abort ordering while rebinding resumed rows to the server schema.
+
+## Event index
+
+- #1: `67572805-c70d-4101-96ef-d37366cb19a2` | 2026-08-19T16:34:43.796Z | STATE_CHANGE/line_started | incident=`159c397a-666a-419d-b6f6-c97c5a5cddfd` | lesson_key=`frozen-context-before-start` | event_sha256=`e3dfabc485fb45f3558398953289e6796549ee333407fb607a5642a70d3de681`
+- #2: `b18b0b7d-2f70-4bd0-8a51-75f5de4d2026` | 2026-08-19T16:45:00.000Z | FAILURE/tdd_red_legacy_resume_authority | incident=`f98a69e1-2e2a-4f44-8d31-fb1f9b6e48d1` | lesson_key=`legacy-resume-branch-authority-red-first` | event_sha256=`5b80f9f88bf298871f50316f7cff84f597634e7a51a27225b35a4f9a84ca5cf9`
+- #3: `d0a1b2c3-4d5e-4678-9abc-def012345678` | 2026-08-19T17:08:00.000Z | FAILURE/focused_regression_after_authority_hardening | incident=`e1a2b3c4-d5e6-4789-abcd-ef0123456789` | lesson_key=`focused-regression-after-resume-hardening` | event_sha256=`e2a3e2cfa6d81ccafa2de83736f60feea46917ca144231ec6a7deef75169d166`
+- #4: `f2b3c4d5-e6f7-4890-ab12-cd3456789012` | 2026-08-19T17:10:00.000Z | GATE/focused_verification_passed | incident=`a3b4c5d6-e7f8-4901-ab23-cd4567890123` | lesson_key=`focused-authority-gate-before-handoff` | event_sha256=`afdc0ddfbc34ecd88c67b50772d4f385474316a4faf6cde06b768a70e2df790e`
+- #5: `c4d5e6f7-8901-4a23-bcde-f56789012345` | 2026-08-19T17:11:00.000Z | STATE_CHANGE/line_completed | incident=`d5e6f789-0123-4abc-def5-678901234567` | lesson_key=`package-local-closeout-keeps-external-gates-separate` | event_sha256=`f6bfdb31f11f633c9b07d827cab874c7264fa3f2f378da950317c5bb8795ca1e`
