@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { ClassificationEvidence } from "./ClassificationEvidence";
+import { ClassificationEvidence, classificationCanonicalDigest, classificationProjectId, isPersistedClassificationArtifact } from "./ClassificationEvidence";
 
 const taskHash = "sha256:" + "t".repeat(64);
 const splitHash = "sha256:split";
@@ -99,10 +99,10 @@ const packet = {
 
 const serverIdentity = {
   schema_version: 1,
-  project_id: "project:sha256:" + "1".repeat(64),
-  run_id: "run:test",
+  project_id: "project:sha256:2e976514ddb95c870f6a5cc39ad82b8680258acb017646e385c11137be58514c",
+  run_id: "run-classification",
   namespace: "workbench.prediction.classification-artifacts.v1",
-  digest: "sha256:e5044e243c6bdcb2a927d17b6e6dc8aaa5ee4366d0181520ffbd4b9a9934a5b0",
+  digest: "sha256:320329e552523db557110a09c929a6314932bd072a889491345ea2006785a4f7",
 };
 const foldReceipt = {
   fold: 0,
@@ -176,6 +176,20 @@ function canonicalJson(value: unknown): string {
 function digest(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
+
+describe("classification canonical contract", () => {
+  it("matches the Python canonical-json-v1 Unicode vector", async () => {
+    const { classificationCanonicalDigest } = await import("./ClassificationEvidence");
+    expect(classificationCanonicalDigest({
+      text: "e\u0301",
+      composed: "é",
+      emoji: "🧪",
+      nested: { ключ: "क" },
+      number: 1.25,
+      zero: -0.0,
+    })).toBe("d064d3a0678569cd737b9304f5151b8752ffb506ce48dc78795c3549dd0250ba");
+  });
+});
 
 function sharedClassificationArtifactsWrapper(
   artifact: Record<string, unknown> = persistedClassificationArtifact(),
@@ -273,6 +287,21 @@ describe("ClassificationEvidence", () => {
     } as never} />);
 
     expect(screen.getByTestId("classification-evidence")).toHaveTextContent("UNAVAILABLE");
+  });
+
+  it("requires server identity to bind to the active project and run", () => {
+    const wrapper = sharedClassificationArtifactsWrapper();
+
+    expect(classificationCanonicalDigest("/private/tmp/report-project")).toBe("2df96cac937e1eed909d079a960e1145e02179b1af1f52910cfda48e64334f4e");
+    expect(classificationProjectId("/private/tmp/report-project")).toBe("project:sha256:2e976514ddb95c870f6a5cc39ad82b8680258acb017646e385c11137be58514c");
+    expect(isPersistedClassificationArtifact(wrapper, {
+      projectRoot: "/private/tmp/report-project",
+      runId: "run-classification",
+    })).toBe(true);
+    expect(isPersistedClassificationArtifact(wrapper, {
+      projectRoot: "/private/tmp/report-project",
+      runId: "run:test",
+    })).toBe(false);
   });
 
   it("rejects wrapper metrics tampering when the server receipt digest is stale", () => {

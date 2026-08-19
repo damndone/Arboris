@@ -81,7 +81,7 @@ def classification_server_identity(run_root: Path) -> dict[str, Any]:
         "run_id": run_id,
         "namespace": _CLASSIFICATION_SERVER_NAMESPACE,
     }
-    digest = "sha256:" + _sha256(json.dumps(base, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    digest = "sha256:" + sha256_canonical(base)
     return {**base, "digest": digest}
 
 
@@ -96,7 +96,7 @@ def _validate_server_identity_shape(value: Any) -> dict[str, Any]:
     }
     if value.get("schema_version") != 1 or any(type(base[key]) is not str or not base[key] for key in ("project_id", "run_id", "namespace")):
         raise ContractError("CLASSIFICATION_SERVER_IDENTITY_INVALID", "classification server identity fields are invalid")
-    expected_digest = "sha256:" + _sha256(json.dumps(base, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    expected_digest = "sha256:" + sha256_canonical(base)
     if value.get("digest") != expected_digest:
         raise ContractError("CLASSIFICATION_SERVER_IDENTITY_INVALID", "classification server identity digest is invalid")
     return dict(value)

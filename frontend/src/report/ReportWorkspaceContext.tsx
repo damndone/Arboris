@@ -57,6 +57,7 @@ import { fetchFigureAiContext } from "../workbench/views/figureAi";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
 import {
   isPersistedClassificationArtifact,
+  type ClassificationActiveScope,
   type ClassificationArtifactsWrapper,
 } from "./ClassificationEvidence";
 
@@ -145,8 +146,9 @@ function indexedClassificationArtifactId(value: unknown): string | null {
 export function readClassificationEvidencePacket(
   value: unknown,
   indexedArtifact?: unknown,
+  activeScope?: ClassificationActiveScope,
 ): ClassificationArtifactsWrapper | null {
-  if (!isPersistedClassificationArtifact(value)) return null;
+  if (!isPersistedClassificationArtifact(value, activeScope)) return null;
   const item = asRecord(indexedArtifact);
   const contract = asRecord(item?.payload_contract);
   const indexedSchema = item?.payload_schema ?? contract?.payload_schema;
@@ -489,6 +491,7 @@ export function ReportWorkspaceProvider({
             return readClassificationEvidencePacket(
               await fetchArtifactJson(projectRoot, runId, item.artifact_id),
               item,
+              { projectRoot, runId },
             );
           } catch {
             return null;

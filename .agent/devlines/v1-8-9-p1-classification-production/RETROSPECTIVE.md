@@ -10,14 +10,14 @@ COMPLETED_WITH_KNOWN_GATES
 
 ## Metrics
 
-- Failure frequency: 14/61 (23.0%; 23.0 per 100 events)
-- Repeat rate: 0/14 (0.0%)
-- Recurrence rate: 0/14 (0.0%)
-- MTTR: median=0 ms (sample=8; unresolved=5)
+- Failure frequency: 17/66 (25.8%; 25.8 per 100 events)
+- Repeat rate: 0/17 (0.0%)
+- Recurrence rate: 0/17 (0.0%)
+- MTTR: median=0 ms (sample=10; unresolved=6)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/12 (0.0%)
+- Gate waste rate: 0/13 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -25,6 +25,7 @@ COMPLETED_WITH_KNOWN_GATES
 
 - #2 2026-08-19T16:45:53.000Z `tdd_red_task_split_profile`; cause_status: `known`; cause: The production classification entrypoint still fixed every task to the iid_stratified split profile.; resolution: `accepted`; lesson: Make the typed task split profile drive the executable manifest before any model fit.
 - #3 2026-08-19T16:50:23.000Z `tdd_red_production_contracts`; cause_status: `known`; cause: The additive entrypoint rejects declared weights, has no preprocessing seam, and coerces numeric strings through the helper-only path.; resolution: `accepted`; lesson: Expose only typed production seams and fail closed before any helper-only fitting can run.
+- #63 2026-08-19T23:09:10.000Z `classification_seventh_red_probes`; cause_status: `known`; cause: The seventh-round reviewer probes reproduced four production gaps: a classification contract alias returned the canonical wrapper, backend server identity digest did not use canonical-json-v1 for a Unicode run id, Agent/Notebook propagated FileNotFoundError or JSONDecodeError for the index, and frontend consumers accepted a wrapper without active project/run binding while the canonical helper was absent.; resolution: `accepted`; lesson: Keep the four reviewer probes behavior-level and implement only the missing joins and adapter normalization before rerunning the original classification suites.
 
 ## All errors
 
@@ -39,10 +40,12 @@ COMPLETED_WITH_KNOWN_GATES
 - #47 2026-08-19T21:30:30.000Z `classification_fourth_remediation_formal_append_error`; cause_status: `known`; cause: The first formal append attempt omitted the required event_id field and was rejected before changing the formal log.; resolution: `resolved`; lesson: Check the append event schema before invoking the formal CLI and preserve the CLI as the only formal write path.
 - #55 2026-08-19T22:27:30.000Z `classification_sixth_formal_append_error`; cause_status: `known`; cause: The first formal GAP append used an unsupported cause_status value and was rejected before changing the formal event stream.; resolution: `resolved`; lesson: Validate formal event field values against the CLI schema before append and keep the CLI as the only formal write path.
 - #59 2026-08-19T22:35:30.000Z `classification_sixth_final_cli_error`; cause_status: `known`; cause: The final formal GREEN append referenced a temporary event file that was not present after the multi-file patch operation, so the CLI rejected it before changing the event stream.; resolution: `resolved`; lesson: Create and verify each temporary formal event file before invoking the append CLI, and keep rejected append attempts in the formal error stream.
+- #64 2026-08-19T23:28:00.000Z `classification_formal_path_redaction_error`; cause_status: `known`; cause: The first formal GAP append was rejected because its event text contained an absolute host path; the CLI rejected it before changing the formal event stream.; resolution: `resolved`; lesson: Formal evidence text must use repository-relative references and must pass sensitive-path validation before append.
 
 ## All gaps
 
 - #56 2026-08-19T22:27:00.000Z `classification_sixth_list_index_gap`; cause_status: `known`; cause: The server artifact listing endpoint strips the classification index payload contract, receipt path/digest, and server identity before ReportWorkspace can perform the required indexed wrapper join; the generic classification_evidence path must remain on its generic integrity contract.; resolution: `open`; lesson: Preserve the server-owned classification index fields at the report list seam, then let the shared wrapper validator perform the artifact, receipt, identity, and content join; do not route generic classification_evidence through the bespoke receipt loader.
+- #65 2026-08-19T23:27:00.000Z `classification_active_identity_scope_gap`; cause_status: `known`; cause: The first active-scope GREEN attempt used an unresolved fixture while the server-owned identity hashes the resolved project root; the equality contract correctly rejected the path alias until the fixture used the resolved root.; resolution: `resolved`; lesson: Identity tests must use the same resolved project-root representation as the server contract; a filesystem alias must not be silently accepted as another project.
 
 ## All waste
 
@@ -51,12 +54,15 @@ COMPLETED_WITH_KNOWN_GATES
 ## Root causes and solutions
 
 - `classification-fourth-remediation-cli-error`: occurrences=1; cause_status: `known`; root cause: The first formal append attempt omitted the required event_id field and was rejected before changing the formal log.; solution: `resolved`
+- `classification-resolved-project-identity`: occurrences=1; cause_status: `known`; root cause: The first active-scope GREEN attempt used an unresolved fixture while the server-owned identity hashes the resolved project root; the equality contract correctly rejected the path alias until the fixture used the resolved root.; solution: `resolved`
+- `classification-seventh-remediation-red`: occurrences=1; cause_status: `known`; root cause: The seventh-round reviewer probes reproduced four production gaps: a classification contract alias returned the canonical wrapper, backend server identity digest did not use canonical-json-v1 for a Unicode run id, Agent/Notebook propagated FileNotFoundError or JSONDecodeError for the index, and frontend consumers accepted a wrapper without active project/run binding while the canonical helper was absent.; solution: `accepted`
 - `classification-sixth-final-cli-error`: occurrences=1; cause_status: `known`; root cause: The final formal GREEN append referenced a temporary event file that was not present after the multi-file patch operation, so the CLI rejected it before changing the event stream.; solution: `resolved`
 - `classification-sixth-formal-schema-error`: occurrences=1; cause_status: `known`; root cause: The first formal GAP append used an unsupported cause_status value and was rejected before changing the formal event stream.; solution: `resolved`
 - `classification-sixth-list-index-gap`: occurrences=1; cause_status: `known`; root cause: The server artifact listing endpoint strips the classification index payload contract, receipt path/digest, and server identity before ReportWorkspace can perform the required indexed wrapper join; the generic classification_evidence path must remain on its generic integrity contract.; solution: `open`
 - `compile-after-protocol-edit`: occurrences=1; cause_status: `known`; root cause: The first production-path patch left a metadata local uninitialized and then introduced an indentation error while adding weighted threshold inputs.; solution: `accepted`
 - `formal-append-repo-relative-event-file`: occurrences=1; cause_status: `known`; root cause: The formal append command rejected an external temporary event path because event files must be repository-relative.; solution: `resolved`
 - `formal-cli-surface-check`: occurrences=1; cause_status: `known`; root cause: The first attempt used nonexistent formal control subcommands append-event and status instead of the existing append interface.; solution: `resolved`
+- `formal-event-relative-paths`: occurrences=1; cause_status: `known`; root cause: The first formal GAP append was rejected because its event text contained an absolute host path; the CLI rejected it before changing the formal event stream.; solution: `resolved`
 - `formal-retrospective-regeneration`: occurrences=1; cause_status: `known`; root cause: Formal verification correctly rejected the pre-existing generated retrospective because the new RED, CLI correction, and GREEN gate events had been appended afterward.; solution: `open`
 - `frontend-verification-package-root`: occurrences=1; cause_status: `known`; root cause: The initial npm frontend focused and typecheck commands were launched from the worktree root, which has no package.json; the actual package root is the allowlisted frontend directory.; solution: `resolved`
 - `production-contracts-red`: occurrences=1; cause_status: `known`; root cause: The additive entrypoint rejects declared weights, has no preprocessing seam, and coerces numeric strings through the helper-only path.; solution: `accepted`
@@ -72,12 +78,15 @@ COMPLETED_WITH_KNOWN_GATES
 ## New rules
 
 - `classification-fourth-remediation-cli-error`: line experience occurrence(s)=1
+- `classification-resolved-project-identity`: line experience occurrence(s)=1
+- `classification-seventh-remediation-red`: line experience occurrence(s)=1
 - `classification-sixth-final-cli-error`: line experience occurrence(s)=1
 - `classification-sixth-formal-schema-error`: line experience occurrence(s)=1
 - `classification-sixth-list-index-gap`: line experience occurrence(s)=1
 - `compile-after-protocol-edit`: line experience occurrence(s)=1
 - `formal-append-repo-relative-event-file`: line experience occurrence(s)=1
 - `formal-cli-surface-check`: line experience occurrence(s)=1
+- `formal-event-relative-paths`: line experience occurrence(s)=1
 - `formal-retrospective-regeneration`: line experience occurrence(s)=1
 - `frontend-verification-package-root`: line experience occurrence(s)=1
 - `production-contracts-red`: line experience occurrence(s)=1
@@ -94,6 +103,8 @@ COMPLETED_WITH_KNOWN_GATES
 - Create and verify each temporary formal event file before invoking the append CLI, and keep rejected append attempts in the formal error stream.
 - Exercise each authority, split, policy, and evidence boundary before implementing its smallest green path.
 - Expose only typed production seams and fail closed before any helper-only fitting can run.
+- Formal evidence text must use repository-relative references and must pass sensitive-path validation before append.
+- Identity tests must use the same resolved project-root representation as the server contract; a filesystem alias must not be silently accepted as another project.
 - Keep adversarial behavior-level probes ahead of implementation and require server-owned identity, metadata, and evidence joins at every production consumer boundary.
 - Keep authority, typed family identity, and persisted support evidence as behavior-level RED probes before production repair.
 - Keep consumer fixtures at the same typed identity boundary as production packets; do not weaken the validator to accommodate stale tests.
@@ -101,6 +112,7 @@ COMPLETED_WITH_KNOWN_GATES
 - Keep every consumer fixture aligned with the complete typed family evidence contract.
 - Keep foreign-copy, memory-bypass, raw-frontend, Notebook, tamper, stale, and status probes ahead of implementation and require one server-indexed wrapper at every consumer boundary.
 - Keep public consumer APIs capability-only and bind every consumed classification field to a server-owned persisted receipt before trusting outer artifact or index digests.
+- Keep the four reviewer probes behavior-level and implement only the missing joins and adapter normalization before rerunning the original classification suites.
 - Keep the package-local runtime join typed and explicit, and leave host bootstrap composition as a separate integration boundary.
 - Keep the server-indexed wrapper as the only production consumer boundary and retain Notebook as a first-class persisted projection.
 - Keep the shared server-owned wrapper as the only classification consumer input and bind every rendered field to its receipt.
@@ -111,6 +123,7 @@ COMPLETED_WITH_KNOWN_GATES
 - Resolve the package root before running frontend verification commands in a multi-package worktree.
 - Run compileall immediately after surgical protocol edits and keep branch-local evidence green before adding the next contract.
 - Treat server-owned persisted artifact reload as a separate boundary from a green runtime return; every consumer must validate the same fold receipt contract and status/identity joins.
+- Treat the route ID join, canonical digest contract, active scope, and typed unavailable adapter as independent behavior-level probes before production implementation and retain all prior generic integrity and statistical boundaries.
 - Use the formal CLI with a repository-relative temporary event file and never edit .agent records directly.
 - Validate formal event field values against the CLI schema before append and keep the CLI as the only formal write path.
 
@@ -177,3 +190,8 @@ COMPLETED_WITH_KNOWN_GATES
 - #59: `d0123456-789a-4bcd-ef01-23456789abcd` | 2026-08-19T22:35:30.000Z | ERROR/classification_sixth_final_cli_error | incident=`d0123456-789a-4bcd-ef01-23456789abce` | lesson_key=`classification-sixth-final-cli-error` | event_sha256=`a704487b4347afaf95b22d7a0f9d5944602158aa15f05b74859a6e48ec60a659`
 - #60: `be0fa1c2-d3e4-5678-9abc-def012345678` | 2026-08-19T22:34:00.000Z | GATE/classification_sixth_final_green | incident=`be0fa1c2-d3e4-5678-9abc-def012345679` | lesson_key=`classification-sixth-final-green` | event_sha256=`67dd1f8bc743cd7d7c6ae90742473e36b41dffe3405a39b75405a6f8559b8ae2`
 - #61: `cf1ab2d3-e4f5-6789-abcd-ef0123456789` | 2026-08-19T22:35:00.000Z | STATE_CHANGE/classification_sixth_final_terminal | incident=`cf1ab2d3-e4f5-6789-abcd-ef0123456790` | lesson_key=`classification-sixth-final-terminal` | event_sha256=`12ef3c87310f2d4a2a9f47f6706b9058bc0f549436652535a01e4cb21baf72b2`
+- #62: `e7f6a5b4-c3d2-4e1f-9087-6a5b4c3d2e1f` | 2026-08-19T23:00:00.000Z | REVIEW/classification_seventh_quality_action_required | incident=`f6e5d4c3-b2a1-4987-0f6e-5d4c3b2a1f0e` | lesson_key=`classification-seventh-quality-action-required` | event_sha256=`09736aba82093d683fb993b61a952f0d046723811e2ab7bb3230b255050e27e0`
+- #63: `f8e7d6c5-b4a3-2910-8f7e-6d5c4b3a2f10` | 2026-08-19T23:09:10.000Z | FAILURE/classification_seventh_red_probes | incident=`a9b8c7d6-e5f4-3210-9a8b-7c6d5e4f3a2b` | lesson_key=`classification-seventh-remediation-red` | event_sha256=`b60fb24fdb27cc2456c0e9b29cc2c177bb192b11f9d8aa9f06f554d044efd3be`
+- #64: `c3d4e5f6-a7b8-4901-bc23-456789abcdef` | 2026-08-19T23:28:00.000Z | ERROR/classification_formal_path_redaction_error | incident=`d4e5f6a7-b8c9-4012-cd34-56789abcdef0` | lesson_key=`formal-event-relative-paths` | event_sha256=`f4f77ad5a353dcf0ec8c86a4da663dfdbf091fc629eff2fb4580dca614baa3d4`
+- #65: `a1b2c3d4-e5f6-4789-ab01-23456789abcd` | 2026-08-19T23:27:00.000Z | GAP/classification_active_identity_scope_gap | incident=`b2c3d4e5-f6a7-4890-bc12-3456789abcde` | lesson_key=`classification-resolved-project-identity` | event_sha256=`1f23a0cbc4778784e50397df13d33e6979dffe8ad295d18b3e78d109261943dc`
+- #66: `e5f6a7b8-c9d0-4123-ef45-6789abcdef01` | 2026-08-19T23:30:16.000Z | GATE/classification_seventh_package_green | incident=`f6a7b8c9-d0e1-4234-f567-89abcdef0123` | lesson_key=`classification-seventh-package-green-boundaries` | event_sha256=`00ce180f63621462e9c48c073b3f66a2eaa531c943696074aeb08f14606349ce`

@@ -10,10 +10,10 @@ const modelHash = "sha256:model";
 const classificationResultRef = `classification-evidence:${taskHash}:${splitHash}:${releasePlanHash}`;
 const serverIdentity = {
   schema_version: 1,
-  project_id: "project:sha256:" + "1".repeat(64),
-  run_id: "run:test",
+  project_id: "project:sha256:2e976514ddb95c870f6a5cc39ad82b8680258acb017646e385c11137be58514c",
+  run_id: "run-classification",
   namespace: "workbench.prediction.classification-artifacts.v1",
-  digest: "sha256:e5044e243c6bdcb2a927d17b6e6dc8aaa5ee4366d0181520ffbd4b9a9934a5b0",
+  digest: "sha256:320329e552523db557110a09c929a6314932bd072a889491345ea2006785a4f7",
 };
 const classificationFacets = ["classification", "task", "split", "holdout", "release_plan"];
 const classificationFamilyEvidence = {
@@ -211,6 +211,19 @@ describe("ReportView v1.8.9 evidence mounts", () => {
     expect(readTypedClassificationEvidence(packet)).toBeNull();
     expect(readTypedClassificationEvidence(persistedWrapper, persistedWrapper.index)).toEqual(persistedWrapper);
     expect(readTypedClassificationEvidence({ metrics: { accuracy: 0.8 } })).toBeNull();
+  });
+
+  it("binds the Report consumer to the active project/run identity", () => {
+    expect(readTypedClassificationEvidence(
+      persistedWrapper,
+      persistedWrapper.index,
+      { projectRoot: "/private/tmp/report-project", runId: "run-classification" },
+    )).toEqual(persistedWrapper);
+    expect(readTypedClassificationEvidence(
+      persistedWrapper,
+      persistedWrapper.index,
+      { projectRoot: "/private/tmp/report-project", runId: "run:test" },
+    )).toBeNull();
   });
 
   it("mounts the typed packet without recalculating or dumping unknown payloads", () => {

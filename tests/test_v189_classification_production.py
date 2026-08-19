@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from workbench.prediction import run_classification_model_v189
+from workbench.canonical import canonical_json_v1, sha256_canonical
 from workbench.predictive_research.classification_contracts import (
     ClassificationTaskSpecV1,
     DecisionPolicyV1,
@@ -24,6 +25,7 @@ from workbench.predictive_research.consumer_projection import (
     read_classification_artifacts_wrapper_from_run_root,
     read_classification_evidence_from_run_root,
 )
+from workbench.api_errors import WorkbenchAPIError
 from workbench.http import runs_routes
 
 
@@ -805,6 +807,163 @@ def test_runs_artifact_route_serves_classification_only_as_validated_wrapper(tmp
     assert listed_item["receipt_path"] == "classification_receipt.json"
     assert listed_item["receipt_sha256"] == served["receipt_sha256"]
     assert listed_item["server_identity"] == served["server_identity"]
+
+
+def test_runs_artifact_route_rejects_classification_contract_alias_returning_another_wrapper(tmp_path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-classification"
+    run_root.mkdir(parents=True)
+    (run_root / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    run_classification_model_v189(
+        frame,
+        run_root,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    canonical_record = next(item for item in index["artifacts"] if item.get("artifact_type") == "classification_artifacts")
+    index["artifacts"].append({
+        **canonical_record,
+        "artifact_id": "classification-alias",
+        "artifact_type": "classification_evidence",
+        "payload_contract": {"payload_schema": "workbench.prediction.classification-artifacts", "schema_version": 1},
+    })
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        runs_routes.download_artifact_endpoint("run-classification", "classification-alias", str(project_root))
+
+    assert exc_info.value.code == "CLASSIFICATION_ARTIFACT_IDENTITY_MISMATCH"
+
+
+@pytest.mark.parametrize("mutation", ("wrapper", "wrapper_index"))
+def test_runs_artifact_route_rejects_each_wrapper_identity_mismatch_with_exact_code(tmp_path, monkeypatch, mutation: str) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-classification"
+    run_root.mkdir(parents=True)
+    (run_root / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": []}), encoding="utf-8")
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    run_classification_model_v189(
+        frame,
+        run_root,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+    artifact_id = next(
+        item["artifact_id"]
+        for item in json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))["artifacts"]
+        if item.get("artifact_type") == "classification_artifacts"
+    )
+    wrapper = read_classification_artifacts_wrapper_from_run_root(run_root)
+    if mutation == "wrapper":
+        mutated_wrapper = {**wrapper, "artifact_id": "classification-wrapper-alias"}
+    else:
+        mutated_wrapper = {**wrapper, "index": {**wrapper["index"], "artifact_id": "classification-wrapper-alias"}}
+    monkeypatch.setattr(runs_routes, "read_classification_artifacts_wrapper_from_run_root", lambda _run_root: mutated_wrapper)
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        runs_routes.download_artifact_endpoint("run-classification", artifact_id, str(project_root))
+
+    assert exc_info.value.code == "CLASSIFICATION_ARTIFACT_IDENTITY_MISMATCH"
+
+
+def test_runs_artifact_route_does_not_treat_generic_alias_id_as_classification_wrapper(tmp_path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-generic-alias"
+    run_root.mkdir(parents=True)
+    payload_path = run_root / "generic.json"
+    payload_path.write_text('{"kind":"generic"}', encoding="utf-8")
+    payload_sha256 = hashlib.sha256(payload_path.read_bytes()).hexdigest()
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artifacts": [
+                    {
+                        "artifact_id": "classification_artifacts",
+                        "artifact_type": "generic_result",
+                        "path": "generic.json",
+                        "sha256": payload_sha256,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = runs_routes.download_artifact_endpoint("run-generic-alias", "classification_artifacts", str(project_root))
+
+    assert response.__class__.__name__ == "FileResponse"
+
+
+def test_classification_canonical_unicode_vector_matches_backend_contract() -> None:
+    value = {
+        "text": "e\u0301",
+        "composed": "é",
+        "emoji": "🧪",
+        "nested": {"ключ": "क"},
+        "number": 1.25,
+        "zero": -0.0,
+    }
+
+    assert canonical_json_v1(value) == '{"composed":"é","emoji":"🧪","nested":{"ключ":"क"},"number":1.25,"text":"é","zero":0}'
+    assert sha256_canonical(value) == "d064d3a0678569cd737b9304f5151b8752ffb506ce48dc78795c3549dd0250ba"
+
+
+def test_classification_server_identity_unicode_digest_uses_canonical_contract(tmp_path) -> None:
+    from workbench.predictive_research.persistence import classification_server_identity
+
+    identity = classification_server_identity(tmp_path / "项目" / "runs" / "run-é")
+    base = {key: identity[key] for key in ("schema_version", "project_id", "run_id", "namespace")}
+
+    assert identity["digest"] == "sha256:" + sha256_canonical(base)
+
+
+@pytest.mark.parametrize(
+    ("index_state", "expected_code"),
+    (
+        ("missing", "CLASSIFICATION_ARTIFACTS_INDEX_UNAVAILABLE"),
+        ("malformed_json", "CLASSIFICATION_ARTIFACTS_INDEX_INVALID"),
+        ("malformed_schema", "CLASSIFICATION_ARTIFACTS_INDEX_INVALID"),
+    ),
+)
+def test_agent_and_notebook_classification_consumers_return_stable_typed_index_unavailable(tmp_path, index_state: str, expected_code: str) -> None:
+    from workbench.agent.context_tools import read_classification_evidence_for_agent
+    from workbench.agent.notebook.evidence import read_classification_evidence_for_notebook
+
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    if index_state == "malformed_json":
+        (run_root / "artifacts_index.json").write_text("{", encoding="utf-8")
+    elif index_state == "malformed_schema":
+        (run_root / "artifacts_index.json").write_text(json.dumps({"schema_version": 1, "artifacts": {}}), encoding="utf-8")
+
+    shared_projection = read_classification_evidence_from_run_root(run_root, consumer="report")
+    agent_projection = read_classification_evidence_for_agent(run_root)
+    notebook_projection = read_classification_evidence_for_notebook(run_root)
+
+    expected_shared = {
+        "payload_schema": "workbench.prediction.classification-evidence.unavailable",
+        "schema_version": 1,
+        "status": "unavailable",
+        "consumer": "report",
+        "code": expected_code,
+    }
+    expected_agent = {**expected_shared, "consumer": "agent"}
+    expected_notebook = {**expected_shared, "consumer": "notebook"}
+    assert shared_projection == expected_shared
+    assert agent_projection == expected_agent
+    assert notebook_projection == expected_notebook
 
 
 def test_shared_wrapper_rejects_metrics_tamper_even_when_raw_artifact_index_hash_is_rewritten(tmp_path) -> None:

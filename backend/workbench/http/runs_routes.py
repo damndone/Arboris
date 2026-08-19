@@ -1071,7 +1071,6 @@ def download_artifact_endpoint(
     artifact_type = matched.get("artifact_type")
     is_classification_artifacts = (
         artifact_type == "classification_artifacts"
-        or artifact_id == "classification_artifacts"
         or (
             isinstance(matched.get("payload_contract"), dict)
             and matched["payload_contract"].get("payload_schema")
@@ -1082,7 +1081,6 @@ def download_artifact_endpoint(
     )
     is_generic_typed_evidence = (
         artifact_type == "classification_evidence"
-        or artifact_id == "classification_evidence"
         or (
             isinstance(matched.get("payload_contract"), dict)
             and matched["payload_contract"].get("payload_schema")
@@ -1099,6 +1097,23 @@ def download_artifact_endpoint(
                 message="The server-owned classification evidence wrapper is unavailable.",
                 details={"artifact_id": artifact_id, "run_id": run_id},
             ) from exc
+        wrapper_index = wrapper.get("index")
+        if (
+            matched.get("artifact_id") != artifact_id
+            or wrapper.get("artifact_id") != matched.get("artifact_id")
+            or not isinstance(wrapper_index, dict)
+            or wrapper_index.get("artifact_id") != matched.get("artifact_id")
+        ):
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="CLASSIFICATION_ARTIFACT_IDENTITY_MISMATCH",
+                message="The requested classification artifact is not the server-indexed wrapper artifact.",
+                details={
+                    "requested_artifact_id": artifact_id,
+                    "matched_artifact_id": matched.get("artifact_id"),
+                    "returned_artifact_id": wrapper.get("artifact_id"),
+                },
+            )
         return JSONResponse(content=wrapper)
     # Legacy non-evidence indexes occasionally contain placeholder digests;
     # preserve their read compatibility, but never expose a typed

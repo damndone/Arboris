@@ -87,6 +87,11 @@ export interface ClassificationArtifactsWrapper {
   readonly server_identity: EvidenceRecord;
 }
 
+export interface ClassificationActiveScope {
+  readonly projectRoot: string;
+  readonly runId: string;
+}
+
 const tableStyle = { fontSize: 12, borderCollapse: "collapse" as const };
 const cellStyle = { padding: "2px 10px 2px 0", textAlign: "left" as const };
 const SAFE_DISPLAY_KEYS = new Set([
@@ -171,16 +176,48 @@ function sameJson(left: unknown, right: unknown): boolean {
   }
 }
 
+function normalizeCanonicalString(value: string): string {
+  const normalized = value.normalize("NFC");
+  for (const character of normalized) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
+      throw new Error("canonical JSON does not allow surrogate code points");
+    }
+  }
+  return normalized;
+}
+
+function compareCodePointStrings(left: string, right: string): number {
+  const leftCodePoints = Array.from(left, (character) => character.codePointAt(0) ?? 0);
+  const rightCodePoints = Array.from(right, (character) => character.codePointAt(0) ?? 0);
+  const length = Math.min(leftCodePoints.length, rightCodePoints.length);
+  for (let index = 0; index < length; index += 1) {
+    if (leftCodePoints[index] !== rightCodePoints[index]) {
+      return leftCodePoints[index] - rightCodePoints[index];
+    }
+  }
+  return leftCodePoints.length - rightCodePoints.length;
+}
+
 function canonicalJson(value: unknown): string {
-  if (value === undefined) return "null";
+  if (value === undefined) throw new Error("canonical JSON does not allow undefined");
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "number") return JSON.stringify(value);
-  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("canonical JSON does not allow NaN or Infinity");
+    return Object.is(value, -0) ? "0" : JSON.stringify(value);
+  }
+  if (typeof value === "string") return JSON.stringify(normalizeCanonicalString(value));
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   const record = asRecord(value);
   if (!record) throw new Error("unsupported canonical value");
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  const normalizedEntries = Object.entries(record).map(([key, item]) => [normalizeCanonicalString(key), item] as const);
+  const uniqueKeys = new Set(normalizedEntries.map(([key]) => key));
+  if (uniqueKeys.size !== normalizedEntries.length) {
+    throw new Error("Unicode normalization produced duplicate object keys");
+  }
+  normalizedEntries.sort(([left], [right]) => compareCodePointStrings(left, right));
+  return `{${normalizedEntries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
 }
 
 function sha256(value: string): string {
@@ -248,11 +285,46 @@ function sha256(value: string): string {
   return [...state].map((word) => word.toString(16).padStart(8, "0")).join("");
 }
 
-function canonicalDigest(value: unknown): string {
+export function classificationCanonicalJson(value: unknown): string {
+  return canonicalJson(value);
+}
+
+export function classificationCanonicalDigest(value: unknown): string {
   return sha256(canonicalJson(value));
 }
 
-export function isPersistedClassificationArtifact(value: unknown): value is ClassificationArtifactsWrapper {
+export function classificationProjectId(projectRoot: string): string {
+  return `project:sha256:${sha256(projectRoot)}`;
+}
+
+function canonicalDigest(value: unknown): string {
+  try {
+    return classificationCanonicalDigest(value);
+  } catch {
+    return "";
+  }
+}
+
+function matchesActiveClassificationScope(
+  serverIdentity: EvidenceRecord,
+  activeScope?: ClassificationActiveScope,
+): boolean {
+  if (activeScope === undefined) return true;
+  return (
+    typeof activeScope.projectRoot === "string"
+    && activeScope.projectRoot.length > 0
+    && typeof activeScope.runId === "string"
+    && activeScope.runId.length > 0
+    && serverIdentity.project_id === classificationProjectId(activeScope.projectRoot)
+    && serverIdentity.run_id === activeScope.runId
+    && serverIdentity.namespace === "workbench.prediction.classification-artifacts.v1"
+  );
+}
+
+export function isPersistedClassificationArtifact(
+  value: unknown,
+  activeScope?: ClassificationActiveScope,
+): value is ClassificationArtifactsWrapper {
   const persistedInvalid = (): false => false;
   const wrapper = asRecord(value);
   const artifact = asRecord(wrapper?.artifact);
@@ -308,6 +380,7 @@ export function isPersistedClassificationArtifact(value: unknown): value is Clas
     ].sort().join("|")
     || Object.keys(contentDigests).length !== CLASSIFICATION_CONTENT_DIGEST_KEYS.length
     || CLASSIFICATION_CONTENT_DIGEST_KEYS.some((key) => !isHexDigest(contentDigests[key]))
+    || !matchesActiveClassificationScope(serverIdentity, activeScope)
   ) return persistedInvalid();
   const receiptBase = { ...receipt };
   delete receiptBase.receipt_digest;
@@ -319,8 +392,8 @@ export function isPersistedClassificationArtifact(value: unknown): value is Clas
     evaluation: canonicalDigest(artifact.evaluation),
     "evaluation.metrics": canonicalDigest(asRecord(artifact.evaluation)?.metrics),
     models: canonicalDigest(artifact.models),
-    "models.metadata": canonicalDigest(Object.fromEntries(Object.entries(asRecord(artifact.models) ?? {}).map(([modelId, model]) => [modelId, asRecord(model)?.metadata]))),
-    "models.warnings": canonicalDigest(Object.fromEntries(Object.entries(asRecord(artifact.models) ?? {}).map(([modelId, model]) => [modelId, asRecord(asRecord(model)?.metadata)?.warnings]))),
+    "models.metadata": canonicalDigest(Object.fromEntries(Object.entries(asRecord(artifact.models) ?? {}).map(([modelId, model]) => [modelId, asRecord(model)?.metadata ?? null]))),
+    "models.warnings": canonicalDigest(Object.fromEntries(Object.entries(asRecord(artifact.models) ?? {}).map(([modelId, model]) => [modelId, asRecord(asRecord(model)?.metadata)?.warnings ?? null]))),
     fit: canonicalDigest(artifact.fit),
     fold_receipts: canonicalDigest(Object.fromEntries(Object.entries(asRecord(artifact.fit)?.models ?? {}).map(([modelId, model]) => [modelId, asRecord(model)?.fold_receipts]))),
   };

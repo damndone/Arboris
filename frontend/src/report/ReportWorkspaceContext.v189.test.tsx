@@ -49,10 +49,10 @@ const modelHash = "sha256:model";
 const classificationResultRef = `classification-evidence:${taskHash}:${splitHash}:${releasePlanHash}`;
 const serverIdentity = {
   schema_version: 1,
-  project_id: "project:sha256:" + "1".repeat(64),
-  run_id: "run:test",
+  project_id: "project:sha256:2e976514ddb95c870f6a5cc39ad82b8680258acb017646e385c11137be58514c",
+  run_id: "run-classification",
   namespace: "workbench.prediction.classification-artifacts.v1",
-  digest: "sha256:e5044e243c6bdcb2a927d17b6e6dc8aaa5ee4366d0181520ffbd4b9a9934a5b0",
+  digest: "sha256:320329e552523db557110a09c929a6314932bd072a889491345ea2006785a4f7",
 };
 const classificationFacets = ["classification", "task", "split", "holdout", "release_plan"];
 const classificationFamilyEvidence = {
@@ -293,7 +293,7 @@ function WorkspaceProbe() {
 
 function renderWorkspace() {
   return render(
-    <ReportWorkspaceProvider projectRoot="/tmp/report-project">
+    <ReportWorkspaceProvider projectRoot="/private/tmp/report-project">
       <WorkspaceProbe />
     </ReportWorkspaceProvider>,
   );
@@ -311,6 +311,19 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
 
   it("requires an indexed artifact for classification provenance", () => {
     expect(readClassificationEvidencePacket(persistedClassificationArtifactsWrapper)).toBeNull();
+  });
+
+  it("accepts only the active project/run identity and rejects run:test fixtures", () => {
+    expect(readClassificationEvidencePacket(
+      persistedClassificationArtifactsWrapper,
+      indexedClassificationItem(),
+      { projectRoot: "/private/tmp/report-project", runId: "run-classification" },
+    )).not.toBeNull();
+    expect(readClassificationEvidencePacket(
+      persistedClassificationArtifactsWrapper,
+      indexedClassificationItem(),
+      { projectRoot: "/private/tmp/report-project", runId: "run:test" },
+    )).toBeNull();
   });
 
   it("rejects an indexed artifact whose receipt binding is stale", () => {
@@ -342,7 +355,7 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
 
     await waitFor(() => expect(screen.getByTestId("classification-state")).toHaveTextContent("present"));
     expect(mockArtifactJson.current).toHaveBeenCalledWith(
-      "/tmp/report-project",
+      "/private/tmp/report-project",
       "run-classification",
       "sha256:" + "a".repeat(64),
     );

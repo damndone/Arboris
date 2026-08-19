@@ -22,6 +22,7 @@ import {
 } from "./FamilyEvidence";
 import {
   ClassificationEvidence,
+  type ClassificationActiveScope,
   type ClassificationArtifactsWrapper,
 } from "./ClassificationEvidence";
 import {
@@ -38,18 +39,21 @@ import "./report.css";
 export function readTypedClassificationEvidence(
   value: unknown,
   indexedArtifact?: unknown,
+  activeScope?: ClassificationActiveScope,
 ): ClassificationArtifactsWrapper | null {
-  return readClassificationEvidencePacket(value, indexedArtifact) as ClassificationArtifactsWrapper | null;
+  return readClassificationEvidencePacket(value, indexedArtifact, activeScope) as ClassificationArtifactsWrapper | null;
 }
 
 export function ReportClassificationEvidenceMount({
   evidence,
   indexedArtifact,
+  activeScope,
 }: {
   evidence: unknown;
   indexedArtifact?: unknown;
+  activeScope?: ClassificationActiveScope;
 }) {
-  const packet = readTypedClassificationEvidence(evidence, indexedArtifact);
+  const packet = readTypedClassificationEvidence(evidence, indexedArtifact, activeScope);
   return (
     <section
       aria-label="Classification evidence"
@@ -290,6 +294,9 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         <ReportClassificationEvidenceMount
           evidence={classificationEvidenceArtifact}
           indexedArtifact={classificationEvidenceIndex}
+          activeScope={workspace.projectRoot && activeRunId
+            ? { projectRoot: workspace.projectRoot, runId: activeRunId }
+            : undefined}
         />
       )}
 

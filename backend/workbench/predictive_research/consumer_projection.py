@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import json
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ _REQUIRED = {
 }
 _CONSUMERS = frozenset({"agent", "report", "table", "compare"})
 _CLASSIFICATION_CONSUMERS = frozenset({"agent", "notebook", "report"})
+_CLASSIFICATION_UNAVAILABLE_SCHEMA = "workbench.prediction.classification-evidence.unavailable"
 _LEGACY_MESSAGE = (
     "Legacy evaluation — split protocol was not persisted. The result remains "
     "readable but is not comparable with v1.8.6 predictive-research results."
@@ -109,9 +111,7 @@ def read_prediction_evidence_from_run_root(
 def read_classification_artifacts_wrapper_from_run_root(run_root: Path) -> dict[str, Any]:
     """Reload raw classification bytes only inside a server-owned wrapper."""
 
-    index = read_json(run_root / "artifacts_index.json")
-    if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
-        raise PayloadContractError("ARTIFACT_INDEX_INVALID", "artifacts_index.json has no artifact list")
+    index = _read_classification_artifacts_index(run_root)
     records = [
         record
         for record in index["artifacts"]
@@ -190,8 +190,56 @@ def read_classification_evidence_from_run_root(
 ) -> dict[str, Any]:
     """Project evidence only after loading and validating the shared wrapper."""
 
-    wrapper = read_classification_artifacts_wrapper_from_run_root(run_root)
+    try:
+        wrapper = read_classification_artifacts_wrapper_from_run_root(run_root)
+    except PayloadContractError as exc:
+        if consumer in _CLASSIFICATION_CONSUMERS and exc.code in {
+            "CLASSIFICATION_ARTIFACTS_INDEX_UNAVAILABLE",
+            "CLASSIFICATION_ARTIFACTS_INDEX_INVALID",
+        }:
+            return _classification_unavailable_projection(consumer=consumer, code=exc.code)
+        raise
     return _project_classification_evidence(wrapper["artifact"], consumer=consumer)
+
+
+def _read_classification_artifacts_index(run_root: Path) -> dict[str, Any]:
+    """Read only the server-owned classification index with stable index errors."""
+
+    try:
+        index = read_json(run_root / "artifacts_index.json")
+    except FileNotFoundError as exc:
+        raise PayloadContractError(
+            "CLASSIFICATION_ARTIFACTS_INDEX_UNAVAILABLE",
+            "classification artifacts_index.json is unavailable",
+        ) from exc
+    except OSError as exc:
+        raise PayloadContractError(
+            "CLASSIFICATION_ARTIFACTS_INDEX_UNAVAILABLE",
+            "classification artifacts_index.json is unavailable",
+        ) from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise PayloadContractError(
+            "CLASSIFICATION_ARTIFACTS_INDEX_INVALID",
+            "classification artifacts_index.json is malformed",
+        ) from exc
+    if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
+        raise PayloadContractError(
+            "CLASSIFICATION_ARTIFACTS_INDEX_INVALID",
+            "classification artifacts_index.json has no artifact list",
+        )
+    return index
+
+
+def _classification_unavailable_projection(*, consumer: str, code: str) -> dict[str, Any]:
+    """Return the one typed unavailable shape for classification index failures."""
+
+    return {
+        "payload_schema": _CLASSIFICATION_UNAVAILABLE_SCHEMA,
+        "schema_version": 1,
+        "status": "unavailable",
+        "consumer": consumer,
+        "code": code,
+    }
 
 
 def _has_payload_contract(value: Any) -> bool:
