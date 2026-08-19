@@ -128,7 +128,16 @@ def run_acceptance(
         "V189_CANDIDATE_SHA": identity.commit_sha,
     })
     backend_paths = tuple(identity.worktree / item for item in BACKEND_TESTS)
-    backend_command = (str(identity.interpreter), "-m", "pytest", *BACKEND_TESTS, "-q", "--disable-warnings")
+    backend_command = (
+        str(identity.interpreter),
+        "-m",
+        "pytest",
+        "-p",
+        "no:cacheprovider",
+        *BACKEND_TESTS,
+        "-q",
+        "--disable-warnings",
+    )
     results = [
         _command_result("candidate_backend", backend_command, identity.worktree, environment, backend_paths)
     ]
