@@ -1,10 +1,10 @@
-"""Untrusted plan IR, server compilation records, confirmations and failures.
+"""Untrusted plan IR, compilation records, confirmations and failures.
 
-The objects here are intentionally separate from runtime execution.  A
-client may serialize a draft or a parsed persistence record, but only a
-``CompilationRecordStoreV1`` can issue the process-bound reference consumed by
-the admission gate.  A field named ``trusted`` or a signature-looking string
-is never used as authority.
+The objects here are intentionally separate from runtime execution.  Drafts
+and historical records may be parsed, but this C0 package has no trusted host
+compiler wiring and therefore cannot mint runtime authority.  Host-backed
+compilation is an explicit typed integration seam; a field named ``trusted``
+or a signature-looking string is never used as authority.
 """
 
 from __future__ import annotations
@@ -16,8 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from functools import wraps
-from threading import Lock
-from typing import Any
+from typing import Any, Protocol
 
 from workbench.canonical import CanonicalJSONError, canonical_json_v1, sha256_canonical
 from workbench.contracts.common.contract_ref import ContractRefV1
@@ -30,6 +29,7 @@ _DRAFT_SCHEMA = "draft-agent-plan.v1"
 _COMPILED_SCHEMA = "compiled-workflow.v1"
 _RECORD_SCHEMA = "compilation-record.v1"
 _SERVER_DRAFT_REF_SCHEMA = "server-draft-plan-ref.v1"
+_HOST_COMPILATION_RECEIPT_SCHEMA = "host-compilation-receipt.v1"
 _REFERENCE_FIELDS = {"record_id", "record_digest", "semantic_plan_hash"}
 _DRAFT_FIELDS = {
     "schema_version",
@@ -386,50 +386,40 @@ _DRAFT_DURABLE_ALLOWED_KEYS = (
     | _DRAFT_DURABLE_MAPPING_KEYS
     | _DRAFT_DURABLE_ARRAY_NUMBER_KEYS
 )
-# The compiler capability and the exact record object are kept server-side.
-# Neither appears on the wire or on ``CompilationRecordV1`` itself.  This is
-# deliberately an identity registry rather than a client-controlled marker:
-# parsing/constructing a record can never upgrade it to server authority.
-_SERVER_COMPILER_CAPABILITIES: dict[int, object] = {}
-_SERVER_COMPILER_ISSUER_CAPABILITIES: dict[int, object] = {}
-_SERVER_DRAFT_REFERENCES: dict[int, tuple[object, object, object]] = {}
-_SERVER_DRAFT_REGISTRATION_LOCK = Lock()
-_SERVER_DRAFT_SEQUENCE = 0
-_SERVER_COMPILATION_SEQUENCE = 0
-_SERVER_COMPILER_VERSION = "compiler:1.8.9"
-_SERVER_AUTHORIZED_COMPILED_WORKFLOWS: dict[int, tuple[object, object, str]] = {}
-_SERVER_AUTHORIZED_RECORDS: dict[int, tuple[object, object]] = {}
-
-
-def _is_server_authorized_record(value: object) -> bool:
-    authority = _SERVER_AUTHORIZED_RECORDS.get(id(value))
-    if authority is None or authority[0] is not value:
-        return False
-    capability = authority[1]
-    return _SERVER_COMPILER_CAPABILITIES.get(id(capability)) is capability
-
-
-def _is_server_authorized_compiled(value: object, capability: object) -> bool:
-    authority = _SERVER_AUTHORIZED_COMPILED_WORKFLOWS.get(id(value))
-    if (
-        authority is None
-        or authority[0] is not value
-        or authority[1] is not capability
-        or _SERVER_COMPILER_CAPABILITIES.get(id(capability)) is not capability
-    ):
-        return False
-    try:
-        return authority[2] == sha256_canonical(value.to_dict())
-    except (AttributeError, CanonicalJSONError, ContractError, RecursionError, TypeError, ValueError):
-        return False
-
-
 class PlanningContractError(ContractError):
     """A planning contract failure with a stable public code."""
 
     def __init__(self, code: str, message: str | None = None) -> None:
         self.code = code
         super().__init__(message or code)
+
+
+class HostCompilationAuthorityPortV1(Protocol):
+    """Typed seam owned by the external supervisor-backed compiler host.
+
+    This C0 line deliberately ships no implementation of the port.  A future
+    integration line must provide an out-of-process host channel that verifies
+    the draft, scope and record before returning a runtime reference.  The
+    contract package never treats a Python object, serialized payload or local
+    token as that trust root.
+    """
+
+    def issue_compilation_record(
+        self,
+        receipt: "HostCompilationReceiptV1",
+    ) -> "ServerCompilationRecordReferenceV1": ...
+
+    def resolve_compilation_record(
+        self,
+        receipt: "HostCompilationReceiptV1",
+    ) -> "CompilationRecordV1": ...
+
+
+def _host_compiler_required(action: str) -> PlanningContractError:
+    return _error(
+        "HOST_COMPILER_INTEGRATION_REQUIRED",
+        f"{action} requires a trusted supervisor-backed host compiler",
+    )
 
 
 class PlanRiskLevelV1(str, Enum):
@@ -1254,30 +1244,18 @@ class CompiledWorkflowV1:
         )
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class ServerDraftPlanReferenceV1:
-    """Opaque server registration for a server-created draft plan copy."""
+    """Untrusted wire metadata; it is never a live registration authority."""
 
     draft_ref: str
     semantic_plan_hash: str
     draft_digest: str
 
-    @classmethod
-    def _new(
-        cls,
-        *,
-        draft_ref: str,
-        semantic_plan_hash: str,
-        draft_digest: str,
-    ) -> "ServerDraftPlanReferenceV1":
-        _require_opaque_ref(draft_ref, "draft_ref", ("draft-plan:",))
-        _digest(semantic_plan_hash, "semantic_plan_hash")
-        _digest(draft_digest, "draft_digest")
-        value = object.__new__(cls)
-        object.__setattr__(value, "draft_ref", draft_ref)
-        object.__setattr__(value, "semantic_plan_hash", semantic_plan_hash)
-        object.__setattr__(value, "draft_digest", draft_digest)
-        return value
+    def __post_init__(self) -> None:
+        _require_opaque_ref(self.draft_ref, "draft_ref", ("draft-plan:",))
+        _digest(self.semantic_plan_hash, "semantic_plan_hash")
+        _digest(self.draft_digest, "draft_digest")
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -1297,7 +1275,7 @@ class ServerDraftPlanReferenceV1:
         )
         if value["schema_version"] != _SERVER_DRAFT_REF_SCHEMA:
             raise _error("PLANNING_SCHEMA_INVALID", "server draft reference schema_version is invalid")
-        return cls._new(
+        return cls(
             draft_ref=value["draft_ref"],  # type: ignore[arg-type]
             semantic_plan_hash=value["semantic_plan_hash"],  # type: ignore[arg-type]
             draft_digest=value["draft_digest"],  # type: ignore[arg-type]
@@ -1333,25 +1311,118 @@ class CompilationRecordReferenceV1:
         )
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
+class HostCompilationReceiptV1:
+    """Untrusted metadata returned by a supervisor-backed host channel.
+
+    This value is deliberately only a typed carrier.  It is not a signature,
+    key, capability token or local proof, and the C0 store never accepts it as
+    authority.  The next host-integration line must validate it at the remote
+    boundary before issuing or resolving a runtime reference.
+    """
+
+    receipt_id: str
+    compilation_record_ref: CompilationRecordReferenceV1
+    scope_ref: str
+    principal_ref: str
+    session_ref: str
+    project_ref: str
+    semantic_plan_hash: str
+    issued_at: str
+    expires_at: str
+
+    def __post_init__(self) -> None:
+        _require_opaque_ref(self.receipt_id, "receipt_id", ("receipt:",))
+        if type(self.compilation_record_ref) is not CompilationRecordReferenceV1:
+            raise _error("HOST_COMPILATION_RECEIPT_INVALID", "compilation_record_ref is invalid")
+        _require_opaque_ref(
+            self.scope_ref,
+            "scope_ref",
+            ("project:", "workspace:", "notebook:", "scope:"),
+        )
+        _require_opaque_ref(self.principal_ref, "principal_ref", ("principal:",))
+        _require_opaque_ref(self.session_ref, "session_ref", ("session:",))
+        _require_opaque_ref(
+            self.project_ref,
+            "project_ref",
+            ("project:", "workspace:", "notebook:", "scope:"),
+        )
+        _digest(self.semantic_plan_hash, "semantic_plan_hash")
+        if self.semantic_plan_hash != self.compilation_record_ref.semantic_plan_hash:
+            raise _error("HOST_COMPILATION_RECEIPT_INVALID", "receipt hash mismatches record reference")
+        issued = _parse_timestamp(self.issued_at, "issued_at")
+        expires = _parse_timestamp(self.expires_at, "expires_at")
+        if expires <= issued:
+            raise _error("HOST_COMPILATION_RECEIPT_INVALID", "receipt expiry must be after issue time")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": _HOST_COMPILATION_RECEIPT_SCHEMA,
+            "receipt_id": self.receipt_id,
+            "compilation_record_ref": self.compilation_record_ref.to_dict(),
+            "scope_ref": self.scope_ref,
+            "principal_ref": self.principal_ref,
+            "session_ref": self.session_ref,
+            "project_ref": self.project_ref,
+            "semantic_plan_hash": self.semantic_plan_hash,
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
+        }
+
+    @classmethod
+    @_wire_boundary
+    def from_dict(cls, value: dict[str, object]) -> "HostCompilationReceiptV1":
+        value = _wire(
+            value,
+            {
+                "schema_version",
+                "receipt_id",
+                "compilation_record_ref",
+                "scope_ref",
+                "principal_ref",
+                "session_ref",
+                "project_ref",
+                "semantic_plan_hash",
+                "issued_at",
+                "expires_at",
+            },
+            "host_compilation_receipt",
+        )
+        if value["schema_version"] != _HOST_COMPILATION_RECEIPT_SCHEMA:
+            raise _error("PLANNING_SCHEMA_INVALID", "host compilation receipt schema_version is invalid")
+        raw_reference = value["compilation_record_ref"]
+        if type(raw_reference) is not dict:
+            raise _error("PLANNING_NESTED_DICT_REQUIRED", "host compilation receipt reference must be a dict")
+        return cls(
+            receipt_id=value["receipt_id"],  # type: ignore[arg-type]
+            compilation_record_ref=CompilationRecordReferenceV1.from_dict(raw_reference),
+            scope_ref=value["scope_ref"],  # type: ignore[arg-type]
+            principal_ref=value["principal_ref"],  # type: ignore[arg-type]
+            session_ref=value["session_ref"],  # type: ignore[arg-type]
+            project_ref=value["project_ref"],  # type: ignore[arg-type]
+            semantic_plan_hash=value["semantic_plan_hash"],  # type: ignore[arg-type]
+            issued_at=value["issued_at"],  # type: ignore[arg-type]
+            expires_at=value["expires_at"],  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True)
 class ServerCompilationRecordReferenceV1:
+    """Untrusted reference metadata returned by a host integration seam.
+
+    Constructing this value is never sufficient for runtime authority.  The
+    C0 store has no host channel and therefore rejects every resolution
+    attempt; a later host-backed store must validate the reference remotely.
+    """
+
     record_id: str
     record_digest: str
     semantic_plan_hash: str
-    _issuer_token: object
 
-    @classmethod
-    def _issue(
-        cls,
-        reference: CompilationRecordReferenceV1,
-        issuer_token: object,
-    ) -> "ServerCompilationRecordReferenceV1":
-        value = object.__new__(cls)
-        object.__setattr__(value, "record_id", reference.record_id)
-        object.__setattr__(value, "record_digest", reference.record_digest)
-        object.__setattr__(value, "semantic_plan_hash", reference.semantic_plan_hash)
-        object.__setattr__(value, "_issuer_token", issuer_token)
-        return value
+    def __post_init__(self) -> None:
+        _text(self.record_id, "record_id")
+        _digest(self.record_digest, "record_digest")
+        _digest(self.semantic_plan_hash, "semantic_plan_hash")
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -1477,20 +1548,9 @@ class CompilationRecordV1:
         _compiler_capability: object | None = None,
         **kwargs: Any,
     ) -> "CompilationRecordV1":
-        """Private server seam requiring a registered compiler capability."""
+        """Removed local minting seam; host integration owns record issuance."""
 
-        if (
-            type(compiled) is not CompiledWorkflowV1
-            or _compiler_capability is None
-            or not _is_server_authorized_compiled(compiled, _compiler_capability)
-        ):
-            raise _error(
-                "SERVER_COMPILER_AUTHORITY_REQUIRED",
-                "private record construction requires a registered server compiler capability",
-            )
-        record = cls.from_compiled(compiled, **kwargs)
-        _SERVER_AUTHORIZED_RECORDS[id(record)] = (record, _compiler_capability)
-        return record
+        raise _host_compiler_required("server compilation record construction")
 
     def _record_payload(self) -> dict[str, object]:
         return {
@@ -1555,23 +1615,16 @@ class CompilationRecordV1:
 
 
 class CompilationRecordStoreV1:
-    """The only issuer/verifier seam for server compilation references."""
+    """Read-only C0 store; host-backed issuance is intentionally unavailable."""
 
     def __init__(self) -> None:
-        self._issuer_token = object()
-        self._records: dict[tuple[str, str], CompilationRecordV1] = {}
+        pass
 
     def issue(self, record: CompilationRecordV1) -> ServerCompilationRecordReferenceV1:
-        raise _error(
-            "SERVER_COMPILER_AUTHORITY_REQUIRED",
-            "client records cannot be issued; server compiler authority is required",
-        )
+        raise _host_compiler_required("compilation record issuance")
 
     def _issue_server(self, record: CompilationRecordV1) -> ServerCompilationRecordReferenceV1:
-        if type(record) is not CompilationRecordV1 or not _is_server_authorized_record(record):
-            raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "record was not produced by the server compiler")
-        self._records[(record.record_id, record.record_digest)] = record
-        return ServerCompilationRecordReferenceV1._issue(record.reference, self._issuer_token)
+        raise _host_compiler_required("server compilation record issuance")
 
     def resolve_client_reference(
         self,
@@ -1579,56 +1632,27 @@ class CompilationRecordStoreV1:
     ) -> tuple[CompilationRecordV1, ServerCompilationRecordReferenceV1]:
         if type(reference) is not CompilationRecordReferenceV1:
             raise _error("SERVER_RECORD_REFERENCE_REQUIRED", "client input must be an untrusted record reference")
-        record = self._records.get((reference.record_id, reference.record_digest))
-        if record is None or record.semantic_plan_hash != reference.semantic_plan_hash:
-            raise _error("SERVER_RECORD_UNRESOLVED", "compilation record reference is not server-resolved")
-        return record, ServerCompilationRecordReferenceV1._issue(record.reference, self._issuer_token)
+        raise _host_compiler_required("compilation record resolution")
 
     def resolve(self, reference: ServerCompilationRecordReferenceV1) -> CompilationRecordV1:
         if type(reference) is not ServerCompilationRecordReferenceV1:
             raise _error("SERVER_RECORD_REFERENCE_REQUIRED", "runtime requires a server-owned record reference")
-        if reference._issuer_token is not self._issuer_token:
-            raise _error("SERVER_RECORD_REFERENCE_REQUIRED", "record reference was not issued by this server store")
-        record = self._records.get((reference.record_id, reference.record_digest))
-        if record is None or record.semantic_plan_hash != reference.semantic_plan_hash:
-            raise _error("SERVER_RECORD_UNRESOLVED", "server compilation record is unavailable")
-        return record
+        raise _host_compiler_required("compilation record resolution")
 
 
 class ServerCompilationRecordIssuerV1:
-    """Server-owned compiler/issuer seam; persistence parsing is never authority."""
+    """Retired C0 compatibility symbol.
+
+    The former public issuer minted local process tokens and is no longer a
+    security authority.  Keeping the symbol only gives old imports a stable,
+    typed failure while the host-backed Compiler integration is assembled.
+    """
 
     def __init__(self, store: CompilationRecordStoreV1 | None = None) -> None:
-        if store is not None and type(store) is not CompilationRecordStoreV1:
-            raise _error("SERVER_RECORD_STORE_REQUIRED", "server compiler requires a compilation record store")
-        self.store = store
-        capability = object()
-        _SERVER_COMPILER_CAPABILITIES[id(capability)] = capability
-        _SERVER_COMPILER_ISSUER_CAPABILITIES[id(self)] = capability
+        raise _host_compiler_required("legacy compilation issuer construction")
 
     def register_draft(self, draft: DraftAgentPlanV1) -> ServerDraftPlanReferenceV1:
-        """Create a server-owned draft copy and return its opaque registration."""
-
-        if type(draft) is not DraftAgentPlanV1:
-            raise _error("SERVER_DRAFT_REQUIRED", "server compiler requires a typed draft plan")
-        capability = _SERVER_COMPILER_ISSUER_CAPABILITIES.get(id(self))
-        if capability is None or _SERVER_COMPILER_CAPABILITIES.get(id(capability)) is not capability:
-            raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "server compiler capability is unavailable")
-        try:
-            server_draft = DraftAgentPlanV1.from_dict(draft.to_dict())
-        except (AttributeError, PlanningContractError, TypeError, ValueError) as exc:
-            raise _error("SERVER_DRAFT_INVALID", "server compiler could not register the draft plan") from exc
-        global _SERVER_DRAFT_SEQUENCE
-        with _SERVER_DRAFT_REGISTRATION_LOCK:
-            _SERVER_DRAFT_SEQUENCE += 1
-            draft_ref = f"draft-plan:{_SERVER_DRAFT_SEQUENCE}"
-            value = ServerDraftPlanReferenceV1._new(
-                draft_ref=draft_ref,
-                semantic_plan_hash=server_draft.semantic_plan_hash,
-                draft_digest=sha256_canonical(server_draft.to_dict()),
-            )
-            _SERVER_DRAFT_REFERENCES[id(value)] = (value, capability, server_draft)
-            return value
+        raise _host_compiler_required("legacy draft registration")
 
     def compile_workflow(
         self,
@@ -1640,104 +1664,13 @@ class ServerCompilationRecordIssuerV1:
         preview_fingerprint: object = None,
         plan_diff: object = None,
     ) -> CompiledWorkflowV1:
-        """Compile only from a live server-registered draft reference.
-
-        ``compiled`` is retained as a positional compatibility trap so an old
-        caller gets a stable contract error rather than Python's ``TypeError``.
-        A client/wire compiled object is never promoted; this seam constructs
-        the compiled workflow from the server-owned draft copy itself. Compiler
-        provenance is generated inside this seam, so caller-supplied compiler
-        versions, execution identities, previews, or diffs are rejected.
-        """
-
-        if type(draft_reference) is not ServerDraftPlanReferenceV1:
-            raise _error(
-                "SERVER_DRAFT_REGISTRATION_REQUIRED",
-                "server compiler requires a live registered draft reference",
-            )
-        if compiled is not None:
-            raise _error(
-                "SERVER_COMPILED_INPUT_FORBIDDEN",
-                "server compiler constructs compiled workflows; client compiled input is not accepted",
-            )
-        if any(
-            value is not None
-            for value in (compiler_version, server_execution_identity, preview_fingerprint, plan_diff)
-        ):
-            raise _error(
-                "SERVER_COMPILER_PROVENANCE_FORBIDDEN",
-                "compiler provenance is generated by the server compiler",
-            )
-        reference_entry = _SERVER_DRAFT_REFERENCES.get(id(draft_reference))
-        if reference_entry is None or reference_entry[0] is not draft_reference:
-            raise _error("SERVER_DRAFT_REGISTRATION_REQUIRED", "draft reference was not issued by this server compiler")
-        capability = _SERVER_COMPILER_ISSUER_CAPABILITIES.get(id(self))
-        if capability is None or reference_entry[1] is not capability:
-            raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "draft reference is outside this server compiler scope")
-        server_draft = reference_entry[2]
-        if type(server_draft) is not DraftAgentPlanV1:
-            raise _error("SERVER_DRAFT_INVALID", "registered server draft is invalid")
-        if (
-            draft_reference.semantic_plan_hash != server_draft.semantic_plan_hash
-            or draft_reference.draft_digest != sha256_canonical(server_draft.to_dict())
-        ):
-            raise _error("SERVER_DRAFT_HASH_MISMATCH", "compiled workflow does not match the registered server draft")
-        global _SERVER_COMPILATION_SEQUENCE
-        with _SERVER_DRAFT_REGISTRATION_LOCK:
-            _SERVER_COMPILATION_SEQUENCE += 1
-            server_execution_identity = f"compile:server:{_SERVER_COMPILATION_SEQUENCE}"
-        compiler_version = _SERVER_COMPILER_VERSION
-        preview_fingerprint = sha256_canonical(
-            {
-                "semantic_plan_hash": server_draft.semantic_plan_hash,
-                "compiler_version": compiler_version,
-                "draft_ref": draft_reference.draft_ref,
-            }
-        )
-        plan_diff = {
-            "effect": server_draft.effect.value,
-            "data_impact": "read_dataset" if "read_refs" in server_draft.data_impact else "none",
-        }
-        try:
-            server_compiled = CompiledWorkflowV1.from_draft(
-                server_draft,
-                compiler_version=compiler_version,
-                server_execution_identity=server_execution_identity,
-                preview_fingerprint=preview_fingerprint,
-                plan_diff=plan_diff,
-                risk_level=server_draft.risk_level,
-                effect=server_draft.effect,
-                resource_budget=server_draft.resource_budget,
-                contract_snapshot_refs=server_draft.contract_snapshot_refs,
-                catalog_snapshot_ref=server_draft.catalog_snapshot_ref,
-            )
-        except (AttributeError, CanonicalJSONError, RecursionError, PlanningContractError, TypeError, ValueError) as exc:
-            raise _error("SERVER_COMPILE_INVALID", "server compiler could not compile the registered draft") from exc
-        _SERVER_AUTHORIZED_COMPILED_WORKFLOWS[id(server_compiled)] = (
-            server_compiled,
-            capability,
-            sha256_canonical(server_compiled.to_dict()),
-        )
-        return server_compiled
+        raise _host_compiler_required("legacy workflow compilation")
 
     def compile_record(self, compiled: CompiledWorkflowV1, **kwargs: Any) -> CompilationRecordV1:
-        if type(compiled) is not CompiledWorkflowV1:
-            raise _error("SERVER_COMPILED_REQUIRED", "server compiler requires a compiled workflow")
-        capability = _SERVER_COMPILER_ISSUER_CAPABILITIES.get(id(self))
-        if capability is None or not _is_server_authorized_compiled(compiled, capability):
-            raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "workflow was not produced by this server compiler seam")
-        return CompilationRecordV1._from_server_compiled(
-            compiled,
-            _compiler_capability=capability,
-            **kwargs,
-        )
+        raise _host_compiler_required("legacy compilation record construction")
 
     def issue(self, record: CompilationRecordV1) -> ServerCompilationRecordReferenceV1:
-        if self.store is None:
-            raise _error("SERVER_RECORD_STORE_REQUIRED", "server issuer requires a record store")
-        if type(record) is not CompilationRecordV1 or not _is_server_authorized_record(record):
-            raise _error("SERVER_COMPILER_AUTHORITY_REQUIRED", "record was not produced by this server compiler seam")
-        return self.store._issue_server(record)
+        raise _host_compiler_required("legacy compilation record issuance")
 
 
 @dataclass(frozen=True)
@@ -2022,10 +1955,11 @@ __all__ = [
     "ConfirmationBindingStoreV1",
     "DraftAgentPlanV1",
     "FailureEnvelopeV1",
+    "HostCompilationReceiptV1",
     "PlanEffectV1",
     "PlanRiskLevelV1",
+    "HostCompilationAuthorityPortV1",
     "PlanningContractError",
     "ServerDraftPlanReferenceV1",
     "ServerCompilationRecordReferenceV1",
-    "ServerCompilationRecordIssuerV1",
 ]
