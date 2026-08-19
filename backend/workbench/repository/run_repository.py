@@ -9,6 +9,7 @@ symbols are re-exported from ``workbench.api`` for backward-compatible imports.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,8 @@ from ..artifacts import read_json
 
 # Highest artifacts_index.json schema_version this server understands.
 SUPPORTED_REGISTRY_VERSION = 1
+ERROR_ARTIFACTS_INDEX_UNAVAILABLE = "ARTIFACTS_INDEX_UNAVAILABLE"
+ERROR_ARTIFACTS_INDEX_INVALID = "ARTIFACTS_INDEX_INVALID"
 
 
 def _resolve_project_root(run_root: Path) -> Path:
@@ -109,8 +112,32 @@ def _artifact_counts(run_root: Path) -> dict[str, int]:
 def _read_artifacts_index(run_root: Path) -> dict:
     index_path = run_root / "artifacts_index.json"
     if not index_path.is_file():
-        return {"artifacts": []}
-    data = read_json(index_path)
+        raise WorkbenchAPIError(
+            status_code=503,
+            code=ERROR_ARTIFACTS_INDEX_UNAVAILABLE,
+            message="artifacts_index.json is unavailable",
+            details={"run_id": run_root.name},
+        )
+    try:
+        data = read_json(index_path)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code=ERROR_ARTIFACTS_INDEX_INVALID,
+            message="artifacts_index.json is malformed",
+            details={"run_id": run_root.name},
+        ) from exc
+    if (
+        not isinstance(data, dict)
+        or not isinstance(data.get("artifacts", []), list)
+        or not all(isinstance(record, dict) for record in data.get("artifacts", []))
+    ):
+        raise WorkbenchAPIError(
+            status_code=500,
+            code=ERROR_ARTIFACTS_INDEX_INVALID,
+            message="artifacts_index.json has an invalid artifact list",
+            details={"run_id": run_root.name},
+        )
     raw = data.get("schema_version", 1)
     if not isinstance(raw, int) or isinstance(raw, bool):
         raise WorkbenchAPIError(

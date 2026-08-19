@@ -7,7 +7,9 @@ from dataclasses import replace
 
 import pandas as pd
 import pytest
+from fastapi.testclient import TestClient
 
+from workbench.api import app
 from workbench.prediction import run_classification_model_v189
 from workbench.canonical import canonical_json_v1, sha256_canonical
 from workbench.predictive_research.classification_contracts import (
@@ -809,6 +811,55 @@ def test_runs_artifact_route_serves_classification_only_as_validated_wrapper(tmp
     assert listed_item["server_identity"] == served["server_identity"]
 
 
+@pytest.mark.parametrize(
+    ("index_state", "expected_code"),
+    (
+        ("missing", "ARTIFACTS_INDEX_UNAVAILABLE"),
+        ("malformed_json", "ARTIFACTS_INDEX_INVALID"),
+    ),
+)
+def test_runs_artifact_list_red_probe_rejects_missing_or_malformed_index(
+    tmp_path, index_state: str, expected_code: str
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-artifacts-list"
+    run_root.mkdir(parents=True)
+    if index_state == "malformed_json":
+        (run_root / "artifacts_index.json").write_text("{", encoding="utf-8")
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        runs_routes.list_artifacts_endpoint("run-artifacts-list", str(project_root))
+
+    assert exc_info.value.code == expected_code
+
+
+@pytest.mark.parametrize(
+    ("index_state", "expected_status", "expected_code"),
+    (
+        ("missing", 503, "ARTIFACTS_INDEX_UNAVAILABLE"),
+        ("malformed_json", 500, "ARTIFACTS_INDEX_INVALID"),
+    ),
+)
+def test_runs_artifact_list_http_boundary_returns_typed_error_without_raw_exception(
+    tmp_path, index_state: str, expected_status: int, expected_code: str
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-artifacts-http"
+    run_root.mkdir(parents=True)
+    if index_state == "malformed_json":
+        (run_root / "artifacts_index.json").write_text("{", encoding="utf-8")
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-artifacts-http/artifacts",
+        params={"project_root": str(project_root)},
+    )
+    body = response.json()
+
+    assert response.status_code == expected_status
+    assert body["error"]["code"] == expected_code
+    assert "JSONDecodeError" not in response.text
+
+
 def test_runs_artifact_route_rejects_classification_contract_alias_returning_another_wrapper(tmp_path) -> None:
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-classification"
@@ -1044,11 +1095,7 @@ def test_index_hash_and_outer_artifact_updates_cannot_self_sign_invalid_fold_sup
     with pytest.raises(ContractError) as exc_info:
         read_classification_evidence_from_run_root(tmp_path, consumer="report")
 
-    assert exc_info.value.code in {
-        "CLASSIFICATION_PERSISTED_RECEIPT_INVALID",
-        "CLASSIFICATION_PERSISTED_FOLD_RECEIPTS_INVALID",
-        "CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID",
-    }
+    assert exc_info.value.code == "CLASSIFICATION_PERSISTED_RECEIPT_INVALID"
 
 
 def test_content_level_receipt_binding_rejects_metrics_and_model_metadata_tampering(tmp_path) -> None:
@@ -1174,7 +1221,7 @@ def test_persisted_classification_artifact_rejects_degraded_evidence_promoted_to
     with pytest.raises(ContractError) as exc_info:
         _project_classification_evidence(persisted, consumer="report")
 
-    assert exc_info.value.code in {"CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID", "CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID"}
+    assert exc_info.value.code == "CLASSIFICATION_EVIDENCE_C0_STATUS_INVALID"
 
 
 def test_group_validation_fold_red_probe_rejects_single_class_validation_support(tmp_path) -> None:

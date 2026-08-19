@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api";
 import { ReportWorkspaceProvider, readClassificationEvidencePacket, useReportWorkspace } from "./ReportWorkspaceContext";
 
 const CLASSIFICATION_ARTIFACTS_SCHEMA = "workbench.prediction.classification-artifacts";
@@ -9,6 +10,7 @@ const mockForest = vi.hoisted(() => ({ current: null as unknown }));
 const mockArtifacts = vi.hoisted(() => ({
   current: { groups: [] as Array<{ artifact_type: string; items: Array<Record<string, unknown>> }> },
 }));
+const mockArtifactsError = vi.hoisted(() => ({ current: null as Error | null }));
 const mockArtifactJson = vi.hoisted(() => ({ current: vi.fn() }));
 
 vi.mock("../workbench/ForestContext", () => ({
@@ -36,7 +38,9 @@ vi.mock("../api", async (importOriginal) => {
       post_estimation_results: [],
       prediction_evidence: null,
     }),
-    fetchRunArtifacts: () => Promise.resolve(mockArtifacts.current),
+    fetchRunArtifacts: () => mockArtifactsError.current
+      ? Promise.reject(mockArtifactsError.current)
+      : Promise.resolve(mockArtifacts.current),
     fetchArtifactJson: (...args: unknown[]) => mockArtifactJson.current(...args),
   };
 });
@@ -287,6 +291,7 @@ function WorkspaceProbe() {
       <output data-testid="classification-context">
         {packet === undefined ? "" : JSON.stringify(packet)}
       </output>
+      <output data-testid="artifact-inventory-error">{workspace.figureInventoryError ?? ""}</output>
     </>
   );
 }
@@ -306,6 +311,7 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
       forest: { nodes: [], edges: [], heads: [] },
     };
     mockArtifacts.current = { groups: [] };
+    mockArtifactsError.current = null;
     mockArtifactJson.current.mockReset();
   });
 
@@ -395,6 +401,19 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     renderWorkspace();
 
     await waitFor(() => expect(mockArtifactJson.current).not.toHaveBeenCalled());
+    expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE");
+    expect(screen.getByTestId("classification-context")).not.toHaveTextContent("secret");
+  });
+
+  it.each([
+    ["ARTIFACTS_INDEX_UNAVAILABLE", 503],
+    ["ARTIFACTS_INDEX_INVALID", 500],
+  ])("preserves a typed artifact-list failure and blocks Report continuation (%s)", async (code, status) => {
+    mockArtifactsError.current = new ApiError(status, "server artifact inventory unavailable", code);
+
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByTestId("artifact-inventory-error")).toHaveTextContent(code));
     expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE");
     expect(screen.getByTestId("classification-context")).not.toHaveTextContent("secret");
   });

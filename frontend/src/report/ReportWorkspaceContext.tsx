@@ -48,6 +48,7 @@ import {
   editReportRevision,
 } from "./reportDocument";
 import {
+  ApiError,
   fetchArtifactJson,
   fetchRunArtifacts,
   fetchRunDetail,
@@ -80,6 +81,14 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function artifactInventoryFailureMessage(error: unknown): string {
+  const code = error instanceof ApiError ? error.code : null;
+  if (code === "ARTIFACTS_INDEX_UNAVAILABLE" || code === "ARTIFACTS_INDEX_INVALID") {
+    return `Unable to load the figure inventory (server artifact index: ${code}); report generation is disabled.`;
+  }
+  return "Unable to load the figure inventory; report generation is disabled.";
 }
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
@@ -520,8 +529,11 @@ export function ReportWorkspaceProvider({
           );
         }
       })
-      .catch(() => {
-        if (!cancelled) setFamilyEvidenceArtifacts({});
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setFamilyEvidenceArtifacts({});
+          setFigureInventoryError(artifactInventoryFailureMessage(error));
+        }
       });
     return () => {
       cancelled = true;
@@ -622,11 +634,11 @@ export function ReportWorkspaceProvider({
           setTimeSeriesArtifacts(Object.fromEntries(resolvedTimeSeries.filter((item) => item !== null)));
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setReportFigures([]);
           setTimeSeriesArtifacts({});
-          setFigureInventoryError("Unable to load the run figure inventory; report generation is disabled.");
+          setFigureInventoryError(artifactInventoryFailureMessage(error));
         }
       })
       .finally(() => {
@@ -786,6 +798,10 @@ export function ReportWorkspaceProvider({
 
   async function handleGenerate(options: ReportGenerationOptions = {}): Promise<boolean> {
     if (!table) return false;
+    if (figureInventoryError !== null) {
+      setError(figureInventoryError);
+      return false;
+    }
     const evidence = options.evidence ?? {
       facts: allFacts.map(cloneFact),
       scope: {
