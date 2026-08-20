@@ -52,7 +52,12 @@ from ..model_terms import (
     polynomial_column_name,
 )
 from ..predictive_research.contracts import FeatureRecipeV1
-from ..reporting import render_html_report
+from ..reporting import (
+    WorkflowReportPayloadV1,
+    WorkflowReportStepV1,
+    issue_workflow_report_writer,
+    render_html_report,
+)
 from ..repository.run_repository import _read_artifacts_index
 from ..statistical_exploration import (
     ExplorationSpec,
@@ -7449,53 +7454,72 @@ def _execute_workflow_report(
         )
     finally:
         collection_output.close()
-    view_model = {
-        "title": "Statistical workflow report",
-        "facts": [
-            f"Workflow steps completed: {len(steps)}.",
-            f"Workflow id: {draft.workflow_id}",
-            f"Source rows: {next(iter(validated_previous.values()))['row_counts'].get('source', 0) if validated_previous else 0}",
-        ],
-        "claims": [],
-        "warnings": [],
-        "descriptive_stats": [],
-        "exploration": collection,
-    }
+    report_payload = WorkflowReportPayloadV1(
+        workflow_id=draft.workflow_id,
+        workflow_plan_fingerprint=draft.plan_fingerprint,
+        steps=tuple(
+            WorkflowReportStepV1(
+                step_id=step_id,
+                status=value["status"],
+                artifact_ids=tuple(value["artifact_ids"]),
+            )
+            for step_id, value in steps.items()
+        ),
+        exploration_log=tuple(
+            json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            for event in events
+        ),
+        source_rows=(
+            next(iter(validated_previous.values()))["row_counts"].get("source", 0)
+            if validated_previous
+            else 0
+        ),
+    )
+    report_writer = issue_workflow_report_writer(
+        report_payload,
+        evidence_port,
+        admission_receipt,
+        canonical_run_root=run_root,
+        producer_step="report.compose",
+        input_collection=(collection_id,),
+        artifact_bindings={
+            "html": (
+                "reports",
+                f"{draft.workflow_id}.html",
+                html_id,
+                "report",
+            ),
+            "pdf": (
+                "reports",
+                f"{draft.workflow_id}.pdf",
+                pdf_id,
+                "report",
+            ),
+            "xlsx": (
+                "exports",
+                f"{draft.workflow_id}.xlsx",
+                xlsx_id,
+                "table_export",
+            ),
+        },
+    )
     render_html_report(
-        view_model,
+        report_writer,
         run_root,
         filename=f"{draft.workflow_id}.html",
         artifact_id=html_id,
-        inputs=[collection_id],
-        evidence_port=evidence_port,
-        admission_receipt=admission_receipt,
     )
     export_pdf(
-        view_model,
+        report_writer,
         run_root,
         filename=f"{draft.workflow_id}.pdf",
         artifact_id=pdf_id,
-        inputs=[collection_id],
-        evidence_port=evidence_port,
-        admission_receipt=admission_receipt,
     )
     export_xlsx(
-        {
-            "workflow_steps": [
-                {
-                    "step_id": key,
-                    "status": value["status"],
-                    "artifact_ids": ", ".join(value["artifact_ids"]),
-                }
-                for key, value in steps.items()
-            ]
-        },
+        report_writer,
         run_root,
         filename=f"{draft.workflow_id}.xlsx",
         artifact_id=xlsx_id,
-        inputs=[collection_id],
-        evidence_port=evidence_port,
-        admission_receipt=admission_receipt,
     )
     return WorkflowStepResult(
         artifact_ids=[collection_id, html_id, pdf_id, xlsx_id],

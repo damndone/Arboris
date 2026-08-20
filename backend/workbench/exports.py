@@ -15,26 +15,21 @@ from reportlab.pdfgen import canvas
 
 from .artifacts import register_artifact, write_bytes_durable
 from .report_export import ReportEvidenceWriterV1
-from .reporting import ReportDocumentWriterV1, _assert_report_output_path
+from .reporting import (
+    ReportDocumentWriterV1,
+    WorkflowReportWriterV1,
+    _assert_report_output_path,
+)
 
-def export_pdf(
-    writer: ReportDocumentWriterV1,
-    run_root: Path,
+
+def _render_pdf_bytes(
+    report: Mapping[str, Any],
     *,
-    filename: str = "report.pdf",
-    artifact_id: str = "report_pdf",
-    inputs: Sequence[str] = (),
-    evidence_port: Any = None,
-    admission_receipt: Any = None,
-) -> Path:
-    if type(writer) is not ReportDocumentWriterV1:
-        raise TypeError("export_pdf requires ReportDocumentWriterV1")
-    writer._assert_server_owned()
-    if writer.canonical_run_root != run_root.expanduser().resolve(strict=False):
-        raise ValueError("REPORT_WRITER_RUN_ROOT_MISMATCH")
-    report = writer.view_model
+    deterministic: bool = False,
+) -> bytes:
     output = io.BytesIO()
-    pdf = canvas.Canvas(output, pagesize=letter, pageCompression=0)
+    canvas_options = {"invariant": 1} if deterministic else {}
+    pdf = canvas.Canvas(output, pagesize=letter, pageCompression=0, **canvas_options)
     _, height = letter
     y = height - 72
     if report.get("report_kind") == "arma_garch":
@@ -59,15 +54,49 @@ def export_pdf(
             y = _draw_section(pdf, "Statistical tests", st or [], y)
         _draw_section(pdf, "Warnings", report.get("warnings", []), y)
     pdf.save()
+    return output.getvalue()
+
+def export_pdf(
+    writer: ReportDocumentWriterV1 | WorkflowReportWriterV1,
+    run_root: Path,
+    *,
+    filename: str = "report.pdf",
+    artifact_id: str = "report_pdf",
+    inputs: Sequence[str] = (),
+    evidence_port: Any = None,
+    admission_receipt: Any = None,
+) -> Path:
+    if type(writer) is WorkflowReportWriterV1:
+        if writer.canonical_run_root != run_root.expanduser().resolve(strict=False):
+            from .agent.workflow_runtime import WorkflowExecutionError
+
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_PATH_CHANGED: workflow report run root changed"
+            )
+        return writer._write_formal_output(
+            "pdf",
+            directory_name="reports",
+            filename=filename,
+            artifact_id=artifact_id,
+            artifact_type="report",
+            content=_render_pdf_bytes(writer.view_model, deterministic=True),
+        )
+    if type(writer) is not ReportDocumentWriterV1:
+        raise TypeError("export_pdf requires ReportDocumentWriterV1")
+    writer._assert_server_owned()
+    if writer.canonical_run_root != run_root.expanduser().resolve(strict=False):
+        raise ValueError("REPORT_WRITER_RUN_ROOT_MISMATCH")
+    report = writer.view_model
+    output = _render_pdf_bytes(report)
     pdf_path = run_root / "reports" / filename
     _assert_report_output_path(run_root, pdf_path)
-    write_bytes_durable(pdf_path, output.getvalue())
+    write_bytes_durable(pdf_path, output)
     register_artifact(run_root, artifact_id, pdf_path, "report", "export", list(inputs))
     return pdf_path
 
 
 def export_xlsx(
-    writer: ReportEvidenceWriterV1,
+    writer: ReportEvidenceWriterV1 | WorkflowReportWriterV1,
     run_root: Path,
     *,
     filename: str = "tables.xlsx",
@@ -76,6 +105,21 @@ def export_xlsx(
     evidence_port: Any = None,
     admission_receipt: Any = None,
 ) -> Path:
+    if type(writer) is WorkflowReportWriterV1:
+        if writer.canonical_run_root != run_root.expanduser().resolve(strict=False):
+            from .agent.workflow_runtime import WorkflowExecutionError
+
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_PATH_CHANGED: workflow report run root changed"
+            )
+        return writer._write_formal_output(
+            "xlsx",
+            directory_name="exports",
+            filename=filename,
+            artifact_id=artifact_id,
+            artifact_type="table_export",
+            content=_render_workflow_xlsx(writer),
+        )
     xlsx_bytes = render_typed_xlsx(writer)
     xlsx_path = run_root / "exports" / filename
     _assert_report_output_path(run_root, xlsx_path)
@@ -94,6 +138,26 @@ def render_typed_xlsx(
     writer._assert_server_owned()
     tables = writer.tables()
 
+    return _render_tables_xlsx(tables)
+
+
+def _render_workflow_xlsx(writer: WorkflowReportWriterV1) -> bytes:
+    writer._assert_server_owned()
+    exploration = writer.view_model.get("exploration", {})
+    steps = exploration.get("steps", {}) if isinstance(exploration, Mapping) else {}
+    rows = [
+        {
+            "step_id": step_id,
+            "status": value.get("status", ""),
+            "artifact_ids": ", ".join(value.get("artifact_ids", [])),
+        }
+        for step_id, value in steps.items()
+        if isinstance(value, Mapping)
+    ]
+    return _render_tables_xlsx({"workflow_steps": rows})
+
+
+def _render_tables_xlsx(tables: Mapping[str, Sequence[Mapping[str, Any]]]) -> bytes:
     workbook = Workbook()
     default_sheet = workbook.active
     workbook.remove(default_sheet)

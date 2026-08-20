@@ -17,10 +17,12 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from tests.test_data_column_cast import _source_project
+from tests.test_data_column_cast import _source_project as _legacy_source_project
 from tests.workflow_fixtures import composed_plan
-from workbench.artifacts import register_artifact
+from workbench.artifacts import initialize_artifact_index, register_artifact, sha256_file
+from workbench.exports import export_pdf, export_xlsx
 from workbench.agent.workflow import (
+    WorkflowExecutionError,
     WorkflowExecutor,
     WorkflowStepResult,
     compile_workflow,
@@ -34,6 +36,12 @@ from workbench.agent.workflow_runtime import (
     build_workflow_step_executor,
     collect_post_estimation_results,
     prepare_formal_workflow_output,
+)
+from workbench.reporting import (
+    WorkflowReportPayloadV1,
+    WorkflowReportStepV1,
+    issue_workflow_report_writer,
+    render_html_report,
 )
 
 
@@ -63,6 +71,31 @@ def _test_evidence_port(project_root):
 EvidencePersistencePort = _test_evidence_port
 from workbench.lineage.run_inputs import write_run_inputs
 from workbench.lineage.upload_store import store_upload_bytes
+
+
+def _source_project(tmp_path, frame):
+    """Create the source fixture through the current artifact record contract."""
+
+    project, run_id, artifact_id = _legacy_source_project(tmp_path, frame)
+    run_root = project / "runs" / run_id
+    initialize_artifact_index(run_root)
+    register_artifact(
+        run_root,
+        artifact_id,
+        run_root / "data.csv",
+        "raw_data",
+        "fixture",
+        [],
+    )
+    return project, run_id, artifact_id
+
+
+def _typed_report_payload(draft, artifact_id: str) -> WorkflowReportPayloadV1:
+    return WorkflowReportPayloadV1(
+        workflow_id=draft.workflow_id,
+        workflow_plan_fingerprint=draft.plan_fingerprint,
+        steps=(WorkflowReportStepV1("report", "completed", (artifact_id,)),),
+    )
 
 
 def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -> None:
@@ -303,6 +336,24 @@ def _compile(project_run, frame, *, workflow_id, steps=None, bindings=None):
     )
 
 
+def _report_plan() -> list[dict]:
+    """Keep report tests on the typed exploration-to-report boundary."""
+
+    specs = composed_plan()
+    return [
+        {
+            **spec,
+            "depends_on": [
+                dependency
+                for dependency in spec.get("depends_on", [])
+                if dependency != "models"
+            ],
+        }
+        for spec in specs
+        if spec["operation_id"] != "model.genesis"
+    ]
+
+
 def _complete_report_dependencies(project, draft, report_step, frame):
     """Build report inputs through the same admitted runtime path as users."""
 
@@ -311,7 +362,7 @@ def _complete_report_dependencies(project, draft, report_step, frame):
     )
     write_run_inputs(
         project / "runs" / str(draft.target["run_id"]),
-        form={"model_type": "auto", "y": "", "x": ""},
+        form={"model_type": "auto", "y": "", "x": "", "survey_subpop": "True"},
         upload={"sha256": upload_sha, "filename": "fixture.csv"},
         rerun_of=None,
         from_node=None,
@@ -1607,13 +1658,18 @@ def test_numeric_transform_reaches_model_and_declared_joint_test(tmp_path) -> No
 
 
 def test_report_collection_exports_one_complete_artifact_pack(tmp_path) -> None:
-    # The helper now executes the real model.genesis dependency chain instead
+    # The helper executes the real typed exploration dependency chain instead
     # of fabricating completed results. Keep enough observations for the
-    # modeling validation gate to pass so this test exercises report evidence,
-    # not the intentional insufficient-sample blocker.
+    # exploration validation gate to pass so this test exercises report
+    # evidence, not the intentional insufficient-sample blocker.
     frame = _frame(36)
     project, run_id, artifact_id = _source_project(tmp_path, frame)
-    draft = _compile((run_id, artifact_id), frame, workflow_id="wf-report-runtime")
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-report-runtime",
+        steps=_report_plan(),
+    )
     report = next(step for step in draft.steps if step.operation_id == "report.compose")
     port, previous = _complete_report_dependencies(project, draft, report, frame)
     receipt = port.admit(draft, report)
@@ -1630,12 +1686,201 @@ def test_report_collection_exports_one_complete_artifact_pack(tmp_path) -> None:
     assert (project / "runs" / run_id / "reports" / "wf-report-runtime.html").is_file()
     assert (project / "runs" / run_id / "reports" / "wf-report-runtime.pdf").is_file()
     assert (project / "runs" / run_id / "exports" / "wf-report-runtime.xlsx").is_file()
+    collection_id = result.payload["collection_id"]
+
+    index = json.loads(
+        (project / "runs" / run_id / "artifacts_index.json").read_text(encoding="utf-8")
+    )
+    records = {record["artifact_id"]: record for record in index["artifacts"]}
+    for artifact_id, artifact_type, relative_path in (
+        (f"workflow_report_{draft.workflow_id}_html", "report", "reports/wf-report-runtime.html"),
+        (f"workflow_report_{draft.workflow_id}_pdf", "report", "reports/wf-report-runtime.pdf"),
+        (f"workflow_report_{draft.workflow_id}_xlsx", "table_export", "exports/wf-report-runtime.xlsx"),
+    ):
+        record = records[artifact_id]
+        assert set(record) >= {
+            "artifact_id",
+            "path",
+            "artifact_type",
+            "step",
+            "sha256",
+            "inputs",
+            "config_hash",
+            "code_version",
+        }
+        assert record["path"] == relative_path
+        assert record["artifact_type"] == artifact_type
+        assert record["step"] == "report.compose"
+        assert record["inputs"] == [collection_id]
+        assert record["sha256"] == sha256_file(project / "runs" / run_id / record["path"])
+        server_record = port._server_artifact_registry[(receipt.receipt_id, run_id, artifact_id)]
+        assert server_record["content_sha256"] == record["sha256"]
+        assert server_record["run_id"] == run_id
+        assert server_record["producer_step"] == "report.compose"
+        assert server_record["inputs"] == record["inputs"]
+
+    first_bytes = {
+        artifact_id: (project / "runs" / run_id / records[artifact_id]["path"]).read_bytes()
+        for artifact_id in result.artifact_ids
+        if artifact_id != collection_id
+    }
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, report))
+    try:
+        replay = _execute_workflow_report(project, draft, previous, report)
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
+    assert replay.artifact_ids == result.artifact_ids
+    assert {
+        artifact_id: (project / "runs" / run_id / records[artifact_id]["path"]).read_bytes()
+        for artifact_id in first_bytes
+    } == first_bytes
+
+
+def test_report_composition_rejects_a_caller_owned_mapping_before_any_write(tmp_path) -> None:
+    frame = _frame(36)
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-report-raw-mapping",
+        steps=_report_plan(),
+    )
+    report = next(step for step in draft.steps if step.operation_id == "report.compose")
+    port, _previous = _complete_report_dependencies(project, draft, report, frame)
+    receipt = port.admit(draft, report)
+    run_root = project / "runs" / run_id
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, report))
+    try:
+        with pytest.raises(TypeError, match="ReportDocumentWriterV1|typed|writer"):
+            render_html_report(
+                {"title": "caller-owned"},
+                run_root,
+                filename="caller-owned.html",
+                evidence_port=port,
+                admission_receipt=receipt,
+            )
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
+    assert not (run_root / "reports" / "caller-owned.html").exists()
+
+
+def test_report_export_adapters_reject_raw_mappings_before_any_write(tmp_path) -> None:
+    run_root = tmp_path / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+
+    with pytest.raises(TypeError, match="ReportDocumentWriterV1"):
+        render_html_report({"title": "caller-owned"}, run_root)
+    with pytest.raises(TypeError, match="ReportDocumentWriterV1"):
+        export_pdf({"title": "caller-owned"}, run_root)
+    with pytest.raises(TypeError, match="ReportEvidenceWriterV1"):
+        export_xlsx({"workflow_steps": []}, run_root)
+
+    assert not (run_root / "reports").exists()
+    assert not (run_root / "exports").exists()
+
+
+def test_workflow_report_writer_rejects_rebinding_root_and_receipt(tmp_path) -> None:
+    frame = _frame()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-report-binding-probes",
+        steps=_report_plan(),
+    )
+    report = next(step for step in draft.steps if step.operation_id == "report.compose")
+    port = EvidencePersistencePort(project)
+    receipt = port.admit(draft, report)
+    run_root = project / "runs" / run_id
+    payload = _typed_report_payload(draft, "workflow_report_collection_wf-report-binding-probes")
+    expected_bindings = {
+        "html": (
+            "reports",
+            f"{draft.workflow_id}.html",
+            f"workflow_report_{draft.workflow_id}_html",
+            "report",
+        ),
+        "pdf": (
+            "reports",
+            f"{draft.workflow_id}.pdf",
+            f"workflow_report_{draft.workflow_id}_pdf",
+            "report",
+        ),
+        "xlsx": (
+            "exports",
+            f"{draft.workflow_id}.xlsx",
+            f"workflow_report_{draft.workflow_id}_xlsx",
+            "table_export",
+        ),
+    }
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, report))
+    try:
+        with pytest.raises(TypeError, match="WorkflowReportPayloadV1"):
+            issue_workflow_report_writer(
+                {"title": "caller-owned"},
+                port,
+                receipt,
+                canonical_run_root=run_root,
+                producer_step="report.compose",
+                input_collection=(f"workflow_report_collection_{draft.workflow_id}",),
+                artifact_bindings=expected_bindings,
+            )
+        with pytest.raises(WorkflowExecutionError, match="IDENTITY_MISMATCH"):
+            issue_workflow_report_writer(
+                dataclasses.replace(payload, workflow_id="foreign-workflow"),
+                port,
+                receipt,
+                canonical_run_root=run_root,
+                producer_step="report.compose",
+                input_collection=(f"workflow_report_collection_{draft.workflow_id}",),
+                artifact_bindings=expected_bindings,
+            )
+        writer = issue_workflow_report_writer(
+            payload,
+            port,
+            receipt,
+            canonical_run_root=run_root,
+            producer_step="report.compose",
+            input_collection=(f"workflow_report_collection_{draft.workflow_id}",),
+            artifact_bindings=expected_bindings,
+        )
+        with pytest.raises(WorkflowExecutionError, match="PATH_CHANGED|binding"):
+            render_html_report(
+                writer,
+                run_root,
+                filename="rebound.html",
+                artifact_id="bound_html",
+            )
+        with pytest.raises(WorkflowExecutionError, match="PATH_CHANGED|run root"):
+            export_pdf(writer, project / "foreign-run")
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
+    assert not (run_root / "reports" / "rebound.html").exists()
+    assert not (run_root / "reports" / "bound.pdf").exists()
+
+    foreign_project = tmp_path / "foreign-project"
+    foreign_port = EvidencePersistencePort(foreign_project)
+    foreign_receipt = foreign_port.admit(draft, report)
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, report))
+    try:
+        with pytest.raises(WorkflowExecutionError, match="receipt|admission"):
+            issue_workflow_report_writer(
+                payload,
+                foreign_port,
+                foreign_receipt,
+                canonical_run_root=run_root,
+                producer_step="report.compose",
+                input_collection=(f"workflow_report_collection_{draft.workflow_id}",),
+                artifact_bindings=expected_bindings,
+            )
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
 
 
 def test_report_collection_uses_the_declared_report_step_id(tmp_path) -> None:
     frame = _frame(36)
     project, run_id, artifact_id = _source_project(tmp_path, frame)
-    renamed_specs = composed_plan()
+    renamed_specs = _report_plan()
     for spec in renamed_specs:
         if spec["operation_id"] == "report.compose":
             spec["step_id"] = "final_report"
