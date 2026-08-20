@@ -448,7 +448,7 @@ def test_reused_legacy_compilation_confirmation_cannot_execute_a_second_proposal
         session_ref=session_id,
         project_ref=project_ref,
     )
-    store.confirmations[(project_ref, session_id, record_id)] = confirmation
+    store.retain_confirmation(project_ref, session_id, record_id, confirmation)
 
     with pytest.raises(WorkbenchAPIError) as error:
         agent_routes._execute_legacy_agent_proposal_via_server_boundary(
@@ -519,7 +519,7 @@ def test_first_legacy_claim_uses_server_receipt_proposal_identity_before_execute
             )
 
     store = agent_routes.AgentNotebookCutoverAuthorityStoreV1()
-    store.confirmations[(project_ref, session_id, record_id)] = _server_receipt(
+    store.retain_confirmation(project_ref, session_id, record_id, _server_receipt(
         confirmation_id="confirmation-a",
         compilation_record_id=record_id,
         proposal_id="proposal-a",
@@ -529,7 +529,7 @@ def test_first_legacy_claim_uses_server_receipt_proposal_identity_before_execute
         actor_ref=actor_ref,
         session_ref=session_id,
         project_ref=project_ref,
-    )
+    ))
     monkeypatch.setattr(
         agent_routes,
         "_cutover_authority",
@@ -659,7 +659,7 @@ def test_same_legacy_proposal_can_claim_once_but_replay_fails_closed(
             )
 
     store = agent_routes.AgentNotebookCutoverAuthorityStoreV1()
-    store.confirmations[(project_ref, session_id, record_id)] = _server_receipt(
+    store.retain_confirmation(project_ref, session_id, record_id, _server_receipt(
         confirmation_id="confirmation-a",
         compilation_record_id=record_id,
         proposal_id="proposal-a",
@@ -669,7 +669,7 @@ def test_same_legacy_proposal_can_claim_once_but_replay_fails_closed(
         actor_ref=actor_ref,
         session_ref=session_id,
         project_ref=project_ref,
-    )
+    ))
     monkeypatch.setattr(agent_routes, "_cutover_authority", lambda *_args, **_kwargs: Compiler())
     monkeypatch.setattr(agent_routes, "_cutover_store", lambda **_kwargs: store)
     monkeypatch.setattr(
@@ -755,6 +755,7 @@ def test_serialized_legacy_confirmation_handle_cannot_execute(
         "session_ref": session_id,
         "project_ref": project_ref,
     }
+    store.confirmation_digests[(project_ref, session_id, record_id)] = "c" * 64
     monkeypatch.setattr(agent_routes, "_cutover_authority", lambda *_args, **_kwargs: Compiler())
     monkeypatch.setattr(agent_routes, "_cutover_store", lambda **_kwargs: store)
     monkeypatch.setattr(

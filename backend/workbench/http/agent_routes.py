@@ -2112,6 +2112,9 @@ class AgentNotebookCutoverAuthorityStoreV1:
     authorities: dict[tuple[str, str], Any] = field(default_factory=dict)
     confirmations: dict[tuple[str, str, str], Any] = field(default_factory=dict)
     confirmation_digests: dict[tuple[str, str, str], str] = field(default_factory=dict)
+    confirmation_serializations: dict[tuple[str, str, str], dict[str, object]] = field(
+        default_factory=dict
+    )
     # A retained legacy compilation record may be used by only the proposal
     # that first claimed it.  This is server-owned state, not a client hint.
     legacy_proposal_bindings: dict[tuple[str, str, str], dict[str, Any]] = field(
@@ -2133,8 +2136,13 @@ class AgentNotebookCutoverAuthorityStoreV1:
             existing_digest = self.confirmation_digests.get(key)
             if existing_digest is not None and existing_digest != receipt.confirmation_digest:
                 raise ValueError("confirmation receipt identity changed")
+            serialized = receipt.to_dict()
+            existing_serialized = self.confirmation_serializations.get(key)
+            if existing_serialized is not None and existing_serialized != serialized:
+                raise ValueError("confirmation receipt serialization changed")
             self.confirmations[key] = receipt
             self.confirmation_digests[key] = receipt.confirmation_digest
+            self.confirmation_serializations[key] = serialized
 
 
 _DEFAULT_CUTOVER_STORE = AgentNotebookCutoverAuthorityStoreV1()
@@ -2317,6 +2325,9 @@ def configure_agent_notebook_cutover_authority(
     for key in tuple(store.confirmation_digests):
         if key[:2] == scope:
             store.confirmation_digests.pop(key, None)
+    for key in tuple(store.confirmation_serializations):
+        if key[:2] == scope:
+            store.confirmation_serializations.pop(key, None)
     for key in tuple(store.legacy_proposal_bindings):
         if key[:2] == scope:
             store.legacy_proposal_bindings.pop(key, None)
@@ -2478,7 +2489,7 @@ def _execute_legacy_agent_proposal_via_server_boundary(
     """Execute a legacy proposal only through a retained cutover receipt."""
 
     binding = _legacy_cutover_binding(proposal)
-    required = ("compilation_record_id", "confirmation_id")
+    required = ("compilation_record_id", "confirmation_id", "semantic_plan_hash")
     missing = [name for name in required if binding.get(name) is None]
     if missing:
         raise WorkbenchAPIError(
@@ -2496,8 +2507,16 @@ def _execute_legacy_agent_proposal_via_server_boundary(
         session_id,
         request=request,
     )
+    persisted_proposal_id = _object_value(proposal, "proposal_id")
+    if persisted_proposal_id != proposal_id:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The request proposal id does not match the route-owned persisted proposal.",
+            details={"fields": ["proposal_id"]},
+        )
     expected_proposal = {
-        "proposal_id": proposal_id,
+        "proposal_id": persisted_proposal_id,
         "proposal_revision": _object_value(proposal, "revision"),
         "proposal_fingerprint": _object_value(proposal, "fingerprint"),
         "operation_id": _object_value(proposal, "operation_id"),
@@ -2576,8 +2595,15 @@ def _execute_legacy_agent_proposal_via_server_boundary(
         retained_digest = getattr(cutover_store, "confirmation_digests", {}).get(
             (canonical_project, canonical_session, record_id)
         )
-        if retained_digest is not None and digest != retained_digest:
+        if retained_digest is None or digest != retained_digest:
             confirmation_mismatches.append("confirmation_digest")
+        retained_serialization = getattr(cutover_store, "confirmation_serializations", {}).get(
+            (canonical_project, canonical_session, record_id)
+        )
+        if not isinstance(retained_serialization, Mapping) or dict(
+            confirmation.to_dict()
+        ) != dict(retained_serialization):
+            confirmation_mismatches.append("receipt_serialization")
     if confirmation_mismatches:
         raise WorkbenchAPIError(
             status_code=409,
@@ -2711,7 +2737,7 @@ def _execute_legacy_agent_proposal_via_server_boundary(
         result = compiler.execute(
             record_id,
             confirmation,
-            current_data_snapshot_digest=binding["data_snapshot_digest"],
+            current_data_snapshot_digest=binding.get("data_snapshot_digest"),
         )
     except Exception as exc:
         raise _cutover_error(exc, action="execute") from exc
