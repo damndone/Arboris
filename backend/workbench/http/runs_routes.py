@@ -102,13 +102,21 @@ class _UnsatisfiableArtifactRange(ValueError):
     pass
 
 
+def _parse_artifact_decimal(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise _MalformedArtifactRange("Range header: numeric component is too large") from exc
+
+
 def _parse_artifact_range_header(http_range: str, file_size: int) -> list[tuple[int, int]]:
     """Parse a bounded byte-range header into half-open offsets.
 
     This is deliberately Workbench-owned so the generic artifact stream does
     not depend on Starlette's private parser or a path-backed response.  The
     header and range count are bounded before any range list is materialized;
-    the returned offsets are safe for the already-opened descriptor.
+    every range component is syntax-checked before satisfiability is applied,
+    and the returned offsets are safe for the already-opened descriptor.
     """
 
     if not isinstance(http_range, str) or not isinstance(file_size, int) or isinstance(file_size, bool):
@@ -136,34 +144,41 @@ def _parse_artifact_range_header(http_range: str, file_size: int) -> list[tuple[
     ranges: list[tuple[int, int]] = []
     for part in range_parts:
         part = part.strip()
-        if not part or part == "-" or "-" not in part:
-            continue
+        if not part or part.count("-") != 1:
+            raise _MalformedArtifactRange("Range header: invalid range specification")
         start_text, end_text = part.split("-", 1)
-        start_text = start_text.strip()
-        end_text = end_text.strip()
-        try:
-            start = int(start_text) if start_text else max(file_size - int(end_text), 0)
-            end = (
-                int(end_text) + 1
-                if start_text and end_text and int(end_text) < file_size
-                else file_size
-            )
-            ranges.append((start, end))
-        except ValueError:
-            continue
+        if start_text:
+            if not start_text.isascii() or not start_text.isdigit():
+                raise _MalformedArtifactRange("Range header: invalid range specification")
+            start = _parse_artifact_decimal(start_text)
+            if end_text:
+                if not end_text.isascii() or not end_text.isdigit():
+                    raise _MalformedArtifactRange("Range header: invalid range specification")
+                last = _parse_artifact_decimal(end_text)
+                if last < start:
+                    raise _MalformedArtifactRange(
+                        "Range header: start must be less than end"
+                    )
+                end = last + 1 if last < file_size else file_size
+            else:
+                end = file_size
+        else:
+            if not end_text.isascii() or not end_text.isdigit():
+                raise _MalformedArtifactRange("Range header: invalid range specification")
+            suffix_length = _parse_artifact_decimal(end_text)
+            start = max(file_size - suffix_length, 0)
+            end = file_size
+        ranges.append((start, end))
 
-    if not ranges:
-        raise _MalformedArtifactRange("Range header: range must be requested")
-    if any(not (0 <= start < file_size) for start, _ in ranges):
+    satisfiable_ranges = [(start, end) for start, end in ranges if 0 <= start < file_size]
+    if not satisfiable_ranges:
         raise _UnsatisfiableArtifactRange()
-    if any(start > end for start, end in ranges):
-        raise _MalformedArtifactRange("Range header: start must be less than end")
-    if len(ranges) == 1:
-        return ranges
+    if len(satisfiable_ranges) == 1:
+        return satisfiable_ranges
 
-    ranges.sort()
-    merged: list[tuple[int, int]] = [ranges[0]]
-    for start, end in ranges[1:]:
+    satisfiable_ranges.sort()
+    merged: list[tuple[int, int]] = [satisfiable_ranges[0]]
+    for start, end in satisfiable_ranges[1:]:
         last_start, last_end = merged[-1]
         if start <= last_end:
             merged[-1] = (last_start, max(last_end, end))

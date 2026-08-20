@@ -1555,6 +1555,26 @@ def test_generic_artifact_route_owns_bounded_range_parser() -> None:
         parser("bytes=" + ",".join("0-1" for _ in range(65)), 10)
 
 
+@pytest.mark.parametrize(
+    "range_header",
+    ("bytes=0-1,garbage", "bytes=+1-2", "bytes=999-1000,garbage"),
+)
+def test_generic_artifact_range_parser_enforces_strict_numeric_grammar(range_header: str) -> None:
+    with pytest.raises(runs_routes._MalformedArtifactRange):
+        runs_routes._parse_artifact_range_header(range_header, 10)
+
+
+def test_generic_artifact_range_parser_strictly_rejects_unbounded_decimal_conversion() -> None:
+    with pytest.raises(runs_routes._MalformedArtifactRange):
+        runs_routes._parse_artifact_range_header(f"bytes={'9' * 5000}-", 10)
+
+
+def test_generic_artifact_range_parser_mixed_set_filters_only_valid_unsatisfiable_components() -> None:
+    assert runs_routes._parse_artifact_range_header("bytes=0-1,999-1000", 10) == [(0, 2)]
+    with pytest.raises(runs_routes._UnsatisfiableArtifactRange):
+        runs_routes._parse_artifact_range_header("bytes=999-1000,500-600", 10)
+
+
 def test_generic_artifact_download_uses_bounded_stream_and_compatibility_headers(
     tmp_path, monkeypatch
 ) -> None:
@@ -1696,6 +1716,39 @@ def test_generic_artifact_download_rejects_unsatisfiable_range_explicitly(tmp_pa
 
     assert response.status_code == 416
     assert response.headers["content-range"] == f"bytes */{len(expected)}"
+
+
+def test_generic_artifact_download_accepts_mixed_satisfiable_and_unsatisfiable_ranges(tmp_path) -> None:
+    project_root, _run_root, artifact_id, expected = _materialize_generic_artifact_run(tmp_path)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": f"bytes=0-1,{len(expected) + 100}-{len(expected) + 200}"},
+    )
+
+    assert response.status_code == 206
+    assert response.content == expected[:2]
+    assert response.headers["content-range"] == f"bytes 0-1/{len(expected)}"
+    assert response.headers["content-length"] == "2"
+
+
+@pytest.mark.parametrize(
+    "range_header",
+    ("bytes=0-1,garbage", "bytes=0-1,+1-2", "bytes=999999-1000000,garbage"),
+)
+def test_generic_artifact_download_rejects_malformed_mixed_ranges(
+    tmp_path, range_header: str
+) -> None:
+    project_root, _run_root, artifact_id, _expected = _materialize_generic_artifact_run(tmp_path)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": range_header},
+    )
+
+    assert response.status_code == 400
 
 
 def test_generic_artifact_download_rejects_artifact_over_stream_size_policy(tmp_path) -> None:
