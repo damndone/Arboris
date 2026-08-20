@@ -431,6 +431,64 @@ def test_manifest_fails_closed_when_callable_pyreadstat_runtime_probe_is_broken(
     assert all(item["reason_code"] == "optional_dependency" for item in native_items.values())
 
 
+def test_manifest_fails_closed_when_zsav_probe_mode_is_broken(monkeypatch) -> None:
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from workbench import data_interchange
+    from workbench.data_operation_manifest import build_data_operation_manifest
+
+    def write_sav(frame, path, *, compress=False):
+        Path(path).write_bytes(b"sav")
+        if compress:
+            raise RuntimeError("ZSAV mode is unavailable")
+
+    def read_sav(_path):
+        return frame.copy(), None
+
+    def write_dta(_frame, path, *, version):
+        Path(path).write_bytes(b"dta")
+
+    def read_dta(_path):
+        return frame.copy(), None
+
+    frame = pd.DataFrame({"code": [1]})
+    broken_zsav_module = SimpleNamespace(
+        read_sav=read_sav,
+        write_sav=write_sav,
+        read_dta=read_dta,
+        write_dta=write_dta,
+    )
+    original_verified_import = data_interchange._verified_import
+    monkeypatch.setattr(
+        data_interchange,
+        "_verified_import",
+        lambda name: broken_zsav_module
+        if name == "pyreadstat"
+        else original_verified_import(name),
+    )
+
+    manifest = build_data_operation_manifest().to_dict()
+    native_items = {
+        item["operation_id"]: item
+        for item in manifest["unavailable"]
+        if item["operation_id"] in {
+            "data.interchange.sav",
+            "data.interchange.zsav",
+            "data.interchange.dta",
+        }
+    }
+    assert set(native_items) == {
+        "data.interchange.sav",
+        "data.interchange.zsav",
+        "data.interchange.dta",
+    }
+    assert all(item["status"] == "unavailable" for item in native_items.values())
+    assert all(item["reason_code"] == "optional_dependency" for item in native_items.values())
+
+
 def test_package_runtime_adapter_joins_live_catalog_and_exposes_record_evidence_ports() -> None:
     from workbench.data_operation_manifest import build_data_consumer_runtime_adapter
 

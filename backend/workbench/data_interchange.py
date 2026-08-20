@@ -174,13 +174,16 @@ def _pyreadstat_probe_succeeded(module: Any) -> bool:
     with tempfile.TemporaryDirectory(prefix="workbench-pyreadstat-probe-") as directory:
         root = Path(directory)
         sav_path = root / "probe.sav"
+        zsav_path = root / "probe.zsav"
         dta_path = root / "probe.dta"
         module.write_sav(probe_frame, str(sav_path))
         sav_restored, _sav_meta = module.read_sav(str(sav_path))
+        module.write_sav(probe_frame, str(zsav_path), compress=True)
+        zsav_restored, _zsav_meta = module.read_sav(str(zsav_path))
         module.write_dta(probe_frame, str(dta_path), version=15)
         dta_restored, _dta_meta = module.read_dta(str(dta_path))
 
-    for restored in (sav_restored, dta_restored):
+    for restored in (sav_restored, zsav_restored, dta_restored):
         if not isinstance(restored, pd.DataFrame):
             return False
         if tuple(restored.columns) != tuple(probe_frame.columns):
@@ -305,6 +308,12 @@ def _frames_equal(left: pd.DataFrame, right: pd.DataFrame) -> tuple[bool, bool, 
     return True, dtype_equal, schema_equal
 
 
+def _path_entry_exists(path: Path) -> bool:
+    """Treat dangling symlinks as existing user-owned path entries."""
+
+    return path.exists() or path.is_symlink()
+
+
 def _write_frame(frame: pd.DataFrame, target_format: str, path: Path) -> None:
     if target_format == "csv":
         frame.to_csv(path, index=False)
@@ -333,7 +342,7 @@ def _write_frame(frame: pd.DataFrame, target_format: str, path: Path) -> None:
                 pyreadstat.write_dta(frame, str(path), version=15)
             else:
                 pyreadstat.write_sav(frame, str(path), compress=target_format == "zsav")
-        except Exception as exc:
+        except RuntimeError as exc:
             raise InterchangeUnavailableError(
                 _pyreadstat_unavailable_capability(target_format)
             ) from exc
@@ -366,7 +375,7 @@ def _read_frame(target_format: str, path: Path) -> pd.DataFrame:
                 restored, _meta = pyreadstat.read_dta(str(path))
             else:
                 restored, _meta = pyreadstat.read_sav(str(path))
-        except Exception as exc:
+        except RuntimeError as exc:
             raise InterchangeUnavailableError(
                 _pyreadstat_unavailable_capability(target_format)
             ) from exc
@@ -395,9 +404,12 @@ def write_interchange_frame(
         )
     target_path = Path(path).expanduser()
     target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_existed_before = _path_entry_exists(target_path)
     try:
         _write_frame(frame, normalized, target_path)
     except InterchangeUnavailableError as error:
+        if not target_existed_before:
+            target_path.unlink(missing_ok=True)
         return InterchangeWriteResultV1(
             target_format=normalized,
             status="unavailable",
@@ -442,6 +454,7 @@ def round_trip_frame(
     target_dir = Path(directory).expanduser().resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / f"roundtrip.{normalized}"
+    path_existed_before = _path_entry_exists(path)
     write_result = write_interchange_frame(frame, target_format=normalized, path=path)
     if write_result.status != "written":
         return RoundTripResultV1(
@@ -457,6 +470,8 @@ def round_trip_frame(
     try:
         restored = _read_frame(normalized, path)
     except InterchangeUnavailableError as error:
+        if not path_existed_before:
+            path.unlink(missing_ok=True)
         return RoundTripResultV1(
             target_format=normalized,
             status="unavailable",

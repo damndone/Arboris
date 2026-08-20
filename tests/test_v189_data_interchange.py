@@ -430,6 +430,116 @@ def test_native_runtime_failures_after_admission_are_typed_unavailable(
     assert round_trip_result.capability.reason_code == "optional_dependency"
 
 
+def test_native_partial_writer_cleans_only_owned_targets(tmp_path, monkeypatch) -> None:
+    api = _api()
+    frame = pd.DataFrame({"code": [1]})
+
+    def partial_writer(_frame, path, *args, **kwargs):
+        Path(path).write_bytes(b"partial-native-artifact")
+        raise RuntimeError("adapter wrote a partial artifact")
+
+    admitted_partial = SimpleNamespace(
+        read_sav=partial_writer,
+        write_sav=partial_writer,
+        read_dta=partial_writer,
+        write_dta=partial_writer,
+    )
+    monkeypatch.setattr(api, "_pyreadstat_module", lambda: admitted_partial)
+
+    new_target = tmp_path / "new.sav"
+    write_result = api.write_interchange_frame(
+        frame,
+        target_format="sav",
+        path=new_target,
+    )
+    assert write_result.status == "unavailable"
+    assert write_result.path is None
+    assert not new_target.exists()
+
+    existing_target = tmp_path / "existing.sav"
+    existing_target.write_bytes(b"user-owned-artifact")
+    write_result = api.write_interchange_frame(
+        frame,
+        target_format="sav",
+        path=existing_target,
+    )
+    assert write_result.status == "unavailable"
+    assert write_result.path is None
+    assert existing_target.exists()
+
+    roundtrip_dir = tmp_path / "roundtrip"
+    roundtrip_result = api.round_trip_frame(
+        frame,
+        metadata={},
+        target_format="sav",
+        directory=roundtrip_dir,
+    )
+    assert roundtrip_result.status == "unavailable"
+    assert roundtrip_result.path is None
+    assert not (roundtrip_dir / "roundtrip.sav").exists()
+
+    existing_roundtrip = tmp_path / "existing-roundtrip"
+    existing_roundtrip.mkdir()
+    existing_roundtrip_path = existing_roundtrip / "roundtrip.sav"
+    existing_roundtrip_path.write_bytes(b"user-owned-roundtrip")
+    roundtrip_result = api.round_trip_frame(
+        frame,
+        metadata={},
+        target_format="sav",
+        directory=existing_roundtrip,
+    )
+    assert roundtrip_result.status == "unavailable"
+    assert roundtrip_result.path is None
+    assert existing_roundtrip_path.exists()
+
+
+def test_pyreadstat_admission_probes_sav_zsav_and_dta_modes(monkeypatch) -> None:
+    api = _api()
+    calls: list[tuple[str, bool | None, Path]] = []
+    probe_frame = pd.DataFrame({"__workbench_probe__": pd.Series([1], dtype="int64")})
+
+    def write_sav(_frame, path, *, compress=False):
+        calls.append(("write_sav", compress, Path(path)))
+        Path(path).write_bytes(b"sav")
+
+    def read_sav(path):
+        calls.append(("read_sav", None, Path(path)))
+        return probe_frame.copy(), None
+
+    def write_dta(_frame, path, *, version):
+        calls.append(("write_dta", None, Path(path)))
+        Path(path).write_bytes(b"dta")
+
+    def read_dta(path):
+        calls.append(("read_dta", None, Path(path)))
+        return probe_frame.copy(), None
+
+    admitted = SimpleNamespace(
+        read_sav=read_sav,
+        write_sav=write_sav,
+        read_dta=read_dta,
+        write_dta=write_dta,
+    )
+    original_verified_import = api._verified_import
+    monkeypatch.setattr(
+        api,
+        "_verified_import",
+        lambda name: admitted if name == "pyreadstat" else original_verified_import(name),
+    )
+
+    assert api._pyreadstat_module() is admitted
+    assert [(name, flag) for name, flag, _path in calls] == [
+        ("write_sav", False),
+        ("read_sav", None),
+        ("write_sav", True),
+        ("read_sav", None),
+        ("write_dta", None),
+        ("read_dta", None),
+    ]
+    assert all(path.parent != Path.cwd() for _name, _flag, path in calls)
+    assert all(not path.exists() for _name, _flag, path in calls)
+
+
 def test_pyreadstat_admission_runs_a_bounded_probe_through_the_real_adapter(
     monkeypatch,
 ) -> None:
