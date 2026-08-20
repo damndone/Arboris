@@ -2230,37 +2230,100 @@ def test_arma_garch_report_admission_missing_is_typed_and_does_not_build_raw_del
     assert events["rendered"] == []
 
 
-def test_arma_garch_report_admission_valid_reaches_raw_builder_and_renderer(
+def test_arma_garch_report_admission_valid_real_workflow_renders_owner_document(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from workbench.engine.packs.arma_garch import deliverables
+    from tests.models.arma_garch.test_pack_runtime import _options, _source
+    from workbench import orchestrator
+    from workbench.app import app
+    from workbench.artifacts import initialize_artifact_index, read_json, sha256_file
+    from workbench.config import WorkbenchConfig
+    from workbench.engine.packs.loader import bootstrap_builtin_packs
+    from workbench.lineage import incremental
+    from workbench.model_options import bind_new_model_options
 
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    (run_root / "raw_snapshot").mkdir()
+    initialize_artifact_index(run_root)
+    source = tmp_path / "series.csv"
+    _source().to_csv(source, index=False)
+    bootstrap_builtin_packs()
+    bound_options = bind_new_model_options("time_series.arma_garch", _options())
+    assert bound_options.binding is not None
+    config = WorkbenchConfig(
+        random_seed=20260720,
+        imputation_method="",
+        imputation_m=1,
+        imputation_max_iter=1,
+        max_missing_rate=0.4,
+        run_timeout_s=180.0,
+    )
+    captured: dict[str, object] = {}
+    original_run_pipeline_traced = incremental.run_pipeline_traced
+
+    def run_pipeline_traced_with_capture(pipeline, ctx, env, **kwargs):
+        captured["before_ctx"] = ctx
+        result = original_run_pipeline_traced(pipeline, ctx, env, **kwargs)
+        captured["after_ctx"] = result
+        return result
+
+    monkeypatch.setattr(
+        incremental,
+        "run_pipeline_traced",
+        run_pipeline_traced_with_capture,
+    )
     with _server_owned_evidence(
         tmp_path / "owner-store",
         run_id="run-1",
         model_run_id="run-1",
         canonical_project_root=project_root,
         keep_open=True,
-    ) as (_record, _binding, owner):
-        projection = owner.issue_report_projection(owner._canonical_report_wire())  # type: ignore[attr-defined]
-        run_root.mkdir(parents=True)
-        ctx = _arma_report_stage_context(run_root, owner=owner, projection=projection)
-        calls: list[Path] = []
-        monkeypatch.setattr(
-            deliverables,
-            "build_arma_garch_deliverables",
-            lambda path: calls.append(path) or {"report": {"status": "available", "facts": []}},
-        )
-        result, events = _run_report_stage_for_probe(ctx, run_root, monkeypatch)
+    ) as (record, binding, owner):
+        configure_report_evidence_owner(owner)
+        try:
+            result = orchestrator._run_workflow(
+                run_root,
+                "run-1",
+                [source],
+                "auto",
+                "value",
+                [],
+                config,
+                "2026-08-20T00:00:00+00:00",
+                model_type="time_series.arma_garch",
+                model_options=_options(),
+                model_options_binding=bound_options.binding.to_dict(),
+            )
+        finally:
+            configure_report_evidence_owner(None)
 
-    assert result is ctx
-    assert calls == [run_root]
-    assert events["rendered"]
-    assert events["rendered"][0][1] is owner
-    assert events["rendered"][0][2] is projection
+    assert result == {"run_id": "run-1", "status": "completed"}
+    ctx = captured["before_ctx"]
+    assert ctx.artifacts["_report_evidence_owner"] is owner
+    projection = ctx.artifacts["_report_evidence_projection"]
+    assert type(projection) is EvidenceProjectionV1
+    assert projection._owner is owner
+    assert projection.wire["artifactRef"] == record.artifact_id
+    assert projection.wire["commitId"] == binding.commit_id
+    assert projection.wire["envelopeDigest"] == record.envelope_digest
+    assert owner.accepts_canonical_run_root(run_root)
+    assert app.state.report_evidence_persistence is None
+
+    report_path = run_root / "reports" / "report.html"
+    assert report_path.is_file()
+    html = report_path.read_text(encoding="utf-8")
+    assert 'id="time-series-overview"' in html
+    assert "ARMA(1,0)" in html
+    index = read_json(run_root / "artifacts_index.json")
+    report_record = next(
+        item for item in index["artifacts"] if item["artifact_id"] == "report_html"
+    )
+    assert report_record["path"] == "reports/report.html"
+    assert report_record["artifact_type"] == "report"
+    assert report_record["sha256"] == sha256_file(report_path)
 
 
 def test_html_report_endpoint_never_returns_an_unindexed_report_file(tmp_path: Path) -> None:

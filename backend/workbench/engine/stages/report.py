@@ -116,7 +116,7 @@ class ReportStage:
         # The normal run-stage artifact retains the historical presentation
         # semantics.  It is not the Report-page writer boundary: exports on
         # that page require a committed server-owned projection.
-        from ...reporting import render_legacy_html_report
+        from ...reporting import render_html_report, render_legacy_html_report
 
         run_root = env.run_root
         run_id = env.run_id
@@ -340,7 +340,6 @@ class ReportStage:
         # Render HTML report via view_model
         report_render_status = "pending"
         report_available = False
-        time_series_deliverables: dict[str, Any] | None = None
         report_admission = _report_evidence_admission(ctx)
         if report_admission is not None:
             report_owner, report_projection = report_admission
@@ -368,10 +367,16 @@ class ReportStage:
                     + str(view_model.get("reasonCode", "EVIDENCE_OWNER_CAPABILITY_REQUIRED"))
                 )
             if primary_type == "time_series.arma_garch":
-                from ..packs.arma_garch.deliverables import build_arma_garch_deliverables
+                from ..packs.arma_garch.deliverables import (
+                    build_arma_garch_report_document,
+                )
 
-                time_series_deliverables = build_arma_garch_deliverables(run_root)
-                view_model = time_series_deliverables["report"]
+                report_owner, report_projection = report_admission
+                report_writer = build_arma_garch_report_document(
+                    run_root,
+                    owner=report_owner,
+                    projection=report_projection,
+                )
             else:
                 from ...report_view_model import build_report_view_model
 
@@ -390,12 +395,15 @@ class ReportStage:
                 )
             if report_admission is None:
                 raise RuntimeError("REPORT_EVIDENCE_UNAVAILABLE:EVIDENCE_OWNER_CAPABILITY_REQUIRED")
-            render_legacy_html_report(
-                view_model,
-                run_root,
-                owner=report_owner,
-                projection=report_projection,
-            )
+            if primary_type == "time_series.arma_garch":
+                render_html_report(report_writer, run_root)
+            else:
+                render_legacy_html_report(
+                    view_model,
+                    run_root,
+                    owner=report_owner,
+                    projection=report_projection,
+                )
             report_render_status = "complete"
             report_available = (run_root / "reports" / "report.html").is_file()
             env.step("reporting", "complete", "Rendered HTML report")

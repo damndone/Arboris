@@ -9,9 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ....artifacts import read_json
+
+if TYPE_CHECKING:
+    from ....report_export import EvidenceProjectionV1
+    from ....reporting import ReportDocumentWriterV1
+    from ....services.results_service import ServerOwnedReportEvidencePersistenceV1
 
 
 def build_arma_garch_deliverables(run_root: Path) -> dict[str, Any]:
@@ -108,6 +113,52 @@ def build_arma_garch_deliverables(run_root: Path) -> dict[str, Any]:
             "Acceptance": acceptance,
         },
     }
+
+
+def build_arma_garch_report_document(
+    run_root: Path,
+    *,
+    owner: "ServerOwnedReportEvidencePersistenceV1",
+    projection: "EvidenceProjectionV1",
+) -> "ReportDocumentWriterV1":
+    """Build the ARMA report and bind it to the server-owned Report writer.
+
+    ``build_arma_garch_deliverables`` remains the deterministic family
+    projection of registered ``ts.*`` artifacts.  This adapter is the only
+    legal presentation boundary for the ReportStage family path: the raw
+    family mapping is enriched exclusively with the already-issued projection
+    wire and then admitted by the owner capability factory.
+    """
+
+    from ....report_export import EvidenceProjectionV1
+    from ....reporting import ReportDocumentWriterV1
+    from ....services.results_service import ServerOwnedReportEvidencePersistenceV1
+
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        raise TypeError("ARMA report document requires a server-owned owner capability")
+    if type(projection) is not EvidenceProjectionV1:
+        raise TypeError("ARMA report document requires an owner-issued projection")
+    if getattr(projection, "_owner", None) is not owner:
+        raise TypeError("ARMA report document requires an owner-issued projection")
+
+    deliverables = build_arma_garch_deliverables(run_root)
+    report = deliverables.get("report")
+    if not isinstance(report, Mapping):
+        raise TypeError("ARMA deliverables must contain a report mapping")
+
+    wire = projection.wire
+    view_model = dict(wire)
+    view_model.update(dict(report))
+    # ReportDocumentWriterV1 requires these fields to remain exact copies of
+    # the immutable owner-issued wire even when the family adds presentation
+    # fields such as the ARMA template's overview and metrics.
+    view_model["facts"] = list(wire.get("facts", ()))
+    view_model["provenance"] = dict(wire.get("provenance", {}))
+    return owner.issue_report_document_writer(
+        view_model,
+        projection,
+        canonical_run_root=run_root,
+    )
 
 
 def _artifact_payloads(run_root: Path) -> dict[str, Any]:
