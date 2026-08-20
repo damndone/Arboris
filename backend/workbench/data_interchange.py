@@ -8,6 +8,7 @@ remain typed unavailable when their dependency is absent.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -19,7 +20,13 @@ from .metadata import MetadataLossManifestV1, build_metadata_loss_manifest
 
 InterchangeStatus = Literal["available", "unavailable"]
 WriteStatus = Literal["written", "unavailable"]
-RoundTripStatus = Literal["verified", "unavailable"]
+RoundTripStatus = Literal[
+    "verified",
+    "unavailable",
+    "schema_mismatch",
+    "metadata_loss",
+    "value_mismatch",
+]
 SUPPORTED_INTERCHANGE_FORMATS = ("csv", "xlsx", "parquet", "sav", "zsav", "dta")
 
 
@@ -29,6 +36,14 @@ class InterchangeUnavailableError(RuntimeError):
     def __init__(self, capability: "InterchangeCapabilityV1") -> None:
         self.capability = capability
         super().__init__(f"{capability.reason_code}: {capability.message}")
+
+
+class InterchangeMetadataError(ValueError):
+    """Raised when declared interchange metadata cannot be represented safely."""
+
+    def __init__(self, reason_code: str, message: str) -> None:
+        self.reason_code = reason_code
+        super().__init__(f"{reason_code}: {message}")
 
 
 @dataclass(frozen=True)
@@ -94,6 +109,55 @@ def _has_module(name: str) -> bool:
         return False
 
 
+def _verified_import(name: str) -> Any | None:
+    """Return an importable optional module, not just a find-spec result."""
+
+    if not _has_module(name):
+        return None
+    try:
+        module = importlib.import_module(name)
+        # Exercise the normal import hook as well.  This matters when a
+        # module is already present in sys.modules but its import boundary is
+        # currently unavailable to a bounded consumer.
+        __import__(name, fromlist=["*"])
+        return module
+    except Exception:
+        return None
+
+
+def _verified_pyarrow_adapter() -> tuple[Any, Any] | None:
+    """Import and exercise the pyarrow adapter used by bounded readers."""
+
+    pa = _verified_import("pyarrow")
+    parquet = _verified_import("pyarrow.parquet")
+    if pa is None or parquet is None:
+        return None
+    try:
+        probe = pa.table({"__workbench_probe__": pa.array([1], type=pa.int64())})
+        sink = pa.BufferOutputStream()
+        parquet.write_table(probe, sink)
+        reader = parquet.ParquetFile(pa.BufferReader(sink.getvalue()))
+        if reader.metadata is None or reader.metadata.num_rows != 1:
+            return None
+    except Exception:
+        return None
+    return pa, parquet
+
+
+def _parquet_adapter() -> tuple[Any, Any] | None:
+    return _verified_pyarrow_adapter()
+
+
+def _pyreadstat_module() -> Any | None:
+    module = _verified_import("pyreadstat")
+    if module is None:
+        return None
+    required = ("read_sav", "write_sav", "read_dta", "write_dta")
+    if not all(callable(getattr(module, name, None)) for name in required):
+        return None
+    return module
+
+
 def _parquet_engine() -> str | None:
     """Return an engine admitted by the bounded Parquet contract.
 
@@ -102,7 +166,7 @@ def _parquet_engine() -> str | None:
     adapter is implemented and verified, so capability discovery must not
     claim it is executable merely because its module is installed.
     """
-    if _has_module("pyarrow"):
+    if _parquet_adapter() is not None:
         return "pyarrow"
     return None
 
@@ -133,7 +197,7 @@ def interchange_capability(target_format: str) -> InterchangeCapabilityV1:
         )
     if normalized == "csv":
         return InterchangeCapabilityV1(normalized, "available")
-    if normalized == "xlsx" and not _has_module("openpyxl"):
+    if normalized == "xlsx" and _verified_import("openpyxl") is None:
         return InterchangeCapabilityV1(
             normalized,
             "unavailable",
@@ -142,7 +206,7 @@ def interchange_capability(target_format: str) -> InterchangeCapabilityV1:
         )
     if normalized == "parquet" and _parquet_engine() is None:
         return _parquet_unavailable_capability()
-    if normalized in {"sav", "zsav", "dta"} and not _has_module("pyreadstat"):
+    if normalized in {"sav", "zsav", "dta"} and _pyreadstat_module() is None:
         return InterchangeCapabilityV1(
             normalized,
             "unavailable",
@@ -154,15 +218,30 @@ def interchange_capability(target_format: str) -> InterchangeCapabilityV1:
 
 def _loss_metadata(metadata: Mapping[str, Any]) -> dict[str, Mapping[str, object]]:
     if not isinstance(metadata, Mapping):
-        raise TypeError("metadata must be a mapping")
+        raise InterchangeMetadataError("invalid_metadata", "metadata must be a mapping")
     if "columns" not in metadata:
-        return {str(column): fields for column, fields in metadata.items()}
+        result: dict[str, Mapping[str, object]] = {}
+        for column, fields in metadata.items():
+            if not isinstance(fields, Mapping):
+                raise InterchangeMetadataError(
+                    "metadata_loss",
+                    f"metadata for {column!r} must be a mapping",
+                )
+            result[str(column)] = fields
+        return result
     columns = metadata.get("columns")
     if not isinstance(columns, Mapping):
-        raise TypeError("metadata.columns must be a mapping")
-    result: dict[str, Mapping[str, object]] = {
-        str(column): fields for column, fields in columns.items() if isinstance(fields, Mapping)
-    }
+        raise InterchangeMetadataError(
+            "invalid_metadata", "metadata.columns must be a mapping"
+        )
+    result = {}
+    for column, fields in columns.items():
+        if not isinstance(fields, Mapping):
+            raise InterchangeMetadataError(
+                "metadata_loss",
+                f"metadata for column {column!r} must be a mapping",
+            )
+        result[str(column)] = fields
     dataset = {
         key: value
         for key, value in metadata.items()
@@ -198,15 +277,23 @@ def _write_frame(frame: pd.DataFrame, target_format: str, path: Path) -> None:
         engine = _parquet_engine()
         if engine is None:
             raise InterchangeUnavailableError(interchange_capability(target_format))
-        frame.to_parquet(path, index=False, engine=engine)
+        try:
+            frame.to_parquet(path, index=False, engine=engine)
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise InterchangeUnavailableError(interchange_capability(target_format)) from exc
         return
     if target_format in {"sav", "zsav", "dta"}:
-        import pyreadstat
+        pyreadstat = _pyreadstat_module()
+        if pyreadstat is None:
+            raise InterchangeUnavailableError(interchange_capability(target_format))
 
-        if target_format == "dta":
-            pyreadstat.write_dta(frame, str(path), version=15)
-        else:
-            pyreadstat.write_sav(frame, str(path), compress=target_format == "zsav")
+        try:
+            if target_format == "dta":
+                pyreadstat.write_dta(frame, str(path), version=15)
+            else:
+                pyreadstat.write_sav(frame, str(path), compress=target_format == "zsav")
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise InterchangeUnavailableError(interchange_capability(target_format)) from exc
         return
     raise InterchangeUnavailableError(interchange_capability(target_format))
 
@@ -220,14 +307,22 @@ def _read_frame(target_format: str, path: Path) -> pd.DataFrame:
         engine = _parquet_engine()
         if engine is None:
             raise InterchangeUnavailableError(interchange_capability(target_format))
-        return pd.read_parquet(path, engine=engine)
+        try:
+            return pd.read_parquet(path, engine=engine)
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise InterchangeUnavailableError(interchange_capability(target_format)) from exc
     if target_format in {"sav", "zsav", "dta"}:
-        import pyreadstat
+        pyreadstat = _pyreadstat_module()
+        if pyreadstat is None:
+            raise InterchangeUnavailableError(interchange_capability(target_format))
 
-        if target_format == "dta":
-            restored, _meta = pyreadstat.read_dta(str(path))
-        else:
-            restored, _meta = pyreadstat.read_sav(str(path))
+        try:
+            if target_format == "dta":
+                restored, _meta = pyreadstat.read_dta(str(path))
+            else:
+                restored, _meta = pyreadstat.read_sav(str(path))
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise InterchangeUnavailableError(interchange_capability(target_format)) from exc
         return restored
     raise InterchangeUnavailableError(interchange_capability(target_format))
 
@@ -253,7 +348,15 @@ def write_interchange_frame(
         )
     target_path = Path(path).expanduser()
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    _write_frame(frame, normalized, target_path)
+    try:
+        _write_frame(frame, normalized, target_path)
+    except InterchangeUnavailableError as error:
+        return InterchangeWriteResultV1(
+            target_format=normalized,
+            status="unavailable",
+            path=None,
+            capability=error.capability,
+        )
     return InterchangeWriteResultV1(
         target_format=normalized,
         status="written",
@@ -304,14 +407,32 @@ def round_trip_frame(
             metadata_loss=loss,
             capability=write_result.capability,
         )
-    restored = _read_frame(normalized, path)
+    try:
+        restored = _read_frame(normalized, path)
+    except InterchangeUnavailableError as error:
+        return RoundTripResultV1(
+            target_format=normalized,
+            status="unavailable",
+            frame_equal=False,
+            dtype_equal=False,
+            schema_equal=False,
+            path=None,
+            metadata_loss=loss,
+            capability=error.capability,
+        )
     frame_equal, dtype_equal, schema_equal = _frames_equal(frame, restored)
-    if not frame_equal:
-        raise ValueError(f"{normalized} round-trip changed values or column order")
+    if not schema_equal:
+        status: RoundTripStatus = "schema_mismatch"
+    elif not frame_equal:
+        status = "value_mismatch"
+    elif loss.has_loss:
+        status = "metadata_loss"
+    else:
+        status = "verified"
     return RoundTripResultV1(
         target_format=normalized,
-        status="verified",
-        frame_equal=True,
+        status=status,
+        frame_equal=frame_equal,
         dtype_equal=dtype_equal,
         schema_equal=schema_equal,
         path=str(path),
@@ -322,6 +443,7 @@ def round_trip_frame(
 
 __all__ = [
     "InterchangeCapabilityV1",
+    "InterchangeMetadataError",
     "InterchangeUnavailableError",
     "InterchangeWriteResultV1",
     "RoundTripResultV1",

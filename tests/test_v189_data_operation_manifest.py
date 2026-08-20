@@ -318,11 +318,74 @@ def test_manifest_advertises_only_real_data_consumer_extensions() -> None:
         assert descriptor.request_schema["additionalProperties"] is False
         assert descriptor.request_schema["properties"]["source_artifact_id"]["type"] == "string"
 
+    from workbench.data_interchange import interchange_capability
+
     unavailable = manifest.to_dict().get("unavailable", [])
-    assert {
-        item["operation_id"] for item in unavailable
-        if item["operation_id"] in {"data.interchange.sav", "data.interchange.zsav", "data.interchange.dta"}
-    } == {"data.interchange.sav", "data.interchange.zsav", "data.interchange.dta"}
+    native_items = {
+        item["operation_id"]: item
+        for item in unavailable
+        if item["operation_id"] in {
+            "data.interchange.sav",
+            "data.interchange.zsav",
+            "data.interchange.dta",
+        }
+    }
+    assert set(native_items) == {
+        "data.interchange.sav",
+        "data.interchange.zsav",
+        "data.interchange.dta",
+    }
+    for operation_id, item in native_items.items():
+        capability = interchange_capability(operation_id.rsplit(".", 1)[-1])
+        assert item["status"] == "unavailable"
+        assert item["reason_code"] == capability.reason_code
+
+
+def test_manifest_fails_closed_when_pyreadstat_import_is_broken(monkeypatch) -> None:
+    import importlib
+
+    from workbench import data_operation_manifest as api
+    from workbench import data_interchange
+
+    real_import_module = importlib.import_module
+    original_has_module = data_interchange._has_module
+
+    monkeypatch.setattr(
+        data_interchange,
+        "_has_module",
+        lambda name: True if name == "pyreadstat" else original_has_module(name),
+    )
+
+    def broken_import(name: str, package: str | None = None):
+        if name == "pyreadstat":
+            raise ModuleNotFoundError("pyreadstat is installed but cannot be imported")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", broken_import)
+
+    manifest = api.build_data_operation_manifest()
+    unavailable = manifest.to_dict().get("unavailable", [])
+
+    native_items = {
+        item["operation_id"]: item
+        for item in unavailable
+        if item["operation_id"] in {
+            "data.interchange.sav",
+            "data.interchange.zsav",
+            "data.interchange.dta",
+        }
+    }
+    assert set(native_items) == {
+        "data.interchange.sav",
+        "data.interchange.zsav",
+        "data.interchange.dta",
+    }
+    for operation_id, item in native_items.items():
+        capability = data_interchange.interchange_capability(
+            operation_id.rsplit(".", 1)[-1]
+        )
+        assert item["status"] == "unavailable"
+        assert item["reason_code"] == capability.reason_code == "optional_dependency"
 
 
 def test_package_runtime_adapter_joins_live_catalog_and_exposes_record_evidence_ports() -> None:

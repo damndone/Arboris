@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 import re
+from types import MappingProxyType
 
 import pandas as pd
 
@@ -28,6 +29,22 @@ MAX_METADATA_STRING_LENGTH = 256
 MAX_METADATA_TOTAL_BYTES = 64 * 1024
 MAX_METADATA_PROVENANCE_BYTES = 8 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _freeze_metadata(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze_metadata(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_metadata(item) for item in value)
+    return value
+
+
+def _thaw_metadata(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw_metadata(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_metadata(item) for item in value]
+    return value
 
 
 class MetadataProvenanceError(ValueError):
@@ -334,7 +351,7 @@ def metadata_revision_digest(
         )
     payload = {
         "schema_revision": schema_revision,
-        "metadata": metadata,
+        "metadata": _thaw_metadata(metadata),
     }
     digest = hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
@@ -408,14 +425,20 @@ class MetadataRegistryV1:
             raise MetadataProvenanceError(
                 "METADATA_DECLARATION_INVALID", "metadata registry metadata must be an object"
             )
+        owned_metadata = _freeze_metadata(self.metadata)
         metadata_bytes = len(
-            json.dumps(self.metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            json.dumps(
+                _thaw_metadata(owned_metadata),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
         )
         if metadata_bytes > MAX_METADATA_TOTAL_BYTES:
             raise MetadataProvenanceError(
                 "METADATA_DECLARATION_BOUNDS", "metadata registry exceeds the server byte bound"
             )
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", owned_metadata)
 
     @classmethod
     def from_payload(
@@ -517,13 +540,13 @@ class MetadataRegistryV1:
                 "METADATA_REGISTRY_INVALID", "metadata registry columns must be an object"
             )
         projected_columns = {
-            str(column): dict(declaration)
+            str(column): _thaw_metadata(declaration)
             for column, declaration in raw_columns.items()
             if column in known and isinstance(declaration, Mapping)
         }
         result: dict[str, object] = dict(projected_columns)
         dataset = {
-            key: self.metadata[key]
+            key: _thaw_metadata(self.metadata[key])
             for key in ("weight", "split", "group")
             if key in self.metadata
         }
@@ -545,6 +568,11 @@ class MetadataRegistryV1:
             for column, declaration in raw_columns.items()
             if isinstance(declaration, Mapping) and "user_missing_values" in declaration
         }
+
+    def to_metadata_dict(self) -> dict[str, object]:
+        """Return a recursively thawed compatibility projection for consumers."""
+
+        return _thaw_metadata(self.metadata)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -569,7 +597,7 @@ class MetadataRegistryV1:
                 "node_id": self.source_node_id,
                 "artifact_id": self.source_artifact_id,
             },
-            "metadata": dict(self.metadata),
+            "metadata": _thaw_metadata(self.metadata),
         }
 
 

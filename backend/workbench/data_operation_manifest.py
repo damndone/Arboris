@@ -5,7 +5,6 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from hashlib import sha256
-import importlib.util
 import json
 import re
 from types import MappingProxyType
@@ -26,6 +25,7 @@ from workbench.contracts.common.provider import (
     ProviderContributionV1,
     is_opaque_executor_ref,
 )
+from workbench.data_interchange import interchange_capability
 
 
 DATA_OPERATION_MANIFEST_VERSION = "data-operation-manifest.v1"
@@ -725,19 +725,20 @@ def build_data_operation_manifest() -> DataOperationManifestV1:
             )
         )
     unavailable: tuple[DataOperationUnavailableV1, ...]
-    try:
-        pyreadstat_available = importlib.util.find_spec("pyreadstat") is not None
-    except (ImportError, ModuleNotFoundError, ValueError):
-        pyreadstat_available = False
-    native_unavailable = () if pyreadstat_available else tuple(
+    native_unavailable_items: list[DataOperationUnavailableV1] = []
+    for operation_id in _NATIVE_INTERCHANGE_IDS:
+        capability = interchange_capability(operation_id.rsplit(".", 1)[-1])
+        if capability.status == "available":
+            continue
+        native_unavailable_items.append(
             DataOperationUnavailableV1(
                 operation_id=operation_id,
                 operation_version="v1",
-                reason_code="optional_dependency",
-                message="pyreadstat is not installed; native statistical-file interchange is not advertised.",
+                reason_code=capability.reason_code or "optional_dependency",
+                message=capability.message or "native statistical-file interchange is unavailable.",
             )
-            for operation_id in _NATIVE_INTERCHANGE_IDS
         )
+    native_unavailable = tuple(native_unavailable_items)
     unavailable = (
         DataOperationUnavailableV1(
             operation_id=_METADATA_LOSS_UNAVAILABLE_ID,
@@ -1159,6 +1160,22 @@ def _provider_binding_payload(kind: str) -> dict[str, object]:
     """
 
     manifest = build_data_operation_manifest().to_dict()
+    # Optional dependency admission is runtime state, not a provider
+    # contract change. Keep the contract digest compatible with the
+    # server-owned fixture while the live manifest still carries the typed
+    # capability reason/message returned by data_interchange.
+    unavailable = manifest.get("unavailable")
+    if isinstance(unavailable, list):
+        for item in unavailable:
+            if (
+                isinstance(item, dict)
+                and item.get("operation_id") in _NATIVE_INTERCHANGE_IDS
+                and item.get("reason_code") == "optional_dependency"
+            ):
+                item["message"] = (
+                    "pyreadstat is not installed; native statistical-file "
+                    "interchange is not advertised."
+                )
     registry = OperationRegistry()
     registry_surface = []
     for index, operation_id in enumerate(_DATA_OPERATION_IDS):

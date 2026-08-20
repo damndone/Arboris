@@ -15,6 +15,7 @@ from typing import Any, Iterable, Literal, Mapping
 
 import pandas as pd
 
+from . import data_interchange
 from .artifacts import (
     register_artifact,
     read_json,
@@ -1256,7 +1257,7 @@ def _execute_data_transform(
             named[output] = pd.NamedAgg(column=column, aggfunc=function)
         weight = None
         if metadata_registry is not None:
-            candidate_weight = metadata_registry.metadata.get("weight")
+            candidate_weight = metadata_registry.to_metadata_dict().get("weight")
             if isinstance(candidate_weight, Mapping):
                 weight = candidate_weight
         if weight is not None:
@@ -2181,7 +2182,7 @@ def _metadata_mutation_canonical(
         )
         if registry is None:
             return incoming
-        existing = registry.metadata
+        existing = registry.to_metadata_dict()
         merged_columns: dict[str, object] = {}
         existing_columns = existing.get("columns", {})
         if isinstance(existing_columns, Mapping):
@@ -4083,7 +4084,7 @@ def _metadata_for_output(
                 for old, new in parameters["mapping"].items()
             }
 
-    source_metadata = registry.metadata
+    source_metadata = registry.to_metadata_dict()
     raw_columns = source_metadata.get("columns", {})
     if not isinstance(raw_columns, Mapping):
         return {"columns": {}}
@@ -4167,7 +4168,7 @@ def _metadata_sidecar_payload(
     schema_artifact_sha256 = schema_revision.removeprefix("schema:")
     metadata_loss: list[dict[str, str]] = []
     if registry is not None:
-        source_metadata = registry.metadata
+        source_metadata = registry.to_metadata_dict()
         source_columns = source_metadata.get("columns", {})
         aliases = {str(key): str(value) for key, value in (column_aliases or {}).items()}
         if isinstance(source_columns, Mapping):
@@ -4886,7 +4887,17 @@ def _read_frame(path: Path) -> pd.DataFrame:
     if suffix == ".csv":
         frame = pd.read_csv(path)
     elif suffix in {".parquet", ".pq"}:
-        frame = pd.read_parquet(path)
+        engine = data_interchange._parquet_engine()
+        if engine is None:
+            raise data_interchange.InterchangeUnavailableError(
+                data_interchange.interchange_capability("parquet")
+            )
+        try:
+            frame = pd.read_parquet(path, engine=engine)
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise data_interchange.InterchangeUnavailableError(
+                data_interchange.interchange_capability("parquet")
+            ) from exc
     elif suffix in {".xlsx", ".xls"}:
         frame = pd.read_excel(path)
     else:

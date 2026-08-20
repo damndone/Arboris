@@ -81,6 +81,25 @@ def test_excel_sheet_limit_is_checked_before_registration(tmp_path: Path):
     assert read_json(run.root / "artifacts_index.json") == {"schema_version": 1, "artifacts": []}
 
 
+def test_raw_snapshot_symlink_is_rejected_before_any_external_copy(tmp_path: Path):
+    source = tmp_path / "source.csv"
+    pd.DataFrame({"x": [1]}).to_csv(source, index=False)
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    raw_snapshot = run.root / "raw_snapshot"
+    raw_snapshot.rmdir()
+    raw_snapshot.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError) as error:
+        ingest_files([source], run.root, WorkbenchConfig())
+
+    assert not (outside / source.name).exists()
+    assert read_json(run.root / "artifacts_index.json") == {"schema_version": 1, "artifacts": []}
+    assert error.value.reason_code == "raw_snapshot_containment"
+
+
 def test_parquet_bounded_ingestion_reports_typed_optional_dependency(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -145,3 +164,45 @@ def test_coerce_datetime_to_numeric_converts_numeric_hint_columns():
     assert pd.api.types.is_numeric_dtype(frame["exposure_months"])
     # Column without numeric hint should stay datetime
     assert pd.api.types.is_datetime64_any_dtype(frame["label"])
+
+
+def test_metadata_registry_owns_nested_metadata_immutably() -> None:
+    from workbench.metadata import MetadataRegistryV1
+
+    metadata = {
+        "columns": {
+            "score": {
+                "value_labels": {"1": "one"},
+                "user_missing_values": [99],
+            }
+        }
+    }
+    registry = MetadataRegistryV1(
+        source_run_id="run-1",
+        source_node_id="node-1",
+        source_artifact_id="artifact-1",
+        schema_revision="schema:fixture",
+        metadata_revision="metadata:fixture",
+        metadata=metadata,
+        source_content_sha256="a" * 64,
+        schema_artifact_id="schema:fixture",
+        schema_artifact_sha256="d" * 64,
+        metadata_artifact_id="metadata:fixture-artifact",
+        metadata_artifact_path="metadata/registry.json",
+        metadata_artifact_sha256="b" * 64,
+        metadata_index_entry_sha256="c" * 64,
+    )
+
+    metadata["columns"]["score"]["value_labels"]["1"] = "caller-mutated"
+    metadata["columns"]["score"]["user_missing_values"].append(100)
+
+    assert registry.metadata["columns"]["score"]["value_labels"]["1"] == "one"
+    assert registry.metadata["columns"]["score"]["user_missing_values"] == (99,)
+    with pytest.raises(TypeError):
+        registry.metadata["columns"]["score"]["value_labels"]["1"] = "blocked"
+    with pytest.raises((TypeError, AttributeError)):
+        registry.metadata["columns"]["score"]["user_missing_values"].append(101)
+
+    serialized = registry.to_dict()
+    serialized["metadata"]["columns"]["score"]["value_labels"]["1"] = "serialized-mutated"
+    assert registry.metadata["columns"]["score"]["value_labels"]["1"] == "one"
