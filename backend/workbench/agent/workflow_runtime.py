@@ -72,6 +72,7 @@ from .workflow import (
     WorkflowExecutionError,
     WorkflowStep,
     WorkflowStepResult,
+    WorkflowStepState,
     _fingerprint,
     _require_server_compiler_receipt,
     _workflow_admission_fingerprint,
@@ -81,6 +82,7 @@ from .workflow import (
     _persisted_lineage,
     _binding_body,
     _validated_artifact_ids,
+    MAX_PERSISTED_ROW_COUNT,
 )
 from .post_estimation_registry import (
     PostEstimationRegistryError,
@@ -414,6 +416,22 @@ def _completion_seal(record: Mapping[str, Any]) -> str:
     return hmac.new(_EVIDENCE_COMPLETION_SEAL_KEY, encoded, hashlib.sha256).hexdigest()
 
 
+def _artifact_admission_seal(record: Mapping[str, Any]) -> str:
+    payload = {
+        str(key): value
+        for key, value in record.items()
+        if key != "artifact_admission_seal"
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hmac.new(_EVIDENCE_COMPLETION_SEAL_KEY, encoded, hashlib.sha256).hexdigest()
+
+
 def _persisted_admission_fingerprint(record: Mapping[str, Any]) -> str:
     return _fingerprint(
         {
@@ -432,6 +450,40 @@ def _snapshot_json(value: Any) -> Any:
     return json.loads(
         json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
     )
+
+
+def _validated_row_counts(value: Any, *, field_name: str) -> dict[str, int]:
+    """Normalize persisted row counts without exposing conversion failures."""
+
+    if value is None:
+        value = {}
+    if not isinstance(value, Mapping):
+        raise WorkflowExecutionError(
+            f"WORKFLOW_EVIDENCE_CORRUPT: {field_name} are malformed"
+        )
+    normalized: dict[str, int] = {}
+    for key, count in value.items():
+        if type(key) is not str or not key:
+            raise WorkflowExecutionError(
+                f"WORKFLOW_EVIDENCE_CORRUPT: {field_name} keys are malformed"
+            )
+        if (
+            type(count) is not int
+            or count < 0
+            or count > MAX_PERSISTED_ROW_COUNT
+        ):
+            raise WorkflowExecutionError(
+                f"WORKFLOW_EVIDENCE_CORRUPT: {field_name} values are malformed"
+            )
+        normalized[key] = count
+    return normalized
+
+
+def _require_admitted_status(record: Mapping[str, Any]) -> None:
+    if record.get("status") != "admitted":
+        raise WorkflowExecutionError(
+            "WORKFLOW_ADMISSION_REQUIRED: persisted admission status is not admitted"
+        )
 
 
 def _workflow_contract_fingerprint_from_dict(value: Mapping[str, Any]) -> str:
@@ -2013,6 +2065,298 @@ class EvidencePersistencePort:
             )
         self._server_artifact_registry[key] = row
 
+    def _persist_server_artifact_admission(
+        self,
+        row: Mapping[str, Any],
+        *,
+        receipt: WorkflowAdmissionReceipt,
+        directory_fd: int | None = None,
+    ) -> None:
+        """Persist the frozen registry row for same-process Resume validation."""
+
+        self._require_receipt(receipt)
+        record = {
+            "record_type": "workflow_artifact_admission",
+            **_snapshot_json(dict(row)),
+            "receipt_owner": receipt.receipt_owner,
+            "owner_pid": receipt.owner_pid,
+            "process_generation": receipt.process_generation,
+        }
+        record["artifact_admission_seal"] = _artifact_admission_seal(record)
+        path = self._path(receipt.workflow_id)
+        def append_if_missing(locked_directory_fd: int) -> None:
+            records = self._records(receipt.workflow_id)
+            matching = [
+                item
+                for item in records
+                if item.get("record_type") == "workflow_artifact_admission"
+                and item.get("receipt_id") == receipt.receipt_id
+                and item.get("run_id") == record.get("run_id")
+                and item.get("artifact_id") == record.get("artifact_id")
+            ]
+            if len(matching) > 1 or (matching and matching[0] != record):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: persisted server artifact admission changed"
+                )
+            if not matching:
+                _append_evidence_record(path, record, directory_fd=locked_directory_fd)
+
+        if directory_fd is not None:
+            append_if_missing(directory_fd)
+            return
+        with _evidence_lock(
+            path, admitted_directory_fd=self._host_endpoint_fd
+        ) as lock:
+            append_if_missing(lock.directory_fd)
+
+    def _resumed_server_artifact_row(
+        self,
+        record: Mapping[str, Any],
+        *,
+        receipt: WorkflowAdmissionReceipt,
+    ) -> dict[str, Any]:
+        if record.get("artifact_admission_seal") != _artifact_admission_seal(record):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted server artifact admission seal is invalid"
+            )
+        expected = {
+            "record_type": "workflow_artifact_admission",
+            "workflow_id": receipt.workflow_id,
+            "workflow_step_id": receipt.step_id,
+            "receipt_id": receipt.receipt_id,
+            "receipt_owner": receipt.receipt_owner,
+            "owner_pid": receipt.owner_pid,
+            "process_generation": receipt.process_generation,
+        }
+        if any(record.get(key) != value for key, value in expected.items()):
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: persisted server artifact admission is bound to another receipt"
+            )
+        return {
+            str(key): value
+            for key, value in record.items()
+            if key
+            not in {
+                "record_type",
+                "artifact_admission_seal",
+                "receipt_owner",
+                "owner_pid",
+                "process_generation",
+            }
+        }
+
+    def validate_resumed_step_state(
+        self,
+        draft: WorkflowDraft,
+        step: WorkflowStep,
+        state: WorkflowStepState,
+    ) -> WorkflowStepResult:
+        """Rebind persisted state to sealed completion and artifact admission."""
+
+        self._require_server_host()
+        if type(state) is not WorkflowStepState or state.status != "completed":
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: only a completed typed step may be resumed"
+            )
+        scope_ref = self._require_server_draft(draft)
+        contract_fingerprint = self._contract_fingerprint(step)
+        target_fingerprint = _fingerprint(self._target_snapshot(draft))
+        records = self._records(draft.workflow_id)
+        execution_key = f"{draft.workflow_id}:{step.step_id}:{step.fingerprint}"
+        completions = [
+            item
+            for item in records
+            if item.get("record_type") == "workflow_completion"
+            and item.get("status") == "completed"
+            and item.get("execution_key") == execution_key
+            and item.get("step_id") == step.step_id
+        ]
+        if len(completions) != 1:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed step lacks one server completion"
+            )
+        completion = completions[0]
+        receipt_id = completion.get("receipt_id")
+        if type(receipt_id) is not str or not receipt_id:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed step has no server receipt"
+            )
+        admissions = [
+            item
+            for item in records
+            if item.get("record_type") == "workflow_admission"
+            and item.get("receipt_id") == receipt_id
+            and item.get("execution_key") == execution_key
+        ]
+        if len(admissions) != 1:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed step lacks one server admission"
+            )
+        admission = admissions[0]
+        _require_admitted_status(admission)
+        try:
+            attempt = int(completion.get("attempt", 1))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted completion attempt is invalid"
+            ) from exc
+        compiler_receipt = _require_server_compiler_receipt(draft)
+        receipt = WorkflowAdmissionReceipt(
+            workflow_id=draft.workflow_id,
+            step_id=step.step_id,
+            plan_fingerprint=draft.plan_fingerprint,
+            step_fingerprint=step.fingerprint,
+            scope_ref=scope_ref,
+            contract_fingerprint=contract_fingerprint,
+            receipt_id=receipt_id,
+            attempt=attempt,
+            completed_result=None,
+            target_fingerprint=target_fingerprint,
+            admission_fingerprint=compiler_receipt.admission_fingerprint,
+            receipt_owner=_EVIDENCE_RECEIPT_OWNER,
+            owner_pid=self._owner_pid,
+            process_generation=self._process_generation,
+        )
+        self._validate_admission_record(admission, receipt)
+        # Completion integrity is checked before any persisted metadata is
+        # converted into a result.  A malformed row count must never leak the
+        # built-in ValueError raised by int(), and a forged metadata field must
+        # be rejected by the seal before it is consumed.
+        self._validate_completion_record(completion, receipt)
+        completed_result = self._result_from_record(completion)
+        receipt = replace(receipt, completed_result=completed_result)
+        if any(
+            item.get("record_type") == "workflow_abort"
+            and item.get("receipt_id") == receipt.receipt_id
+            for item in records
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_ADMISSION_ABORTED: completed state belongs to an aborted receipt"
+            )
+
+        completion_artifacts = _validated_artifact_ids(
+            completion.get("artifact_ids", [])
+        )
+        if list(state.artifact_ids) != completion_artifacts:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: persisted artifact_ids differ from the server completion"
+            )
+        completion_bindings = completion.get("output_bindings") or {}
+        completion_lineage = completion.get("lineage") or {}
+        if not isinstance(completion_bindings, Mapping) or not isinstance(
+            completion_lineage, Mapping
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: server completion metadata is malformed"
+            )
+        if _snapshot_json(state.output_bindings) != _snapshot_json(dict(completion_bindings)):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: persisted output_bindings differ from the server completion"
+            )
+        if _snapshot_json(state.lineage) != _snapshot_json(dict(completion_lineage)):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: persisted lineage differs from the server completion"
+            )
+        completion_row_counts = _validated_row_counts(
+            completion.get("row_counts"),
+            field_name="completion row_counts",
+        )
+        if dict(state.row_counts) != completion_row_counts:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: persisted row_counts differ from the server completion"
+            )
+
+        # Resume is itself an authority boundary. A terminal model step may
+        # have no downstream consumer to trigger _dependent_model_branch(), so
+        # validate every persisted model branch here before staging any
+        # artifact row or returning the result to a callback.
+        model_operations = {"model.genesis", "model.auto", "model.custom"}
+        if step.operation_id in model_operations:
+            raw_branches = completion_lineage.get("branches")
+            if raw_branches is None:
+                model_output = completion_bindings.get("model_branches")
+                if isinstance(model_output, Mapping):
+                    raw_branches = model_output.get("branches")
+            if not isinstance(raw_branches, list) or not raw_branches:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed model step has no persisted branches"
+                )
+            for branch in raw_branches:
+                if not isinstance(branch, Mapping):
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_EVIDENCE_CORRUPT: persisted model branch is malformed"
+                    )
+                _validate_persisted_model_branch(
+                    self.project_root,
+                    draft,
+                    step.step_id,
+                    branch,
+                )
+
+        staged_rows: dict[tuple[str, str, str], dict[str, Any]] = {}
+        previous_rows: dict[tuple[str, str, str], dict[str, Any] | None] = {}
+        target_run_id = _require_workflow_opaque_ref(
+            admission.get("target", {}).get("run_id"),
+            "workflow target run_id",
+        )
+        for raw_artifact_id in completion_artifacts:
+            if raw_artifact_id.count(":") > 1:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed artifact identity is malformed"
+                )
+            if ":" in raw_artifact_id:
+                run_id, artifact_id = raw_artifact_id.split(":", 1)
+            else:
+                run_id, artifact_id = target_run_id, raw_artifact_id
+            _require_workflow_opaque_ref(run_id, "resumed artifact run_id")
+            _require_workflow_artifact_ref(artifact_id, "resumed artifact_id")
+            matching = [
+                item
+                for item in records
+                if item.get("record_type") == "workflow_artifact_admission"
+                and item.get("receipt_id") == receipt.receipt_id
+                and item.get("run_id") == run_id
+                and item.get("artifact_id") == artifact_id
+            ]
+            key = (receipt.receipt_id, run_id, artifact_id)
+            current_row = self._server_artifact_registry.get(key)
+            if len(matching) > 1:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: artifact admission is not unique"
+                )
+            if matching:
+                row = self._resumed_server_artifact_row(matching[0], receipt=receipt)
+            elif current_row is not None:
+                row = dict(current_row)
+            else:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed artifact is not in the server artifact registry"
+                )
+            if current_row is not None and current_row != row:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: server artifact registry changed before Resume"
+                )
+            previous_rows[key] = current_row
+            staged_rows[key] = row
+            self._server_artifact_registry[key] = row
+        try:
+            self._validate_completion_artifacts(
+                admission,
+                receipt=receipt,
+                artifact_ids=completion_artifacts,
+                output_bindings=completion_bindings,
+                lineage=completion_lineage,
+            )
+        except Exception:
+            for key, previous_row in previous_rows.items():
+                if previous_row is None:
+                    self._server_artifact_registry.pop(key, None)
+                else:
+                    self._server_artifact_registry[key] = previous_row
+            raise
+        self._register_receipt(receipt)
+        return completed_result
+
     def admit_result_artifacts(
         self,
         receipt: WorkflowAdmissionReceipt,
@@ -2323,33 +2667,60 @@ class EvidencePersistencePort:
 
     @staticmethod
     def _result_from_record(record: Mapping[str, Any]) -> WorkflowStepResult:
-        outputs = record.get("output_bindings") or {}
-        lineage = record.get("lineage") or {}
-        if not isinstance(outputs, Mapping) or not isinstance(lineage, Mapping):
-            raise WorkflowExecutionError("WORKFLOW_EVIDENCE_CORRUPT: completion metadata is malformed")
-        if any(not isinstance(value, Mapping) for value in outputs.values()):
-            raise WorkflowExecutionError("WORKFLOW_EVIDENCE_CORRUPT: output binding is malformed")
-        if any("binding_type" not in value for value in outputs.values()):
-            raise WorkflowExecutionError("WORKFLOW_EVIDENCE_CORRUPT: typed output binding lacks binding_type")
-        payload: dict[str, Any] = {
-            "output_bindings": {str(key): dict(value) for key, value in outputs.items() if isinstance(value, Mapping)},
-            "lineage": dict(lineage),
-        }
-        produced = outputs.get("produced_dataset")
-        if isinstance(produced, Mapping):
-            payload["produced_dataset"] = _binding_body(produced)
-        branches = lineage.get("branches")
-        if isinstance(branches, list):
-            payload["branches"] = branches
-        return WorkflowStepResult(
-            artifact_ids=_validated_artifact_ids(record.get("artifact_ids", [])),
-            row_counts={str(key): int(value) for key, value in (record.get("row_counts") or {}).items()},
-            result_fingerprint=record.get("result_fingerprint"),
-            payload=payload,
-            output_bindings={str(key): dict(value) for key, value in outputs.items() if isinstance(value, Mapping)},
-            lineage=dict(lineage),
-            restored_from_state=True,
-        )
+        try:
+            outputs = record.get("output_bindings") or {}
+            lineage = record.get("lineage") or {}
+            if not isinstance(outputs, Mapping) or not isinstance(lineage, Mapping):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_CORRUPT: completion metadata is malformed"
+                )
+            if any(not isinstance(value, Mapping) for value in outputs.values()):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_CORRUPT: output binding is malformed"
+                )
+            if any("binding_type" not in value for value in outputs.values()):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_CORRUPT: typed output binding lacks binding_type"
+                )
+            normalized_outputs = {
+                str(key): dict(value)
+                for key, value in outputs.items()
+                if isinstance(value, Mapping)
+            }
+            normalized_lineage = dict(lineage)
+            payload: dict[str, Any] = {
+                "output_bindings": normalized_outputs,
+                "lineage": normalized_lineage,
+            }
+            produced = outputs.get("produced_dataset")
+            if isinstance(produced, Mapping):
+                payload["produced_dataset"] = _binding_body(produced)
+            branches = lineage.get("branches")
+            if isinstance(branches, list):
+                payload["branches"] = branches
+            result_fingerprint = record.get("result_fingerprint")
+            if result_fingerprint is not None and not isinstance(result_fingerprint, str):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_CORRUPT: completion result fingerprint is malformed"
+                )
+            return WorkflowStepResult(
+                artifact_ids=_validated_artifact_ids(record.get("artifact_ids", [])),
+                row_counts=_validated_row_counts(
+                    record.get("row_counts"),
+                    field_name="completion row_counts",
+                ),
+                result_fingerprint=result_fingerprint,
+                payload=payload,
+                output_bindings=normalized_outputs,
+                lineage=normalized_lineage,
+                restored_from_state=True,
+            )
+        except WorkflowExecutionError:
+            raise
+        except (AttributeError, KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: completion metadata is malformed"
+            ) from exc
 
     @staticmethod
     def _target_snapshot(draft: WorkflowDraft) -> dict[str, Any]:
@@ -2372,6 +2743,7 @@ class EvidencePersistencePort:
         record: Mapping[str, Any],
         receipt: WorkflowAdmissionReceipt,
     ) -> None:
+        _require_admitted_status(record)
         if record.get("receipt_owner") != receipt.receipt_owner:
             raise WorkflowExecutionError(
                 "WORKFLOW_RESTART_AUTHORITY_REQUIRED: persisted admission belongs to another worker"
@@ -2727,7 +3099,13 @@ class EvidencePersistencePort:
     def _validate_completion_record(
         record: Mapping[str, Any], receipt: WorkflowAdmissionReceipt
     ) -> None:
-        if record.get("completion_seal") != _completion_seal(record):
+        try:
+            expected_seal = _completion_seal(record)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: completion integrity seal is invalid"
+            ) from exc
+        if record.get("completion_seal") != expected_seal:
             raise WorkflowExecutionError(
                 "WORKFLOW_EVIDENCE_CORRUPT: completion integrity seal is invalid"
             )
@@ -2831,6 +3209,13 @@ class EvidencePersistencePort:
                     raise WorkflowExecutionError(
                         "WORKFLOW_EVIDENCE_CORRUPT: completion lacks its unique admission"
                     )
+                _require_admitted_status(completion_admissions[0])
+                try:
+                    completion_attempt = int(completion.get("attempt", 1))
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_EVIDENCE_CORRUPT: persisted completion attempt is invalid"
+                    ) from exc
                 receipt = WorkflowAdmissionReceipt(
                     workflow_id=draft.workflow_id,
                     step_id=step.step_id,
@@ -2839,16 +3224,20 @@ class EvidencePersistencePort:
                     scope_ref=scope_ref,
                     contract_fingerprint=contract_fingerprint,
                     receipt_id=str(completion["receipt_id"]),
-                    attempt=int(completion.get("attempt", 1)),
-                    completed_result=self._result_from_record(completion),
+                    attempt=completion_attempt,
+                    completed_result=None,
                     target_fingerprint=target_fingerprint,
                     admission_fingerprint=compiler_receipt.admission_fingerprint,
                     receipt_owner=_EVIDENCE_RECEIPT_OWNER,
                     owner_pid=self._owner_pid,
                     process_generation=self._process_generation,
                 )
-                self._validate_completion_record(completion, receipt)
                 self._validate_admission_record(completion_admissions[0], receipt)
+                self._validate_completion_record(completion, receipt)
+                receipt = replace(
+                    receipt,
+                    completed_result=self._result_from_record(completion),
+                )
                 if any(
                     item.get("record_type") == "workflow_abort"
                     and item.get("receipt_id") == receipt.receipt_id
@@ -2899,7 +3288,12 @@ class EvidencePersistencePort:
                 raise WorkflowExecutionError(
                     "WORKFLOW_DUPLICATE_EXECUTION: an admitted workflow step has no completion"
                 )
-            attempts = [int(item.get("attempt", 0)) for item in relevant]
+            try:
+                attempts = [int(item.get("attempt", 0)) for item in relevant]
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_CORRUPT: persisted admission attempt is invalid"
+                ) from exc
             attempt = max(attempts, default=0) + 1
             receipt_id = f"workflow-admission:{secrets.token_hex(16)}"
             record = {
@@ -2972,7 +3366,10 @@ class EvidencePersistencePort:
             "receipt_id": receipt.receipt_id,
             "attempt": receipt.attempt,
             "artifact_ids": _validated_artifact_ids(result.artifact_ids),
-            "row_counts": {str(key): int(value) for key, value in result.row_counts.items()},
+            "row_counts": _validated_row_counts(
+                result.row_counts,
+                field_name="result row_counts",
+            ),
             "result_fingerprint": result.result_fingerprint,
             "output_bindings": outputs,
             "lineage": lineage,
@@ -3009,6 +3406,27 @@ class EvidencePersistencePort:
                 output_bindings=record["output_bindings"],
                 lineage=record["lineage"],
             )
+            for raw_artifact_id in _validated_artifact_ids(record["artifact_ids"]):
+                if ":" in raw_artifact_id:
+                    run_id, artifact_id = raw_artifact_id.split(":", 1)
+                else:
+                    run_id = _require_workflow_opaque_ref(
+                        admission.get("target", {}).get("run_id"),
+                        "workflow completion artifact run_id",
+                    )
+                    artifact_id = raw_artifact_id
+                artifact_row = self._server_artifact_registry.get(
+                    (receipt.receipt_id, run_id, artifact_id)
+                )
+                if artifact_row is None:
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: completion artifact has no frozen server admission"
+                    )
+                self._persist_server_artifact_admission(
+                    artifact_row,
+                    receipt=receipt,
+                    directory_fd=lock.directory_fd,
+                )
             existing = [
                 item
                 for item in records
@@ -5245,6 +5663,7 @@ def build_workflow_step_executor(
                 root, draft, lineage, step_frame, step, previous
             )
         if dispatcher_key == "capability_factory.custom_dispatcher":
+            _require_server_model_custom_dispatch_declaration(draft, step)
             if not callable(custom_step_executor):
                 raise WorkflowExecutionError(
                     "model.custom requires an authorized custom capability gateway"
@@ -5632,12 +6051,234 @@ def _declared_branch_term_groups(
     return groups
 
 
+def _require_server_model_custom_dispatch_declaration(
+    draft: WorkflowDraft,
+    model_step: Any,
+) -> None:
+    """Prove a custom gateway is declared before it can be invoked."""
+
+    bindings = draft.bindings
+    declarations = bindings.get("server_model_declarations") if isinstance(bindings, Mapping) else None
+    declaration = (
+        declarations.get(model_step.step_id)
+        if isinstance(declarations, Mapping)
+        else None
+    )
+    if (
+        not isinstance(declaration, Mapping)
+        or declaration.get("operation_id") != "model.custom"
+        or declaration.get("branch_producing") is not True
+        or not isinstance(declaration.get("branches"), list)
+        or not declaration.get("branches")
+    ):
+        raise WorkflowExecutionError(
+            "model.custom requires a server-owned branch-producing declaration before gateway dispatch"
+        )
+    for branch in declaration["branches"]:
+        if not isinstance(branch, Mapping) or not isinstance(branch.get("branch_id"), str):
+            raise WorkflowExecutionError(
+                "model.custom server branch declaration is malformed"
+            )
+
+
+def _validate_server_model_custom_branch_declaration(
+    draft: WorkflowDraft,
+    model_step: Any,
+    branch: Mapping[str, Any],
+) -> None:
+    """Require a server-owned branch declaration for ``model.custom``."""
+
+    bindings = draft.bindings
+    declarations = bindings.get("server_model_declarations") if isinstance(bindings, Mapping) else None
+    declaration = (
+        declarations.get(model_step.step_id)
+        if isinstance(declarations, Mapping)
+        else None
+    )
+    if not isinstance(declaration, Mapping):
+        raise WorkflowExecutionError(
+            "completed model.custom branch requires a server-owned branch-producing declaration"
+        )
+    if declaration.get("operation_id") != "model.custom" or declaration.get("branch_producing") is not True:
+        raise WorkflowExecutionError(
+            "completed model.custom branch declaration is not an explicit server branch-producing declaration"
+        )
+    declared_branches = declaration.get("branches")
+    if not isinstance(declared_branches, list) or not declared_branches:
+        raise WorkflowExecutionError(
+            "completed model.custom branch declaration has no server-declared branches"
+        )
+    branch_id = branch.get("branch_id")
+    matches = [
+        item
+        for item in declared_branches
+        if isinstance(item, Mapping) and item.get("branch_id") == branch_id
+    ]
+    if len(matches) != 1:
+        raise WorkflowExecutionError(
+            "completed model.custom branch is not declared by the server model step"
+        )
+    declared_branch = matches[0]
+    declared_family = declared_branch.get("model_family")
+    declared_outcome = declared_branch.get("outcome")
+    declared_predictors = declared_branch.get("predictors")
+    declared_covariance = declared_branch.get("covariance")
+    if (
+        type(declared_family) is not str
+        or not declared_family
+        or type(declared_outcome) is not str
+        or not declared_outcome
+        or type(declared_covariance) is not str
+        or not declared_covariance
+        or not isinstance(declared_predictors, list)
+        or any(type(item) is not str or not item for item in declared_predictors)
+    ):
+        raise WorkflowExecutionError(
+            "completed model.custom branch declaration is missing family, outcome, predictors, or covariance"
+        )
+    if declaration.get("model_family") not in {None, declared_family}:
+        raise WorkflowExecutionError(
+            "completed model.custom server declaration has conflicting model families"
+        )
+    persisted_spec = branch.get("branch_spec")
+    if not isinstance(persisted_spec, Mapping):
+        raise WorkflowExecutionError(
+            "completed model.custom branch lacks a declaration bound to the server model step"
+        )
+    expected = {
+        "model_family": declared_family,
+        "outcome": declared_outcome,
+        "predictors": list(declared_predictors),
+        "covariance": declared_covariance,
+    }
+    actual = {
+        field_name: persisted_spec.get(field_name)
+        for field_name in expected
+    }
+    mismatches = [
+        field_name
+        for field_name, expected_value in expected.items()
+        if actual[field_name] != expected_value
+    ]
+    if mismatches:
+        raise WorkflowExecutionError(
+            "completed model.custom branch declaration differs from the server-compiled model step: "
+            + ", ".join(mismatches)
+        )
+
+
+def _validate_compiled_model_branch_declaration(
+    draft: WorkflowDraft,
+    model_step: Any,
+    branch: Mapping[str, Any],
+) -> None:
+    """Bind persisted branch semantics to the current compiled model step."""
+
+    if model_step.operation_id == "model.custom":
+        _validate_server_model_custom_branch_declaration(draft, model_step, branch)
+        return
+
+    compiled_spec = model_step.spec
+    if not isinstance(compiled_spec, Mapping):
+        raise WorkflowExecutionError(
+            "completed model branch cannot bind to a compiled model step without a spec"
+        )
+    if model_step.operation_id == "model.auto":
+        raise WorkflowExecutionError(
+            "completed model branch cannot bind to a compiled model step whose family is unresolved"
+        )
+    if model_step.operation_id != "model.genesis":
+        raise WorkflowExecutionError(
+            "completed model branch is not bound to a compiled model step"
+        )
+    compiled_family = compiled_spec.get("model_family")
+    compiled_branches = compiled_spec.get("branches")
+    if not isinstance(compiled_family, str) or not compiled_family:
+        raise WorkflowExecutionError(
+            "completed model branch cannot bind to a compiled model step without a model family"
+        )
+    if not isinstance(compiled_branches, list):
+        raise WorkflowExecutionError(
+            "completed model branch cannot bind to a compiled model step without branches"
+        )
+    branch_id = branch.get("branch_id")
+    compiled_branch = next(
+        (
+            candidate
+            for candidate in compiled_branches
+            if isinstance(candidate, Mapping)
+            and candidate.get("branch_id") == branch_id
+        ),
+        None,
+    )
+    if compiled_branch is None:
+        raise WorkflowExecutionError(
+            "completed model branch is not declared by the compiled model step"
+        )
+    persisted_spec = branch.get("branch_spec")
+    if not isinstance(persisted_spec, Mapping):
+        raise WorkflowExecutionError(
+            "completed model branch lacks a declaration bound to the compiled model step"
+        )
+    compiled_outcome = compiled_branch.get("outcome")
+    compiled_predictors = compiled_branch.get("predictors")
+    if type(compiled_outcome) is not str or not compiled_outcome:
+        raise WorkflowExecutionError(
+            "compiled model step branch outcome is incomplete"
+        )
+    if not isinstance(compiled_predictors, list) or any(
+        type(item) is not str or not item for item in compiled_predictors
+    ):
+        raise WorkflowExecutionError(
+            "compiled model step branch predictors are incomplete"
+        )
+    compiled_covariance = compiled_branch.get("covariance")
+    if compiled_covariance is None:
+        compiled_covariance = compiled_spec.get("covariance")
+    if type(compiled_covariance) is not str or not compiled_covariance:
+        raise WorkflowExecutionError(
+            "compiled model step branch covariance is incomplete"
+        )
+    expected = {
+        "model_family": compiled_family,
+        "outcome": compiled_outcome,
+        "predictors": list(compiled_predictors),
+        "covariance": compiled_covariance,
+    }
+    actual = {
+        "model_family": persisted_spec.get("model_family"),
+        "outcome": persisted_spec.get("outcome"),
+        "predictors": persisted_spec.get("predictors"),
+        "covariance": persisted_spec.get("covariance"),
+    }
+    if actual != expected:
+        mismatches = [
+            field_name
+            for field_name in expected
+            if actual[field_name] != expected[field_name]
+        ]
+        raise WorkflowExecutionError(
+            "completed model branch declaration differs from the compiled model step: "
+            + ", ".join(mismatches)
+        )
+
+
 def _validate_persisted_model_branch(
     root: Path,
     draft: WorkflowDraft,
     model_step_id: str,
     branch: Mapping[str, Any],
 ) -> None:
+    compiled_step = next(
+        (step for step in draft.steps if step.step_id == model_step_id),
+        None,
+    )
+    if compiled_step is not None and compiled_step.operation_id in {
+        "model.genesis",
+        "model.auto",
+        "model.custom",
+    }:
+        _validate_compiled_model_branch_declaration(draft, compiled_step, branch)
     if branch.get("workflow_id") != draft.workflow_id:
         raise WorkflowExecutionError(
             "completed model branch belongs to another workflow scope"

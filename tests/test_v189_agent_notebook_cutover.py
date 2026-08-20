@@ -26,6 +26,7 @@ from workbench.agent.workflow_contracts import (
     AnalysisClarificationV1,
     OperationValidationError,
 )
+from workbench.agent.proposals import ProposalStore
 from workbench.api_errors import WorkbenchAPIError
 from workbench.http.agent_routes import (
     AgentNotebookCutoverCompileRequest,
@@ -155,6 +156,37 @@ def _intent(*, actor: str = "principal:user:1", session: str = "session:1") -> A
     )
 
 
+def _persisted_plan(compiler: AgentNotebookCompilerV1, root) -> tuple[object, object]:
+    plan = compiler.compile(_intent(), entrypoint="agent")
+    record = compiler.record(plan.compilation_record_id)
+    proposal_store = compiler.server_proposal_store(root)
+    proposal = proposal_store.create(
+        session_id="session:1",
+        chain_id="chain:1",
+        operation_id="model.rerun",
+        target={"run_id": "run:1"},
+        preconditions={
+            "server_compilation": {
+                "compilation_record_id": record.record_id,
+                "confirmation_id": "confirmation:pending",
+                "actor_ref": record.principal_ref,
+                "session_ref": record.session_ref,
+                "project_ref": record.project_ref,
+                "semantic_plan_hash": record.semantic_plan_hash,
+                "target": {"run_id": "run:1"},
+                "chain_id": "chain:1",
+                "operation_id": "model.rerun",
+            }
+        },
+        changes={},
+        evidence_refs=(),
+        expected_effect=("rerun",),
+        risks=(),
+    )
+    compiler.bind_persisted_proposal(plan.compilation_record_id, proposal_store, proposal.proposal_id)
+    return proposal_store, plan
+
+
 def test_cutover_requires_a_host_compiler_and_has_no_local_issuer_fallback() -> None:
     provider_catalog = load_builtin_catalog()
     runtime_registry = _runtime_registry(provider_catalog)
@@ -247,7 +279,74 @@ def test_agent_and_notebook_share_semantic_plan_but_not_execution_instance() -> 
     assert notebook_plan.plan_diff["entrypoint"] == "notebook"
 
 
-def test_confirmation_and_evidence_gate_execution() -> None:
+def test_compiler_confirmation_uses_the_persisted_server_proposal_identity(
+    tmp_path,
+) -> None:
+    _catalog, compiler = _cutover()
+    _proposal_store, plan = _persisted_plan(compiler, tmp_path / "proposal")
+
+    receipt = compiler.confirm(plan.compilation_record_id)
+
+    assert receipt.proposal_id != f"proposal:{plan.compilation_record_id}"
+    assert receipt.proposal_revision == 1
+    assert receipt.proposal_fingerprint
+
+
+def test_compiler_confirmation_rejects_caller_supplied_proposal_identity() -> None:
+    _catalog, compiler = _cutover()
+    plan = compiler.compile(_intent(), entrypoint="agent")
+
+    with pytest.raises(TypeError):
+        compiler.confirm(
+            plan.compilation_record_id,
+            proposal_id="proposal:caller",
+            proposal_revision=1,
+            proposal_fingerprint="caller-fingerprint",
+        )
+
+
+def test_persisted_proposal_revision_is_bound_before_confirmation(tmp_path) -> None:
+    _catalog, compiler = _cutover()
+    plan = compiler.compile(_intent(), entrypoint="agent")
+    record = compiler.record(plan.compilation_record_id)
+    proposal_store = compiler.server_proposal_store(tmp_path)
+    proposal = proposal_store.create(
+        session_id="session:1",
+        chain_id="chain:1",
+        operation_id="model.rerun",
+        target={"run_id": "run:1"},
+        preconditions={
+            "server_compilation": {
+                "compilation_record_id": record.record_id,
+                "confirmation_id": "confirmation:pending",
+                "actor_ref": record.principal_ref,
+                "session_ref": record.session_ref,
+                "project_ref": record.project_ref,
+                "semantic_plan_hash": record.semantic_plan_hash,
+                "target": {"run_id": "run:1"},
+                "chain_id": "chain:1",
+                "operation_id": "model.rerun",
+            }
+        },
+        changes={},
+        evidence_refs=(),
+        expected_effect=("rerun",),
+        risks=(),
+    )
+
+    compiler.bind_persisted_proposal(plan.compilation_record_id, proposal_store, proposal.proposal_id)
+    receipt = compiler.confirm(plan.compilation_record_id)
+
+    assert receipt.proposal_id == proposal.proposal_id
+    assert receipt.proposal_revision == proposal.revision
+    assert receipt.proposal_fingerprint == proposal.fingerprint
+    assert receipt.semantic_plan_hash == plan.semantic_plan_hash
+    assert receipt.actor_ref == "principal:user:1"
+    assert receipt.session_ref == "session:1"
+    assert receipt.project_ref == "project:1"
+
+
+def test_confirmation_and_evidence_gate_execution(tmp_path) -> None:
     committed: list[str] = []
 
     def commit(
@@ -258,7 +357,7 @@ def test_confirmation_and_evidence_gate_execution() -> None:
         return _receipt(context, result)
 
     _catalog, compiler = _cutover(evidence_committer=commit)
-    plan = compiler.compile(_intent(), entrypoint="agent")
+    _proposal_store, plan = _persisted_plan(compiler, tmp_path / "proposal")
     confirmation = compiler.confirm(plan.compilation_record_id)
     result = compiler.execute(plan.compilation_record_id, confirmation)
 
@@ -268,9 +367,9 @@ def test_confirmation_and_evidence_gate_execution() -> None:
     assert compiler.operation(plan.operation_id).state == "completed"
 
 
-def test_client_shaped_authority_and_stale_snapshot_are_rejected() -> None:
+def test_client_shaped_authority_and_stale_snapshot_are_rejected(tmp_path) -> None:
     _catalog, compiler = _cutover()
-    plan = compiler.compile(_intent(), entrypoint="agent")
+    _proposal_store, plan = _persisted_plan(compiler, tmp_path / "proposal")
     confirmation = compiler.confirm(plan.compilation_record_id)
 
     with pytest.raises(CutoverCompilerError, match="server-issued"):
@@ -320,9 +419,9 @@ def test_missing_intent_fields_return_typed_clarifications_and_injection_is_bloc
         )
 
 
-def test_completion_cannot_be_claimed_without_evidence_commit() -> None:
+def test_completion_cannot_be_claimed_without_evidence_commit(tmp_path) -> None:
     _catalog, compiler = _cutover(evidence_committer=lambda _context, _result: None)
-    plan = compiler.compile(_intent(), entrypoint="agent")
+    _proposal_store, plan = _persisted_plan(compiler, tmp_path / "proposal")
     confirmation = compiler.confirm(plan.compilation_record_id)
     with pytest.raises(CutoverCompilerError, match="evidence"):
         compiler.execute(plan.compilation_record_id, confirmation)
@@ -331,11 +430,11 @@ def test_completion_cannot_be_claimed_without_evidence_commit() -> None:
     assert operation.error_code == "EVIDENCE_COMMIT_REQUIRED"
 
 
-def test_completion_rejects_untyped_or_cross_scope_evidence_receipts() -> None:
+def test_completion_rejects_untyped_or_cross_scope_evidence_receipts(tmp_path) -> None:
     _catalog, untyped_compiler = _cutover(
         evidence_committer=lambda _context, _result: "evidence:forged:string"
     )
-    plan = untyped_compiler.compile(_intent(), entrypoint="agent")
+    _proposal_store, plan = _persisted_plan(untyped_compiler, tmp_path / "untyped")
     confirmation = untyped_compiler.confirm(plan.compilation_record_id)
     with pytest.raises(CutoverCompilerError, match="evidence"):
         untyped_compiler.execute(plan.compilation_record_id, confirmation)
@@ -360,7 +459,9 @@ def test_completion_rejects_untyped_or_cross_scope_evidence_receipts() -> None:
         )
 
     _catalog, cross_scope_compiler = _cutover(evidence_committer=cross_scope_commit)
-    cross_scope_plan = cross_scope_compiler.compile(_intent(), entrypoint="agent")
+    _proposal_store, cross_scope_plan = _persisted_plan(
+        cross_scope_compiler, tmp_path / "cross-scope"
+    )
     cross_scope_confirmation = cross_scope_compiler.confirm(cross_scope_plan.compilation_record_id)
     with pytest.raises(CutoverCompilerError, match="evidence"):
         cross_scope_compiler.execute(
@@ -375,7 +476,9 @@ def test_completion_rejects_untyped_or_cross_scope_evidence_receipts() -> None:
         return replace(_receipt(context, result), evidence_digest="f" * 64)
 
     _catalog, stale_content_compiler = _cutover(evidence_committer=stale_content_commit)
-    stale_plan = stale_content_compiler.compile(_intent(), entrypoint="agent")
+    _proposal_store, stale_plan = _persisted_plan(
+        stale_content_compiler, tmp_path / "stale-content"
+    )
     stale_confirmation = stale_content_compiler.confirm(stale_plan.compilation_record_id)
     with pytest.raises(CutoverCompilerError, match="evidence"):
         stale_content_compiler.execute(stale_plan.compilation_record_id, stale_confirmation)
@@ -426,16 +529,12 @@ def test_http_cutover_requires_explicit_server_authority_and_keeps_confirmation_
     preview_response = compile_agent_notebook_cutover(request)
     record_id = preview_response["preview"]["compilation_record_id"]
     assert isinstance(record_id, str)
-    confirmation_response = confirm_agent_notebook_cutover(
-        record_id,
-        AgentNotebookCutoverScopeRequest(**scope),
-    )
-    confirmation_id = confirmation_response["confirmation"]["confirmation_id"]
-    result_response = execute_agent_notebook_cutover(
-        record_id,
-        AgentNotebookCutoverExecuteRequest(**scope, confirmation_id=confirmation_id),
-    )
-    assert result_response["result"]["status"] == "completed"
+    with pytest.raises(WorkbenchAPIError) as missing_proposal:
+        confirm_agent_notebook_cutover(
+            record_id,
+            AgentNotebookCutoverScopeRequest(**scope),
+        )
+    assert missing_proposal.value.code == "PROPOSAL_BINDING_REQUIRED"
 
     with pytest.raises(WorkbenchAPIError) as forged_error:
         execute_agent_notebook_cutover(

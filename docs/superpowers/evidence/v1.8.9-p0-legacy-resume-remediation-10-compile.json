@@ -1,0 +1,11 @@
+{
+  "artifact_role": "compile",
+  "observed_at": "2026-08-20T06:15:26.000Z",
+  "command": "PYTHONPYCACHEPREFIX=/private/tmp/workbench-v189-remediation10-pycache PYTHONPATH=backend .venv/bin/python -m compileall -q backend/workbench tests",
+  "exit_code": 0,
+  "result": "no output; exit 0",
+  "audited_head": "b2e718b64ae7c9419e5271862dda38d2f7f6e27b",
+  "audited_tree": "7e875a2757e423a87185cc10c95a41f39f15c370",
+  "implementation_tip": "621ee442084c4f34b9d42413a7140a39506df988",
+  "source_refs": ["backend/workbench", "tests"]
+}

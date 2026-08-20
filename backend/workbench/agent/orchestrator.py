@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
 from ..services.rerun_service import (
@@ -63,6 +64,10 @@ from .proposals import (
     ProposalRevision,
     ProposalStaleError,
     ProposalStore,
+    ProposalStoreCapabilityError,
+    ProposalStoreCapabilityIssuerV1,
+    ProposalStoreCapabilityV1,
+    _issue_server_owned_proposal_store_authority,
 )
 from .risk import (
     RiskAuthorizationReplay,
@@ -82,6 +87,29 @@ from .workflow import (
 _DATA_CHILD_NODE_OPERATIONS = frozenset(
     {"data.column.cast", "data.columns.cast", "code.execute", "operation.multi_step"}
 )
+
+
+class LegacyAgentConfirmationBoundaryError(ProposalConfirmationError):
+    """The historical Agent confirmation API cannot mint a new authority."""
+
+    code = "AGENT_NOTEBOOK_CUTOVER_REQUIRED"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "historical Agent confirmation requires the server-owned "
+            "AgentNotebookCompilerV1 boundary"
+        )
+
+
+class LegacyProposalWriteBoundaryError(ProposalConfirmationError):
+    """A legacy proposal mutation lacks a live server-owned store capability."""
+
+    code = "AGENT_PROPOSAL_WRITE_AUTHORITY_REQUIRED"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "legacy proposal mutation requires a server-owned ProposalStore capability"
+        )
 
 
 def _workflow_failure_message(state: WorkflowExecutionState) -> str:
@@ -174,7 +202,7 @@ class _OrchestratorOperationHandler:
         )
 
     async def validate(self, record: OperationRecord) -> None:
-        self.orchestrator.proposal_store.validate_confirmation_preconditions(
+        self.orchestrator._proposal_store_for_read().validate_confirmation_preconditions(
             record.proposal_id,
             current_context_fingerprint=self.current_context_fingerprint,
             current_active_head_run_id=self.current_active_head_run_id,
@@ -533,7 +561,8 @@ class WorkbenchOrchestrator:
         events: AgentEventStream,
         *,
         main_session_id: str,
-        proposal_store: ProposalStore | None = None,
+        proposal_store: ProposalStore | ProposalStoreCapabilityV1 | None = None,
+        proposal_store_issuer: ProposalStoreCapabilityIssuerV1 | None = None,
         operation_store: OperationRecordStore | None = None,
         operation_registry: OperationRegistry | None = None,
         context_provider: WorkbenchContextProvider | None = None,
@@ -543,7 +572,16 @@ class WorkbenchOrchestrator:
         self.repository = repository
         self.events = events
         self.main_session_id = main_session_id
-        self.proposal_store = proposal_store or ProposalStore(repository.root)
+        # A default orchestrator must not mint a caller-owned proposal writer.
+        # Established data-operation callers may still inject a raw store for
+        # private read-only confirmation bookkeeping, but it is never exposed
+        # through the public proposal_store attribute and every proposal
+        # mutation below requires the live server-issued capability explicitly.
+        self._proposal_store = proposal_store
+        self._proposal_store_issuer = proposal_store_issuer
+        self.proposal_store = (
+            proposal_store if type(proposal_store) is ProposalStoreCapabilityV1 else None
+        )
         self.operation_store = operation_store or OperationRecordStore(repository.root)
         self.operation_registry = operation_registry or OperationRegistry()
         self.context_provider = context_provider
@@ -559,6 +597,48 @@ class WorkbenchOrchestrator:
         self._execution_locks: dict[str, asyncio.Lock] = {}
         self._operation_locks: dict[str, asyncio.Lock] = {}
         self._lease_owner = f"agent:{uuid4().hex}"
+
+    def _proposal_store_for_read(self) -> ProposalStore | ProposalStoreCapabilityV1:
+        """Return an admitted, root-bound store for confirmed-operation reads."""
+
+        store = self._proposal_store
+        if type(store) is ProposalStore:
+            self._require_proposal_store_root(store)
+            return store
+        if type(store) is ProposalStoreCapabilityV1:
+            if self._proposal_store_issuer is None:
+                raise LegacyProposalWriteBoundaryError()
+            try:
+                admitted = store._require_admitted(self._proposal_store_issuer)
+            except ProposalStoreCapabilityError as exc:
+                raise LegacyProposalWriteBoundaryError() from exc
+            self._require_proposal_store_root(admitted)
+            return store
+        raise LegacyProposalWriteBoundaryError()
+
+    def _proposal_store_for_write(self) -> ProposalStoreCapabilityV1:
+        """Require the server-issued capability before any proposal mutation."""
+
+        store = self._proposal_store
+        if type(store) is not ProposalStoreCapabilityV1:
+            raise LegacyProposalWriteBoundaryError()
+        if self._proposal_store_issuer is None:
+            raise LegacyProposalWriteBoundaryError()
+        try:
+            admitted = store._require_admitted(self._proposal_store_issuer)
+        except ProposalStoreCapabilityError as exc:
+            raise LegacyProposalWriteBoundaryError() from exc
+        self._require_proposal_store_root(admitted)
+        return store
+
+    def _require_proposal_store_root(self, store: ProposalStore) -> None:
+        try:
+            repository_root = self.repository.root.resolve().stat()
+            repository_identity = (int(repository_root.st_dev), int(repository_root.st_ino))
+        except (OSError, RuntimeError) as exc:
+            raise LegacyProposalWriteBoundaryError() from exc
+        if store._root_identity != repository_identity:
+            raise LegacyProposalWriteBoundaryError()
 
     def _compile_workflow_record(
         self,
@@ -733,10 +813,11 @@ class WorkbenchOrchestrator:
         command_id: str | None = None,
         proposal_id: str | None = None,
     ) -> ProposalRevision:
+        proposal_store = self._proposal_store_for_write()
         session_id, _agent = self._chain(chain_id)
         definition = self.operation_registry.require(operation_id, operation_version)
         definition.validate(target=target, preconditions=preconditions, changes=changes)
-        proposal = self.proposal_store.create(
+        proposal = proposal_store.create(
             session_id=session_id,
             chain_id=chain_id,
             operation_id=operation_id,
@@ -783,7 +864,8 @@ class WorkbenchOrchestrator:
         expected_effect: Iterable[str] | None = None,
         risks: Iterable[str] | None = None,
     ) -> ProposalRevision:
-        latest = self.proposal_store.latest_revision(proposal_id)
+        proposal_store = self._proposal_store_for_write()
+        latest = proposal_store.latest_revision(proposal_id)
         definition = self.operation_registry.require(
             latest.operation_id,
             latest.operation_version,
@@ -793,7 +875,7 @@ class WorkbenchOrchestrator:
             preconditions=latest.preconditions,
             changes=changes,
         )
-        revised = self.proposal_store.revise(
+        revised = proposal_store.revise(
             proposal_id,
             base_revision=base_revision,
             changes=changes,
@@ -825,7 +907,8 @@ class WorkbenchOrchestrator:
         actor_type: str,
         reason: str | None = None,
     ) -> ProposalDecision:
-        decision = self.proposal_store.decline(
+        proposal_store = self._proposal_store_for_write()
+        decision = proposal_store.decline(
             proposal_id,
             actor_type=actor_type,
             reason=reason,
@@ -859,52 +942,12 @@ class WorkbenchOrchestrator:
         current_context_fingerprint: str | None,
         current_active_head_run_id: str | None,
     ) -> OperationRecord:
-        latest = self.proposal_store.latest_revision(proposal_id)
-        try:
-            confirmation = self.proposal_store.confirm(
-                proposal_id,
-                revision=revision,
-                fingerprint=fingerprint,
-                actor_type=actor_type,
-                current_context_fingerprint=current_context_fingerprint,
-                current_active_head_run_id=current_active_head_run_id,
-            )
-        except ProposalStaleError:
-            self.events.emit(
-                latest.session_id,
-                "proposal_stale",
-                {"proposal_id": proposal_id, "revision": revision},
-                command_id=latest.command_id,
-            )
-            raise
-
-        record = self.operation_store.create_pending(
-            confirmation,
-            command_id=confirmation.command_id,
-        )
-        self.repository.append(
-            confirmation.session_id,
-            "custom_message",
-            {
-                "message_type": "operation_confirmation",
-                "audience": "model",
-                "content": json.dumps(confirmation.to_dict(), ensure_ascii=False, sort_keys=True),
-                "confirmation": confirmation.to_dict(),
-                "operation_record_id": record.record_id,
-            },
-        )
-        self.events.emit(
-            confirmation.session_id,
-            "proposal_confirmed",
-            {
-                "proposal_id": confirmation.proposal_id,
-                "revision": confirmation.revision,
-                "fingerprint": confirmation.fingerprint,
-                "operation_record_id": record.record_id,
-            },
-            command_id=confirmation.command_id,
-        )
-        return record
+        # Historical Agent confirmations used to write directly to the
+        # ProposalStore and OperationRecordStore.  That path has no typed
+        # server-owned compile/confirm/execute receipt, so it must not remain
+        # an alternate authority.  Fail before even reading or mutating either
+        # store; the HTTP compatibility route has its own compiler boundary.
+        raise LegacyAgentConfirmationBoundaryError()
 
     @staticmethod
     def _deterministic_effect_ids(
@@ -1341,7 +1384,7 @@ class WorkbenchOrchestrator:
             record.preconditions.get("run_family_id")
             or f"legacy-family:{source_run_id}"
         )
-        proposal = self.proposal_store.latest_revision(record.proposal_id)
+        proposal = self._proposal_store_for_read().latest_revision(record.proposal_id)
         executed_proposal_payload_hash = ""
         analysis_loop_binding = self._analysis_loop_binding(record)
         if analysis_loop_binding is not None:
@@ -1545,7 +1588,7 @@ class WorkbenchOrchestrator:
             target_run_id=target_run_id,
             from_node=source_node_ref,
             op_overrides=_overrides_from_proposal_changes(
-                self.proposal_store.latest_revision(record.proposal_id).changes
+                self._proposal_store_for_read().latest_revision(record.proposal_id).changes
             ),
             workbench_context=workbench_context,
         )
@@ -3020,6 +3063,136 @@ class CutoverCompilerError(RuntimeError):
         super().__init__(message or code)
 
 
+_SERVER_COMPILATION_REQUIRED_FIELDS = (
+    "compilation_record_id",
+    "confirmation_id",
+    "actor_ref",
+    "session_ref",
+    "project_ref",
+    "semantic_plan_hash",
+    "target",
+    "chain_id",
+    "operation_id",
+)
+
+
+def canonical_proposal_fingerprint(proposal: ProposalRevision) -> str:
+    """Return the ProposalStore identity digest for one persisted revision."""
+
+    identity = {
+        "proposal_id": proposal.proposal_id,
+        "operation_id": proposal.operation_id,
+        "operation_version": proposal.operation_version,
+        "revision": proposal.revision,
+        "target": proposal.target,
+        "preconditions": proposal.preconditions,
+        "changes": proposal.changes,
+        "evidence_refs": proposal.evidence_refs,
+        "expected_effect": proposal.expected_effect,
+        "risks": proposal.risks,
+    }
+    canonical = json.dumps(identity, ensure_ascii=False, sort_keys=True, default=list)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def validate_server_proposal_revision(
+    proposal: ProposalRevision,
+    *,
+    actor_ref: str | None = None,
+    session_ref: str | None = None,
+    project_ref: str | None = None,
+) -> dict[str, Any]:
+    """Validate the route/compiler-owned binding in a persisted proposal.
+
+    The nested ``server_compilation`` object is persisted server metadata, not
+    a client identity envelope.  Its critical fields must be present and must
+    agree with the outer ProposalStore revision before a caller can reach a
+    compiler, authority, or execution handle.
+    """
+
+    if type(proposal) is not ProposalRevision:
+        raise CutoverCompilerError(
+            "SERVER_PROPOSAL_REQUIRED",
+            "proposal binding requires a server-owned ProposalRevision",
+        )
+    if proposal.fingerprint != canonical_proposal_fingerprint(proposal):
+        raise CutoverCompilerError("SERVER_PROPOSAL_INTEGRITY")
+    if type(proposal.preconditions) is not dict:
+        raise CutoverCompilerError("SERVER_PROPOSAL_COMPILATION_REQUIRED")
+    server_compilation = proposal.preconditions.get("server_compilation")
+    if type(server_compilation) is not dict:
+        raise CutoverCompilerError(
+            "SERVER_PROPOSAL_COMPILATION_REQUIRED",
+            "a ProposalStore proposal requires complete server_compilation metadata",
+        )
+
+    missing = [
+        field_name
+        for field_name in _SERVER_COMPILATION_REQUIRED_FIELDS
+        if field_name not in server_compilation
+    ]
+    invalid = []
+    for field_name in _SERVER_COMPILATION_REQUIRED_FIELDS:
+        if field_name not in server_compilation:
+            continue
+        value = server_compilation[field_name]
+        if field_name == "target":
+            if type(value) is not dict:
+                invalid.append(field_name)
+            continue
+        if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+            invalid.append(field_name)
+    semantic_hash = server_compilation.get("semantic_plan_hash")
+    if (
+        semantic_hash is not None
+        and (
+            type(semantic_hash) is not str
+            or len(semantic_hash) != 64
+            or any(character not in "0123456789abcdef" for character in semantic_hash)
+        )
+    ):
+        invalid.append("semantic_plan_hash")
+    if missing or invalid:
+        raise CutoverCompilerError(
+            "SERVER_PROPOSAL_COMPILATION_REQUIRED",
+            "server_compilation is incomplete or malformed: "
+            + ", ".join(sorted(set(missing + invalid))),
+        )
+
+    expected_scope = {
+        "session_ref": proposal.session_id,
+        "chain_id": proposal.chain_id,
+        "operation_id": proposal.operation_id,
+        "target": proposal.target,
+    }
+    if actor_ref is not None:
+        expected_scope["actor_ref"] = actor_ref
+    if session_ref is not None:
+        expected_scope["session_ref"] = session_ref
+    if project_ref is not None:
+        expected_scope["project_ref"] = project_ref
+    mismatches = [
+        field_name
+        for field_name, expected in expected_scope.items()
+        if server_compilation.get(field_name) != expected
+    ]
+    optional_identity = {
+        "proposal_id": proposal.proposal_id,
+        "proposal_revision": proposal.revision,
+        "proposal_fingerprint": proposal.fingerprint,
+    }
+    for field_name, expected in optional_identity.items():
+        if field_name in server_compilation and server_compilation[field_name] != expected:
+            mismatches.append(field_name)
+    if mismatches:
+        raise CutoverCompilerError(
+            "PROPOSAL_SCOPE_MISMATCH",
+            "server_compilation does not match the persisted proposal: "
+            + ", ".join(sorted(set(mismatches))),
+        )
+    return dict(server_compilation)
+
+
 @dataclass(frozen=True)
 class CutoverCompilationPreviewV1:
     entrypoint: str
@@ -3051,24 +3224,79 @@ class CutoverCompilationPreviewV1:
 
 
 @dataclass(frozen=True)
+class ServerProposalBindingV1:
+    """Server-owned proposal identity attached before confirmation issuance."""
+
+    proposal_id: str
+    proposal_revision: int
+    proposal_fingerprint: str
+    semantic_plan_hash: str
+    actor_ref: str
+    session_ref: str
+    project_ref: str
+    confirmation_id: str
+    _authority_token: object = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("proposal_id", self.proposal_id),
+            ("proposal_fingerprint", self.proposal_fingerprint),
+            ("semantic_plan_hash", self.semantic_plan_hash),
+            ("actor_ref", self.actor_ref),
+            ("session_ref", self.session_ref),
+            ("project_ref", self.project_ref),
+            ("confirmation_id", self.confirmation_id),
+        ):
+            if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+                raise CutoverCompilerError("SERVER_PROPOSAL_BINDING_INVALID", f"{name} is invalid")
+        if type(self.proposal_revision) is not int or self.proposal_revision <= 0:
+            raise CutoverCompilerError(
+                "SERVER_PROPOSAL_BINDING_INVALID", "proposal_revision is invalid"
+            )
+
+
+@dataclass(frozen=True)
 class ServerConfirmationReceiptV1:
     """A server-issued confirmation handle; its private token is authority."""
 
     confirmation_id: str
     confirmation_digest: str
     compilation_record_id: str
+    proposal_id: str
+    proposal_revision: int
+    proposal_fingerprint: str
     semantic_plan_hash: str
     actor_ref: str
     session_ref: str
     project_ref: str
     _authority_token: object = field(repr=False, compare=False)
 
-    def to_dict(self) -> dict[str, str]:
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("confirmation_id", self.confirmation_id),
+            ("confirmation_digest", self.confirmation_digest),
+            ("compilation_record_id", self.compilation_record_id),
+            ("proposal_id", self.proposal_id),
+            ("proposal_fingerprint", self.proposal_fingerprint),
+            ("semantic_plan_hash", self.semantic_plan_hash),
+            ("actor_ref", self.actor_ref),
+            ("session_ref", self.session_ref),
+            ("project_ref", self.project_ref),
+        ):
+            if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+                raise CutoverCompilerError("SERVER_CONFIRMATION_INVALID", f"{name} is invalid")
+        if type(self.proposal_revision) is not int or self.proposal_revision <= 0:
+            raise CutoverCompilerError("SERVER_CONFIRMATION_INVALID", "proposal_revision is invalid")
+
+    def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": "server-confirmation-receipt.v1",
             "confirmation_id": self.confirmation_id,
             "confirmation_digest": self.confirmation_digest,
             "compilation_record_id": self.compilation_record_id,
+            "proposal_id": self.proposal_id,
+            "proposal_revision": self.proposal_revision,
+            "proposal_fingerprint": self.proposal_fingerprint,
             "semantic_plan_hash": self.semantic_plan_hash,
             "actor_ref": self.actor_ref,
             "session_ref": self.session_ref,
@@ -3147,11 +3375,17 @@ class AgentNotebookCompilerV1:
         self._confirmation_store = None
         self._admission_gate = None
         self._authority_token = object()
+        (
+            self._proposal_store_issuer,
+            self._proposal_store_service_admission,
+        ) = _issue_server_owned_proposal_store_authority()
         self._records: dict[str, Any] = {}
         self._server_refs: dict[str, Any] = {}
         self._descriptors: dict[str, Any] = {}
         self._operation_by_record: dict[str, str] = {}
+        self._proposal_bindings: dict[str, ServerProposalBindingV1] = {}
         self._confirmations: dict[str, Any] = {}
+        self._issued_receipts: dict[str, ServerConfirmationReceiptV1] = {}
         self._operations = CutoverOperationStoreV1()
         self.method_snapshot_ref = "method:snapshot:1"
         self.risk_snapshot_ref = "risk:snapshot:1"
@@ -3521,6 +3755,170 @@ class AgentNotebookCompilerV1:
             },
         )
 
+    @staticmethod
+    def _persisted_proposal_fingerprint(proposal: ProposalRevision) -> str:
+        """Recompute the ProposalStore fingerprint before accepting its identity."""
+
+        return canonical_proposal_fingerprint(proposal)
+
+    def server_proposal_store(self, root: Path | str) -> ProposalStoreCapabilityV1:
+        """Issue the only ProposalStore view accepted by this compiler authority."""
+
+        return ProposalStore._issue_server_capability(
+            root,
+            issuer=self._proposal_store_issuer,
+            service_admission=self._proposal_store_service_admission,
+        )
+
+    def _load_persisted_proposal(
+        self,
+        proposal_store: ProposalStoreCapabilityV1,
+        proposal_id: str,
+    ) -> ProposalRevision:
+        """Read and integrity-check one exact server-owned latest revision."""
+
+        if type(proposal_store) is not ProposalStoreCapabilityV1:
+            raise CutoverCompilerError(
+                "SERVER_PROPOSAL_STORE_CAPABILITY_REQUIRED",
+                "proposal binding requires an opaque ProposalStore capability issued by this authority",
+            )
+        try:
+            proposal_store._require_admitted(self._proposal_store_issuer)
+        except ProposalStoreCapabilityError as exc:
+            raise CutoverCompilerError(
+                "SERVER_PROPOSAL_STORE_CAPABILITY_REQUIRED",
+                "proposal binding requires an opaque ProposalStore capability issued by this authority",
+            ) from exc
+        if type(proposal_id) is not str or not proposal_id.strip():
+            raise CutoverCompilerError("SERVER_PROPOSAL_ID_REQUIRED")
+        try:
+            proposal = proposal_store.latest_revision(proposal_id)
+        except (KeyError, OSError, TypeError, ValueError) as exc:
+            raise CutoverCompilerError("SERVER_PROPOSAL_UNKNOWN") from exc
+        if proposal.proposal_id != proposal_id:
+            raise CutoverCompilerError("SERVER_PROPOSAL_UNKNOWN")
+        validate_server_proposal_revision(proposal)
+        return proposal
+
+    @staticmethod
+    def _record_operation_id(record: Any) -> str | None:
+        operation_id = getattr(record, "operation_id", None)
+        if operation_id is not None:
+            return operation_id
+        compiled_workflow = getattr(record, "compiled_workflow", None)
+        operation_id = getattr(compiled_workflow, "operation_id", None)
+        if operation_id is not None:
+            return operation_id
+        plan_diff = getattr(compiled_workflow, "plan_diff", None)
+        if isinstance(plan_diff, Mapping):
+            return plan_diff.get("operation_id")
+        return None
+
+    def _bind_persisted_proposal(
+        self,
+        compilation_record_id: str,
+        proposal_store: ProposalStoreCapabilityV1,
+        proposal_id: str,
+    ) -> None:
+        proposal = self._load_persisted_proposal(proposal_store, proposal_id)
+        server_compilation = validate_server_proposal_revision(proposal)
+        record = self.record(compilation_record_id)
+        if server_compilation["compilation_record_id"] != record.record_id:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        if proposal.session_id != record.session_ref:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        if server_compilation["actor_ref"] != record.principal_ref:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        if server_compilation["session_ref"] != record.session_ref:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        if server_compilation["project_ref"] != record.project_ref:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        if server_compilation["semantic_plan_hash"] != record.semantic_plan_hash:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        record_operation = self._record_operation_id(record)
+        if record_operation is not None and record_operation != server_compilation["operation_id"]:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        if self._confirmations.get(record.record_id) is not None:
+            raise CutoverCompilerError("PROPOSAL_BINDING_REBIND_FORBIDDEN")
+        self._proposal_bindings[record.record_id] = ServerProposalBindingV1(
+            proposal_id=proposal.proposal_id,
+            proposal_revision=proposal.revision,
+            proposal_fingerprint=proposal.fingerprint,
+            semantic_plan_hash=record.semantic_plan_hash,
+            actor_ref=record.principal_ref,
+            session_ref=record.session_ref,
+            project_ref=record.project_ref,
+            confirmation_id=server_compilation["confirmation_id"],
+            _authority_token=self._authority_token,
+        )
+
+    def bind_proposal(
+        self,
+        compilation_record_id: str,
+        proposal_store: ProposalStoreCapabilityV1 | object,
+        proposal_id: str | None = None,
+    ) -> None:
+        """Bind only the exact latest revision held by the server ProposalStore."""
+
+        if type(proposal_store) is not ProposalStoreCapabilityV1 or proposal_id is None:
+            raise CutoverCompilerError(
+                "SERVER_PROPOSAL_STORE_CAPABILITY_REQUIRED",
+                "caller-created ProposalRevision values are not proposal authority; "
+                "supply the server-issued ProposalStore capability and exact proposal_id",
+            )
+        self._bind_persisted_proposal(compilation_record_id, proposal_store, proposal_id)
+
+    def bind_persisted_proposal(
+        self,
+        compilation_record_id: str,
+        proposal_store: ProposalStoreCapabilityV1,
+        proposal_id: str,
+    ) -> None:
+        """Load the exact latest revision from the server-owned ProposalStore."""
+
+        self.bind_proposal(compilation_record_id, proposal_store, proposal_id)
+
+    def compile_for_proposal(
+        self,
+        intent: Any,
+        *,
+        proposal_store: ProposalStoreCapabilityV1 | object | None = None,
+        proposal_id: str | None = None,
+        entrypoint: str = "agent",
+        proposal: object | None = None,
+    ) -> CutoverCompilationPreviewV1:
+        """Compile and bind one exact ProposalStore revision in one server flow."""
+
+        if proposal is not None or type(proposal_store) is not ProposalStoreCapabilityV1 or proposal_id is None:
+            raise CutoverCompilerError(
+                "SERVER_PROPOSAL_STORE_CAPABILITY_REQUIRED",
+                "caller-created ProposalRevision values are not accepted; "
+                "supply the server-issued ProposalStore capability and exact proposal_id",
+            )
+        self._load_persisted_proposal(proposal_store, proposal_id)
+        preview = self.compile(intent, entrypoint=entrypoint)
+        if preview.compilation_record_id is None:
+            return preview
+        self.bind_proposal(preview.compilation_record_id, proposal_store, proposal_id)
+        return preview
+
+    def compile_for_persisted_proposal(
+        self,
+        intent: Any,
+        *,
+        proposal_store: ProposalStoreCapabilityV1,
+        proposal_id: str,
+        entrypoint: str,
+    ) -> CutoverCompilationPreviewV1:
+        """Compile and bind from the exact revision stored by the server."""
+
+        return self.compile_for_proposal(
+            intent,
+            proposal_store=proposal_store,
+            proposal_id=proposal_id,
+            entrypoint=entrypoint,
+        )
+
     def compile_natural_language(
         self,
         text: str,
@@ -3589,7 +3987,10 @@ class AgentNotebookCompilerV1:
     def operation(self, operation_id: str, *, entrypoint: str | None = None) -> Any:
         return self._operations.require(operation_id, entrypoint=entrypoint)
 
-    def confirm(self, compilation_record_id: str) -> ServerConfirmationReceiptV1:
+    def confirm(
+        self,
+        compilation_record_id: str,
+    ) -> ServerConfirmationReceiptV1:
         from ..contracts.agent.planning import ConfirmationBindingV1
 
         record = self.record(compilation_record_id)
@@ -3599,9 +4000,18 @@ class AgentNotebookCompilerV1:
         operation = self._operations.require(operation_id)
         if operation.state != "compiled":
             raise CutoverCompilerError("OPERATION_CONFIRMATION_STATE_INVALID")
+        proposal_binding = self._proposal_bindings.get(record.record_id)
+        if (
+            type(proposal_binding) is not ServerProposalBindingV1
+            or proposal_binding._authority_token is not self._authority_token
+        ):
+            raise CutoverCompilerError(
+                "PROPOSAL_BINDING_REQUIRED",
+                "confirmation requires a server-owned proposal binding",
+            )
         now = self.clock()
         binding = ConfirmationBindingV1(
-            confirmation_id=f"confirmation:{uuid4().hex}",
+            confirmation_id=proposal_binding.confirmation_id,
             compilation_record_ref=record.reference,
             actor_ref=record.principal_ref,
             session_ref=record.session_ref,
@@ -3612,6 +4022,9 @@ class AgentNotebookCompilerV1:
             policy_snapshot_ref=self.policy_snapshot_ref,
             confirmed_at=now.isoformat(),
             expires_at=record.expires_at,
+            proposal_id=proposal_binding.proposal_id,
+            proposal_revision=proposal_binding.proposal_revision,
+            proposal_fingerprint=proposal_binding.proposal_fingerprint,
         )
         issued = self._confirmation_store.issue(binding)
         self._confirmations[record.record_id] = issued
@@ -3621,16 +4034,21 @@ class AgentNotebookCompilerV1:
             state="confirmed",
             confirmation_id=issued.confirmation_id,
         )
-        return ServerConfirmationReceiptV1(
+        receipt = ServerConfirmationReceiptV1(
             confirmation_id=issued.confirmation_id,
             confirmation_digest=issued.confirmation_digest,
             compilation_record_id=record.record_id,
+            proposal_id=proposal_binding.proposal_id,
+            proposal_revision=proposal_binding.proposal_revision,
+            proposal_fingerprint=proposal_binding.proposal_fingerprint,
             semantic_plan_hash=record.semantic_plan_hash,
             actor_ref=record.principal_ref,
             session_ref=record.session_ref,
             project_ref=record.project_ref,
             _authority_token=self._authority_token,
         )
+        self._issued_receipts[record.record_id] = receipt
+        return receipt
 
     def execute(
         self,
@@ -3660,11 +4078,24 @@ class AgentNotebookCompilerV1:
         if confirmation.compilation_record_id != compilation_record_id:
             raise CutoverCompilerError("CONFIRMATION_SCOPE_MISMATCH")
         record = self.record(compilation_record_id)
+        if (
+            confirmation.semantic_plan_hash != record.semantic_plan_hash
+            or confirmation.actor_ref != record.principal_ref
+            or confirmation.session_ref != record.session_ref
+            or confirmation.project_ref != record.project_ref
+        ):
+            raise CutoverCompilerError("CONFIRMATION_SCOPE_MISMATCH")
         binding = self._confirmations.get(compilation_record_id)
         if type(binding) is not ConfirmationBindingV1:
             raise CutoverCompilerError("SERVER_CONFIRMATION_UNKNOWN")
         if binding.confirmation_id != confirmation.confirmation_id or binding.confirmation_digest != confirmation.confirmation_digest:
             raise CutoverCompilerError("CONFIRMATION_DIGEST_MISMATCH")
+        if (
+            binding.proposal_id != confirmation.proposal_id
+            or binding.proposal_revision != confirmation.proposal_revision
+            or binding.proposal_fingerprint != confirmation.proposal_fingerprint
+        ):
+            raise CutoverCompilerError("CONFIRMATION_PROPOSAL_BINDING_MISMATCH")
         expected_digest = record.source_commitments.get("data_snapshot")
         if current_data_snapshot_digest is not None and current_data_snapshot_digest != expected_digest:
             raise CutoverCompilerError("DATA_SNAPSHOT_CHANGED", "data snapshot changed after compilation")
@@ -3787,5 +4218,7 @@ __all__ = [
     "CutoverCompilationPreviewV1",
     "CutoverCompilerError",
     "CutoverExecutionResultV1",
+    "LegacyAgentConfirmationBoundaryError",
+    "ServerProposalBindingV1",
     "ServerConfirmationReceiptV1",
 ]

@@ -1,0 +1,33 @@
+{
+  "manifest_role": "v1.8.9-p0-legacy-resume-remediation-10-formal-evidence",
+  "observed_at": "2026-08-20T06:15:26.000Z",
+  "audited_head": "b2e718b64ae7c9419e5271862dda38d2f7f6e27b",
+  "audited_tree": "7e875a2757e423a87185cc10c95a41f39f15c370",
+  "implementation_tip": "621ee442084c4f34b9d42413a7140a39506df988",
+  "artifacts": [
+    {
+      "role": "focused",
+      "ref": "docs/superpowers/evidence/v1.8.9-p0-legacy-resume-remediation-10-focused.json",
+      "sha256": "581f56425e5d29b490a66f38b0f93515965b27d8e68dda569491fe22e4574cb0",
+      "result": "6 passed in 1.58s"
+    },
+    {
+      "role": "adversarial_compatibility",
+      "ref": "docs/superpowers/evidence/v1.8.9-p0-legacy-resume-remediation-10-adversarial.json",
+      "sha256": "b7e891604d279b1c2fb6c84e1f12449db8f2260858b3c27033add26f92ceeb4c",
+      "result": "69 passed in 2.28s"
+    },
+    {
+      "role": "compile",
+      "ref": "docs/superpowers/evidence/v1.8.9-p0-legacy-resume-remediation-10-compile.json",
+      "sha256": "f53876ae11872d2234ed8fefb4545a6254187269162a44b68fb069bdbfafd8a0",
+      "result": "no output; exit 0"
+    }
+  ],
+  "checks": {
+    "git_diff_check": "exit 0",
+    "product_code_changed": false,
+    "tests_changed": false,
+    "predecessor_records_changed": false
+  }
+}

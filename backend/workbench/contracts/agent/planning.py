@@ -1686,6 +1686,12 @@ class ConfirmationBindingV1:
     policy_snapshot_ref: str
     confirmed_at: str
     expires_at: str
+    # These fields are optional for older generic cutover callers.  The
+    # server-owned Agent confirmation path always supplies all three so a
+    # legacy proposal cannot be selected by a caller-authored envelope.
+    proposal_id: str = ""
+    proposal_revision: int = 0
+    proposal_fingerprint: str = ""
     _issuer_token: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -1713,6 +1719,18 @@ class ConfirmationBindingV1:
         expires = _parse_timestamp(self.expires_at, "expires_at")
         if expires <= confirmed:
             raise _error("PLANNING_EXPIRY_INVALID", "expires_at must be after confirmed_at")
+        proposal_fields = (
+            self.proposal_id,
+            self.proposal_revision,
+            self.proposal_fingerprint,
+        )
+        if any(value != "" and value != 0 for value in proposal_fields):
+            _text(self.proposal_id, "proposal_id")
+            if type(self.proposal_revision) is not int or self.proposal_revision <= 0:
+                raise _error("PLANNING_PROPOSAL_BINDING_INVALID", "proposal_revision is invalid")
+            _text(self.proposal_fingerprint, "proposal_fingerprint")
+        elif proposal_fields != ("", 0, ""):
+            raise _error("PLANNING_PROPOSAL_BINDING_INVALID", "proposal binding is incomplete")
 
     @property
     def confirmation_digest(self) -> str:
@@ -1729,6 +1747,9 @@ class ConfirmationBindingV1:
                 "policy_snapshot_ref": self.policy_snapshot_ref,
                 "confirmed_at": self.confirmed_at,
                 "expires_at": self.expires_at,
+                "proposal_id": self.proposal_id,
+                "proposal_revision": self.proposal_revision,
+                "proposal_fingerprint": self.proposal_fingerprint,
             }
         )
 
@@ -1773,6 +1794,9 @@ class ConfirmationBindingV1:
             "policy_snapshot_ref": self.policy_snapshot_ref,
             "confirmed_at": self.confirmed_at,
             "expires_at": self.expires_at,
+            "proposal_id": self.proposal_id,
+            "proposal_revision": self.proposal_revision,
+            "proposal_fingerprint": self.proposal_fingerprint,
             "confirmation_digest": self.confirmation_digest,
         }
 
@@ -1793,6 +1817,9 @@ class ConfirmationBindingV1:
                 "policy_snapshot_ref",
                 "confirmed_at",
                 "expires_at",
+                "proposal_id",
+                "proposal_revision",
+                "proposal_fingerprint",
                 "confirmation_digest",
             },
             "confirmation_binding",
@@ -1812,6 +1839,9 @@ class ConfirmationBindingV1:
             policy_snapshot_ref=value["policy_snapshot_ref"],  # type: ignore[arg-type]
             confirmed_at=value["confirmed_at"],  # type: ignore[arg-type]
             expires_at=value["expires_at"],  # type: ignore[arg-type]
+            proposal_id=value.get("proposal_id", ""),  # type: ignore[arg-type]
+            proposal_revision=value.get("proposal_revision", 0),  # type: ignore[arg-type]
+            proposal_fingerprint=value.get("proposal_fingerprint", ""),  # type: ignore[arg-type]
         )
         if value["confirmation_digest"] != binding.confirmation_digest:
             raise _error("PLANNING_DIGEST_MISMATCH", "confirmation_digest does not match binding fields")

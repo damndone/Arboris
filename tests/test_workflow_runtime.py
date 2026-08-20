@@ -286,7 +286,7 @@ def _panel_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _compile(project_run, frame, *, workflow_id, steps=None):
+def _compile(project_run, frame, *, workflow_id, steps=None, bindings=None):
     run_id, artifact_id = project_run
     return compile_workflow(
         workflow_id=workflow_id,
@@ -299,6 +299,7 @@ def _compile(project_run, frame, *, workflow_id, steps=None):
         },
         steps=composed_plan() if steps is None else steps,
         available_columns=list(frame.columns),
+        bindings=bindings,
     )
 
 
@@ -1738,6 +1739,15 @@ def test_model_custom_requires_an_authorized_gateway_and_can_be_injected(tmp_pat
                 },
             }
         ],
+        bindings={
+            "server_model_declarations": {
+                "custom_capability": {
+                    "operation_id": "model.custom",
+                    "branch_producing": True,
+                    "branches": [{"branch_id": "custom"}],
+                }
+            }
+        },
     )
     admission_port = EvidencePersistencePort(project)
     admission_receipt = admission_port.admit(draft, draft.steps[0])

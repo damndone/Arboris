@@ -102,6 +102,24 @@ def _bounded_workflow_error_code(*, status: str, error: object) -> str:
         if match is not None:
             return match.group(1)
     return "WORKFLOW_STEP_FAILED"
+
+
+def _legacy_compilation_required(*, option_id: str, option_revision: int) -> OptionRevisionStale:
+    """Return the typed compatibility refusal for pre-v1.1 execution paths."""
+
+    error = OptionRevisionStale(
+        "historical Notebook execution requires an AgentNotebookCompilerV1 "
+        "server compilation record and scope-bound confirmation/admission",
+        option_id=option_id,
+        option_revision=option_revision,
+        reason="legacy_compilation_required",
+    )
+    # Keep the established NotebookOptionError response envelope while making
+    # the authority refusal distinguishable from an ordinary stale revision.
+    error.code = "NOTEBOOK_LEGACY_COMPILATION_REQUIRED"
+    return error
+
+
 from ..workflow import compile_workflow, execute_workflow
 from .artifact_contract import (
     COMMITTABLE_VALIDATION_STATUSES,
@@ -1961,6 +1979,13 @@ class NotebookService:
         not permission to use the legacy ``/execute`` callback path.
         """
 
+        view = self.store.read_option(notebook_id, option_id)
+        current = view.current_revision
+        if not bool(getattr(current, "materializable", False)):
+            raise _legacy_compilation_required(
+                option_id=option_id,
+                option_revision=current.option_revision,
+            )
         if self.execution_gateway is None:
             raise OptionExecutionGatewayUnavailable(
                 "explicit capability execution is unavailable on this host",
@@ -1968,8 +1993,6 @@ class NotebookService:
                 reason="trusted_execution_gateway_unavailable",
             )
 
-        view = self.store.read_option(notebook_id, option_id)
-        current = view.current_revision
         if not isinstance(current, NotebookOptionRevisionV12):
             raise OptionRevisionStale(
                 "confirm_and_execute requires NotebookOptionRevision@1.2",
@@ -1978,6 +2001,13 @@ class NotebookService:
                 reason="execution_contract_version",
             )
         proposal = view.current_stored_revision.proposal
+        if current.capability_resolution_binding_ref is None:
+            raise OptionRevisionStale(
+                "historical options cannot execute without a current server capability binding",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="legacy_compilation_required",
+            )
         offered_modes = _execution_modes_for(current.risk_level, proposal.operation_id)
         if len(offered_modes) < 2 or offered_modes[1] not in current.execution_modes:
             raise OptionRevisionStale(
@@ -2462,6 +2492,12 @@ class NotebookService:
         view = self.store.read_option(notebook_id, option_id)
         current = view.current_revision
 
+        if not bool(getattr(current, "materializable", False)):
+            raise _legacy_compilation_required(
+                option_id=option_id,
+                option_revision=current.option_revision,
+            )
+
         if option_revision != current.option_revision:
             raise OptionRevisionStale(
                 f"option {option_id} is at revision {current.option_revision}; "
@@ -2581,6 +2617,11 @@ class NotebookService:
         view = self.store.read_option(notebook_id, option_id)
         current = view.current_revision
         proposal = view.current_stored_revision.proposal
+        if not bool(getattr(current, "materializable", False)) or proposal.operation_id == "operation.multi_step":
+            raise _legacy_compilation_required(
+                option_id=option_id,
+                option_revision=current.option_revision,
+            )
         if (option_revision, proposal_id, proposal_revision) != (
             current.option_revision,
             current.typed_proposal_id,

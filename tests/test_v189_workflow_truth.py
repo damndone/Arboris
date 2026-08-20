@@ -43,6 +43,7 @@ from workbench.agent.workflow_runtime import (
     _validate_persisted_model_branch,
     _model_artifact_id,
     _admit_workflow_host_endpoint_from_supervisor,
+    build_workflow_step_executor,
     issue_server_evidence_port,
 )
 from workbench.reporting import render_html_report
@@ -1124,6 +1125,223 @@ def test_model_branch_rejects_a_path_like_model_run_ref(tmp_path) -> None:
 
     with pytest.raises(WorkflowExecutionError, match="opaque model run reference"):
         _validate_persisted_model_branch(tmp_path, draft, draft.steps[0].step_id, branch)
+
+
+def _model_branch_with_forged_declaration(
+    draft, model_step, *, field: str, forged_value: object
+) -> dict[str, object]:
+    branch_spec: dict[str, object] = {
+        "model_family": "ols",
+        "covariance": "unadjusted",
+        "outcome": "outcome",
+        "predictors": ["rate_a"],
+        "categorical": [],
+        "polynomials": [],
+    }
+    branch_spec[field] = forged_value
+    return {
+        "branch_id": "m1",
+        "run_id": "model-run",
+        "artifact_ids": ["ols_1"],
+        "model_artifact_id": "ols_1",
+        "workflow_id": draft.workflow_id,
+        "workflow_step_id": model_step.step_id,
+        "source_run_id": "run-1",
+        "source_artifact_id": "raw-1",
+        "source_sha256": "sha256:source-1",
+        "branch_spec": branch_spec,
+        "predictor_columns": ["rate_a"],
+        "term_groups": {
+            "linear": {"rate_a": ["rate_a"]},
+            "polynomial": {},
+            "categorical": {},
+        },
+    }
+
+
+def test_model_branch_rejects_predictor_forgery_against_compiled_step(tmp_path) -> None:
+    draft = compile_fixture_workflow(workflow_id="wf-model-declaration-binding")
+    model_step = next(
+        step for step in draft.steps if step.operation_id == "model.genesis"
+    )
+    branch = _model_branch_with_forged_declaration(
+        draft, model_step, field="predictors", forged_value=["rate_b"]
+    )
+
+    with pytest.raises(WorkflowExecutionError, match="compiled model step"):
+        _validate_persisted_model_branch(tmp_path, draft, model_step.step_id, branch)
+
+
+def test_model_branch_rejects_covariance_forgery_against_compiled_step(tmp_path) -> None:
+    draft = compile_fixture_workflow(workflow_id="wf-model-declaration-binding")
+    model_step = next(
+        step for step in draft.steps if step.operation_id == "model.genesis"
+    )
+    branch = _model_branch_with_forged_declaration(
+        draft, model_step, field="covariance", forged_value="robust"
+    )
+
+    with pytest.raises(WorkflowExecutionError, match="compiled model step"):
+        _validate_persisted_model_branch(tmp_path, draft, model_step.step_id, branch)
+
+
+def _custom_model_branch_fixture(tmp_path, *, bindings=None):
+    draft = compile_fixture_workflow(
+        workflow_id="wf-custom-model-declaration",
+        steps=[
+            {
+                "step_id": "custom-model",
+                "operation_id": "model.custom",
+                "spec": {
+                    "capability_ref": "capability:example",
+                    "binding_ref": "binding:example",
+                    "operation": "fit",
+                },
+            }
+        ],
+    )
+    if bindings is not None:
+        draft = dataclasses.replace(draft, bindings=bindings)
+
+    source_root = tmp_path / "runs" / "run-1"
+    source_root.mkdir(parents=True)
+    source_path = source_root / "data.csv"
+    source_path.write_text("outcome,rate_a\n1,2\n", encoding="utf-8")
+    initialize_artifact_index(source_root)
+    register_artifact(
+        source_root,
+        "raw-1",
+        source_path,
+        "dataset",
+        "ingestion",
+        [],
+    )
+
+    model_root = tmp_path / "runs" / "model-run"
+    model_path = model_root / "model_results" / "ols_1.json"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_text(json.dumps({"model_family": "ols"}), encoding="utf-8")
+    (model_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": "model-run", "status": "completed"}),
+        encoding="utf-8",
+    )
+    initialize_artifact_index(model_root)
+    register_artifact(
+        model_root,
+        "ols_1",
+        model_path,
+        "model_result",
+        "model.custom",
+        ["raw-1"],
+    )
+
+    branch = {
+        "branch_id": "m1",
+        "run_id": "model-run",
+        "artifact_ids": ["ols_1"],
+        "model_artifact_id": "ols_1",
+        "workflow_id": draft.workflow_id,
+        "workflow_step_id": "custom-model",
+        "source_run_id": "run-1",
+        "source_artifact_id": "raw-1",
+        "source_sha256": sha256_file(source_path),
+        "branch_spec": {
+            "model_family": "ols",
+            "covariance": "unadjusted",
+            "outcome": "outcome",
+            "predictors": ["rate_a"],
+            "categorical": [],
+            "polynomials": [],
+        },
+        "predictor_columns": ["rate_a"],
+        "term_groups": {
+            "linear": {"rate_a": ["rate_a"]},
+            "polynomial": {},
+            "categorical": {},
+        },
+    }
+    return draft, branch
+
+
+def test_model_custom_branch_requires_a_server_branch_declaration(tmp_path) -> None:
+    draft, branch = _custom_model_branch_fixture(tmp_path)
+
+    with pytest.raises(WorkflowExecutionError, match="server.*declaration|branch-producing"):
+        _validate_persisted_model_branch(tmp_path, draft, "custom-model", branch)
+
+
+def test_model_custom_gateway_is_not_called_without_a_server_branch_declaration(
+    tmp_path, monkeypatch
+) -> None:
+    draft, _branch = _custom_model_branch_fixture(tmp_path)
+    monkeypatch.setattr(
+        "workbench.agent.workflow_runtime.resolve_statistical_source",
+        lambda *_args, **_kwargs: (
+            {
+                "artifact_id": "raw-1",
+                "node_ref": "stage:raw",
+                "source_sha256": "sha256:source",
+            },
+            pd.DataFrame({"outcome": [1.0], "rate_a": [2.0]}),
+        ),
+    )
+    evidence_port = EvidencePersistencePort(tmp_path)
+    admission = evidence_port.admit(draft, draft.steps[0])
+    calls: list[str] = []
+
+    def unauthorized_gateway(**_kwargs):
+        calls.append("called")
+        return WorkflowStepResult(artifact_ids=[])
+
+    executor = build_workflow_step_executor(
+        tmp_path,
+        draft,
+        custom_step_executor=unauthorized_gateway,
+        evidence_port=evidence_port,
+    )
+    try:
+        with pytest.raises(WorkflowExecutionError, match="server.*declaration|branch-producing"):
+            executor(draft.steps[0], {}, admission_receipt=admission)
+    finally:
+        evidence_port.abort(admission, "undeclared custom gateway probe")
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("field", "forged_value"),
+    (
+        ("model_family", "forged-family"),
+        ("outcome", "rate_b"),
+        ("predictors", ["rate_b"]),
+        ("covariance", "robust"),
+    ),
+)
+def test_model_custom_branch_rejects_forged_server_declaration_fields(
+    tmp_path, field, forged_value
+) -> None:
+    bindings = {
+        "server_model_declarations": {
+            "custom-model": {
+                "operation_id": "model.custom",
+                "branch_producing": True,
+                "model_family": "ols",
+                "branches": [
+                    {
+                        "branch_id": "m1",
+                        "model_family": "ols",
+                        "outcome": "outcome",
+                        "predictors": ["rate_a"],
+                        "covariance": "unadjusted",
+                    }
+                ],
+            }
+        }
+    }
+    draft, branch = _custom_model_branch_fixture(tmp_path, bindings=bindings)
+    branch["branch_spec"][field] = forged_value
+
+    with pytest.raises(WorkflowExecutionError, match="declaration|compiled model step"):
+        _validate_persisted_model_branch(tmp_path, draft, "custom-model", branch)
 
 
 def test_model_branch_rejects_a_symlinked_model_run_ref(tmp_path) -> None:

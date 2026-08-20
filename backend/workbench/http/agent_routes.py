@@ -7,7 +7,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Literal
+from threading import RLock
+from typing import Any, Literal, Mapping
 from uuid import uuid4
 
 from fastapi import APIRouter, Query, Request, Response
@@ -61,8 +62,22 @@ from ..agent.operations import (
     OperationValidationError,
 )
 from ..agent.execution import OperationClaimConflict
-from ..agent.orchestrator import WorkbenchOrchestrator
-from ..agent.proposals import ProposalConfirmationError, ProposalStaleError, ProposalStore
+from ..agent.orchestrator import (
+    CutoverCompilerError,
+    ServerConfirmationReceiptV1,
+    WorkbenchOrchestrator,
+    validate_server_proposal_revision,
+)
+from ..agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    issue_route_proposal_store,
+    ProposalConfirmationError,
+    ProposalRevision,
+    ProposalStaleError,
+    ProposalStore,
+    ProposalStoreCapabilityError,
+    ProposalStoreCapabilityV1,
+)
 from ..agent.session import EntryRef, JsonlSessionRepository
 from ..agent.tools import ToolRegistry
 from ..api_errors import WorkbenchAPIError
@@ -713,6 +728,99 @@ def _public_session(
     }
 
 
+_ROUTE_PROPOSAL_STORE_ISSUER = DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER
+_ROUTE_PROPOSAL_STORE_OWNER_LOCK = RLock()
+_ROUTE_PROPOSAL_REFERENCE_ADMISSIONS: dict[int, tuple[object, ProposalStoreCapabilityV1, ProposalRevision]] = {}
+
+
+def _server_proposal_store(root: Path) -> ProposalStoreCapabilityV1:
+    """Issue the route-owned persisted ProposalStore view for one project."""
+
+    return issue_route_proposal_store(root)
+
+
+@dataclass(frozen=True, init=False)
+class ServerOwnedLegacyProposalReferenceV1:
+    """An opaque route reference issued only after a persisted reread."""
+
+    store: ProposalStoreCapabilityV1
+    revision: ProposalRevision
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("legacy proposal references are issued by the route boundary")
+
+    @classmethod
+    def _issue(
+        cls,
+        store: ProposalStoreCapabilityV1,
+        revision: ProposalRevision,
+    ) -> "ServerOwnedLegacyProposalReferenceV1":
+        if type(store) is not ProposalStoreCapabilityV1 or type(revision) is not ProposalRevision:
+            raise WorkbenchAPIError(
+                status_code=403,
+                code="AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED",
+                message="The legacy route requires a server-owned persisted proposal reference.",
+            )
+        try:
+            store._require_admitted(_ROUTE_PROPOSAL_STORE_ISSUER)
+        except ProposalStoreCapabilityError as exc:
+            raise WorkbenchAPIError(
+                status_code=403,
+                code="AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED",
+                message="The legacy route requires a server-owned persisted proposal reference.",
+            ) from exc
+        reference = object.__new__(cls)
+        object.__setattr__(reference, "store", store)
+        object.__setattr__(reference, "revision", revision)
+        with _ROUTE_PROPOSAL_STORE_OWNER_LOCK:
+            _ROUTE_PROPOSAL_REFERENCE_ADMISSIONS[id(reference)] = (reference, store, revision)
+        return reference
+
+    def _require_admitted(self) -> tuple[ProposalStoreCapabilityV1, ProposalRevision]:
+        if type(self) is not ServerOwnedLegacyProposalReferenceV1:
+            raise WorkbenchAPIError(
+                status_code=403,
+                code="AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED",
+                message="The legacy route requires a server-owned persisted proposal reference.",
+            )
+        with _ROUTE_PROPOSAL_STORE_OWNER_LOCK:
+            admission = _ROUTE_PROPOSAL_REFERENCE_ADMISSIONS.get(id(self))
+        if admission is None or admission[0] is not self:
+            raise WorkbenchAPIError(
+                status_code=403,
+                code="AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED",
+                message="The legacy route requires a server-owned persisted proposal reference.",
+            )
+        _reference, store, revision = admission
+        if self.store is not store or self.revision is not revision:
+            raise WorkbenchAPIError(
+                status_code=403,
+                code="AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED",
+                message="The legacy route proposal reference binding changed.",
+            )
+        try:
+            store._require_admitted(_ROUTE_PROPOSAL_STORE_ISSUER)
+        except ProposalStoreCapabilityError as exc:
+            raise WorkbenchAPIError(
+                status_code=403,
+                code="AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED",
+                message="The legacy route requires a live server-owned proposal store.",
+            ) from exc
+        return store, revision
+
+    def __copy__(self) -> "ServerOwnedLegacyProposalReferenceV1":
+        raise TypeError("legacy proposal references cannot be copied")
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> "ServerOwnedLegacyProposalReferenceV1":
+        raise TypeError("legacy proposal references cannot be copied")
+
+    def __reduce__(self) -> tuple[object, ...]:
+        raise TypeError("legacy proposal references cannot be serialized")
+
+    def __reduce_ex__(self, _protocol: int) -> tuple[object, ...]:
+        raise TypeError("legacy proposal references cannot be serialized")
+
+
 def _public_proposals(store: ProposalStore, session_id: str) -> list[dict[str, Any]]:
     proposals: list[dict[str, Any]] = []
     for revision in store.latest_revisions_for_session(session_id):
@@ -729,15 +837,33 @@ def _public_proposals(store: ProposalStore, session_id: str) -> list[dict[str, A
 
 
 def _proposal_for_session(
-    store: ProposalStore,
+    store: ProposalStoreCapabilityV1,
     *,
     proposal_id: str,
     session_id: str,
     chain_id: str | None,
+    actor_ref: str | None = None,
+    project_ref: str | None = None,
 ):
+    if type(store) is not ProposalStoreCapabilityV1:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_PROPOSAL_STORE_CAPABILITY_REQUIRED",
+            message="Agent proposal reads require the server-owned ProposalStore capability.",
+            details={"proposal_id": proposal_id},
+        )
+    try:
+        store._require_admitted(_ROUTE_PROPOSAL_STORE_ISSUER)
+    except ProposalStoreCapabilityError as exc:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_PROPOSAL_STORE_CAPABILITY_REQUIRED",
+            message="Agent proposal reads require the server-owned ProposalStore capability.",
+            details={"proposal_id": proposal_id},
+        ) from exc
     try:
         proposal = store.latest_revision(proposal_id)
-    except (KeyError, ValueError) as exc:
+    except (KeyError, OSError, TypeError, ValueError, ProposalStoreCapabilityError) as exc:
         raise WorkbenchAPIError(
             status_code=404,
             code="AGENT_PROPOSAL_NOT_FOUND",
@@ -753,7 +879,31 @@ def _proposal_for_session(
             message="Agent proposal was not found in this session.",
             details={"proposal_id": proposal_id, "session_id": session_id},
         )
-    return proposal
+    try:
+        validate_server_proposal_revision(
+            proposal,
+            actor_ref=actor_ref,
+            session_ref=session_id,
+            project_ref=project_ref,
+        )
+    except CutoverCompilerError as exc:
+        code = str(getattr(exc, "code", "SERVER_PROPOSAL_INTEGRITY"))
+        if code == "SERVER_PROPOSAL_COMPILATION_REQUIRED":
+            api_code = "AGENT_LEGACY_COMPILATION_REQUIRED"
+            status_code = 409
+        elif code == "PROPOSAL_SCOPE_MISMATCH":
+            api_code = "AGENT_LEGACY_BINDING_MISMATCH"
+            status_code = 403
+        else:
+            api_code = "AGENT_PROPOSAL_INTEGRITY"
+            status_code = 403
+        raise WorkbenchAPIError(
+            status_code=status_code,
+            code=api_code,
+            message="The persisted Agent proposal failed server-owned integrity validation.",
+            details={"proposal_id": proposal_id, "reason": code},
+        ) from exc
+    return ServerOwnedLegacyProposalReferenceV1._issue(store, proposal)
 
 
 def _public_proposal(store: ProposalStore, proposal_id: str) -> dict[str, Any]:
@@ -1412,10 +1562,13 @@ def create_agent_analysis_loop_proposal(
             details={"run_id": body.source_run_id},
         )
 
+    proposal_store = _server_proposal_store(repository.root)
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
         main_session_id=_ensure_main_session(repository, root),
+        proposal_store=proposal_store,
+        proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
         context_provider=provider,
     )
     # Proposal creation needs a registered Chain identity but does not invoke
@@ -1489,7 +1642,7 @@ def create_agent_analysis_loop_proposal(
         )
     return {
         "session_id": session_id,
-        "proposal": _public_proposal(orchestrator.proposal_store, proposal.proposal_id),
+        "proposal": _public_proposal(proposal_store, proposal.proposal_id),
         "plan_diff": packet.plan_diff.to_dict(),
         "registered_action": RECOVERY_ACTIONS["ols.use_clustered_covariance_v1"].to_dict(),
         "timings_ms": {
@@ -1659,10 +1812,13 @@ def create_agent_fork_proposal(
     )
     session_id = str(metadata["session_id"])
     chain_id = str(metadata["chain_id"])
+    proposal_store = _server_proposal_store(repository.root)
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
         main_session_id=_ensure_main_session(repository, root),
+        proposal_store=proposal_store,
+        proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
         context_provider=NodeOperationContextProvider(root),
     )
     agent = AgentCore(
@@ -1719,7 +1875,7 @@ def create_agent_fork_proposal(
     return {
         "session_id": session_id,
         "source_session_entry_id": source_entry_id,
-        "proposal": _public_proposal(orchestrator.proposal_store, proposal.proposal_id),
+        "proposal": _public_proposal(proposal_store, proposal.proposal_id),
         "navigation": navigation.to_dict(),
         "status": "pending",
     }
@@ -1763,17 +1919,21 @@ def decline_agent_proposal(
 ) -> dict[str, Any]:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
-    store = ProposalStore(repository.root)
+    store = _server_proposal_store(repository.root)
     _proposal_for_session(
         store,
         proposal_id=proposal_id,
         session_id=session_id,
         chain_id=metadata.get("chain_id"),
+        actor_ref=f"actor:agent:{session_id}",
+        project_ref=f"project:{root.resolve()}",
     )
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
         main_session_id=_ensure_main_session(repository, root),
+        proposal_store=store,
+        proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
         context_provider=NodeOperationContextProvider(root),
     )
     try:
@@ -1804,17 +1964,21 @@ def revise_agent_proposal(
 ) -> dict[str, Any]:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
-    store = ProposalStore(repository.root)
+    store = _server_proposal_store(repository.root)
     _proposal_for_session(
         store,
         proposal_id=proposal_id,
         session_id=session_id,
         chain_id=metadata.get("chain_id"),
+        actor_ref=f"actor:agent:{session_id}",
+        project_ref=f"project:{root.resolve()}",
     )
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
         main_session_id=_ensure_main_session(repository, root),
+        proposal_store=store,
+        proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
         context_provider=NodeOperationContextProvider(root),
     )
     try:
@@ -1851,126 +2015,63 @@ async def confirm_agent_proposal(
     proposal_id: str,
     project_root: str,
     body: AgentProposalConfirmRequest,
+    request: Request = None,
 ) -> dict[str, Any]:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
-    store = ProposalStore(repository.root)
+    store = _server_proposal_store(repository.root)
     proposal = _proposal_for_session(
         store,
         proposal_id=proposal_id,
         session_id=session_id,
         chain_id=metadata.get("chain_id"),
+        actor_ref=f"actor:agent:{session_id}",
+        project_ref=f"project:{root.resolve()}",
     )
-    authoritative_active_head_run_id = _authoritative_active_head(
-        root,
-        chain_id=str(proposal.chain_id),
-        requested_active_head_run_id=body.active_head_run_id,
-    )
-    current_context_fingerprint = _current_proposal_context_fingerprint(
-        root,
-        proposal,
-        active_head_run_id=authoritative_active_head_run_id,
-    )
-    orchestrator = WorkbenchOrchestrator(
-        repository,
-        events,
-        main_session_id=_ensure_main_session(repository, root),
-        context_provider=NodeOperationContextProvider(root),
-    )
-    is_analysis_loop = isinstance(proposal.preconditions.get("analysis_loop"), dict)
-    try:
-        if is_analysis_loop:
-            cluster_variable = proposal.changes.get("entity_col")
-            if type(cluster_variable) is not str or not cluster_variable:
-                raise PlanBindingError(
-                    "analysis-loop proposal has no exact cluster variable",
-                    code="STALE_PLAN",
-                )
-            resolved = resolve_analysis_loop_inputs(
-                root,
-                run_id=str(proposal.target["run_id"]),
-                cluster_variable=cluster_variable,
-            )
-            confirmed_payload_hash = (
-                body.confirmed_payload_hash
-                or proposal.preconditions.get("confirmed_payload_hash")
-            )
-            if type(confirmed_payload_hash) is not str or not confirmed_payload_hash:
-                raise PlanBindingError(
-                    "analysis-loop confirmation has no canonical payload hash",
-                    code="CONFIRMED_PAYLOAD_MISMATCH",
-                )
-            record = confirm_analysis_loop_proposal(
-                orchestrator=orchestrator,
-                plan_store=PlanDiffStore(repository.root, create=False),
-                proposal_id=proposal_id,
-                current_source=resolved.source,
-                current_source_context_fingerprint=current_context_fingerprint,
-                current_active_head_run_id=authoritative_active_head_run_id,
-                revision=body.revision,
-                fingerprint=body.fingerprint,
-                confirmed_payload_hash=confirmed_payload_hash,
-            )
-        else:
-            record = orchestrator.confirm_proposal(
-                proposal_id,
-                revision=body.revision,
-                fingerprint=body.fingerprint,
-                actor_type="user",
-                current_context_fingerprint=current_context_fingerprint,
-                current_active_head_run_id=authoritative_active_head_run_id,
-            )
-    except PlanBindingError as exc:
+    if type(proposal) is not ServerOwnedLegacyProposalReferenceV1:
         raise WorkbenchAPIError(
-            status_code=409,
-            code=exc.code,
-            message=str(exc),
-            details=getattr(exc, "details", {"proposal_id": proposal_id}),
-        ) from exc
-    except ProposalStaleError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="AGENT_PROPOSAL_STALE",
-            message="The proposal is stale and must be regenerated.",
-            details={"proposal_id": proposal_id},
-        ) from exc
-    except (ProposalConfirmationError, KeyError) as exc:
+            status_code=403,
+            code="AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED",
+            message=(
+                "Historical Agent confirmation requires a route-issued reference "
+                "to a server-reread ProposalStore revision."
+            ),
+        )
+    proposal._require_admitted()
+    proposal_revision = proposal.revision.revision
+    if proposal_revision is not None and body.revision != proposal_revision:
         raise WorkbenchAPIError(
             status_code=409,
             code="AGENT_PROPOSAL_CONFLICT",
             message="The proposal revision or fingerprint is no longer confirmable.",
             details={"proposal_id": proposal_id},
-        ) from exc
-    # Design §8.2: the user confirmation IS the execution gate. The registry
-    # selects the request-independent operation handler; no model text
-    # participates in execution.
-    try:
-        record = await orchestrator.execute_confirmed_operation(
-            record.record_id,
-            project_root=root,
-            current_context_fingerprint=current_context_fingerprint,
-            current_active_head_run_id=authoritative_active_head_run_id,
         )
-    except ProposalStaleError as exc:
+    proposal_fingerprint = proposal.revision.fingerprint
+    if body.fingerprint != proposal_fingerprint:
         raise WorkbenchAPIError(
             status_code=409,
-            code="AGENT_PROPOSAL_STALE",
-            message="The proposal became stale before execution.",
+            code="AGENT_PROPOSAL_CONFLICT",
+            message="The proposal revision or fingerprint is no longer confirmable.",
             details={"proposal_id": proposal_id},
-        ) from exc
-    except OperationClaimConflict as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="AGENT_OPERATION_CONFLICT",
-            message="Another confirmed operation is already executing against this Chain head.",
-            details={"proposal_id": proposal_id},
-        ) from exc
+        )
+
+    # Historical Agent proposals are not allowed to instantiate the legacy
+    # WorkbenchOrchestrator.  A proposal may continue only if an earlier
+    # server-owned AgentNotebookCompilerV1 compile and confirmation were
+    # persisted into its opaque binding; otherwise this route is typed
+    # fail-closed.
+    cutover = _execute_legacy_agent_proposal_via_server_boundary(
+        proposal,
+        proposal_id=proposal_id,
+        root=root,
+        session_id=session_id,
+        request=request,
+    )
     return {
         "proposal": _public_proposal(store, proposal_id),
-        "operation": record.to_dict(),
-        "status": record.status,
+        "operation": cutover["operation"],
+        "status": cutover["status"],
     }
-
 
 @router.post("/agent/sessions/{session_id}/operations/{record_id}/reconcile")
 async def reconcile_agent_operation(
@@ -2003,17 +2104,17 @@ async def reconcile_agent_operation(
             message="Agent operation record was not found in this session.",
             details={"record_id": record_id, "session_id": session_id},
         )
-    orchestrator = WorkbenchOrchestrator(
-        repository,
-        events,
-        main_session_id=_ensure_main_session(repository, root),
-        context_provider=NodeOperationContextProvider(root),
+    if record.operation_id == "graph.fork":
+        return {"operation": record.to_dict(), "status": record.status}
+    raise WorkbenchAPIError(
+        status_code=409,
+        code="AGENT_LEGACY_RECONCILE_COMPILATION_REQUIRED",
+        message=(
+            "Historical Agent operation reconciliation requires the server-owned "
+            "Agent/Notebook compilation boundary before it can execute."
+        ),
+        details={"record_id": record_id, "operation_id": record.operation_id},
     )
-    if record.operation_id != "graph.fork":
-        record = await orchestrator.reconcile_confirmed_proposal(
-            record_id, project_root=root
-        )
-    return {"operation": record.to_dict(), "status": record.status}
 
 
 @router.post("/agent/sessions/{session_id}/turns")
@@ -2058,10 +2159,13 @@ async def run_agent_turn(
         # turn performs zero Workbench mutation. Proposals stay allowlisted to
         # registry-enabled operations and remain confirmation-gated audit records.
         operation_registry = OperationRegistry()
+        proposal_store = _server_proposal_store(repository.root)
         orchestrator = WorkbenchOrchestrator(
             repository,
             events,
             main_session_id=_ensure_main_session(repository, root),
+            proposal_store=proposal_store,
+            proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
             operation_registry=operation_registry,
             context_provider=NodeOperationContextProvider(root),
         )
@@ -2185,6 +2289,65 @@ class AgentNotebookCutoverAuthorityStoreV1:
 
     authorities: dict[tuple[str, str], Any] = field(default_factory=dict)
     confirmations: dict[tuple[str, str, str], Any] = field(default_factory=dict)
+    confirmation_digests: dict[tuple[str, str, str], str] = field(default_factory=dict)
+    confirmation_authorities: dict[tuple[str, str, str], Any] = field(default_factory=dict)
+    confirmation_receipts: dict[tuple[str, str, str], ServerConfirmationReceiptV1] = field(
+        default_factory=dict
+    )
+    confirmation_serializations: dict[tuple[str, str, str], dict[str, object]] = field(
+        default_factory=dict
+    )
+    # A retained legacy compilation record may be used by only the proposal
+    # that first claimed it.  This is server-owned state, not a client hint.
+    legacy_proposal_bindings: dict[tuple[str, str, str], dict[str, Any]] = field(
+        default_factory=dict
+    )
+    lock: RLock = field(default_factory=RLock, repr=False)
+
+    def retain_confirmation(
+        self,
+        project_ref: str,
+        session_ref: str,
+        compilation_record_id: str,
+        receipt: ServerConfirmationReceiptV1,
+        *,
+        authority: Any | None = None,
+    ) -> None:
+        if type(receipt) is not ServerConfirmationReceiptV1:
+            raise TypeError("confirmation receipt must be server-issued")
+        key = (project_ref, session_ref, compilation_record_id)
+        with self.lock:
+            if authority is not None:
+                bound_authority = self.authorities.get((project_ref, session_ref))
+                issued_receipt = getattr(bound_authority, "_issued_receipts", {}).get(
+                    compilation_record_id
+                )
+                authority_token = getattr(bound_authority, "_authority_token", None)
+                if (
+                    bound_authority is not authority
+                    or authority_token is None
+                    or receipt._authority_token is not authority_token
+                    or issued_receipt is not receipt
+                ):
+                    raise WorkbenchAPIError(
+                        status_code=403,
+                        code="AGENT_CONFIRMATION_AUTHORITY_REQUIRED",
+                        message="The confirmation receipt was not issued by the bound server authority.",
+                        details={"compilation_record_id": compilation_record_id},
+                    )
+            existing_digest = self.confirmation_digests.get(key)
+            if existing_digest is not None and existing_digest != receipt.confirmation_digest:
+                raise ValueError("confirmation receipt identity changed")
+            serialized = receipt.to_dict()
+            existing_serialized = self.confirmation_serializations.get(key)
+            if existing_serialized is not None and existing_serialized != serialized:
+                raise ValueError("confirmation receipt serialization changed")
+            self.confirmations[key] = receipt
+            self.confirmation_digests[key] = receipt.confirmation_digest
+            if authority is not None:
+                self.confirmation_authorities[key] = authority
+                self.confirmation_receipts[key] = receipt
+            self.confirmation_serializations[key] = serialized
 
 
 _DEFAULT_CUTOVER_STORE = AgentNotebookCutoverAuthorityStoreV1()
@@ -2364,6 +2527,21 @@ def configure_agent_notebook_cutover_authority(
     for key in tuple(store.confirmations):
         if key[:2] == scope:
             store.confirmations.pop(key, None)
+    for key in tuple(store.confirmation_digests):
+        if key[:2] == scope:
+            store.confirmation_digests.pop(key, None)
+    for key in tuple(store.confirmation_authorities):
+        if key[:2] == scope:
+            store.confirmation_authorities.pop(key, None)
+    for key in tuple(store.confirmation_receipts):
+        if key[:2] == scope:
+            store.confirmation_receipts.pop(key, None)
+    for key in tuple(store.confirmation_serializations):
+        if key[:2] == scope:
+            store.confirmation_serializations.pop(key, None)
+    for key in tuple(store.legacy_proposal_bindings):
+        if key[:2] == scope:
+            store.legacy_proposal_bindings.pop(key, None)
     if compiler is None:
         store.authorities.pop(scope, None)
     else:
@@ -2427,6 +2605,446 @@ def _cutover_error(exc: Exception, *, action: str) -> WorkbenchAPIError:
     if code in {"RUNTIME_CATALOG_NOT_BOUND", "PROVIDER_RUNTIME_NOT_BOUND", "CAPABILITY_BINDING_MISSING"}:
         status = 503
     return WorkbenchAPIError(status_code=status, code=code, message=str(exc))
+
+
+def _legacy_cutover_binding(proposal: Any) -> dict[str, Any]:
+    """Read only the server-handle envelope accepted by legacy proposals.
+
+    The values are lookup hints, never execution authority.  The compiler's
+    persisted record and the app-owned confirmation store must agree with all
+    scope values before execution is possible.
+    """
+
+    raw_preconditions = getattr(proposal, "preconditions", None)
+    if not isinstance(raw_preconditions, Mapping):
+        raw_preconditions = {}
+    candidate: Mapping[str, Any] = raw_preconditions
+    for key in ("server_compilation", "agent_notebook_cutover", "cutover"):
+        nested = raw_preconditions.get(key)
+        if isinstance(nested, Mapping):
+            candidate = nested
+            break
+
+    def first_string(*keys: str) -> str | None:
+        for key in keys:
+            value = candidate.get(key)
+            if type(value) is str and value and value == value.strip() and "\x00" not in value:
+                return value
+        return None
+
+    def first_int(*keys: str) -> int | None:
+        for key in keys:
+            value = candidate.get(key)
+            if type(value) is int and value > 0:
+                return value
+        return None
+
+    return {
+        "compilation_record_id": first_string(
+            "compilation_record_id", "server_compilation_record_id"
+        ),
+        "confirmation_id": first_string(
+            "confirmation_id", "server_confirmation_id"
+        ),
+        "actor_ref": first_string("actor_ref", "principal_ref"),
+        "session_ref": first_string("session_ref"),
+        "project_ref": first_string("project_ref"),
+        "proposal_id": first_string("proposal_id"),
+        "proposal_revision": first_int("proposal_revision", "revision"),
+        "proposal_fingerprint": first_string("proposal_fingerprint", "fingerprint"),
+        "operation_id": first_string("operation_id", "operation"),
+        "semantic_plan_hash": first_string("semantic_plan_hash", "plan_hash"),
+        "data_snapshot_digest": first_string(
+            "current_data_snapshot_digest", "data_snapshot_digest"
+        ),
+    }
+
+
+def _legacy_agent_route_scope(
+    root: Path,
+    session_id: str,
+    *,
+    request: Request | None,
+) -> tuple[str, str, str]:
+    """Resolve the route-owned historical Agent scope before any lookup.
+
+    The proposal is an untrusted compatibility envelope.  Its preconditions
+    may carry a retained server handle, but they never choose the authority
+    used to resolve that handle.
+    """
+
+    project_ref = f"project:{root.resolve()}"
+    actor_ref = f"actor:agent:{session_id}"
+    return _assert_server_identity(
+        request,
+        project_ref=project_ref,
+        claimed_actor_ref=actor_ref,
+        claimed_session_ref=session_id,
+    )
+
+
+def _object_value(value: Any, name: str) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _execute_legacy_agent_proposal_via_server_boundary(
+    proposal: Any,
+    *,
+    proposal_id: str,
+    root: Path,
+    session_id: str,
+    request: Request | None,
+) -> dict[str, Any]:
+    """Execute a legacy proposal only through a retained cutover receipt."""
+
+    if type(proposal) is not ServerOwnedLegacyProposalReferenceV1:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED",
+            message=(
+                "Historical Agent confirmation requires a route-issued reference "
+                "to a server-reread ProposalStore revision."
+            ),
+        )
+    proposal_store, referenced_revision = proposal._require_admitted()
+    if proposal_id != referenced_revision.proposal_id:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The request proposal id does not match the route-owned persisted proposal.",
+            details={"fields": ["proposal_id"]},
+        )
+    canonical_actor, canonical_session, canonical_project = _legacy_agent_route_scope(
+        root,
+        session_id,
+        request=request,
+    )
+    # Re-read the exact route-owned store immediately before any precondition
+    # parsing, authority lookup, record read, claim, or write. A stale opaque
+    # reference cannot authorize a changed persisted revision.
+    reread = _proposal_for_session(
+        proposal_store,
+        proposal_id=proposal_id,
+        session_id=canonical_session,
+        chain_id=referenced_revision.chain_id,
+        actor_ref=canonical_actor,
+        project_ref=canonical_project,
+    )
+    if reread.revision != referenced_revision:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_PROPOSAL_INTEGRITY",
+            message="The route-owned proposal revision changed after admission.",
+            details={"proposal_id": proposal_id},
+        )
+    proposal = reread.revision
+    persisted_proposal = True
+    binding = _legacy_cutover_binding(proposal)
+    if persisted_proposal:
+        # Proposal identity is derived from the server revision. A nested
+        # caller-shaped identity is only a consistency hint and is rejected
+        # below if it disagrees with this route-owned value.
+        for field_name, value in (
+            ("proposal_id", proposal.proposal_id),
+            ("proposal_revision", proposal.revision),
+            ("proposal_fingerprint", proposal.fingerprint),
+        ):
+            if binding.get(field_name) is None:
+                binding[field_name] = value
+    required = ("compilation_record_id", "confirmation_id", "semantic_plan_hash")
+    missing = [name for name in required if binding.get(name) is None]
+    if missing:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_LEGACY_COMPILATION_REQUIRED",
+            message=(
+                "Historical Agent proposals require a server-owned AgentNotebookCompilerV1 "
+                "compilation record and retained confirmation before execution."
+            ),
+            details={"missing": missing},
+        )
+
+    persisted_proposal_id = _object_value(proposal, "proposal_id")
+    if persisted_proposal_id != proposal_id:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The request proposal id does not match the route-owned persisted proposal.",
+            details={"fields": ["proposal_id"]},
+        )
+    expected_proposal = {
+        "proposal_id": persisted_proposal_id,
+        "proposal_revision": _object_value(proposal, "revision"),
+        "proposal_fingerprint": _object_value(proposal, "fingerprint"),
+        "operation_id": _object_value(proposal, "operation_id"),
+    }
+    if any(value is None for value in expected_proposal.values()):
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_LEGACY_COMPILATION_REQUIRED",
+            message=(
+                "Historical Agent proposals require a server-owned proposal binding "
+                "with revision, fingerprint, and operation identity."
+            ),
+            details={"missing": [key for key, value in expected_proposal.items() if value is None]},
+        )
+    persisted_session = _object_value(proposal, "session_id")
+    if persisted_session is not None and persisted_session != canonical_session:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The route-owned proposal is not bound to this Agent session.",
+            details={"fields": ["session_ref"]},
+        )
+    expected_binding = {
+        **expected_proposal,
+        "actor_ref": canonical_actor,
+        "session_ref": canonical_session,
+        "project_ref": canonical_project,
+    }
+    binding_mismatches = [
+        name
+        for name, expected in expected_binding.items()
+        if binding.get(name) is not None and binding.get(name) != expected
+    ]
+    if binding_mismatches:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The retained Agent compilation binding does not match the route-owned proposal scope.",
+            details={"fields": binding_mismatches},
+        )
+
+    record_id = binding["compilation_record_id"]
+    cutover_store = _cutover_store(request=request)
+    confirmation = cutover_store.confirmations.get(
+        (canonical_project, canonical_session, record_id)
+    )
+    confirmation_mismatches = []
+    if confirmation is None:
+        confirmation_mismatches.append("confirmation_id")
+    elif binding.get("semantic_plan_hash") is not None and _object_value(
+        confirmation, "semantic_plan_hash"
+    ) != binding["semantic_plan_hash"]:
+        confirmation_mismatches.append("semantic_plan_hash")
+    elif type(confirmation) is not ServerConfirmationReceiptV1:
+        # A serialized receipt or a duck-typed object is data, not a server
+        # authority object. It must never be promoted into an executable
+        # handle by a legacy compatibility route.
+        confirmation_mismatches.append("receipt_type")
+    else:
+        for field_name, expected in (
+            ("confirmation_id", binding["confirmation_id"]),
+            ("compilation_record_id", record_id),
+            ("actor_ref", canonical_actor),
+            ("session_ref", canonical_session),
+            ("project_ref", canonical_project),
+        ):
+            if _object_value(confirmation, field_name) != expected:
+                confirmation_mismatches.append(field_name)
+        digest = _object_value(confirmation, "confirmation_digest")
+        if (
+            type(digest) is not str
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            confirmation_mismatches.append("confirmation_digest")
+        retained_digest = getattr(cutover_store, "confirmation_digests", {}).get(
+            (canonical_project, canonical_session, record_id)
+        )
+        if retained_digest is None or digest != retained_digest:
+            confirmation_mismatches.append("confirmation_digest")
+        retained_serialization = getattr(cutover_store, "confirmation_serializations", {}).get(
+            (canonical_project, canonical_session, record_id)
+        )
+        if not isinstance(retained_serialization, Mapping) or dict(
+            confirmation.to_dict()
+        ) != dict(retained_serialization):
+            confirmation_mismatches.append("receipt_serialization")
+        retained_authority = getattr(cutover_store, "confirmation_authorities", {}).get(
+            (canonical_project, canonical_session, record_id)
+        )
+        retained_receipt = getattr(cutover_store, "confirmation_receipts", {}).get(
+            (canonical_project, canonical_session, record_id)
+        )
+        authority_token = getattr(retained_authority, "_authority_token", None)
+        if (
+            retained_authority is None
+            or retained_receipt is not confirmation
+            or authority_token is None
+            or confirmation._authority_token is not authority_token
+        ):
+            confirmation_mismatches.append("receipt_authority")
+    if confirmation_mismatches:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code=(
+                "SERVER_CONFIRMATION_UNKNOWN"
+                if confirmation is None
+                or (
+                    type(confirmation) is not ServerConfirmationReceiptV1
+                    and "receipt_type" in confirmation_mismatches
+                )
+                else "AGENT_LEGACY_BINDING_MISMATCH"
+            ),
+            message="The legacy proposal has no matching server-retained confirmation handle.",
+            details={"compilation_record_id": record_id, "fields": confirmation_mismatches},
+        )
+    receipt_binding = {
+        "proposal_id": _object_value(confirmation, "proposal_id"),
+        "proposal_revision": _object_value(confirmation, "proposal_revision"),
+        "proposal_fingerprint": _object_value(confirmation, "proposal_fingerprint"),
+        "semantic_plan_hash": _object_value(confirmation, "semantic_plan_hash"),
+        "confirmation_id": _object_value(confirmation, "confirmation_id"),
+        "compilation_record_id": _object_value(confirmation, "compilation_record_id"),
+        "actor_ref": _object_value(confirmation, "actor_ref"),
+        "session_ref": _object_value(confirmation, "session_ref"),
+        "project_ref": _object_value(confirmation, "project_ref"),
+    }
+    binding_key = (canonical_project, canonical_session, record_id)
+    with cutover_store.lock:
+        if cutover_store.legacy_proposal_bindings.get(binding_key) is not None:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_LEGACY_PROPOSAL_BINDING_REPLAY",
+                message=(
+                    "The retained compilation confirmation has already been used. "
+                    "Recompile and reconfirm."
+                ),
+                details={"compilation_record_id": record_id},
+            )
+    receipt_proposal_mismatches = [
+        name
+        for name, expected in {
+            "proposal_id": expected_proposal["proposal_id"],
+            "proposal_revision": expected_proposal["proposal_revision"],
+            "proposal_fingerprint": expected_proposal["proposal_fingerprint"],
+        }.items()
+        if receipt_binding.get(name) != expected
+    ]
+    if receipt_proposal_mismatches:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The server confirmation receipt is not bound to this Agent proposal.",
+            details={"fields": receipt_proposal_mismatches},
+        )
+    compiler = _cutover_authority(canonical_project, canonical_session, request=request)
+    try:
+        record = compiler.record(record_id)
+    except Exception as exc:
+        raise _cutover_error(exc, action="confirm") from exc
+    record_mismatches = []
+    if _object_value(record, "record_id") != record_id:
+        record_mismatches.append("compilation_record_id")
+    if _object_value(record, "principal_ref") != canonical_actor:
+        record_mismatches.append("actor_ref")
+    if _object_value(record, "session_ref") != canonical_session:
+        record_mismatches.append("session_ref")
+    if _object_value(record, "project_ref") != canonical_project:
+        record_mismatches.append("project_ref")
+    if _object_value(record, "semantic_plan_hash") != receipt_binding["semantic_plan_hash"]:
+        record_mismatches.append("semantic_plan_hash")
+    record_operation = _object_value(record, "operation_id")
+    if record_operation is None:
+        compiled_workflow = _object_value(record, "compiled_workflow")
+        record_operation = _object_value(compiled_workflow, "operation_id")
+        if record_operation is None:
+            plan_diff = _object_value(compiled_workflow, "plan_diff")
+            record_operation = _object_value(plan_diff, "operation_id")
+    if record_operation is not None and record_operation != expected_proposal["operation_id"]:
+        record_mismatches.append("operation_id")
+    if record_mismatches:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The server compilation record is not bound to the canonical Agent proposal.",
+            details={"fields": record_mismatches},
+        )
+    receipt_scope_mismatches = [
+        name
+        for name, expected in {
+            "compilation_record_id": record_id,
+            "semantic_plan_hash": _object_value(record, "semantic_plan_hash"),
+            "actor_ref": canonical_actor,
+            "session_ref": canonical_session,
+            "project_ref": canonical_project,
+        }.items()
+        if receipt_binding.get(name) != expected
+    ]
+    if receipt_scope_mismatches:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The server confirmation receipt is not bound to the canonical Agent scope.",
+            details={"fields": receipt_scope_mismatches},
+        )
+    proposal_binding = {
+        "proposal_id": receipt_binding["proposal_id"],
+        "proposal_revision": receipt_binding["proposal_revision"],
+        "proposal_fingerprint": receipt_binding["proposal_fingerprint"],
+        "operation_id": expected_proposal["operation_id"],
+        "semantic_plan_hash": receipt_binding["semantic_plan_hash"],
+        "confirmation_id": receipt_binding["confirmation_id"],
+        "actor_ref": canonical_actor,
+        "session_ref": canonical_session,
+        "project_ref": canonical_project,
+    }
+    with cutover_store.lock:
+        retained = cutover_store.legacy_proposal_bindings.get(binding_key)
+        if retained is not None:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_LEGACY_PROPOSAL_BINDING_REPLAY",
+                message=(
+                    "The retained compilation confirmation is already bound to a "
+                    "different historical Agent proposal. Recompile and reconfirm."
+                ),
+                details={"compilation_record_id": record_id},
+            )
+        if retained is None:
+            cutover_store.legacy_proposal_bindings[binding_key] = proposal_binding
+    try:
+        result = compiler.execute(
+            record_id,
+            confirmation,
+            current_data_snapshot_digest=binding.get("data_snapshot_digest"),
+        )
+    except Exception as exc:
+        raise _cutover_error(exc, action="execute") from exc
+    if not hasattr(result, "to_dict"):
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_CUTOVER_RESULT_INVALID",
+            message="The server compiler returned no typed execution result.",
+        )
+    result_dict = result.to_dict()
+    if not isinstance(result_dict, Mapping):
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_CUTOVER_RESULT_INVALID",
+            message="The server compiler returned an invalid execution result envelope.",
+        )
+    if (
+        result_dict.get("compilation_record_id") not in {None, record_id}
+        or type(result_dict.get("operation_id")) is not str
+        or not result_dict.get("operation_id")
+    ):
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The server execution result is not bound to the confirmed compilation record.",
+            details={"field": "compilation_record_id"},
+        )
+    operation = {
+        "record_id": record_id,
+        "operation_id": result_dict.get("operation_id"),
+        "status": result_dict.get("status"),
+        "cutover_execution": result_dict,
+    }
+    return {"operation": operation, "status": result_dict.get("status")}
 
 
 def _assert_cutover_record_scope(
@@ -2498,9 +3116,13 @@ def confirm_agent_notebook_cutover(
         receipt = compiler.confirm(compilation_record_id)
     except Exception as exc:
         raise _cutover_error(exc, action="confirm") from exc
-    _cutover_store(request=request).confirmations[
-        (body.project_ref, body.session_ref, compilation_record_id)
-    ] = receipt
+    _cutover_store(request=request).retain_confirmation(
+        body.project_ref,
+        body.session_ref,
+        compilation_record_id,
+        receipt,
+        authority=compiler,
+    )
     return {"confirmation": receipt.to_dict()}
 
 
@@ -2523,7 +3145,10 @@ def execute_agent_notebook_cutover(
     confirmation = _cutover_store(request=request).confirmations.get(
         (body.project_ref, body.session_ref, compilation_record_id)
     )
-    if confirmation is None or confirmation.confirmation_id != body.confirmation_id:
+    if (
+        type(confirmation) is not ServerConfirmationReceiptV1
+        or confirmation.confirmation_id != body.confirmation_id
+    ):
         raise WorkbenchAPIError(
             status_code=409,
             code="SERVER_CONFIRMATION_UNKNOWN",

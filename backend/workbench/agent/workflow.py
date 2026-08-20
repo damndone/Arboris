@@ -30,6 +30,10 @@ MAX_PERSISTED_METADATA_BYTES = 64 * 1024
 MAX_PERSISTED_METADATA_DEPTH = 6
 MAX_PERSISTED_METADATA_ITEMS = 128
 MAX_PERSISTED_ARTIFACT_IDS = 256
+# Counts cross the Python/JSON/TypeScript boundary.  Keep them bounded rather
+# than allowing Python's arbitrary-precision integers to become unbounded
+# persisted metadata.
+MAX_PERSISTED_ROW_COUNT = 2**63 - 1
 SERVER_COMPILER_AUTHORITY = "workbench.server.workflow"
 
 
@@ -417,6 +421,35 @@ def _validated_artifact_ids(value: Any) -> list[str]:
     return result
 
 
+def _validated_persisted_row_counts(
+    value: Any, *, field_name: str = "row_counts"
+) -> dict[str, int]:
+    """Parse persisted counts without leaking conversion or overflow errors."""
+
+    if value is None:
+        value = {}
+    if not isinstance(value, Mapping):
+        raise WorkflowExecutionError(
+            f"workflow step state {field_name} must be an object, got {type(value).__name__}"
+        )
+    normalized: dict[str, int] = {}
+    for key, count in value.items():
+        if type(key) is not str or not key:
+            raise WorkflowExecutionError(
+                f"workflow step state {field_name} contains an invalid key"
+            )
+        if (
+            type(count) is not int
+            or count < 0
+            or count > MAX_PERSISTED_ROW_COUNT
+        ):
+            raise WorkflowExecutionError(
+                f"workflow step state {field_name} contains an invalid count"
+            )
+        normalized[key] = count
+    return normalized
+
+
 def _state_lineage(
     draft: "WorkflowDraft",
     step: "WorkflowStep",
@@ -599,7 +632,7 @@ class WorkflowStepState:
             fingerprint=str(value["fingerprint"]),
             status=str(value.get("status", "pending")),
             artifact_ids=tuple(_validated_artifact_ids(value.get("artifact_ids", []))),
-            row_counts={str(key): int(item) for key, item in (value.get("row_counts") or {}).items()},
+            row_counts=_validated_persisted_row_counts(value.get("row_counts")),
             error=value.get("error"),
             result_fingerprint=value.get("result_fingerprint"),
             output_bindings=bindings,
@@ -756,6 +789,20 @@ class WorkflowExecutor:
             for step_id, step_state in states.items()
             if step_state.status == "completed"
         }
+
+        # A persisted state record is only a resume hint.  Before any
+        # dependent callback is admitted, rebind every completed step to its
+        # sealed server completion, unique admission, and frozen artifact
+        # registry rows.  The returned result is rebuilt from that server
+        # record, so tampered state metadata cannot reach a callback.
+        for step in draft.steps:
+            step_state = states[step.step_id]
+            if step_state.status == "completed":
+                completed_results[step.step_id] = evidence_port.validate_resumed_step_state(
+                    draft,
+                    step,
+                    step_state,
+                )
 
         for step in draft.steps:
             current = states[step.step_id]
@@ -954,6 +1001,7 @@ def compile_workflow(
     steps: Any,
     available_columns: list[str] | tuple[str, ...] | None = None,
     workflow_template: str = "agent-composed-v1",
+    bindings: Mapping[str, Any] | None = None,
 ) -> WorkflowDraft:
     """Compile an Agent-composed plan of arbitrary shape.
 
@@ -975,6 +1023,9 @@ def compile_workflow(
         raise OperationValidationError("workflow source context_fingerprint is required")
 
     ordered = validate_workflow_steps(steps, available_columns=available_columns)
+    normalized_bindings = _validated_metadata(
+        bindings or {}, field_name="workflow bindings"
+    )
     source_artifact_fingerprint = str(
         preconditions.get("source_artifact_fingerprint")
         or preconditions["context_fingerprint"]
@@ -999,7 +1050,7 @@ def compile_workflow(
             "workflow_template": workflow_template,
             "target": dict(target),
             "preconditions": dict(preconditions),
-            "bindings": {},
+            "bindings": normalized_bindings,
             "steps": [step.to_dict() for step in compiled_steps],
         }
     )
@@ -1008,7 +1059,7 @@ def compile_workflow(
         workflow_template=workflow_template,
         target=dict(target),
         preconditions=dict(preconditions),
-        bindings={},
+        bindings=normalized_bindings,
         steps=compiled_steps,
         plan_fingerprint=plan_fingerprint,
         compiler_authority=SERVER_COMPILER_AUTHORITY,
@@ -1018,7 +1069,7 @@ def compile_workflow(
             target=target,
             preconditions=preconditions,
             workflow_template=workflow_template,
-            bindings={},
+            bindings=normalized_bindings,
             steps=compiled_steps,
         ),
     )
