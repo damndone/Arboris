@@ -1260,9 +1260,7 @@ def download_artifact_endpoint(
         range_value = range_header if isinstance(range_header, str) else None
         if_range_value = if_range if isinstance(if_range, str) else None
         ranges: list[tuple[int, int]] = []
-        if range_value is not None and (
-            if_range_value is None or if_range_value in {headers["ETag"], headers["Last-Modified"]}
-        ):
+        if range_value is not None:
             try:
                 ranges = _parse_artifact_range_header(range_value, stat_result.st_size)
             except _MalformedArtifactRange as exc:
@@ -1276,6 +1274,11 @@ def download_artifact_endpoint(
                     status_code=416,
                     headers={"Content-Range": f"bytes */{stat_result.st_size}"},
                 )
+            if if_range_value is not None and if_range_value not in {
+                headers["ETag"],
+                headers["Last-Modified"],
+            }:
+                ranges = []
 
         status_code = 200
         body_ranges: tuple[tuple[int, int], ...] = ()

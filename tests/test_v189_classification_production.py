@@ -1621,6 +1621,7 @@ def test_generic_artifact_download_uses_bounded_stream_and_compatibility_headers
     assert response.headers["content-type"] == "application/octet-stream"
     assert response.headers["content-length"] == str(len(expected))
     assert response.headers["accept-ranges"] == "bytes"
+    assert "content-range" not in response.headers
     assert 'attachment; filename="large.bin"' == response.headers["content-disposition"]
     assert observed["whole_file_reads"] == 0
     assert chunk_sizes
@@ -1695,6 +1696,29 @@ def test_generic_artifact_download_honors_if_range_and_falls_back_to_full_stream
     assert matching_last_modified.content == expected[5:20]
     assert stale.status_code == 200
     assert stale.content == expected
+
+
+@pytest.mark.parametrize(
+    ("range_header", "expected_status"),
+    (("", 400), ("bytes=oops", 400), ("bytes=5-19", 200)),
+)
+def test_generic_artifact_download_parses_present_range_before_stale_if_range(
+    tmp_path, range_header: str, expected_status: int
+) -> None:
+    project_root, _run_root, artifact_id, expected = _materialize_generic_artifact_run(tmp_path)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": range_header, "If-Range": '"stale"'},
+    )
+
+    assert response.status_code == expected_status
+    assert "content-range" not in response.headers
+    if expected_status == 400:
+        assert response.content
+    else:
+        assert response.content == expected
 
 
 @pytest.mark.parametrize("range_header", ("bytes=oops", "items=0-1"))
