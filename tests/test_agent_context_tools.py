@@ -38,7 +38,7 @@ def test_p7_public_projection_preserves_hurdle_approximation_labels() -> None:
     from workbench.agent.context_tools import _public_operation_artifact_result
 
     many_coefficients = {
-        f"x_{index}": {"estimate": float(index), "standard_error": 0.1, "p_value": 0.04}
+        f"x_{index}": {"estimate": float(index), "std_error": 0.1, "p_value": 0.04}
         for index in range(120)
     }
     public, omitted = _public_operation_artifact_result(
@@ -69,6 +69,11 @@ def test_p7_public_projection_preserves_hurdle_approximation_labels() -> None:
         "standard_error_method": "bfgs_inverse_hessian_approximation",
         "p_value_method": "normal_wald_approximation",
         "p_value_status": "approximate",
+    }
+    assert public["result"]["coefficient_estimands"]["positive_count"]["x_0"] == {
+        "estimate": 0.0,
+        "std_error": 0.1,
+        "p_value": 0.04,
     }
     assert omitted == ["raw_artifact_payloads", "raw_rows"]
 
@@ -239,6 +244,7 @@ def _write_notebook_workflow_receipt(
     project_root: Path,
     *,
     survey_design: dict | None = None,
+    artifact_result_extra: dict | None = None,
 ) -> None:
     """Persist one committed Notebook receipt with sibling model runs.
 
@@ -261,6 +267,8 @@ def _write_notebook_workflow_receipt(
     }
     if survey_design is not None:
         result["survey_design"] = survey_design
+    if artifact_result_extra is not None:
+        result.update(artifact_result_extra)
     joint_result.write_text(json.dumps({"result": result}), encoding="utf-8")
     source_root.joinpath("artifacts_index.json").write_text(
         json.dumps(
@@ -867,6 +875,177 @@ def test_notebook_survey_packet_projection_is_typed_and_omits_absent_metadata(
     )
     absent_projected = result_without_survey["notebook_workflows"][0]["post_estimation_evidence"][0]["result"]
     assert "survey_design" not in absent_projected
+
+
+def test_notebook_receipt_projection_drops_unknown_optional_and_raw_fields(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project-with-unknowns"
+    _write_notebook_workflow_receipt(
+        project_root,
+        survey_design={
+            "n_obs": 100,
+            "degf": 4,
+            "variance_method": "linearization",
+            "provenance": {"run_id": "source-run", "producer": "server"},
+        },
+        artifact_result_extra={
+            "provenance": {
+                "run_id": "source-run",
+                "artifact_id": "joint-test-result",
+                "producer": "server",
+                "unknown_provenance": "drop",
+            },
+            "coefficients": {
+                "x": {
+                    "estimate": 1.25,
+                    "source_id": "model_results.ols_1.coefficients.x",
+                    "unknown_nested": "drop",
+                }
+            },
+            "raw_rows": [{"must_not": "cross"}],
+            "unknown_extra": {"must_not": "cross"},
+        },
+    )
+    provider = _load_provider_type()(project_root)
+    projected = provider.inspect_notebook_workflow_results(
+        InspectNotebookWorkflowResultsRequest(
+            request_id="inspect-notebook-closed-allowlist",
+            owner_run_id="branch-east",
+            op_node_id="model:ols_1",
+            active_head_run_id="branch-east",
+        )
+    )["notebook_workflows"][0]["post_estimation_evidence"][0]["result"]
+
+    assert projected["test_statistic"] == 12.4
+    assert projected["p_value"] == 0.003
+    assert projected["survey_design"]["n_obs"] == 100
+    assert projected["coefficients"]["x"] == {
+        "estimate": 1.25,
+        "source_id": "model_results.ols_1.coefficients.x",
+    }
+    assert "provenance" in projected
+    assert "unknown_provenance" not in json.dumps(projected)
+    assert "unknown_extra" not in json.dumps(projected)
+    assert "raw_rows" not in json.dumps(projected)
+
+
+def test_sparse_model_projections_omit_absent_optional_fields() -> None:
+    from workbench.agent.context_tools import (
+        _bounded_persisted_model_facts,
+        _bounded_regression_table,
+        _public_requested_model_coefficients,
+    )
+
+    sparse = {
+        "model_id": "ols_1",
+        "coefficients": {"x": {"estimate": 1.25}},
+    }
+
+    assert _bounded_persisted_model_facts([sparse]) == [{
+        "model_id": "ols_1",
+        "coefficients": [{"term": "x", "estimate": 1.25}],
+    }]
+    requested = _public_requested_model_coefficients(
+        run_id="run-a",
+        result=sparse,
+        requested_terms=("x",),
+    )
+    assert requested == {
+        "run_id": "run-a",
+        "model_id": "ols_1",
+        "coefficients": [{
+            "term": "x",
+            "estimate": 1.25,
+            "provenance": {"run_id": "run-a"},
+        }],
+        "evidence_ref": {
+            "run_id": "run-a",
+            "model_id": "ols_1",
+            "result_ref": "model_results:ols_1",
+        },
+    }
+    table = _bounded_regression_table([sparse])
+    assert table is not None
+    assert table["models"] == [{"id": "ols_1", "label": "ols_1"}]
+    assert table["rows"] == [{
+        "term": "x",
+        "label": "x",
+        "models": {"ols_1": {"estimate": 1.25}},
+    }]
+
+
+def test_invalid_declared_projection_fields_omit_values_but_keep_typed_reason() -> None:
+    from workbench.agent.context_tools import (
+        _bounded_persisted_model_facts,
+        _bounded_regression_table,
+        _public_requested_model_coefficients,
+    )
+
+    invalid = {
+        "model_id": "ols_1",
+        "nobs": 10**400,
+        "coefficients": {
+            "x": {
+                "estimate": 1.25,
+                "std_error": -1,
+                "p_value": 2,
+            }
+        },
+    }
+
+    requested = _public_requested_model_coefficients(
+        run_id="run-a",
+        result=invalid,
+        requested_terms=("x",),
+    )
+    assert requested is not None
+    assert requested["coefficients"] == [{
+        "term": "x",
+        "estimate": 1.25,
+        "provenance": {"run_id": "run-a"},
+        "projection_status": "unavailable",
+        "unavailable_reason": "AGENT_COEFFICIENT_VALUE_INVALID",
+    }]
+    assert "nobs" not in requested
+    assert requested["model_metadata_status"] == "unavailable"
+    assert requested["model_metadata_unavailable_reason"] == "AGENT_MODEL_METADATA_INVALID"
+
+    facts = _bounded_persisted_model_facts([invalid])
+    assert facts[0]["coefficients"] == [{
+        "term": "x",
+        "estimate": 1.25,
+        "projection_status": "unavailable",
+        "unavailable_reason": "AGENT_COEFFICIENT_VALUE_INVALID",
+    }]
+    table = _bounded_regression_table([invalid])
+    assert table is not None
+    assert "nobs" not in table["models"][0]
+    assert table["models"][0]["projection_status"] == "unavailable"
+    cell = table["rows"][0]["models"]["ols_1"]
+    assert "std_error" not in cell
+    assert "p_value" not in cell
+    assert cell["projection_status"] == "unavailable"
+    assert cell["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
+
+
+def test_empty_declared_labels_are_omitted_but_keep_typed_reason() -> None:
+    from workbench.agent.context_tools import _public_requested_model_coefficients
+
+    projected = _public_requested_model_coefficients(
+        run_id="run-a",
+        result={
+            "model_id": "ols-1",
+            "model_type": "",
+            "coefficients": {"x": {"estimate": 1.0}},
+        },
+        requested_terms=("x",),
+    )
+
+    assert projected is not None
+    assert "model_type" not in projected
+    assert projected["model_metadata_status"] == "unavailable"
+    assert projected["model_metadata_unavailable_reason"] == "AGENT_MODEL_METADATA_INVALID"
 
 
 def test_agent_unavailable_projection_omits_optional_persisted_fields() -> None:

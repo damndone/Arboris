@@ -33,6 +33,7 @@ from ..services.server_run_artifacts import (
 from ..data_operations import _read_frame
 from ..graph_model import NodeKind
 from ..survey.projection import (
+    bounded_survey_number,
     bounded_survey_integer,
     project_survey_coefficient,
     project_survey_design,
@@ -3230,103 +3231,137 @@ def _public_requested_model_coefficients(
         if not isinstance(coefficient, dict):
             missing_terms.append(term)
             continue
-        public_coefficients.append(
-            {
-                "term": term,
-                **_bounded_agent_coefficient(coefficient, run_id=run_id),
-            }
-        )
+        bounded = _bounded_agent_coefficient(coefficient, run_id=run_id)
+        public_coefficients.append({"term": term, **bounded})
 
-    predictors = result.get("x_columns")
-    public_predictors = (
-        [item for item in predictors if isinstance(item, str)][:_MAX_PUBLIC_MODEL_PREDICTORS]
-        if isinstance(predictors, list)
-        else []
-    )
-    predictor_count = (
-        len([item for item in predictors if isinstance(item, str)])
-        if isinstance(predictors, list)
-        else 0
-    )
-    covariance_evidence = result.get("covariance_evidence")
-    covariance_evidence = (
-        covariance_evidence if isinstance(covariance_evidence, dict) else {}
-    )
-    confidence_level = _public_probability(covariance_evidence.get("confidence_level"))
-    cluster_variable = covariance_evidence.get("cluster_variable")
-    cluster_count = _public_positive_int(covariance_evidence.get("cluster_count"))
-    nobs, invalid_nobs = project_survey_model_count(
-        result.get("nobs"), unavailable_reason="AGENT_MODEL_METADATA_INVALID"
-    )
-    df_model = bounded_survey_integer(result.get("df_model"))
-    df_resid = bounded_survey_integer(result.get("df_resid"), positive=True)
-    invalid_df_model = result.get("df_model") is not None and df_model is None
-    invalid_df_resid = result.get("df_resid") is not None and df_resid is None
-    invalid_model_contract = invalid_nobs or invalid_df_model or invalid_df_resid
-    exposure_col = result.get("exposure_col")
-    sampling_weight = result.get("sampling_weight")
-    if exposure_col is not None and (
-        not isinstance(exposure_col, str) or not exposure_col or len(exposure_col) > 128
-    ):
-        invalid_model_contract = True
-        exposure_col = None
-    if sampling_weight is not None and (
-        not isinstance(sampling_weight, str) or not sampling_weight or len(sampling_weight) > 128
-    ):
-        invalid_model_contract = True
-        sampling_weight = None
-    public_model = {
+    public_model: dict[str, Any] = {
         "run_id": run_id,
         "model_id": model_id,
-        "model_type": result.get("model_type") if isinstance(result.get("model_type"), str) else None,
-        "nobs": nobs,
-        "r_squared": _public_stat_number(result.get("r_squared")),
-        "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
-        "df_model": df_model,
-        "df_resid": df_resid,
-        "outcome": result.get("y_column") if isinstance(result.get("y_column"), str) else None,
-        "predictors": public_predictors,
-        "predictors_omitted": max(predictor_count - len(public_predictors), 0),
-        "entity_col": result.get("entity_col") if isinstance(result.get("entity_col"), str) else None,
-        "time_col": result.get("time_col") if isinstance(result.get("time_col"), str) else None,
-        "covariance": result.get("covariance") if isinstance(result.get("covariance"), str) else None,
-        "covariance_estimator": (
-            result.get("covariance_estimator")
-            if isinstance(result.get("covariance_estimator"), str)
-            else None
-        ),
-        "confidence_interval": {
-            "level": confidence_level,
-            "method": (
-                covariance_evidence.get("confidence_interval_method")
-                if isinstance(covariance_evidence.get("confidence_interval_method"), str)
-                else None
-            ),
-        },
-        "covariance_details": {
-            "cluster_variable": cluster_variable if isinstance(cluster_variable, str) else None,
-            "cluster_count": cluster_count,
-            "cluster_entity": (
-                covariance_evidence.get("cluster_entity")
-                if isinstance(covariance_evidence.get("cluster_entity"), bool)
-                else None
-            ),
-        },
-        "coefficients": public_coefficients,
-        "missing_terms": missing_terms,
         "evidence_ref": {
             "run_id": run_id,
             "model_id": model_id,
             "result_ref": f"model_results:{model_id}",
         },
     }
+    invalid_model_contract = False
+
+    for key in (
+        "model_type",
+        "y_column",
+        "entity_col",
+        "time_col",
+        "covariance",
+        "covariance_estimator",
+    ):
+        value = _bounded_present_field(result, key, _bounded_label)
+        if value is _MISSING:
+            continue
+        if value is None:
+            invalid_model_contract = True
+        else:
+            public_model["outcome" if key == "y_column" else key] = value
+
+    for key in ("r_squared", "r_squared_adj"):
+        value = _bounded_present_field(result, key, _public_stat_number)
+        if value is _MISSING:
+            continue
+        if value is None:
+            invalid_model_contract = True
+        else:
+            public_model[key] = value
+
+    nobs = _bounded_present_field(
+        result,
+        "nobs",
+        lambda value: project_survey_model_count(
+            value, unavailable_reason="AGENT_MODEL_METADATA_INVALID"
+        )[0],
+    )
+    if nobs is not _MISSING:
+        if nobs is None:
+            invalid_model_contract = True
+        else:
+            public_model["nobs"] = nobs
+    for key, positive in (("df_model", False), ("df_resid", True)):
+        value = _bounded_present_field(
+            result,
+            key,
+            lambda raw, positive=positive: bounded_survey_integer(raw, positive=positive),
+        )
+        if value is _MISSING:
+            continue
+        if value is None:
+            invalid_model_contract = True
+        else:
+            public_model[key] = value
+
+    predictors = result.get("x_columns")
+    if "x_columns" in result:
+        if not isinstance(predictors, list) or not all(isinstance(item, str) for item in predictors):
+            invalid_model_contract = True
+        elif predictors:
+            public_model["predictors"] = predictors[:_MAX_PUBLIC_MODEL_PREDICTORS]
+            omitted = max(len(predictors) - len(public_model["predictors"]), 0)
+            if omitted:
+                public_model["predictors_omitted"] = omitted
+
+    covariance_evidence = result.get("covariance_evidence")
+    if "covariance_evidence" in result:
+        if not isinstance(covariance_evidence, dict):
+            invalid_model_contract = True
+            covariance_evidence = {}
+        confidence: dict[str, Any] = {}
+        if "confidence_level" in covariance_evidence:
+            level = _public_probability(covariance_evidence["confidence_level"])
+            if level is None:
+                invalid_model_contract = True
+            else:
+                confidence["level"] = level
+        if "confidence_interval_method" in covariance_evidence:
+            method = _bounded_label(covariance_evidence["confidence_interval_method"])
+            if method is None:
+                invalid_model_contract = True
+            else:
+                confidence["method"] = method
+        if confidence:
+            public_model["confidence_interval"] = confidence
+        details: dict[str, Any] = {}
+        for key, validator in (
+            ("cluster_variable", _bounded_label),
+            ("cluster_count", _public_positive_int),
+        ):
+            if key not in covariance_evidence:
+                continue
+            value = validator(covariance_evidence[key])
+            if value is None:
+                invalid_model_contract = True
+            else:
+                details[key] = value
+        if "cluster_entity" in covariance_evidence:
+            value = covariance_evidence["cluster_entity"]
+            if not isinstance(value, bool):
+                invalid_model_contract = True
+            else:
+                details["cluster_entity"] = value
+        if details:
+            public_model["covariance_details"] = details
+
+    for key in ("exposure_col", "sampling_weight"):
+        value = _bounded_present_field(result, key, _bounded_label)
+        if value is _MISSING:
+            continue
+        if value is None:
+            invalid_model_contract = True
+        else:
+            public_model[key] = value
+
+    if public_coefficients:
+        public_model["coefficients"] = public_coefficients
+    if missing_terms:
+        public_model["missing_terms"] = missing_terms
     survey_design = _bounded_survey_design([result])
     if survey_design is not None:
         public_model["survey_design"] = survey_design
-    if "exposure_col" in result:
-        public_model["exposure_col"] = exposure_col
-    if "sampling_weight" in result:
-        public_model["sampling_weight"] = sampling_weight
     if invalid_model_contract:
         public_model.update({
             "model_metadata_status": "unavailable",
@@ -3345,6 +3380,21 @@ def _public_stat_number(value: Any) -> int | float | None:
     if not math.isfinite(parsed) or abs(parsed) > 1_000_000_000_000.0:
         return None
     return value
+
+
+_MISSING = object()
+
+
+def _bounded_present_field(
+    source: Mapping[str, Any],
+    key: str,
+    validator: Callable[[Any], Any],
+) -> Any:
+    """Distinguish an absent source key from a declared invalid value."""
+
+    if key not in source:
+        return _MISSING
+    return validator(source[key])
 
 
 def _public_probability(value: Any) -> float | None:
@@ -3585,28 +3635,48 @@ def _bounded_regression_table(
         model_id = result.get("model_id")
         if not isinstance(model_id, str) or not model_id:
             continue
-        model_nobs, invalid_nobs = project_survey_model_count(
-            result.get("nobs"), unavailable_reason="AGENT_MODEL_METADATA_INVALID"
+        model_view: dict[str, Any] = {"id": model_id}
+        label = _bounded_label(result.get("model_label"))
+        model_type = _bounded_label(result.get("model_type"))
+        if label is not None:
+            model_view["label"] = label
+        elif model_type is not None:
+            model_view["label"] = model_type
+        else:
+            model_view["label"] = model_id
+        if "model_type" in result:
+            if model_type is None:
+                model_view.update(
+                    {
+                        "projection_status": "unavailable",
+                        "unavailable_reason": "AGENT_MODEL_METADATA_INVALID",
+                    }
+                )
+            else:
+                model_view["model_type"] = model_type
+        model_nobs = _bounded_present_field(
+            result,
+            "nobs",
+            lambda value: project_survey_model_count(
+                value, unavailable_reason="AGENT_MODEL_METADATA_INVALID"
+            )[0],
         )
-        model_view = {
-            "id": model_id,
-            "label": result.get("model_label") or result.get("model_type") or model_id,
-            "model_type": result.get("model_type"),
-            "nobs": model_nobs,
-        }
+        if model_nobs is not _MISSING:
+            if model_nobs is not None:
+                model_view["nobs"] = model_nobs
+            if model_nobs is None:
+                model_view.update(
+                    {
+                        "projection_status": "unavailable",
+                        "unavailable_reason": "AGENT_MODEL_METADATA_INVALID",
+                    }
+                )
         design = project_survey_design(
             result.get("survey_design"),
             unavailable_reason="AGENT_SURVEY_METADATA_INVALID",
         )
         if design is not None:
             model_view["survey_design"] = design
-        if invalid_nobs:
-            model_view.update(
-                {
-                    "projection_status": "unavailable",
-                    "unavailable_reason": "AGENT_MODEL_METADATA_INVALID",
-                }
-            )
         models.append(model_view)
         coefficients = result.get("coefficients")
         if not isinstance(coefficients, dict):
@@ -3623,10 +3693,13 @@ def _bounded_regression_table(
                 raw_cell, budget=budget, run_id=result.get("run_id")
             )
             parsed_p = cell.get("p_value")
-            cell["significance"] = next(
-                (marker for marker, cutoff in cutoffs if isinstance(parsed_p, (int, float)) and parsed_p < cutoff),
-                "",
-            )
+            if isinstance(parsed_p, (int, float)) and not isinstance(parsed_p, bool):
+                marker = next(
+                    (marker for marker, cutoff in cutoffs if parsed_p < cutoff),
+                    None,
+                )
+                if marker is not None:
+                    cell["significance"] = marker
             row["models"][model_id] = cell
 
     if not models:
@@ -3636,14 +3709,14 @@ def _bounded_regression_table(
     rows = [
         {
             **row,
-            "models": {
-                model_id: row["models"].get(model_id)
-                for model_id in model_ids
-            },
+            "models": dict(row["models"]),
         }
         for row in rows_by_term.values()
+        if row["models"]
     ]
-    return {
+    if not rows:
+        return None
+    projected = {
         "payload_schema": "workbench.regression-table",
         "schema_version": 1,
         "models": models,
@@ -3652,8 +3725,11 @@ def _bounded_regression_table(
             "cutoffs": {marker: cutoff for marker, cutoff in cutoffs},
             "legend": "*** p < 0.01; ** p < 0.05; * p < 0.1",
         },
-        "models_omitted": max(len(model_results) - len(models), 0),
     }
+    omitted = max(len(model_results) - len(models), 0)
+    if omitted:
+        projected["models_omitted"] = omitted
+    return projected
 
 
 def _bounded_result_summary(
@@ -3824,7 +3900,7 @@ def _project_family_evidence(
 
 
 def _bounded_label(value: Any) -> str | None:
-    return value[:128] if isinstance(value, str) else None
+    return value[:128] if isinstance(value, str) and value else None
 
 
 def _bounded_labels(value: Any, *, limit: int = 16) -> list[str]:
@@ -3838,18 +3914,43 @@ def _bounded_agent_coefficient(
     run_id: str | None = None,
 ) -> dict[str, Any]:
     """Project coefficient evidence with bounded numbers and provenance."""
-    numeric_fields = ("estimate", "std_error", "ci_lower", "ci_upper", "p_value")
     projected = project_survey_coefficient(
         coefficient,
         unavailable_reason="AGENT_COEFFICIENT_VALUE_INVALID",
         run_id=run_id,
     )
-    if projected.get("projection_status") == "unavailable":
-        # Preserve the established Agent shape without returning invalid raw
-        # scalars. Report/XLSX intentionally omit these fields instead.
-        for field in numeric_fields:
-            if field in coefficient:
-                projected[field] = None
+    # The shared Survey projector marks the whole coefficient unavailable when
+    # one declared field is invalid.  The Agent seam still may expose other
+    # fields whose own source values are bounded and valid, but never creates
+    # a nullable placeholder for the invalid field.
+    invalid_ci_pair = False
+    if "ci_lower" in coefficient and "ci_upper" in coefficient:
+        lower = bounded_survey_number(coefficient["ci_lower"])
+        upper = bounded_survey_number(coefficient["ci_upper"])
+        invalid_ci_pair = lower is None or upper is None or lower > upper
+    for field in ("estimate", "ci_lower", "ci_upper"):
+        if field not in coefficient:
+            continue
+        if field in {"ci_lower", "ci_upper"} and invalid_ci_pair:
+            continue
+        value = bounded_survey_number(coefficient[field])
+        if value is not None:
+            projected[field] = value
+    if "std_error" in coefficient:
+        value = bounded_survey_number(coefficient["std_error"], positive=True)
+        if value is not None:
+            projected["std_error"] = value
+    if "p_value" in coefficient:
+        value = bounded_survey_number(coefficient["p_value"], probability=True)
+        if value is not None:
+            projected["p_value"] = value
+    if (
+        isinstance(coefficient.get("confidence_interval"), (list, tuple))
+        and len(coefficient["confidence_interval"]) == 2
+    ):
+        interval = [bounded_survey_number(item) for item in coefficient["confidence_interval"]]
+        if all(item is not None for item in interval) and interval[0] <= interval[1]:
+            projected["confidence_interval"] = interval
     return projected
 
 
@@ -4144,36 +4245,17 @@ def _bounded_persisted_model_facts(
             bounded = _bounded_agent_coefficient(
                 coefficient, run_id=result.get("run_id")
             )
-            rows.append(
-                {
-                    "term": term,
-                    "estimate": bounded.get("estimate"),
-                    "std_error": bounded.get("std_error"),
-                    "p_value": bounded.get("p_value"),
-                    "ci_lower": bounded.get("ci_lower"),
-                    "ci_upper": bounded.get("ci_upper"),
-                    **{
-                        key: bounded[key]
-                        for key in (
-                            "variance_source",
-                            "source_id",
-                            "warnings",
-                            "provenance",
-                            "projection_status",
-                            "unavailable_reason",
-                        )
-                        if key in bounded
-                    },
-                }
-            )
-        projected.append(
-            {
-                "model_id": model_id,
-                "r_squared": _public_stat_number(result.get("r_squared")),
-                "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
-                "coefficients": rows,
-            }
-        )
+            rows.append({"term": term, **bounded})
+        model: dict[str, Any] = {"model_id": model_id}
+        for key in ("r_squared", "r_squared_adj"):
+            value = _bounded_present_field(result, key, _public_stat_number)
+            if value is _MISSING:
+                continue
+            if value is not None:
+                model[key] = value
+        if rows:
+            model["coefficients"] = rows
+        projected.append(model)
     return projected
 
 
@@ -4338,6 +4420,219 @@ class _PublicResultBudget:
     omitted_items: int = 0
 
 
+_PUBLIC_ARTIFACT_STRING_FIELDS = frozenset(
+    {
+        "contract",
+        "contract_version",
+        "operation_id",
+        "schema_version",
+        "payload_schema",
+        "operation",
+        "missing_policy",
+        "branch_id",
+        "test_id",
+        "test_version",
+        "test_type",
+        "family",
+        "correction",
+        "status",
+        "source_artifact_id",
+        "source_sha256",
+    }
+)
+_PUBLIC_ARTIFACT_NUMERIC_FIELDS = frozenset(
+    {
+        "source_row_count",
+        "filtered_row_count",
+        "obs",
+        "nobs",
+        "df",
+        "degrees_of_freedom",
+        "statistic",
+        "test_statistic",
+        "f_statistic",
+        "p_value",
+        "p_value_corrected",
+        "effect_size",
+        "estimate",
+        "std_error",
+        "ci_lower",
+        "ci_upper",
+        "mean",
+        "std_dev",
+        "min",
+        "max",
+        "missing_count",
+        "r_squared",
+        "r_squared_adj",
+        "design_effect",
+        "effective_sample_size",
+    }
+)
+_PUBLIC_ARTIFACT_VARIABLE_NUMERIC_FIELDS = _PUBLIC_ARTIFACT_NUMERIC_FIELDS | frozenset(
+    {"median", "q1", "q3"}
+)
+
+
+def _bounded_artifact_provenance(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    projected: dict[str, str] = {}
+    for key in ("run_id", "source_id", "artifact_id", "producer"):
+        label = _bounded_label(value.get(key))
+        if label is not None:
+            projected[key] = label
+    return projected or None
+
+
+def _bounded_artifact_variables(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    projected: dict[str, Any] = {}
+    omitted = max(len(value) - 16, 0)
+    for raw_name, raw_variable in list(value.items())[:16]:
+        if not isinstance(raw_name, str) or not isinstance(raw_variable, dict):
+            omitted += 1
+            continue
+        bounded: dict[str, Any] = {}
+        for key in _PUBLIC_ARTIFACT_VARIABLE_NUMERIC_FIELDS:
+            if key not in raw_variable:
+                continue
+            number = _public_stat_number(raw_variable[key])
+            if number is not None:
+                bounded[key] = number
+            else:
+                omitted += 1
+        if "dtype" in raw_variable:
+            dtype = _bounded_label(raw_variable["dtype"])
+            if dtype is not None:
+                bounded["dtype"] = dtype
+            else:
+                omitted += 1
+        if bounded:
+            projected[raw_name[:128]] = bounded
+        else:
+            omitted += 1
+    if omitted:
+        projected["_omitted_item_count"] = omitted
+    return projected or None
+
+
+def _bounded_artifact_coefficients(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    projected: dict[str, Any] = {}
+    for raw_term, raw_coefficient in list(value.items())[:32]:
+        if not isinstance(raw_term, str) or not isinstance(raw_coefficient, dict):
+            continue
+        bounded = _bounded_agent_coefficient(raw_coefficient)
+        if bounded:
+            projected[raw_term[:128]] = bounded
+    return projected or None
+
+
+def _bounded_artifact_coefficient_estimands(value: Any) -> dict[str, Any] | None:
+    """Project typed P7 coefficient families without recursing into raw payloads."""
+
+    if not isinstance(value, dict):
+        return None
+    projected: dict[str, Any] = {}
+    for raw_family, raw_coefficients in list(value.items())[:8]:
+        if not isinstance(raw_family, str):
+            continue
+        coefficients = _bounded_artifact_coefficients(raw_coefficients)
+        if coefficients is not None:
+            projected[raw_family[:128]] = coefficients
+    return projected or None
+
+
+def _bounded_artifact_inference(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    allowed = {
+        "standard_error_method",
+        "p_value_method",
+        "p_value_status",
+        "confidence_interval_method",
+    }
+    projected: dict[str, Any] = {}
+    for raw_section, raw_inference in list(value.items())[:8]:
+        if not isinstance(raw_section, str) or not isinstance(raw_inference, dict):
+            continue
+        section: dict[str, str] = {}
+        for key in allowed:
+            if key not in raw_inference:
+                continue
+            label = _bounded_label(raw_inference[key])
+            if label is not None:
+                section[key] = label
+        if section:
+            projected[raw_section[:128]] = section
+    return projected or None
+
+
+def _bounded_declared_artifact_result(
+    artifact_type: str,
+    result: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Project one artifact family through an explicit, typed field registry."""
+
+    projected: dict[str, Any] = {}
+    for key in _PUBLIC_ARTIFACT_STRING_FIELDS:
+        if key not in result:
+            continue
+        value = _bounded_label(result[key])
+        if value is not None:
+            projected[key] = value
+    for key in _PUBLIC_ARTIFACT_NUMERIC_FIELDS:
+        if key not in result:
+            continue
+        value = _public_stat_number(result[key])
+        if value is not None:
+            projected[key] = value
+
+    if "provenance" in result:
+        provenance = _bounded_artifact_provenance(result["provenance"])
+        if provenance is not None:
+            projected["provenance"] = provenance
+    if "survey_design" in result:
+        design = project_survey_design(
+            result["survey_design"],
+            unavailable_reason="AGENT_SURVEY_METADATA_INVALID",
+        )
+        if design is not None:
+            projected["survey_design"] = design
+    if "coefficients" in result:
+        coefficients = _bounded_artifact_coefficients(result["coefficients"])
+        if coefficients is not None:
+            projected["coefficients"] = coefficients
+
+    if artifact_type == "statistical_exploration" and "variables" in result:
+        variables = _bounded_artifact_variables(result["variables"])
+        if variables is not None:
+            projected["variables"] = variables
+
+    if artifact_type == "p7_analysis":
+        for key, projector in (
+            ("inference", _bounded_artifact_inference),
+            ("coefficient_estimands", _bounded_artifact_coefficient_estimands),
+        ):
+            if key not in result:
+                continue
+            value = projector(result[key])
+            if value is not None:
+                projected[key] = value
+        nested = result.get("result")
+        if isinstance(nested, dict):
+            nested_projected = _bounded_declared_artifact_result(
+                "p7_analysis", nested
+            )
+            if nested_projected is not None:
+                projected["result"] = nested_projected
+
+    return projected or None
+
+
 def _public_operation_artifact_result(
     artifact_type: str,
     payload: dict[str, Any],
@@ -4354,18 +4649,9 @@ def _public_operation_artifact_result(
     result = payload.get("result")
     if not isinstance(result, dict):
         return None, ["raw_artifact_payloads"]
-    bounded = _bounded_public_result_value(result)
-    if not isinstance(bounded, dict):
-        return None, ["raw_artifact_payloads"]
-    if "survey_design" in result:
-        survey_design = project_survey_design(
-            result.get("survey_design"),
-            unavailable_reason="AGENT_SURVEY_METADATA_INVALID",
-        )
-        if survey_design is None:
-            bounded.pop("survey_design", None)
-        else:
-            bounded["survey_design"] = survey_design
+    bounded = _bounded_declared_artifact_result(artifact_type, result)
+    if bounded is None:
+        return None, ["raw_artifact_payloads", "raw_rows"]
     return bounded, ["raw_artifact_payloads", "raw_rows"]
 
 

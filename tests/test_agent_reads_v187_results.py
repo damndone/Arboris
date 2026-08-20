@@ -247,15 +247,15 @@ def test_agent_coefficient_projection_bounds_huge_values_and_provenance():
     projected = projected_model["coefficients"][0]
     assert projected["projection_status"] == "unavailable"
     assert projected["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
-    assert projected["estimate"] is None
+    assert "estimate" not in projected
     assert projected["projection_status"] == "unavailable"
     assert projected["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
-    assert projected_model["nobs"] is None
-    assert projected_model["df_model"] is None
-    assert projected_model["df_resid"] is None
+    assert "nobs" not in projected_model
+    assert "df_model" not in projected_model
+    assert "df_resid" not in projected_model
     assert projected_model["model_metadata_status"] == "unavailable"
-    assert projected_model["exposure_col"] is None
-    assert projected_model["sampling_weight"] is None
+    assert "exposure_col" not in projected_model
+    assert "sampling_weight" not in projected_model
     assert len(projected["source_id"]) <= 128
     assert len(projected["variance_source"]) <= 128
     assert len(projected["warnings"]) <= 16
@@ -297,22 +297,22 @@ def test_agent_regression_and_diagnostic_projections_do_not_copy_invalid_survey_
     table = _bounded_regression_table([result])
     model = table["models"][0]
     cell = table["rows"][0]["models"]["ols_1"]
-    assert model["nobs"] is None
+    assert "nobs" not in model
     assert model["projection_status"] == "unavailable"
     assert model["survey_design"]["projection_status"] == "unavailable"
     assert "n_obs" not in model["survey_design"]
     assert "degf" not in model["survey_design"]
     assert cell["projection_status"] == "unavailable"
-    assert cell.get("p_value") is None
-    assert cell.get("std_error") is None
-    assert cell.get("ci_lower") is None
-    assert cell.get("ci_upper") is None
+    assert "p_value" not in cell
+    assert "std_error" not in cell
+    assert "ci_lower" not in cell
+    assert "ci_upper" not in cell
     assert cell["source_id"] == "run-1:model_results.ols_1.coefficients.x"
 
     diagnostic = _bounded_coefficient_row({"variable": "x", **result["coefficients"]["x"]})
     assert diagnostic["projection_status"] == "unavailable"
-    assert diagnostic.get("p_value") is None
-    assert diagnostic.get("std_error") is None
+    assert "p_value" not in diagnostic
+    assert "std_error" not in diagnostic
 
 
 def test_agent_result_summary_bounds_raw_identity_and_metrics(tmp_path):
@@ -488,6 +488,50 @@ def test_ordinary_non_survey_agent_diagnostics_omit_optional_survey_fields(tmp_p
     assert "marginal_effects" not in summary
     assert "survey_design" not in diagnostics
     assert "marginal_effects" not in diagnostics
+
+
+def test_real_agent_projection_has_no_nullable_sparse_model_facts(tmp_path):
+    """A real completed Agent read must omit absent low-level placeholders."""
+    project, run_id = _run(
+        tmp_path,
+        "ordinary-sparse-projection",
+        "survey/design.csv",
+        model_type="ols",
+        y="y",
+        x=["x1", "x2"],
+    )
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    persisted_models = summary["persisted_models"]
+    assert persisted_models
+    for model in persisted_models:
+        assert all(value is not None for value in model.values())
+        for coefficient in model.get("coefficients", []):
+            assert all(value is not None for value in coefficient.values())
+    assert "survey_design" not in summary
+    assert "marginal_effects" not in summary
+
+
+def test_report_projection_keeps_sparse_survey_boundary():
+    """Report remains a separate bounded consumer for sparse model packets."""
+    from workbench.report_view_model import build_regression_table
+
+    packet = build_regression_table(
+        [
+            (
+                "ols_1",
+                {
+                    "model_id": "ols_1",
+                    "model_type": "ols",
+                    "coefficients": {"x": {"estimate": 1.25}},
+                },
+            )
+        ]
+    )
+
+    assert packet["models"][0]["id"] == "ols_1"
+    assert "survey_design" not in packet["models"][0]
+    assert "survey_provenance" not in packet["models"][0]
 
 
 def test_agent_result_summary_omits_unpersisted_survey_sections(tmp_path):
