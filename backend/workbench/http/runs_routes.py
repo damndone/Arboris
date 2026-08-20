@@ -31,7 +31,6 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from pydantic import BaseModel, ConfigDict, Field
-from starlette.responses import MalformedRangeHeader, RangeNotSatisfiable
 
 from ..api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
@@ -87,6 +86,90 @@ from ..services.run_service import (
 from ._deps import BYTES_PER_GB
 
 router = APIRouter()
+
+
+MAX_ARTIFACT_RANGE_HEADER_BYTES = 64 * 1024
+MAX_ARTIFACT_RANGE_COUNT = 64
+
+
+class _MalformedArtifactRange(ValueError):
+    def __init__(self, content: str = "Malformed range header.") -> None:
+        self.content = content
+        super().__init__(content)
+
+
+class _UnsatisfiableArtifactRange(ValueError):
+    pass
+
+
+def _parse_artifact_range_header(http_range: str, file_size: int) -> list[tuple[int, int]]:
+    """Parse a bounded byte-range header into half-open offsets.
+
+    This is deliberately Workbench-owned so the generic artifact stream does
+    not depend on Starlette's private parser or a path-backed response.  The
+    header and range count are bounded before any range list is materialized;
+    the returned offsets are safe for the already-opened descriptor.
+    """
+
+    if not isinstance(http_range, str) or not isinstance(file_size, int) or isinstance(file_size, bool):
+        raise _MalformedArtifactRange()
+    try:
+        header_bytes = len(http_range.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise _MalformedArtifactRange() from exc
+    if header_bytes > MAX_ARTIFACT_RANGE_HEADER_BYTES:
+        raise _MalformedArtifactRange("Range header exceeds the bounded header size.")
+    if file_size < 0:
+        raise _MalformedArtifactRange()
+
+    try:
+        units, range_value = http_range.split("=", 1)
+    except ValueError as exc:
+        raise _MalformedArtifactRange() from exc
+    if units.strip().lower() != "bytes":
+        raise _MalformedArtifactRange("Only support bytes range")
+
+    range_parts = range_value.split(",")
+    if len(range_parts) > MAX_ARTIFACT_RANGE_COUNT:
+        raise _MalformedArtifactRange("Range header contains too many ranges.")
+
+    ranges: list[tuple[int, int]] = []
+    for part in range_parts:
+        part = part.strip()
+        if not part or part == "-" or "-" not in part:
+            continue
+        start_text, end_text = part.split("-", 1)
+        start_text = start_text.strip()
+        end_text = end_text.strip()
+        try:
+            start = int(start_text) if start_text else max(file_size - int(end_text), 0)
+            end = (
+                int(end_text) + 1
+                if start_text and end_text and int(end_text) < file_size
+                else file_size
+            )
+            ranges.append((start, end))
+        except ValueError:
+            continue
+
+    if not ranges:
+        raise _MalformedArtifactRange("Range header: range must be requested")
+    if any(not (0 <= start < file_size) for start, _ in ranges):
+        raise _UnsatisfiableArtifactRange()
+    if any(start > end for start, end in ranges):
+        raise _MalformedArtifactRange("Range header: start must be less than end")
+    if len(ranges) == 1:
+        return ranges
+
+    ranges.sort()
+    merged: list[tuple[int, int]] = [ranges[0]]
+    for start, end in ranges[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 class ReportExportFigure(BaseModel):
@@ -1166,12 +1249,12 @@ def download_artifact_endpoint(
             if_range_value is None or if_range_value in {headers["ETag"], headers["Last-Modified"]}
         ):
             try:
-                ranges = FileResponse._parse_range_header(range_value, stat_result.st_size)
-            except MalformedRangeHeader as exc:
+                ranges = _parse_artifact_range_header(range_value, stat_result.st_size)
+            except _MalformedArtifactRange as exc:
                 opened.close()
                 opened = None
                 return Response(content=exc.content, status_code=400, media_type="text/plain")
-            except RangeNotSatisfiable:
+            except _UnsatisfiableArtifactRange:
                 opened.close()
                 opened = None
                 return Response(

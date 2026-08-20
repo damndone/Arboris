@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import hashlib
 import shutil
@@ -1542,6 +1543,18 @@ def test_runs_artifact_route_does_not_treat_generic_alias_id_as_classification_w
     assert "attachment" in response.headers["content-disposition"]
 
 
+def test_generic_artifact_route_owns_bounded_range_parser() -> None:
+    source = inspect.getsource(runs_routes.download_artifact_endpoint)
+
+    assert hasattr(runs_routes, "_parse_artifact_range_header")
+    assert "FileResponse" not in source
+    assert "_parse_range_header" not in source
+    parser = runs_routes._parse_artifact_range_header
+    assert parser("bytes=1-3", 10) == [(1, 4)]
+    with pytest.raises(runs_routes._MalformedArtifactRange):
+        parser("bytes=" + ",".join("0-1" for _ in range(65)), 10)
+
+
 def test_generic_artifact_download_uses_bounded_stream_and_compatibility_headers(
     tmp_path, monkeypatch
 ) -> None:
@@ -1639,6 +1652,11 @@ def test_generic_artifact_download_honors_if_range_and_falls_back_to_full_stream
         params={"project_root": str(project_root)},
         headers={"Range": "bytes=5-19", "If-Range": base.headers["etag"]},
     )
+    matching_last_modified = client.get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": "bytes=5-19", "If-Range": base.headers["last-modified"]},
+    )
     stale = client.get(
         f"/runs/run-generic-stream/artifacts/{artifact_id}",
         params={"project_root": str(project_root)},
@@ -1647,6 +1665,9 @@ def test_generic_artifact_download_honors_if_range_and_falls_back_to_full_stream
 
     assert matching.status_code == 206
     assert matching.content == expected[5:20]
+    assert base.headers["last-modified"]
+    assert matching_last_modified.status_code == 206
+    assert matching_last_modified.content == expected[5:20]
     assert stale.status_code == 200
     assert stale.content == expected
 
@@ -1761,6 +1782,174 @@ def test_generic_artifact_download_closes_fd_when_hash_fails(tmp_path, monkeypat
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "ARTIFACT_INTEGRITY_UNAVAILABLE"
+    assert captured
+    assert all(opened._closed for opened in captured)
+
+
+def test_generic_artifact_stream_closes_fd_when_pread_fails(tmp_path, monkeypatch) -> None:
+    project_root, _run_root, artifact_id, _expected = _materialize_generic_artifact_run(tmp_path)
+    from workbench.repository import file_integrity
+
+    captured = []
+    original_open = file_integrity.open_run_relative_file
+    original_sha256 = file_integrity.OpenedRunFile.sha256
+    original_pread = file_integrity.os.pread
+    state = {"hash_calls": 0, "armed": False, "pread_calls": 0}
+
+    def capture_open(run_root, relative_path):
+        opened = original_open(run_root, relative_path)
+        captured.append(opened)
+        return opened
+
+    def arm_after_hash(self):
+        result = original_sha256(self)
+        state["hash_calls"] += 1
+        state["armed"] = state["hash_calls"] >= 2
+        return result
+
+    def raise_pread_after_hash(fd, size, offset):
+        if state["armed"]:
+            state["pread_calls"] += 1
+            raise OSError("controlled pread failure")
+        return original_pread(fd, size, offset)
+
+    monkeypatch.setattr(file_integrity, "open_run_relative_file", capture_open, raising=True)
+    monkeypatch.setattr(file_integrity.OpenedRunFile, "sha256", arm_after_hash, raising=True)
+    monkeypatch.setattr(file_integrity.os, "pread", raise_pread_after_hash, raising=True)
+
+    response = runs_routes.download_artifact_endpoint(
+        "run-generic-stream",
+        artifact_id,
+        str(project_root),
+    )
+
+    async def drain() -> list[bytes]:
+        chunks = []
+        with pytest.raises(OSError):
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+        return chunks
+
+    assert asyncio.run(drain()) == []
+    assert state["pread_calls"] == 1
+    assert captured
+    assert all(opened._closed for opened in captured)
+
+
+@pytest.mark.parametrize(
+    ("stat_index", "mutation_name"),
+    ((1, "inode"), (2, "device")),
+    ids=("inode", "device"),
+)
+def test_generic_artifact_stream_fails_closed_on_read_time_inode_device_mutation(
+    tmp_path, monkeypatch, stat_index: int, mutation_name: str
+) -> None:
+    project_root, _run_root, artifact_id, _expected = _materialize_generic_artifact_run(tmp_path)
+    from workbench.repository import file_integrity
+
+    captured = []
+    original_open = file_integrity.open_run_relative_file
+    original_sha256 = file_integrity.OpenedRunFile.sha256
+    original_fstat = file_integrity.os.fstat
+    original_pread = file_integrity.os.pread
+    state = {"hash_calls": 0, "hashed": False, "stream_started": False, "mutated": False}
+
+    def capture_open(run_root, relative_path):
+        opened = original_open(run_root, relative_path)
+        captured.append(opened)
+        return opened
+
+    def arm_after_hash(self):
+        result = original_sha256(self)
+        state["hash_calls"] += 1
+        state["hashed"] = state["hash_calls"] >= 2
+        return result
+
+    def mark_stream_read(fd, size, offset):
+        chunk = original_pread(fd, size, offset)
+        if state["hashed"]:
+            state["stream_started"] = True
+        return chunk
+
+    def replace_inode_after_stream_read(fd):
+        result = original_fstat(fd)
+        if state["stream_started"] and not state["mutated"]:
+            values = list(result)
+            values[stat_index] += 1
+            state["mutated"] = True
+            return type(result)(values)
+        return result
+
+    monkeypatch.setattr(file_integrity, "open_run_relative_file", capture_open, raising=True)
+    monkeypatch.setattr(file_integrity.OpenedRunFile, "sha256", arm_after_hash, raising=True)
+    monkeypatch.setattr(file_integrity.os, "pread", mark_stream_read, raising=True)
+    monkeypatch.setattr(file_integrity.os, "fstat", replace_inode_after_stream_read, raising=True)
+
+    response = runs_routes.download_artifact_endpoint(
+        "run-generic-stream",
+        artifact_id,
+        str(project_root),
+    )
+
+    async def drain() -> list[bytes]:
+        chunks = []
+        with pytest.raises(OSError):
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+        return chunks
+
+    assert asyncio.run(drain()) == []
+    assert state["mutated"], (mutation_name, state)
+    assert captured
+    assert all(opened._closed for opened in captured)
+
+
+def test_generic_artifact_stream_closes_fd_when_iterator_fails(tmp_path, monkeypatch) -> None:
+    project_root, _run_root, artifact_id, _expected = _materialize_generic_artifact_run(tmp_path)
+    from workbench.repository import file_integrity
+
+    captured = []
+    original_open = file_integrity.open_run_relative_file
+    original_sha256 = file_integrity.OpenedRunFile.sha256
+    original_iter_bytes = file_integrity.OpenedRunFile.iter_bytes
+    state = {"hash_calls": 0, "armed": False, "iterator_calls": 0}
+
+    def capture_open(run_root, relative_path):
+        opened = original_open(run_root, relative_path)
+        captured.append(opened)
+        return opened
+
+    def arm_after_hash(self):
+        result = original_sha256(self)
+        state["hash_calls"] += 1
+        state["armed"] = state["hash_calls"] >= 2
+        return result
+
+    def fail_iterator(self, start=0, end=None):
+        if state["armed"]:
+            state["iterator_calls"] += 1
+            raise OSError("controlled iterator failure")
+        yield from original_iter_bytes(self, start, end)
+
+    monkeypatch.setattr(file_integrity, "open_run_relative_file", capture_open, raising=True)
+    monkeypatch.setattr(file_integrity.OpenedRunFile, "sha256", arm_after_hash, raising=True)
+    monkeypatch.setattr(file_integrity.OpenedRunFile, "iter_bytes", fail_iterator, raising=True)
+
+    response = runs_routes.download_artifact_endpoint(
+        "run-generic-stream",
+        artifact_id,
+        str(project_root),
+    )
+
+    async def drain() -> list[bytes]:
+        chunks = []
+        with pytest.raises(OSError):
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+        return chunks
+
+    assert asyncio.run(drain()) == []
+    assert state["iterator_calls"] == 1
     assert captured
     assert all(opened._closed for opened in captured)
 
