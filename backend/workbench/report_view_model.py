@@ -417,14 +417,72 @@ def build_report_view_model(
     statistical_evidence: dict[str, Any] | None = None,
     regression_table: dict[str, Any] | None = None,
     exploration: dict[str, Any] | None = None,
-    evidence_projection: Mapping[str, Any] | None = None,
+    evidence_projection: object | None = None,
     include_legacy_presentation: bool = False,
+    owner: object | None = None,
+    request_identity: ReportEvidenceRequestIdentityV1 | None = None,
+    artifact_admission: object | None = None,
 ) -> dict[str, Any]:
-    # Preserve report presentation semantics (narrative, diagnostics,
-    # exploration, statistical and survey sections) while keeping citable
-    # numeric facts on the typed projection lane below.  Presentation fields
-    # are bounded view-model material, never an authority source for exports.
-    if isinstance(evidence_projection, Mapping) or include_legacy_presentation:
+    # A caller-shaped Mapping is not a Report capability.  Admit the typed C0
+    # projection before legacy presentation reads or any downstream writer.
+    if evidence_projection is not None:
+        from .evidence.consumer_adapters import default_projection_registry
+        from .report_export import (
+            EvidenceProjectionV1 as ReportEvidenceProjectionV1,
+            _validate_owner_bound_projection,
+        )
+
+        if type(evidence_projection) is not ReportEvidenceProjectionV1:
+            return _unavailable_report_evidence(
+                artifact_id="unknown-artifact",
+                artifact_type="unknown",
+                reason_code="EVIDENCE_OWNER_CAPABILITY_REQUIRED",
+            )
+        try:
+            _validate_owner_bound_projection(evidence_projection, owner)
+            canonical_projection = default_projection_registry().project(
+                owner._canonical_record,  # type: ignore[attr-defined]
+                consumer_id="report",
+                destination="local",
+            )
+            canonical_view = build_persisted_evidence_report_view(
+                canonical_projection,
+                owner=owner,
+                request_identity=request_identity,
+                artifact_admission=artifact_admission,
+            )
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return _unavailable_report_evidence(
+                artifact_id="unknown-artifact",
+                artifact_type="unknown",
+                reason_code="EVIDENCE_OWNER_CAPABILITY_REQUIRED",
+                status="blocked",
+            )
+        if canonical_view.get("status") != "available":
+            return canonical_view
+
+        # Preserve report presentation semantics only after typed evidence has
+        # been admitted. Presentation is never an authority source for facts.
+        presentation = _build_legacy_presentation(
+            summary,
+            run_root,
+            descriptive_stats=descriptive_stats,
+            statistical_tests=statistical_tests,
+            statistical_evidence=statistical_evidence,
+            regression_table=regression_table,
+            exploration=exploration,
+        )
+        facts = list(canonical_view.get("facts", []))
+        return {
+            **presentation,
+            **canonical_view,
+            "facts": facts,
+            "typedFacts": [dict(fact) for fact in facts],
+            "critical_errors": list(presentation["critical_errors"]),
+            "typed_critical_errors": [],
+        }
+
+    if include_legacy_presentation:
         presentation = _build_legacy_presentation(
             summary,
             run_root,
@@ -453,106 +511,21 @@ def build_report_view_model(
             "model_diagnostics": {},
             "model_quality": None,
         }
-    if not isinstance(evidence_projection, Mapping):
-        return {
-            **presentation,
-            "schemaVersion": 1,
-            "status": "unavailable",
-            "projectionId": "report:unavailable",
-            "commitId": "UNAVAILABLE",
-            "envelopeDigest": "UNAVAILABLE",
-            "validationStatus": "unavailable",
-            "validationSummary": {"status": "unavailable", "reasonCode": "REPORT_EVIDENCE_REQUIRED"},
-            "provenance": {},
-            "facts": [],
-            "typedFacts": [],
-            "critical_errors": list(presentation["critical_errors"]),
-            "typed_critical_errors": [{"code": "REPORT_EVIDENCE_REQUIRED", "severity": "BLOCKER"}],
-            **_projection_identity_fields({}),
-        }
-    projection = evidence_projection
-    if projection.get("status") != "available":
-        return {
-            **presentation,
-            "schemaVersion": 1,
-            "status": str(projection.get("status", "unavailable")),
-            "projectionId": str(projection.get("projectionId", "report:unavailable")),
-            "commitId": str(projection.get("commitId", "UNAVAILABLE")),
-            "envelopeDigest": str(projection.get("envelopeDigest", "UNAVAILABLE")),
-            "validationStatus": str(projection.get("validationStatus", "unavailable")),
-            "validationSummary": dict(projection.get("validationSummary", {})) if isinstance(projection.get("validationSummary"), Mapping) else {},
-            "provenance": dict(projection.get("provenance", {})) if isinstance(projection.get("provenance"), Mapping) else {},
-            "facts": [],
-            "typedFacts": [],
-            "critical_errors": list(presentation["critical_errors"]),
-            "typed_critical_errors": [{"code": str(projection.get("reasonCode", "REPORT_EVIDENCE_UNAVAILABLE")), "severity": "BLOCKER"}],
-            **_projection_identity_fields(projection),
-        }
-    facts = projection.get("facts")
-    required_projection_fields = (
-        "projectionId",
-        "commitId",
-        "envelopeDigest",
-        "validationStatus",
-    )
-    identity_fields = (
-        "actorRef",
-        "projectRef",
-        "sessionRef",
-        "scopeRef",
-        "runId",
-        "modelRunId",
-        "confirmationRef",
-    )
-    typed_projection = (
-        projection.get("schemaVersion") == 1
-        and all(isinstance(projection.get(key), str) and str(projection[key]).strip() for key in required_projection_fields)
-        and isinstance(projection.get("provenance"), Mapping)
-        and all(isinstance(projection.get(key), str) and str(projection[key]).strip() != "UNAVAILABLE" for key in identity_fields)
-    )
-    typed_facts = (
-        isinstance(facts, list)
-        and len(facts) <= 80
-        and all(
-            isinstance(fact, Mapping)
-            and isinstance(fact.get("factId"), str)
-            and isinstance(fact.get("statisticId"), str)
-            and "value" in fact
-            for fact in facts
-        )
-    )
-    if not typed_projection or not typed_facts:
-        return {
-            **presentation,
-            "schemaVersion": 1,
-            "status": "blocked",
-            "projectionId": str(projection.get("projectionId", "report:blocked")),
-            "commitId": str(projection.get("commitId", "UNAVAILABLE")),
-            "envelopeDigest": str(projection.get("envelopeDigest", "UNAVAILABLE")),
-            "validationStatus": "unavailable",
-            "validationSummary": {"status": "blocked", "reasonCode": "REPORT_EVIDENCE_FACTS_INVALID"},
-            "provenance": {},
-            "facts": [],
-            "typedFacts": [],
-            "critical_errors": list(presentation["critical_errors"]),
-            "typed_critical_errors": [{"code": "REPORT_EVIDENCE_FACTS_INVALID", "severity": "BLOCKER"}],
-            **_projection_identity_fields(projection),
-        }
     return {
         **presentation,
         "schemaVersion": 1,
-        "status": "available",
-        "projectionId": str(projection.get("projectionId")),
-        "commitId": str(projection.get("commitId")),
-        "envelopeDigest": str(projection.get("envelopeDigest")),
-        "validationStatus": str(projection.get("validationStatus", "unavailable")),
-        "validationSummary": dict(projection.get("validationSummary", {})) if isinstance(projection.get("validationSummary"), Mapping) else {},
-        "provenance": dict(projection.get("provenance", {})) if isinstance(projection.get("provenance"), Mapping) else {},
-        "facts": [dict(fact) for fact in facts],
-        "typedFacts": [dict(fact) for fact in facts],
+        "status": "unavailable",
+        "projectionId": "report:unavailable",
+        "commitId": "UNAVAILABLE",
+        "envelopeDigest": "UNAVAILABLE",
+        "validationStatus": "unavailable",
+        "validationSummary": {"status": "unavailable", "reasonCode": "REPORT_EVIDENCE_REQUIRED"},
+        "provenance": {},
+        "facts": [],
+        "typedFacts": [],
         "critical_errors": list(presentation["critical_errors"]),
-        "typed_critical_errors": [],
-        **_projection_identity_fields(projection),
+        "typed_critical_errors": [{"code": "REPORT_EVIDENCE_REQUIRED", "severity": "BLOCKER"}],
+        **_projection_identity_fields({}),
     }
 
 

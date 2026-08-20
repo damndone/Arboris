@@ -1,11 +1,12 @@
-# remediation-4 task plan
+# remediation-5 task plan
 
-- [x] Start the unique formal line from exact baseline and read its Context Pack.
-- [x] Record predecessor/review evidence and root/worktree boundary checks.
-- [x] TDD owner/projection/request-identity admission and no-I/O boundary.
-- [x] TDD strict outer/nested wire presence and conflict handling.
-- [x] TDD frontend server-bound provenance and forged-pair rejection.
-- [x] Run controlled host, focused backend/frontend, events, typecheck,
-      compileall, diff check, and formal verification.
-- [x] Generate handoff, commit implementation/formal records, and report exact
-      SHAs plus remaining NOT VERIFIED gates.
+- [x] Reuse the existing remediation-5 objective and Context Pack; verify exact
+      remediation-4 tip and parent.
+- [x] Add forged Mapping view/render and forged `object.__new__` writer probes;
+      run RED before the implementation gate.
+- [x] Require the exact C0 owner-issued Report projection, host proof/receipt,
+      canonical evidence admission, and owner-bound run root before facts or IO.
+- [x] Preserve the valid server-admitted owner path and run the controlled
+      backend focused suite.
+- [x] Run frontend focused tests/typecheck, compileall, diff check, strict
+      event pair, formal verify/retrospective, and exact closeout reconciliation.

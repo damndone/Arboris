@@ -181,6 +181,7 @@ def render_html_report(
 ) -> Path:
     if type(writer) is not ReportDocumentWriterV1:
         raise TypeError("render_html_report requires ReportDocumentWriterV1")
+    writer._assert_server_owned()
     if writer.canonical_run_root != run_root.expanduser().resolve(strict=False):
         raise ValueError("REPORT_WRITER_RUN_ROOT_MISMATCH")
     view_model = writer.view_model
@@ -208,28 +209,32 @@ def render_legacy_html_report(
     filename: str = "report.html",
     artifact_id: str = "report_html",
     inputs: list[str] | tuple[str, ...] = (),
+    owner: object | None = None,
+    projection: EvidenceProjectionV1 | None = None,
 ) -> Path:
-    """Retain the historical run-stage HTML surface without opening a writer seam.
+    """Render a legacy-shaped view only through the server-owned writer seam.
 
-    This compatibility renderer is intentionally not an export writer and is
-    never accepted by ``render_html_report`` or the typed PDF/XLSX seams.  The
-    Report page still requires a committed server-owned projection.
+    The historical function name is retained for callers, but a Mapping alone
+    is never an authority.  The owner-issued projection and canonical run root
+    are validated before templates, bytes, registration, or filesystem IO.
     """
 
     if not isinstance(view_model, Mapping):
         raise TypeError("legacy report view must be a mapping")
-    environment = Environment(
-        loader=FileSystemLoader(Path(__file__).parent / "templates"),
-        autoescape=True,
+    if type(projection) is not EvidenceProjectionV1:
+        raise TypeError("legacy report render requires an owner-issued projection")
+    if owner is None:
+        raise TypeError("legacy report render requires a server-owned owner capability")
+    _validate_owner_bound_projection(projection, owner)
+    writer = owner.issue_report_document_writer(  # type: ignore[attr-defined]
+        view_model,
+        projection,
+        canonical_run_root=run_root,
     )
-    if view_model.get("report_kind") == "arma_garch":
-        template = environment.get_template("arma_garch_report.html.j2")
-        rendered_view_model = dict(view_model)
-    else:
-        template = environment.get_template("report.html.j2")
-        rendered_view_model = _normalize_to_view_model(dict(view_model))
-    html_path = run_root / "reports" / filename
-    _assert_report_output_path(run_root, html_path)
-    write_bytes_durable(html_path, template.render(view_model=rendered_view_model).encode("utf-8"))
-    register_artifact(run_root, artifact_id, html_path, "report", "reporting", list(inputs))
-    return html_path
+    return render_html_report(
+        writer,
+        run_root,
+        filename=filename,
+        artifact_id=artifact_id,
+        inputs=inputs,
+    )

@@ -1,40 +1,38 @@
-# remediation-4 progress
+# remediation-5 progress
 
-## 2026-08-19
+## Baseline and RED
 
-- Read root `AGENTS.md`, global rules, predecessor remediation-3 Context Pack,
-  retrospective, handoff, and prior objectives before implementation.
-- Confirmed target worktree was clean at exact tip `7329ccda...`; root dirty
-  frontend test files were observed read-only and were not touched.
-- Read systematic-debugging, test-driven-development, receiving-code-review,
-  writing-plans, planning-with-files-zh, and verification-before-completion
-  instructions. No production code has been changed for remediation-4.
-- Next gate: run `scripts/devline_control.py start` exactly once for the new
-  remediation-4 formal line, then read the generated Context Pack.
+- Reused the existing remediation-5 objective/formal line; no second `start`
+  was run. Exact baseline HEAD:
+  `f82758736adabd80d3d9dcb03b317f86c221f27a1`; parent:
+  `c59999695bd4af5d941f77ad2dd53841ae2641a1`.
+- Forged Mapping view/render probes were RED on the baseline: the view was
+  `available` and legacy rendering reached the writer seam. The default valid
+  owner probe hit the known Unix authority socket permission boundary.
 
-## RED probes
+## GREEN and package-local gate
 
-- Formal line started and Context Pack read.
-- Added owner/request identity, `object.__new__` projection, and strict
-  outer/nested wire probes before production changes.
-- Default sandbox hit the known authority socket permission boundary; the same
-  command in the controlled host harness produced real RED: `5 failed, 51
-  deselected, 1 warning`.
-- No production implementation has been changed after the RED run.
+- `build_report_view_model` now admits only the owner-issued typed Report
+  projection after C0 owner/proof/receipt/canonical evidence validation.
+- Legacy HTML delegates through the owner-issued document writer; formal HTML
+  revalidates ownership before template or filesystem IO.
+- Forged Mapping/render and forged `object.__new__` HTML writer probes prove
+  `write_bytes_durable` and `register_artifact` are not called. The controlled
+  valid owner path renders successfully.
+- Controlled backend Evidence/Report/event focused suite: `114 passed, 1
+  warning`; strict event pair: `17 passed`.
+- Frontend focused suite: `3 files, 50 passed`; frontend typecheck,
+  compileall, and `git diff --check` passed. React `act(...)` warnings remain
+  test-harness warnings; no test failed.
 
-## GREEN and controlled-host closeout preparation
+## Formal closeout
 
-- Owner/request/object forge probes passed `2`; strict present-invalid outer
-  wire probes passed `3` in the controlled socket-capable host.
-- Frontend receipt boundary passed `11` tests and workspace receipt path passed
-  `6`; the ReportView fixture was updated to carry the server receipt rather
-  than weakening the production parser.
-- Real HTTP receipt transport probes passed `2`; controlled backend focused
-  suite passed `119` with `1` warning, and `tests/test_events.py` plus
-  `tests/test_devline_control_events.py` passed `17`.
-- Frontend focused suite passed `74` with `9` skipped; `npm run typecheck`,
-  targeted `compileall`, and `git diff --check` passed.
-- Only the target worktree was changed. Root's pre-existing dirty frontend
-  tests and `.formal/` were not written. Formal GATE, completion state,
-  retrospective, and verify are complete; the exact implementation commit and
-  handoff commit are the remaining repository closeout actions.
+- Formal events include RED, GREEN, GATE, resolution of the RED incident, and
+  `STATE_CHANGE STARTED -> COMPLETED`; retrospective/verify must report
+  `unresolved=0`.
+
+## Remaining gates
+
+Browser, provider, central, production live-host, full repository gate,
+release, merge, push, tag, deployment, and browser-visible acceptance remain
+`NOT VERIFIED`.

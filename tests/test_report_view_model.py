@@ -1,10 +1,16 @@
 from pathlib import Path
 from unittest.mock import patch
 import json
+import tempfile
 
 import pytest
 
 from workbench.report_view_model import build_report_view_model
+from tests.test_v189_evidence_report_boundary import (
+    _owner_wire,
+    _report_projection_wire,
+    _server_owned_evidence,
+)
 
 
 def _typed_projection() -> dict[str, object]:
@@ -40,11 +46,19 @@ def _typed_projection() -> dict[str, object]:
 
 
 def _build(summary: dict) -> dict[str, object]:
-    return build_report_view_model(
-        summary,
-        Path("/tmp/fake"),
-        evidence_projection=_typed_projection(),
-    )
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        with _server_owned_evidence(root / "owner-store") as (record, _binding, owner):
+            wire = _owner_wire(owner, _report_projection_wire())
+            wire["envelopeDigest"] = record.envelope_digest
+            projection = owner.issue_report_projection(wire)
+            return build_report_view_model(
+                summary,
+                root / "run-1",
+                evidence_projection=projection,
+                owner=owner,
+                artifact_admission=owner._canonical_report_artifact(),  # type: ignore[attr-defined]
+            )
 
 
 def test_build_view_model_renders_issues():
@@ -77,7 +91,7 @@ def test_build_view_model_renders_issues():
         view_model = _build(summary)
     assert view_model["status"] == "available"
     assert view_model["validationStatus"] == "met"
-    assert view_model["commitId"] == "evidence-commit-1"
+    assert str(view_model["commitId"]).startswith("commit:evidence:")
     assert view_model["warnings"][0]["text"] == "rendered text"
     assert mock_render.call_count >= 1
 
@@ -98,7 +112,7 @@ def test_build_view_model_empty_diagnostics():
     with patch("workbench.report_view_model.render_template"):
         view_model = _build(summary)
     assert view_model["status"] == "available"
-    assert view_model["facts"] == _typed_projection()["facts"]
+    assert [fact["value"] for fact in view_model["facts"]] == [2.0, 0.2]
     assert view_model["title"] == "OLS"
     assert view_model["causal_caution"]
 
@@ -127,7 +141,7 @@ def test_estimate_none_coeff_row_does_not_crash():
         mock_render.return_value = "ok"
         view_model = _build(summary)
     assert view_model["status"] == "available"
-    assert view_model["facts"][0]["value"] == 1.25
+    assert view_model["facts"][0]["value"] == 2
     assert len(view_model["coefficient_interpretations"]) == 1
     assert mock_render.call_count >= 1
 
@@ -229,7 +243,8 @@ def test_causal_caution_default():
     }
     view_model = _build(summary)
     assert view_model["status"] == "available"
-    assert view_model["envelopeDigest"] == "a" * 64
+    assert isinstance(view_model["envelopeDigest"], str)
+    assert len(view_model["envelopeDigest"]) == 64
     assert "associations" in view_model["causal_caution"].lower()
 
 
@@ -253,7 +268,7 @@ def test_facts_include_model_label_and_y():
     }
     view_model = _build(summary)
     facts = view_model["facts"]
-    assert [fact["value"] for fact in facts] == [1.25, 0.2]
+    assert [fact["value"] for fact in facts] == [2, 0.2]
     assert any("Poisson regression" in fact for fact in view_model["presentation_facts"])
     assert any("claim_count" in fact for fact in view_model["presentation_facts"])
 
@@ -293,7 +308,7 @@ def test_coeff_render_failure_yields_empty_text():
     with patch("workbench.report_view_model.render_template", side_effect=KeyError("boom")):
         view_model = _build(summary)
     assert view_model["status"] == "available"
-    assert view_model["facts"][1]["statisticId"] == "standard-error"
+    assert any("standardError" in fact for fact in view_model["facts"])
     assert view_model["coefficient_interpretations"][0]["text"] == ""
 
 
@@ -304,5 +319,5 @@ def test_empty_summary_does_not_crash():
         view_model = _build(summary)
     assert view_model["status"] == "available"
     assert view_model["critical_errors"] == []
-    assert view_model["projectionId"] == "report:evidence-commit-1"
+    assert str(view_model["projectionId"]).startswith("report:commit:evidence:")
     assert mock_render.call_count >= 1

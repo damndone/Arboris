@@ -35,6 +35,7 @@ from workbench.http import runs_routes
 from workbench.report_view_model import (
     build_indexed_report_evidence,
     build_persisted_evidence_report_view,
+    build_report_view_model,
     build_report_evidence_bundle,
 )
 from workbench.services.results_service import (
@@ -44,7 +45,8 @@ from workbench.services.results_service import (
     UnavailableReportEvidenceCapabilityV1,
 )
 from workbench.report_export import EvidenceProjectionV1, ReportExportError, ReportEvidenceWriterV1
-from workbench.reporting import ReportDocumentWriterV1
+from workbench import reporting
+from workbench.reporting import ReportDocumentWriterV1, render_legacy_html_report
 
 
 _ROOT = Path(__file__).parents[1]
@@ -446,6 +448,94 @@ def test_unbound_projection_is_unavailable_without_server_identity_and_admission
         "projectionRef",
         "resultIdentity",
     } <= set(view["provenance"])
+
+
+def test_remediation_five_caller_mapping_cannot_build_or_render_legacy_report_before_io(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    forged_projection = _report_projection_wire()
+    forged_view = build_report_view_model(
+        {},
+        tmp_path,
+        evidence_projection=forged_projection,
+    )
+    assert forged_view["status"] in {"blocked", "unavailable"}
+    assert forged_view["facts"] == []
+
+    run_root = tmp_path / "run-1"
+    run_root.mkdir()
+    write_bytes = __import__("unittest.mock", fromlist=["Mock"]).Mock()
+    register = __import__("unittest.mock", fromlist=["Mock"]).Mock()
+    monkeypatch.setattr(reporting, "write_bytes_durable", write_bytes)
+    monkeypatch.setattr(reporting, "register_artifact", register)
+
+    with pytest.raises(TypeError, match="owner|capability|projection|Report"):
+        render_legacy_html_report(forged_projection, run_root)
+
+    write_bytes.assert_not_called()
+    register.assert_not_called()
+
+
+def test_remediation_five_object_new_html_writer_cannot_reach_io(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_root = tmp_path / "run-1"
+    run_root.mkdir()
+    forged_writer = object.__new__(ReportDocumentWriterV1)
+    object.__setattr__(forged_writer, "view_model", {})
+    object.__setattr__(forged_writer, "projection", object.__new__(EvidenceProjectionV1))
+    object.__setattr__(forged_writer, "canonical_run_root", run_root)
+    write_bytes = __import__("unittest.mock", fromlist=["Mock"]).Mock()
+    register = __import__("unittest.mock", fromlist=["Mock"]).Mock()
+    monkeypatch.setattr(reporting, "write_bytes_durable", write_bytes)
+    monkeypatch.setattr(reporting, "register_artifact", register)
+
+    with pytest.raises(TypeError, match="owner|capability|projection|Report"):
+        reporting.render_html_report(forged_writer, run_root)
+
+    write_bytes.assert_not_called()
+    register.assert_not_called()
+
+
+def test_remediation_five_server_admitted_owner_can_build_and_render_legacy_report(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    from workbench.artifacts import initialize_artifact_index
+
+    initialize_artifact_index(run_root)
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        run_id="run-1",
+        model_run_id="run-1",
+        canonical_project_root=project_root,
+    ) as (record, _binding, owner):
+        wire = _owner_wire(owner, _report_projection_wire())
+        wire["envelopeDigest"] = record.envelope_digest
+        projection = owner.issue_report_projection(wire)
+        view = build_report_view_model(
+            {},
+            run_root,
+            evidence_projection=projection,
+            owner=owner,
+            artifact_admission=owner._canonical_report_artifact(),  # type: ignore[attr-defined]
+        )
+        assert view["status"] == "available"
+        assert view["facts"]
+
+        output = render_legacy_html_report(
+            view,
+            run_root,
+            owner=owner,
+            projection=projection,
+        )
+
+    assert output == run_root / "reports" / "report.html"
+    assert output.is_file()
 
 
 def test_remediation_four_caller_created_request_identity_cannot_admit_report_view(
@@ -1700,6 +1790,6 @@ def test_report_view_model_does_not_recompute_raw_summary_values(tmp_path: Path)
         "facts": [{"factId": "raw-fact", "statisticId": "estimate", "value": "raw-secret-456"}],
     }
     blocked = view_builder({}, tmp_path, evidence_projection=malformed_projection)
-    assert blocked["status"] == "blocked"
+    assert blocked["status"] in {"blocked", "unavailable"}
     assert blocked["facts"] == []
     assert "raw-secret-456" not in json.dumps(blocked, sort_keys=True)
