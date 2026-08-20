@@ -25,7 +25,7 @@ from ..api_errors import (
     ERROR_RUN_NOT_FOUND,
     WorkbenchAPIError,
 )
-from ..artifacts import read_json
+from ..artifacts import read_json, sha256_file
 from ..predictive_research.contracts import ContractError
 from ..predictive_research.persistence import validate_classification_server_identity
 
@@ -198,6 +198,15 @@ def _validate_artifact_record(run_root: Path, record: Any) -> dict[str, Any]:
         raise ValueError("artifact record config_hash is invalid")
     _validate_artifact_digest(record["sha256"])
     _validate_run_relative_path(run_root, record["path"])
+    artifact_path = (run_root / record["path"]).resolve()
+    try:
+        if not artifact_path.is_file():
+            raise ValueError("indexed artifact path is not a regular file")
+        actual_sha256 = sha256_file(artifact_path)
+    except OSError as exc:
+        raise ValueError("indexed artifact file is unreadable") from exc
+    if actual_sha256 != record["sha256"]:
+        raise ValueError("indexed artifact digest does not match file content")
 
     payload_contract = record.get("payload_contract")
     if "payload_contract" in record:
@@ -354,7 +363,14 @@ def _read_artifacts_index(run_root: Path) -> dict:
         )
     try:
         data = read_json(index_path)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except OSError as exc:
+        raise WorkbenchAPIError(
+            status_code=503,
+            code=ERROR_ARTIFACTS_INDEX_UNAVAILABLE,
+            message="artifacts_index.json is unavailable",
+            details={"run_id": run_root.name},
+        ) from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise WorkbenchAPIError(
             status_code=500,
             code=ERROR_ARTIFACTS_INDEX_INVALID,

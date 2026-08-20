@@ -29,6 +29,7 @@ from workbench.predictive_research.consumer_projection import (
 )
 from workbench.api_errors import WorkbenchAPIError
 from workbench.http import runs_routes
+from workbench.repository import run_repository
 
 
 def _rewrite_indexed_classification_artifact(run_root, mutate, *, update_outer_id: bool = False) -> dict:
@@ -52,7 +53,7 @@ def _canonical_artifact_record(**overrides: object) -> dict[str, object]:
         "path": "data.json",
         "artifact_type": "data",
         "step": "ingest",
-        "sha256": "a" * 64,
+        "sha256": hashlib.sha256(b"{}").hexdigest(),
         "inputs": [],
         "config_hash": "",
         "code_version": "1.8.9",
@@ -831,13 +832,18 @@ def test_runs_artifact_route_serves_classification_only_as_validated_wrapper(tmp
     ),
 )
 def test_runs_artifact_list_red_probe_rejects_missing_or_malformed_index(
-    tmp_path, index_state: str, expected_code: str
+    tmp_path, monkeypatch, index_state: str, expected_code: str
 ) -> None:
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-artifacts-list"
     run_root.mkdir(parents=True)
     if index_state == "unreadable":
-        (run_root / "artifacts_index.json").mkdir()
+        (run_root / "artifacts_index.json").write_text("{}", encoding="utf-8")
+
+        def raise_permission(_path):
+            raise PermissionError("controlled unreadable index probe")
+
+        monkeypatch.setattr(run_repository, "read_json", raise_permission)
     elif index_state == "malformed_json":
         (run_root / "artifacts_index.json").write_text("{", encoding="utf-8")
 
@@ -856,13 +862,18 @@ def test_runs_artifact_list_red_probe_rejects_missing_or_malformed_index(
     ),
 )
 def test_runs_artifact_list_http_boundary_returns_typed_error_without_raw_exception(
-    tmp_path, index_state: str, expected_status: int, expected_code: str
+    tmp_path, monkeypatch, index_state: str, expected_status: int, expected_code: str
 ) -> None:
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-artifacts-http"
     run_root.mkdir(parents=True)
     if index_state == "unreadable":
-        (run_root / "artifacts_index.json").mkdir()
+        (run_root / "artifacts_index.json").write_text("{}", encoding="utf-8")
+
+        def raise_permission(_path):
+            raise PermissionError("controlled unreadable index probe")
+
+        monkeypatch.setattr(run_repository, "read_json", raise_permission)
     elif index_state == "malformed_json":
         (run_root / "artifacts_index.json").write_text("{", encoding="utf-8")
 
@@ -897,16 +908,144 @@ def test_runs_artifact_list_accepts_canonical_formal_output_in_repository(tmp_pa
 
     listed = runs_routes.list_artifacts_endpoint("run-formal-output", str(project_root))
 
-    assert listed["groups"] == [{
-        "artifact_type": "formal_output",
-        "items": [{
-            "artifact_id": "artifact:formal-output",
-            "path": "formal_output.json",
+    assert listed["groups"] == [
+        {
             "artifact_type": "formal_output",
-            "step": "formal_output",
-            "sha256": "a" * 64,
-        }],
-    }]
+            "items": [
+                {
+                    "artifact_id": "artifact:formal-output",
+                    "path": "formal_output.json",
+                    "artifact_type": "formal_output",
+                    "step": "formal_output",
+                    "sha256": hashlib.sha256(b"{}").hexdigest(),
+                }
+            ],
+        }
+    ]
+
+
+def test_runs_artifact_list_rejects_missing_indexed_artifact_at_repository_and_http(
+    tmp_path,
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-missing-artifact"
+    run_root.mkdir(parents=True)
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "artifacts": [_canonical_artifact_record(path="missing.json")],
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        runs_routes.list_artifacts_endpoint("run-missing-artifact", str(project_root))
+
+    assert exc_info.value.code == "ARTIFACTS_INDEX_INVALID"
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-missing-artifact/artifacts",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert "groups" not in response.json()
+
+
+def test_runs_artifact_list_rejects_non_regular_indexed_artifact_at_repository_and_http(
+    tmp_path,
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-non-regular-artifact"
+    run_root.mkdir(parents=True)
+    (run_root / "data.json").mkdir()
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "artifacts": [_canonical_artifact_record()],
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        runs_routes.list_artifacts_endpoint("run-non-regular-artifact", str(project_root))
+
+    assert exc_info.value.code == "ARTIFACTS_INDEX_INVALID"
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-non-regular-artifact/artifacts",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert "groups" not in response.json()
+
+
+def test_runs_artifact_list_rejects_digest_mismatch_at_repository_and_http(tmp_path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-digest-mismatch"
+    run_root.mkdir(parents=True)
+    (run_root / "data.json").write_text("{}", encoding="utf-8")
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "artifacts": [_canonical_artifact_record(
+                sha256=hashlib.sha256(b"different bytes").hexdigest(),
+            )],
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        runs_routes.list_artifacts_endpoint("run-digest-mismatch", str(project_root))
+
+    assert exc_info.value.code == "ARTIFACTS_INDEX_INVALID"
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-digest-mismatch/artifacts",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert "groups" not in response.json()
+
+
+def test_runs_artifact_list_rejects_unreadable_regular_artifact_at_repository_and_http(
+    tmp_path, monkeypatch
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-unreadable-artifact"
+    run_root.mkdir(parents=True)
+    (run_root / "data.json").write_text("{}", encoding="utf-8")
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "artifacts": [_canonical_artifact_record()],
+        }),
+        encoding="utf-8",
+    )
+
+    def raise_permission(_path):
+        raise PermissionError("controlled unreadable artifact probe")
+
+    monkeypatch.setattr(run_repository, "sha256_file", raise_permission, raising=False)
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        runs_routes.list_artifacts_endpoint("run-unreadable-artifact", str(project_root))
+
+    assert exc_info.value.code == "ARTIFACTS_INDEX_INVALID"
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-unreadable-artifact/artifacts",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert "groups" not in response.json()
 
 
 def test_runs_artifact_list_accepts_canonical_formal_output_over_http(tmp_path) -> None:
