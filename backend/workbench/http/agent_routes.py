@@ -62,8 +62,14 @@ from ..agent.operations import (
     OperationValidationError,
 )
 from ..agent.execution import OperationClaimConflict
-from ..agent.orchestrator import ServerConfirmationReceiptV1, WorkbenchOrchestrator
+from ..agent.orchestrator import (
+    CutoverCompilerError,
+    ServerConfirmationReceiptV1,
+    WorkbenchOrchestrator,
+    validate_server_proposal_revision,
+)
 from ..agent.proposals import ProposalConfirmationError, ProposalStaleError, ProposalStore
+from ..agent.proposals import ProposalRevision
 from ..agent.session import EntryRef, JsonlSessionRepository
 from ..agent.tools import ToolRegistry
 from ..api_errors import WorkbenchAPIError
@@ -735,10 +741,12 @@ def _proposal_for_session(
     proposal_id: str,
     session_id: str,
     chain_id: str | None,
+    actor_ref: str | None = None,
+    project_ref: str | None = None,
 ):
     try:
         proposal = store.latest_revision(proposal_id)
-    except (KeyError, ValueError) as exc:
+    except (KeyError, OSError, TypeError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=404,
             code="AGENT_PROPOSAL_NOT_FOUND",
@@ -754,6 +762,30 @@ def _proposal_for_session(
             message="Agent proposal was not found in this session.",
             details={"proposal_id": proposal_id, "session_id": session_id},
         )
+    try:
+        validate_server_proposal_revision(
+            proposal,
+            actor_ref=actor_ref,
+            session_ref=session_id,
+            project_ref=project_ref,
+        )
+    except CutoverCompilerError as exc:
+        code = str(getattr(exc, "code", "SERVER_PROPOSAL_INTEGRITY"))
+        if code == "SERVER_PROPOSAL_COMPILATION_REQUIRED":
+            api_code = "AGENT_LEGACY_COMPILATION_REQUIRED"
+            status_code = 409
+        elif code == "PROPOSAL_SCOPE_MISMATCH":
+            api_code = "AGENT_LEGACY_BINDING_MISMATCH"
+            status_code = 403
+        else:
+            api_code = "AGENT_PROPOSAL_INTEGRITY"
+            status_code = 403
+        raise WorkbenchAPIError(
+            status_code=status_code,
+            code=api_code,
+            message="The persisted Agent proposal failed server-owned integrity validation.",
+            details={"proposal_id": proposal_id, "reason": code},
+        ) from exc
     return proposal
 
 
@@ -1770,6 +1802,8 @@ def decline_agent_proposal(
         proposal_id=proposal_id,
         session_id=session_id,
         chain_id=metadata.get("chain_id"),
+        actor_ref=f"actor:agent:{session_id}",
+        project_ref=f"project:{root.resolve()}",
     )
     orchestrator = WorkbenchOrchestrator(
         repository,
@@ -1811,6 +1845,8 @@ def revise_agent_proposal(
         proposal_id=proposal_id,
         session_id=session_id,
         chain_id=metadata.get("chain_id"),
+        actor_ref=f"actor:agent:{session_id}",
+        project_ref=f"project:{root.resolve()}",
     )
     orchestrator = WorkbenchOrchestrator(
         repository,
@@ -1862,6 +1898,8 @@ async def confirm_agent_proposal(
         proposal_id=proposal_id,
         session_id=session_id,
         chain_id=metadata.get("chain_id"),
+        actor_ref=f"actor:agent:{session_id}",
+        project_ref=f"project:{root.resolve()}",
     )
     proposal_revision = getattr(proposal, "revision", None)
     if proposal_revision is not None and body.revision != proposal_revision:
@@ -2488,7 +2526,32 @@ def _execute_legacy_agent_proposal_via_server_boundary(
 ) -> dict[str, Any]:
     """Execute a legacy proposal only through a retained cutover receipt."""
 
+    persisted_proposal = type(proposal) is ProposalRevision
+    if persisted_proposal:
+        # The HTTP handler's object is an untrusted snapshot. Re-read the
+        # exact server proposal immediately before any authority lookup,
+        # record read, claim, or write so a retained old fingerprint cannot
+        # authorize mutated persisted fields.
+        proposal = _proposal_for_session(
+            ProposalStore(root),
+            proposal_id=proposal_id,
+            session_id=session_id,
+            chain_id=_object_value(proposal, "chain_id"),
+            actor_ref=f"actor:agent:{session_id}",
+            project_ref=f"project:{root.resolve()}",
+        )
     binding = _legacy_cutover_binding(proposal)
+    if persisted_proposal:
+        # Proposal identity is derived from the server revision. A nested
+        # caller-shaped identity is only a consistency hint and is rejected
+        # below if it disagrees with this route-owned value.
+        for field_name, value in (
+            ("proposal_id", proposal.proposal_id),
+            ("proposal_revision", proposal.revision),
+            ("proposal_fingerprint", proposal.fingerprint),
+        ):
+            if binding.get(field_name) is None:
+                binding[field_name] = value
     required = ("compilation_record_id", "confirmation_id", "semantic_plan_hash")
     missing = [name for name in required if binding.get(name) is None]
     if missing:

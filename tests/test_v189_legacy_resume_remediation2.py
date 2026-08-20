@@ -115,25 +115,42 @@ def test_confirmation_without_real_server_proposal_fails_closed() -> None:
 def test_compile_for_persisted_proposal_reloads_latest_revision_before_binding(
     tmp_path, monkeypatch
 ) -> None:
-    proposal_store, proposal = _server_proposal(tmp_path)
     _catalog, compiler = _cutover()
-    original_compile = compiler.compile
-
-    def compile_then_revise(intent, *, entrypoint):
-        preview = original_compile(intent, entrypoint=entrypoint)
-        proposal_store.revise(
-            proposal.proposal_id,
-            base_revision=proposal.revision,
-            changes={"rebound": True},
-        )
-        return preview
-
-    monkeypatch.setattr(compiler, "compile", compile_then_revise)
-    preview = compiler.compile_for_persisted_proposal(
-        _intent(),
-        proposal_store=proposal_store,
-        proposal_id=proposal.proposal_id,
-        entrypoint="agent",
+    preview = compiler.compile(_intent(), entrypoint="agent")
+    record = compiler.record(preview.compilation_record_id)
+    proposal_store = ProposalStore(tmp_path / "server-proposals")
+    proposal = proposal_store.create(
+        session_id=record.session_ref,
+        chain_id="chain:1",
+        operation_id="model.rerun",
+        target={"run_id": "run:1"},
+        preconditions={
+            "server_compilation": {
+                "compilation_record_id": record.record_id,
+                "confirmation_id": "confirmation:pending",
+                "actor_ref": record.principal_ref,
+                "session_ref": record.session_ref,
+                "project_ref": record.project_ref,
+                "semantic_plan_hash": record.semantic_plan_hash,
+                "target": {"run_id": "run:1"},
+                "chain_id": "chain:1",
+                "operation_id": "model.rerun",
+            }
+        },
+        changes={},
+        evidence_refs=(),
+        expected_effect=("rerun",),
+        risks=(),
+    )
+    proposal_store.revise(
+        proposal.proposal_id,
+        base_revision=proposal.revision,
+        changes={"rebound": True},
+    )
+    compiler.bind_persisted_proposal(
+        preview.compilation_record_id,
+        proposal_store,
+        proposal.proposal_id,
     )
     receipt = compiler.confirm(preview.compilation_record_id)
     latest = proposal_store.latest_revision(proposal.proposal_id)

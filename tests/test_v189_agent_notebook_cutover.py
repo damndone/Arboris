@@ -157,24 +157,33 @@ def _intent(*, actor: str = "principal:user:1", session: str = "session:1") -> A
 
 
 def _persisted_plan(compiler: AgentNotebookCompilerV1, root) -> tuple[ProposalStore, object]:
+    plan = compiler.compile(_intent(), entrypoint="agent")
+    record = compiler.record(plan.compilation_record_id)
     proposal_store = ProposalStore(root)
     proposal = proposal_store.create(
         session_id="session:1",
         chain_id="chain:1",
         operation_id="model.rerun",
         target={"run_id": "run:1"},
-        preconditions={},
+        preconditions={
+            "server_compilation": {
+                "compilation_record_id": record.record_id,
+                "confirmation_id": "confirmation:pending",
+                "actor_ref": record.principal_ref,
+                "session_ref": record.session_ref,
+                "project_ref": record.project_ref,
+                "semantic_plan_hash": record.semantic_plan_hash,
+                "target": {"run_id": "run:1"},
+                "chain_id": "chain:1",
+                "operation_id": "model.rerun",
+            }
+        },
         changes={},
         evidence_refs=(),
         expected_effect=("rerun",),
         risks=(),
     )
-    plan = compiler.compile_for_persisted_proposal(
-        _intent(),
-        proposal_store=proposal_store,
-        proposal_id=proposal.proposal_id,
-        entrypoint="agent",
-    )
+    compiler.bind_persisted_proposal(plan.compilation_record_id, proposal_store, proposal.proposal_id)
     return proposal_store, plan
 
 
@@ -298,25 +307,34 @@ def test_compiler_confirmation_rejects_caller_supplied_proposal_identity() -> No
 
 def test_persisted_proposal_revision_is_bound_before_confirmation(tmp_path) -> None:
     _catalog, compiler = _cutover()
+    plan = compiler.compile(_intent(), entrypoint="agent")
+    record = compiler.record(plan.compilation_record_id)
     proposal_store = ProposalStore(tmp_path)
     proposal = proposal_store.create(
         session_id="session:1",
         chain_id="chain:1",
         operation_id="model.rerun",
         target={"run_id": "run:1"},
-        preconditions={},
+        preconditions={
+            "server_compilation": {
+                "compilation_record_id": record.record_id,
+                "confirmation_id": "confirmation:pending",
+                "actor_ref": record.principal_ref,
+                "session_ref": record.session_ref,
+                "project_ref": record.project_ref,
+                "semantic_plan_hash": record.semantic_plan_hash,
+                "target": {"run_id": "run:1"},
+                "chain_id": "chain:1",
+                "operation_id": "model.rerun",
+            }
+        },
         changes={},
         evidence_refs=(),
         expected_effect=("rerun",),
         risks=(),
     )
 
-    plan = compiler.compile_for_persisted_proposal(
-        _intent(),
-        proposal_store=proposal_store,
-        proposal_id=proposal.proposal_id,
-        entrypoint="agent",
-    )
+    compiler.bind_persisted_proposal(plan.compilation_record_id, proposal_store, proposal.proposal_id)
     receipt = compiler.confirm(plan.compilation_record_id)
 
     assert receipt.proposal_id == proposal.proposal_id

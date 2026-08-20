@@ -2993,6 +2993,136 @@ class CutoverCompilerError(RuntimeError):
         super().__init__(message or code)
 
 
+_SERVER_COMPILATION_REQUIRED_FIELDS = (
+    "compilation_record_id",
+    "confirmation_id",
+    "actor_ref",
+    "session_ref",
+    "project_ref",
+    "semantic_plan_hash",
+    "target",
+    "chain_id",
+    "operation_id",
+)
+
+
+def canonical_proposal_fingerprint(proposal: ProposalRevision) -> str:
+    """Return the ProposalStore identity digest for one persisted revision."""
+
+    identity = {
+        "proposal_id": proposal.proposal_id,
+        "operation_id": proposal.operation_id,
+        "operation_version": proposal.operation_version,
+        "revision": proposal.revision,
+        "target": proposal.target,
+        "preconditions": proposal.preconditions,
+        "changes": proposal.changes,
+        "evidence_refs": proposal.evidence_refs,
+        "expected_effect": proposal.expected_effect,
+        "risks": proposal.risks,
+    }
+    canonical = json.dumps(identity, ensure_ascii=False, sort_keys=True, default=list)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def validate_server_proposal_revision(
+    proposal: ProposalRevision,
+    *,
+    actor_ref: str | None = None,
+    session_ref: str | None = None,
+    project_ref: str | None = None,
+) -> dict[str, Any]:
+    """Validate the route/compiler-owned binding in a persisted proposal.
+
+    The nested ``server_compilation`` object is persisted server metadata, not
+    a client identity envelope.  Its critical fields must be present and must
+    agree with the outer ProposalStore revision before a caller can reach a
+    compiler, authority, or execution handle.
+    """
+
+    if type(proposal) is not ProposalRevision:
+        raise CutoverCompilerError(
+            "SERVER_PROPOSAL_REQUIRED",
+            "proposal binding requires a server-owned ProposalRevision",
+        )
+    if proposal.fingerprint != canonical_proposal_fingerprint(proposal):
+        raise CutoverCompilerError("SERVER_PROPOSAL_INTEGRITY")
+    if type(proposal.preconditions) is not dict:
+        raise CutoverCompilerError("SERVER_PROPOSAL_COMPILATION_REQUIRED")
+    server_compilation = proposal.preconditions.get("server_compilation")
+    if type(server_compilation) is not dict:
+        raise CutoverCompilerError(
+            "SERVER_PROPOSAL_COMPILATION_REQUIRED",
+            "a ProposalStore proposal requires complete server_compilation metadata",
+        )
+
+    missing = [
+        field_name
+        for field_name in _SERVER_COMPILATION_REQUIRED_FIELDS
+        if field_name not in server_compilation
+    ]
+    invalid = []
+    for field_name in _SERVER_COMPILATION_REQUIRED_FIELDS:
+        if field_name not in server_compilation:
+            continue
+        value = server_compilation[field_name]
+        if field_name == "target":
+            if type(value) is not dict:
+                invalid.append(field_name)
+            continue
+        if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+            invalid.append(field_name)
+    semantic_hash = server_compilation.get("semantic_plan_hash")
+    if (
+        semantic_hash is not None
+        and (
+            type(semantic_hash) is not str
+            or len(semantic_hash) != 64
+            or any(character not in "0123456789abcdef" for character in semantic_hash)
+        )
+    ):
+        invalid.append("semantic_plan_hash")
+    if missing or invalid:
+        raise CutoverCompilerError(
+            "SERVER_PROPOSAL_COMPILATION_REQUIRED",
+            "server_compilation is incomplete or malformed: "
+            + ", ".join(sorted(set(missing + invalid))),
+        )
+
+    expected_scope = {
+        "session_ref": proposal.session_id,
+        "chain_id": proposal.chain_id,
+        "operation_id": proposal.operation_id,
+        "target": proposal.target,
+    }
+    if actor_ref is not None:
+        expected_scope["actor_ref"] = actor_ref
+    if session_ref is not None:
+        expected_scope["session_ref"] = session_ref
+    if project_ref is not None:
+        expected_scope["project_ref"] = project_ref
+    mismatches = [
+        field_name
+        for field_name, expected in expected_scope.items()
+        if server_compilation.get(field_name) != expected
+    ]
+    optional_identity = {
+        "proposal_id": proposal.proposal_id,
+        "proposal_revision": proposal.revision,
+        "proposal_fingerprint": proposal.fingerprint,
+    }
+    for field_name, expected in optional_identity.items():
+        if field_name in server_compilation and server_compilation[field_name] != expected:
+            mismatches.append(field_name)
+    if mismatches:
+        raise CutoverCompilerError(
+            "PROPOSAL_SCOPE_MISMATCH",
+            "server_compilation does not match the persisted proposal: "
+            + ", ".join(sorted(set(mismatches))),
+        )
+    return dict(server_compilation)
+
+
 @dataclass(frozen=True)
 class CutoverCompilationPreviewV1:
     entrypoint: str
@@ -3552,20 +3682,7 @@ class AgentNotebookCompilerV1:
     def _persisted_proposal_fingerprint(proposal: ProposalRevision) -> str:
         """Recompute the ProposalStore fingerprint before accepting its identity."""
 
-        identity = {
-            "proposal_id": proposal.proposal_id,
-            "operation_id": proposal.operation_id,
-            "operation_version": proposal.operation_version,
-            "revision": proposal.revision,
-            "target": proposal.target,
-            "preconditions": proposal.preconditions,
-            "changes": proposal.changes,
-            "evidence_refs": proposal.evidence_refs,
-            "expected_effect": proposal.expected_effect,
-            "risks": proposal.risks,
-        }
-        canonical = json.dumps(identity, ensure_ascii=False, sort_keys=True, default=list)
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return canonical_proposal_fingerprint(proposal)
 
     @staticmethod
     def _load_persisted_proposal(
@@ -3587,8 +3704,7 @@ class AgentNotebookCompilerV1:
             raise CutoverCompilerError("SERVER_PROPOSAL_UNKNOWN") from exc
         if proposal.proposal_id != proposal_id:
             raise CutoverCompilerError("SERVER_PROPOSAL_UNKNOWN")
-        if proposal.fingerprint != AgentNotebookCompilerV1._persisted_proposal_fingerprint(proposal):
-            raise CutoverCompilerError("SERVER_PROPOSAL_INTEGRITY")
+        validate_server_proposal_revision(proposal)
         return proposal
 
     @staticmethod
@@ -3611,24 +3727,24 @@ class AgentNotebookCompilerV1:
         proposal_store: ProposalStore,
         proposal_id: str,
     ) -> None:
-        record = self.record(compilation_record_id)
         proposal = self._load_persisted_proposal(proposal_store, proposal_id)
+        server_compilation = validate_server_proposal_revision(proposal)
+        record = self.record(compilation_record_id)
+        if server_compilation["compilation_record_id"] != record.record_id:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
         if proposal.session_id != record.session_ref:
             raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
-        record_operation = self._record_operation_id(record)
-        if record_operation is not None and record_operation != proposal.operation_id:
+        if server_compilation["actor_ref"] != record.principal_ref:
             raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
-        server_compilation = proposal.preconditions.get("server_compilation")
-        if isinstance(server_compilation, Mapping):
-            for field_name, expected in (
-                ("actor_ref", record.principal_ref),
-                ("session_ref", record.session_ref),
-                ("project_ref", record.project_ref),
-                ("semantic_plan_hash", record.semantic_plan_hash),
-            ):
-                supplied = server_compilation.get(field_name)
-                if supplied is not None and supplied != expected:
-                    raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        if server_compilation["session_ref"] != record.session_ref:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        if server_compilation["project_ref"] != record.project_ref:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        if server_compilation["semantic_plan_hash"] != record.semantic_plan_hash:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        record_operation = self._record_operation_id(record)
+        if record_operation is not None and record_operation != server_compilation["operation_id"]:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
         if self._confirmations.get(record.record_id) is not None:
             raise CutoverCompilerError("PROPOSAL_BINDING_REBIND_FORBIDDEN")
         self._proposal_bindings[record.record_id] = ServerProposalBindingV1(
