@@ -63,6 +63,82 @@ def test_public_writer_creates_real_file_and_reports_schema_boundary(tmp_path) -
     assert restored.dtypes.astype(str).tolist() == frame.dtypes.astype(str).tolist()
 
 
+def test_parquet_dependency_matrix_has_one_truthful_semantic(tmp_path, monkeypatch) -> None:
+    api = _api()
+    from workbench.data_interchange import InterchangeUnavailableError
+    from workbench.ingestion import read_frame_bounded
+
+    frame = pd.DataFrame({"code": [1, 2], "label": ["a", "b"]})
+    source = tmp_path / "source.parquet"
+    source_result = api.write_interchange_frame(
+        frame,
+        target_format="parquet",
+        path=source,
+    )
+    assert source_result.status == "written"
+
+    original_has_module = api._has_module
+    matrices = (
+        ("pyarrow-only", {"pyarrow": True, "fastparquet": False}, "pyarrow", "available"),
+        ("fastparquet-only", {"pyarrow": False, "fastparquet": True}, None, "unavailable"),
+        ("both", {"pyarrow": True, "fastparquet": True}, "pyarrow", "available"),
+        ("neither", {"pyarrow": False, "fastparquet": False}, None, "unavailable"),
+    )
+
+    for label, availability, expected_engine, expected_status in matrices:
+        with monkeypatch.context() as patch:
+            def simulated_has_module(
+                name: str,
+                availability=availability,
+                original_has_module=original_has_module,
+            ) -> bool:
+                if name in availability:
+                    return availability[name]
+                return original_has_module(name)
+
+            patch.setattr(api, "_has_module", simulated_has_module)
+            capability = api.interchange_capability("parquet")
+            assert api._parquet_engine() == expected_engine
+            assert capability.status == expected_status
+
+            target = tmp_path / f"{label}.parquet"
+            write_result = api.write_interchange_frame(
+                frame,
+                target_format="parquet",
+                path=target,
+            )
+            round_trip_result = api.round_trip_frame(
+                frame,
+                metadata={},
+                target_format="parquet",
+                directory=tmp_path / label,
+            )
+
+            if expected_status == "available":
+                assert write_result.status == "written"
+                assert target.exists()
+                assert round_trip_result.status == "verified"
+                bounded, truncated = read_frame_bounded(source, max_rows=1)
+                assert bounded.to_dict(orient="records") == [{"code": 1, "label": "a"}]
+                assert truncated is True
+                bounded_capability = capability
+            else:
+                assert write_result.status == "unavailable"
+                assert not target.exists()
+                assert round_trip_result.status == "unavailable"
+                with pytest.raises(InterchangeUnavailableError) as error:
+                    read_frame_bounded(source, max_rows=1)
+                bounded_capability = error.value.capability
+
+            assert write_result.capability == capability
+            assert round_trip_result.capability == capability
+            assert bounded_capability == capability
+            assert capability.target_format == "parquet"
+            assert capability.status == expected_status
+            if expected_status == "unavailable":
+                assert capability.reason_code == "optional_dependency"
+
+
 def test_missing_parquet_dependency_is_typed_for_writer_and_round_trip(
     tmp_path, monkeypatch
 ) -> None:

@@ -95,11 +95,31 @@ def _has_module(name: str) -> bool:
 
 
 def _parquet_engine() -> str | None:
+    """Return an engine admitted by the bounded Parquet contract.
+
+    The bounded reader relies on pyarrow's batch iterator for its explicit
+    row-cap sentinel.  fastparquet is not admitted until an equivalent bounded
+    adapter is implemented and verified, so capability discovery must not
+    claim it is executable merely because its module is installed.
+    """
     if _has_module("pyarrow"):
         return "pyarrow"
-    if _has_module("fastparquet"):
-        return "fastparquet"
     return None
+
+
+_PARQUET_UNAVAILABLE_MESSAGE = (
+    "pyarrow is required for the bounded Parquet interchange contract; "
+    "fastparquet is not admitted without a verified bounded reader."
+)
+
+
+def _parquet_unavailable_capability() -> InterchangeCapabilityV1:
+    return InterchangeCapabilityV1(
+        target_format="parquet",
+        status="unavailable",
+        reason_code="optional_dependency",
+        message=_PARQUET_UNAVAILABLE_MESSAGE,
+    )
 
 
 def interchange_capability(target_format: str) -> InterchangeCapabilityV1:
@@ -121,12 +141,7 @@ def interchange_capability(target_format: str) -> InterchangeCapabilityV1:
             "openpyxl is required for XLSX interchange.",
         )
     if normalized == "parquet" and _parquet_engine() is None:
-        return InterchangeCapabilityV1(
-            normalized,
-            "unavailable",
-            "optional_dependency",
-            "pyarrow or fastparquet is required for Parquet interchange.",
-        )
+        return _parquet_unavailable_capability()
     if normalized in {"sav", "zsav", "dta"} and not _has_module("pyreadstat"):
         return InterchangeCapabilityV1(
             normalized,

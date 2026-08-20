@@ -7,7 +7,8 @@ import pandas as pd
 
 from .artifacts import register_artifact
 from .config import WorkbenchConfig
-from .data_interchange import InterchangeCapabilityV1, InterchangeUnavailableError
+from . import data_interchange
+from .data_interchange import InterchangeUnavailableError
 
 
 def _ensure_unique_basenames(paths: list[Path]) -> None:
@@ -86,17 +87,16 @@ def read_frame_bounded(
     if suffix == ".csv":
         frame = pd.read_csv(path, nrows=max_rows + 1)
     elif suffix in {".parquet", ".pq"}:
+        if data_interchange._parquet_engine() is None:
+            raise InterchangeUnavailableError(
+                data_interchange.interchange_capability("parquet")
+            )
         try:
             import pyarrow as pa
             import pyarrow.parquet as pq
         except (ImportError, ModuleNotFoundError) as exc:
             raise InterchangeUnavailableError(
-                InterchangeCapabilityV1(
-                    target_format="parquet",
-                    status="unavailable",
-                    reason_code="optional_dependency",
-                    message="pyarrow is required for bounded Parquet ingestion.",
-                )
+                data_interchange._parquet_unavailable_capability()
             ) from exc
         parquet_file = pq.ParquetFile(path)
         batches = parquet_file.iter_batches(batch_size=max_rows + 1)
