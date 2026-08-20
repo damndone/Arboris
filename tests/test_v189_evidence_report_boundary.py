@@ -2228,6 +2228,7 @@ def test_arma_garch_report_admission_missing_is_typed_and_does_not_build_raw_del
     assert events["view_models"]
     assert events["view_models"][0]["status"] in {"unavailable", "blocked"}
     assert events["rendered"] == []
+    assert not (run_root / "reports" / "report.html").exists()
 
 
 def test_arma_garch_report_admission_valid_real_workflow_renders_owner_document(
