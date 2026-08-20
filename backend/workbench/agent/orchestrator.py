@@ -99,6 +99,17 @@ class LegacyAgentConfirmationBoundaryError(ProposalConfirmationError):
         )
 
 
+class LegacyProposalWriteBoundaryError(ProposalConfirmationError):
+    """A legacy proposal mutation lacks a live server-owned store capability."""
+
+    code = "AGENT_PROPOSAL_WRITE_AUTHORITY_REQUIRED"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "legacy proposal mutation requires a server-owned ProposalStore capability"
+        )
+
+
 def _workflow_failure_message(state: WorkflowExecutionState) -> str:
     """Keep the failed step's server-owned error visible to the Agent."""
 
@@ -189,7 +200,7 @@ class _OrchestratorOperationHandler:
         )
 
     async def validate(self, record: OperationRecord) -> None:
-        self.orchestrator.proposal_store.validate_confirmation_preconditions(
+        self.orchestrator._proposal_store_for_read().validate_confirmation_preconditions(
             record.proposal_id,
             current_context_fingerprint=self.current_context_fingerprint,
             current_active_head_run_id=self.current_active_head_run_id,
@@ -548,7 +559,7 @@ class WorkbenchOrchestrator:
         events: AgentEventStream,
         *,
         main_session_id: str,
-        proposal_store: ProposalStore | None = None,
+        proposal_store: ProposalStore | ProposalStoreCapabilityV1 | None = None,
         operation_store: OperationRecordStore | None = None,
         operation_registry: OperationRegistry | None = None,
         context_provider: WorkbenchContextProvider | None = None,
@@ -558,7 +569,15 @@ class WorkbenchOrchestrator:
         self.repository = repository
         self.events = events
         self.main_session_id = main_session_id
-        self.proposal_store = proposal_store or ProposalStore(repository.root)
+        # A default orchestrator must not mint a caller-owned proposal writer.
+        # Established data-operation callers may still inject a raw store for
+        # private read-only confirmation bookkeeping, but it is never exposed
+        # through the public proposal_store attribute and every proposal
+        # mutation below requires the live server-issued capability explicitly.
+        self._proposal_store = proposal_store
+        self.proposal_store = (
+            proposal_store if type(proposal_store) is ProposalStoreCapabilityV1 else None
+        )
         self.operation_store = operation_store or OperationRecordStore(repository.root)
         self.operation_registry = operation_registry or OperationRegistry()
         self.context_provider = context_provider
@@ -574,6 +593,44 @@ class WorkbenchOrchestrator:
         self._execution_locks: dict[str, asyncio.Lock] = {}
         self._operation_locks: dict[str, asyncio.Lock] = {}
         self._lease_owner = f"agent:{uuid4().hex}"
+
+    def _proposal_store_for_read(self) -> ProposalStore | ProposalStoreCapabilityV1:
+        """Return an admitted, root-bound store for confirmed-operation reads."""
+
+        store = self._proposal_store
+        if type(store) is ProposalStore:
+            self._require_proposal_store_root(store)
+            return store
+        if type(store) is ProposalStoreCapabilityV1:
+            try:
+                admitted = store._require_admitted()
+            except ProposalStoreCapabilityError as exc:
+                raise LegacyProposalWriteBoundaryError() from exc
+            self._require_proposal_store_root(admitted)
+            return store
+        raise LegacyProposalWriteBoundaryError()
+
+    def _proposal_store_for_write(self) -> ProposalStoreCapabilityV1:
+        """Require the server-issued capability before any proposal mutation."""
+
+        store = self._proposal_store
+        if type(store) is not ProposalStoreCapabilityV1:
+            raise LegacyProposalWriteBoundaryError()
+        try:
+            admitted = store._require_admitted()
+        except ProposalStoreCapabilityError as exc:
+            raise LegacyProposalWriteBoundaryError() from exc
+        self._require_proposal_store_root(admitted)
+        return store
+
+    def _require_proposal_store_root(self, store: ProposalStore) -> None:
+        try:
+            repository_root = self.repository.root.resolve().stat()
+            repository_identity = (int(repository_root.st_dev), int(repository_root.st_ino))
+        except (OSError, RuntimeError) as exc:
+            raise LegacyProposalWriteBoundaryError() from exc
+        if store._root_identity != repository_identity:
+            raise LegacyProposalWriteBoundaryError()
 
     def _compile_workflow_record(
         self,
@@ -748,10 +805,11 @@ class WorkbenchOrchestrator:
         command_id: str | None = None,
         proposal_id: str | None = None,
     ) -> ProposalRevision:
+        proposal_store = self._proposal_store_for_write()
         session_id, _agent = self._chain(chain_id)
         definition = self.operation_registry.require(operation_id, operation_version)
         definition.validate(target=target, preconditions=preconditions, changes=changes)
-        proposal = self.proposal_store.create(
+        proposal = proposal_store.create(
             session_id=session_id,
             chain_id=chain_id,
             operation_id=operation_id,
@@ -798,7 +856,8 @@ class WorkbenchOrchestrator:
         expected_effect: Iterable[str] | None = None,
         risks: Iterable[str] | None = None,
     ) -> ProposalRevision:
-        latest = self.proposal_store.latest_revision(proposal_id)
+        proposal_store = self._proposal_store_for_write()
+        latest = proposal_store.latest_revision(proposal_id)
         definition = self.operation_registry.require(
             latest.operation_id,
             latest.operation_version,
@@ -808,7 +867,7 @@ class WorkbenchOrchestrator:
             preconditions=latest.preconditions,
             changes=changes,
         )
-        revised = self.proposal_store.revise(
+        revised = proposal_store.revise(
             proposal_id,
             base_revision=base_revision,
             changes=changes,
@@ -840,7 +899,8 @@ class WorkbenchOrchestrator:
         actor_type: str,
         reason: str | None = None,
     ) -> ProposalDecision:
-        decision = self.proposal_store.decline(
+        proposal_store = self._proposal_store_for_write()
+        decision = proposal_store.decline(
             proposal_id,
             actor_type=actor_type,
             reason=reason,
@@ -1316,7 +1376,7 @@ class WorkbenchOrchestrator:
             record.preconditions.get("run_family_id")
             or f"legacy-family:{source_run_id}"
         )
-        proposal = self.proposal_store.latest_revision(record.proposal_id)
+        proposal = self._proposal_store_for_read().latest_revision(record.proposal_id)
         executed_proposal_payload_hash = ""
         analysis_loop_binding = self._analysis_loop_binding(record)
         if analysis_loop_binding is not None:
@@ -1520,7 +1580,7 @@ class WorkbenchOrchestrator:
             target_run_id=target_run_id,
             from_node=source_node_ref,
             op_overrides=_overrides_from_proposal_changes(
-                self.proposal_store.latest_revision(record.proposal_id).changes
+                self._proposal_store_for_read().latest_revision(record.proposal_id).changes
             ),
             workbench_context=workbench_context,
         )

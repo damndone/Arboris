@@ -1563,10 +1563,12 @@ def create_agent_analysis_loop_proposal(
             details={"run_id": body.source_run_id},
         )
 
+    proposal_store = _server_proposal_store(repository.root)
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
         main_session_id=_ensure_main_session(repository, root),
+        proposal_store=proposal_store,
         context_provider=provider,
     )
     # Proposal creation needs a registered Chain identity but does not invoke
@@ -1640,7 +1642,7 @@ def create_agent_analysis_loop_proposal(
         )
     return {
         "session_id": session_id,
-        "proposal": _public_proposal(orchestrator.proposal_store, proposal.proposal_id),
+        "proposal": _public_proposal(proposal_store, proposal.proposal_id),
         "plan_diff": packet.plan_diff.to_dict(),
         "registered_action": RECOVERY_ACTIONS["ols.use_clustered_covariance_v1"].to_dict(),
         "timings_ms": {
@@ -1810,10 +1812,12 @@ def create_agent_fork_proposal(
     )
     session_id = str(metadata["session_id"])
     chain_id = str(metadata["chain_id"])
+    proposal_store = _server_proposal_store(repository.root)
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
         main_session_id=_ensure_main_session(repository, root),
+        proposal_store=proposal_store,
         context_provider=NodeOperationContextProvider(root),
     )
     agent = AgentCore(
@@ -1870,7 +1874,7 @@ def create_agent_fork_proposal(
     return {
         "session_id": session_id,
         "source_session_entry_id": source_entry_id,
-        "proposal": _public_proposal(orchestrator.proposal_store, proposal.proposal_id),
+        "proposal": _public_proposal(proposal_store, proposal.proposal_id),
         "navigation": navigation.to_dict(),
         "status": "pending",
     }
@@ -1927,6 +1931,7 @@ def decline_agent_proposal(
         repository,
         events,
         main_session_id=_ensure_main_session(repository, root),
+        proposal_store=store,
         context_provider=NodeOperationContextProvider(root),
     )
     try:
@@ -1970,6 +1975,7 @@ def revise_agent_proposal(
         repository,
         events,
         main_session_id=_ensure_main_session(repository, root),
+        proposal_store=store,
         context_provider=NodeOperationContextProvider(root),
     )
     try:
@@ -2150,10 +2156,12 @@ async def run_agent_turn(
         # turn performs zero Workbench mutation. Proposals stay allowlisted to
         # registry-enabled operations and remain confirmation-gated audit records.
         operation_registry = OperationRegistry()
+        proposal_store = _server_proposal_store(repository.root)
         orchestrator = WorkbenchOrchestrator(
             repository,
             events,
             main_session_id=_ensure_main_session(repository, root),
+            proposal_store=proposal_store,
             operation_registry=operation_registry,
             context_provider=NodeOperationContextProvider(root),
         )

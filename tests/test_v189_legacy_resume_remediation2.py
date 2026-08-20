@@ -10,7 +10,7 @@ import pytest
 from tests.test_agent_proposal_operations import make_orchestrator, proposal_kwargs
 from tests.test_v189_agent_notebook_cutover import _cutover, _intent
 from tests.test_v189_legacy_route_authority import _server_receipt
-from workbench.agent.orchestrator import CutoverCompilerError
+from workbench.agent.orchestrator import CutoverCompilerError, WorkbenchOrchestrator
 from workbench.agent.proposals import ProposalConfirmationError, ProposalStore
 from workbench.api_errors import WorkbenchAPIError
 from workbench.http import agent_routes
@@ -553,26 +553,21 @@ def test_receipt_proposal_identity_mismatch_fails_before_authority_or_claim(
 
 
 def test_direct_workbench_confirmation_fails_before_legacy_store_writes(
-    tmp_path, monkeypatch
+    tmp_path,
 ) -> None:
-    orchestrator = make_orchestrator(tmp_path)
+    bootstrap = make_orchestrator(tmp_path)
+    proposal_store = agent_routes._server_proposal_store(tmp_path / "workbench")
+    orchestrator = WorkbenchOrchestrator(
+        bootstrap.repository,
+        bootstrap.events,
+        main_session_id="main-session",
+        proposal_store=proposal_store,
+    )
+    chain_session_id, chain_agent = bootstrap._chains["chain-a"]
+    orchestrator.register_chain("chain-a", chain_session_id, chain_agent)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
-    proposal_confirm_calls: list[str] = []
-    operation_create_calls: list[str] = []
-
-    original_confirm = orchestrator.proposal_store.confirm
-    original_create_pending = orchestrator.operation_store.create_pending
-
-    def spy_confirm(*args, **kwargs):
-        proposal_confirm_calls.append(str(args[0]))
-        return original_confirm(*args, **kwargs)
-
-    def spy_create_pending(*args, **kwargs):
-        operation_create_calls.append(str(getattr(args[0], "proposal_id", "unknown")))
-        return original_create_pending(*args, **kwargs)
-
-    monkeypatch.setattr(orchestrator.proposal_store, "confirm", spy_confirm)
-    monkeypatch.setattr(orchestrator.operation_store, "create_pending", spy_create_pending)
+    proposal_path = proposal_store.root / "proposals" / f"{proposal.proposal_id}.jsonl"
+    before_proposal = proposal_path.read_bytes()
 
     with pytest.raises(ProposalConfirmationError) as error:
         asyncio.run(
@@ -588,7 +583,6 @@ def test_direct_workbench_confirmation_fails_before_legacy_store_writes(
         )
 
     assert getattr(error.value, "code", None) == "AGENT_NOTEBOOK_CUTOVER_REQUIRED"
-    assert proposal_confirm_calls == []
-    assert operation_create_calls == []
+    assert proposal_path.read_bytes() == before_proposal
     assert orchestrator.proposal_store.latest_status(proposal.proposal_id) == "pending"
     assert orchestrator.operation_store.list_records() == []
