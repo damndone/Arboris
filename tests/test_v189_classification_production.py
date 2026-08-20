@@ -877,6 +877,7 @@ def test_runs_artifact_list_http_boundary_returns_typed_error_without_raw_except
         "missing_artifacts",
         "null_artifacts",
         "unknown_record_type",
+        "forged_artifact_type",
         "missing_required_field",
         "null_path",
         "null_digest",
@@ -903,6 +904,8 @@ def test_runs_artifact_list_rejects_noncanonical_index_records_with_exact_invali
         index["artifacts"] = None
     elif mutation == "unknown_record_type":
         index["artifacts"][0]["record_type"] = "unknown"  # type: ignore[index]
+    elif mutation == "forged_artifact_type":
+        index["artifacts"][0]["artifact_type"] = "forged_type"  # type: ignore[index]
     elif mutation == "missing_required_field":
         index["artifacts"][0].pop("inputs")  # type: ignore[index]
     elif mutation == "null_path":
@@ -947,6 +950,30 @@ def test_runs_artifact_list_http_boundary_rejects_tampered_record_without_raw_ex
 
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert "JSONDecodeError" not in response.text
+
+
+def test_runs_artifact_list_http_boundary_rejects_forged_artifact_type_without_groups(tmp_path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-forged-artifact-type"
+    run_root.mkdir(parents=True)
+    (run_root / "data.json").write_text("{}", encoding="utf-8")
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "artifacts": [_canonical_artifact_record(artifact_type="forged_type")],
+        }),
+        encoding="utf-8",
+    )
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-forged-artifact-type/artifacts",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert "groups" not in response.json()
     assert "JSONDecodeError" not in response.text
 
 

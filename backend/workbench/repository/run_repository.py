@@ -57,6 +57,63 @@ _ARTIFACT_RECORD_OPTIONAL_FIELDS = frozenset(
 _ARTIFACT_INDEX_FIELDS = frozenset(
     {"schema_version", "artifacts", "classification_server_identity"}
 )
+# This is the server's closed vocabulary for the persisted ArtifactRecord
+# ``artifact_type`` field.  The values are the established kinds emitted by
+# the prediction, report/export, statistical-exploration, time-series/model,
+# LMM, workflow, and legacy compatibility registries.  Keep this explicit:
+# accepting any non-``unknown`` string would let a forged record cross the
+# repository -> HTTP -> ReportWorkspace boundary as a usable group.
+_KNOWN_ARTIFACT_TYPES = frozenset(
+    {
+        "classification_artifacts",
+        "classification_evidence",
+        "custom_json",
+        "data",
+        "dataset",
+        "derived_data",
+        "evaluation_packet",
+        "evidence-envelope",
+        "figure",
+        "figure_packet",
+        "generic_result",
+        "json",
+        "lmm_diagnostic_packet",
+        "lmm_recovery_packet",
+        "metadata",
+        "model_diagnostic",
+        "model_output",
+        "model_result",
+        "model_result_packet",
+        "negative_control_packet",
+        "notebook_workflow_result",
+        "p7_analysis",
+        "post_estimation",
+        "prediction_feature_recipe",
+        "prediction_packet",
+        "prediction_result",
+        "prediction_sample_spec",
+        "prediction_split_plan",
+        "processed_data",
+        "profile",
+        "raw_data",
+        "raw_dataset",
+        "report",
+        "report_collection",
+        "run_metadata",
+        "statistical_exploration",
+        "statistical_test",
+        "survival_evidence",
+        "table_export",
+        "time_series_json",
+        "time_series_manifest",
+        "transcript",
+        "workflow_capability_metadata",
+        "workflow_capability_result",
+        "workflow_output",
+        "workflow_prediction_training_data",
+        "workflow_prepared_data",
+    }
+)
 
 
 def _validate_artifact_digest(value: Any) -> None:
@@ -109,8 +166,8 @@ def _validate_artifact_record(run_root: Path, record: Any) -> dict[str, Any]:
     for field in ("artifact_id", "path", "artifact_type", "step", "code_version"):
         if type(record[field]) is not str or not record[field].strip():
             raise ValueError(f"artifact record field {field} is invalid")
-    if record["artifact_type"] == "unknown":
-        raise ValueError("artifact record kind is unknown")
+    if record["artifact_type"] not in _KNOWN_ARTIFACT_TYPES:
+        raise ValueError("artifact record kind is not in the canonical vocabulary")
     if not isinstance(record["inputs"], list) or any(
         type(item) is not str or not item.strip() for item in record["inputs"]
     ):

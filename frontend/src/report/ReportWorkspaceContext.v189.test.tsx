@@ -418,6 +418,21 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     expect(screen.getByTestId("classification-context")).not.toHaveTextContent("secret");
   });
 
+  it("does not continue when the backend rejects a forged artifact type", async () => {
+    mockArtifactsError.current = new ApiError(
+      500,
+      "artifact inventory rejected forged_type",
+      "ARTIFACTS_INDEX_INVALID",
+      { artifact_type: "forged_type" },
+    );
+
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByTestId("artifact-inventory-error")).toHaveTextContent("ARTIFACTS_INDEX_INVALID"));
+    expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE");
+    expect(screen.getByTestId("classification-context")).not.toHaveTextContent("forged_type");
+  });
+
   it.each([
     ["malformed packet", { ...evidencePacket, metrics: "not-an-object", secret: "malformed-secret" }],
     ["unsupported schema version", { ...evidencePacket, schema_version: 2, secret: "unsupported-secret" }],
