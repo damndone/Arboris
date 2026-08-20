@@ -6,14 +6,14 @@
 
 ## Final status
 
-CONTEXT_RESCOPED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 4/11 (36.4%; 36.4 per 100 events)
-- Repeat rate: 0/4 (0.0%)
-- Recurrence rate: 0/4 (0.0%)
-- MTTR: N/A (sample=0; unresolved=4)
+- Failure frequency: 5/14 (35.7%; 35.7 per 100 events)
+- Repeat rate: 0/5 (0.0%)
+- Recurrence rate: 0/5 (0.0%)
+- MTTR: N/A (sample=0; unresolved=5)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -34,7 +34,7 @@ CONTEXT_RESCOPED
 
 ## All gaps
 
-- None recorded.
+- #12 2026-08-20T02:07:36.000Z `known_external_acceptance_boundaries`; cause_status: `external`; cause: This remediation line is deliberately scoped to server-side Legacy/Resume authority and local focused evidence; browser acceptance, provider/external runtime, full repository gate, release, merge, and tag evidence were not requested or executed.; resolution: `accepted`; lesson: Keep local implementation evidence, external provider/browser acceptance, and release integration as separate claims.
 
 ## All waste
 
@@ -43,6 +43,7 @@ CONTEXT_RESCOPED
 ## Root causes and solutions
 
 - `compiler-fixtures-must-persist-server-compilation`: occurrences=1; cause_status: `known`; root cause: The stricter server-owned ProposalStore contract correctly rejected six pre-existing Agent/Notebook compiler fixtures that still created generic proposals without server_compilation metadata.; solution: `open`
+- `external-gates-remain-not-verified`: occurrences=1; cause_status: `external`; root cause: This remediation line is deliberately scoped to server-side Legacy/Resume authority and local focused evidence; browser acceptance, provider/external runtime, full repository gate, release, merge, and tag evidence were not requested or executed.; solution: `accepted`
 - `legacy-remediation-fixture-migrates-without-history-rewrite`: occurrences=1; cause_status: `known`; root cause: The remediation-2 reload-before-binding regression fixture still created a generic ProposalStore proposal, so the remediation-3 validator stopped the flow before the intended latest-revision assertion.; solution: `open`
 - `legacy-resume-remediation3-corrected-red`: occurrences=1; cause_status: `known`; root cause: After correcting the probe request envelope, the repository-backed remediation tests still showed that generic and incomplete server compilations bound successfully, cross-scope target chain and operation metadata was ignored, and the legacy route allowed persisted target tampering, incomplete compilation, and cross-scope compilation to reach the execute seam.; solution: `open`
 - `legacy-resume-remediation3-red-before-green`: occurrences=1; cause_status: `known`; root cause: The new remediation probes exposed that persisted ProposalStore compilation metadata was optional, target chain and operation were not bound, and the legacy route did not reject a tampered persisted target before execution. The first probe run reported 15 failed and 1 passed; three route cases also need the required active-head request field before they can exercise the boundary.; solution: `open`
@@ -50,6 +51,7 @@ CONTEXT_RESCOPED
 ## Added tests
 
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_legacy_route_authority.py tests/test_v189_agent_notebook_cutover.py tests/test_v189_notebook_cutover_route.py tests/test_v189_agent_notebook_runtime_bridge.py tests/test_v189_resume_authority.py tests/test_v189_workflow_truth.py tests/test_workflow_resume.py tests/test_workflow_runtime.py tests/test_v189_legacy_resume_remediation2.py tests/test_v189_legacy_resume_remediation3.py tests/contracts/test_v189_contract_lock.py -q; 371 passed, 53 warnings`
+- `backend/workbench/agent/orchestrator.py; backend/workbench/http/agent_routes.py; focused result: 371 passed, 53 warnings`
 - `tests/test_v189_agent_notebook_cutover.py; PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_agent_notebook_cutover.py -q; 6 failed, 9 passed`
 - `tests/test_v189_legacy_resume_remediation2.py; PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_legacy_resume_remediation2.py -q; 1 failed, 13 passed`
 - `tests/test_v189_legacy_resume_remediation3.py; PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_legacy_resume_remediation3.py -q; 13 failed, 3 passed`
@@ -58,6 +60,7 @@ CONTEXT_RESCOPED
 ## New rules
 
 - `compiler-fixtures-must-persist-server-compilation`: line experience occurrence(s)=1
+- `external-gates-remain-not-verified`: line experience occurrence(s)=1
 - `legacy-remediation-fixture-migrates-without-history-rewrite`: line experience occurrence(s)=1
 - `legacy-resume-remediation3-corrected-red`: line experience occurrence(s)=1
 - `legacy-resume-remediation3-red-before-green`: line experience occurrence(s)=1
@@ -65,8 +68,10 @@ CONTEXT_RESCOPED
 ## Future guidance
 
 - A corrected route request is required before interpreting a security probe, but the corrected red result must remain the implementation gate until all side-effect spies stay empty.
+- Keep local implementation evidence, external provider/browser acceptance, and release integration as separate claims.
 - Keep remediation history immutable while migrating its positive fixtures to the current server-owned lifecycle in the active remediation line.
 - Keep repository-backed incomplete, scope, tamper, and replay probes red before implementing the smallest server-owned validation boundary.
+- Review the ordering of identity validation and side effects directly, then support the conclusion with spies and the focused regression command.
 - When tightening an authority contract, update positive fixtures to exercise the real server-owned lifecycle rather than weakening production validation for historical generic inputs.
 
 ## Event index
@@ -82,3 +87,6 @@ CONTEXT_RESCOPED
 - #9: `d5ba761a-010c-443f-9671-d801c78746e3` | 2026-08-20T01:59:42.718Z | STATE_CHANGE/context_rescoped | incident=`8de910bc-4816-486b-a49a-1a1ee8e0a8b5` | lesson_key=`context-pack-rescope` | event_sha256=`6d4f0fbb3e7e99fbbbcc048c29a42dfb1e311de4e1f39671ba2f2e59ef9a8e69`
 - #10: `7b3e1d9a-5f2c-46e8-90a7-4d1f6b8c2e53` | 2026-08-20T02:05:40.000Z | GATE/focused_legacy_resume_green | incident=`e1c7a4f9-2b6d-48e0-93f5-7a1d4c8b6203` | lesson_key=`current-focused-gate-count-only` | event_sha256=`4875ba8ca898e4ce15c52b08a97106c37652c3b5746d391b626f7cdf465c02d3`
 - #11: `8c4f1a7e-2d9b-46e0-93f5-6b1c7a4d820e` | 2026-08-20T02:06:39.000Z | GATE/isolated_compileall_and_diff_check | incident=`f2d8a4c1-7e9b-45f0-93c6-1a5d8b2e6047` | lesson_key=`isolated-compileall-zero-remaining` | event_sha256=`b20efe2a29cc7f385134e05280228ecee87a277d26aed5486560c269dff75400`
+- #12: `9d5c2a7e-4b1f-46e8-90c3-7a2d5f8b1e64` | 2026-08-20T02:07:36.000Z | GAP/known_external_acceptance_boundaries | incident=`a8e4c1f7-2d9b-46e0-93c5-7b1d4a8f6203` | lesson_key=`external-gates-remain-not-verified` | event_sha256=`c6effac8fd7a48af9ec0a14712fda115e0816d11909fef782726bb27ead4b9de`
+- #13: `a1f6c3e8-7b2d-49f0-93c5-1d8a4e6b720f` | 2026-08-20T02:07:36.000Z | REVIEW/server_owned_proposal_boundary_review | incident=`b7e2d4a9-1c6f-48f0-93d5-7a2e4c8b6103` | lesson_key=`authority-ordering-review-with-spies` | event_sha256=`9caecd37724bb8f691a98db45039598ad149fc64fb5f0ebbec2bf324ac3b5501`
+- #14: `b2e7c4a1-9d6f-48e0-93c5-1a7d4b8f620e` | 2026-08-20T02:09:04.000Z | STATE_CHANGE/line_completed | incident=`c8f4a1d7-2e9b-46f0-93c5-7a1d4b8e6203` | lesson_key=`exact-tip-remediation-handoff` | event_sha256=`cdf2a0de67553b0f41ea5f1f9b9ae3c52201e506e14f1cdbb659a5f85c700502`
