@@ -681,7 +681,7 @@ async def run_endpoint(
     survey_replicate_type: str = Form(""),      # brr | jackknife | bootstrap | provided
     survey_lonely_psu: str = Form(""),          # fail | remove | adjust | average | certainty
     survey_weight_frame: str = Form(""),        # cross_sectional | longitudinal
-    survey_subpop: str = Form(""),
+    survey_subpop: str | None = Form(None),
     iv_endog: str = Form(""),          # JSON array of column names, e.g. ["educ"]
     iv_instruments: str = Form(""),    # JSON array of column names
     did_mode: str = Form(""),
@@ -811,7 +811,7 @@ async def batch_run_endpoint(
     survey_replicate_type: str = Form(""),
     survey_lonely_psu: str = Form(""),
     survey_weight_frame: str = Form(""),
-    survey_subpop: str = Form(""),
+    survey_subpop: str | None = Form(None),
 ) -> dict:
     _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     if sheet_name or transpose == "true":

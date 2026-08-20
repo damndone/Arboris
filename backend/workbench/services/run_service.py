@@ -679,7 +679,7 @@ def _submit_run(
         form.get("survey_replicate_type", ""),
         form.get("survey_lonely_psu", ""),
         form.get("survey_weight_frame", ""),
-        form.get("survey_subpop", ""),
+        form.get("survey_subpop"),
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -739,7 +739,7 @@ def _bg_run(
     survey_replicate_type: str = "",
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
-    survey_subpop: str = "",
+    survey_subpop: str | None = None,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")

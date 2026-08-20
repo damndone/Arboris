@@ -116,6 +116,35 @@ def test_run_endpoint_forwards_survey_design_params(tmp_path):
     assert kw["survey_subpop"] == "region == 'north'"
 
 
+def test_run_endpoint_omitted_survey_subpop_reaches_dispatch_as_absent(tmp_path):
+    """An ordinary HTTP run must not become an invalid empty subpopulation."""
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "ordinary"}
+    ).json()["project_root"]
+
+    with patch(
+        "workbench.services.run_service._run_workflow",
+        return_value={"run_id": "r", "status": "succeeded"},
+    ) as m:
+        resp = client.post(
+            "/runs",
+            data={
+                "project_root": root, "mode": "auto", "model_type": "ols",
+                "y": "y", "x": "x", "model_options": "{}",
+            },
+            files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")},
+        )
+        for _ in range(100):
+            if m.call_args is not None:
+                break
+            time.sleep(0.05)
+
+    assert resp.status_code == 200
+    assert m.call_args is not None
+    assert m.call_args.kwargs["survey_subpop"] is None
+
+
 def test_runs_batch_does_not_silently_ignore_survey_design(tmp_path):
     """``/runs/batch`` must not silently drop a declared survey design.
 
@@ -334,6 +363,7 @@ def test_replicate_weight_columns_without_a_method_fail_closed(tmp_path):
         ("survey_lonely_psu", 0, "SURVEY_LONELY_PSU_INVALID", {}),
         ("survey_weight_frame", 0, "SURVEY_WEIGHT_FRAME_INVALID", {}),
         ("survey_subpop", False, "SURVEY_SUBPOP_INVALID", {}),
+        ("survey_subpop", "", "SURVEY_SUBPOP_INVALID", {}),
         ("sampling_weight", 0, "SURVEY_SAMPLING_WEIGHT_INVALID", {}),
         (
             "survey_replicate_type",
@@ -354,6 +384,7 @@ def test_replicate_weight_columns_without_a_method_fail_closed(tmp_path):
         "falsey-lonely-psu",
         "falsey-weight-frame",
         "falsey-subpopulation",
+        "empty-subpopulation",
         "falsey-sampling-weight",
         "falsey-replicate-type",
         "falsey-replicate-columns",
