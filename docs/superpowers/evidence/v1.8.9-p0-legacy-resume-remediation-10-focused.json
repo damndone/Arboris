@@ -1,0 +1,15 @@
+{
+  "artifact_role": "focused",
+  "observed_at": "2026-08-20T06:15:26.000Z",
+  "command": "PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_legacy_resume_remediation8.py -q --disable-warnings --maxfail=1",
+  "exit_code": 0,
+  "result": "6 passed in 1.58s",
+  "audited_head": "b2e718b64ae7c9419e5271862dda38d2f7f6e27b",
+  "audited_tree": "7e875a2757e423a87185cc10c95a41f39f15c370",
+  "implementation_tip": "621ee442084c4f34b9d42413a7140a39506df988",
+  "source_refs": [
+    "tests/test_v189_legacy_resume_remediation8.py",
+    ".agent/devlines/v1-8-9-p0-legacy-resume-remediation-9/events.jsonl"
+  ],
+  "source_digest": "8021fd30a229319ef9039a45dc72903a49717aa067c8adb272b1f6964cb7c750"
+}

@@ -1,0 +1,19 @@
+{
+  "artifact_role": "adversarial_compatibility",
+  "observed_at": "2026-08-20T06:15:26.000Z",
+  "command": "PYTHONPATH=backend .venv/bin/python -m pytest tests/test_v189_legacy_resume_remediation7.py tests/test_v189_legacy_resume_remediation6.py tests/test_v189_legacy_resume_remediation5.py tests/test_v189_legacy_resume_remediation2.py tests/test_v189_legacy_route_authority.py tests/test_v189_agent_notebook_cutover.py tests/test_workflow_resume.py -q --disable-warnings --maxfail=1",
+  "exit_code": 0,
+  "result": "69 passed in 2.28s",
+  "audited_head": "b2e718b64ae7c9419e5271862dda38d2f7f6e27b",
+  "audited_tree": "7e875a2757e423a87185cc10c95a41f39f15c370",
+  "implementation_tip": "621ee442084c4f34b9d42413a7140a39506df988",
+  "source_refs": [
+    "tests/test_v189_legacy_resume_remediation7.py",
+    "tests/test_v189_legacy_resume_remediation6.py",
+    "tests/test_v189_legacy_resume_remediation5.py",
+    "tests/test_v189_legacy_resume_remediation2.py",
+    "tests/test_v189_legacy_route_authority.py",
+    "tests/test_v189_agent_notebook_cutover.py",
+    "tests/test_workflow_resume.py"
+  ]
+}
