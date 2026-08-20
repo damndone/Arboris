@@ -229,6 +229,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         "_artifact_file_sha256",
         "_canonical_project_root",
         "_canonical_record",
+        "_report_authority_marker",
     )
 
     def __init__(
@@ -365,6 +366,16 @@ class ServerOwnedReportEvidencePersistenceV1:
             else None
         )
         self._canonical_record = canonical_record
+        self._report_authority_marker = object()
+
+    def __copy__(self):
+        raise TypeError("host-bound Report evidence owner capabilities cannot be copied")
+
+    def __deepcopy__(self, _memo):
+        raise TypeError("host-bound Report evidence owner capabilities cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("host-bound Report evidence owner capabilities cannot be serialized")
 
     @classmethod
     def _from_host(cls, *args: object, **kwargs: object) -> "ServerOwnedReportEvidencePersistenceV1":

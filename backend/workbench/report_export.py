@@ -35,9 +35,6 @@ class ReportExportError(ValueError):
     """A user-visible report export validation or materialisation error."""
 
 
-_REPORT_FACTORY_TOKEN = object()
-
-
 class _ImmutableDict(dict[str, Any]):
     """JSON-compatible recursively immutable mapping used at the report wire."""
 
@@ -79,12 +76,54 @@ def report_projection_digest(wire: Mapping[str, Any]) -> str:
     )
 
 
+def _require_server_owned_owner(owner: object) -> object:
+    """Admit only the real C0 owner instance, never a duck-typed caller object."""
+
+    try:
+        from .services.results_service import ServerOwnedReportEvidencePersistenceV1
+    except ImportError as exc:  # pragma: no cover - import cycles fail closed
+        raise TypeError("Report evidence requires a server-owned owner capability") from exc
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        raise TypeError("Report evidence requires a server-owned owner capability")
+    marker = getattr(owner, "_report_authority_marker", None)
+    if type(marker) is not object:
+        raise TypeError("Report evidence requires a server-owned owner capability")
+    return owner
+
+
+def _validate_owner_bound_projection(
+    projection: "EvidenceProjectionV1",
+    owner: object,
+) -> None:
+    """Re-check the C0 owner and the complete canonical wire before any render IO."""
+
+    admitted_owner = _require_server_owned_owner(owner)
+    if type(projection) is not EvidenceProjectionV1:
+        raise TypeError("Report evidence requires EvidenceProjectionV1")
+    if getattr(projection, "_owner", None) is not admitted_owner:
+        raise TypeError("Report evidence projection is not bound to the owner capability")
+    if getattr(projection, "_authority_marker", None) is not getattr(
+        admitted_owner, "_report_authority_marker", None
+    ):
+        raise TypeError("Report evidence projection capability binding is invalid")
+    try:
+        canonical_wire = admitted_owner._canonical_report_wire()  # type: ignore[attr-defined]
+    except (AttributeError, TypeError, ValueError, KeyError) as exc:
+        raise TypeError("Report evidence owner capability is not canonical") from exc
+    if (
+        projection.wire.get("projectionDigest") != canonical_wire.get("projectionDigest")
+        or report_projection_digest(projection.wire) != report_projection_digest(canonical_wire)
+    ):
+        raise TypeError("Report evidence projection is not bound to the canonical owner wire")
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceProjectionV1:
     """Admitted, immutable Report projection used by every export writer."""
 
     wire: Mapping[str, Any]
     _owner: object | None = field(init=False, repr=False, compare=False, default=None)
+    _authority_marker: object | None = field(init=False, repr=False, compare=False, default=None)
 
     def __init__(
         self,
@@ -93,33 +132,36 @@ class EvidenceProjectionV1:
         _factory_token: object | None = None,
         _owner: object | None = None,
     ) -> None:
-        if _factory_token is not _REPORT_FACTORY_TOKEN:
-            raise TypeError("EvidenceProjectionV1 is server-owned; use the owner capability factory")
-        if not isinstance(wire, Mapping):
-            raise TypeError("EvidenceProjectionV1 requires a mapping at its typed admission seam")
-        object.__setattr__(self, "wire", _freeze_wire_value(wire))
-        object.__setattr__(self, "_owner", _owner)
+        del wire, _factory_token, _owner
+        raise TypeError("EvidenceProjectionV1 is server-owned; use the owner capability factory")
 
     @classmethod
     def unavailable(cls, reason_code: str) -> "EvidenceProjectionV1":
         if type(reason_code) is not str or not reason_code.strip():
             raise TypeError("reason_code must be a non-empty string")
-        return cls(
-            wire={
-                "schemaVersion": 1,
-                "projectionId": "report:unavailable",
-                "consumerId": "report",
-                "consumerVersion": "1.0",
-                "status": "unavailable",
-                "commitId": "UNAVAILABLE",
-                "envelopeDigest": "UNAVAILABLE",
-                "validationStatus": "unavailable",
-                "facts": [],
-                "provenance": {},
-                "reasonCode": reason_code,
-            },
-            _factory_token=_REPORT_FACTORY_TOKEN,
+        instance = object.__new__(cls)
+        object.__setattr__(
+            instance,
+            "wire",
+            _freeze_wire_value(
+                {
+                    "schemaVersion": 1,
+                    "projectionId": "report:unavailable",
+                    "consumerId": "report",
+                    "consumerVersion": "1.0",
+                    "status": "unavailable",
+                    "commitId": "UNAVAILABLE",
+                    "envelopeDigest": "UNAVAILABLE",
+                    "validationStatus": "unavailable",
+                    "facts": [],
+                    "provenance": {},
+                    "reasonCode": reason_code,
+                }
+            ),
         )
+        object.__setattr__(instance, "_owner", None)
+        object.__setattr__(instance, "_authority_marker", None)
+        return instance
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "EvidenceProjectionV1":
@@ -132,9 +174,19 @@ class EvidenceProjectionV1:
         *,
         owner: object,
     ) -> "EvidenceProjectionV1":
+        admitted_owner = _require_server_owned_owner(owner)
         if not isinstance(value, Mapping):
             raise TypeError("EvidenceProjectionV1 requires a mapping at its typed admission seam")
         wire = dict(value)
+        try:
+            canonical_wire = admitted_owner._canonical_report_wire()  # type: ignore[attr-defined]
+        except (AttributeError, TypeError, ValueError, KeyError) as exc:
+            raise TypeError("Report evidence owner capability is not canonical") from exc
+        if (
+            wire.get("projectionDigest") != canonical_wire.get("projectionDigest")
+            or report_projection_digest(wire) != report_projection_digest(canonical_wire)
+        ):
+            raise ReportExportError("REPORT_EVIDENCE_OWNER_WIRE_MISMATCH")
         if wire.get("status") != "available":
             raise ReportExportError("REPORT_EVIDENCE_PROJECTION_UNAVAILABLE")
         if wire.get("schemaVersion") != 1 or wire.get("consumerId") != "report":
@@ -181,7 +233,18 @@ class EvidenceProjectionV1:
             raise ReportExportError("REPORT_EVIDENCE_PROJECTION_DIGEST_INVALID")
         if projection_digest != report_projection_digest(wire):
             raise ReportExportError("REPORT_EVIDENCE_PROJECTION_DIGEST_MISMATCH")
-        return cls(wire=wire, _factory_token=_REPORT_FACTORY_TOKEN, _owner=owner)
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "wire", _freeze_wire_value(wire))
+        object.__setattr__(instance, "_owner", admitted_owner)
+        object.__setattr__(
+            instance,
+            "_authority_marker",
+            getattr(admitted_owner, "_report_authority_marker"),
+        )
+        return instance
+
+    def _assert_server_owned(self) -> None:
+        _validate_owner_bound_projection(self, getattr(self, "_owner", None))
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,17 +264,8 @@ class ReportEvidenceWriterV1:
         _factory_token: object | None = None,
         _server_table_rows: dict[str, tuple[dict[str, Any], ...]] | None = None,
     ) -> None:
-        if _factory_token is not _REPORT_FACTORY_TOKEN:
-            raise TypeError("ReportEvidenceWriterV1 is server-owned; use the owner capability factory")
-        if type(projection) is not EvidenceProjectionV1:
-            raise TypeError("ReportEvidenceWriterV1 requires EvidenceProjectionV1")
-        if tables_override is not None or _server_table_rows is not None:
-            raise TypeError("ReportEvidenceWriterV1 rejects caller-owned raw tables")
-        if not sections or any(type(section) is not str or not section.strip() for section in sections):
-            raise TypeError("ReportEvidenceWriterV1 requires named typed sections")
-        object.__setattr__(self, "projection", projection)
-        object.__setattr__(self, "sections", tuple(sections))
-        object.__setattr__(self, "tables_override", None)
+        del projection, sections, tables_override, _factory_token, _server_table_rows
+        raise TypeError("ReportEvidenceWriterV1 is server-owned; use the owner capability factory")
 
     @classmethod
     def from_projection(
@@ -232,18 +286,30 @@ class ReportEvidenceWriterV1:
         sections: tuple[str, ...],
         table_rows: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
     ) -> "ReportEvidenceWriterV1":
+        _validate_owner_bound_projection(projection, owner)
+        if not sections or any(type(section) is not str or not section.strip() for section in sections):
+            raise TypeError("ReportEvidenceWriterV1 requires named typed sections")
         if type(projection) is not EvidenceProjectionV1 or getattr(projection, "_owner", None) is not owner:
             raise TypeError("ReportEvidenceWriterV1 requires an owner-issued projection")
-        normalized_rows: dict[str, tuple[dict[str, Any], ...]] | None = None
         if table_rows is not None:
             raise TypeError("ReportEvidenceWriterV1 rejects caller-owned raw tables")
-        return cls(
-            projection=projection,
-            sections=sections,
-            _factory_token=_REPORT_FACTORY_TOKEN,
-        )
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "projection", projection)
+        object.__setattr__(instance, "sections", tuple(sections))
+        object.__setattr__(instance, "tables_override", None)
+        return instance
+
+    def _assert_server_owned(self) -> None:
+        self.projection._assert_server_owned()
+        if not self.sections or any(
+            type(section) is not str or not section.strip() for section in self.sections
+        ):
+            raise TypeError("ReportEvidenceWriterV1 requires named typed sections")
+        if self.tables_override is not None:
+            raise TypeError("ReportEvidenceWriterV1 rejects caller-owned raw tables")
 
     def tables(self) -> dict[str, list[dict[str, Any]]]:
+        self._assert_server_owned()
         facts = self.projection.wire["facts"]
         rows = [
             {
@@ -671,6 +737,7 @@ def export_report(
 ) -> tuple[bytes, str, str]:
     if type(evidence_projection) is not EvidenceProjectionV1:
         raise ReportExportError("REPORT_EVIDENCE_PROJECTION_REQUIRED")
+    evidence_projection._assert_server_owned()
     projection = evidence_projection.wire
     if format not in {"html", "docx", "tex", "pdf-print"}:
         raise ReportExportError(f"Unsupported report export format: {format}")

@@ -101,6 +101,18 @@ def test_append_is_anchored_and_detects_duplicate_ids_and_hash_integrity(tmp_pat
         verify_log(root, line_id)
 
 
+def test_append_assigns_a_server_timestamp_without_mutating_the_source_event(tmp_path: Path) -> None:
+    root, line_id = _line(tmp_path)
+    source = _event()
+    source_timestamp = source["timestamp"]
+
+    appended = append_event(root, line_id, source)
+
+    assert source["timestamp"] == source_timestamp
+    assert appended["timestamp"] != source_timestamp
+    assert verify_log(root, line_id)["event_count"] == 1
+
+
 def test_rejects_malicious_line_ids_and_symbolic_link_line_directories(tmp_path: Path) -> None:
     root, _ = _line(tmp_path)
     with pytest.raises(EventValidationError):

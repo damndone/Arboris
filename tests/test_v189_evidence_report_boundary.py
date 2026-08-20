@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import copy
+import pickle
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -40,7 +41,7 @@ from workbench.services.results_service import (
     ServerOwnedReportEvidencePersistenceV1,
     UnavailableReportEvidenceCapabilityV1,
 )
-from workbench.report_export import EvidenceProjectionV1, ReportEvidenceWriterV1
+from workbench.report_export import EvidenceProjectionV1, ReportExportError, ReportEvidenceWriterV1
 from workbench.reporting import ReportDocumentWriterV1
 
 
@@ -1012,6 +1013,90 @@ def test_round_four_index_cannot_synchronize_forged_facts_or_digest(
     assert view["status"] == "blocked"
     assert view["reasonCode"] in {"REPORT_EVIDENCE_FACTS_MISMATCH", "REPORT_EVIDENCE_PROJECTION_DIGEST_MISMATCH"}
     assert view["facts"] == []
+
+
+def test_round_five_imported_factory_token_and_forged_owner_fail_before_projection_io() -> None:
+    """A self-consistent caller wire cannot mint an exportable projection."""
+
+    import workbench.report_export as report_export_module
+
+    forged_owner = {"owner": "caller-created"}
+    wire = _report_projection_wire()
+    wire["projectionDigest"] = report_export_module.report_projection_digest(wire)
+
+    with pytest.raises(TypeError, match="owner|capability|server-owned"):
+        EvidenceProjectionV1._from_server_wire(wire, owner=forged_owner)
+
+    imported_token = getattr(report_export_module, "_REPORT_FACTORY_TOKEN", object())
+    with pytest.raises(TypeError, match="owner|capability|server-owned"):
+        EvidenceProjectionV1(
+            wire,
+            _factory_token=imported_token,
+            _owner=forged_owner,
+        )
+
+
+def test_round_five_forged_and_serialized_projection_objects_fail_before_writer_io() -> None:
+    """A caller-shaped projection object cannot reach the XLSX writer."""
+
+    import workbench.report_export as report_export_module
+
+    forged_owner = {"owner": "caller-created"}
+    wire = _report_projection_wire()
+    wire["projectionDigest"] = report_export_module.report_projection_digest(wire)
+    forged_projection = object.__new__(EvidenceProjectionV1)
+    object.__setattr__(forged_projection, "wire", wire)
+    object.__setattr__(forged_projection, "_owner", forged_owner)
+    object.__setattr__(forged_projection, "_authority_marker", object())
+    serialized_projection = pickle.loads(pickle.dumps(forged_projection))
+
+    for candidate in (forged_projection, serialized_projection):
+        with pytest.raises(TypeError, match="owner|capability|server-owned"):
+            ReportEvidenceWriterV1._from_server_projection(
+                candidate,
+                owner=forged_owner,
+                sections=("facts",),
+            )
+
+
+def test_round_five_real_owner_rejects_a_self_consistent_forged_wire_before_writer_io(
+    tmp_path: Path,
+) -> None:
+    with _server_owned_evidence(tmp_path / "owner-store") as (record, _binding, owner):
+        wire = _owner_wire(owner, _report_projection_wire())
+        wire["envelopeDigest"] = record.envelope_digest
+        wire["facts"] = [{"factId": "fact-forged", "statisticId": "estimate", "value": 999.0}]
+        import workbench.report_export as report_export_module
+
+        wire["projectionDigest"] = report_export_module.report_projection_digest(wire)
+
+        with pytest.raises(ReportExportError, match="OWNER_WIRE"):
+            EvidenceProjectionV1._from_server_wire(wire, owner=owner)
+
+
+def test_round_five_unowned_xlsx_render_rejects_before_workbook_io(monkeypatch) -> None:
+    import workbench.exports as exports_module
+    import workbench.report_export as report_export_module
+
+    forged_owner = {"owner": "caller-created"}
+    wire = _report_projection_wire()
+    wire["projectionDigest"] = report_export_module.report_projection_digest(wire)
+    forged_projection = object.__new__(EvidenceProjectionV1)
+    object.__setattr__(forged_projection, "wire", wire)
+    object.__setattr__(forged_projection, "_owner", forged_owner)
+    object.__setattr__(forged_projection, "_authority_marker", object())
+    forged_writer = object.__new__(ReportEvidenceWriterV1)
+    object.__setattr__(forged_writer, "projection", forged_projection)
+    object.__setattr__(forged_writer, "sections", ("facts",))
+    object.__setattr__(forged_writer, "tables_override", None)
+    monkeypatch.setattr(
+        exports_module,
+        "Workbook",
+        lambda: pytest.fail("unowned writer reached XLSX workbook IO"),
+    )
+
+    with pytest.raises(TypeError, match="owner|capability|server-owned"):
+        exports_module.render_typed_xlsx(forged_writer)
 
 
 def test_copied_valid_report_pair_in_foreign_project_root_is_typed_rejected(

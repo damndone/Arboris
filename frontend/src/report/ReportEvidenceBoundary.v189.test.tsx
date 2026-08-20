@@ -57,6 +57,7 @@ const committedProjection: ReportEvidenceProjection = {
   envelopeRef: "evidence-envelope:result-1",
   commitId: "evidence-commit-1",
   envelopeDigest: "a".repeat(64),
+  projectionDigest: "2f5d786810fde6f8f3cf6c1e403bd6b5ec97035601e6f70a4302fe731e602362",
   status: "available",
   executionStatus: "completed",
   availability: "available",
@@ -196,6 +197,13 @@ describe("Report evidence boundary v1.8.9", () => {
     expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
   });
 
+  it("rejects a self-consistent-looking projection with a tampered digest", () => {
+    expect(readReportEvidenceProjection({
+      ...committedProjection,
+      projectionDigest: "b".repeat(64),
+    })).toBeNull();
+  });
+
   it("parses and renders validation independently from execution and availability", () => {
     const parsed = readReportEvidenceProjection(validatedProjection);
     expect(parsed).toMatchObject({
@@ -247,7 +255,14 @@ describe("Report evidence boundary v1.8.9", () => {
       exporting: false,
       resultTableExporting: false,
       postEstimationLoadError: null,
-      predictionEvidence: null,
+      predictionEvidence: {
+        status: "validated",
+        split_plan_hash: "split-plan-1",
+        development: { cv: [] },
+        oos: { n: 4, metrics: { r2: 0.91, rmse: 1.2 } },
+        controls: [],
+        limits: ["display-only compatibility evidence"],
+      },
       modelResults: [rawRegressionResult],
       familyEvidenceArtifacts: { raw: { leaked_scalar: 9.9 } },
       reportEvidenceProjection: committedProjection,
@@ -275,6 +290,7 @@ describe("Report evidence boundary v1.8.9", () => {
     expect(screen.getByTestId("typed-evidence-provenance")).toHaveTextContent("operation-1");
     expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
     expect(screen.queryByText("123.456")).not.toBeInTheDocument();
+    expect(screen.getByTestId("report-prediction-evidence-non-citable")).toHaveTextContent(/non-citable/i);
   });
 
   it("fail-closes every legacy raw fact helper instead of feeding the Report writer", () => {

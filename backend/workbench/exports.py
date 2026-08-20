@@ -29,6 +29,7 @@ def export_pdf(
 ) -> Path:
     if type(writer) is not ReportDocumentWriterV1:
         raise TypeError("export_pdf requires ReportDocumentWriterV1")
+    writer._assert_server_owned()
     if writer.canonical_run_root != run_root.expanduser().resolve(strict=False):
         raise ValueError("REPORT_WRITER_RUN_ROOT_MISMATCH")
     report = writer.view_model
@@ -90,6 +91,7 @@ def render_typed_xlsx(
 
     if type(writer) is not ReportEvidenceWriterV1:
         raise TypeError("render_typed_xlsx requires ReportEvidenceWriterV1")
+    writer._assert_server_owned()
     tables = writer.tables()
 
     workbook = Workbook()

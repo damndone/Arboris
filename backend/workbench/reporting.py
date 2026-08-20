@@ -10,7 +10,7 @@ from jinja2 import Environment, FileSystemLoader
 from .artifacts import register_artifact, write_bytes_durable
 from .report_export import (
     EvidenceProjectionV1,
-    _REPORT_FACTORY_TOKEN,
+    _validate_owner_bound_projection,
     _freeze_wire_value,
 )
 
@@ -33,16 +33,8 @@ class ReportDocumentWriterV1:
         _factory_token: object | None = None,
         _owner: object | None = None,
     ) -> None:
-        if _factory_token is not _REPORT_FACTORY_TOKEN:
-            raise TypeError("ReportDocumentWriterV1 is server-owned; use the owner capability factory")
-        if not isinstance(view_model, Mapping):
-            raise TypeError("ReportDocumentWriterV1 requires a typed report payload")
-        if type(projection) is not EvidenceProjectionV1 or getattr(projection, "_owner", None) is not _owner:
-            raise TypeError("ReportDocumentWriterV1 requires an owner-issued projection")
-        object.__setattr__(self, "view_model", _freeze_wire_value(dict(view_model)))
-        object.__setattr__(self, "projection", projection)
-        object.__setattr__(self, "canonical_run_root", canonical_run_root.expanduser().resolve(strict=False))
-        object.__setattr__(self, "_owner", _owner)
+        del view_model, projection, canonical_run_root, _factory_token, _owner
+        raise TypeError("ReportDocumentWriterV1 is server-owned; use the owner capability factory")
 
     @classmethod
     def from_view_model(
@@ -63,16 +55,19 @@ class ReportDocumentWriterV1:
         owner: object,
         canonical_run_root: Path,
     ) -> "ReportDocumentWriterV1":
+        _validate_owner_bound_projection(projection, owner)
         if not isinstance(view_model, Mapping):
             raise TypeError("ReportDocumentWriterV1 requires a bound typed report payload")
         _validate_bound_report_view_model(view_model, projection)
-        return cls(
-            view_model=dict(view_model),
-            projection=projection,
-            canonical_run_root=canonical_run_root,
-            _factory_token=_REPORT_FACTORY_TOKEN,
-            _owner=owner,
-        )
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "view_model", _freeze_wire_value(dict(view_model)))
+        object.__setattr__(instance, "projection", projection)
+        object.__setattr__(instance, "canonical_run_root", canonical_run_root.expanduser().resolve(strict=False))
+        object.__setattr__(instance, "_owner", owner)
+        return instance
+
+    def _assert_server_owned(self) -> None:
+        _validate_owner_bound_projection(self.projection, getattr(self, "_owner", None))
 
 
 def _validate_bound_report_view_model(

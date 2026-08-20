@@ -267,7 +267,18 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         </div>
       )}
 
-      <PredictionResearchReportSections evidence={workspace.predictionEvidence} />
+      {workspace.predictionEvidence && (
+        <section
+          data-testid="report-prediction-evidence-non-citable"
+          aria-label="Non-citable predictive compatibility evidence"
+          style={{ marginBottom: 12 }}
+        >
+          <p style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "0 0 6px" }}>
+            NON-CITABLE: predictive research compatibility evidence is display-only and is not included in the Report writer facts.
+          </p>
+          <PredictionResearchReportSections evidence={workspace.predictionEvidence} />
+        </section>
+      )}
       <RegressionTable packet={regressionTable} />
       <p
         data-testid="legacy-report-results-unavailable"
