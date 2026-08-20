@@ -2047,6 +2047,222 @@ def test_remediation_six_report_stage_adapts_exact_owner_projection_and_fails_cl
     assert admitted[1] is projection
 
 
+def _arma_report_stage_context(
+    run_root: Path,
+    *,
+    owner: ServerOwnedReportEvidencePersistenceV1 | None = None,
+    projection: EvidenceProjectionV1 | None = None,
+) -> SimpleNamespace:
+    artifacts: dict[str, object] = {
+        "_cleaned": object(),
+        "_categorical_vars": [],
+        "_model_results": [("arma_garch_1", {"model_type": "time_series.arma_garch"})],
+        "_normalized_y": "value",
+        "_normalized_x": [],
+        "_poisson_x": [],
+        "_profile": {"row_count": 1, "column_count": 1},
+        "_routing": {"kind": "time_series"},
+        "_dropped_vars": [],
+        "_reliability_info": {},
+        "_effective_exposure_col": None,
+        "_imputation_summary": {},
+        "_diagnostic_artifacts": {},
+        "_statistical_tests": {"evidence": None},
+        "_statistical_test_summaries": [],
+        "_claims": [],
+        "_issue_dicts": [],
+        "_coercion_actions": [],
+        "_data_detected_y_type": "continuous",
+        "_input_files": [],
+        "_mode": "auto",
+        "_y": "value",
+        "_x": [],
+        "_model_type": "time_series.arma_garch",
+        "_started_at": "2026-08-20T00:00:00+00:00",
+    }
+    if owner is not None:
+        artifacts["_report_evidence_owner"] = owner
+    if projection is not None:
+        artifacts["_report_evidence_projection"] = projection
+    return SimpleNamespace(
+        artifacts=artifacts,
+        exposure_col=None,
+        y_type="continuous",
+        roles={},
+        terminal_status=None,
+        primary_type=None,
+    )
+
+
+def _patch_report_stage_side_effects(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[object]]:
+    from workbench import artifacts as artifact_module
+    from workbench import diagnostic_summary as diagnostic_summary_module
+    from workbench import orchestrator as orchestrator_module
+    from workbench import report_view_model as report_view_model_module
+    from workbench import reporting as reporting_module
+    from workbench.engine.stages import report as report_module
+
+    events: dict[str, list[object]] = {"view_models": [], "rendered": []}
+    monkeypatch.setattr(orchestrator_module, "_build_descriptive_stats", lambda *_a, **_k: [])
+    monkeypatch.setattr(orchestrator_module, "_build_variable_importance", lambda *_a, **_k: [])
+    monkeypatch.setattr(orchestrator_module, "_build_model_routing_summary", lambda *_a, **_k: {})
+    monkeypatch.setattr(orchestrator_module, "_lineage", lambda *_a, **_k: [])
+    monkeypatch.setattr(orchestrator_module, "_safe_flush_recorder", lambda *_a, **_k: None)
+    monkeypatch.setattr(orchestrator_module, "_write_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(orchestrator_module, "build_diagnostic_summary", lambda **_k: {})
+    monkeypatch.setattr(report_view_model_module, "build_regression_table", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        report_view_model_module,
+        "build_report_view_model",
+        lambda *_a, **_k: events["view_models"].append({
+            "status": "unavailable",
+            "facts": [],
+            "reasonCode": "EVIDENCE_OWNER_CAPABILITY_REQUIRED",
+        }) or events["view_models"][-1],
+    )
+    monkeypatch.setattr(diagnostic_summary_module, "finalize_diagnostic_summary", lambda value, **_k: value)
+    monkeypatch.setattr(artifact_module, "write_json", lambda *_a, **_k: None)
+    monkeypatch.setattr(artifact_module, "register_artifact", lambda *_a, **_k: None)
+    monkeypatch.setattr(report_module, "_refresh_artifact_checksum", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        reporting_module,
+        "render_legacy_html_report",
+        lambda view_model, _run_root, *, owner, projection: events["rendered"].append(
+            (view_model, owner, projection)
+        ),
+    )
+    return events
+
+
+def _run_report_stage_for_probe(ctx: SimpleNamespace, run_root: Path, monkeypatch: pytest.MonkeyPatch):
+    from workbench.engine.context import RunEnv
+    from workbench.engine.stages.report import ReportStage
+
+    events = _patch_report_stage_side_effects(monkeypatch)
+    env = RunEnv(run_root=run_root, run_id=run_root.name, recorder=SimpleNamespace())
+    return ReportStage().run(ctx, env), events
+
+
+def test_orchestrator_report_admission_injects_exact_pair_before_real_report_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from workbench import orchestrator
+    from workbench.app import app
+    from workbench.lineage import incremental
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    source = tmp_path / "source.csv"
+    source.write_text("value\n1\n", encoding="utf-8")
+    config = SimpleNamespace(
+        random_seed=1,
+        imputation_method="",
+        imputation_m=1,
+        imputation_max_iter=1,
+        max_missing_rate=0.4,
+        run_timeout_s=10.0,
+    )
+    captured: dict[str, object] = {}
+
+    def capture_pipeline(pipeline, ctx, _env, **_kwargs):
+        captured["pipeline"] = pipeline
+        captured["ctx"] = ctx
+        ctx.terminal_status = "completed"
+        return ctx
+
+    monkeypatch.setattr(incremental, "run_pipeline_traced", capture_pipeline)
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        run_id="run-1",
+        model_run_id="run-1",
+        canonical_project_root=project_root,
+        keep_open=True,
+    ) as (_record, _binding, owner):
+        configure_report_evidence_owner(owner)
+        try:
+            orchestrator._run_workflow(
+                run_root,
+                "run-1",
+                [source],
+                "auto",
+                "value",
+                [],
+                config,
+                "2026-08-20T00:00:00+00:00",
+                model_type="ols",
+            )
+        finally:
+            configure_report_evidence_owner(None)
+
+    ctx = captured["ctx"]
+    assert any(type(stage).__name__ == "ReportStage" for stage in captured["pipeline"])
+    assert ctx.artifacts["_report_evidence_owner"] is owner
+    projection = ctx.artifacts["_report_evidence_projection"]
+    assert type(projection) is EvidenceProjectionV1
+    assert projection._owner is owner
+    assert app.state.report_evidence_persistence is None
+
+
+def test_arma_garch_report_admission_missing_is_typed_and_does_not_build_raw_deliverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from workbench.engine.packs.arma_garch import deliverables
+
+    run_root = tmp_path / "project" / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    ctx = _arma_report_stage_context(run_root)
+    calls: list[Path] = []
+
+    def raw_builder(path: Path) -> dict[str, object]:
+        calls.append(path)
+        raise AssertionError("ARMA raw deliverable builder reached before Report admission")
+
+    monkeypatch.setattr(deliverables, "build_arma_garch_deliverables", raw_builder)
+    result, events = _run_report_stage_for_probe(ctx, run_root, monkeypatch)
+
+    assert result is ctx
+    assert calls == []
+    assert events["view_models"]
+    assert events["view_models"][0]["status"] in {"unavailable", "blocked"}
+    assert events["rendered"] == []
+
+
+def test_arma_garch_report_admission_valid_reaches_raw_builder_and_renderer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from workbench.engine.packs.arma_garch import deliverables
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        run_id="run-1",
+        model_run_id="run-1",
+        canonical_project_root=project_root,
+        keep_open=True,
+    ) as (_record, _binding, owner):
+        projection = owner.issue_report_projection(owner._canonical_report_wire())  # type: ignore[attr-defined]
+        run_root.mkdir(parents=True)
+        ctx = _arma_report_stage_context(run_root, owner=owner, projection=projection)
+        calls: list[Path] = []
+        monkeypatch.setattr(
+            deliverables,
+            "build_arma_garch_deliverables",
+            lambda path: calls.append(path) or {"report": {"status": "available", "facts": []}},
+        )
+        result, events = _run_report_stage_for_probe(ctx, run_root, monkeypatch)
+
+    assert result is ctx
+    assert calls == [run_root]
+    assert events["rendered"]
+    assert events["rendered"][0][1] is owner
+    assert events["rendered"][0][2] is projection
+
+
 def test_html_report_endpoint_never_returns_an_unindexed_report_file(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-1"

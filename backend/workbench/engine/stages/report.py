@@ -348,6 +348,25 @@ class ReportStage:
                 report_admission = None
         env.step("reporting", "start", "Rendering report...")
         try:
+            if report_admission is None:
+                # Every report family, including ARMA-GARCH, must enter the
+                # typed unavailable contract before any family-specific raw
+                # deliverable is read or constructed.
+                from ...report_view_model import build_report_view_model
+
+                view_model = build_report_view_model(
+                    diagnostic_summary,
+                    run_root,
+                    descriptive_stats=descriptive_stats,
+                    statistical_tests=statistical_test_summaries,
+                    statistical_evidence=statistical_tests.get("evidence"),
+                    regression_table=regression_table,
+                    include_legacy_presentation=True,
+                )
+                raise RuntimeError(
+                    "REPORT_EVIDENCE_UNAVAILABLE:"
+                    + str(view_model.get("reasonCode", "EVIDENCE_OWNER_CAPABILITY_REQUIRED"))
+                )
             if primary_type == "time_series.arma_garch":
                 from ..packs.arma_garch.deliverables import build_arma_garch_deliverables
 
@@ -356,22 +375,6 @@ class ReportStage:
             else:
                 from ...report_view_model import build_report_view_model
 
-                if report_admission is None:
-                    # This call is intentionally typed unavailable.  It must
-                    # never be converted back into the historical raw summary.
-                    view_model = build_report_view_model(
-                        diagnostic_summary,
-                        run_root,
-                        descriptive_stats=descriptive_stats,
-                        statistical_tests=statistical_test_summaries,
-                        statistical_evidence=statistical_tests.get("evidence"),
-                        regression_table=regression_table,
-                        include_legacy_presentation=True,
-                    )
-                    raise RuntimeError(
-                        "REPORT_EVIDENCE_UNAVAILABLE:"
-                        + str(view_model.get("reasonCode", "EVIDENCE_OWNER_CAPABILITY_REQUIRED"))
-                    )
                 report_owner, report_projection = report_admission
                 view_model = build_report_view_model(
                     diagnostic_summary,
