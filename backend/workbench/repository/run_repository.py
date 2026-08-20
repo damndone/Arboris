@@ -72,6 +72,7 @@ _KNOWN_ARTIFACT_TYPES = frozenset(
         "custom_json",
         "data",
         "dataset",
+        "design_precheck",
         "derived_data",
         "evaluation_packet",
         "evidence-envelope",
