@@ -9,7 +9,9 @@ symbols are re-exported from ``workbench.api`` for backward-compatible imports.
 """
 from __future__ import annotations
 
+import inspect
 import json
+from functools import lru_cache
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
@@ -116,6 +118,26 @@ _KNOWN_ARTIFACT_TYPES = frozenset(
 )
 
 
+@lru_cache(maxsize=1)
+def _canonical_artifact_types() -> frozenset[str]:
+    """Return the closed vocabulary published by the canonical producers.
+
+    The workflow producer owns the default type for formal outputs. Read that
+    default from the producer signature so this repository boundary cannot
+    silently drift from the workflow registry again. The legacy and other
+    established producer types remain the compatibility vocabulary above.
+    """
+
+    from ..agent.workflow_runtime import record_formal_workflow_artifact
+
+    artifact_type = inspect.signature(record_formal_workflow_artifact).parameters[
+        "artifact_type"
+    ].default
+    if type(artifact_type) is not str or not artifact_type:
+        raise ValueError("canonical formal workflow artifact type is unavailable")
+    return _KNOWN_ARTIFACT_TYPES | frozenset({artifact_type})
+
+
 def _validate_artifact_digest(value: Any) -> None:
     if (
         type(value) is not str
@@ -166,7 +188,7 @@ def _validate_artifact_record(run_root: Path, record: Any) -> dict[str, Any]:
     for field in ("artifact_id", "path", "artifact_type", "step", "code_version"):
         if type(record[field]) is not str or not record[field].strip():
             raise ValueError(f"artifact record field {field} is invalid")
-    if record["artifact_type"] not in _KNOWN_ARTIFACT_TYPES:
+    if record["artifact_type"] not in _canonical_artifact_types():
         raise ValueError("artifact record kind is not in the canonical vocabulary")
     if not isinstance(record["inputs"], list) or any(
         type(item) is not str or not item.strip() for item in record["inputs"]

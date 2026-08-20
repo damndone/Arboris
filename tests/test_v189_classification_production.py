@@ -826,6 +826,7 @@ def test_runs_artifact_route_serves_classification_only_as_validated_wrapper(tmp
     ("index_state", "expected_code"),
     (
         ("missing", "ARTIFACTS_INDEX_UNAVAILABLE"),
+        ("unreadable", "ARTIFACTS_INDEX_UNAVAILABLE"),
         ("malformed_json", "ARTIFACTS_INDEX_INVALID"),
     ),
 )
@@ -835,7 +836,9 @@ def test_runs_artifact_list_red_probe_rejects_missing_or_malformed_index(
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-artifacts-list"
     run_root.mkdir(parents=True)
-    if index_state == "malformed_json":
+    if index_state == "unreadable":
+        (run_root / "artifacts_index.json").mkdir()
+    elif index_state == "malformed_json":
         (run_root / "artifacts_index.json").write_text("{", encoding="utf-8")
 
     with pytest.raises(WorkbenchAPIError) as exc_info:
@@ -848,6 +851,7 @@ def test_runs_artifact_list_red_probe_rejects_missing_or_malformed_index(
     ("index_state", "expected_status", "expected_code"),
     (
         ("missing", 503, "ARTIFACTS_INDEX_UNAVAILABLE"),
+        ("unreadable", 503, "ARTIFACTS_INDEX_UNAVAILABLE"),
         ("malformed_json", 500, "ARTIFACTS_INDEX_INVALID"),
     ),
 )
@@ -857,7 +861,9 @@ def test_runs_artifact_list_http_boundary_returns_typed_error_without_raw_except
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-artifacts-http"
     run_root.mkdir(parents=True)
-    if index_state == "malformed_json":
+    if index_state == "unreadable":
+        (run_root / "artifacts_index.json").mkdir()
+    elif index_state == "malformed_json":
         (run_root / "artifacts_index.json").write_text("{", encoding="utf-8")
 
     response = TestClient(app, raise_server_exceptions=False).get(
@@ -869,6 +875,65 @@ def test_runs_artifact_list_http_boundary_returns_typed_error_without_raw_except
     assert response.status_code == expected_status
     assert body["error"]["code"] == expected_code
     assert "JSONDecodeError" not in response.text
+
+
+def test_runs_artifact_list_accepts_canonical_formal_output_in_repository(tmp_path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-formal-output"
+    run_root.mkdir(parents=True)
+    (run_root / "formal_output.json").write_text("{}", encoding="utf-8")
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "artifacts": [_canonical_artifact_record(
+                artifact_id="artifact:formal-output",
+                path="formal_output.json",
+                artifact_type="formal_output",
+                step="formal_output",
+            )],
+        }),
+        encoding="utf-8",
+    )
+
+    listed = runs_routes.list_artifacts_endpoint("run-formal-output", str(project_root))
+
+    assert listed["groups"] == [{
+        "artifact_type": "formal_output",
+        "items": [{
+            "artifact_id": "artifact:formal-output",
+            "path": "formal_output.json",
+            "artifact_type": "formal_output",
+            "step": "formal_output",
+            "sha256": "a" * 64,
+        }],
+    }]
+
+
+def test_runs_artifact_list_accepts_canonical_formal_output_over_http(tmp_path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-formal-output-http"
+    run_root.mkdir(parents=True)
+    (run_root / "formal_output.json").write_text("{}", encoding="utf-8")
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "artifacts": [_canonical_artifact_record(
+                artifact_id="artifact:formal-output",
+                path="formal_output.json",
+                artifact_type="formal_output",
+                step="formal_output",
+            )],
+        }),
+        encoding="utf-8",
+    )
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-formal-output-http/artifacts",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["groups"][0]["artifact_type"] == "formal_output"
 
 
 @pytest.mark.parametrize(
@@ -968,6 +1033,68 @@ def test_runs_artifact_list_http_boundary_rejects_forged_artifact_type_without_g
 
     response = TestClient(app, raise_server_exceptions=False).get(
         "/runs/run-forged-artifact-type/artifacts",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert "groups" not in response.json()
+    assert "JSONDecodeError" not in response.text
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "missing_artifacts",
+        "null_artifacts",
+        "unknown_record_type",
+        "forged_artifact_type",
+        "missing_required_field",
+        "null_path",
+        "null_digest",
+        "duplicate_id",
+        "path_escape",
+        "invalid_digest",
+        "tampered_structure",
+    ),
+)
+def test_runs_artifact_list_http_boundary_returns_500_for_every_invalid_mutation(
+    tmp_path, mutation: str
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-artifact-http-mutations"
+    run_root.mkdir(parents=True)
+    (run_root / "data.json").write_text("{}", encoding="utf-8")
+    index: dict[str, object] = {
+        "schema_version": 1,
+        "artifacts": [_canonical_artifact_record()],
+    }
+    if mutation == "missing_artifacts":
+        index.pop("artifacts")
+    elif mutation == "null_artifacts":
+        index["artifacts"] = None
+    elif mutation == "unknown_record_type":
+        index["artifacts"][0]["record_type"] = "unknown"  # type: ignore[index]
+    elif mutation == "forged_artifact_type":
+        index["artifacts"][0]["artifact_type"] = "forged_type"  # type: ignore[index]
+    elif mutation == "missing_required_field":
+        index["artifacts"][0].pop("inputs")  # type: ignore[index]
+    elif mutation == "null_path":
+        index["artifacts"][0]["path"] = None  # type: ignore[index]
+    elif mutation == "null_digest":
+        index["artifacts"][0]["sha256"] = None  # type: ignore[index]
+    elif mutation == "duplicate_id":
+        index["artifacts"].append(_canonical_artifact_record(path="second.json"))  # type: ignore[union-attr]
+    elif mutation == "path_escape":
+        index["artifacts"][0]["path"] = "../outside.json"  # type: ignore[index]
+    elif mutation == "invalid_digest":
+        index["artifacts"][0]["sha256"] = "not-a-digest"  # type: ignore[index]
+    elif mutation == "tampered_structure":
+        index["artifacts"][0]["inputs"] = {"artifact_id": "forged"}  # type: ignore[index]
+    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-artifact-http-mutations/artifacts",
         params={"project_root": str(project_root)},
     )
 

@@ -369,6 +369,27 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     expect(screen.getByTestId("classification-context")).toHaveTextContent(CLASSIFICATION_EVIDENCE_SCHEMA);
   });
 
+  it("accepts a canonical formal_output inventory without blocking ReportWorkspace", async () => {
+    mockArtifacts.current = {
+      groups: [{
+        artifact_type: "formal_output",
+        items: [{
+          artifact_id: "artifact:formal-output",
+          path: "formal_output.json",
+          artifact_type: "formal_output",
+          step: "formal_output",
+          sha256: "a".repeat(64),
+        }],
+      }],
+    };
+
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByTestId("artifact-inventory-error")).toHaveTextContent(""));
+    expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE");
+    expect(mockArtifactJson.current).not.toHaveBeenCalled();
+  });
+
   it("marks an indexed classification artifact unavailable when persisted fold receipts are missing", async () => {
     mockArtifacts.current = {
       groups: [{
