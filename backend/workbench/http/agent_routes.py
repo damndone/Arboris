@@ -69,6 +69,8 @@ from ..agent.orchestrator import (
     validate_server_proposal_revision,
 )
 from ..agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    issue_route_proposal_store,
     ProposalConfirmationError,
     ProposalRevision,
     ProposalStaleError,
@@ -726,7 +728,7 @@ def _public_session(
     }
 
 
-_ROUTE_PROPOSAL_STORE_OWNER = object()
+_ROUTE_PROPOSAL_STORE_ISSUER = DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER
 _ROUTE_PROPOSAL_STORE_OWNER_LOCK = RLock()
 _ROUTE_PROPOSAL_REFERENCE_ADMISSIONS: dict[int, tuple[object, ProposalStoreCapabilityV1, ProposalRevision]] = {}
 
@@ -734,10 +736,7 @@ _ROUTE_PROPOSAL_REFERENCE_ADMISSIONS: dict[int, tuple[object, ProposalStoreCapab
 def _server_proposal_store(root: Path) -> ProposalStoreCapabilityV1:
     """Issue the route-owned persisted ProposalStore view for one project."""
 
-    return ProposalStore._issue_server_capability(
-        root,
-        owner_token=_ROUTE_PROPOSAL_STORE_OWNER,
-    )
+    return issue_route_proposal_store(root)
 
 
 @dataclass(frozen=True, init=False)
@@ -763,7 +762,7 @@ class ServerOwnedLegacyProposalReferenceV1:
                 message="The legacy route requires a server-owned persisted proposal reference.",
             )
         try:
-            store._require_admitted(_ROUTE_PROPOSAL_STORE_OWNER)
+            store._require_admitted(_ROUTE_PROPOSAL_STORE_ISSUER)
         except ProposalStoreCapabilityError as exc:
             raise WorkbenchAPIError(
                 status_code=403,
@@ -800,7 +799,7 @@ class ServerOwnedLegacyProposalReferenceV1:
                 message="The legacy route proposal reference binding changed.",
             )
         try:
-            store._require_admitted(_ROUTE_PROPOSAL_STORE_OWNER)
+            store._require_admitted(_ROUTE_PROPOSAL_STORE_ISSUER)
         except ProposalStoreCapabilityError as exc:
             raise WorkbenchAPIError(
                 status_code=403,
@@ -854,7 +853,7 @@ def _proposal_for_session(
             details={"proposal_id": proposal_id},
         )
     try:
-        store._require_admitted(_ROUTE_PROPOSAL_STORE_OWNER)
+        store._require_admitted(_ROUTE_PROPOSAL_STORE_ISSUER)
     except ProposalStoreCapabilityError as exc:
         raise WorkbenchAPIError(
             status_code=403,
@@ -1569,6 +1568,7 @@ def create_agent_analysis_loop_proposal(
         events,
         main_session_id=_ensure_main_session(repository, root),
         proposal_store=proposal_store,
+        proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
         context_provider=provider,
     )
     # Proposal creation needs a registered Chain identity but does not invoke
@@ -1818,6 +1818,7 @@ def create_agent_fork_proposal(
         events,
         main_session_id=_ensure_main_session(repository, root),
         proposal_store=proposal_store,
+        proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
         context_provider=NodeOperationContextProvider(root),
     )
     agent = AgentCore(
@@ -1932,6 +1933,7 @@ def decline_agent_proposal(
         events,
         main_session_id=_ensure_main_session(repository, root),
         proposal_store=store,
+        proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
         context_provider=NodeOperationContextProvider(root),
     )
     try:
@@ -1976,6 +1978,7 @@ def revise_agent_proposal(
         events,
         main_session_id=_ensure_main_session(repository, root),
         proposal_store=store,
+        proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
         context_provider=NodeOperationContextProvider(root),
     )
     try:
@@ -2162,6 +2165,7 @@ async def run_agent_turn(
             events,
             main_session_id=_ensure_main_session(repository, root),
             proposal_store=proposal_store,
+            proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
             operation_registry=operation_registry,
             context_provider=NodeOperationContextProvider(root),
         )

@@ -258,6 +258,7 @@ def test_server_capability_replay_is_stale_without_duplicate_write(tmp_path: Pat
         events,
         main_session_id="main-session",
         proposal_store=store,
+        proposal_store_issuer=agent_routes._ROUTE_PROPOSAL_STORE_ISSUER,
     )
 
     revised = orchestrator.revise_proposal(

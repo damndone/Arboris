@@ -65,6 +65,7 @@ from .proposals import (
     ProposalStaleError,
     ProposalStore,
     ProposalStoreCapabilityError,
+    ProposalStoreCapabilityIssuerV1,
     ProposalStoreCapabilityV1,
 )
 from .risk import (
@@ -560,6 +561,7 @@ class WorkbenchOrchestrator:
         *,
         main_session_id: str,
         proposal_store: ProposalStore | ProposalStoreCapabilityV1 | None = None,
+        proposal_store_issuer: ProposalStoreCapabilityIssuerV1 | None = None,
         operation_store: OperationRecordStore | None = None,
         operation_registry: OperationRegistry | None = None,
         context_provider: WorkbenchContextProvider | None = None,
@@ -575,6 +577,7 @@ class WorkbenchOrchestrator:
         # through the public proposal_store attribute and every proposal
         # mutation below requires the live server-issued capability explicitly.
         self._proposal_store = proposal_store
+        self._proposal_store_issuer = proposal_store_issuer
         self.proposal_store = (
             proposal_store if type(proposal_store) is ProposalStoreCapabilityV1 else None
         )
@@ -602,8 +605,10 @@ class WorkbenchOrchestrator:
             self._require_proposal_store_root(store)
             return store
         if type(store) is ProposalStoreCapabilityV1:
+            if self._proposal_store_issuer is None:
+                raise LegacyProposalWriteBoundaryError()
             try:
-                admitted = store._require_admitted()
+                admitted = store._require_admitted(self._proposal_store_issuer)
             except ProposalStoreCapabilityError as exc:
                 raise LegacyProposalWriteBoundaryError() from exc
             self._require_proposal_store_root(admitted)
@@ -616,8 +621,10 @@ class WorkbenchOrchestrator:
         store = self._proposal_store
         if type(store) is not ProposalStoreCapabilityV1:
             raise LegacyProposalWriteBoundaryError()
+        if self._proposal_store_issuer is None:
+            raise LegacyProposalWriteBoundaryError()
         try:
-            admitted = store._require_admitted()
+            admitted = store._require_admitted(self._proposal_store_issuer)
         except ProposalStoreCapabilityError as exc:
             raise LegacyProposalWriteBoundaryError() from exc
         self._require_proposal_store_root(admitted)
@@ -3367,6 +3374,11 @@ class AgentNotebookCompilerV1:
         self._confirmation_store = None
         self._admission_gate = None
         self._authority_token = object()
+        self._proposal_store_issuer = ProposalStoreCapabilityIssuerV1()
+        self._proposal_store_issuer._grant_mutation_admission()
+        self._proposal_store_service_admission = (
+            self._proposal_store_issuer._register_service_admission()
+        )
         self._records: dict[str, Any] = {}
         self._server_refs: dict[str, Any] = {}
         self._descriptors: dict[str, Any] = {}
@@ -3752,7 +3764,11 @@ class AgentNotebookCompilerV1:
     def server_proposal_store(self, root: Path | str) -> ProposalStoreCapabilityV1:
         """Issue the only ProposalStore view accepted by this compiler authority."""
 
-        return ProposalStore._issue_server_capability(root, owner_token=self._authority_token)
+        return ProposalStore._issue_server_capability(
+            root,
+            issuer=self._proposal_store_issuer,
+            service_admission=self._proposal_store_service_admission,
+        )
 
     def _load_persisted_proposal(
         self,
@@ -3767,7 +3783,7 @@ class AgentNotebookCompilerV1:
                 "proposal binding requires an opaque ProposalStore capability issued by this authority",
             )
         try:
-            proposal_store._require_admitted(self._authority_token)
+            proposal_store._require_admitted(self._proposal_store_issuer)
         except ProposalStoreCapabilityError as exc:
             raise CutoverCompilerError(
                 "SERVER_PROPOSAL_STORE_CAPABILITY_REQUIRED",

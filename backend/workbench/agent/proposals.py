@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -209,11 +210,129 @@ class ProposalDecision:
 
 _PROPOSAL_STORE_PROCESS_GENERATION = object()
 _PROPOSAL_STORE_CAPABILITY_LOCK = RLock()
-_PROPOSAL_STORE_CAPABILITY_ADMISSIONS: dict[int, tuple[object, object, object, int, tuple[int, int]]] = {}
+_PROPOSAL_STORE_ISSUER_ADMISSIONS: dict[
+    int, tuple[object, str, int, object, object]
+] = {}
+_PROPOSAL_STORE_CAPABILITY_ADMISSIONS: dict[
+    int, tuple[object, object, object, str, object, object | None, int, object, tuple[int, int]]
+] = {}
 
 
 class ProposalStoreCapabilityError(ProposalError):
     """A raw or forged ProposalStore was supplied where server admission is required."""
+
+
+class ProposalStoreCapabilityIssuerV1:
+    """A process-local server issuer for proposal-store capabilities.
+
+    The issuer owns a random nonce and a registry admission. A capability is
+    usable only while its exact issuer object, nonce, process generation, and
+    store-root identity all match the server registry snapshot.
+    """
+
+    __slots__ = ("_issuer_nonce", "_mutation_admission", "_process_id", "_generation")
+
+    def __init__(self) -> None:
+        self._issuer_nonce = secrets.token_hex(32)
+        self._mutation_admission: object | None = None
+        self._process_id = os.getpid()
+        self._generation = _PROPOSAL_STORE_PROCESS_GENERATION
+        with _PROPOSAL_STORE_CAPABILITY_LOCK:
+            _PROPOSAL_STORE_ISSUER_ADMISSIONS[id(self)] = (
+                self,
+                self._issuer_nonce,
+                None,
+                self._process_id,
+                self._generation,
+            )
+
+    def _require_live(self) -> None:
+        with _PROPOSAL_STORE_CAPABILITY_LOCK:
+            admission = _PROPOSAL_STORE_ISSUER_ADMISSIONS.get(id(self))
+        if (
+            admission is None
+            or admission[0] is not self
+            or admission[1] != self._issuer_nonce
+            or admission[3] != self._process_id
+            or admission[4] is not self._generation
+            or self._process_id != os.getpid()
+        ):
+            raise ProposalStoreCapabilityError(
+                "server proposal capability issuer is not current"
+            )
+
+    def _issue_store(
+        self,
+        root: Path | str,
+        *,
+        service_admission: object,
+    ) -> "ProposalStoreCapabilityV1":
+        self._require_live()
+        self._require_service_admission(service_admission)
+        return ProposalStoreCapabilityV1._issue(
+            ProposalStore(root),
+            issuer=self,
+            service_admission=service_admission,
+        )
+
+    def _register_service_admission(self) -> object:
+        """Create one opaque service-entry handle outside the issuer object."""
+
+        self._require_live()
+        service_admission = object()
+        with _PROPOSAL_STORE_CAPABILITY_LOCK:
+            current = _PROPOSAL_STORE_ISSUER_ADMISSIONS.get(id(self))
+            if current is None or current[0] is not self:
+                raise ProposalStoreCapabilityError(
+                    "server proposal capability issuer is not current"
+                )
+            _PROPOSAL_STORE_ISSUER_ADMISSIONS[id(self)] = (
+                self,
+                self._issuer_nonce,
+                service_admission,
+                self._process_id,
+                self._generation,
+            )
+        return service_admission
+
+    def _require_service_admission(self, service_admission: object) -> None:
+        with _PROPOSAL_STORE_CAPABILITY_LOCK:
+            current = _PROPOSAL_STORE_ISSUER_ADMISSIONS.get(id(self))
+        if (
+            current is None
+            or current[0] is not self
+            or current[1] != self._issuer_nonce
+            or current[2] is not service_admission
+        ):
+            raise ProposalStoreCapabilityError(
+                "server proposal capability service admission is required"
+            )
+
+    def _grant_mutation_admission(self) -> None:
+        """Register this issuer as a live server mutation authority."""
+
+        self._require_live()
+        self._mutation_admission = object()
+
+
+# The HTTP route owns this exact issuer identity. It is intentionally shared
+# with the orchestrator's default route binding, while every capability still
+# carries its own nonce/root/process snapshot in the registry.
+DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER = ProposalStoreCapabilityIssuerV1()
+DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER._grant_mutation_admission()
+_DEFAULT_ROUTE_PROPOSAL_STORE_SERVICE_ADMISSION = (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER._register_service_admission()
+)
+
+
+def issue_route_proposal_store(root: Path | str) -> "ProposalStoreCapabilityV1":
+    """Issue the route capability through the server-owned service entrance."""
+
+    return ProposalStore._issue_server_capability(
+        root,
+        issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+        service_admission=_DEFAULT_ROUTE_PROPOSAL_STORE_SERVICE_ADMISSION,
+    )
 
 
 class ProposalStoreCapabilityV1:
@@ -225,21 +344,41 @@ class ProposalStoreCapabilityV1:
     it has the same Python type or points at a complete JSONL file.
     """
 
-    __slots__ = ("_store", "_owner_token", "_root_identity", "_process_id", "_generation")
+    __slots__ = (
+        "_store",
+        "_issuer",
+        "_issuer_nonce",
+        "_service_admission",
+        "_mutation_admission",
+        "_root_identity",
+        "_process_id",
+        "_generation",
+    )
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         raise TypeError("proposal store capabilities are issued by server admission")
 
     @classmethod
-    def _issue(cls, store: "ProposalStore", *, owner_token: object) -> "ProposalStoreCapabilityV1":
-        if type(store) is not ProposalStore or owner_token is None:
+    def _issue(
+        cls,
+        store: "ProposalStore",
+        *,
+        issuer: ProposalStoreCapabilityIssuerV1,
+        service_admission: object,
+    ) -> "ProposalStoreCapabilityV1":
+        if type(store) is not ProposalStore or type(issuer) is not ProposalStoreCapabilityIssuerV1:
             raise ProposalStoreCapabilityError("server proposal store admission is invalid")
+        issuer._require_live()
+        issuer._require_service_admission(service_admission)
         capability = object.__new__(cls)
         process_id = os.getpid()
         generation = _PROPOSAL_STORE_PROCESS_GENERATION
         for name, value in (
             ("_store", store),
-            ("_owner_token", owner_token),
+            ("_issuer", issuer),
+            ("_issuer_nonce", issuer._issuer_nonce),
+            ("_service_admission", service_admission),
+            ("_mutation_admission", issuer._mutation_admission),
             ("_root_identity", store._root_identity),
             ("_process_id", process_id),
             ("_generation", generation),
@@ -249,28 +388,53 @@ class ProposalStoreCapabilityV1:
             _PROPOSAL_STORE_CAPABILITY_ADMISSIONS[id(capability)] = (
                 capability,
                 store,
-                owner_token,
+                issuer,
+                issuer._issuer_nonce,
+                service_admission,
+                issuer._mutation_admission,
                 process_id,
                 generation,
+                store._root_identity,
             )
         return capability
 
-    def _require_admitted(self, owner_token: object | None = None) -> "ProposalStore":
+    def _require_admitted(
+        self,
+        issuer: ProposalStoreCapabilityIssuerV1 | None = None,
+    ) -> "ProposalStore":
         if type(self) is not ProposalStoreCapabilityV1:
             raise ProposalStoreCapabilityError("server proposal store capability is required")
         with _PROPOSAL_STORE_CAPABILITY_LOCK:
             admission = _PROPOSAL_STORE_CAPABILITY_ADMISSIONS.get(id(self))
         if admission is None or admission[0] is not self:
             raise ProposalStoreCapabilityError("proposal store capability was not server-admitted")
-        _capability, store, admitted_owner, process_id, generation = admission
+        (
+            _capability,
+            store,
+            admitted_issuer,
+            issuer_nonce,
+            service_admission,
+            mutation_admission,
+            process_id,
+            generation,
+            root_identity,
+        ) = admission
+        if issuer is not None and issuer is not admitted_issuer:
+            raise ProposalStoreCapabilityError(
+                "proposal store capability issuer binding changed"
+            )
+        admitted_issuer._require_live()
         if (
             self._store is not store
-            or self._owner_token is not admitted_owner
+            or self._issuer is not admitted_issuer
+            or self._issuer_nonce != issuer_nonce
+            or self._service_admission is not service_admission
+            or self._mutation_admission is not mutation_admission
             or self._root_identity != store._root_identity
+            or self._root_identity != root_identity
             or self._process_id != process_id
             or self._generation is not generation
             or process_id != os.getpid()
-            or (owner_token is not None and owner_token is not admitted_owner)
         ):
             raise ProposalStoreCapabilityError("server proposal store capability binding changed")
         try:
@@ -281,12 +445,22 @@ class ProposalStoreCapabilityV1:
             raise ProposalStoreCapabilityError("server proposal store root identity changed")
         return store
 
+    def _require_mutation_admitted(self) -> "ProposalStore":
+        """Require a live server issuer before any proposal mutation."""
+
+        store = self._require_admitted()
+        if self._issuer._mutation_admission is None:
+            raise ProposalStoreCapabilityError(
+                "proposal store capability mutation admission is required"
+            )
+        return store
+
     @property
     def root(self) -> Path:
         return self._require_admitted().root
 
     def create(self, *args: object, **kwargs: object) -> ProposalRevision:
-        store = self._require_admitted()
+        store = self._require_mutation_admitted()
         preconditions = kwargs.get("preconditions")
         if type(preconditions) is dict:
             server_compilation = preconditions.get("server_compilation")
@@ -302,13 +476,13 @@ class ProposalStoreCapabilityV1:
         return store.create(*args, **kwargs)
 
     def revise(self, *args: object, **kwargs: object) -> ProposalRevision:
-        return self._require_admitted().revise(*args, **kwargs)
+        return self._require_mutation_admitted().revise(*args, **kwargs)
 
     def confirm(self, *args: object, **kwargs: object) -> ProposalConfirmation:
-        return self._require_admitted().confirm(*args, **kwargs)
+        return self._require_mutation_admitted().confirm(*args, **kwargs)
 
     def decline(self, *args: object, **kwargs: object) -> ProposalDecision:
-        return self._require_admitted().decline(*args, **kwargs)
+        return self._require_mutation_admitted().decline(*args, **kwargs)
 
     def latest_revision(self, *args: object, **kwargs: object) -> ProposalRevision:
         return self._require_admitted().latest_revision(*args, **kwargs)
@@ -366,11 +540,14 @@ class ProposalStore:
         cls,
         root: Path | str,
         *,
-        owner_token: object,
+        issuer: ProposalStoreCapabilityIssuerV1,
+        service_admission: object,
     ) -> ProposalStoreCapabilityV1:
-        """Issue a capability only to a server authority that owns ``owner_token``."""
+        """Issue a capability through an exact server-owned issuer registry."""
 
-        return ProposalStoreCapabilityV1._issue(cls(root), owner_token=owner_token)
+        if type(issuer) is not ProposalStoreCapabilityIssuerV1:
+            raise ProposalStoreCapabilityError("server proposal capability issuer is required")
+        return issuer._issue_store(root, service_admission=service_admission)
 
     def create(
         self,

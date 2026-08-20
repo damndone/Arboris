@@ -562,6 +562,7 @@ def test_direct_workbench_confirmation_fails_before_legacy_store_writes(
         bootstrap.events,
         main_session_id="main-session",
         proposal_store=proposal_store,
+        proposal_store_issuer=agent_routes._ROUTE_PROPOSAL_STORE_ISSUER,
     )
     chain_session_id, chain_agent = bootstrap._chains["chain-a"]
     orchestrator.register_chain("chain-a", chain_session_id, chain_agent)
