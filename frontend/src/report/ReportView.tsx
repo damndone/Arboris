@@ -46,6 +46,12 @@ export function ReportClassificationEvidenceMount({ evidence }: { evidence: unkn
       data-testid="report-classification-evidence"
       style={{ marginBottom: 16 }}
     >
+      <p
+        data-testid="report-classification-evidence-non-citable"
+        style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "0 0 6px" }}
+      >
+        NON-CITABLE: classification artifact JSON is display-only and is excluded from Report facts, writer input, and LLM context.
+      </p>
       {packet ? (
         <ClassificationEvidence evidence={packet} />
       ) : (

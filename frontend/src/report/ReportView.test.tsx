@@ -5,7 +5,7 @@ import { loadAiActivity } from "../aiActivity/aiActivityLog";
 import { ReportReviewPanel } from "./ReportReviewPanel";
 import { ReportViewContent } from "./ReportView";
 import { ReportWorkspaceProvider } from "./ReportWorkspaceContext";
-import type { ReportEvidenceProjection } from "./factTable";
+import { reportProjectionDigest, type ReportEvidenceProjection } from "./factTable";
 
 const mockForest = vi.hoisted(() => ({ current: null as unknown }));
 const mockWb = vi.hoisted(() => ({ current: null as unknown }));
@@ -87,7 +87,7 @@ function typedReportEvidence(
     { statisticId: "metric:r_squared", value: 0.86 },
   ],
 ): ReportEvidenceProjection {
-  return {
+  const projection = {
     schemaVersion: 1,
     projectionId: "report:commit:report-test",
     consumerId: "report",
@@ -114,13 +114,37 @@ function typedReportEvidence(
       ...fact,
     })),
     sections: [],
+    projectionDigest: "",
     provenance: {
       artifactRef: "artifact:report-test",
+      artifactType: "post_estimation",
+      scopeRef: "scope:report-test",
+      contentHash: "b".repeat(64),
+      sourceRef: "source:report-test",
+      validatorRef: "validator:report-test",
+      executionRef: "execution:report-test",
+      contractDigest: "c".repeat(64),
       commitId: "commit:report-test",
       envelopeRef: "envelope:report-test",
+      envelopeDigest: "a".repeat(64),
       lineageRefs: ["lineage:report-test"],
+      projectionRef: {
+        kind: "projection",
+        logical_id: "workbench.consumer_projection.report",
+        semantic_version: "1.0",
+        contract_digest: "d".repeat(64),
+      },
+      resultIdentity: {
+        contract: "evidence-envelope",
+        result_id: "result:report-test",
+        schema_version: "1.0",
+      },
     },
-  };
+  } as ReportEvidenceProjection;
+  (projection as unknown as Record<string, unknown>).projectionDigest = reportProjectionDigest(
+    projection as unknown as Record<string, unknown>,
+  );
+  return projection;
 }
 
 describe("ReportView", () => {

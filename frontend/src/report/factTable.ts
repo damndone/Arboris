@@ -30,14 +30,21 @@ export interface CitableFact {
 }
 
 export interface ReportEvidenceProvenance {
-  readonly artifactRef?: string;
+  readonly artifactRef: string;
   readonly artifactId?: string;
-  readonly artifactType?: string;
-  readonly commitId?: string;
-  readonly envelopeRef?: string;
-  readonly lineageRefs?: readonly string[];
-  readonly projectionRef?: Record<string, unknown>;
-  readonly resultIdentity?: Record<string, unknown>;
+  readonly artifactType: string;
+  readonly scopeRef: string;
+  readonly contentHash: string;
+  readonly sourceRef: string;
+  readonly validatorRef: string | Record<string, unknown>;
+  readonly executionRef: string;
+  readonly contractDigest: string;
+  readonly commitId: string;
+  readonly envelopeRef: string;
+  readonly envelopeDigest: string;
+  readonly lineageRefs: readonly string[];
+  readonly projectionRef: Record<string, unknown>;
+  readonly resultIdentity: Record<string, unknown>;
   readonly indexed?: boolean;
   readonly admissionStatus?: string;
   readonly projections?: readonly Record<string, unknown>[];
@@ -58,8 +65,8 @@ export interface ReportEvidenceIdentity {
 
 export type ReportEvidenceProjection = EvidenceViewModel & {
   readonly schemaVersion: 1;
-  /** Present on server wires; omitted by legacy local view fixtures. */
-  readonly projectionDigest?: string;
+  /** Server-owned canonical digest; unavailable projections use a typed sentinel. */
+  readonly projectionDigest: string;
   readonly actorRef: string;
   readonly projectRef: string;
   readonly sessionRef: string;
@@ -83,7 +90,7 @@ function asEvidenceRecord(value: unknown): Record<string, unknown> | null {
 function readEvidenceProvenance(value: unknown): ReportEvidenceProvenance | null {
   const record = asEvidenceRecord(value);
   if (!record) return null;
-  const provenance: ReportEvidenceProvenance = {};
+  const parsedProvenance: Record<string, unknown> = {};
   for (const key of [
     "artifactRef",
     "artifactId",
@@ -94,30 +101,30 @@ function readEvidenceProvenance(value: unknown): ReportEvidenceProvenance | null
   ] as const) {
     if (record[key] !== undefined && typeof record[key] !== "string") return null;
     if (typeof record[key] === "string") {
-      (provenance as Record<string, unknown>)[key] = record[key];
+      parsedProvenance[key] = record[key];
     }
   }
   if (record.indexed !== undefined && typeof record.indexed !== "boolean") return null;
   if (record.indexed === true) {
-    (provenance as Record<string, unknown>).indexed = true;
+    parsedProvenance.indexed = true;
   }
   if (record.lineageRefs !== undefined) {
     if (!Array.isArray(record.lineageRefs) || !record.lineageRefs.every((item) => typeof item === "string")) return null;
-    (provenance as Record<string, unknown>).lineageRefs = record.lineageRefs;
+    parsedProvenance.lineageRefs = record.lineageRefs;
   }
   if (record.envelopeDigests !== undefined) {
     if (!Array.isArray(record.envelopeDigests) || !record.envelopeDigests.every((item) => typeof item === "string")) return null;
-    (provenance as Record<string, unknown>).envelopeDigests = record.envelopeDigests;
+    parsedProvenance.envelopeDigests = record.envelopeDigests;
   }
   if (record.projectionRef !== undefined) {
     const projectionRef = asEvidenceRecord(record.projectionRef);
     if (!projectionRef) return null;
-    (provenance as Record<string, unknown>).projectionRef = projectionRef;
+    parsedProvenance.projectionRef = projectionRef;
   }
   if (record.resultIdentity !== undefined) {
     const resultIdentity = asEvidenceRecord(record.resultIdentity);
     if (!resultIdentity) return null;
-    (provenance as Record<string, unknown>).resultIdentity = resultIdentity;
+    parsedProvenance.resultIdentity = resultIdentity;
   }
   if (record.projections !== undefined) {
     if (!Array.isArray(record.projections)) return null;
@@ -125,9 +132,57 @@ function readEvidenceProvenance(value: unknown): ReportEvidenceProvenance | null
       .map(asEvidenceRecord)
       .filter((item): item is Record<string, unknown> => item !== null);
     if (projections.length !== record.projections.length) return null;
-    (provenance as Record<string, unknown>).projections = projections;
+    parsedProvenance.projections = projections;
   }
-  return provenance;
+  const requiredTextKeys = [
+    "artifactRef",
+    "artifactType",
+    "scopeRef",
+    "sourceRef",
+    "executionRef",
+    "commitId",
+    "envelopeRef",
+    "envelopeDigest",
+    "contractDigest",
+  ] as const;
+  if (requiredTextKeys.some((key) => typeof record[key] !== "string" || record[key] === "" || record[key] === "UNAVAILABLE")) {
+    return null;
+  }
+  const digestKeys = ["contentHash", "contractDigest", "envelopeDigest"] as const;
+  if (digestKeys.some((key) => typeof record[key] !== "string" || !/^[0-9a-f]{64}$/.test(record[key] as string))) {
+    return null;
+  }
+  const validatorRef = record.validatorRef;
+  if (typeof validatorRef === "string") {
+    if (!validatorRef.trim() || validatorRef === "UNAVAILABLE") return null;
+  } else {
+    const validatorRecord = asEvidenceRecord(validatorRef);
+    if (!validatorRecord) return null;
+    for (const key of ["kind", "logical_id", "semantic_version", "contract_digest"] as const) {
+      if (typeof validatorRecord[key] !== "string" || validatorRecord[key] === "") return null;
+    }
+    if (!/^[0-9a-f]{64}$/.test(validatorRecord.contract_digest as string)) return null;
+  }
+  const projectionRef = asEvidenceRecord(record.projectionRef);
+  if (!projectionRef) return null;
+  for (const key of ["kind", "logical_id", "semantic_version", "contract_digest"] as const) {
+    if (typeof projectionRef[key] !== "string" || projectionRef[key] === "") return null;
+  }
+  if (!/^[0-9a-f]{64}$/.test(projectionRef.contract_digest as string)) return null;
+  if (!Array.isArray(record.lineageRefs) || !record.lineageRefs.every((item) => typeof item === "string" && item.trim() !== "")) {
+    return null;
+  }
+  const resultIdentity = asEvidenceRecord(record.resultIdentity);
+  if (!resultIdentity) return null;
+  for (const key of ["contract", "result_id", "schema_version"] as const) {
+    if (typeof resultIdentity[key] !== "string" || resultIdentity[key] === "") return null;
+  }
+  for (const key of requiredTextKeys) {
+    parsedProvenance[key] = record[key];
+  }
+  parsedProvenance.contentHash = record.contentHash;
+  parsedProvenance.validatorRef = validatorRef;
+  return parsedProvenance as unknown as ReportEvidenceProvenance;
 }
 
 /** Canonical JSON v1 parity for the server-owned projection digest. */
@@ -247,7 +302,7 @@ function sha256Hex(text: string): string {
     .join("");
 }
 
-function reportProjectionDigest(candidate: Record<string, unknown>): string {
+export function reportProjectionDigest(candidate: Record<string, unknown>): string {
   const withoutDigest = Object.fromEntries(
     Object.entries(candidate).filter(([key]) => key !== "projectionDigest"),
   );
@@ -304,7 +359,9 @@ export function readReportEvidenceProjection(
   if (reasonCode !== undefined && typeof reasonCode !== "string") return null;
   if (typeof provenance.commitId === "string" && provenance.commitId !== commitId) return null;
   if (typeof provenance.artifactRef === "string" && provenance.artifactRef !== candidate.artifactRef) return null;
+  if (provenance.scopeRef !== candidate.scopeRef) return null;
   if (typeof provenance.envelopeRef === "string" && provenance.envelopeRef !== candidate.envelopeRef) return null;
+  if (provenance.envelopeDigest !== candidate.envelopeDigest) return null;
   if (
     Array.isArray(provenance.envelopeDigests)
     && !provenance.envelopeDigests.includes(candidate.envelopeDigest)
@@ -385,7 +442,21 @@ export function unavailableReportEvidence(
     sections: [{ key: "persisted-evidence", label: "Persisted evidence", status: "unavailable" }],
     reasonCode,
     provenance: {
+      artifactRef,
+      artifactType: "UNAVAILABLE",
       artifactId: artifactRef,
+      scopeRef: "UNAVAILABLE",
+      contentHash: "UNAVAILABLE",
+      sourceRef: "UNAVAILABLE",
+      validatorRef: "UNAVAILABLE",
+      executionRef: "UNAVAILABLE",
+      contractDigest: "UNAVAILABLE",
+      commitId: "UNAVAILABLE",
+      envelopeRef: "UNAVAILABLE",
+      envelopeDigest: "UNAVAILABLE",
+      lineageRefs: [],
+      projectionRef: {},
+      resultIdentity: {},
       indexed: true,
       admissionStatus: "unavailable",
     },

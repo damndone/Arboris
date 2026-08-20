@@ -88,6 +88,10 @@ def _require_server_owned_owner(owner: object) -> object:
     marker = getattr(owner, "_report_authority_marker", None)
     if type(marker) is not object:
         raise TypeError("Report evidence requires a server-owned owner capability")
+    try:
+        owner._require_report_authority()  # type: ignore[attr-defined]
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise TypeError("Report evidence requires a live host-admitted owner capability") from exc
     return owner
 
 

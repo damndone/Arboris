@@ -580,13 +580,40 @@ def build_persisted_evidence_report_view(
     projection: "EvidenceProjectionV1",
     *,
     request_identity: ReportEvidenceRequestIdentityV1 | None = None,
+    artifact_admission: "ArtifactAdmissionV1" | None = None,
 ) -> dict[str, object]:
     """Expose a bounded report view by copying a typed projection only."""
 
     from .evidence.consumer_adapters import EvidenceProjectionV1
+    from .evidence.contracts import ArtifactAdmissionV1
 
     if type(projection) is not EvidenceProjectionV1:
         raise TypeError("projection must be EvidenceProjectionV1")
+    if type(request_identity) is not ReportEvidenceRequestIdentityV1:
+        return _unavailable_report_evidence(
+            artifact_id=projection.artifact_ref,
+            artifact_type="unknown",
+            reason_code="EVIDENCE_OWNER_CONTEXT_REQUIRED",
+            request_identity=None,
+        )
+    if type(artifact_admission) is not ArtifactAdmissionV1:
+        return _unavailable_report_evidence(
+            artifact_id=projection.artifact_ref,
+            artifact_type="unknown",
+            reason_code="EVIDENCE_PROVENANCE_REQUIRED",
+            request_identity=request_identity,
+        )
+    if (
+        artifact_admission.artifact_id != projection.artifact_ref
+        or artifact_admission.envelope_digest != projection.envelope_digest
+        or dict(artifact_admission.envelope.result_identity) != dict(projection.result_identity)
+    ):
+        return _unavailable_report_evidence(
+            artifact_id=projection.artifact_ref,
+            artifact_type=artifact_admission.artifact_type,
+            reason_code="EVIDENCE_PROVENANCE_MISMATCH",
+            request_identity=request_identity,
+        )
     facts: list[dict[str, object]] = []
     for fact in projection.facts:
         row: dict[str, object] = {
@@ -629,8 +656,20 @@ def build_persisted_evidence_report_view(
         "sections": sections,
         "provenance": {
             "artifactRef": projection.artifact_ref,
+            "artifactType": artifact_admission.artifact_type,
+            "scopeRef": artifact_admission.scope_ref,
+            "contentHash": artifact_admission.content_hash,
+            "sourceRef": artifact_admission.source_ref,
+            "validatorRef": (
+                artifact_admission.validator_ref.to_dict()
+                if hasattr(artifact_admission.validator_ref, "to_dict")
+                else artifact_admission.validator_ref
+            ),
+            "executionRef": artifact_admission.execution_ref,
+            "contractDigest": artifact_admission.contract_digest,
             "commitId": projection.commit_id,
             "envelopeRef": projection.envelope_ref,
+            "envelopeDigest": projection.envelope_digest,
             "lineageRefs": list(projection.lineage_refs),
             "projectionRef": projection.projection_ref.to_dict(),
             "resultIdentity": dict(projection.result_identity),
@@ -700,8 +739,21 @@ def _unavailable_report_evidence(
         ],
         "reasonCode": reason_code,
         "provenance": {
+            "artifactRef": safe_artifact_id,
             "artifactId": safe_artifact_id,
             "artifactType": safe_artifact_type,
+            "scopeRef": request_identity.scope_ref if request_identity else "UNAVAILABLE",
+            "contentHash": "UNAVAILABLE",
+            "sourceRef": "UNAVAILABLE",
+            "validatorRef": "UNAVAILABLE",
+            "executionRef": "UNAVAILABLE",
+            "contractDigest": "UNAVAILABLE",
+            "commitId": "UNAVAILABLE",
+            "envelopeRef": "UNAVAILABLE",
+            "envelopeDigest": "UNAVAILABLE",
+            "lineageRefs": [],
+            "projectionRef": {},
+            "resultIdentity": {},
             "indexed": True,
             "admissionStatus": status,
         },
@@ -853,6 +905,12 @@ def build_indexed_report_evidence(
             artifact_type=artifact_type,
             reason_code="EVIDENCE_ARTIFACT_ID_REQUIRED",
         )
+    if artifact_type == "unknown":
+        return _unavailable_report_evidence(
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            reason_code="EVIDENCE_ARTIFACT_TYPE_REQUIRED",
+        )
 
     # The artifact payload is deliberately not a source for identity, binding,
     # envelope, or facts.  It is an untrusted compatibility input retained in
@@ -947,6 +1005,59 @@ def build_indexed_report_evidence(
                 "indexed artifact file hash differs from persisted content",
             )
 
+        nested_index = indexed_artifact.get("evidence")
+        nested_index = nested_index if isinstance(nested_index, Mapping) else {}
+
+        def required_index_provenance(*keys: str, reason_code: str) -> object:
+            for source in (indexed_artifact, nested_index):
+                for key in keys:
+                    if key in source:
+                        candidate = source[key]
+                        if candidate is None or (
+                            type(candidate) is str and not candidate.strip()
+                        ):
+                            break
+                        return candidate
+            raise EvidenceProjectionError(
+                reason_code,
+                "canonical indexed artifact provenance is required",
+            )
+
+        source_ref = required_text(
+            required_index_provenance(
+                "source_ref",
+                "evidence_source_ref",
+                reason_code="EVIDENCE_SOURCE_REF_REQUIRED",
+            ),
+            "EVIDENCE_SOURCE_REF_REQUIRED",
+        )
+        validator_ref = required_index_provenance(
+            "validator_ref",
+            "evidence_validator_ref",
+            reason_code="EVIDENCE_VALIDATOR_REF_REQUIRED",
+        )
+        if type(validator_ref) not in {str, dict}:
+            raise EvidenceProjectionError(
+                "EVIDENCE_VALIDATOR_REF_REQUIRED",
+                "canonical validator reference is required",
+            )
+        execution_ref = required_text(
+            required_index_provenance(
+                "execution_ref",
+                "evidence_execution_ref",
+                reason_code="EVIDENCE_EXECUTION_REF_REQUIRED",
+            ),
+            "EVIDENCE_EXECUTION_REF_REQUIRED",
+        )
+        contract_digest = required_text(
+            required_index_provenance(
+                "contract_digest",
+                "evidence_contract_digest",
+                reason_code="EVIDENCE_CONTRACT_DIGEST_REQUIRED",
+            ),
+            "EVIDENCE_CONTRACT_DIGEST_REQUIRED",
+        )
+
         run_id = required_text(run_id_raw, "EVIDENCE_RUN_ID_REQUIRED")
         model_run_id = required_text(model_run_id_raw, "EVIDENCE_MODEL_RUN_ID_REQUIRED")
         if request_identity is not None and (
@@ -1029,6 +1140,24 @@ def build_indexed_report_evidence(
             artifact_file_sha256=artifact_file_sha256,
             envelope_digest=(candidate_binding.envelope_digest if candidate_binding is not None else None),
         )
+        canonical_artifact = authoritative_persistence._canonical_report_artifact()
+        canonical_validator_ref = (
+            canonical_artifact.validator_ref.to_dict()
+            if hasattr(canonical_artifact.validator_ref, "to_dict")
+            else canonical_artifact.validator_ref
+        )
+        for name, observed, expected, reason_code in (
+            ("artifact_type", artifact_type, canonical_artifact.artifact_type, "EVIDENCE_ARTIFACT_TYPE_MISMATCH"),
+            ("source_ref", source_ref, canonical_artifact.source_ref, "EVIDENCE_SOURCE_REF_MISMATCH"),
+            ("validator_ref", validator_ref, canonical_validator_ref, "EVIDENCE_VALIDATOR_REF_MISMATCH"),
+            ("execution_ref", execution_ref, canonical_artifact.execution_ref, "EVIDENCE_EXECUTION_REF_MISMATCH"),
+            ("contract_digest", contract_digest, canonical_artifact.contract_digest, "EVIDENCE_CONTRACT_DIGEST_MISMATCH"),
+        ):
+            if observed != expected:
+                raise EvidenceProjectionError(
+                    reason_code,
+                    f"indexed {name} differs from the server-owned artifact admission",
+                )
         projection = default_projection_registry().project(
             persisted_record,
             consumer_id="report",
@@ -1046,6 +1175,7 @@ def build_indexed_report_evidence(
         canonical_view = build_persisted_evidence_report_view(
             projection,
             request_identity=identity,
+            artifact_admission=authoritative_persistence._canonical_report_artifact(),
         )
         # Some historical index/payload writers copied the projected facts and
         # digest into their outer records.  If those optional fields are

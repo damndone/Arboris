@@ -11,12 +11,21 @@ from __future__ import annotations
 
 import os
 import re
+import weakref
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 
 from ..artifacts import read_json
+from ..canonical import sha256_canonical
 from ..domain import GuardrailIssue, Severity
+from ..evidence.authority import (
+    EvidenceHostAuthorityError,
+    build_authority_request,
+    issue_host_proof,
+    validate_host_proof,
+)
 from ..term_parser import is_q_quoted_dummy, parse_term
 from .lmm_result_adapter import read_lmm_public_results
 
@@ -168,7 +177,11 @@ from ..evidence.consumer_adapters import (
     PersistedEvidenceEnvelopeV1,
 )
 from ..evidence.contracts import ArtifactAdmissionV1
-from ..evidence.persistence import EvidencePacketStoreV1, EvidencePersistenceError
+from ..evidence.persistence import (
+    EvidencePacketStoreV1,
+    EvidencePersistenceAdmissionV1,
+    EvidencePersistenceError,
+)
 from ..evidence.registry import (
     EvidenceRegistryError,
     EvidenceRegistryReceiptV1,
@@ -206,7 +219,49 @@ class ReportEvidenceRequestIdentityV1:
     confirmation_ref: str
 
 
-_REPORT_OWNER_FACTORY_TOKEN = object()
+_REPORT_OWNER_ADMISSIONS: weakref.WeakKeyDictionary[object, object] = weakref.WeakKeyDictionary()
+_REPORT_OWNER_ADMISSIONS_LOCK = RLock()
+
+
+def _report_owner_payload_digest(
+    *,
+    actor_ref: str,
+    project_ref: str,
+    session_ref: str,
+    scope_ref: str,
+    run_id: str,
+    model_run_id: str,
+    artifact_id: str,
+    commit_id: str,
+    confirmation_ref: str,
+    artifact_file_sha256: str,
+    canonical_project_root: Path | str | None,
+    root_device: int,
+    root_inode: int,
+) -> str:
+    return sha256_canonical(
+        {
+            "actor_ref": actor_ref,
+            "project_ref": project_ref,
+            "session_ref": session_ref,
+            "scope_ref": scope_ref,
+            "run_id": run_id,
+            "model_run_id": model_run_id,
+            "artifact_id": artifact_id,
+            "commit_id": commit_id,
+            "confirmation_ref": confirmation_ref,
+            "artifact_file_sha256": artifact_file_sha256,
+            "canonical_project_root": (
+                None
+                if canonical_project_root is None
+                else str(Path(canonical_project_root).expanduser().resolve(strict=False))
+            ),
+            "persistence_root": {
+                "device": root_device,
+                "inode": root_inode,
+            },
+        }
+    )
 
 
 class ServerOwnedReportEvidencePersistenceV1:
@@ -229,7 +284,12 @@ class ServerOwnedReportEvidencePersistenceV1:
         "_artifact_file_sha256",
         "_canonical_project_root",
         "_canonical_record",
+        "_authority_handle",
+        "_authority_request",
+        "_authority_proof",
+        "_canonical_artifact",
         "_report_authority_marker",
+        "__weakref__",
     )
 
     def __init__(
@@ -249,12 +309,12 @@ class ServerOwnedReportEvidencePersistenceV1:
         confirmation_ref: str,
         artifact_file_sha256: str,
         canonical_project_root: Path | str | None = None,
-        _factory_token: object | None = None,
+        authority_handle: object | None = None,
     ) -> None:
-        if _factory_token is not _REPORT_OWNER_FACTORY_TOKEN:
+        if authority_handle is None:
             raise EvidenceProjectionError(
                 "EVIDENCE_HOST_AUTHORITY_REQUIRED",
-                "Report evidence owner construction requires a host-issued factory capability",
+                "Report evidence owner construction requires a host-issued C0 capability",
             )
         if type(evidence_store) is not EvidencePacketStoreV1:
             raise EvidenceProjectionError(
@@ -299,6 +359,22 @@ class ServerOwnedReportEvidencePersistenceV1:
                 "EVIDENCE_ARTIFACT_FILE_HASH_REQUIRED",
                 "Report evidence requires a canonical artifact file hash",
             )
+        authority_request, authority_proof = self._issue_report_authority(
+            evidence_store,
+            registry,
+            authority_handle,
+            actor_ref=actor_ref,
+            project_ref=project_ref,
+            session_ref=session_ref,
+            scope_ref=scope_ref,
+            run_id=run_id,
+            model_run_id=model_run_id,
+            artifact_id=artifact_id,
+            commit_id=commit_id,
+            confirmation_ref=confirmation_ref,
+            artifact_file_sha256=artifact_file_sha256,
+            canonical_project_root=canonical_project_root,
+        )
         try:
             if registry.scope_ref != scope_ref:
                 raise EvidenceProjectionError(
@@ -366,7 +442,155 @@ class ServerOwnedReportEvidencePersistenceV1:
             else None
         )
         self._canonical_record = canonical_record
+        self._authority_handle = authority_handle
+        self._authority_request = authority_request
+        self._authority_proof = authority_proof
+        self._canonical_artifact = artifact
         self._report_authority_marker = object()
+        with _REPORT_OWNER_ADMISSIONS_LOCK:
+            _REPORT_OWNER_ADMISSIONS[self] = self
+
+    @staticmethod
+    def _issue_report_authority(
+        evidence_store: EvidencePacketStoreV1,
+        registry: EvidenceRegistryV1,
+        authority_handle: object,
+        *,
+        actor_ref: str,
+        project_ref: str,
+        session_ref: str,
+        scope_ref: str,
+        run_id: str,
+        model_run_id: str,
+        artifact_id: str,
+        commit_id: str,
+        confirmation_ref: str,
+        artifact_file_sha256: str,
+        canonical_project_root: Path | str | None,
+    ) -> tuple[object, str]:
+        """Admit a Report owner only through the live C0 host capability."""
+
+        try:
+            if type(evidence_store) is not EvidencePacketStoreV1:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+                    "Report evidence requires the server-owned EvidencePacketStoreV1",
+                )
+            if type(registry) is not EvidenceRegistryV1:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+                    "Report evidence requires the server-owned EvidenceRegistryV1",
+                )
+            admission = evidence_store.admission
+            if type(admission) is not EvidencePersistenceAdmissionV1:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_HOST_AUTHORITY_REQUIRED",
+                    "Report owner admission requires the C0 persistence authority",
+                )
+            admitted_handle = getattr(admission, "_authority_handle", None)
+            if authority_handle is not admitted_handle:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_HOST_AUTHORITY_REQUIRED",
+                    "Report owner authority must be the C0 admission's exact host handle",
+                )
+            admission._validate_authority()
+            registry_handle = registry._host_authority_handle()
+            if registry_handle is not authority_handle:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_HOST_AUTHORITY_REQUIRED",
+                    "Report owner authority is not bound to the C0 registry",
+                )
+            root_fd = admission._require_open()
+            root_device = int(admission._root_dev)
+            root_inode = int(admission._root_ino)
+            payload_digest = _report_owner_payload_digest(
+                actor_ref=actor_ref,
+                project_ref=project_ref,
+                session_ref=session_ref,
+                scope_ref=scope_ref,
+                run_id=run_id,
+                model_run_id=model_run_id,
+                artifact_id=artifact_id,
+                commit_id=commit_id,
+                confirmation_ref=confirmation_ref,
+                artifact_file_sha256=artifact_file_sha256,
+                canonical_project_root=canonical_project_root,
+                root_device=root_device,
+                root_inode=root_inode,
+            )
+            request = build_authority_request(
+                authority_handle,
+                purpose="evidence.report.owner",
+                scope_ref=scope_ref,
+                subject_id=id(evidence_store),
+                payload_digest=payload_digest,
+                root_fd=root_fd,
+            )
+            proof = issue_host_proof(authority_handle, request)
+            validate_host_proof(authority_handle, request, proof)
+            return request, proof
+        except EvidenceProjectionError:
+            raise
+        except EvidenceHostAuthorityError as exc:
+            raise EvidenceProjectionError(exc.code, str(exc)) from exc
+        except (EvidencePersistenceError, EvidenceRegistryError, AttributeError, TypeError, ValueError) as exc:
+            raise EvidenceProjectionError(
+                "EVIDENCE_HOST_AUTHORITY_REQUIRED",
+                "Report owner authority is not backed by the live C0 host capability",
+            ) from exc
+
+    def _require_report_authority(self) -> None:
+        """Revalidate the exact admitted owner before every Report boundary."""
+
+        with _REPORT_OWNER_ADMISSIONS_LOCK:
+            if _REPORT_OWNER_ADMISSIONS.get(self) is not self:
+                raise EvidenceProjectionError(
+                    "EVIDENCE_HOST_AUTHORITY_REQUIRED",
+                    "Report owner is not the exact host-admitted capability",
+                )
+        try:
+            evidence_store = self._evidence_store
+            registry = self._registry
+            admission = evidence_store.admission
+            handle = self._authority_handle
+            if type(admission) is not EvidencePersistenceAdmissionV1:
+                raise ValueError("persistence admission type changed")
+            if getattr(admission, "_authority_handle", None) is not handle:
+                raise ValueError("persistence authority handle changed")
+            if registry._host_authority_handle() is not handle:
+                raise ValueError("registry authority handle changed")
+            if self._authority_request.subject_id != id(evidence_store):
+                raise ValueError("Report owner subject binding changed")
+            if self._authority_request.scope_ref != self._scope_ref:
+                raise ValueError("Report owner scope binding changed")
+            expected_payload = _report_owner_payload_digest(
+                actor_ref=self._actor_ref,
+                project_ref=self._project_ref,
+                session_ref=self._session_ref,
+                scope_ref=self._scope_ref,
+                run_id=self._run_id,
+                model_run_id=self._model_run_id,
+                artifact_id=self._artifact_id,
+                commit_id=self._commit_id,
+                confirmation_ref=self._confirmation_ref,
+                artifact_file_sha256=self._artifact_file_sha256,
+                canonical_project_root=self._canonical_project_root,
+                root_device=int(admission._root_dev),
+                root_inode=int(admission._root_ino),
+            )
+            if self._authority_request.payload_digest != expected_payload:
+                raise ValueError("Report owner payload binding changed")
+            admission._validate_authority()
+            validate_host_proof(handle, self._authority_request, self._authority_proof)
+        except EvidenceProjectionError:
+            raise
+        except EvidenceHostAuthorityError as exc:
+            raise EvidenceProjectionError(exc.code, str(exc)) from exc
+        except (EvidencePersistenceError, EvidenceRegistryError, AttributeError, TypeError, ValueError) as exc:
+            raise EvidenceProjectionError(
+                "EVIDENCE_HOST_AUTHORITY_REQUIRED",
+                "Report owner authority is no longer a live C0 capability",
+            ) from exc
 
     def __copy__(self):
         raise TypeError("host-bound Report evidence owner capabilities cannot be copied")
@@ -379,9 +603,8 @@ class ServerOwnedReportEvidencePersistenceV1:
 
     @classmethod
     def _from_host(cls, *args: object, **kwargs: object) -> "ServerOwnedReportEvidencePersistenceV1":
-        """Host-only constructor; the public constructor cannot mint authority."""
+        """Construct only with the C0 host-issued capability supplied by the server."""
 
-        kwargs["_factory_token"] = _REPORT_OWNER_FACTORY_TOKEN
         return cls(*args, **kwargs)  # type: ignore[arg-type]
 
     @property
@@ -431,6 +654,10 @@ class ServerOwnedReportEvidencePersistenceV1:
     def accepts_project_root(self, project_root: Path | str) -> bool:
         """Check the server-owned root binding before any artifact is read."""
 
+        try:
+            self._require_report_authority()
+        except EvidenceProjectionError:
+            return False
         if self._canonical_project_root is None:
             return False
         try:
@@ -441,6 +668,10 @@ class ServerOwnedReportEvidencePersistenceV1:
     def accepts_canonical_run_root(self, run_root: Path | str) -> bool:
         """Check the server-owned project root plus this exact run identity."""
 
+        try:
+            self._require_report_authority()
+        except EvidenceProjectionError:
+            return False
         if self._canonical_project_root is None:
             return False
         try:
@@ -450,6 +681,7 @@ class ServerOwnedReportEvidencePersistenceV1:
             return False
 
     def _canonical_report_wire(self) -> dict[str, object]:
+        self._require_report_authority()
         from ..evidence.consumer_adapters import default_projection_registry
         from ..report_view_model import build_persisted_evidence_report_view
 
@@ -469,13 +701,26 @@ class ServerOwnedReportEvidencePersistenceV1:
                 model_run_id=self._model_run_id,
                 confirmation_ref=self._confirmation_ref,
             ),
+            artifact_admission=self._canonical_artifact,
         )
+
+    def _canonical_report_artifact(self) -> ArtifactAdmissionV1:
+        """Return the exact C0 artifact admission used by Report projection."""
+
+        self._require_report_authority()
+        if type(self._canonical_artifact) is not ArtifactAdmissionV1:
+            raise EvidenceProjectionError(
+                "EVIDENCE_PROVENANCE_REQUIRED",
+                "Report provenance is not bound to an admitted artifact",
+            )
+        return self._canonical_artifact
 
     def issue_report_projection(self, wire: Mapping[str, object]):
         """Issue an opaque Report projection only for this exact C0 owner."""
 
         from ..report_export import EvidenceProjectionV1
 
+        self._require_report_authority()
         if not isinstance(wire, Mapping):
             raise TypeError("Report projection wire must be a server-produced mapping")
         expected = {
@@ -514,6 +759,7 @@ class ServerOwnedReportEvidencePersistenceV1:
 
         from ..report_export import EvidenceProjectionV1, ReportEvidenceWriterV1
 
+        self._require_report_authority()
         if type(projection) is not EvidenceProjectionV1:
             raise TypeError("Report writer requires an owner-issued projection")
         if table_rows is not None:
@@ -536,6 +782,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         from ..report_export import EvidenceProjectionV1
         from ..reporting import ReportDocumentWriterV1
 
+        self._require_report_authority()
         if not isinstance(view_model, Mapping):
             raise TypeError("Report document payload must be server-produced")
         if type(projection) is not EvidenceProjectionV1:
@@ -570,6 +817,7 @@ class ServerOwnedReportEvidencePersistenceV1:
     ) -> PersistedEvidenceEnvelopeV1:
         """Load only the registry-owned artifact bound to this commit context."""
 
+        self._require_report_authority()
         if (
             actor_ref != self._actor_ref
             or confirmation_ref != self._confirmation_ref
@@ -712,6 +960,8 @@ def configure_report_evidence_persistence(
         UnavailableReportEvidenceCapabilityV1,
     }:
         raise TypeError("persistence must be a server-owned Report capability or None")
+    if type(persistence) is ServerOwnedReportEvidencePersistenceV1:
+        persistence._require_report_authority()
     global _REPORT_EVIDENCE_PERSISTENCE
     _REPORT_EVIDENCE_PERSISTENCE = persistence
 

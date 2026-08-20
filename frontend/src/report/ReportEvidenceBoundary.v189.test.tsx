@@ -5,6 +5,7 @@ import {
   buildPostEstimationFacts,
   buildReportEvidenceFacts,
   buildTimeSeriesFacts,
+  reportProjectionDigest,
   unavailableReportEvidence,
   type ReportEvidenceProjection,
 } from "./factTable";
@@ -25,6 +26,7 @@ vi.mock("./ReportWorkspaceContext", () => ({
   ReportWorkspaceProvider: ({ children }: { children: unknown }) => children,
   useReportWorkspace: () => mockWorkspace.current,
   useReportWorkspaceOptional: () => mockWorkspace.current,
+  readClassificationEvidencePacket: () => null,
 }));
 
 const rawRegressionResult = {
@@ -57,7 +59,7 @@ const committedProjection: ReportEvidenceProjection = {
   envelopeRef: "evidence-envelope:result-1",
   commitId: "evidence-commit-1",
   envelopeDigest: "a".repeat(64),
-  projectionDigest: "2f5d786810fde6f8f3cf6c1e403bd6b5ec97035601e6f70a4302fe731e602362",
+  projectionDigest: "",
   status: "available",
   executionStatus: "completed",
   availability: "available",
@@ -72,11 +74,39 @@ const committedProjection: ReportEvidenceProjection = {
   sections: [],
   provenance: {
     artifactRef: "artifact-1",
+    artifactType: "post_estimation",
+    scopeRef: "scope:project:1",
+    contentHash: "b".repeat(64),
+    sourceRef: "source:run-1",
+    validatorRef: {
+      kind: "validator",
+      logical_id: "evidence.validator.v1",
+      semantic_version: "1.0",
+      contract_digest: "c".repeat(64),
+    },
+    executionRef: "execution:run-1",
+    contractDigest: "d".repeat(64),
     commitId: "evidence-commit-1",
     envelopeRef: "evidence-envelope:result-1",
+    envelopeDigest: "a".repeat(64),
     lineageRefs: ["operation-1", "artifact-1"],
+    projectionRef: {
+      kind: "projection",
+      logical_id: "workbench.consumer_projection.report",
+      semantic_version: "1.0",
+      contract_digest: "e".repeat(64),
+    },
+    resultIdentity: {
+      contract: "evidence-envelope",
+      result_id: "result-1",
+      schema_version: "1.0",
+    },
   },
 };
+
+(committedProjection as unknown as Record<string, unknown>).projectionDigest = reportProjectionDigest(
+  committedProjection as unknown as Record<string, unknown>,
+);
 
 const validatedProjection = {
   ...committedProjection,
@@ -204,6 +234,25 @@ describe("Report evidence boundary v1.8.9", () => {
     })).toBeNull();
   });
 
+  it("rejects a self-consistent digest when canonical provenance is incomplete", () => {
+    const incomplete = {
+      ...committedProjection,
+      provenance: { ...committedProjection.provenance },
+    } as Record<string, unknown>;
+    delete (incomplete.provenance as Record<string, unknown>).commitId;
+    incomplete.projectionDigest = reportProjectionDigest(incomplete);
+    expect(readReportEvidenceProjection(incomplete)).toBeNull();
+  });
+
+  it("rejects a self-consistent digest when identity and provenance disagree", () => {
+    const inconsistent = {
+      ...committedProjection,
+      provenance: { ...committedProjection.provenance, scopeRef: "scope:foreign" },
+    } as Record<string, unknown>;
+    inconsistent.projectionDigest = reportProjectionDigest(inconsistent);
+    expect(readReportEvidenceProjection(inconsistent)).toBeNull();
+  });
+
   it("parses and renders validation independently from execution and availability", () => {
     const parsed = readReportEvidenceProjection(validatedProjection);
     expect(parsed).toMatchObject({
@@ -264,7 +313,10 @@ describe("Report evidence boundary v1.8.9", () => {
         limits: ["display-only compatibility evidence"],
       },
       modelResults: [rawRegressionResult],
-      familyEvidenceArtifacts: { raw: { leaked_scalar: 9.9 } },
+      familyEvidenceArtifacts: {
+        raw: { leaked_scalar: 9.9 },
+        classification_evidence: { raw_classification_secret: "RAW_CLASSIFICATION_SECRET" },
+      },
       reportEvidenceProjection: committedProjection,
       reportExportAllowed: true,
       history: [],
@@ -288,6 +340,8 @@ describe("Report evidence boundary v1.8.9", () => {
 
     expect(screen.getByTestId(`typed-evidence-${committedProjection.projectionId}`)).toHaveTextContent("AVAILABLE");
     expect(screen.getByTestId("typed-evidence-provenance")).toHaveTextContent("operation-1");
+    expect(screen.getByTestId("report-classification-evidence-non-citable")).toHaveTextContent("NON-CITABLE");
+    expect(screen.getByTestId("report-classification-evidence-non-citable")).not.toHaveTextContent("RAW_CLASSIFICATION_SECRET");
     expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
     expect(screen.queryByText("123.456")).not.toBeInTheDocument();
     expect(screen.getByTestId("report-prediction-evidence-non-citable")).toHaveTextContent(/non-citable/i);

@@ -173,9 +173,10 @@ def test_agent_notebook_and_report_contributions_share_the_same_fact_values() ->
     )
 
     assert [row["value"] for row in agent["facts"]] == [row["value"] for row in notebook["facts"]]
-    assert [row["value"] for row in agent["facts"]] == [row["value"] for row in report["facts"]]
+    assert report["status"] == "unavailable"
+    assert report["facts"] == []
     assert agent["artifact_ref"] == notebook["artifact_ref"] == report["artifactRef"] == "artifact-1"
-    assert agent["envelope_digest"] == notebook["envelope_digest"] == report["envelopeDigest"]
+    assert agent["envelope_digest"] == notebook["envelope_digest"]
 
 
 def test_agent_notebook_report_projection_replay_is_stable_under_concurrency() -> None:

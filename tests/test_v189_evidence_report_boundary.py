@@ -5,6 +5,7 @@ import io
 import json
 import copy
 import pickle
+import atexit
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -47,6 +48,16 @@ from workbench.reporting import ReportDocumentWriterV1
 
 _ROOT = Path(__file__).parents[1]
 _FIXTURE = _ROOT / "tests" / "fixtures" / "contracts" / "v189" / "evidence_envelope.json"
+_LIVE_SERVER_EVIDENCE_CONTEXTS: list[object] = []
+
+
+def _close_live_server_evidence_contexts() -> None:
+    while _LIVE_SERVER_EVIDENCE_CONTEXTS:
+        context = _LIVE_SERVER_EVIDENCE_CONTEXTS.pop()
+        context.__exit__(None, None, None)  # type: ignore[attr-defined]
+
+
+atexit.register(_close_live_server_evidence_contexts)
 
 
 def _ref(kind: str, logical_id: str) -> ContractRefV1:
@@ -128,6 +139,7 @@ def _canonical_indexed_artifact(
     ).encode("utf-8")
     index = _indexed_artifact(
         artifact_id=resolved_artifact_id,
+        artifact_type=record.artifact_type,
         sha256=hashlib.sha256(content).hexdigest(),
         run_id=run_id,
         model_run_id=model_run_id,
@@ -146,6 +158,14 @@ def _canonical_indexed_artifact(
         evidence_artifact_admission_ref=record.artifact_id,
         evidence_run_id=run_id,
         evidence_model_run_id=model_run_id,
+        source_ref=record.source_ref,
+        validator_ref=(
+            record.validator_ref.to_dict()
+            if hasattr(record.validator_ref, "to_dict")
+            else record.validator_ref
+        ),
+        execution_ref=record.execution_ref,
+        contract_digest=record.contract_digest,
     )
     return index, payload, hashlib.sha256(content).hexdigest()
 
@@ -157,21 +177,29 @@ def _server_owned_evidence(
     run_id: str = "run-1",
     model_run_id: str = "run-1",
     canonical_project_root: Path | None = None,
+    keep_open: bool = False,
 ) -> Iterator[tuple[ArtifactAdmissionV1, EvidenceCommitBindingV1, ServerOwnedReportEvidencePersistenceV1]]:
     """Build the same C0 registry/store/receipt capability as the owner seam."""
 
     from tests.test_v189_evidence_envelope import _admit, _admit_store, _authorized_registry
 
     tmp_path.mkdir(parents=True, exist_ok=True)
-    registry, _host = _authorized_registry("scope:project:1")
-    record = _admit(
-        registry,
-        json.loads(_FIXTURE.read_text(encoding="utf-8")),
+    registry, host = _authorized_registry("scope:project:1")
+    record = registry.admit_artifact(
         artifact_id="artifact-1",
+        artifact_type="post_estimation",
         scope_ref="scope:project:1",
+        content=json.loads(_FIXTURE.read_text(encoding="utf-8")),
+        source_ref="source:dataset:1",
+        validator_ref="validator:evidence-envelope:1",
         execution_ref=f"execution:{run_id}",
+        contract_digest="c" * 64,
     )
-    with _admit_store(tmp_path, registry) as store:
+    store_context = _admit_store(tmp_path, registry)
+    store = store_context.__enter__()
+    if keep_open:
+        _LIVE_SERVER_EVIDENCE_CONTEXTS.append(store_context)
+    try:
         receipt = registry.persistence_receipt(record)
         binding = store.commit(record, receipt=receipt)
         owner_payload = {
@@ -198,8 +226,12 @@ def _server_owned_evidence(
             confirmation_ref=f"confirmation:{run_id}",
             artifact_file_sha256=hashlib.sha256(owner_raw).hexdigest(),
             canonical_project_root=canonical_project_root,
+            authority_handle=host.channel,
         )
         yield record, binding, capability
+    finally:
+        if not keep_open:
+            store_context.__exit__(None, None, None)
 
 
 def _report_projection_wire() -> dict[str, object]:
@@ -237,7 +269,7 @@ def _owner_wire(owner: ServerOwnedReportEvidencePersistenceV1, wire: dict[str, o
 
 
 def _owner_issued_projection(tmp_path: Path):
-    with _server_owned_evidence(tmp_path / "owner-store") as (record, _binding, owner):
+    with _server_owned_evidence(tmp_path / "owner-store", keep_open=True) as (record, _binding, owner):
         wire = _owner_wire(owner, _report_projection_wire())
         wire["envelopeDigest"] = record.envelope_digest
         return owner.issue_report_projection(wire)
@@ -253,6 +285,7 @@ def _owner_issued_document_writer(
         run_id=run_root.name,
         model_run_id=run_root.name,
         canonical_project_root=run_root.parent.parent,
+        keep_open=True,
     ) as (record, _binding, owner):
         wire = _owner_wire(owner, _report_projection_wire())
         wire["envelopeDigest"] = record.envelope_digest
@@ -299,7 +332,7 @@ def _owner_issued_evidence_writer(
     sections: tuple[str, ...],
     table_rows: dict[str, list[dict[str, object]]] | None = None,
 ):
-    with _server_owned_evidence(tmp_path / "owner-store") as (record, _binding, owner):
+    with _server_owned_evidence(tmp_path / "owner-store", keep_open=True) as (record, _binding, owner):
         wire = _owner_wire(owner, _report_projection_wire())
         wire["envelopeDigest"] = record.envelope_digest
         projection = owner.issue_report_projection(wire)
@@ -382,7 +415,7 @@ def test_tampered_committed_envelope_is_blocked_without_facts(tmp_path: Path) ->
     assert view["facts"] == []
 
 
-def test_committed_projection_exposes_digest_provenance_and_bounded_facts() -> None:
+def test_unbound_projection_is_unavailable_without_server_identity_and_admission() -> None:
     record = _persisted_record()
     projection = default_projection_registry().project(
         record,
@@ -392,20 +425,119 @@ def test_committed_projection_exposes_digest_provenance_and_bounded_facts() -> N
 
     view = build_persisted_evidence_report_view(projection)
 
+    assert view["status"] == "unavailable"
+    assert view["reasonCode"] == "EVIDENCE_OWNER_CONTEXT_REQUIRED"
+    assert view["commitId"] == "UNAVAILABLE"
+    assert view["facts"] == []
+    assert {
+        "artifactRef",
+        "artifactType",
+        "scopeRef",
+        "contentHash",
+        "sourceRef",
+        "validatorRef",
+        "executionRef",
+        "contractDigest",
+        "commitId",
+        "envelopeRef",
+        "envelopeDigest",
+        "lineageRefs",
+        "projectionRef",
+        "resultIdentity",
+    } <= set(view["provenance"])
+
+
+def test_remediation_three_report_provenance_is_complete_and_canonical(tmp_path: Path) -> None:
+    with _server_owned_evidence(tmp_path / "owner-store") as (record, binding, owner):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=owner,
+        )
+
     assert view["status"] == "available"
-    assert view["commitId"] == record.commit_id
-    assert view["envelopeDigest"] == record.binding.envelope_digest
-    assert view["validationStatus"] == projection.validation_summary["requirement_status"]
-    assert view["validationSummary"] == dict(projection.validation_summary)
-    assert view["provenance"] == {
-        "artifactRef": record.artifact_ref,
-        "commitId": record.commit_id,
-        "envelopeRef": record.envelope_ref,
-        "lineageRefs": list(record.envelope.lineage_refs),
-        "projectionRef": projection.projection_ref.to_dict(),
-        "resultIdentity": dict(record.envelope.result_identity),
-    }
-    assert [fact["value"] for fact in view["facts"]] == [2.0, 0.2]
+    assert set(
+        (
+            "artifactRef",
+            "artifactType",
+            "scopeRef",
+            "contentHash",
+            "sourceRef",
+            "validatorRef",
+            "executionRef",
+            "contractDigest",
+            "commitId",
+            "envelopeRef",
+            "envelopeDigest",
+            "projectionRef",
+            "resultIdentity",
+            "lineageRefs",
+        )
+    ) <= set(view["provenance"])
+    assert view["provenance"]["contentHash"] == record.content_hash
+    assert view["provenance"]["sourceRef"] == record.source_ref
+    assert view["provenance"]["executionRef"] == record.execution_ref
+    assert view["provenance"]["contractDigest"] == record.contract_digest
+
+
+@pytest.mark.parametrize(
+    ("field", "reason_code"),
+    (
+        ("source_ref", "EVIDENCE_SOURCE_REF_REQUIRED"),
+        ("validator_ref", "EVIDENCE_VALIDATOR_REF_REQUIRED"),
+        ("execution_ref", "EVIDENCE_EXECUTION_REF_REQUIRED"),
+        ("contract_digest", "EVIDENCE_CONTRACT_DIGEST_REQUIRED"),
+    ),
+)
+def test_remediation_three_outer_index_missing_provenance_is_unavailable(
+    tmp_path: Path,
+    field: str,
+    reason_code: str,
+) -> None:
+    with _server_owned_evidence(tmp_path / field) as (record, binding, owner):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact.pop(field)
+        view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=owner,
+        )
+
+    assert view["status"] in {"blocked", "unavailable"}
+    assert view["reasonCode"] == reason_code
+    assert view["facts"] == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason_code"),
+    (
+        ("source_ref", "source:forged", "EVIDENCE_SOURCE_REF_MISMATCH"),
+        ("execution_ref", "execution:foreign", "EVIDENCE_EXECUTION_REF_MISMATCH"),
+        ("contract_digest", "f" * 64, "EVIDENCE_CONTRACT_DIGEST_MISMATCH"),
+    ),
+)
+def test_remediation_three_outer_index_tampered_provenance_is_unavailable(
+    tmp_path: Path,
+    field: str,
+    value: object,
+    reason_code: str,
+) -> None:
+    with _server_owned_evidence(tmp_path / field) as (record, binding, owner):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact[field] = value
+        view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=owner,
+        )
+
+    assert view["status"] in {"blocked", "unavailable"}
+    assert view["reasonCode"] == reason_code
+    assert view["facts"] == []
 
 
 def test_indexed_canonical_commit_is_the_only_path_that_admits_report_facts(tmp_path: Path) -> None:
@@ -1097,6 +1229,155 @@ def test_round_five_unowned_xlsx_render_rejects_before_workbook_io(monkeypatch) 
 
     with pytest.raises(TypeError, match="owner|capability|server-owned"):
         exports_module.render_typed_xlsx(forged_writer)
+
+
+def test_remediation_three_imported_factory_roots_and_untrusted_owner_fail_before_io(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Importing a legacy token or selecting a caller-owned owner cannot reach persistence IO."""
+
+    import workbench.report_export as report_export_module
+    import workbench.services.results_service as results_service_module
+
+    assert not hasattr(report_export_module, "_REPORT_FACTORY_TOKEN")
+    assert not hasattr(results_service_module, "_REPORT_OWNER_FACTORY_TOKEN")
+
+    with _server_owned_evidence(tmp_path / "owner-store") as (_record, _binding, owner):
+        monkeypatch.setattr(
+            type(owner._evidence_store),
+            "load",
+            lambda *_args, **_kwargs: pytest.fail("untrusted owner construction reached persistence IO"),
+        )
+        with pytest.raises((TypeError, EvidenceProjectionError), match="host|authority|capability"):
+            ServerOwnedReportEvidencePersistenceV1._from_host(
+                owner._evidence_store,
+                owner._registry,
+                owner._receipt,
+                actor_ref=owner.actor_ref,
+                project_ref=owner.project_ref,
+                session_ref=owner.session_ref,
+                scope_ref=owner.scope_ref,
+                run_id=owner.run_id,
+                model_run_id=owner.model_run_id,
+                artifact_id=owner.artifact_id,
+                commit_id=owner.commit_id,
+                confirmation_ref=owner.confirmation_ref,
+                artifact_file_sha256=owner.artifact_file_sha256,
+                canonical_project_root=owner.canonical_project_root,
+            )
+
+
+@contextmanager
+def _server_host_issued_report_evidence(tmp_path: Path):
+    """Build a Report owner only from the real test server's admitted endpoint."""
+
+    from tests.test_v189_evidence_envelope import _admit, _admit_store, _authorized_registry
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    registry, host = _authorized_registry("scope:project:1")
+    record = _admit(
+        registry,
+        json.loads(_FIXTURE.read_text(encoding="utf-8")),
+        artifact_id="artifact-1",
+        scope_ref="scope:project:1",
+        execution_ref="execution:run-1",
+    )
+    with _admit_store(tmp_path, registry) as store:
+        receipt = registry.persistence_receipt(record)
+        binding = store.commit(record, receipt=receipt)
+        owner = ServerOwnedReportEvidencePersistenceV1._from_host(
+            store,
+            registry,
+            receipt,
+            authority_handle=host.channel,
+            actor_ref="actor:1",
+            project_ref="project:1",
+            session_ref="session:1",
+            scope_ref="scope:project:1",
+            run_id="run-1",
+            model_run_id="run-1",
+            artifact_id=record.artifact_id,
+            commit_id=binding.commit_id,
+            confirmation_ref="confirmation:run-1",
+            artifact_file_sha256=hashlib.sha256(b"server-host-artifact").hexdigest(),
+            canonical_project_root=tmp_path / "project",
+        )
+        yield record, binding, owner, host
+
+
+def test_remediation_three_controlled_server_host_harness_issues_report_owner(tmp_path: Path) -> None:
+    with _server_host_issued_report_evidence(tmp_path / "owner-store") as (_record, _binding, owner, host):
+        projection = owner.issue_report_projection(owner._canonical_report_wire())
+        assert projection.wire["status"] == "available"
+        assert any(key[0] == "evidence.report.owner" for key in host.issued)
+
+
+def test_remediation_three_forged_authority_and_object_new_owner_fail_before_io(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _server_host_issued_report_evidence(tmp_path / "owner-store") as (
+        _record,
+        _binding,
+        owner,
+        _host,
+    ):
+        store = owner._evidence_store
+        registry = owner._registry
+        receipt = owner._receipt
+        monkeypatch.setattr(
+            type(store),
+            "load",
+            lambda *_args, **_kwargs: pytest.fail("forged owner reached persistence IO"),
+        )
+        with pytest.raises((TypeError, EvidenceProjectionError), match="owner|authority|capability"):
+            type(owner)._from_host(
+                store,
+                registry,
+                receipt,
+                actor_ref=owner.actor_ref,
+                project_ref=owner.project_ref,
+                session_ref=owner.session_ref,
+                scope_ref=owner.scope_ref,
+                run_id=owner.run_id,
+                model_run_id=owner.model_run_id,
+                artifact_id=owner.artifact_id,
+                commit_id=owner.commit_id,
+                confirmation_ref=owner.confirmation_ref,
+                artifact_file_sha256=owner.artifact_file_sha256,
+                canonical_project_root=owner.canonical_project_root,
+                authority_handle=object(),
+            )
+
+        forged_owner = object.__new__(type(owner))
+        for slot in type(owner).__slots__:
+            if slot == "__weakref__":
+                continue
+            object.__setattr__(forged_owner, slot, getattr(owner, slot))
+        with pytest.raises((TypeError, EvidenceProjectionError), match="owner|authority|capability"):
+            forged_owner.issue_report_projection(owner._canonical_report_wire())
+
+
+def test_remediation_three_configuration_rejects_object_new_owner(
+    tmp_path: Path,
+) -> None:
+    from workbench.services.results_service import configure_report_evidence_persistence
+
+    with _server_host_issued_report_evidence(tmp_path / "owner-store") as (
+        _record,
+        _binding,
+        owner,
+        _host,
+    ):
+        forged_owner = object.__new__(type(owner))
+        for slot in type(owner).__slots__:
+            if slot == "__weakref__":
+                continue
+            object.__setattr__(forged_owner, slot, getattr(owner, slot))
+
+        with pytest.raises((TypeError, EvidenceProjectionError), match="owner|authority|capability"):
+            configure_report_evidence_persistence(forged_owner)
 
 
 def test_copied_valid_report_pair_in_foreign_project_root_is_typed_rejected(
