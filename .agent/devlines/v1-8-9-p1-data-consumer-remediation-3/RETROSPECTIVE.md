@@ -6,11 +6,11 @@
 
 ## Final status
 
-STARTED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 2/4 (50.0%; 50.0 per 100 events)
+- Failure frequency: 2/5 (40.0%; 40.0 per 100 events)
 - Repeat rate: 0/2 (0.0%)
 - Recurrence rate: 0/2 (0.0%)
 - MTTR: N/A (sample=0; unresolved=2)
@@ -63,3 +63,4 @@ STARTED
 - #2: `4d5f7a91-2c3e-4b6d-8f10-9a2c4e6b8d10` | 2026-08-20T05:25:00.000Z | FAILURE/native_partial_writer_cleanup_red | incident=`5e7a9c1b-3d4f-6a8b-0c2e-4f6a8b0c2e4f` | lesson_key=`owned-target-cleanup` | event_sha256=`7082471d3048523b668d44febb6934ba004480d6a97dcf865988ab5d04a23293`
 - #3: `6f8a0c2e-4b6d-8f10-9a2c-4e6b8d0f2a4c` | 2026-08-20T05:25:01.000Z | FAILURE/zsav_admission_probe_red | incident=`7a9c1e3f-5b7d-9f1a-3c5e-7a9c1e3f5b7d` | lesson_key=`native-mode-probe-parity` | event_sha256=`d2d408e22b70bfd924fa0c009ae2c037159c9fe7c67de11c1a070a99b76403ed`
 - #4: `8b0d2f4a-6c8e-0a2c-4e6f-8a0c2e4f6a8c` | 2026-08-20T05:30:00.000Z | GATE/data_consumer_remediation_3_package_local_green | incident=`9c1e3f5b-7d9f-1b3d-5f7a-9c1e3f5b7d9f` | lesson_key=`package-local-evidence-boundary` | event_sha256=`4027e3220254a081672d542430a905005b613d609c8441c382a8544b36834fb1`
+- #5: `0c2e4f6a-8b0d-2f4a-6c8e-0a2c4e6f8a0c` | 2026-08-20T05:35:00.000Z | STATE_CHANGE/line_completed | incident=`1e3f5b7d-9f1b-3d5f-7a9c-1e3f5b7d9f1b` | lesson_key=`close-at-owned-evidence-boundary` | event_sha256=`589d41544e71082fd91d616da0be47a7b10559948e82032ee749814cff158045`
