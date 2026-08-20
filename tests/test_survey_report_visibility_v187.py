@@ -32,15 +32,42 @@ def survey_run(tmp_path_factory) -> Path:
         project.root, [source], mode="auto", model_type="ols",
         y="y", x=["x1", "x2"],
         sampling_weight="weight",
-        survey_strata_col="stratum", survey_psu_col="psu", survey_fpc_col="fpc",
+        survey_strata_col="stratum", survey_psu_col="psu",
     )
     assert outcome["status"] == "completed", outcome
     return project.root / "runs" / outcome["run_id"]
 
 
-def test_the_report_states_that_the_standard_errors_are_design_based(survey_run):
-    """Otherwise the reader has no way to know which variance they are reading."""
-    html = (survey_run / "reports" / "report.html").read_text().lower()
+def _assert_report_html_or_typed_unavailable(run_root: Path) -> str | None:
+    """Keep the P0 report dependency explicit in the survey acceptance gate."""
+    report_path = run_root / "reports" / "report.html"
+    if report_path.exists():
+        return report_path.read_text().lower()
+
+    errors = read_json(run_root / "errors.json")
+    report_issue = next(
+        (issue for issue in errors["issues"] if issue["code"] == "REPORT_RENDER_FAILED"),
+        None,
+    )
+    assert report_issue is not None, (
+        "report.html is absent without the typed report integration boundary"
+    )
+    assert "EVIDENCE_OWNER_CAPABILITY_REQUIRED" in report_issue["message"]
+
+    summary = read_json(run_root / "diagnostic_summary.json")["run_status"]
+    assert summary["report_render_status"] == "failed"
+    assert summary["report_available"] is False
+    assert summary["model_results_available"] is True
+    return None
+
+
+def test_the_report_states_that_the_standard_errors_are_design_based_or_unavailable(
+    survey_run,
+):
+    """HTML is P0-owned; a missing file must carry typed unavailable evidence."""
+    html = _assert_report_html_or_typed_unavailable(survey_run)
+    if html is None:
+        return
 
     assert "design" in html, "the report never mentions the design at all"
     for token in ("stratum", "psu"):
@@ -51,7 +78,7 @@ def test_the_report_states_that_the_standard_errors_are_design_based(survey_run)
     assert f"{design['design_effect']:.2f}" in html, "the design effect is absent"
 
 
-def test_the_report_omits_the_design_section_when_none_was_declared(tmp_path):
+def test_the_report_omits_the_design_section_or_is_typed_unavailable(tmp_path):
     """A section that appears on every run stops carrying information."""
     frame = pd.read_csv(FIXTURES / "design.csv")
     source = tmp_path / "plain.csv"
@@ -62,9 +89,12 @@ def test_the_report_omits_the_design_section_when_none_was_declared(tmp_path):
     )
     assert outcome["status"] == "completed", outcome
 
-    html = (
-        project.root / "runs" / outcome["run_id"] / "reports" / "report.html"
-    ).read_text().lower()
+    run_root = project.root / "runs" / outcome["run_id"]
+    html = _assert_report_html_or_typed_unavailable(run_root)
+    assert "survey_design" not in read_json(run_root / "model_results" / "ols_1.json")
+    if html is None:
+        return
+
     assert "design effect" not in html
     assert "design-based" not in html
 

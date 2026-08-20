@@ -218,7 +218,7 @@ def run_workflow(
     survey_replicate_type: str = "",
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
-    survey_subpop: str = "",
+    survey_subpop: str | None = None,
     labels: dict[str, object] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
@@ -546,7 +546,7 @@ def run_batch_y_workflow(
     survey_replicate_type: str = "",
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
-    survey_subpop: str = "",
+    survey_subpop: str | None = None,
 ) -> dict[str, Any]:
     """Run one workflow per outcome column.
 
@@ -639,7 +639,7 @@ def _run_workflow(
     survey_replicate_type: str = "",
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
-    survey_subpop: str = "",
+    survey_subpop: str | None = None,
     labels: dict[str, object] | None = None,
     lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,
@@ -741,7 +741,14 @@ def _run_workflow(
     ctx.artifacts["_survey_strata_col"] = survey_strata_col
     ctx.artifacts["_survey_psu_col"] = survey_psu_col
     ctx.artifacts["_survey_fpc_col"] = survey_fpc_col
-    ctx.artifacts["_survey_replicate_weights"] = list(survey_replicate_weights or [])
+    if survey_replicate_weights is None:
+        ctx.artifacts["_survey_replicate_weights"] = []
+    elif isinstance(survey_replicate_weights, (list, tuple)):
+        ctx.artifacts["_survey_replicate_weights"] = list(survey_replicate_weights)
+    else:
+        # Preserve a declared wrong-type value for the typed Survey adapter;
+        # ``or []`` would silently turn False/0 into an absent declaration.
+        ctx.artifacts["_survey_replicate_weights"] = survey_replicate_weights
     ctx.artifacts["_survey_replicate_type"] = survey_replicate_type
     ctx.artifacts["_survey_lonely_psu"] = survey_lonely_psu
     ctx.artifacts["_survey_weight_frame"] = survey_weight_frame

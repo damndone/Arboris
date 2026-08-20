@@ -14,14 +14,20 @@ the precision of the estimate, and it will have no way to know.
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
 
 from workbench.agent.context_tools import (
+    InspectDiagnosticsRequest,
+    InspectProjectModelCoefficientsRequest,
     InspectResultSummaryRequest,
     NodeOperationContextProvider,
+    _bounded_regression_table,
     _bounded_model_family_evidence,
+    _public_requested_model_coefficients,
+    _bounded_coefficient_row,
 )
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
@@ -49,6 +55,16 @@ def _summary(project, run_id: str, node: str) -> dict:
     )
 
 
+def _diagnostics(project, run_id: str, node: str) -> dict:
+    provider = NodeOperationContextProvider(project.root)
+    return provider.inspect_diagnostics(
+        InspectDiagnosticsRequest(
+            request_id="diagnostics-test", owner_run_id=run_id,
+            op_node_id=node, active_head_run_id=run_id,
+        )
+    )
+
+
 def test_the_agent_can_see_that_standard_errors_are_design_based(tmp_path):
     """Otherwise it will describe the precision of an interval it cannot read."""
     project, run_id = _run(
@@ -63,14 +79,486 @@ def test_the_agent_can_see_that_standard_errors_are_design_based(tmp_path):
         assert field in payload, f"the Agent cannot read {field}"
 
 
-def test_a_run_without_a_design_says_so_rather_than_omitting_the_field(tmp_path):
-    """Absence must be readable as absence, not as a field that failed to load."""
+def test_agent_projection_preserves_survey_provenance_and_replicate_metadata(tmp_path):
+    """A bounded Agent read must retain the survey qualification per coefficient."""
+    replicate_columns = [f"repw{i:02d}" for i in range(1, 13)]
+    project, run_id = _run(
+        tmp_path, "svy-replicate", "survey/design_with_replicate_weights.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+        survey_replicate_type="provided", survey_replicate_weights=replicate_columns,
+    )
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    design = summary["survey_design"]
+    assert design["replicates_attempted"] == 12
+    assert design["replicates_succeeded"] + design["replicates_failed"] == 12
+    assert isinstance(design["replicate_failure_reasons"], dict)
+
+    row = next(row for row in summary["regression_table"]["rows"] if row["term"] == "x1")
+    coefficient = row["models"]["ols_1"]
+    assert coefficient["variance_source"] == "survey_design"
+    assert coefficient["source_id"] == "model_results.ols_1.coefficients.x1"
+    assert isinstance(coefficient["warnings"], list)
+
+    requested = NodeOperationContextProvider(project.root).inspect_project_model_coefficients(
+        InspectProjectModelCoefficientsRequest(run_ids=(run_id,), terms=("x1",))
+    )
+    projected = requested["models"][0]["coefficients"][0]
+    assert projected["variance_source"] == "survey_design"
+    assert projected["source_id"] == "model_results.ols_1.coefficients.x1"
+    assert isinstance(projected["warnings"], list)
+
+
+def test_agent_rejects_tampered_model_result_before_projection(tmp_path):
+    """A valid JSON file is not valid evidence once its indexed hash changes."""
+    project, run_id = _run(
+        tmp_path, "tampered", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    result_path = project.root / "runs" / run_id / "model_results" / "ols_1.json"
+    payload = json.loads(result_path.read_text())
+    payload["coefficients"]["x1"]["estimate"] = 999.0
+    result_path.write_text(json.dumps(payload))
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    assert summary["available"] is False
+    assert summary["status"] == "unavailable"
+    assert summary["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
+
+
+def test_invalid_server_owned_model_artifact_omits_optional_result_and_diagnostic_fields(
+    tmp_path,
+):
+    """Invalid real-run evidence keeps typed reason without invented sections."""
+    project, run_id = _run(
+        tmp_path,
+        "invalid-agent-result",
+        "survey/design.csv",
+        model_type="ols",
+        y="y",
+        x=["x1", "x2"],
+    )
+    result_path = project.root / "runs" / run_id / "model_results" / "ols_1.json"
+    payload = json.loads(result_path.read_text())
+    payload["coefficients"]["x1"]["estimate"] = 999.0
+    result_path.write_text(json.dumps(payload))
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    diagnostics = _diagnostics(project, run_id, "model:ols_1")["diagnostics"]
+    for projection in (summary, diagnostics):
+        assert projection["available"] is False
+        assert projection["status"] == "unavailable"
+        assert projection["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
+        assert "survey_design" not in projection
+        assert "regression_table" not in projection
+        assert "marginal_effects" not in projection
+
+
+def test_agent_rejects_foreign_binding_even_when_index_hash_is_rewritten(tmp_path):
+    from workbench.artifacts import sha256_file, write_json
+
+    project, run_id = _run(
+        tmp_path, "foreign-binding", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    run_root = project.root / "runs" / run_id
+    result_path = run_root / "model_results" / "ols_1.json"
+    payload = json.loads(result_path.read_text())
+    payload["result_binding"]["project_root"] = "/foreign/project"
+    write_json(result_path, payload)
+
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text())
+    for record in index["artifacts"]:
+        if record.get("artifact_id") == "ols_1":
+            record["sha256"] = sha256_file(result_path)
+    write_json(index_path, index)
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    assert summary["available"] is False
+    assert summary["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
+
+
+def test_agent_requires_server_index_and_rejects_synchronized_digest_forgery(tmp_path):
+    project, run_id = _run(
+        tmp_path, "tamper", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    run_root = project.root / "runs" / run_id
+    result_path = run_root / "model_results" / "ols_1.json"
+    payload = json.loads(result_path.read_text())
+    payload["coefficients"]["x1"]["estimate"] = 123.0
+    result_path.write_text(json.dumps(payload))
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text())
+    for record in index["artifacts"]:
+        if record.get("artifact_id") == "ols_1":
+            record["sha256"] = hashlib.sha256(result_path.read_bytes()).hexdigest()
+    index_path.write_text(json.dumps(index))
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    assert summary["available"] is False
+    assert summary["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
+
+
+def test_agent_rejects_legacy_model_results_without_index(tmp_path):
+    project, run_id = _run(
+        tmp_path, "missing-index", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+    )
+    run_root = project.root / "runs" / run_id
+    (run_root / "artifacts_index.json").unlink()
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    assert summary["available"] is False
+    assert summary["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
+
+
+def test_agent_coefficient_projection_bounds_huge_values_and_provenance():
+    """Agent output must be typed unavailable rather than serializing huge values."""
+    result = {
+        "model_id": "ols_1",
+        "model_label": "Survey OLS",
+        "coefficients": {
+            "x": {
+                "estimate": 10**400,
+                "std_error": 10**400,
+                "p_value": 10**400,
+                "ci_lower": 10**400,
+                "ci_upper": 10**400,
+                "variance_source": "v" * 2000,
+                "source_id": "s" * 2000,
+                "warnings": ["w" * 2000] * 100,
+            }
+        },
+        "nobs": 10**400,
+        "df_model": -1,
+        "df_resid": 10**400,
+        "exposure_col": 10**400,
+        "sampling_weight": 10**400,
+    }
+
+    projected_model = _public_requested_model_coefficients(
+        run_id="run-1", result=result, requested_terms=("x",)
+    )
+    projected = projected_model["coefficients"][0]
+    assert projected["projection_status"] == "unavailable"
+    assert projected["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
+    assert "estimate" not in projected
+    assert projected["projection_status"] == "unavailable"
+    assert projected["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
+    assert "nobs" not in projected_model
+    assert "df_model" not in projected_model
+    assert "df_resid" not in projected_model
+    assert projected_model["model_metadata_status"] == "unavailable"
+    assert "exposure_col" not in projected_model
+    assert "sampling_weight" not in projected_model
+    assert len(projected["source_id"]) <= 128
+    assert len(projected["variance_source"]) <= 128
+    assert len(projected["warnings"]) <= 16
+    assert all(len(item) <= 128 for item in projected["warnings"])
+
+    table_cell = _bounded_regression_table([result])["rows"][0]["models"]["ols_1"]
+    assert table_cell["projection_status"] == "unavailable"
+    assert table_cell["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
+
+
+@pytest.mark.parametrize("bad_p", [-1, 2, 10**400, float("nan"), float("inf")])
+def test_agent_regression_and_diagnostic_projections_do_not_copy_invalid_survey_scalars(bad_p):
+    result = {
+        "model_id": "ols_1",
+        "model_type": "ols",
+        "nobs": 10**400,
+        "survey_design": {
+            "n_obs": -1,
+            "n_psu": 2.5,
+            "degf": -2,
+            "residual_degf": 10**400,
+            "variance_method": "linearization",
+            "source_id": "run-1:model_results.ols_1",
+        },
+        "coefficients": {
+            "x": {
+                "estimate": 1.0,
+                "std_error": -1,
+                "p_value": bad_p,
+                "ci_lower": 2.0,
+                "ci_upper": 1.0,
+                "variance_source": "survey_design",
+                "source_id": "run-1:model_results.ols_1.coefficients.x",
+                "warnings": ["SURVEY_INVALID"],
+            }
+        },
+    }
+
+    table = _bounded_regression_table([result])
+    model = table["models"][0]
+    cell = table["rows"][0]["models"]["ols_1"]
+    assert "nobs" not in model
+    assert model["projection_status"] == "unavailable"
+    assert model["survey_design"]["projection_status"] == "unavailable"
+    assert "n_obs" not in model["survey_design"]
+    assert "degf" not in model["survey_design"]
+    assert cell["projection_status"] == "unavailable"
+    assert "p_value" not in cell
+    assert "std_error" not in cell
+    assert "ci_lower" not in cell
+    assert "ci_upper" not in cell
+    assert cell["source_id"] == "run-1:model_results.ols_1.coefficients.x"
+
+    diagnostic = _bounded_coefficient_row({"variable": "x", **result["coefficients"]["x"]})
+    assert diagnostic["projection_status"] == "unavailable"
+    assert "p_value" not in diagnostic
+    assert "std_error" not in diagnostic
+
+
+def test_agent_result_summary_bounds_raw_identity_and_metrics(tmp_path):
+    """Summary metadata must cross the same finite/bounds/status contract."""
+    from workbench.agent.context_tools import _bounded_result_summary
+
+    summary = {
+        "model_identity": {
+            "model_family": "ols",
+            "model_label": "Survey OLS",
+            "y_variable": "y",
+            "n_observations": 10**400,
+            "x_variable_count": -1,
+        },
+        "model_quality": {
+            "metrics": {
+                "aic": 10**400,
+                "p_value": 2,
+                "ok": 1.25,
+            },
+            "primary_metric_keys": ["aic", "p_value", "ok"],
+        },
+    }
+
+    projected = _bounded_result_summary(
+        summary,
+        summary_status="complete",
+        preview={"available": True},
+        model_results=[],
+        run_root=tmp_path,
+    )
+
+    assert projected["available"] is False
+    assert projected["summary_projection_status"] == "unavailable"
+    assert projected["model_identity"].get("n_observations") is None
+    assert projected["metrics"].get("aic") is None
+    assert projected["metrics"].get("p_value") is None
+    assert projected["metrics"]["ok"] == 1.25
+    assert projected["unavailable_reason"] == "AGENT_RESULT_SUMMARY_INVALID"
+
+
+def test_agent_rejects_diagnostic_summary_when_file_and_index_are_tampered_together(tmp_path):
+    """An index rewrite must not make a changed diagnostic payload authoritative."""
+    from workbench.agent.context_tools import _read_diagnostic_summary
+    from workbench.artifacts import sha256_file
+
+    run_root = tmp_path / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    payload = {
+        "run_id": "run-1",
+        "model_identity": {"model_family": "ols", "n_observations": 10},
+        "run_status": {"report_render_status": "complete"},
+    }
+    unsigned = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    payload["summary_binding"] = {
+        "artifact_id": "diagnostic_summary",
+        "run_id": "run-1",
+        "status": "complete",
+        "provenance": "server",
+        "payload_sha256": hashlib.sha256(unsigned.encode()).hexdigest(),
+    }
+    summary_path = run_root / "diagnostic_summary.json"
+    summary_path.write_text(json.dumps(payload), encoding="utf-8")
+    index_path = run_root / "artifacts_index.json"
+    index_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artifacts": [
+                    {
+                        "artifact_id": "diagnostic_summary",
+                        "artifact_type": "metadata",
+                        "path": "diagnostic_summary.json",
+                        "sha256": sha256_file(summary_path),
+                        "step": "diagnostics",
+                        "inputs": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    tampered = dict(payload)
+    tampered["model_identity"] = {"model_family": "ols", "n_observations": 999}
+    summary_path.write_text(json.dumps(tampered), encoding="utf-8")
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["artifacts"][0]["sha256"] = sha256_file(summary_path)
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    summary, status = _read_diagnostic_summary(run_root)
+    assert summary is None
+    assert status == "artifact_invalid"
+
+
+def test_agent_diagnostics_rejects_synchronized_diagnostic_summary_tamper(tmp_path):
+    project, run_id = _run(
+        tmp_path, "diagnostic-tamper", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    run_root = project.root / "runs" / run_id
+    summary_path = run_root / "diagnostic_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["model_identity"]["n_observations"] = 999
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    for record in index["artifacts"]:
+        if record.get("artifact_id") == "diagnostic_summary":
+            record["sha256"] = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    diagnostics = _diagnostics(project, run_id, "model:ols_1")["diagnostics"]
+    assert diagnostics["available"] is False
+    assert diagnostics["status"] == "unavailable"
+    assert diagnostics["unavailable_reason"] == "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
+
+
+def test_agent_diagnostics_rejects_invalid_scalars_even_with_rebound_summary_digest(tmp_path):
+    """A rewritten file, index, and binding still cannot authorize raw scalars."""
+    from workbench.artifacts import sha256_file
+    from workbench.survey.projection import survey_payload_sha256
+
+    project, run_id = _run(
+        tmp_path, "diagnostic-invalid-scalar", "survey/design.csv",
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+    )
+    run_root = project.root / "runs" / run_id
+    summary_path = run_root / "diagnostic_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["model_identity"]["n_observations"] = 10**400
+    summary["summary_binding"]["payload_sha256"] = survey_payload_sha256(summary)
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    for record in index["artifacts"]:
+        if record.get("artifact_id") == "diagnostic_summary":
+            record["sha256"] = sha256_file(summary_path)
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    diagnostics = _diagnostics(project, run_id, "model:ols_1")["diagnostics"]
+    assert diagnostics["available"] is False
+    assert diagnostics["status"] == "unavailable"
+    assert diagnostics["unavailable_reason"] == "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
+
+
+def test_a_run_without_a_design_omits_the_optional_field(tmp_path):
+    """Absent persisted design metadata must not be synthesized as ``None``."""
     project, run_id = _run(
         tmp_path, "plain", "survey/design.csv",
         model_type="ols", y="y", x=["x1", "x2"],
     )
     summary = _summary(project, run_id, "model:ols_1")["result_summary"]
-    assert summary.get("survey_design") is None
+    assert "survey_design" not in summary
+
+
+def test_ordinary_non_survey_agent_diagnostics_omit_optional_survey_fields(tmp_path):
+    """A normal run must not advertise absent Survey result sections."""
+    project, run_id = _run(
+        tmp_path,
+        "ordinary-agent-read",
+        "survey/design.csv",
+        model_type="ols",
+        y="y",
+        x=["x1", "x2"],
+    )
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    diagnostics = _diagnostics(project, run_id, "model:ols_1")["diagnostics"]
+    assert "survey_design" not in summary
+    assert "marginal_effects" not in summary
+    assert "survey_design" not in diagnostics
+    assert "marginal_effects" not in diagnostics
+
+
+def test_real_agent_projection_has_no_nullable_sparse_model_facts(tmp_path):
+    """A real completed Agent read must omit absent low-level placeholders."""
+    project, run_id = _run(
+        tmp_path,
+        "ordinary-sparse-projection",
+        "survey/design.csv",
+        model_type="ols",
+        y="y",
+        x=["x1", "x2"],
+    )
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    persisted_models = summary["persisted_models"]
+    assert persisted_models
+    for model in persisted_models:
+        assert all(value is not None for value in model.values())
+        for coefficient in model.get("coefficients", []):
+            assert all(value is not None for value in coefficient.values())
+    assert "survey_design" not in summary
+    assert "marginal_effects" not in summary
+
+
+def test_report_projection_keeps_sparse_survey_boundary():
+    """Report remains a separate bounded consumer for sparse model packets."""
+    from workbench.report_view_model import build_regression_table
+
+    packet = build_regression_table(
+        [
+            (
+                "ols_1",
+                {
+                    "model_id": "ols_1",
+                    "model_type": "ols",
+                    "coefficients": {"x": {"estimate": 1.25}},
+                },
+            )
+        ]
+    )
+
+    assert packet["models"][0]["id"] == "ols_1"
+    assert "survey_design" not in packet["models"][0]
+    assert "survey_provenance" not in packet["models"][0]
+
+
+def test_agent_result_summary_omits_unpersisted_survey_sections(tmp_path):
+    """No persisted survey sections means no invented ``None`` or empty list."""
+    from workbench.agent.context_tools import _bounded_result_summary
+
+    projected = _bounded_result_summary(
+        None,
+        summary_status="missing",
+        preview={"available": False},
+        model_results=[],
+        run_root=tmp_path / "run-1",
+    )
+
+    for field in (
+        "survey_design",
+        "regression_table",
+        "marginal_effects",
+        "full_table_ref",
+        "interpretation_mode",
+        "run_status",
+        "persisted_models",
+        "statistical_evidence",
+        "model_family_evidence",
+        "coefficient_rows",
+    ):
+        assert field not in projected
 
 
 def test_the_agent_can_read_an_anova_table(tmp_path):

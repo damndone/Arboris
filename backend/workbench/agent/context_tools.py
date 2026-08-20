@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -19,7 +20,6 @@ from ..graph_store import GraphStore, graph_to_json
 from ..lineage.node_write_validation import build_rerun_operation_context
 from ..lineage.op_contract import resolve_operation_contract
 from ..lineage.run_inputs import read_run_inputs
-from ..services.results_service import read_model_results
 from ..analysis_loop.compare import ComparePacket
 from ..analysis_loop.time_series_compare import read_time_series_artifacts as _read_time_series_artifacts
 from ..analysis_loop.plan import PlanDiff
@@ -29,8 +29,22 @@ from ..predictive_research.consumer_projection import (
     read_classification_evidence_from_run_root,
     read_prediction_evidence_from_run_root,
 )
+from ..services.server_run_artifacts import (
+    ServerOwnedArtifactManifestError,
+    read_server_owned_run_artifacts,
+)
 from ..data_operations import _read_frame
 from ..graph_model import NodeKind
+from ..survey.projection import (
+    bounded_survey_number,
+    bounded_survey_integer,
+    project_survey_coefficient,
+    project_survey_design,
+    project_survey_result_summary,
+    project_survey_model_count,
+    survey_payload_sha256,
+    validate_survey_artifact_binding,
+)
 from .context_compiler import resolve_registered_artifact
 from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .recipes.registry import build_option_vocabulary, validate_model_options_patch
@@ -1607,12 +1621,52 @@ class NodeOperationContextProvider:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
+        model_results, verification_error = _verified_model_results(run_root)
+        if verification_error is not None:
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "diagnostics": _agent_result_unavailable(verification_error),
+                "omitted_sections": ["raw_model_results", "coefficient_risk"],
+            }
+        summary, summary_status = _read_diagnostic_summary(run_root)
+        if summary_status != "complete":
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "diagnostics": _agent_result_unavailable(
+                    "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
+                ),
+                "omitted_sections": ["raw_model_results", "coefficient_risk"],
+            }
+        summary_projection = project_survey_result_summary(
+            summary,
+            summary_status=summary_status,
+            unavailable_reason="AGENT_DIAGNOSTIC_SUMMARY_INVALID",
+            run_id=run_root.name,
+            artifact_id="diagnostic_summary",
+        )
+        if summary_projection.get("projection_status") != "available":
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "diagnostics": _agent_result_unavailable(
+                    "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
+                ),
+                "omitted_sections": ["raw_model_results", "coefficient_risk"],
+            }
         preview = build_diagnostic_summary_preview(
             run_root,
             manifest,
-            read_model_results(run_root),
+            model_results,
         )
         diagnostics, omitted_sections = _bounded_diagnostics(preview)
+        survey_design = _bounded_survey_design(model_results)
+        if survey_design is not None:
+            diagnostics["survey_design"] = survey_design
+        regression_table = _bounded_regression_table(model_results)
+        if regression_table is not None:
+            diagnostics["regression_table"] = regression_table
         return {
             **canonical,
             "node": _bounded_node(node),
@@ -1712,7 +1766,14 @@ class NodeOperationContextProvider:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
-        model_results = read_model_results(run_root)
+        model_results, verification_error = _verified_model_results(run_root)
+        if verification_error is not None:
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "result_summary": _agent_result_unavailable(verification_error),
+                "omitted_sections": ["raw_model_results", "coefficient_rows"],
+            }
         preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
         summary, summary_status = _read_diagnostic_summary(run_root)
         result_summary = _bounded_result_summary(
@@ -1723,7 +1784,7 @@ class NodeOperationContextProvider:
             run_root=run_root,
         )
         omitted_sections = ["raw_model_results"]
-        if result_summary["coefficient_rows_omitted"]:
+        if result_summary.get("coefficient_rows_omitted"):
             omitted_sections.append("coefficient_rows")
         return {
             **canonical,
@@ -1936,7 +1997,15 @@ class NodeOperationContextProvider:
         models: list[dict[str, Any]] = []
         for run_id in request.run_ids:
             run_root = self._project_run_root(run_id)
-            for result in read_model_results(run_root):
+            model_results, verification_error = _verified_model_results(run_root)
+            if verification_error is not None:
+                models.append({
+                    "run_id": run_id,
+                    "projection_status": "unavailable",
+                    "unavailable_reason": verification_error,
+                })
+                continue
+            for result in model_results:
                 public_model = _public_requested_model_coefficients(
                     run_id=run_id,
                     result=result,
@@ -2091,7 +2160,12 @@ class NodeOperationContextProvider:
                 raise ToolVisibleError(
                     "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: requested artifact is not a persisted figure."
                 )
-            models = [result for result in read_model_results(run_root) if isinstance(result, dict)]
+            models, verification_error = _verified_model_results(run_root)
+            if verification_error is not None:
+                raise ToolVisibleError(
+                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: "
+                    f"{verification_error}."
+                )
             if len(models) != 1 or not isinstance(models[0].get("model_id"), str):
                 raise ToolVisibleError(
                     "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: the figure does not resolve to exactly one persisted model."
@@ -2173,7 +2247,13 @@ class NodeOperationContextProvider:
                 )
             run_root = self._project_run_root(run_id)
             matches: list[tuple[str, dict[str, Any]]] = []
-            for result in read_model_results(run_root):
+            model_results, verification_error = _verified_model_results(run_root)
+            if verification_error is not None:
+                raise ToolVisibleError(
+                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: "
+                    f"{verification_error}."
+                )
+            for result in model_results:
                 model_id = result.get("model_id")
                 model_type = result.get("model_type")
                 coefficients = result.get("coefficients")
@@ -2281,7 +2361,13 @@ class NodeOperationContextProvider:
                 )
             run_root = self._project_run_root(run_id)
             matches: list[tuple[str, float]] = []
-            for result in read_model_results(run_root):
+            model_results, verification_error = _verified_model_results(run_root)
+            if verification_error is not None:
+                raise ToolVisibleError(
+                    "PROJECT_COEFFICIENT_TRANSFORM_UNAVAILABLE: "
+                    f"{verification_error}."
+                )
+            for result in model_results:
                 model_id = result.get("model_id")
                 coefficients = result.get("coefficients")
                 coefficient = coefficients.get(term) if isinstance(coefficients, dict) else None
@@ -2594,8 +2680,20 @@ class NodeOperationContextProvider:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
+        model_results, verification_error = _verified_model_results(run_root)
+        if verification_error is not None:
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "artifact_preview": {
+                    "available": False,
+                    "preview_status": "unavailable",
+                    "unavailable_reason": verification_error,
+                },
+                "omitted_sections": ["raw_artifact_payloads", "raw_model_results"],
+            }
         artifact_manifest = _bounded_artifact_manifest(
-            build_artifact_manifest(run_root, read_model_results(run_root))
+            build_artifact_manifest(run_root, model_results)
         )
         lifecycle = str(manifest.get("status") or "completed")
         if lifecycle in {"queued", "running"}:
@@ -3131,96 +3229,188 @@ def _public_requested_model_coefficients(
 
     public_coefficients: list[dict[str, Any]] = []
     missing_terms: list[str] = []
+    invalid_term = False
     for term in requested_terms:
-        coefficient = coefficients.get(term)
-        if not isinstance(coefficient, dict):
-            missing_terms.append(term)
+        term_key = _bounded_term(term)
+        if term_key is None:
+            invalid_term = True
             continue
-        public_coefficients.append(
-            {
-                "term": term,
-                "estimate": _public_stat_number(coefficient.get("estimate")),
-                "std_error": _public_stat_number(coefficient.get("std_error")),
-                "p_value": _public_stat_number(coefficient.get("p_value")),
-                "ci_lower": _public_stat_number(coefficient.get("ci_lower")),
-                "ci_upper": _public_stat_number(coefficient.get("ci_upper")),
-                "source_id": (
-                    coefficient.get("source_id")
-                    if isinstance(coefficient.get("source_id"), str)
-                    else None
-                ),
-            }
-        )
+        coefficient = coefficients.get(term_key)
+        if not isinstance(coefficient, dict):
+            missing_terms.append(term_key)
+            continue
+        bounded = _bounded_agent_coefficient(coefficient, run_id=run_id)
+        if not _coefficient_has_typed_cell(bounded):
+            invalid_term = True
+            continue
+        public_coefficients.append({"term": term_key, **bounded})
 
-    predictors = result.get("x_columns")
-    public_predictors = (
-        [item for item in predictors if isinstance(item, str)][:_MAX_PUBLIC_MODEL_PREDICTORS]
-        if isinstance(predictors, list)
-        else []
-    )
-    predictor_count = (
-        len([item for item in predictors if isinstance(item, str)])
-        if isinstance(predictors, list)
-        else 0
-    )
-    covariance_evidence = result.get("covariance_evidence")
-    covariance_evidence = (
-        covariance_evidence if isinstance(covariance_evidence, dict) else {}
-    )
-    confidence_level = _public_probability(covariance_evidence.get("confidence_level"))
-    cluster_variable = covariance_evidence.get("cluster_variable")
-    cluster_count = _public_positive_int(covariance_evidence.get("cluster_count"))
-    return {
+    public_model: dict[str, Any] = {
         "run_id": run_id,
         "model_id": model_id,
-        "model_type": result.get("model_type") if isinstance(result.get("model_type"), str) else None,
-        "nobs": _public_positive_int(result.get("nobs")),
-        "r_squared": _public_stat_number(result.get("r_squared")),
-        "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
-        "df_model": _public_stat_number(result.get("df_model")),
-        "df_resid": _public_stat_number(result.get("df_resid")),
-        "outcome": result.get("y_column") if isinstance(result.get("y_column"), str) else None,
-        "predictors": public_predictors,
-        "predictors_omitted": max(predictor_count - len(public_predictors), 0),
-        "entity_col": result.get("entity_col") if isinstance(result.get("entity_col"), str) else None,
-        "time_col": result.get("time_col") if isinstance(result.get("time_col"), str) else None,
-        "covariance": result.get("covariance") if isinstance(result.get("covariance"), str) else None,
-        "covariance_estimator": (
-            result.get("covariance_estimator")
-            if isinstance(result.get("covariance_estimator"), str)
-            else None
-        ),
-        "confidence_interval": {
-            "level": confidence_level,
-            "method": (
-                covariance_evidence.get("confidence_interval_method")
-                if isinstance(covariance_evidence.get("confidence_interval_method"), str)
-                else None
-            ),
-        },
-        "covariance_details": {
-            "cluster_variable": cluster_variable if isinstance(cluster_variable, str) else None,
-            "cluster_count": cluster_count,
-            "cluster_entity": (
-                covariance_evidence.get("cluster_entity")
-                if isinstance(covariance_evidence.get("cluster_entity"), bool)
-                else None
-            ),
-        },
-        "coefficients": public_coefficients,
-        "missing_terms": missing_terms,
         "evidence_ref": {
             "run_id": run_id,
             "model_id": model_id,
             "result_ref": f"model_results:{model_id}",
         },
     }
+    invalid_model_contract = False
+
+    for key in (
+        "model_type",
+        "y_column",
+        "entity_col",
+        "time_col",
+        "covariance",
+        "covariance_estimator",
+    ):
+        value = _bounded_present_field(result, key, _bounded_label)
+        if value is _MISSING:
+            continue
+        if value is None:
+            invalid_model_contract = True
+        else:
+            public_model["outcome" if key == "y_column" else key] = value
+
+    for key in ("r_squared", "r_squared_adj"):
+        value = _bounded_present_field(result, key, _public_stat_number)
+        if value is _MISSING:
+            continue
+        if value is None:
+            invalid_model_contract = True
+        else:
+            public_model[key] = value
+
+    nobs = _bounded_present_field(
+        result,
+        "nobs",
+        lambda value: project_survey_model_count(
+            value, unavailable_reason="AGENT_MODEL_METADATA_INVALID"
+        )[0],
+    )
+    if nobs is not _MISSING:
+        if nobs is None:
+            invalid_model_contract = True
+        else:
+            public_model["nobs"] = nobs
+    for key, positive in (("df_model", False), ("df_resid", True)):
+        value = _bounded_present_field(
+            result,
+            key,
+            lambda raw, positive=positive: bounded_survey_integer(raw, positive=positive),
+        )
+        if value is _MISSING:
+            continue
+        if value is None:
+            invalid_model_contract = True
+        else:
+            public_model[key] = value
+
+    predictors = result.get("x_columns")
+    if "x_columns" in result:
+        if not isinstance(predictors, list) or not all(isinstance(item, str) for item in predictors):
+            invalid_model_contract = True
+        elif predictors:
+            public_model["predictors"] = predictors[:_MAX_PUBLIC_MODEL_PREDICTORS]
+            omitted = max(len(predictors) - len(public_model["predictors"]), 0)
+            if omitted:
+                public_model["predictors_omitted"] = omitted
+
+    covariance_evidence = result.get("covariance_evidence")
+    if "covariance_evidence" in result:
+        if not isinstance(covariance_evidence, dict):
+            invalid_model_contract = True
+            covariance_evidence = {}
+        confidence: dict[str, Any] = {}
+        if "confidence_level" in covariance_evidence:
+            level = _public_probability(covariance_evidence["confidence_level"])
+            if level is None:
+                invalid_model_contract = True
+            else:
+                confidence["level"] = level
+        if "confidence_interval_method" in covariance_evidence:
+            method = _bounded_label(covariance_evidence["confidence_interval_method"])
+            if method is None:
+                invalid_model_contract = True
+            else:
+                confidence["method"] = method
+        if confidence:
+            public_model["confidence_interval"] = confidence
+        details: dict[str, Any] = {}
+        for key, validator in (
+            ("cluster_variable", _bounded_label),
+            ("cluster_count", _public_positive_int),
+        ):
+            if key not in covariance_evidence:
+                continue
+            value = validator(covariance_evidence[key])
+            if value is None:
+                invalid_model_contract = True
+            else:
+                details[key] = value
+        if "cluster_entity" in covariance_evidence:
+            value = covariance_evidence["cluster_entity"]
+            if not isinstance(value, bool):
+                invalid_model_contract = True
+            else:
+                details["cluster_entity"] = value
+        if details:
+            public_model["covariance_details"] = details
+
+    for key in ("exposure_col", "sampling_weight"):
+        value = _bounded_present_field(result, key, _bounded_label)
+        if value is _MISSING:
+            continue
+        if value is None:
+            invalid_model_contract = True
+        else:
+            public_model[key] = value
+
+    if public_coefficients:
+        public_model["coefficients"] = public_coefficients
+    if missing_terms:
+        public_model["missing_terms"] = missing_terms
+    survey_design = _bounded_survey_design([result])
+    if survey_design is not None:
+        public_model["survey_design"] = survey_design
+    if invalid_model_contract:
+        public_model.update({
+            "model_metadata_status": "unavailable",
+            "model_metadata_unavailable_reason": "AGENT_MODEL_METADATA_INVALID",
+        })
+    if invalid_term:
+        public_model.update({
+            "projection_status": "unavailable",
+            "unavailable_reason": "AGENT_COEFFICIENT_TERM_INVALID",
+        })
+    return public_model
 
 
 def _public_stat_number(value: Any) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return value if math.isfinite(float(value)) else None
+    try:
+        parsed = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or abs(parsed) > 1_000_000_000_000.0:
+        return None
+    return value
+
+
+_MISSING = object()
+
+
+def _bounded_present_field(
+    source: Mapping[str, Any],
+    key: str,
+    validator: Callable[[Any], Any],
+) -> Any:
+    """Distinguish an absent source key from a declared invalid value."""
+
+    if key not in source:
+        return _MISSING
+    return validator(source[key])
 
 
 def _public_probability(value: Any) -> float | None:
@@ -3231,7 +3421,12 @@ def _public_probability(value: Any) -> float | None:
 
 
 def _public_positive_int(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or value > 1_000_000
+    ):
         return None
     return value
 
@@ -3278,6 +3473,31 @@ def _read_diagnostic_summary(run_root: Path) -> tuple[dict[str, Any] | None, str
         return None, "malformed"
     if not isinstance(value, dict):
         return None, "malformed"
+    try:
+        records = read_server_owned_run_artifacts(
+            run_root.parent.parent,
+            run_root.name,
+            required=True,
+        )
+    except (ServerOwnedArtifactManifestError, OSError, ValueError):
+        return None, "artifact_invalid"
+    matches = [
+        record
+        for record in records
+        if record.get("artifact_id") == "diagnostic_summary"
+        and record.get("artifact_type") == "metadata"
+        and record.get("path") == "diagnostic_summary.json"
+    ]
+    if len(matches) != 1:
+        return None, "artifact_invalid"
+    binding_valid = validate_survey_artifact_binding(
+        value.get("summary_binding"),
+        artifact_id="diagnostic_summary",
+        run_id=run_root.name,
+        expected_payload_sha256=survey_payload_sha256(value),
+    )
+    if not binding_valid:
+        return None, "artifact_invalid"
     return value, "complete"
 
 
@@ -3409,7 +3629,7 @@ def _bounded_regression_table(
     *,
     model_limit: int = 4,
     term_limit: int = 32,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Project the persisted coefficient packets into the report-table schema.
 
     Agent consumers need the same side-by-side evidence as Report/Table, but
@@ -3418,6 +3638,9 @@ def _bounded_regression_table(
     counts.  Significance markers are derived from the fixed report defaults;
     they are display metadata, never a replacement for the persisted p-value.
     """
+
+    if not model_results:
+        return None
 
     cutoffs = (("***", 0.01), ("**", 0.05), ("*", 0.1))
     models: list[dict[str, Any]] = []
@@ -3428,58 +3651,112 @@ def _bounded_regression_table(
         model_id = result.get("model_id")
         if not isinstance(model_id, str) or not model_id:
             continue
-        models.append({
-            "id": model_id,
-            "label": result.get("model_label") or result.get("model_type") or model_id,
-            "model_type": result.get("model_type"),
-            "nobs": result.get("nobs"),
-        })
+        model_view: dict[str, Any] = {"id": model_id}
+        label = _bounded_label(result.get("model_label"))
+        model_type = _bounded_label(result.get("model_type"))
+        if label is not None:
+            model_view["label"] = label
+        elif model_type is not None:
+            model_view["label"] = model_type
+        else:
+            model_view["label"] = model_id
+        if "model_type" in result:
+            if model_type is None:
+                model_view.update(
+                    {
+                        "projection_status": "unavailable",
+                        "unavailable_reason": "AGENT_MODEL_METADATA_INVALID",
+                    }
+                )
+            else:
+                model_view["model_type"] = model_type
+        model_nobs = _bounded_present_field(
+            result,
+            "nobs",
+            lambda value: project_survey_model_count(
+                value, unavailable_reason="AGENT_MODEL_METADATA_INVALID"
+            )[0],
+        )
+        if model_nobs is not _MISSING:
+            if model_nobs is not None:
+                model_view["nobs"] = model_nobs
+            if model_nobs is None:
+                model_view.update(
+                    {
+                        "projection_status": "unavailable",
+                        "unavailable_reason": "AGENT_MODEL_METADATA_INVALID",
+                    }
+                )
+        design = project_survey_design(
+            result.get("survey_design"),
+            unavailable_reason="AGENT_SURVEY_METADATA_INVALID",
+        )
+        if design is not None:
+            model_view["survey_design"] = design
+        models.append(model_view)
         coefficients = result.get("coefficients")
         if not isinstance(coefficients, dict):
             continue
+        invalid_term = False
         for term, raw_cell in list(coefficients.items())[: max(0, term_limit)]:
-            if not isinstance(raw_cell, dict):
+            term_key = _bounded_term(term)
+            if term_key is None or not isinstance(raw_cell, dict):
+                invalid_term = True
                 continue
-            term_key = str(term)
             row = rows_by_term.setdefault(
                 term_key,
                 {"term": term_key, "label": term_key, "models": {}},
             )
-            cell = {
-                key: _bounded_public_result_value(raw_cell[key], budget=budget)
-                for key in (
-                    "estimate",
-                    "std_error",
-                    "ci_lower",
-                    "ci_upper",
-                    "p_value",
-                    "source_id",
-                )
-                if key in raw_cell
-            }
-            p_value = raw_cell.get("p_value")
-            try:
-                parsed_p = float(p_value)
-            except (TypeError, ValueError):
-                parsed_p = math.nan
-            cell["significance"] = next(
-                (marker for marker, cutoff in cutoffs if math.isfinite(parsed_p) and parsed_p < cutoff),
-                "",
+            cell = _bounded_agent_coefficient(
+                raw_cell, budget=budget, run_id=result.get("run_id")
             )
-            row["models"][model_id] = cell
+            parsed_p = cell.get("p_value")
+            if isinstance(parsed_p, (int, float)) and not isinstance(parsed_p, bool):
+                marker = next(
+                    (marker for marker, cutoff in cutoffs if parsed_p < cutoff),
+                    None,
+                )
+                if marker is not None:
+                    cell["significance"] = marker
+            if _coefficient_has_typed_cell(cell):
+                row["models"][model_id] = cell
+            else:
+                invalid_term = True
+
+        if invalid_term:
+            model_view.update(
+                {
+                    "projection_status": "unavailable",
+                    "unavailable_reason": "AGENT_COEFFICIENT_TERM_INVALID",
+                }
+            )
+
+    if not models:
+        return None
 
     model_ids = [model["id"] for model in models]
     rows = [
         {
             **row,
-            "models": {
-                model_id: row["models"].get(model_id)
-                for model_id in model_ids
-            },
+            "models": dict(row["models"]),
         }
         for row in rows_by_term.values()
+        if row["models"]
     ]
-    return {
+    if not rows:
+        invalid_models = [
+            model for model in models if model.get("projection_status") == "unavailable"
+        ]
+        if not invalid_models:
+            return None
+        return {
+            "payload_schema": "workbench.regression-table",
+            "schema_version": 1,
+            "models": models,
+            "projection_status": "unavailable",
+            "unavailable_reason": "AGENT_COEFFICIENT_TERM_INVALID",
+        }
+    projected = {
         "payload_schema": "workbench.regression-table",
         "schema_version": 1,
         "models": models,
@@ -3488,8 +3765,11 @@ def _bounded_regression_table(
             "cutoffs": {marker: cutoff for marker, cutoff in cutoffs},
             "legend": "*** p < 0.01; ** p < 0.05; * p < 0.1",
         },
-        "models_omitted": max(len(model_results) - len(models), 0),
     }
+    omitted = max(len(model_results) - len(models), 0)
+    if omitted:
+        projected["models_omitted"] = omitted
+    return projected
 
 
 def _bounded_result_summary(
@@ -3500,95 +3780,93 @@ def _bounded_result_summary(
     model_results: list[dict[str, Any]],
     run_root: Path,
 ) -> dict[str, Any]:
-    identity = summary.get("model_identity") if isinstance(summary, dict) else None
-    identity = identity if isinstance(identity, dict) else {}
-    x_variables = identity.get("x_variables")
-    if not isinstance(x_variables, list):
-        x_variable_count = identity.get("x_variable_count")
-    else:
-        x_variable_count = len(x_variables)
-
-    model_identity = {
-        key: value
-        for key, value in {
-            "model_family": identity.get("model_family"),
-            "model_label": identity.get("model_label"),
-            "y_variable": identity.get("y_variable"),
-            "n_observations": identity.get("n_observations"),
-            "x_variable_count": x_variable_count,
-        }.items()
-        if value is not None
-    }
-
-    quality = summary.get("model_quality") if isinstance(summary, dict) else None
-    quality = quality if isinstance(quality, dict) else {}
-    raw_metrics = quality.get("metrics")
-    metric_items = raw_metrics.items() if isinstance(raw_metrics, dict) else ()
-    metrics = {
-        str(key): value
-        for key, value in metric_items
-        if isinstance(raw_metrics, dict)
-        and isinstance(key, str)
-        and isinstance(value, (int, float))
-        and not isinstance(value, bool)
-    }
-    primary_metric_keys = quality.get("primary_metric_keys")
-    if not isinstance(primary_metric_keys, list):
-        primary_metric_keys = []
-    primary_metric_keys = [key for key in primary_metric_keys if isinstance(key, str)]
+    summary_projection = project_survey_result_summary(
+        summary,
+        summary_status=summary_status,
+        unavailable_reason="AGENT_RESULT_SUMMARY_INVALID",
+        run_id=run_root.name,
+        artifact_id="diagnostic_summary",
+    )
+    model_identity = summary_projection.get("model_identity", {})
+    metrics = summary_projection.get("metrics", {})
+    primary_metric_keys = summary_projection.get("primary_metric_keys", [])
 
     coefficient_summary = summary.get("coefficients_summary") if isinstance(summary, dict) else None
     coefficient_summary = (
         coefficient_summary if isinstance(coefficient_summary, dict) else {}
     )
     raw_rows = coefficient_summary.get("rows")
-    raw_rows = raw_rows if isinstance(raw_rows, list) else []
-    coefficient_rows = [
-        _bounded_coefficient_row(row)
-        for row in raw_rows
-        if isinstance(row, dict)
-    ]
-    coefficient_rows = [row for row in coefficient_rows if row]
+    coefficient_rows = []
+    if isinstance(raw_rows, list):
+        coefficient_rows = [
+            _bounded_coefficient_row(row)
+            for row in raw_rows
+            if isinstance(row, dict)
+        ]
+        coefficient_rows = [row for row in coefficient_rows if row]
     coefficient_rows_omitted = max(len(coefficient_rows) - 8, 0)
 
     run_status = preview.get("run_status")
     statistical_evidence = _bounded_statistics_evidence(run_root)
     model_family_evidence = _bounded_model_family_evidence(run_root, model_results)
     regression_table = _bounded_regression_table(model_results)
-    return {
-        "available": summary_status == "complete" and preview.get("available") is True,
+    projected = {
+        "available": (
+            summary_projection.get("projection_status") == "available"
+            and preview.get("available") is True
+        ),
         "summary_status": summary_status,
-        # v1.8.7. Without these an Agent reads a design-based standard error as
-        # an ordinary one: it would speak about the precision of the estimate
-        # with no way to know the interval uses 8 degrees of freedom rather than
-        # 80 observations. `None` when no design was declared, so absence reads
-        # as absence rather than as a field that failed to load.
-        "survey_design": _bounded_survey_design(model_results),
-        "marginal_effects": _bounded_average_marginal_effects(model_results),
-        "run_lifecycle_status": preview.get("run_lifecycle_status"),
-        "trust_label": preview.get("trust_label"),
-        "model_identity": model_identity,
-        "metrics": metrics,
-        "primary_metric_keys": primary_metric_keys,
-        "coefficient_rows": coefficient_rows[:8],
-        "coefficient_row_count": len(coefficient_rows),
-        "coefficient_rows_omitted": coefficient_rows_omitted,
-        "full_table_ref": (
-            coefficient_summary.get("full_table_ref")
-            if isinstance(coefficient_summary.get("full_table_ref"), str)
-            else None
+        "summary_projection_status": summary_projection.get("projection_status"),
+        **(
+            {"unavailable_reason": summary_projection["unavailable_reason"]}
+            if "unavailable_reason" in summary_projection
+            else {}
         ),
-        "interpretation_mode": (
-            coefficient_summary.get("interpretation_mode")
-            if isinstance(coefficient_summary.get("interpretation_mode"), str)
-            else None
-        ),
-        "run_status": run_status if isinstance(run_status, dict) else None,
-        "persisted_models": _bounded_persisted_model_facts(model_results),
-        "statistical_evidence": statistical_evidence,
-        "regression_table": regression_table,
-        "model_family_evidence": model_family_evidence,
     }
+    for key in ("run_lifecycle_status", "trust_label"):
+        value = preview.get(key)
+        if value is not None:
+            projected[key] = value
+    if isinstance(summary, dict) and isinstance(summary.get("model_identity"), dict):
+        projected["model_identity"] = model_identity
+    model_quality = summary.get("model_quality") if isinstance(summary, dict) else None
+    if isinstance(model_quality, dict):
+        if isinstance(model_quality.get("metrics"), dict):
+            projected["metrics"] = metrics
+        if isinstance(model_quality.get("primary_metric_keys"), list):
+            projected["primary_metric_keys"] = primary_metric_keys
+    if isinstance(raw_rows, list):
+        projected.update(
+            {
+                "coefficient_rows": coefficient_rows[:8],
+                "coefficient_row_count": len(coefficient_rows),
+                "coefficient_rows_omitted": coefficient_rows_omitted,
+            }
+        )
+    for key in ("full_table_ref", "interpretation_mode"):
+        value = coefficient_summary.get(key)
+        if isinstance(value, str):
+            projected[key] = value
+    if isinstance(run_status, dict):
+        projected["run_status"] = run_status
+    persisted_models = _bounded_persisted_model_facts(model_results)
+    if persisted_models:
+        projected["persisted_models"] = persisted_models
+    if statistical_evidence is not None:
+        projected["statistical_evidence"] = statistical_evidence
+    if regression_table is not None:
+        projected["regression_table"] = regression_table
+    if model_family_evidence is not None:
+        projected["model_family_evidence"] = model_family_evidence
+    # Optional survey sections are evidence-backed. Do not manufacture a None
+    # or empty-list marker when the persisted model packet has no such field.
+    survey_design = _bounded_survey_design(model_results)
+    if survey_design is not None:
+        projected["survey_design"] = survey_design
+    marginal_effects = _bounded_average_marginal_effects(model_results)
+    if marginal_effects is not None:
+        projected["marginal_effects"] = marginal_effects
+    return projected
 
 
 def _bounded_model_family_evidence(
@@ -3652,6 +3930,8 @@ def _project_family_evidence(
         )
     for field in spec.fields:
         origin = sidecars[field.sidecar] if field.sidecar else source
+        if field.key == "marginal_effects" and field.source_key not in origin:
+            continue
         value = origin.get(field.source_key)
         if field.nested_key is not None:
             value = value.get(field.nested_key) if isinstance(value, dict) else {}
@@ -3660,13 +3940,85 @@ def _project_family_evidence(
 
 
 def _bounded_label(value: Any) -> str | None:
-    return value[:128] if isinstance(value, str) else None
+    return value[:128] if isinstance(value, str) and value else None
+
+
+def _bounded_term(value: Any) -> str | None:
+    """Accept a coefficient term only when its source label is complete."""
+
+    if not isinstance(value, str) or not value or not value.strip() or len(value) > 128:
+        return None
+    return value
+
+
+_PUBLIC_COEFFICIENT_VALUE_FIELDS = frozenset(
+    {"estimate", "ci_lower", "ci_upper", "std_error", "p_value", "confidence_interval"}
+)
+
+
+def _coefficient_has_public_evidence(value: Mapping[str, Any]) -> bool:
+    return any(field in value for field in _PUBLIC_COEFFICIENT_VALUE_FIELDS)
+
+
+def _coefficient_has_typed_cell(value: Mapping[str, Any]) -> bool:
+    return _coefficient_has_public_evidence(value) or any(
+        field in value for field in ("variance_source", "source_id", "warnings")
+    )
 
 
 def _bounded_labels(value: Any, *, limit: int = 16) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item[:128] for item in value[:limit] if isinstance(item, str)]
+
+
+def _bounded_agent_coefficient(
+    coefficient: Mapping[str, Any], *, budget: _PublicResultBudget | None = None,
+    run_id: str | None = None,
+    unavailable_reason: str = "AGENT_COEFFICIENT_VALUE_INVALID",
+) -> dict[str, Any]:
+    """Project coefficient evidence with bounded numbers and provenance."""
+    projected = project_survey_coefficient(
+        coefficient,
+        unavailable_reason=unavailable_reason,
+        run_id=run_id,
+    )
+    # The shared Survey projector marks the whole coefficient unavailable when
+    # one declared field is invalid.  The Agent seam still may expose other
+    # fields whose own source values are bounded and valid, but never creates
+    # a nullable placeholder for the invalid field.
+    invalid_ci_pair = False
+    if "ci_lower" in coefficient and "ci_upper" in coefficient:
+        lower = bounded_survey_number(coefficient["ci_lower"])
+        upper = bounded_survey_number(coefficient["ci_upper"])
+        invalid_ci_pair = lower is None or upper is None or lower > upper
+    for field in ("estimate", "ci_lower", "ci_upper"):
+        if field not in coefficient:
+            continue
+        if field in {"ci_lower", "ci_upper"} and invalid_ci_pair:
+            continue
+        value = bounded_survey_number(coefficient[field])
+        if value is not None:
+            projected[field] = value
+    if "std_error" in coefficient:
+        value = bounded_survey_number(coefficient["std_error"], positive=True)
+        if value is not None:
+            projected["std_error"] = value
+    if "p_value" in coefficient:
+        value = bounded_survey_number(coefficient["p_value"], probability=True)
+        if value is not None:
+            projected["p_value"] = value
+    if (
+        isinstance(coefficient.get("confidence_interval"), (list, tuple))
+        and len(coefficient["confidence_interval"]) == 2
+    ):
+        interval = [bounded_survey_number(item) for item in coefficient["confidence_interval"]]
+        if all(item is not None for item in interval) and interval[0] <= interval[1]:
+            projected["confidence_interval"] = interval
+    if not _coefficient_has_public_evidence(projected) and "projection_status" not in projected:
+        projected["projection_status"] = "unavailable"
+        projected["unavailable_reason"] = unavailable_reason
+    return projected
 
 
 def _bounded_numeric_list(value: Any, *, limit: int) -> list[int | float]:
@@ -3954,27 +4306,36 @@ def _bounded_persisted_model_facts(
         if not isinstance(model_id, str) or not isinstance(coefficients, dict):
             continue
         rows: list[dict[str, Any]] = []
+        invalid_term = False
         for term, coefficient in list(coefficients.items())[:8]:
-            if not isinstance(term, str) or not isinstance(coefficient, dict):
+            term_key = _bounded_term(term)
+            if term_key is None or not isinstance(coefficient, dict):
+                invalid_term = True
                 continue
-            rows.append(
+            bounded = _bounded_agent_coefficient(
+                coefficient, run_id=result.get("run_id")
+            )
+            if not _coefficient_has_typed_cell(bounded):
+                invalid_term = True
+                continue
+            rows.append({"term": term_key, **bounded})
+        model: dict[str, Any] = {"model_id": model_id}
+        for key in ("r_squared", "r_squared_adj"):
+            value = _bounded_present_field(result, key, _public_stat_number)
+            if value is _MISSING:
+                continue
+            if value is not None:
+                model[key] = value
+        if rows:
+            model["coefficients"] = rows
+        if invalid_term:
+            model.update(
                 {
-                    "term": term,
-                    "estimate": _public_stat_number(coefficient.get("estimate")),
-                    "std_error": _public_stat_number(coefficient.get("std_error")),
-                    "p_value": _public_stat_number(coefficient.get("p_value")),
-                    "ci_lower": _public_stat_number(coefficient.get("ci_lower")),
-                    "ci_upper": _public_stat_number(coefficient.get("ci_upper")),
+                    "projection_status": "unavailable",
+                    "unavailable_reason": "AGENT_COEFFICIENT_TERM_INVALID",
                 }
             )
-        projected.append(
-            {
-                "model_id": model_id,
-                "r_squared": _public_stat_number(result.get("r_squared")),
-                "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
-                "coefficients": rows,
-            }
-        )
+        projected.append(model)
     return projected
 
 
@@ -3988,8 +4349,33 @@ def _bounded_coefficient_row(row: dict[str, Any]) -> dict[str, Any]:
         "ci_lower",
         "ci_upper",
         "significance_label",
+        "variance_source",
+        "source_id",
+        "warnings",
     )
-    return {key: row[key] for key in allowed if key in row}
+    bounded: dict[str, Any] = {}
+    for key in ("variable", "display_name", "significance_label"):
+        if key in row:
+            label = _bounded_label(row.get(key))
+            if label is not None:
+                bounded[key] = label
+    coefficient = _bounded_agent_coefficient(row)
+    for key in (
+        "estimate",
+        "std_error",
+        "p_value",
+        "ci_lower",
+        "ci_upper",
+        "variance_source",
+        "source_id",
+        "warnings",
+    ):
+        if key in row and key in coefficient:
+            bounded[key] = coefficient[key]
+    for key in ("projection_status", "unavailable_reason"):
+        if key in coefficient:
+            bounded[key] = coefficient[key]
+    return bounded
 
 
 def _bounded_artifact_manifest(
@@ -4114,6 +4500,367 @@ class _PublicResultBudget:
     omitted_items: int = 0
 
 
+_PUBLIC_ARTIFACT_STRING_FIELDS = frozenset(
+    {
+        "contract",
+        "contract_version",
+        "operation_id",
+        "schema_version",
+        "payload_schema",
+        "operation",
+        "missing_policy",
+        "branch_id",
+        "test_id",
+        "test_version",
+        "test_type",
+        "family",
+        "correction",
+        "status",
+        "source_artifact_id",
+        "source_sha256",
+    }
+)
+_PUBLIC_ARTIFACT_NUMERIC_FIELDS = frozenset(
+    {
+        "source_row_count",
+        "filtered_row_count",
+        "obs",
+        "nobs",
+        "df",
+        "degrees_of_freedom",
+        "statistic",
+        "test_statistic",
+        "f_statistic",
+        "p_value",
+        "p_value_corrected",
+        "effect_size",
+        "estimate",
+        "std_error",
+        "ci_lower",
+        "ci_upper",
+        "mean",
+        "std_dev",
+        "min",
+        "max",
+        "missing_count",
+        "r_squared",
+        "r_squared_adj",
+        "design_effect",
+        "effective_sample_size",
+    }
+)
+_PUBLIC_ARTIFACT_VARIABLE_NUMERIC_FIELDS = _PUBLIC_ARTIFACT_NUMERIC_FIELDS | frozenset(
+    {"median", "q1", "q3"}
+)
+
+_ARTIFACT_NUMERIC_INVALID_REASON = "AGENT_ARTIFACT_NUMERIC_INVALID"
+_ARTIFACT_NESTING_TOO_DEEP_REASON = "AGENT_ARTIFACT_NESTING_TOO_DEEP"
+_COEFFICIENT_TERM_INVALID_REASON = "AGENT_COEFFICIENT_TERM_INVALID"
+_COEFFICIENT_VALUE_INVALID_REASON = "AGENT_COEFFICIENT_VALUE_INVALID"
+_MAX_PUBLIC_ARTIFACT_NESTING_DEPTH = 32
+_PUBLIC_ARTIFACT_COUNT_FIELDS = frozenset(
+    {"source_row_count", "filtered_row_count", "obs", "nobs", "missing_count"}
+)
+_PUBLIC_ARTIFACT_PROBABILITY_FIELDS = frozenset(
+    {"p_value", "p_value_corrected"}
+)
+_PUBLIC_ARTIFACT_POSITIVE_FIELDS = frozenset({"std_error"})
+_PUBLIC_ARTIFACT_NONNEGATIVE_FIELDS = frozenset(
+    {"df", "degrees_of_freedom", "std_dev", "design_effect", "effective_sample_size"}
+)
+
+
+def _bounded_artifact_provenance(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    projected: dict[str, str] = {}
+    for key in ("run_id", "source_id", "artifact_id", "producer"):
+        label = _bounded_label(value.get(key))
+        if label is not None:
+            projected[key] = label
+    return projected or None
+
+
+def _bounded_artifact_numeric_value(key: str, value: Any) -> int | float | None:
+    if key in _PUBLIC_ARTIFACT_COUNT_FIELDS:
+        return bounded_survey_integer(value)
+    if key in _PUBLIC_ARTIFACT_PROBABILITY_FIELDS:
+        return bounded_survey_number(value, probability=True)
+    if key in _PUBLIC_ARTIFACT_POSITIVE_FIELDS:
+        return bounded_survey_number(value, positive=True)
+    if key in _PUBLIC_ARTIFACT_NONNEGATIVE_FIELDS:
+        return bounded_survey_number(value, nonnegative=True)
+    return _public_stat_number(value)
+
+
+def _bounded_artifact_numeric_mapping(
+    value: Mapping[str, Any],
+    *,
+    fields: Iterable[str],
+    invalid_reasons: set[str],
+) -> dict[str, int | float]:
+    projected: dict[str, int | float] = {}
+    for key in fields:
+        if key not in value:
+            continue
+        number = _bounded_artifact_numeric_value(key, value[key])
+        if number is None:
+            invalid_reasons.add(_ARTIFACT_NUMERIC_INVALID_REASON)
+            continue
+        projected[key] = number
+
+    interval_declared = "ci_lower" in value or "ci_upper" in value
+    if interval_declared:
+        lower = projected.get("ci_lower")
+        upper = projected.get("ci_upper")
+        if (
+            "ci_lower" not in value
+            or "ci_upper" not in value
+            or lower is None
+            or upper is None
+            or lower > upper
+        ):
+            projected.pop("ci_lower", None)
+            projected.pop("ci_upper", None)
+            invalid_reasons.add(_ARTIFACT_NUMERIC_INVALID_REASON)
+    return projected
+
+
+def _bounded_artifact_variables(
+    value: Any, *, invalid_reasons: set[str] | None = None
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    reasons = invalid_reasons if invalid_reasons is not None else set()
+    projected: dict[str, Any] = {}
+    omitted = max(len(value) - 16, 0)
+    for raw_name, raw_variable in list(value.items())[:16]:
+        if not isinstance(raw_name, str) or not isinstance(raw_variable, dict):
+            omitted += 1
+            continue
+        bounded: dict[str, Any] = {}
+        numeric = _bounded_artifact_numeric_mapping(
+            raw_variable,
+            fields=_PUBLIC_ARTIFACT_VARIABLE_NUMERIC_FIELDS,
+            invalid_reasons=reasons,
+        )
+        bounded.update(numeric)
+        omitted += sum(
+            1
+            for key in _PUBLIC_ARTIFACT_VARIABLE_NUMERIC_FIELDS
+            if key in raw_variable and key not in numeric
+        )
+        if "dtype" in raw_variable:
+            dtype = _bounded_label(raw_variable["dtype"])
+            if dtype is not None:
+                bounded["dtype"] = dtype
+            else:
+                omitted += 1
+        if bounded:
+            projected[raw_name[:128]] = bounded
+        else:
+            omitted += 1
+    if omitted:
+        projected["_omitted_item_count"] = omitted
+    return projected or None
+
+
+def _bounded_artifact_coefficients(
+    value: Any, *, invalid_reasons: set[str] | None = None
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    reasons = invalid_reasons if invalid_reasons is not None else set()
+    projected: dict[str, Any] = {}
+    for raw_term, raw_coefficient in list(value.items())[:32]:
+        term = _bounded_term(raw_term)
+        if term is None:
+            reasons.add(_COEFFICIENT_TERM_INVALID_REASON)
+            continue
+        if not isinstance(raw_coefficient, dict):
+            reasons.add(_COEFFICIENT_VALUE_INVALID_REASON)
+            continue
+        bounded = _bounded_agent_coefficient(
+            raw_coefficient,
+            unavailable_reason=_ARTIFACT_NUMERIC_INVALID_REASON,
+        )
+        if (
+            bounded.get("unavailable_reason") == _ARTIFACT_NUMERIC_INVALID_REASON
+            and any(field in raw_coefficient for field in _PUBLIC_COEFFICIENT_VALUE_FIELDS)
+        ):
+            reasons.add(_ARTIFACT_NUMERIC_INVALID_REASON)
+        if not _coefficient_has_typed_cell(bounded):
+            reasons.add(_COEFFICIENT_VALUE_INVALID_REASON)
+            continue
+        projected[term] = bounded
+    return projected or None
+
+
+def _bounded_artifact_coefficient_estimands(
+    value: Any, *, invalid_reasons: set[str] | None = None
+) -> dict[str, Any] | None:
+    """Project typed P7 coefficient families without recursing into raw payloads."""
+
+    if not isinstance(value, dict):
+        return None
+    reasons = invalid_reasons if invalid_reasons is not None else set()
+    projected: dict[str, Any] = {}
+    for raw_family, raw_coefficients in list(value.items())[:8]:
+        family = _bounded_term(raw_family)
+        if family is None:
+            reasons.add(_COEFFICIENT_TERM_INVALID_REASON)
+            continue
+        coefficients = _bounded_artifact_coefficients(
+            raw_coefficients, invalid_reasons=reasons
+        )
+        if coefficients is not None:
+            projected[family] = coefficients
+    return projected or None
+
+
+def _bounded_artifact_inference(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    allowed = {
+        "standard_error_method",
+        "p_value_method",
+        "p_value_status",
+        "confidence_interval_method",
+    }
+    projected: dict[str, Any] = {}
+    for raw_section, raw_inference in list(value.items())[:8]:
+        if not isinstance(raw_section, str) or not isinstance(raw_inference, dict):
+            continue
+        section: dict[str, str] = {}
+        for key in allowed:
+            if key not in raw_inference:
+                continue
+            label = _bounded_label(raw_inference[key])
+            if label is not None:
+                section[key] = label
+        if section:
+            projected[raw_section[:128]] = section
+    return projected or None
+
+
+def _bounded_declared_artifact_result(
+    artifact_type: str,
+    result: dict[str, Any],
+    *,
+    _depth: int = 0,
+    _invalid_reasons: set[str] | None = None,
+) -> dict[str, Any] | None:
+    """Project one artifact family through an explicit, typed field registry."""
+
+    invalid_reasons = _invalid_reasons if _invalid_reasons is not None else set()
+    if _depth >= _MAX_PUBLIC_ARTIFACT_NESTING_DEPTH:
+        return {
+            "projection_status": "unavailable",
+            "unavailable_reason": _ARTIFACT_NESTING_TOO_DEEP_REASON,
+        }
+
+    projected: dict[str, Any] = {}
+    for key in _PUBLIC_ARTIFACT_STRING_FIELDS:
+        if key not in result:
+            continue
+        value = _bounded_label(result[key])
+        if value is not None:
+            projected[key] = value
+    for key in _PUBLIC_ARTIFACT_NUMERIC_FIELDS:
+        if key not in result:
+            continue
+        value = _bounded_artifact_numeric_value(key, result[key])
+        if value is not None:
+            projected[key] = value
+        else:
+            invalid_reasons.add(_ARTIFACT_NUMERIC_INVALID_REASON)
+    interval_declared = "ci_lower" in result or "ci_upper" in result
+    if interval_declared:
+        lower = projected.get("ci_lower")
+        upper = projected.get("ci_upper")
+        if (
+            "ci_lower" not in result
+            or "ci_upper" not in result
+            or lower is None
+            or upper is None
+            or lower > upper
+        ):
+            projected.pop("ci_lower", None)
+            projected.pop("ci_upper", None)
+            invalid_reasons.add(_ARTIFACT_NUMERIC_INVALID_REASON)
+
+    if "provenance" in result:
+        provenance = _bounded_artifact_provenance(result["provenance"])
+        if provenance is not None:
+            projected["provenance"] = provenance
+    if "survey_design" in result:
+        design = project_survey_design(
+            result["survey_design"],
+            unavailable_reason="AGENT_SURVEY_METADATA_INVALID",
+        )
+        if design is not None:
+            projected["survey_design"] = design
+    if "coefficients" in result:
+        coefficients = _bounded_artifact_coefficients(
+            result["coefficients"], invalid_reasons=invalid_reasons
+        )
+        if coefficients is not None:
+            projected["coefficients"] = coefficients
+
+    if artifact_type == "statistical_exploration" and "variables" in result:
+        variables = _bounded_artifact_variables(
+            result["variables"], invalid_reasons=invalid_reasons
+        )
+        if variables is not None:
+            projected["variables"] = variables
+
+    if artifact_type == "p7_analysis":
+        for key, projector in (
+            ("inference", _bounded_artifact_inference),
+            ("coefficient_estimands", _bounded_artifact_coefficient_estimands),
+        ):
+            if key not in result:
+                continue
+            if key == "coefficient_estimands":
+                value = projector(
+                    result[key], invalid_reasons=invalid_reasons
+                )
+            else:
+                value = projector(result[key])
+            if value is not None:
+                projected[key] = value
+        nested = result.get("result")
+        if isinstance(nested, dict):
+            nested_projected = _bounded_declared_artifact_result(
+                "p7_analysis",
+                nested,
+                _depth=_depth + 1,
+                _invalid_reasons=invalid_reasons,
+            )
+            if (
+                nested_projected is not None
+                and nested_projected.get("unavailable_reason")
+                == _ARTIFACT_NESTING_TOO_DEEP_REASON
+            ):
+                return nested_projected
+            if nested_projected is not None:
+                projected["result"] = nested_projected
+
+    if invalid_reasons:
+        for reason in (
+            _COEFFICIENT_TERM_INVALID_REASON,
+            _ARTIFACT_NUMERIC_INVALID_REASON,
+            _COEFFICIENT_VALUE_INVALID_REASON,
+        ):
+            if reason in invalid_reasons:
+                projected["projection_status"] = "unavailable"
+                projected["unavailable_reason"] = reason
+                break
+    if not projected:
+        return None
+    return projected
+
+
 def _public_operation_artifact_result(
     artifact_type: str,
     payload: dict[str, Any],
@@ -4130,7 +4877,10 @@ def _public_operation_artifact_result(
     result = payload.get("result")
     if not isinstance(result, dict):
         return None, ["raw_artifact_payloads"]
-    return _bounded_public_result_value(result), ["raw_artifact_payloads", "raw_rows"]
+    bounded = _bounded_declared_artifact_result(artifact_type, result)
+    if bounded is None:
+        return None, ["raw_artifact_payloads", "raw_rows"]
+    return bounded, ["raw_artifact_payloads", "raw_rows"]
 
 
 def _node_public_result_evidence(
@@ -4274,9 +5024,12 @@ def _bounded_model_figure_numeric_source(
     if not artifact_id.startswith(("residuals_fitted", "residuals_vs_", "qq_residuals")):
         return None
     model_key = node_id.split(":", 1)[1] if node_id.startswith("model:") else ""
+    model_results, verification_error = _verified_model_results(run_root)
+    if verification_error is not None:
+        return None
     candidates = [
         result
-        for result in read_model_results(run_root)
+        for result in model_results
         if isinstance(result, dict)
         and (
             not model_key
@@ -4286,7 +5039,7 @@ def _bounded_model_figure_numeric_source(
     if not candidates and model_key:
         return None
     if not candidates:
-        candidates = [result for result in read_model_results(run_root) if isinstance(result, dict)]
+        candidates = [result for result in model_results if isinstance(result, dict)]
     if len(candidates) != 1:
         return None
     result = candidates[0]
@@ -4538,8 +5291,10 @@ def _bounded_public_result_value(
         budget.omitted_items += 1
         return "[omitted: result item budget]"
     budget.remaining_items -= 1
-    if value is None or isinstance(value, (bool, int, float)):
+    if value is None or isinstance(value, bool):
         return value
+    if isinstance(value, (int, float)):
+        return _public_stat_number(value)
     if isinstance(value, str):
         limit = min(300, budget.remaining_string_characters)
         if limit <= 0:
@@ -4675,18 +5430,25 @@ def _bounded_diagnostics(preview: dict[str, Any]) -> tuple[dict[str, Any], list[
 
     identity = preview.get("model_identity")
     if isinstance(identity, dict):
-        diagnostics["model_identity"] = {
-            key: identity[key]
-            for key in (
-                "primary_model_id",
-                "model_label",
-                "model_type",
-                "y_variable",
-                "n_observations",
-                "x_variable_count",
-            )
-            if key in identity
-        }
+        projected_identity: dict[str, Any] = {}
+        for key in (
+            "primary_model_id",
+            "model_label",
+            "model_type",
+            "y_variable",
+        ):
+            label = _bounded_label(identity.get(key))
+            if label is not None:
+                projected_identity[key] = label
+        if "n_observations" in identity:
+            count = bounded_survey_integer(identity.get("n_observations"))
+            if count is not None:
+                projected_identity["n_observations"] = count
+        if "x_variable_count" in identity:
+            count = bounded_survey_integer(identity.get("x_variable_count"))
+            if count is not None:
+                projected_identity["x_variable_count"] = count
+        diagnostics["model_identity"] = projected_identity
 
     for key, limit in (
         ("contract_warnings", 8),
@@ -4701,6 +5463,125 @@ def _bounded_diagnostics(preview: dict[str, Any]) -> tuple[dict[str, Any], list[
         diagnostics.setdefault("omitted_item_counts", {})[key] = len(values) - limit
 
     return diagnostics, omitted_sections
+
+
+def _agent_result_unavailable(reason: str) -> dict[str, Any]:
+    return {
+        "available": False,
+        "status": "unavailable",
+        "summary_status": "unavailable",
+        "unavailable_reason": reason,
+    }
+
+
+def _verified_model_results(run_root: Path) -> tuple[list[dict[str, Any]], str | None]:
+    """Read model results only through the server-owned artifact boundary."""
+    try:
+        records = read_server_owned_run_artifacts(
+            run_root.parent.parent,
+            run_root.name,
+            required=True,
+        )
+    except (ServerOwnedArtifactManifestError, OSError, ValueError):
+        return [], "AGENT_RESULT_ARTIFACT_INVALID"
+    if not records:
+        return [], "AGENT_RESULT_ARTIFACT_INVALID"
+    by_id = {
+        item.get("artifact_id"): item
+        for item in records
+        if isinstance(item.get("artifact_id"), str)
+    }
+    model_records = [item for item in records if item.get("artifact_type") == "model_result"]
+    if not model_records:
+        return [], "AGENT_RESULT_ARTIFACT_INVALID"
+    model_dir = run_root / "model_results"
+    indexed_paths = {
+        item.get("path")
+        for item in records
+        if item.get("artifact_type") in {"model_result", "model_diagnostic"}
+        and isinstance(item.get("path"), str)
+    }
+    for record in model_records:
+        model_id = record.get("artifact_id")
+        path_text = record.get("path")
+        if not isinstance(model_id, str) or not model_id or path_text != f"model_results/{model_id}.json":
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        indexed_paths.add(path_text)
+    if model_dir.is_dir():
+        actual_paths = {path.relative_to(run_root).as_posix() for path in model_dir.glob("*.json")}
+        if actual_paths != indexed_paths:
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+    elif model_records:
+        return [], "AGENT_RESULT_ARTIFACT_INVALID"
+
+    expected_project = str(run_root.parent.parent.resolve())
+    results: list[dict[str, Any]] = []
+    for record in sorted(model_records, key=lambda item: str(item.get("artifact_id"))):
+        model_id = record["artifact_id"]
+        path = run_root / record["path"]
+        digest = record.get("sha256")
+        inputs = record.get("inputs")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or not isinstance(inputs, list)
+            or not all(isinstance(item, str) and item in by_id for item in inputs)
+        ):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        try:
+            if not path.is_file() or sha256_file(path) != digest:
+                return [], "AGENT_RESULT_ARTIFACT_INVALID"
+            result = read_json(path)
+        except (OSError, ValueError):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        if not isinstance(result, dict) or result.get("model_id") != model_id:
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        binding = result.get("result_binding")
+        if (
+            not isinstance(binding, dict)
+            or binding.get("project_root") != expected_project
+            or binding.get("run_id") != run_root.name
+            or binding.get("model_id") != model_id
+        ):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        if binding.get("source_artifact_ids") != inputs:
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        payload_sha256 = binding.get("payload_sha256")
+        if not isinstance(payload_sha256, str) or len(payload_sha256) != 64:
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        unsigned = dict(result)
+        unsigned_binding = dict(binding)
+        unsigned_binding.pop("payload_sha256", None)
+        unsigned["result_binding"] = unsigned_binding
+        try:
+            expected_payload_sha256 = hashlib.sha256(
+                json.dumps(
+                    unsigned,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+        except (TypeError, ValueError, OverflowError):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        if payload_sha256 != expected_payload_sha256:
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        coefficients = result.get("coefficients")
+        source_ids = binding.get("coefficient_source_ids")
+        if not isinstance(coefficients, dict) or not isinstance(source_ids, dict):
+            return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        for term, coefficient in coefficients.items():
+            expected_source = f"model_results.{model_id}.coefficients.{term}"
+            if (
+                not isinstance(term, str)
+                or not isinstance(coefficient, dict)
+                or coefficient.get("source_id") != expected_source
+                or source_ids.get(term) != expected_source
+            ):
+                return [], "AGENT_RESULT_ARTIFACT_INVALID"
+        results.append(result)
+    return results, None
 
 # v1.7.2 Analysis Loop read-only context seam. This is intentionally appended
 # to preserve the existing provider/request API above.
@@ -4997,24 +5878,16 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
         design = result.get("survey_design")
         if not isinstance(design, dict):
             continue
-        return _bounded_numeric_fields(
+        return project_survey_design(
             design,
-            fields=(
-                "n_obs", "n_strata", "n_psu", "degf", "residual_degf",
-                "design_effect", "effective_sample_size",
-            ),
-            string_fields=(
-                "variance_method", "strata_column", "psu_column",
-                "weight_column", "replicate_type", "lonely_psu_policy",
-                "subpopulation",
-            ),
+            unavailable_reason="AGENT_SURVEY_METADATA_INVALID",
         )
     return None
 
 
 def _bounded_average_marginal_effects(
     model_results: list[dict[str, Any]], *, limit: int = 16
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]] | None:
     """A GLM coefficient is a log-odds; the marginal effect is what gets quoted.
 
     v1.8.7 computes these for logit/probit/poisson and nothing exposed them, so
@@ -5023,9 +5896,11 @@ def _bounded_average_marginal_effects(
     for result in model_results:
         if not isinstance(result, dict):
             continue
+        if "marginal_effects" not in result:
+            continue
         effects = result.get("marginal_effects")
         if not isinstance(effects, list):
-            continue
+            return None
         rows: list[dict[str, Any]] = []
         for row in effects[:limit]:
             if not isinstance(row, dict):
@@ -5038,7 +5913,7 @@ def _bounded_average_marginal_effects(
                 )
             )
         return rows
-    return []
+    return None
 
 
 def project_persisted_evidence_for_agent(

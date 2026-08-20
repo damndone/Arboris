@@ -10,22 +10,241 @@ file, the enumeration matrix would be back, just moved.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from decimal import Decimal, DecimalException
 
 import numpy as np
 import pandas as pd
 
-from .design import SurveyDesign
+from .design import SURVEY_WEIGHT_FRAME_VALUES, SurveyDesign
 from .errors import SurveyEngineError
 from .estimator import EstimatorSpec
 
 #: statsmodels GLM families reachable through the shared adapter, keyed by the
-#: `glm_family` a model family declares.  Adding a row here adds a link in the
-#: chain, not a branch in the logic.
-_GLM_LINKS: dict[str, str] = {
-    "gaussian": "Gaussian",
-    "binomial": "Binomial",
-    "poisson": "Poisson",
+#: `glm_family` a model family declares.  The optional link is explicit because
+#: Probit is binomial with a non-canonical link; routing it through the default
+#: Binomial constructor would silently fit Logit instead.
+_GLM_FAMILIES: dict[str, tuple[str, str | None]] = {
+    "gaussian": ("Gaussian", None),
+    "binomial": ("Binomial", None),
+    "binomial_probit": ("Binomial", "Probit"),
+    "poisson": ("Poisson", None),
 }
+
+_MAX_INVALID_EXPOSURE_ROWS = 16
+
+
+def _exposure_failure(
+    *,
+    exposure: str,
+    reason: str,
+    invalid_rows: list[str] | None = None,
+    detail: str | None = None,
+) -> SurveyEngineError:
+    return SurveyEngineError(
+        "SURVEY_POISSON_EXPOSURE_INVALID",
+        detail or f"exposure column {exposure!r} violates the Poisson exposure contract",
+        exposure_column=exposure,
+        reason=reason,
+        invalid_rows=list(invalid_rows or [])[:_MAX_INVALID_EXPOSURE_ROWS],
+    )
+
+
+def validate_poisson_exposure(frame: pd.DataFrame, exposure: str | None) -> None:
+    """Reject an exposure before a Poisson family can treat it as an input."""
+    if not exposure:
+        return
+    if exposure not in frame.columns:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="missing",
+            detail=f"exposure column {exposure!r} is not in the modeling frame",
+        )
+    try:
+        raw_values = frame[exposure].to_numpy(dtype=object)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="non_numeric",
+            detail=f"exposure column {exposure!r} cannot be read safely",
+        ) from exc
+
+    decimals: list[Decimal] = []
+    non_numeric_rows: list[str] = []
+    boolean_rows: list[str] = []
+    nonfinite_rows: list[str] = []
+    nonpositive_rows: list[str] = []
+    for index, raw_value in zip(frame.index, raw_values, strict=True):
+        row = str(index)
+        if isinstance(raw_value, (bool, np.bool_)):
+            boolean_rows.append(row)
+            continue
+        try:
+            parsed = Decimal(str(raw_value).strip())
+        except (DecimalException, OverflowError, TypeError, ValueError, UnicodeError):
+            non_numeric_rows.append(row)
+            continue
+        decimals.append(parsed)
+        if not parsed.is_finite():
+            nonfinite_rows.append(row)
+        elif parsed <= 0:
+            nonpositive_rows.append(row)
+
+    if boolean_rows:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="boolean",
+            invalid_rows=boolean_rows,
+            detail=f"exposure column {exposure!r} must not contain boolean values",
+        )
+    if non_numeric_rows:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="non_numeric",
+            invalid_rows=non_numeric_rows,
+            detail=f"exposure column {exposure!r} contains values that cannot be parsed safely",
+        )
+    if nonfinite_rows:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="nonfinite",
+            invalid_rows=nonfinite_rows,
+            detail=f"exposure column {exposure!r} must contain finite values",
+        )
+    if nonpositive_rows:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="nonpositive",
+            invalid_rows=nonpositive_rows,
+            detail=f"exposure column {exposure!r} must be strictly positive",
+        )
+
+    overflow_rows: list[str] = []
+    for index, parsed in zip(frame.index, decimals, strict=True):
+        try:
+            converted = float(parsed)
+        except (DecimalException, OverflowError, TypeError, ValueError):
+            overflow_rows.append(str(index))
+            continue
+        if not np.isfinite(converted):
+            overflow_rows.append(str(index))
+    if overflow_rows:
+        raise _exposure_failure(
+            exposure=exposure,
+            reason="not_float_representable",
+            invalid_rows=overflow_rows,
+            detail=f"exposure column {exposure!r} cannot be represented as finite float values",
+        )
+
+
+def _poisson_result_postprocessor(
+    *,
+    primary: dict[str, object],
+    term: str,
+    entry: dict[str, object],
+    estimate: float,
+    ci_lower: float,
+    ci_upper: float,
+) -> None:
+    """Keep Poisson-derived intervals aligned with the survey coefficient."""
+    from math import exp, isfinite
+
+    max_log = 700.0
+    values = {"estimate": estimate, "ci_lower": ci_lower, "ci_upper": ci_upper}
+    if any(
+        not isfinite(value) or abs(value) > max_log
+        for value in values.values()
+    ):
+        raise SurveyEngineError(
+            "SURVEY_POSTPROCESS_INVALID",
+            "Poisson exp transform is outside the finite bounded range",
+            reason="exponential_out_of_bounds",
+            term=term,
+        )
+    try:
+        irr = {
+            "irr": exp(estimate),
+            "irr_ci_lower": exp(ci_lower),
+            "irr_ci_upper": exp(ci_upper),
+        }
+    except (OverflowError, ValueError) as exc:
+        raise SurveyEngineError(
+            "SURVEY_POSTPROCESS_INVALID",
+            "Poisson exp transform could not be represented safely",
+            reason="exponential_overflow",
+            term=term,
+        ) from exc
+    if any(not isfinite(float(value)) for value in irr.values()):
+        raise SurveyEngineError(
+            "SURVEY_POSTPROCESS_INVALID",
+            "Poisson exp transform returned a non-finite value",
+            reason="nonfinite_transform",
+            term=term,
+        )
+    entry.update(irr)
+    primary_irr = primary.get("irr")
+    if isinstance(primary_irr, dict) and isinstance(primary_irr.get(term), dict):
+        primary_irr[term].update(irr)
+
+
+def apply_result_postprocessor(
+    estimator: EstimatorSpec,
+    *,
+    primary: dict[str, object],
+    term: str,
+    entry: dict[str, object],
+    estimate: float,
+    ci_lower: float,
+    ci_upper: float,
+) -> None:
+    """Apply family-owned result decoration through the adapter metadata seam."""
+    callback = estimator.metadata.get("survey_result_postprocessor")
+    if callback is None:
+        return
+    if not callable(callback):
+        raise SurveyEngineError(
+            "SURVEY_ADAPTER_METADATA_INVALID",
+            "survey_result_postprocessor must be callable",
+            estimator=estimator.name,
+        )
+    try:
+        callback(
+            primary=primary,
+            term=term,
+            entry=entry,
+            estimate=estimate,
+            ci_lower=ci_lower,
+            ci_upper=ci_upper,
+        )
+    except OverflowError as exc:
+        raise SurveyEngineError(
+            "SURVEY_POSTPROCESS_INVALID",
+            "survey result postprocessor overflowed",
+            reason="overflow",
+            term=term,
+        ) from exc
+
+
+def supports_glm_family(glm_family: str | None) -> bool:
+    """Return whether a declared survey GLM family has a live adapter path."""
+
+    return isinstance(glm_family, str) and glm_family in _GLM_FAMILIES
+
+
+def is_declared_survey_value(value: object) -> bool:
+    """Return presence semantics for a survey declaration.
+
+    Empty strings and empty column lists are absent values. Every other
+    non-``None`` value, including ``0`` and ``False``, is present and must be
+    type-checked rather than coerced into a default.
+    """
+
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple)):
+        return bool(value)
+    return True
 
 
 def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyDesign | None:
@@ -34,10 +253,126 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
     Returns None when nothing was declared, which is what keeps every existing
     run byte-identical: no declaration, no design, no change of path.
     """
-    strata = str(artifacts.get("_survey_strata_col") or "").strip()
-    psu = str(artifacts.get("_survey_psu_col") or "").strip()
-    weight = str(artifacts.get("_sampling_weight") or "").strip()
+    def declared_text(key: str, *, invalid_code: str, label: str) -> str:
+        """Read a typed declaration without treating falsey values as absent."""
+        value = artifacts.get(key)
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise SurveyEngineError(
+                invalid_code,
+                f"{label} declaration must be a string when supplied",
+                reason="declared_value_type",
+                declared_type=type(value).__name__,
+            )
+        return value.strip()
+
+    strata = declared_text(
+        "_survey_strata_col",
+        invalid_code="SURVEY_STRATA_INVALID",
+        label="survey_strata_col",
+    )
+    psu = declared_text(
+        "_survey_psu_col",
+        invalid_code="SURVEY_PSU_INVALID",
+        label="survey_psu_col",
+    )
+    weight = declared_text(
+        "_sampling_weight",
+        invalid_code="SURVEY_SAMPLING_WEIGHT_INVALID",
+        label="sampling_weight",
+    )
+    fpc = declared_text(
+        "_survey_fpc_col",
+        invalid_code="SURVEY_FPC_INVALID",
+        label="survey_fpc_col",
+    )
+    raw_replicate_columns = artifacts.get("_survey_replicate_weights")
+    if raw_replicate_columns is None:
+        replicate_columns = []
+    elif isinstance(raw_replicate_columns, (list, tuple)):
+        replicate_columns = list(raw_replicate_columns)
+        if any(
+            not isinstance(column, str) or not column.strip()
+            for column in replicate_columns
+        ):
+            raise SurveyEngineError(
+                "SURVEY_REPLICATE_COLUMNS_INVALID",
+                "replicate weight columns must contain non-empty strings",
+                reason="declared_value_type",
+            )
+        replicate_columns = [column.strip() for column in replicate_columns]
+    else:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_COLUMNS_INVALID",
+            "replicate weight columns must be a list of column names",
+        )
+    replicate_type = declared_text(
+        "_survey_replicate_type",
+        invalid_code="SURVEY_REPLICATE_TYPE_INVALID",
+        label="survey_replicate_type",
+    )
+    lonely_psu = declared_text(
+        "_survey_lonely_psu",
+        invalid_code="SURVEY_LONELY_PSU_INVALID",
+        label="survey_lonely_psu",
+    )
+    raw_subpopulation = artifacts.get("_survey_subpop")
+    subpopulation = (
+        raw_subpopulation.strip()
+        if isinstance(raw_subpopulation, str)
+        else raw_subpopulation
+    )
+    if raw_subpopulation is not None and (
+        not isinstance(raw_subpopulation, str) or not raw_subpopulation.strip()
+    ):
+        raise SurveyEngineError(
+            "SURVEY_SUBPOP_INVALID",
+            "subpopulation expression must be a non-empty string",
+            reason="declared_value_type",
+        )
+    weight_frame = declared_text(
+        "_survey_weight_frame",
+        invalid_code="SURVEY_WEIGHT_FRAME_INVALID",
+        label="survey_weight_frame",
+    )
+    if weight_frame and weight_frame not in SURVEY_WEIGHT_FRAME_VALUES:
+        raise SurveyEngineError(
+            "SURVEY_WEIGHT_FRAME_INVALID",
+            f"unknown survey weight frame {weight_frame!r}",
+            allowed=list(SURVEY_WEIGHT_FRAME_VALUES),
+        )
+    if fpc:
+        raise SurveyEngineError(
+            "SURVEY_FPC_UNSUPPORTED",
+            "finite population correction is declared but this survey variance "
+            "engine does not apply FPC; remove survey_fpc_col or use an engine "
+            "with explicit FPC support",
+            fpc_column=fpc,
+        )
     if not weight:
+        declared_fields = [
+            name for name, value in (
+                ("survey_strata_col", strata),
+                ("survey_psu_col", psu),
+                ("survey_replicate_weights", replicate_columns),
+                ("survey_replicate_type", replicate_type),
+                ("survey_lonely_psu", lonely_psu),
+                ("survey_subpop", raw_subpopulation),
+                ("survey_weight_frame", weight_frame),
+            ) if (
+                (name == "survey_subpop" and raw_subpopulation is not None)
+                or (name != "survey_subpop" and bool(value))
+            )
+        ]
+        if declared_fields:
+            raise SurveyEngineError(
+                "SURVEY_DESIGN_INCOMPLETE",
+                "survey design declarations require sampling_weight before "
+                "estimation; no declared design field may be silently ignored",
+                missing=["sampling_weight"],
+                declared_fields=declared_fields,
+            )
         return None
     if not (strata or psu):
         raise SurveyEngineError(
@@ -53,22 +388,32 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
             ],
         )
 
-    replicate_columns = list(artifacts.get("_survey_replicate_weights") or [])
+    if replicate_columns and not replicate_type:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_TYPE_REQUIRED",
+            "replicate weight columns require survey_replicate_type",
+            replicate_weight_columns=replicate_columns[:16],
+        )
     return SurveyDesign(
         frame=frame,
         weight=weight,
         strata=strata or None,
         psu=psu or None,
-        fpc=str(artifacts.get("_survey_fpc_col") or "").strip() or None,
-        lonely_psu=str(artifacts.get("_survey_lonely_psu") or "").strip() or "fail",
-        subpop=str(artifacts.get("_survey_subpop") or "").strip() or None,
-        replicate_type=str(artifacts.get("_survey_replicate_type") or "").strip() or None,
+        lonely_psu=lonely_psu or "fail",
+        subpop=subpopulation,
+        replicate_type=replicate_type or None,
         replicate_weight_columns=replicate_columns,
+        weight_frame=weight_frame or None,
     )
 
 
 def glm_estimator_spec(
-    *, family: str, glm_family: str, y: str, x: Sequence[str]
+    *,
+    family: str,
+    glm_family: str,
+    y: str,
+    x: Sequence[str],
+    exposure: str | None = None,
 ) -> EstimatorSpec:
     """One adapter for every family that declares a statsmodels GLM link.
 
@@ -78,16 +423,21 @@ def glm_estimator_spec(
     """
     import statsmodels.api as sm
 
-    link = _GLM_LINKS.get(glm_family)
-    if link is None:
+    family_spec = _GLM_FAMILIES.get(glm_family)
+    if family_spec is None:
         raise SurveyEngineError(
             "SURVEY_GLM_FAMILY_UNSUPPORTED",
             f"{family!r} declares glm_family={glm_family!r}, which the shared "
             "adapter does not link to statsmodels",
             declared=glm_family,
-            available=sorted(_GLM_LINKS),
+            available=sorted(_GLM_FAMILIES),
         )
-    sm_family = getattr(sm.families, link)()
+    family_name, link_name = family_spec
+    family_class = getattr(sm.families, family_name)
+    if link_name is None:
+        sm_family = family_class()
+    else:
+        sm_family = family_class(link=getattr(sm.families.links, link_name)())
     terms = ["(Intercept)", *x]
 
     def _design_matrix(frame: pd.DataFrame) -> np.ndarray:
@@ -95,21 +445,38 @@ def glm_estimator_spec(
             [np.ones(len(frame))] + [frame[name].to_numpy(dtype=float) for name in x]
         )
 
+    def _fit(frame: pd.DataFrame, weights: np.ndarray):
+        kwargs: dict[str, object] = {"freq_weights": np.asarray(weights, float)}
+        if exposure and glm_family == "poisson":
+            validate_poisson_exposure(frame, exposure)
+            exposure_values = frame[exposure].to_numpy(dtype=float)
+            kwargs["exposure"] = exposure_values
+        return sm.GLM(
+            frame[y].to_numpy(dtype=float),
+            _design_matrix(frame),
+            family=sm_family,
+            **kwargs,
+        ).fit()
+
     def refit(frame: pd.DataFrame, weights: np.ndarray) -> dict[str, float]:
-        exog = _design_matrix(frame)
-        endog = frame[y].to_numpy(dtype=float)
-        fitted = sm.GLM(endog, exog, family=sm_family, freq_weights=np.asarray(weights, float)).fit()
+        fitted = _fit(frame, weights)
         return dict(zip(terms, (float(v) for v in fitted.params), strict=True))
 
     def influence(frame: pd.DataFrame, weights: np.ndarray) -> dict[str, np.ndarray]:
         exog = _design_matrix(frame)
         endog = frame[y].to_numpy(dtype=float)
         w = np.asarray(weights, dtype=float)
-        fitted = sm.GLM(endog, exog, family=sm_family, freq_weights=w).fit()
+        fitted = _fit(frame, weights)
         mu = fitted.fittedvalues
-        # d(eta)/d(mu) cancels for canonical links, leaving (y - mu) as the score.
-        score = (endog - mu)
-        bread = np.linalg.inv((exog.T * (w * fitted.family.weights(mu) if hasattr(fitted.family, "weights") else w)) @ exog)
+        # The canonical-link shortcut is not valid for Probit.  Use the
+        # general GLM score and expected Hessian so the same influence channel
+        # remains truthful for both Binomial links.
+        variance = fitted.family.variance(mu)
+        link_derivative = fitted.family.link.deriv(mu)
+        score = (endog - mu) / (variance * link_derivative)
+        bread = np.linalg.inv(
+            (exog.T * (w * fitted.family.weights(mu))) @ exog
+        )
         contrib = (exog * (w * score)[:, None]) @ bread.T
         return dict(zip(terms, contrib.T, strict=True))
 
@@ -118,5 +485,13 @@ def glm_estimator_spec(
         refit=refit,
         influence=influence,
         consumes_design=False,
-        metadata={"family": family, "glm_family": glm_family, "terms": terms},
+        metadata={
+            "family": family,
+            "glm_family": glm_family,
+            "terms": terms,
+            "exposure": exposure,
+            "survey_result_postprocessor": (
+                _poisson_result_postprocessor if glm_family == "poisson" else None
+            ),
+        },
     )

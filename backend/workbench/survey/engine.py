@@ -50,6 +50,7 @@ class DesignEstimate:
     covariance: np.ndarray
     terms: list[str]
     replicate_summary: ReplicateSummary | None = None
+    replicate_weight_columns: list[str] = field(default_factory=list)
 
     @property
     def residual_degf(self) -> int:
@@ -113,12 +114,53 @@ def estimate_with_design(
             method=method,
         )
 
+    if method == "linearization":
+        if design.replicate_weight_columns and design.replicate_type is None:
+            raise SurveyEngineError(
+                "SURVEY_REPLICATE_TYPE_REQUIRED",
+                "replicate_weight_columns require a declared replicate_type",
+                replicate_weight_columns=list(design.replicate_weight_columns)[:16],
+            )
+        if design.replicate_type is not None:
+            raise SurveyEngineError(
+                "SURVEY_REPLICATE_DECLARATION_MISMATCH",
+                "a declared replicate design must use the replicate variance method",
+                declared_replicate_type=design.replicate_type,
+                requested_method=method,
+            )
+    elif method == "replicate" and design.replicate_weight_columns and design.replicate_type is None:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_TYPE_REQUIRED",
+            "replicate_weight_columns require a declared replicate_type",
+            replicate_weight_columns=list(design.replicate_weight_columns)[:16],
+        )
+
     mask = design.subpop_mask()
+    design.validate_for_estimation(mask)
     frame = design.frame.loc[mask]
     weights = design.weights[mask]
 
-    point = dict(estimator.refit(frame, weights))
+    try:
+        point = {term: float(value) for term, value in dict(estimator.refit(frame, weights)).items()}
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "the survey point estimate is not finite and bounded",
+            reason="nonfinite_estimate",
+        ) from exc
     terms = list(point)
+    if not terms:
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "the survey estimator returned no coefficient terms",
+            reason="empty_estimate",
+        )
+    if any(not np.isfinite(value) or abs(value) > 1_000_000_000_000.0 for value in point.values()):
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "the survey point estimate is not finite and bounded",
+            reason="nonfinite_estimate",
+        )
 
     if method == "linearization":
         contributions = _as_arrays(estimator.influence(frame, weights), terms).T
@@ -131,14 +173,74 @@ def estimate_with_design(
     else:
         raise SurveyEngineError("SURVEY_VARIANCE_METHOD_UNKNOWN", method)
 
+    residual_degf = design.degf - len(terms) + 1
+    if design.degf <= 0:
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "survey design degrees of freedom must be positive",
+            reason="nonpositive_degf",
+            degf=design.degf,
+        )
+    if residual_degf <= 0:
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "survey residual degrees of freedom must be positive",
+            reason="nonpositive_residual_degf",
+            degf=design.degf,
+            residual_degf=residual_degf,
+            terms=len(terms),
+        )
+    cov = np.asarray(cov, dtype=float)
+    if cov.shape != (len(terms), len(terms)) or not np.isfinite(cov).all():
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "survey covariance is not finite and bounded",
+            reason="nonfinite_covariance",
+        )
+    diagonal = np.diag(cov)
+    if np.any(diagonal <= 0) or not np.isfinite(diagonal).all():
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "survey covariance does not produce finite standard errors",
+            reason="nonfinite_standard_error",
+        )
+    standard_errors = {t: float(np.sqrt(cov[i, i])) for i, t in enumerate(terms)}
+    if any(not np.isfinite(value) or abs(value) > 1_000_000_000_000.0 for value in standard_errors.values()):
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "survey standard errors are not finite and bounded",
+            reason="nonfinite_standard_error",
+        )
+    critical = float(stats.t.ppf(0.975, residual_degf))
+    if not np.isfinite(critical):
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "survey confidence critical value is not finite",
+            reason="nonfinite_confidence_critical",
+        )
+    for term in terms:
+        ci = (
+            point[term] - critical * standard_errors[term],
+            point[term] + critical * standard_errors[term],
+        )
+        p_value = 2 * stats.t.sf(abs(point[term] / standard_errors[term]), residual_degf)
+        if any(not np.isfinite(value) or abs(value) > 1_000_000_000_000.0 for value in (*ci, p_value)):
+            raise SurveyEngineError(
+                "SURVEY_INFERENCE_UNAVAILABLE",
+                "survey interval or p-value is not finite and bounded",
+                reason="nonfinite_coefficient_inference",
+                term=term,
+            )
+
     return DesignEstimate(
         estimates=point,
-        standard_errors={t: float(np.sqrt(cov[i, i])) for i, t in enumerate(terms)},
+        standard_errors=standard_errors,
         degf=design.degf,
         method=method,
         covariance=cov,
         terms=terms,
         replicate_summary=summary,
+        replicate_weight_columns=list(design.replicate_weight_columns),
     )
 
 

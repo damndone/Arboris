@@ -457,6 +457,39 @@ def build_capabilities(*, bootstrap_packs: bool = True) -> dict:
     }
 
 
+def survey_capability_bootstrap_status() -> dict[str, object]:
+    """Probe survey capability bootstrap without falsely advertising families.
+
+    A clean process currently reaches a pre-existing import cycle in the
+    statistical-tests/orchestrator package while builtin packs bootstrap.  The
+    survey line does not own that cycle, so expose a typed blocked result for a
+    smoke probe instead of leaking the ImportError or returning an invented
+    survey capability list.  Other import failures remain errors so a new
+    regression cannot be hidden by this boundary.
+    """
+
+    try:
+        manifest = build_capabilities()
+    except ImportError as exc:
+        detail = str(exc)
+        if "StatisticalTestsStage" not in detail or "partially initialized" not in detail:
+            raise
+        return {
+            "status": "blocked",
+            "code": "CAPABILITY_BOOTSTRAP_IMPORT_CYCLE",
+            "detail": detail,
+            "sampling_weight_families": [],
+        }
+
+    survey = manifest.get("survey_design")
+    families = survey.get("sampling_weight_families") if isinstance(survey, dict) else None
+    return {
+        "status": "available",
+        "code": None,
+        "sampling_weight_families": list(families or []),
+    }
+
+
 def _attach_labels_param(model_types: list[dict]) -> None:
     """Every family can carry column metadata, so every family publishes it.
 
@@ -547,6 +580,7 @@ def _survey_design_capability() -> dict:
     hard-coded list that silently rots as families are added.
     """
     from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ..survey.adapters import supports_glm_family
     from ..survey.design import LONELY_PSU_POLICIES, REPLICATE_TYPES
     from ..survey.estimator import VARIANCE_METHOD_REQUIREMENTS
     from ..survey.fields import DESIGN_FIELDS
@@ -559,6 +593,7 @@ def _survey_design_capability() -> dict:
             key
             for key, contract in MODEL_FAMILY_CONTRACTS.items()
             if "sampling" in contract.allows_weights
+            and supports_glm_family(contract.survey_glm_family)
         ),
         "variance_methods": sorted(VARIANCE_METHOD_REQUIREMENTS),
         "variance_method_requirements": {

@@ -5,7 +5,12 @@ import tempfile
 
 import pytest
 
-from workbench.report_view_model import build_report_view_model
+from workbench.report_view_model import (
+    _survey_design_facts,
+    build_regression_table,
+    build_report_view_model,
+    regression_table_export_rows,
+)
 from tests.test_v189_evidence_report_boundary import (
     _owner_wire,
     _report_projection_wire,
@@ -45,7 +50,11 @@ def _typed_projection() -> dict[str, object]:
     }
 
 
-def _build(summary: dict) -> dict[str, object]:
+def _build(
+    summary: dict,
+    *,
+    regression_table: dict[str, object] | None = None,
+) -> dict[str, object]:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         with _server_owned_evidence(root / "owner-store") as (record, _binding, owner):
@@ -55,10 +64,11 @@ def _build(summary: dict) -> dict[str, object]:
             return build_report_view_model(
                 summary,
                 root / "run-1",
+                regression_table=regression_table,
                 evidence_projection=projection,
                 owner=owner,
                 artifact_admission=owner._canonical_report_artifact(),  # type: ignore[attr-defined]
-            )
+    )
 
 
 def test_build_view_model_renders_issues():
@@ -115,6 +125,30 @@ def test_build_view_model_empty_diagnostics():
     assert [fact["value"] for fact in view_model["facts"]] == [2.0, 0.2]
     assert view_model["title"] == "OLS"
     assert view_model["causal_caution"]
+
+
+def test_report_projection_omits_absent_survey_fields():
+    """Report packets must not invent optional survey metadata placeholders."""
+    packet = build_regression_table(
+        [
+            (
+                "ols_1",
+                {
+                    "model_id": "ols_1",
+                    "model_type": "ols",
+                    "coefficients": {"x": {"estimate": 1.0}},
+                },
+            )
+        ]
+    )
+
+    model = packet["models"][0]
+    assert "survey_design" not in model
+    assert "survey_provenance" not in model
+    assert all(
+        "ols_1 survey design" not in row
+        for row in regression_table_export_rows(packet)
+    )
 
 
 # ---- QA edge-case tests ----
@@ -291,6 +325,224 @@ def test_facts_mention_categorical():
     view_model = _build(summary)
     assert view_model["status"] == "available"
     assert "dummy-coded" in " ".join(view_model["presentation_facts"])
+
+
+def test_report_facts_preserve_bounded_survey_replicate_metadata(tmp_path: Path):
+    """Facts must qualify design-based precision with replicate outcome status."""
+    result = {
+        "model_id": "ols_1",
+        "model_label": "Survey OLS",
+        "survey_design": {
+            "variance_method": "replicate",
+            "strata_column": "stratum",
+            "psu_column": "psu",
+            "n_strata": 2,
+            "n_psu": 6,
+            "degf": 4,
+            "replicates_attempted": 12,
+            "replicates_succeeded": 10,
+            "replicates_failed": 2,
+            "replicate_failure_reasons": {"ValueError": 2},
+        },
+        "coefficients": {
+            "x": {
+                "variance_source": "survey_design",
+                "source_id": "model_results.ols_1.coefficients.x",
+                "warnings": ["SURVEY_REPLICATE_FAILURES"],
+            }
+        },
+    }
+    regression_table = build_regression_table([("ols_1", result)])
+
+    view_model = _build(
+        {
+            "model_identity": {
+                "model_label": "Survey OLS",
+                "y_variable": "y",
+                "x_variables": ["x"],
+                "n_observations": 12,
+                "dataset_kind": "cross_section",
+            },
+            "diagnostics": {"blockers": [], "warnings": [], "cautions": [], "info": []},
+            "coefficients_summary": {"rows": []},
+                "narrative_contract": {"constraints": {}},
+            },
+            regression_table=regression_table,
+        )
+
+    # C0 owns the citable ``facts`` field. Survey provenance is a bounded
+    # presentation projection and therefore travels in ``presentation_facts``.
+    facts_text = " ".join(view_model["presentation_facts"])
+    assert "replicates attempted=12" in facts_text
+    assert "succeeded=10" in facts_text
+    assert "failed=2" in facts_text
+    assert "ValueError=2" in facts_text
+    assert "variance_source=survey_design" in facts_text
+    assert "SURVEY_REPLICATE_FAILURES" in facts_text
+
+
+def test_report_projection_fails_closed_on_huge_coefficient_and_replicate_values():
+    """Report projection must not copy unbounded numeric precision into output."""
+    packet = build_regression_table(
+        [
+            (
+                "ols_1",
+                {
+                    "model_label": "Survey OLS",
+                    "survey_design": {
+                        "replicates_attempted": 10**400,
+                        "replicates_succeeded": 10**400,
+                        "replicates_failed": 10**400,
+                    },
+                    "coefficients": {
+                        "x": {
+                            "estimate": 10**400,
+                            "std_error": 10**400,
+                            "p_value": 10**400,
+                            "confidence_interval": [10**400, 10**400],
+                            "source_id": "model_results." + "x" * 2000,
+                            "variance_source": "survey_design",
+                            "warnings": ["warning"] * 100,
+                        }
+                    },
+                },
+            )
+        ]
+    )
+
+    cell = packet["rows"][0]["models"]["ols_1"]
+    assert cell["projection_status"] == "unavailable"
+    assert cell["unavailable_reason"] == "REPORT_COEFFICIENT_VALUE_INVALID"
+    assert "estimate" not in cell
+    provenance = packet["models"][0]["survey_provenance"]
+    assert provenance["projection_status"] == "unavailable"
+    assert provenance["unavailable_reason"] == "REPORT_SURVEY_METADATA_INVALID"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("n_obs", -1),
+    ("n_psu", 1.5),
+    ("degf", 10**400),
+    ("residual_degf", -2),
+    ("design_effect", float("inf")),
+    ("effective_sample_size", -1),
+])
+def test_report_design_counts_and_effects_are_typed_unavailable(field, value):
+    survey_design = {
+        "n_obs": 10,
+        "n_strata": 2,
+        "n_psu": 4,
+        "degf": 2,
+        "residual_degf": 1,
+        "design_effect": 1.2,
+        "effective_sample_size": 8,
+    }
+    survey_design[field] = value
+    packet = build_regression_table([
+        (
+            "ols_1",
+            {
+                "model_type": "ols",
+                "nobs": 10,
+                "survey_design": survey_design,
+                "coefficients": {"x": {"estimate": 1.0, "std_error": 0.2, "p_value": 0.1}},
+            },
+        )
+    ])
+    assert packet["models"][0]["survey_provenance"]["projection_status"] == "unavailable"
+    assert packet["models"][0]["survey_provenance"]["unavailable_reason"] == "REPORT_SURVEY_METADATA_INVALID"
+
+
+def test_report_and_xlsx_propagate_unavailable_design_without_design_claims():
+    result = {
+        "model_type": "ols",
+        "nobs": 10,
+        "survey_design": {
+            "n_obs": -1,
+            "n_strata": 2,
+            "n_psu": 4,
+            "degf": 2,
+            "variance_method": "linearization",
+        },
+        "coefficients": {
+            "x": {"estimate": 1.0, "std_error": 0.2, "p_value": 0.2}
+        },
+    }
+
+    packet = build_regression_table([("ols_1", result)])
+    model = packet["models"][0]
+    assert model["survey_design"]["projection_status"] == "unavailable"
+    assert model["survey_provenance"]["projection_status"] == "unavailable"
+    assert "design-based" not in str(model["survey_design"])
+    assert "design-based" not in " ".join(_survey_design_facts(packet))
+
+    rows = regression_table_export_rows(packet)
+    assert rows[0]["ols_1 survey design"]["projection_status"] == "unavailable"
+
+
+def test_unavailable_survey_design_does_not_copy_invalid_safe_metadata():
+    from workbench.survey.projection import project_survey_design
+
+    projected = project_survey_design(
+        {
+            "projection_status": "unavailable",
+            "unavailable_reason": "upstream_invalid",
+            "variance_method": "linearization",
+            "variance_source": 10**400,
+            "source_id": False,
+            "warnings": [10**400],
+            "provenance": {"run_id": "run-1"},
+        }
+    )
+
+    assert projected["projection_status"] == "unavailable"
+    assert projected["unavailable_reason"] == "upstream_invalid"
+    assert projected["variance_method"] == "linearization"
+    assert "variance_source" not in projected
+    assert "source_id" not in projected
+    assert "warnings" not in projected
+    assert projected["provenance"] == {"run_id": "run-1"}
+
+
+def test_xlsx_preserves_typed_unavailable_coefficient_projection():
+    packet = build_regression_table(
+        [
+            (
+                "ols_1",
+                {
+                    "model_type": "ols",
+                    "coefficients": {
+                        "x": {
+                            "estimate": 1.0,
+                            "std_error": -1,
+                            "p_value": 0.2,
+                        }
+                    },
+                },
+            )
+        ]
+    )
+
+    rows = regression_table_export_rows(packet)
+    assert rows[0]["ols_1 projection_status"] == "unavailable"
+    assert rows[0]["ols_1 unavailable_reason"] == "REPORT_COEFFICIENT_VALUE_INVALID"
+    assert rows[0]["ols_1 std_error"] is None
+
+
+@pytest.mark.parametrize("field,value", [("std_error", -1), ("p_value", 2), ("ci_lower", float("inf"))])
+def test_report_coefficient_inference_values_are_not_copied(field, value):
+    packet = build_regression_table([
+        ("ols_1", {"model_type": "ols", "coefficients": {"x": {
+            "estimate": 1.0, "std_error": 0.2, "p_value": 0.1,
+            "confidence_interval": [0.5, 1.5],
+        }}})
+    ])
+    source = packet["rows"][0]["models"]["ols_1"]
+    source[field] = value
+    rows = regression_table_export_rows(packet)
+    cell = rows[0]["ols_1 estimate"]
+    assert cell is None
+    assert rows[0]["ols_1 projection_status"] == "unavailable"
 
 
 def test_coeff_render_failure_yields_empty_text():

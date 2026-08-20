@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -53,7 +54,19 @@ def _coerce_numeric_like_columns(
             continue
         is_likely_numeric = any(pat in col.lower() for pat in _NUMERIC_HEURISTIC_PATTERNS)
         threshold = 0.80 if is_likely_numeric else 0.90
-        numeric = pd.to_numeric(frame[col], errors="coerce")
+        try:
+            numeric = pd.to_numeric(frame[col], errors="coerce")
+        except (OverflowError, TypeError, ValueError):
+            # Leave unrepresentable object values untouched.  SurveyDesign is
+            # the typed validation boundary and must see the original value,
+            # not a parser overflow or an invented inf/NaN replacement.
+            continue
+        try:
+            finite = np.isfinite(numeric.to_numpy(dtype=float)).all()
+        except (OverflowError, TypeError, ValueError):
+            finite = False
+        if not finite:
+            continue
         good = numeric.notna().sum()
         total = numeric.notna().sum() + numeric.isna().sum()
         if total > 0 and (good / total) >= threshold:

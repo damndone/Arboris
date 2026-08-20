@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from typing import Any
+
+import numpy as np
 
 from ..context import ModelingContext, RunEnv
 from ..pack import AnalysisPack, RerunAction, register_pack
@@ -31,9 +35,13 @@ def _validate_model_family_weights(
     future family fail closed unless it explicitly declares the weight kind.
     """
 
-    from ...agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ...agent.workflow_contracts import (
+        MODEL_FAMILY_CONTRACTS,
+        canonical_model_family,
+    )
 
-    contract = MODEL_FAMILY_CONTRACTS.get(model_type)
+    canonical = canonical_model_family(model_type)
+    contract = MODEL_FAMILY_CONTRACTS.get(canonical)
     allowed = frozenset(contract.allows_weights) if contract is not None else frozenset()
     provided = {
         kind: column
@@ -121,6 +129,7 @@ def _fit_probit(ctx, env):
         model_id="probit_1",
         categorical_x=ctx.artifacts.get("_categorical_vars"),
     )
+    _apply_survey_design_variance(ctx, "probit", primary)
     return "probit_1", primary, fitted
 
 
@@ -155,11 +164,26 @@ def _fit_logit(ctx, env):
         model_id="logit_1",
         categorical_x=ctx.artifacts.get("_categorical_vars"),
     )
+    _apply_survey_design_variance(ctx, "logit", primary)
     return "logit_1", primary, fitted
 
 
 def _fit_poisson(ctx, env):
-    poisson_x = ctx.artifacts["_poisson_x"]
+    from ...orchestrator import _detect_exposure_candidates
+    from ...survey.adapters import validate_poisson_exposure
+
+    exposure_candidates = _detect_exposure_candidates(ctx.artifacts["_normalized_x"])
+    for candidate in exposure_candidates:
+        validate_poisson_exposure(ctx.data.frame, candidate)
+    if ctx.exposure_col is None and exposure_candidates:
+        ctx.exposure_col = exposure_candidates[0]
+    validate_poisson_exposure(ctx.data.frame, ctx.exposure_col)
+    poisson_x = [
+        variable
+        for variable in ctx.artifacts["_normalized_x"]
+        if variable != ctx.exposure_col
+    ]
+    ctx.artifacts["_poisson_x"] = poisson_x
     cat_all = ctx.artifacts.get("_categorical_vars") or set()
     poisson_cat = {v for v in cat_all if v in poisson_x}
     primary, fitted = _orch().run_poisson(
@@ -170,6 +194,7 @@ def _fit_poisson(ctx, env):
         exposure_col=ctx.exposure_col,
         categorical_x=poisson_cat,
     )
+    _apply_survey_design_variance(ctx, "poisson", primary, x=poisson_x)
     return "poisson_1", primary, fitted
 
 
@@ -363,27 +388,41 @@ def _survey_design_declared(ctx) -> bool:
     no family appears here, and none may.  Which families can *use* the design is
     derived from what each declares, in `_survey_estimator_for`.
     """
-    return bool(
-        str(ctx.artifacts.get("_survey_strata_col") or "").strip()
-        or str(ctx.artifacts.get("_survey_psu_col") or "").strip()
+    from ...survey.adapters import is_declared_survey_value
+
+    return any(
+        is_declared_survey_value(ctx.artifacts.get(key))
+        for key in ("_survey_strata_col", "_survey_psu_col")
     )
 
 
-def _survey_estimator_for(model_type: str, y: str, x: list[str]):
+def _survey_estimator_for(
+    model_type: str, y: str, x: list[str], *, exposure: str | None = None
+):
     """Build the engine-side estimator from what the family declared.
 
     Returns None when the family declared no link, which is a refusal to guess:
     a family that has not said how it fits under arbitrary weights does not get a
     design-based variance invented on its behalf.
     """
-    from ...agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ...agent.workflow_contracts import (
+        MODEL_FAMILY_CONTRACTS,
+        canonical_model_family,
+    )
     from ...survey.adapters import glm_estimator_spec
 
-    contract = MODEL_FAMILY_CONTRACTS.get(model_type)
+    canonical = canonical_model_family(model_type)
+    contract = MODEL_FAMILY_CONTRACTS.get(canonical)
     glm_family = getattr(contract, "survey_glm_family", None) if contract else None
     if not glm_family:
         return None
-    return glm_estimator_spec(family=model_type, glm_family=glm_family, y=y, x=list(x))
+    return glm_estimator_spec(
+        family=canonical,
+        glm_family=glm_family,
+        y=y,
+        x=list(x),
+        exposure=exposure,
+    )
 
 
 def _ols_weight_spec(ctx):
@@ -459,7 +498,65 @@ def _design_term(payload_term: str) -> str:
     return _DESIGN_TERM_ALIASES.get(payload_term, payload_term)
 
 
-def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
+def _attach_result_binding(
+    run_root, run_id: str, model_id: str, primary: dict[str, Any], inputs: list[str]
+) -> None:
+    """Bind a persisted model result to its run, project, model, and terms."""
+    if not isinstance(primary, dict):
+        raise ValueError("MODEL_RESULT_INVALID: result payload must be an object")
+    if (
+        not isinstance(inputs, list)
+        or not inputs
+        or not all(isinstance(item, str) and item and len(item) <= 300 for item in inputs)
+    ):
+        raise ValueError("MODEL_RESULT_INVALID: source artifact binding is invalid")
+    for field in ("nobs", "row_count", "n_observations"):
+        value = primary.get(field)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= 1_000_000
+        ):
+            raise ValueError(f"MODEL_RESULT_INVALID: {field} must be a bounded integer")
+    for field in ("sampling_weight", "frequency_weight", "analysis_weight", "exposure_col"):
+        value = primary.get(field)
+        if value is not None and (
+            not isinstance(value, str) or not value or len(value) > 128
+        ):
+            raise ValueError(f"MODEL_RESULT_INVALID: {field} must be a bounded column name")
+    coefficients = primary.get("coefficients")
+    if not isinstance(coefficients, dict) or not coefficients:
+        raise ValueError("MODEL_RESULT_INVALID: result payload has no coefficients")
+    source_ids: dict[str, str] = {}
+    for term, coefficient in coefficients.items():
+        if not isinstance(term, str) or not isinstance(coefficient, dict):
+            raise ValueError("MODEL_RESULT_INVALID: coefficient terms must be objects")
+        source_id = f"model_results.{model_id}.coefficients.{term}"
+        coefficient["source_id"] = source_id
+        source_ids[term] = source_id
+        if not isinstance(coefficient.get("warnings"), list):
+            coefficient["warnings"] = []
+    primary["result_binding"] = {
+        "project_root": str(run_root.parent.parent.resolve()),
+        "run_id": run_id,
+        "model_id": model_id,
+        "source_artifact_ids": list(inputs),
+        "coefficient_source_ids": source_ids,
+    }
+    unsigned = dict(primary)
+    unsigned["result_binding"] = dict(primary["result_binding"])
+    primary["result_binding"]["payload_sha256"] = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _apply_survey_design_variance(
+    ctx, model_type: str, primary: dict, *, x: list[str] | None = None
+) -> None:
     """Replace the naive variance with the design-based one, in place.
 
     The point estimate is already right -- weighted least squares gives the same
@@ -470,7 +567,10 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
     """
     from scipy import stats
 
-    from ...survey.adapters import build_design_from_artifacts
+    from ...survey.adapters import (
+        apply_result_postprocessor,
+        build_design_from_artifacts,
+    )
     from ...survey.engine import estimate_with_design
     from ...survey.errors import SurveyEngineError
 
@@ -478,19 +578,32 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
     if design is None:
         return
     estimator = _survey_estimator_for(
-        model_type, ctx.artifacts["_normalized_y"], ctx.artifacts["_normalized_x"]
+        model_type,
+        ctx.artifacts["_normalized_y"],
+        x if x is not None else ctx.artifacts["_normalized_x"],
+        exposure=ctx.exposure_col,
     )
     if estimator is None:
-        return
+        raise SurveyEngineError(
+            "SURVEY_GLM_FAMILY_UNSUPPORTED",
+            f"model family {model_type!r} has no live survey adapter path",
+            model_type=model_type,
+        )
 
-    declared_replicate = str(ctx.artifacts.get("_survey_replicate_type") or "").strip()
+    declared_replicate = design.replicate_type
     method = "replicate" if declared_replicate else "linearization"
     result = estimate_with_design(
         design, estimator, method=method,
-        replicate_type=declared_replicate or None,
+        replicate_type=declared_replicate,
     )
 
     critical = float(stats.t.ppf(0.975, result.residual_degf))
+    if not np.isfinite(critical):
+        raise SurveyEngineError(
+            "SURVEY_INFERENCE_UNAVAILABLE",
+            "survey confidence critical value is not finite",
+            reason="nonfinite_confidence_critical",
+        )
     coefficients = primary.get("coefficients") or {}
     unmatched = [
         term for term in coefficients if _design_term(term) not in result.standard_errors
@@ -506,18 +619,66 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
             f"{unmatched}; the engine reported {sorted(result.standard_errors)}"
         )
     for term, entry in coefficients.items():
-        se = result.standard_errors[_design_term(term)]
-        estimate = float(entry.get("estimate", result.estimates[_design_term(term)]))
+        design_term = _design_term(term)
+        se = result.standard_errors[design_term]
+        # The survey adapter owns the weighted point estimate as well as the
+        # design variance.  Keeping the runner's unweighted estimate here
+        # would produce a mixed payload whose SE is survey-based but whose
+        # coefficient is not.
+        estimate = float(result.estimates[design_term])
+        if not np.isfinite(se) or se <= 0:
+            raise SurveyEngineError(
+                "SURVEY_INFERENCE_UNAVAILABLE",
+                "survey standard error must be finite and positive",
+                reason="nonfinite_standard_error" if not np.isfinite(se) else "nonpositive_standard_error",
+                term=term,
+            )
         entry["std_error"] = se
+        entry["estimate"] = estimate
         entry["ci_lower"] = estimate - critical * se
         entry["ci_upper"] = estimate + critical * se
-        entry["p_value"] = float(
+        p_value = float(
             2 * stats.t.sf(abs(estimate / se), result.residual_degf)
-        ) if se > 0 else float("nan")
+        )
+        if not all(np.isfinite(value) for value in (estimate, entry["ci_lower"], entry["ci_upper"], p_value)):
+            raise SurveyEngineError(
+                "SURVEY_INFERENCE_UNAVAILABLE",
+                "survey coefficient inference contains a non-finite value",
+                reason="nonfinite_coefficient_inference",
+                term=term,
+            )
+        entry["p_value"] = p_value
+        if round(p_value, 4) < 0.001:
+            entry["p_value_display"] = "< 0.001"
+        else:
+            entry.pop("p_value_display", None)
         entry["variance_source"] = "survey_design"
+        entry_warnings = entry.get("warnings")
+        entry["warnings"] = (
+            list(entry_warnings) if isinstance(entry_warnings, list) else []
+        )
+        apply_result_postprocessor(
+            estimator,
+            primary=primary,
+            term=term,
+            entry=entry,
+            estimate=estimate,
+            ci_lower=entry["ci_lower"],
+            ci_upper=entry["ci_upper"],
+        )
 
     effects = design.design_effects(ctx.artifacts["_normalized_y"])
     summary = result.replicate_summary
+    primary_warnings = primary.get("warnings")
+    survey_warnings = (
+        list(primary_warnings) if isinstance(primary_warnings, list) else []
+    )
+    if summary and summary.failed:
+        survey_warnings.append("SURVEY_REPLICATE_FAILURES")
+        for entry in coefficients.values():
+            if isinstance(entry, dict):
+                entry["warnings"].append("SURVEY_REPLICATE_FAILURES")
+    primary["warnings"] = survey_warnings
     primary["survey_design"] = {
         "strata_column": design.strata,
         "psu_column": design.psu,
@@ -539,6 +700,8 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
         "replicates_succeeded": summary.succeeded if summary else None,
         "replicates_failed": summary.failed if summary else None,
         "replicate_failure_reasons": summary.failure_reasons if summary else None,
+        "replicate_weight_columns": result.replicate_weight_columns,
+        "weight_frame": design.weight_frame,
     }
 
 
@@ -790,6 +953,7 @@ class EstimationStage:
         from ...domain import GuardrailIssue, Severity
         from ...services.pinned_run_directory import LmmPersistenceError
         from ..packs.linear_mixed_effects.input import LmmInputError
+        from ...survey.errors import SurveyEngineError
 
         model_type = ctx.requested_model_type or "auto"
         normalized_y = ctx.artifacts["_normalized_y"]
@@ -889,6 +1053,17 @@ class EstimationStage:
             # weight-support gate so an incoherent pairing is reported as such,
             # rather than as a family that has not been wired up yet.
             _check_survey_composition(ctx, handler.model_type, sampling_weight)
+            if _survey_design_declared(ctx) and _survey_estimator_for(
+                handler.model_type,
+                normalized_y,
+                normalized_x,
+                exposure=ctx.exposure_col,
+            ) is None:
+                raise SurveyEngineError(
+                    "SURVEY_GLM_FAMILY_UNSUPPORTED",
+                    f"model family {handler.model_type!r} has no live survey adapter path",
+                    model_type=handler.model_type,
+                )
             try:
                 _validate_model_family_weights(
                     handler.model_type,
@@ -984,6 +1159,7 @@ class EstimationStage:
             # LMM's registered PacketEnvelope is its sole model-result source;
             # never create a competing legacy ``model_results/*.json`` copy.
             if handler.model_type != "linear_mixed_effects":
+                _attach_result_binding(run_root, run_id, model_id, primary, model_input_ids)
                 _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
             if handler.model_type != "linear_mixed_effects":
                 _persist_model_options_execution_binding(
@@ -1021,7 +1197,7 @@ class EstimationStage:
             # The admitted worker owns the private lifecycle sink.  This stage
             # must never use generic errors.json/manifest fallback.
             raise
-        except ValueError as exc:
+        except (ValueError, SurveyEngineError) as exc:
             # NB: WorkflowValidationError IS-A ValueError but we raised the only
             # pre-check above the try, so any ValueError here is a real fit failure.
             is_model_options_error = isinstance(exc, ModelOptionsValidationError)
@@ -1032,7 +1208,15 @@ class EstimationStage:
                 and bool(structured_code)
                 and isinstance(structured_evidence, Mapping)
             )
-            if is_model_options_error:
+            if isinstance(exc, SurveyEngineError):
+                failure_evidence = {
+                    **exc.context,
+                    "detail": exc.detail,
+                    "y_type": ctx.y_type,
+                    "requested_model_type": model_type,
+                }
+                issue_code = exc.code
+            elif is_model_options_error:
                 failure_evidence = {
                     **exc.evidence,
                     "y_type": ctx.y_type,
@@ -1082,7 +1266,9 @@ class EstimationStage:
                 issue_code = "MODEL_FIT_FAILED"
 
             issue_dicts.append(GuardrailIssue(
-                Severity.BLOCKER if (model_type != "auto" or is_model_options_error) else Severity.WARNING,
+                Severity.BLOCKER
+                if (model_type != "auto" or is_model_options_error or isinstance(exc, SurveyEngineError))
+                else Severity.WARNING,
                 issue_code,
                 str(exc),
                 failure_evidence,
@@ -1090,7 +1276,7 @@ class EstimationStage:
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("estimation", "blocked", f"Model fit failed: {exc}")
 
-            if model_type != "auto" or is_model_options_error:
+            if model_type != "auto" or is_model_options_error or isinstance(exc, SurveyEngineError):
                 # 1.5.3.2 CONTRACT: explicit failure => structured `failed`.
                 # NO silent OLS fallback.
                 _write_manifest(
@@ -1164,6 +1350,7 @@ class EstimationStage:
                 return ctx
 
             _robust_se_dp = _ols_robust_se_decision(ctx)
+            _attach_result_binding(run_root, run_id, "ols_1", ols_result, model_input_ids)
             _write_model_result(run_root, "ols_1", ols_result, inputs=model_input_ids)
             _persist_ols_contract_metadata(run_root, ols_result)
             model_results.append(("ols_1", ols_result))
@@ -1223,6 +1410,7 @@ def _write_design_precheck(ctx, env, model_results) -> None:
 def _check_survey_composition(ctx, model_type: str, sampling_weight: str) -> None:
     """Surface a survey composition refusal as a typed workflow failure."""
     from ...orchestrator._errors import WorkflowValidationError
+    from ...agent.workflow_contracts import canonical_model_family
     from ...survey.composability import (
         SurveyCompositionRefusal,
         check_design_composition,
@@ -1232,7 +1420,7 @@ def _check_survey_composition(ctx, model_type: str, sampling_weight: str) -> Non
     psu = str(ctx.artifacts.get("_survey_psu_col") or "").strip()
     try:
         check_design_composition(
-            model_type=model_type,
+            model_type=canonical_model_family(model_type),
             has_design=bool(strata or psu),
             has_sampling_weight=bool(sampling_weight),
             entity_column=str(ctx.artifacts.get("_entity_col") or "").strip() or None,

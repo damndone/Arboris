@@ -72,6 +72,17 @@ class ContextRescopeRequired:
 
 
 @dataclass(frozen=True)
+class ContextBaselineRebaseRequired:
+    """Durable before/after identities for an explicit baseline correction."""
+
+    line_id: str
+    old_manifest_sha256: str
+    new_manifest_sha256: str
+    old_baseline_sha: str
+    new_baseline_sha: str
+
+
+@dataclass(frozen=True)
 class ContextPackRequest:
     """Validated, caller-supplied facts to freeze before a line starts."""
 
@@ -103,6 +114,16 @@ class _RescopePlan:
     manifest_sha256: str
     old_allowed_paths: tuple[str, ...]
     new_allowed_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _BaselineRebasePlan:
+    request: ContextPackRequest
+    pack: bytes
+    manifest_bytes: bytes
+    manifest_sha256: str
+    old_baseline_sha: str
+    new_baseline_sha: str
 
 
 def create_context_pack(repo_root: Path, line_id: str, request: ContextPackRequest) -> ContextPackResult:
@@ -419,6 +440,85 @@ def rescope_context_pack(
         state_from="CONTEXT_RESCOPE_REQUIRED",
         state_to="CONTEXT_RESCOPED",
         lesson_key="context-pack-rescope",
+    )
+    return verify_context_pack(root, line_id)
+
+
+def record_context_baseline_rebase_required(
+    repo_root: Path, line_id: str, *, baseline_sha: str
+) -> ContextBaselineRebaseRequired:
+    """Audit a baseline correction before changing either frozen file."""
+
+    _validate_baseline_sha(baseline_sha)
+    root, _, old_manifest, old_manifest_sha256 = _load_frozen_context(repo_root, line_id)
+    try:
+        verify_log(_devlines_dir(root, create=False), line_id)
+    except EventValidationError as error:
+        raise ContextPackError("event log is not trustworthy before baseline rebase audit") from error
+    plan = _baseline_rebase_plan(root, line_id, old_manifest, old_manifest_sha256, baseline_sha)
+    if baseline_sha == old_manifest["baseline_sha"]:
+        raise ContextPackError("baseline_sha already matches the frozen Context Pack")
+    rows = _parse_jsonl(
+        _read_regular_file(root / ".agent" / "devlines" / line_id / "events.jsonl", "events.jsonl"),
+        "events.jsonl",
+    )
+    if rows and _is_matching_baseline_rebase_required(rows[-1], old_manifest_sha256, plan):
+        return ContextBaselineRebaseRequired(
+            line_id,
+            old_manifest_sha256,
+            plan.manifest_sha256,
+            plan.old_baseline_sha,
+            plan.new_baseline_sha,
+        )
+    _append_context_state_event(
+        root,
+        line_id,
+        subtype="context_baseline_rebase_required",
+        manifest_sha256=old_manifest_sha256,
+        cause="The frozen Context Pack baseline differs from the verified development-line parent.",
+        impact=_baseline_rebase_impact(old_manifest_sha256, plan),
+        lesson="Record baseline identity correction before publishing a replacement Context Pack.",
+        state_from=_latest_state(rows),
+        state_to="CONTEXT_BASELINE_REBASE_REQUIRED",
+        lesson_key="context-pack-baseline-rebase",
+    )
+    return ContextBaselineRebaseRequired(
+        line_id,
+        old_manifest_sha256,
+        plan.manifest_sha256,
+        plan.old_baseline_sha,
+        plan.new_baseline_sha,
+    )
+
+
+def rebase_context_pack(
+    repo_root: Path, line_id: str, *, baseline_sha: str
+) -> ContextPackResult:
+    """Publish the audited baseline correction and verify the new generation."""
+
+    _validate_baseline_sha(baseline_sha)
+    root, line, old_manifest, old_manifest_sha256 = _load_frozen_context(repo_root, line_id)
+    try:
+        verify_log(_devlines_dir(root, create=False), line_id)
+    except EventValidationError as error:
+        raise ContextPackError("event log is not trustworthy before explicit baseline rebase") from error
+    plan = _baseline_rebase_plan(root, line_id, old_manifest, old_manifest_sha256, baseline_sha)
+    rows = _parse_jsonl(_read_regular_file(line / "events.jsonl", "events.jsonl"), "events.jsonl")
+    if not rows or not _is_matching_baseline_rebase_required(rows[-1], old_manifest_sha256, plan):
+        raise ContextPackError("context_baseline_rebase_required must be durably recorded before rebase")
+    _atomic_replace_file(line, "context-pack.md", plan.pack)
+    _atomic_replace_file(line, "context-pack.manifest.json", plan.manifest_bytes)
+    _append_context_state_event(
+        root,
+        line_id,
+        subtype="context_baseline_rebased",
+        manifest_sha256=plan.manifest_sha256,
+        cause="The audited baseline correction was published as a new frozen Context Pack generation.",
+        impact=_baseline_rebase_impact(old_manifest_sha256, plan),
+        lesson="Bind the corrected development-line parent to both Context Pack and manifest before closing.",
+        state_from="CONTEXT_BASELINE_REBASE_REQUIRED",
+        state_to="CONTEXT_BASELINE_REBASED",
+        lesson_key="context-pack-baseline-rebase",
     )
     return verify_context_pack(root, line_id)
 
@@ -1092,6 +1192,93 @@ def _rescope_impact(old_manifest_sha256: str, plan: _RescopePlan) -> dict[str, A
         "old_allowed_paths": list(plan.old_allowed_paths),
         "new_allowed_paths": list(plan.new_allowed_paths),
     }
+
+
+def _validate_baseline_sha(value: str) -> None:
+    if not isinstance(value, str) or not _SHA1.fullmatch(value):
+        raise ContextPackError("baseline_sha must be an exact lowercase Git SHA")
+
+
+def _baseline_rebase_impact(
+    old_manifest_sha256: str, plan: _BaselineRebasePlan
+) -> dict[str, Any]:
+    return {
+        "old_manifest_sha256": old_manifest_sha256,
+        "new_manifest_sha256": plan.manifest_sha256,
+        "old_baseline_sha": plan.old_baseline_sha,
+        "new_baseline_sha": plan.new_baseline_sha,
+    }
+
+
+def _is_matching_baseline_rebase_required(
+    event: Mapping[str, Any], old_manifest_sha256: str, plan: _BaselineRebasePlan
+) -> bool:
+    return (
+        event.get("type") == "STATE_CHANGE"
+        and event.get("subtype") == "context_baseline_rebase_required"
+        and isinstance(event.get("evidence"), dict)
+        and event["evidence"].get("sha256") == old_manifest_sha256
+        and event.get("impact") == _baseline_rebase_impact(old_manifest_sha256, plan)
+    )
+
+
+def _latest_state(rows: Sequence[Mapping[str, Any]]) -> str:
+    for event in reversed(rows):
+        state = event.get("state_to")
+        if isinstance(state, str) and state:
+            return state
+    return "CONTEXT_FROZEN"
+
+
+def _baseline_rebase_plan(
+    root: Path,
+    line_id: str,
+    old_manifest: Mapping[str, Any],
+    old_manifest_sha256: str,
+    baseline_sha: str,
+) -> _BaselineRebasePlan:
+    _validate_baseline_sha(baseline_sha)
+    old_request = _request_from_manifest(old_manifest)
+    if baseline_sha == old_request.baseline_sha:
+        raise ContextPackError("baseline_sha already matches the frozen Context Pack")
+    rules = old_manifest.get("rules")
+    history = old_manifest.get("history")
+    if not isinstance(rules, Mapping) or not isinstance(history, Mapping):
+        raise ContextPackError("frozen Context Pack rules or history is invalid")
+    request = ContextPackRequest(
+        objective=old_request.objective,
+        baseline_sha=baseline_sha,
+        tags=old_request.tags,
+        affected_paths=old_request.affected_paths,
+        lesson_keys=old_request.lesson_keys,
+        allowed_paths=old_request.allowed_paths,
+        protected_paths=old_request.protected_paths,
+        dependencies=old_request.dependencies,
+        tests=old_request.tests,
+        known_gates=old_request.known_gates,
+    )
+    _validate_request(line_id, request)
+    pack = _render_context_pack(line_id, request, rules, history)
+    manifest = _manifest(
+        line_id,
+        request,
+        _sha256(pack),
+        rules,
+        history,
+        previous_manifest_sha256=old_manifest_sha256,
+        refresh_generation=old_manifest["refresh_generation"] + 1,
+        line_started_manifest_sha256=old_manifest.get("line_started_manifest_sha256", old_manifest_sha256),
+    )
+    manifest_sha256 = _sha256(_canonical_json(manifest) + b"\n")
+    manifest["manifest_sha256"] = manifest_sha256
+    return _BaselineRebasePlan(
+        request=request,
+        pack=pack,
+        manifest_bytes=_canonical_json(manifest) + b"\n",
+        manifest_sha256=manifest_sha256,
+        old_baseline_sha=old_request.baseline_sha,
+        new_baseline_sha=baseline_sha,
+    )
 
 
 def _is_matching_rescope_required(event: Mapping[str, Any], old_manifest_sha256: str, plan: _RescopePlan) -> bool:

@@ -22,7 +22,9 @@ from workbench.development_control.context_pack import (
     ContextPackRequest,
     create_context_pack,
     record_context_refresh_required,
+    record_context_baseline_rebase_required,
     record_context_rescope_required,
+    rebase_context_pack,
     refresh_context_pack,
     rescope_context_pack,
     verify_context_pack,
@@ -103,6 +105,22 @@ def main(argv: list[str] | None = None) -> int:
                     "manifest_sha256": result.manifest_sha256,
                 }
             )
+        elif args.command == "rebase-context":
+            required = record_context_baseline_rebase_required(
+                root, args.line, baseline_sha=args.baseline_sha
+            )
+            result = rebase_context_pack(
+                root, args.line, baseline_sha=args.baseline_sha
+            )
+            _emit(
+                {
+                    "line_id": result.line_id,
+                    "old_manifest_sha256": required.old_manifest_sha256,
+                    "manifest_sha256": result.manifest_sha256,
+                    "old_baseline_sha": required.old_baseline_sha,
+                    "baseline_sha": required.new_baseline_sha,
+                }
+            )
         elif args.command == "append":
             event = _read_json_object(root, args.event_file)
             validate_line_id(args.line)
@@ -171,6 +189,9 @@ def _parser() -> argparse.ArgumentParser:
     rescope.add_argument("--line", required=True)
     rescope.add_argument("--affected-path", action="append", default=[], required=True)
     rescope.add_argument("--allow-path", action="append")
+    rebase = commands.add_parser("rebase-context", help="audit and explicitly correct a frozen baseline")
+    rebase.add_argument("--line", required=True)
+    rebase.add_argument("--baseline-sha", required=True)
     append = commands.add_parser("append", help="append one formal event from a repository-relative JSON object")
     append.add_argument("--line", required=True)
     append.add_argument("--event-file", required=True)

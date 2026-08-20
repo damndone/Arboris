@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 from scipy.linalg import hadamard
 
-from .design import SurveyDesign
+from .design import SurveyDesign, _validated_weight_array
 from .errors import SurveyEngineError
 
 
@@ -25,6 +25,17 @@ def build_replicates(
     design: SurveyDesign, replicate_type: str | None
 ) -> tuple[np.ndarray, list[float]]:
     """Return (n_obs x n_replicates) weights and the per-replicate scale factors."""
+    if (
+        replicate_type is not None
+        and design.replicate_type is not None
+        and replicate_type != design.replicate_type
+    ):
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_DECLARATION_MISMATCH",
+            "the requested replicate method does not match the declared survey design",
+            declared_replicate_type=design.replicate_type,
+            requested_replicate_type=replicate_type,
+        )
     kind = replicate_type or design.replicate_type
     if kind is None:
         raise SurveyEngineError(
@@ -33,6 +44,14 @@ def build_replicates(
         )
     if kind == "provided":
         return _provided(design)
+    if design.replicate_weight_columns:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_COLUMNS_UNSUPPORTED",
+            f"replicate_type={kind!r} generates weights and cannot carry replicate columns; "
+            "use replicate_type='provided' to consume named columns",
+            replicate_type=kind,
+            replicate_weight_columns=list(design.replicate_weight_columns)[:16],
+        )
     if kind == "jackknife":
         return _jackknife(design)
     if kind == "brr":
@@ -53,12 +72,27 @@ def _psu_index(design: SurveyDesign) -> tuple[np.ndarray, np.ndarray, dict[str, 
 
 def _provided(design: SurveyDesign) -> tuple[np.ndarray, list[float]]:
     columns = design.replicate_weight_columns
+    if not columns:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_WEIGHTS_MISSING",
+            "replicate_type='provided' requires replicate_weight_columns",
+        )
     missing = [c for c in columns if c not in design.frame.columns]
     if missing:
         raise SurveyEngineError(
             "SURVEY_REPLICATE_WEIGHTS_MISSING", f"missing columns: {', '.join(missing)}"
         )
-    weights = design.frame[columns].to_numpy(dtype=float)
+    weights = np.column_stack(
+        [
+            _validated_weight_array(
+                design.frame,
+                column,
+                allow_zero=True,
+                error_code="SURVEY_REPLICATE_WEIGHT_INVALID",
+            )
+            for column in columns
+        ]
+    )
     # Published replicate weights are combined weights (the sampling weight is
     # already folded in), which is the NHANES/CPS convention.
     scales = [1.0 / weights.shape[1]] * weights.shape[1]

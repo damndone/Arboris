@@ -32,6 +32,7 @@ class PreEstimationChecksStage:
 
     def run(self, ctx: ModelingContext, env: RunEnv) -> ModelingContext:
         from ...orchestrator import (
+            _detect_exposure_candidates,
             _model_column_issue,
             _coerce_x_columns_to_numeric,
             _detect_categorical_x_vars,
@@ -41,6 +42,8 @@ class PreEstimationChecksStage:
             dpf,
         )
         from ...artifacts import write_json
+        from ...domain import GuardrailIssue, Severity
+        from ...survey.errors import SurveyEngineError
 
         cleaned = ctx.data.frame
         normalized_y = ctx.artifacts["_normalized_y"]
@@ -78,7 +81,97 @@ class PreEstimationChecksStage:
             return ctx
         env.step("model_check", "complete", "Model columns valid")
 
+        # Exposure detection runs before roles, statistical tests, and VIF.  An
+        # invalid exposure must therefore be refused here, through the same
+        # family adapter validator used by the survey estimator, rather than
+        # being allowed to masquerade as an ordinary predictor.
+        from ...survey.adapters import (
+            build_design_from_artifacts,
+            is_declared_survey_value,
+            validate_poisson_exposure,
+        )
+
+        # Sampling weights are a survey-design input, not an ordinary model
+        # weight.  Validate them before X coercion or any model runner can
+        # turn an object-sized integer into inf/OverflowError.  This keeps the
+        # constructor, engine, and real workflow on the same typed boundary.
+        survey_declaration = any(
+            is_declared_survey_value(ctx.artifacts.get(key))
+            for key in (
+                "_sampling_weight",
+                "_survey_strata_col",
+                "_survey_psu_col",
+                "_survey_fpc_col",
+                "_survey_replicate_type",
+                "_survey_lonely_psu",
+                "_survey_weight_frame",
+                "_survey_subpop",
+            )
+        )
+        if survey_declaration:
+            try:
+                build_design_from_artifacts(cleaned, ctx.artifacts)
+            except SurveyEngineError as exc:
+                issue_dicts.append(
+                    GuardrailIssue(
+                        Severity.BLOCKER,
+                        exc.code,
+                        str(exc),
+                        {**exc.context, "detail": exc.detail},
+                    ).to_dict()
+                )
+                write_json(run_root / "errors.json", {"issues": issue_dicts})
+                env.step("model_check", "blocked", str(exc))
+                _write_manifest(
+                    run_root,
+                    run_id,
+                    mode,
+                    "failed",
+                    _lineage(input_files),
+                    started_at=started_at,
+                    y=y,
+                    x=x,
+                    requested_model_type=model_type,
+                )
+                _safe_flush_recorder(env.recorder, context="failed@survey_weight_validation")
+                ctx.terminal_status = "failed"
+                return ctx
+
         coercion_actions = _coerce_x_columns_to_numeric(cleaned, normalized_x, run_root)
+
+        poisson_requested = model_type in {"auto", "poisson", "poisson_rate"}
+        poisson_requested = poisson_requested or (
+            ctx.artifacts.get("_glm_family") == "poisson"
+        )
+        if ctx.y_type == "count" and poisson_requested:
+            try:
+                for candidate in _detect_exposure_candidates(normalized_x):
+                    validate_poisson_exposure(cleaned, candidate)
+            except SurveyEngineError as exc:
+                issue_dicts.append(
+                    GuardrailIssue(
+                        Severity.BLOCKER,
+                        exc.code,
+                        str(exc),
+                        {**exc.context, "detail": exc.detail},
+                    ).to_dict()
+                )
+                write_json(run_root / "errors.json", {"issues": issue_dicts})
+                env.step("model_check", "blocked", str(exc))
+                _write_manifest(
+                    run_root,
+                    run_id,
+                    mode,
+                    "failed",
+                    _lineage(input_files),
+                    started_at=started_at,
+                    y=y,
+                    x=x,
+                    requested_model_type=model_type,
+                )
+                _safe_flush_recorder(env.recorder, context="failed@exposure_validation")
+                ctx.terminal_status = "failed"
+                return ctx
 
         _coerce_dps: dict[str, Any] = {}
         for action in [*actions, *coercion_actions]:

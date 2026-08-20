@@ -87,6 +87,51 @@ def test_build_summary_with_model_results():
     assert len(summary["coefficients_summary"]["rows"]) == 1  # x1, not Intercept
 
 
+def test_diagnostic_projection_is_typed_for_invalid_survey_coefficient_values():
+    summary = build_diagnostic_summary(
+        issue_dicts=[],
+        model_results=[{
+            "model_id": "ols_1",
+            "coefficients": {
+                "Intercept": {"estimate": 1.0, "p_value": 0.5, "std_error": 0.1},
+                "x1": {
+                    "estimate": 10**400,
+                    "std_error": -1,
+                    "p_value": 2,
+                    "ci_lower": 2.0,
+                    "ci_upper": 1.0,
+                    "variance_source": "survey_design",
+                    "source_id": "run-1:model_results.ols_1.coefficients.x1",
+                    "warnings": ["SURVEY_INVALID"],
+                },
+            },
+            "survey_design": {
+                "n_obs": 10,
+                "n_psu": 4,
+                "degf": -1,
+                "residual_degf": 10**400,
+            },
+        }],
+        routing={"kind": "cross_section"},
+        normalized_y="y",
+        normalized_x=["x1"],
+        profile={"row_count": 10, "column_count": 3},
+        categorical_vars=set(),
+        y_type="continuous",
+        primary_type="ols",
+        variable_roles={},
+        run_id="run-1",
+    )
+    row = summary["coefficients_summary"]["rows"][0]
+    assert row["projection_status"] == "unavailable"
+    assert row.get("estimate") is None
+    assert row.get("std_error") is None
+    assert row.get("p_value") is None
+    assert row["source_id"] == "run-1:model_results.ols_1.coefficients.x1"
+    assert summary["survey_design"]["projection_status"] == "unavailable"
+    assert "degf" not in summary["survey_design"]
+
+
 def test_build_summary_includes_narrative_contract():
     issues = [
         {"severity": "WARNING", "code": "TREATMENT_PROXY_CORRELATION", "message": "...",

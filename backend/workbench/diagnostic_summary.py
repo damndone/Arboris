@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import math
 from typing import Any
+
+from .survey.projection import (
+    project_survey_coefficient,
+    project_survey_design,
+    survey_payload_sha256,
+)
 
 
 def build_diagnostic_summary(
@@ -49,11 +56,16 @@ def build_diagnostic_summary(
     for term, coef in coefficients.items():
         if term == "Intercept" or not isinstance(coef, Mapping):
             continue
-        est = coef.get("estimate")
-        p = coef.get("p_value")
-        if est is None:
+        projected_coef = project_survey_coefficient(
+            coef,
+            unavailable_reason="DIAGNOSTIC_COEFFICIENT_VALUE_INVALID",
+            run_id=run_id,
+        )
+        est = projected_coef.get("estimate")
+        p = projected_coef.get("p_value")
+        if est is None and projected_coef.get("projection_status") != "unavailable":
             continue
-        std_err = coef.get("std_error")
+        std_err = projected_coef.get("std_error")
         p_label = _significance_label(p)
         interpretation_guide = "standard"
         template_key = "coef_continuous_association"
@@ -75,18 +87,27 @@ def build_diagnostic_summary(
                 interpretation_guide = "treatment_direct"
                 template_key = "coef_binary_association"
 
-        coeff_rows.append({
+        row = {
             "variable": term,
             "display_name": term_base,
             "level": cat_level or "",
-            "estimate": round(float(est), 4),
+            "estimate": round(float(est), 4) if est is not None else None,
             "std_error": round(float(std_err), 4) if std_err is not None else None,
             "p_value": round(float(p), 4) if p is not None else None,
+            "ci_lower": projected_coef.get("ci_lower"),
+            "ci_upper": projected_coef.get("ci_upper"),
             "significance_label": p_label,
+            "variance_source": projected_coef.get("variance_source"),
+            "source_id": projected_coef.get("source_id"),
+            "warnings": projected_coef.get("warnings", []),
             "interpretation_guide": interpretation_guide,
             "linked_issues": linked_issues,
             "template_key": template_key,
-        })
+        }
+        for key in ("projection_status", "unavailable_reason", "provenance"):
+            if key in projected_coef:
+                row[key] = projected_coef[key]
+        coeff_rows.append(row)
 
     encoded_cat = [
         {"variable": v, "n_levels": _n_levels(v, coefficients), "reference": "1", "method": "treatment_dummy"}
@@ -139,8 +160,14 @@ def build_diagnostic_summary(
     metrics: dict[str, Any] = {}
     for key in ("r_squared", "f_statistic", "f_p_value", "aic", "bic", "pseudo_r2", "llf"):
         val = primary_result.get(key)
-        if val is not None:
-            metrics[key] = val
+        if key.endswith("p_value"):
+            bounded = _bounded_number(val)
+            if bounded is None or not 0 <= bounded <= 1:
+                continue
+        else:
+            bounded = _bounded_number(val)
+        if bounded is not None:
+            metrics[key] = bounded
     primary_keys = _primary_metric_keys(y_type, metrics)
 
     return {
@@ -160,7 +187,7 @@ def build_diagnostic_summary(
             "model_label": _model_label(primary_type),
             "y_variable": normalized_y,
             "x_variables": normalized_x,
-            "n_observations": profile.get("row_count", 0),
+            "n_observations": _bounded_count(profile.get("row_count", 0)),
             "n_predictors_original": n_original,
             "n_predictors_after_encoding": n_after,
             "dataset_kind": routing.get("kind", "unknown"),
@@ -181,6 +208,8 @@ def build_diagnostic_summary(
             "cautions": cautions,
             "info": infos,
         },
+        "survey_design": _bounded_survey_design(primary_result.get("survey_design")),
+        "warnings": _bounded_strings(primary_result.get("warnings")),
         "coefficients_summary": {
             "interpretation_mode": "associational",
             "rows": coeff_rows,
@@ -201,6 +230,7 @@ def finalize_diagnostic_summary(
     issue_dicts: list[dict[str, Any]],
     report_render_status: str,
     report_available: bool,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     """Finalize the status fields after report rendering actually runs.
 
@@ -237,6 +267,17 @@ def finalize_diagnostic_summary(
             (summary.get("run_status") or {}).get("model_results_available")
         ),
     }
+    if run_id:
+        result.pop("summary_binding", None)
+        payload_sha256 = survey_payload_sha256(result)
+        if payload_sha256 is not None:
+            result["summary_binding"] = {
+                "artifact_id": "diagnostic_summary",
+                "run_id": run_id,
+                "status": "complete",
+                "provenance": "server",
+                "payload_sha256": payload_sha256,
+            }
     return result
 
 
@@ -256,7 +297,7 @@ def _model_label(primary_type: str) -> str:
 
 
 def _significance_label(p: float | None) -> str:
-    if p is None:
+    if p is None or not math.isfinite(p):
         return "not reported"
     if p < 0.01:
         return "significant at the 1% level"
@@ -265,6 +306,39 @@ def _significance_label(p: float | None) -> str:
     if p < 0.10:
         return "marginally significant"
     return "not statistically significant at conventional levels"
+
+
+def _bounded_number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        parsed = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) and abs(parsed) <= 1_000_000_000_000.0 else None
+
+
+def _bounded_count(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1_000_000:
+        return None
+    return value
+
+
+def _bounded_string(value: Any) -> str | None:
+    return value[:128] if isinstance(value, str) and value else None
+
+
+def _bounded_strings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item[:128] for item in value[:16] if isinstance(item, str) and item]
+
+
+def _bounded_survey_design(value: Any) -> dict[str, Any] | None:
+    return project_survey_design(
+        value,
+        unavailable_reason="DIAGNOSTIC_SURVEY_METADATA_INVALID",
+    )
 
 
 def _get_confirmed_roles(roles: dict, role_name: str) -> set[str]:

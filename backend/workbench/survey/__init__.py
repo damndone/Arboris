@@ -7,7 +7,7 @@ an estimator this package has never heard of, including one written at runtime,
 obtains a design-based variance on exactly the same terms as a built-in one.
 """
 
-from .design import DesignEffects, SurveyDesign
+from .design import SURVEY_INVALID_SAMPLING_WEIGHTS, DesignEffects, SurveyDesign
 from .engine import (
     MAX_REPLICATE_FAILURE_RATE,
     DesignEstimate,
@@ -36,6 +36,7 @@ __all__ = [
     "EstimatorSpec",
     "JointTest",
     "ReplicateSummary",
+    "SURVEY_INVALID_SAMPLING_WEIGHTS",
     "SurveyCompositionError",
     "SurveyDesign",
     "SurveyEngineError",

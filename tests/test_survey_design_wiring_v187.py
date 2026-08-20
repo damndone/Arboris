@@ -1,13 +1,12 @@
 """v1.8.7 block 1 — shared input wiring for complex survey design.
 
-This block is deliberately **zero behavior**: the new fields travel from the HTTP
-surface through run_service and the orchestrator into ``ctx.artifacts`` and stop
-there.  Nothing consumes them, nothing validates them, no result changes.
+The new fields travel from the HTTP surface through run_service and the
+orchestrator into ``ctx.artifacts``. Unsupported declarations may stop at the
+typed survey boundary; this file protects that fail-closed behavior.
 
 The load-bearing test in this file is
-``test_survey_design_params_do_not_change_any_result`` — if declaring the fields
-moves a single number, semantics leaked into a wiring block and A1/A2 can no
-longer be developed in parallel on top of it.
+``test_fpc_without_sampling_weight_fails_closed_at_the_wired_entry`` — an FPC
+declaration must never be hidden by an ordinary model fallback.
 """
 
 from __future__ import annotations
@@ -211,15 +210,11 @@ def test_survey_design_params_reach_ctx_artifacts(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# 3. ZERO BEHAVIOR — the load-bearing constraint of this block
+# 3. FAIL-CLOSED SURVEY DECLARATIONS
 # --------------------------------------------------------------------------
 
-def test_survey_design_params_do_not_change_any_result(tmp_path):
-    """Declaring survey design fields must not move a single number in block 1.
-
-    Consuming them is block 2's job.  If this fails, semantics leaked into a
-    wiring block and the A1/A2 parallelism premise is broken.
-    """
+def test_fpc_without_sampling_weight_fails_closed_at_the_wired_entry(tmp_path):
+    """An FPC declaration cannot be carried into a naive model result."""
     bare_project, bare_source = _project(tmp_path, "bare")
     bare = run_workflow(
         bare_project.root, [bare_source], mode="auto", model_type="ols", y="y", x=["x"]
@@ -238,39 +233,12 @@ def test_survey_design_params_do_not_change_any_result(tmp_path):
         survey_subpop="region == 'north'",
     )
 
-    assert bare["status"] == declared["status"] == "completed"
-
-    bare_model = read_json(
-        bare_project.root / "runs" / bare["run_id"] / "model_results" / "ols_1.json"
-    )
-    declared_model = read_json(
-        svy_project.root / "runs" / declared["run_id"] / "model_results" / "ols_1.json"
-    )
-
-    assert declared_model["coefficients"] == bare_model["coefficients"]
-    assert json.dumps(declared_model, sort_keys=True) == json.dumps(
-        bare_model, sort_keys=True
-    ), "declaring survey design changed the model result — semantics leaked into block 1"
-
-    bare_arts = sorted(
-        p.name for p in (bare_project.root / "runs" / bare["run_id"]).rglob("*") if p.is_file()
-    )
-    declared_arts = sorted(
-        p.name for p in (svy_project.root / "runs" / declared["run_id"]).rglob("*") if p.is_file()
-    )
-    # The A2b design pre-check (v1.8.7) writes `design_precheck.json` when a
-    # design was *not* declared -- that is the whole point of it, so the two
-    # artifact sets are expected to differ by exactly that file. Spec §6.5
-    # declares this exception in advance: A2-7 constrains routing and statistical
-    # results, not the artifact set. Everything else must still match, so the
-    # comparison is narrowed rather than dropped.
-    expected_extra = {"design_precheck.json"}
-    assert set(bare_arts) - set(declared_arts) <= expected_extra, (
-        "declaring survey design changed the artifact set beyond the declared exception"
-    )
-    assert not set(declared_arts) - set(bare_arts), (
-        "declaring survey design produced artifacts the bare run did not"
-    )
+    assert bare["status"] == "completed"
+    assert declared["status"] == "failed"
+    run_root = svy_project.root / "runs" / declared["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(issue["code"] == "SURVEY_FPC_UNSUPPORTED" for issue in errors["issues"])
+    assert not (run_root / "model_results" / "ols_1.json").exists()
 
 
 def test_sampling_weight_fails_closed_without_a_declared_design(tmp_path):
@@ -294,6 +262,130 @@ def test_sampling_weight_fails_closed_without_a_declared_design(tmp_path):
         or "sampling_weight" in str(issue.get("message", ""))
         for issue in errors["issues"]
     )
+
+
+@pytest.mark.parametrize(
+    "survey_declaration",
+    [
+        {"survey_strata_col": "region"},
+        {"survey_psu_col": "cluster"},
+        {"survey_subpop": "region == 'north'"},
+        {"survey_lonely_psu": "adjust"},
+        {
+            "survey_replicate_type": "provided",
+            "survey_replicate_weights": ["rw1"],
+        },
+    ],
+    ids=["strata", "psu", "subpopulation", "lonely-psu", "provided-replicates"],
+)
+def test_partial_survey_declarations_fail_closed_at_real_workflow_entry(
+    tmp_path, survey_declaration
+):
+    """A survey declaration must not disappear into an ordinary model run."""
+    project, source = _project(tmp_path, f"partial-{next(iter(survey_declaration))}")
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="ols",
+        y="y",
+        x=["x"],
+        **survey_declaration,
+    )
+
+    assert outcome["status"] == "failed", outcome
+    run_root = project.root / "runs" / outcome["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(issue["code"] == "SURVEY_DESIGN_INCOMPLETE" for issue in errors["issues"])
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+
+
+def test_replicate_weight_columns_without_a_method_fail_closed(tmp_path):
+    """Replicate columns are not allowed to be silently ignored by Taylor variance."""
+    project, source = _project(tmp_path, "replicate-columns-without-type")
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="ols",
+        y="y",
+        x=["x"],
+        sampling_weight="rw1",
+        survey_strata_col="region",
+        survey_psu_col="cluster",
+        survey_replicate_weights=["rw1"],
+    )
+
+    assert outcome["status"] == "failed", outcome
+    run_root = project.root / "runs" / outcome["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(
+        issue["code"] == "SURVEY_REPLICATE_TYPE_REQUIRED"
+        for issue in errors["issues"]
+    )
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_code", "extra"),
+    [
+        ("survey_strata_col", 0, "SURVEY_STRATA_INVALID", {}),
+        ("survey_psu_col", False, "SURVEY_PSU_INVALID", {}),
+        ("survey_lonely_psu", 0, "SURVEY_LONELY_PSU_INVALID", {}),
+        ("survey_weight_frame", 0, "SURVEY_WEIGHT_FRAME_INVALID", {}),
+        ("survey_subpop", False, "SURVEY_SUBPOP_INVALID", {}),
+        ("sampling_weight", 0, "SURVEY_SAMPLING_WEIGHT_INVALID", {}),
+        (
+            "survey_replicate_type",
+            False,
+            "SURVEY_REPLICATE_TYPE_INVALID",
+            {"survey_replicate_weights": ["rw1"]},
+        ),
+        (
+            "survey_replicate_weights",
+            False,
+            "SURVEY_REPLICATE_COLUMNS_INVALID",
+            {"survey_replicate_type": "provided"},
+        ),
+    ],
+    ids=[
+        "falsey-strata",
+        "falsey-psu",
+        "falsey-lonely-psu",
+        "falsey-weight-frame",
+        "falsey-subpopulation",
+        "falsey-sampling-weight",
+        "falsey-replicate-type",
+        "falsey-replicate-columns",
+    ],
+)
+def test_falsey_survey_declarations_fail_closed_at_real_workflow_entry(
+    tmp_path, field, value, expected_code, extra
+):
+    """Declared falsey survey values cannot become absent/default declarations."""
+    project, source = _project(tmp_path, f"falsey-{field}")
+    kwargs = {
+        "sampling_weight": "weight",
+        "survey_strata_col": "region",
+        "survey_psu_col": "cluster",
+        field: value,
+        **extra,
+    }
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="ols",
+        y="y",
+        x=["x"],
+        **kwargs,
+    )
+
+    assert outcome["status"] == "failed", outcome
+    run_root = project.root / "runs" / outcome["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(issue["code"] == expected_code for issue in errors["issues"])
+    assert not (run_root / "model_results" / "ols_1.json").exists()
 
 
 # --------------------------------------------------------------------------

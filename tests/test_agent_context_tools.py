@@ -11,7 +11,10 @@ import pytest
 
 from workbench.agent.core import AgentCore
 from workbench.agent.chains import ChainStore
-from workbench.agent.context_tools import InspectTimeSeriesSummaryRequest
+from workbench.agent.context_tools import (
+    InspectNotebookWorkflowResultsRequest,
+    InspectTimeSeriesSummaryRequest,
+)
 from workbench.agent.events import AgentEventStream
 from workbench.agent.model import ModelStreamEvent
 from workbench.agent.operations import OperationRecordStore
@@ -35,7 +38,7 @@ def test_p7_public_projection_preserves_hurdle_approximation_labels() -> None:
     from workbench.agent.context_tools import _public_operation_artifact_result
 
     many_coefficients = {
-        f"x_{index}": {"estimate": float(index), "standard_error": 0.1, "p_value": 0.04}
+        f"x_{index}": {"estimate": float(index), "std_error": 0.1, "p_value": 0.04}
         for index in range(120)
     }
     public, omitted = _public_operation_artifact_result(
@@ -66,6 +69,11 @@ def test_p7_public_projection_preserves_hurdle_approximation_labels() -> None:
         "standard_error_method": "bfgs_inverse_hessian_approximation",
         "p_value_method": "normal_wald_approximation",
         "p_value_status": "approximate",
+    }
+    assert public["result"]["coefficient_estimands"]["positive_count"]["x_0"] == {
+        "estimate": 0.0,
+        "std_error": 0.1,
+        "p_value": 0.04,
     }
     assert omitted == ["raw_artifact_payloads", "raw_rows"]
 
@@ -232,7 +240,12 @@ def _write_project_run(project_root: Path, *, run_id: str = "run-a") -> None:
     )
 
 
-def _write_notebook_workflow_receipt(project_root: Path) -> None:
+def _write_notebook_workflow_receipt(
+    project_root: Path,
+    *,
+    survey_design: dict | None = None,
+    artifact_result_extra: dict | None = None,
+) -> None:
     """Persist one committed Notebook receipt with sibling model runs.
 
     This fixture deliberately uses generic response/exposure-style results.  It
@@ -247,18 +260,16 @@ def _write_notebook_workflow_receipt(project_root: Path) -> None:
     artifacts_root = source_root / "artifacts" / "statistical_test"
     artifacts_root.mkdir(parents=True)
     joint_result = artifacts_root / "joint_test.json"
-    joint_result.write_text(
-        json.dumps(
-            {
-                "result": {
-                    "test_statistic": 12.4,
-                    "p_value": 0.003,
-                    "raw_rows": [{"response": 1.0}],
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
+    result = {
+        "test_statistic": 12.4,
+        "p_value": 0.003,
+        "raw_rows": [{"response": 1.0}],
+    }
+    if survey_design is not None:
+        result["survey_design"] = survey_design
+    if artifact_result_extra is not None:
+        result.update(artifact_result_extra)
+    joint_result.write_text(json.dumps({"result": result}), encoding="utf-8")
     source_root.joinpath("artifacts_index.json").write_text(
         json.dumps(
             {
@@ -682,7 +693,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     assert summary["metrics"] == {"r_squared": 0.72, "aic": 120.5, "bic": 125.1}
     assert summary["primary_metric_keys"] == ["r_squared", "aic"]
     assert summary["coefficient_rows"] == []
-    assert summary["full_table_ref"] is None
+    assert "full_table_ref" not in summary
     assert result_summary.output["omitted_sections"] == ["raw_model_results"]
 
     artifact_result = asyncio.run(
@@ -788,6 +799,471 @@ def test_notebook_workflow_results_discover_only_committed_sibling_evidence(
     assert "raw_rows" not in json.dumps(workflow["post_estimation_evidence"])
     assert str(project_root) not in public_output
     assert result.output["omitted_sections"] == ["raw_artifact_payloads", "raw_rows"]
+
+
+def test_notebook_survey_packet_projection_is_typed_and_omits_absent_metadata(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_notebook_workflow_receipt(
+        project_root,
+        survey_design={
+            "n_obs": 100,
+            "n_strata": 4,
+            "n_psu": 8,
+            "degf": 4,
+            "variance_method": "linearization",
+            "variance_source": "survey_design",
+            "weight_column": "weight",
+            "replicate_type": "BRR",
+            "replicate_weight_columns": ["repw01", "repw02"],
+            "provenance": {
+                "run_id": "source-run",
+                "artifact_id": "joint-test-result",
+                "producer": "server",
+            },
+            "raw_rows": [{"must_not": "cross"}],
+        },
+    )
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-notebook-survey-projection",
+                "tool_id": "inspect_notebook_workflow_results",
+                "arguments": {
+                    "request_id": "inspect-notebook-survey-projection",
+                    "owner_run_id": "branch-east",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "branch-east",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    projected = result.output["notebook_workflows"][0]["post_estimation_evidence"][0]["result"]
+    assert projected["survey_design"] == {
+        "n_obs": 100,
+        "n_strata": 4,
+        "n_psu": 8,
+        "degf": 4,
+        "variance_method": "linearization",
+        "variance_source": "survey_design",
+        "weight_column": "weight",
+        "replicate_type": "BRR",
+        "replicate_weight_columns": ["repw01", "repw02"],
+        "provenance": {
+            "run_id": "source-run",
+            "artifact_id": "joint-test-result",
+            "producer": "server",
+        },
+    }
+    assert "raw_rows" not in json.dumps(projected)
+
+    project_without_survey = tmp_path / "project-without-survey"
+    _write_notebook_workflow_receipt(project_without_survey)
+    result_without_survey = _load_provider_type()(project_without_survey).inspect_notebook_workflow_results(
+        InspectNotebookWorkflowResultsRequest(
+            request_id="inspect-notebook-survey-absent",
+            owner_run_id="branch-east",
+            op_node_id="model:ols_1",
+            active_head_run_id="branch-east",
+        )
+    )
+    absent_projected = result_without_survey["notebook_workflows"][0]["post_estimation_evidence"][0]["result"]
+    assert "survey_design" not in absent_projected
+
+
+def test_notebook_receipt_projection_drops_unknown_optional_and_raw_fields(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project-with-unknowns"
+    _write_notebook_workflow_receipt(
+        project_root,
+        survey_design={
+            "n_obs": 100,
+            "degf": 4,
+            "variance_method": "linearization",
+            "provenance": {"run_id": "source-run", "producer": "server"},
+        },
+        artifact_result_extra={
+            "provenance": {
+                "run_id": "source-run",
+                "artifact_id": "joint-test-result",
+                "producer": "server",
+                "unknown_provenance": "drop",
+            },
+            "coefficients": {
+                "x": {
+                    "estimate": 1.25,
+                    "source_id": "model_results.ols_1.coefficients.x",
+                    "unknown_nested": "drop",
+                }
+            },
+            "raw_rows": [{"must_not": "cross"}],
+            "unknown_extra": {"must_not": "cross"},
+        },
+    )
+    provider = _load_provider_type()(project_root)
+    projected = provider.inspect_notebook_workflow_results(
+        InspectNotebookWorkflowResultsRequest(
+            request_id="inspect-notebook-closed-allowlist",
+            owner_run_id="branch-east",
+            op_node_id="model:ols_1",
+            active_head_run_id="branch-east",
+        )
+    )["notebook_workflows"][0]["post_estimation_evidence"][0]["result"]
+
+    assert projected["test_statistic"] == 12.4
+    assert projected["p_value"] == 0.003
+    assert projected["survey_design"]["n_obs"] == 100
+    assert projected["coefficients"]["x"] == {
+        "estimate": 1.25,
+        "source_id": "model_results.ols_1.coefficients.x",
+    }
+    assert "provenance" in projected
+    assert "unknown_provenance" not in json.dumps(projected)
+    assert "unknown_extra" not in json.dumps(projected)
+    assert "raw_rows" not in json.dumps(projected)
+
+
+def test_real_notebook_receipt_rejects_invalid_artifact_numeric_values(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project-with-invalid-numeric-fields"
+    _write_notebook_workflow_receipt(
+        project_root,
+        artifact_result_extra={
+            "p_value": 2.0,
+            "nobs": -1,
+            "std_error": -0.25,
+            "ci_lower": 4.0,
+            "ci_upper": 1.0,
+        },
+    )
+
+    projected = _load_provider_type()(project_root).inspect_notebook_workflow_results(
+        InspectNotebookWorkflowResultsRequest(
+            request_id="inspect-notebook-invalid-numeric",
+            owner_run_id="branch-east",
+            op_node_id="model:ols_1",
+            active_head_run_id="branch-east",
+        )
+    )["notebook_workflows"][0]["post_estimation_evidence"][0]["result"]
+
+    for field in ("p_value", "nobs", "std_error", "ci_lower", "ci_upper"):
+        assert field not in projected
+    assert projected["projection_status"] == "unavailable"
+    assert projected["unavailable_reason"] == "AGENT_ARTIFACT_NUMERIC_INVALID"
+
+
+def test_sparse_model_projections_omit_absent_optional_fields() -> None:
+    from workbench.agent.context_tools import (
+        _bounded_persisted_model_facts,
+        _bounded_regression_table,
+        _public_requested_model_coefficients,
+    )
+
+    sparse = {
+        "model_id": "ols_1",
+        "coefficients": {"x": {"estimate": 1.25}},
+    }
+
+    assert _bounded_persisted_model_facts([sparse]) == [{
+        "model_id": "ols_1",
+        "coefficients": [{"term": "x", "estimate": 1.25}],
+    }]
+    requested = _public_requested_model_coefficients(
+        run_id="run-a",
+        result=sparse,
+        requested_terms=("x",),
+    )
+    assert requested == {
+        "run_id": "run-a",
+        "model_id": "ols_1",
+        "coefficients": [{
+            "term": "x",
+            "estimate": 1.25,
+            "provenance": {"run_id": "run-a"},
+        }],
+        "evidence_ref": {
+            "run_id": "run-a",
+            "model_id": "ols_1",
+            "result_ref": "model_results:ols_1",
+        },
+    }
+    table = _bounded_regression_table([sparse])
+    assert table is not None
+    assert table["models"] == [{"id": "ols_1", "label": "ols_1"}]
+    assert table["rows"] == [{
+        "term": "x",
+        "label": "x",
+        "models": {"ols_1": {"estimate": 1.25}},
+    }]
+
+
+def test_invalid_declared_projection_fields_omit_values_but_keep_typed_reason() -> None:
+    from workbench.agent.context_tools import (
+        _bounded_persisted_model_facts,
+        _bounded_regression_table,
+        _public_requested_model_coefficients,
+    )
+
+    invalid = {
+        "model_id": "ols_1",
+        "nobs": 10**400,
+        "coefficients": {
+            "x": {
+                "estimate": 1.25,
+                "std_error": -1,
+                "p_value": 2,
+            }
+        },
+    }
+
+    requested = _public_requested_model_coefficients(
+        run_id="run-a",
+        result=invalid,
+        requested_terms=("x",),
+    )
+    assert requested is not None
+    assert requested["coefficients"] == [{
+        "term": "x",
+        "estimate": 1.25,
+        "provenance": {"run_id": "run-a"},
+        "projection_status": "unavailable",
+        "unavailable_reason": "AGENT_COEFFICIENT_VALUE_INVALID",
+    }]
+    assert "nobs" not in requested
+    assert requested["model_metadata_status"] == "unavailable"
+    assert requested["model_metadata_unavailable_reason"] == "AGENT_MODEL_METADATA_INVALID"
+
+    facts = _bounded_persisted_model_facts([invalid])
+    assert facts[0]["coefficients"] == [{
+        "term": "x",
+        "estimate": 1.25,
+        "projection_status": "unavailable",
+        "unavailable_reason": "AGENT_COEFFICIENT_VALUE_INVALID",
+    }]
+    table = _bounded_regression_table([invalid])
+    assert table is not None
+    assert "nobs" not in table["models"][0]
+    assert table["models"][0]["projection_status"] == "unavailable"
+    cell = table["rows"][0]["models"]["ols_1"]
+    assert "std_error" not in cell
+    assert "p_value" not in cell
+    assert cell["projection_status"] == "unavailable"
+    assert cell["unavailable_reason"] == "AGENT_COEFFICIENT_VALUE_INVALID"
+
+
+def test_empty_declared_labels_are_omitted_but_keep_typed_reason() -> None:
+    from workbench.agent.context_tools import _public_requested_model_coefficients
+
+    projected = _public_requested_model_coefficients(
+        run_id="run-a",
+        result={
+            "model_id": "ols-1",
+            "model_type": "",
+            "coefficients": {"x": {"estimate": 1.0}},
+        },
+        requested_terms=("x",),
+    )
+
+    assert projected is not None
+    assert "model_type" not in projected
+    assert projected["model_metadata_status"] == "unavailable"
+    assert projected["model_metadata_unavailable_reason"] == "AGENT_MODEL_METADATA_INVALID"
+
+
+def test_projection_omits_invalid_terms_and_empty_nested_coefficients() -> None:
+    from workbench.agent.context_tools import (
+        _bounded_persisted_model_facts,
+        _bounded_regression_table,
+        _public_requested_model_coefficients,
+    )
+
+    overlong_term = "x" * 129
+    result = {
+        "model_id": "ols_1",
+        "coefficients": {
+            "": {"estimate": 1.0},
+            overlong_term: {"estimate": 2.0},
+            "empty": {},
+            "valid": {"estimate": 3.0},
+        },
+    }
+
+    requested = _public_requested_model_coefficients(
+        run_id="run-a",
+        result=result,
+        requested_terms=("", overlong_term, "empty", "valid"),
+    )
+    assert requested is not None
+    assert requested["coefficients"] == [{
+        "term": "valid",
+        "estimate": 3.0,
+        "provenance": {"run_id": "run-a"},
+    }]
+    assert requested["projection_status"] == "unavailable"
+    assert requested["unavailable_reason"] == "AGENT_COEFFICIENT_TERM_INVALID"
+
+    facts = _bounded_persisted_model_facts([result])[0]
+    assert facts["coefficients"] == [{"term": "valid", "estimate": 3.0}]
+    assert facts["projection_status"] == "unavailable"
+    assert facts["unavailable_reason"] == "AGENT_COEFFICIENT_TERM_INVALID"
+
+    table = _bounded_regression_table([result])
+    assert table is not None
+    assert [row["term"] for row in table["rows"]] == ["valid"]
+    assert table["models"][0]["projection_status"] == "unavailable"
+    assert table["models"][0]["unavailable_reason"] == "AGENT_COEFFICIENT_TERM_INVALID"
+
+
+def test_artifact_numeric_allowlist_rejects_invalid_ranges_and_ordering() -> None:
+    from workbench.agent.context_tools import _public_operation_artifact_result
+
+    public, omitted = _public_operation_artifact_result(
+        "statistical_test",
+        {
+            "result": {
+                "statistic": 2.5,
+                "p_value": 2.0,
+                "nobs": -1,
+                "std_error": -0.25,
+                "ci_lower": 4.0,
+                "ci_upper": 1.0,
+                "raw_rows": [{"secret": "drop"}],
+            }
+        },
+    )
+
+    assert public is not None
+    assert public["statistic"] == 2.5
+    for field in ("p_value", "nobs", "std_error", "ci_lower", "ci_upper"):
+        assert field not in public
+    assert public["projection_status"] == "unavailable"
+    assert public["unavailable_reason"] == "AGENT_ARTIFACT_NUMERIC_INVALID"
+    assert omitted == ["raw_artifact_payloads", "raw_rows"]
+
+    nested, nested_omitted = _public_operation_artifact_result(
+        "statistical_exploration",
+        {
+            "result": {
+                "variables": {
+                    "outcome": {
+                        "mean": 2.5,
+                        "nobs": -1,
+                        "std_error": -0.25,
+                        "ci_lower": 4.0,
+                        "ci_upper": 1.0,
+                    }
+                },
+                "coefficients": {
+                    "outcome": {
+                        "estimate": 1.2,
+                        "p_value": 2.0,
+                        "std_error": -0.25,
+                        "source_id": "model_results.outcome",
+                    }
+                },
+            }
+        },
+    )
+
+    assert nested is not None
+    assert nested["variables"]["outcome"] == {
+        "mean": 2.5,
+    }
+    assert nested["coefficients"]["outcome"] == {
+        "estimate": 1.2,
+        "source_id": "model_results.outcome",
+        "projection_status": "unavailable",
+        "unavailable_reason": "AGENT_ARTIFACT_NUMERIC_INVALID",
+    }
+    assert nested["projection_status"] == "unavailable"
+    assert nested["unavailable_reason"] == "AGENT_ARTIFACT_NUMERIC_INVALID"
+    assert nested_omitted == ["raw_artifact_payloads", "raw_rows"]
+
+
+@pytest.mark.parametrize("nested_result_count", [32, 1100])
+def test_p7_nested_result_depth_is_bounded_without_recursion_error(
+    nested_result_count: int,
+) -> None:
+    from workbench.agent.context_tools import _public_operation_artifact_result
+
+    payload: dict = {}
+    cursor = payload
+    for _ in range(nested_result_count):
+        child: dict = {}
+        cursor["result"] = child
+        cursor = child
+    cursor["status"] = "complete"
+
+    public, omitted = _public_operation_artifact_result(
+        "p7_analysis", {"result": payload}
+    )
+
+    assert public == {
+        "projection_status": "unavailable",
+        "unavailable_reason": "AGENT_ARTIFACT_NESTING_TOO_DEEP",
+    }
+    assert omitted == ["raw_artifact_payloads", "raw_rows"]
+
+
+def test_p7_nested_valid_result_preserves_typed_evidence_only() -> None:
+    from workbench.agent.context_tools import _public_operation_artifact_result
+
+    public, omitted = _public_operation_artifact_result(
+        "p7_analysis",
+        {
+            "result": {
+                "contract": "glm_extensions.result",
+                "result": {
+                    "status": "complete",
+                    "statistic": 4.2,
+                    "coefficient_estimands": {
+                        "positive_count": {
+                            "x": {
+                                "estimate": 1.2,
+                                "p_value": 0.04,
+                            }
+                        }
+                    },
+                    "unknown_nested": {"secret": "drop"},
+                },
+            }
+        },
+    )
+
+    assert public == {
+        "contract": "glm_extensions.result",
+        "result": {
+            "status": "complete",
+            "statistic": 4.2,
+            "coefficient_estimands": {
+                "positive_count": {
+                    "x": {"estimate": 1.2, "p_value": 0.04}
+                }
+            },
+        },
+    }
+    assert omitted == ["raw_artifact_payloads", "raw_rows"]
+
+
+def test_agent_unavailable_projection_omits_optional_persisted_fields() -> None:
+    from workbench.agent.context_tools import _agent_result_unavailable
+
+    projected = _agent_result_unavailable("AGENT_RESULT_ARTIFACT_INVALID")
+
+    assert projected == {
+        "available": False,
+        "status": "unavailable",
+        "summary_status": "unavailable",
+        "unavailable_reason": "AGENT_RESULT_ARTIFACT_INVALID",
+    }
 
 
 def test_global_workflow_reader_discovers_only_committed_visible_branch_evidence(
@@ -1665,6 +2141,26 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                     "confidence_level": 0.95,
                     "confidence_interval_method": "normal_z",
                 },
+                "survey_design": {
+                    "strata_column": "stratum",
+                    "psu_column": "psu",
+                    "weight_column": "weight",
+                    "subpopulation": "region == 'north'",
+                    "n_obs": 100,
+                    "n_strata": 4,
+                    "n_psu": 8,
+                    "degf": 4,
+                    "residual_degf": 3,
+                    "variance_method": "linearization",
+                    "replicate_type": None,
+                    "lonely_psu_policy": "adjust",
+                    "design_effect": 2.5,
+                    "effective_sample_size": 40.0,
+                    "replicates_attempted": None,
+                    "replicates_succeeded": None,
+                    "replicates_failed": None,
+                    "replicate_failure_reasons": None,
+                },
                 "coefficients": {
                     "share": {
                         "estimate": 1.2,
@@ -1672,7 +2168,9 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                         "p_value": 0.001,
                         "ci_lower": 0.61,
                         "ci_upper": 1.79,
+                        "variance_source": "survey_design",
                         "source_id": "model_results.ols_1.coefficients.share",
+                        "warnings": ["SURVEY_REPLICATE_FAILURES"],
                     },
                     "control": {"estimate": 0.4},
                 },
@@ -1722,6 +2220,25 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                     "cluster_count": None,
                     "cluster_entity": None,
                 },
+                "survey_design": {
+                    "n_obs": 100,
+                    "n_strata": 4,
+                    "n_psu": 8,
+                    "degf": 4,
+                    "residual_degf": 3,
+                    "design_effect": 2.5,
+                    "effective_sample_size": 40.0,
+                    "variance_method": "linearization",
+                    "strata_column": "stratum",
+                    "psu_column": "psu",
+                    "weight_column": "weight",
+                    "subpopulation": "region == 'north'",
+                    "lonely_psu_policy": "adjust",
+                    "replicates_attempted": None,
+                    "replicates_succeeded": None,
+                    "replicates_failed": None,
+                    "replicate_failure_reasons": None,
+                },
                 "coefficients": [
                     {
                         "term": "share",
@@ -1730,7 +2247,9 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                         "p_value": 0.001,
                         "ci_lower": 0.61,
                         "ci_upper": 1.79,
+                        "variance_source": "survey_design",
                         "source_id": "model_results.ols_1.coefficients.share",
+                        "warnings": ["SURVEY_REPLICATE_FAILURES"],
                     }
                 ],
                 "missing_terms": [],
@@ -1744,6 +2263,26 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
         "omitted_sections": ["raw_model_results", "raw_rows"],
     }
     assert "99" not in json.dumps(result.output)
+
+
+def test_global_coefficient_inspector_does_not_invent_optional_survey_provenance():
+    from workbench.agent.context_tools import _public_requested_model_coefficients
+
+    projected = _public_requested_model_coefficients(
+        run_id="run-a",
+        result={
+            "model_id": "ols_1",
+            "model_type": "ols_robust",
+            "coefficients": {"share": {"estimate": 1.2}},
+        },
+        requested_terms=("share",),
+    )
+
+    assert projected is not None
+    coefficient = projected["coefficients"][0]
+    assert "variance_source" not in coefficient
+    assert "warnings" not in coefficient
+    assert "survey_design" not in projected
 
 
 def test_global_dataset_schema_inspector_exposes_only_bounded_column_metadata(
