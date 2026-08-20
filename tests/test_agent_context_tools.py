@@ -930,6 +930,36 @@ def test_notebook_receipt_projection_drops_unknown_optional_and_raw_fields(
     assert "raw_rows" not in json.dumps(projected)
 
 
+def test_real_notebook_receipt_rejects_invalid_artifact_numeric_values(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project-with-invalid-numeric-fields"
+    _write_notebook_workflow_receipt(
+        project_root,
+        artifact_result_extra={
+            "p_value": 2.0,
+            "nobs": -1,
+            "std_error": -0.25,
+            "ci_lower": 4.0,
+            "ci_upper": 1.0,
+        },
+    )
+
+    projected = _load_provider_type()(project_root).inspect_notebook_workflow_results(
+        InspectNotebookWorkflowResultsRequest(
+            request_id="inspect-notebook-invalid-numeric",
+            owner_run_id="branch-east",
+            op_node_id="model:ols_1",
+            active_head_run_id="branch-east",
+        )
+    )["notebook_workflows"][0]["post_estimation_evidence"][0]["result"]
+
+    for field in ("p_value", "nobs", "std_error", "ci_lower", "ci_upper"):
+        assert field not in projected
+    assert projected["projection_status"] == "unavailable"
+    assert projected["unavailable_reason"] == "AGENT_ARTIFACT_NUMERIC_INVALID"
+
+
 def test_sparse_model_projections_omit_absent_optional_fields() -> None:
     from workbench.agent.context_tools import (
         _bounded_persisted_model_facts,
@@ -1046,6 +1076,181 @@ def test_empty_declared_labels_are_omitted_but_keep_typed_reason() -> None:
     assert "model_type" not in projected
     assert projected["model_metadata_status"] == "unavailable"
     assert projected["model_metadata_unavailable_reason"] == "AGENT_MODEL_METADATA_INVALID"
+
+
+def test_projection_omits_invalid_terms_and_empty_nested_coefficients() -> None:
+    from workbench.agent.context_tools import (
+        _bounded_persisted_model_facts,
+        _bounded_regression_table,
+        _public_requested_model_coefficients,
+    )
+
+    overlong_term = "x" * 129
+    result = {
+        "model_id": "ols_1",
+        "coefficients": {
+            "": {"estimate": 1.0},
+            overlong_term: {"estimate": 2.0},
+            "empty": {},
+            "valid": {"estimate": 3.0},
+        },
+    }
+
+    requested = _public_requested_model_coefficients(
+        run_id="run-a",
+        result=result,
+        requested_terms=("", overlong_term, "empty", "valid"),
+    )
+    assert requested is not None
+    assert requested["coefficients"] == [{
+        "term": "valid",
+        "estimate": 3.0,
+        "provenance": {"run_id": "run-a"},
+    }]
+    assert requested["projection_status"] == "unavailable"
+    assert requested["unavailable_reason"] == "AGENT_COEFFICIENT_TERM_INVALID"
+
+    facts = _bounded_persisted_model_facts([result])[0]
+    assert facts["coefficients"] == [{"term": "valid", "estimate": 3.0}]
+    assert facts["projection_status"] == "unavailable"
+    assert facts["unavailable_reason"] == "AGENT_COEFFICIENT_TERM_INVALID"
+
+    table = _bounded_regression_table([result])
+    assert table is not None
+    assert [row["term"] for row in table["rows"]] == ["valid"]
+    assert table["models"][0]["projection_status"] == "unavailable"
+    assert table["models"][0]["unavailable_reason"] == "AGENT_COEFFICIENT_TERM_INVALID"
+
+
+def test_artifact_numeric_allowlist_rejects_invalid_ranges_and_ordering() -> None:
+    from workbench.agent.context_tools import _public_operation_artifact_result
+
+    public, omitted = _public_operation_artifact_result(
+        "statistical_test",
+        {
+            "result": {
+                "statistic": 2.5,
+                "p_value": 2.0,
+                "nobs": -1,
+                "std_error": -0.25,
+                "ci_lower": 4.0,
+                "ci_upper": 1.0,
+                "raw_rows": [{"secret": "drop"}],
+            }
+        },
+    )
+
+    assert public is not None
+    assert public["statistic"] == 2.5
+    for field in ("p_value", "nobs", "std_error", "ci_lower", "ci_upper"):
+        assert field not in public
+    assert public["projection_status"] == "unavailable"
+    assert public["unavailable_reason"] == "AGENT_ARTIFACT_NUMERIC_INVALID"
+    assert omitted == ["raw_artifact_payloads", "raw_rows"]
+
+    nested, nested_omitted = _public_operation_artifact_result(
+        "statistical_exploration",
+        {
+            "result": {
+                "variables": {
+                    "outcome": {
+                        "mean": 2.5,
+                        "nobs": -1,
+                        "std_error": -0.25,
+                        "ci_lower": 4.0,
+                        "ci_upper": 1.0,
+                    }
+                },
+                "coefficients": {
+                    "outcome": {
+                        "estimate": 1.2,
+                        "p_value": 2.0,
+                        "std_error": -0.25,
+                        "source_id": "model_results.outcome",
+                    }
+                },
+            }
+        },
+    )
+
+    assert nested is not None
+    assert nested["variables"]["outcome"] == {
+        "mean": 2.5,
+    }
+    assert nested["coefficients"]["outcome"] == {
+        "estimate": 1.2,
+        "source_id": "model_results.outcome",
+        "projection_status": "unavailable",
+        "unavailable_reason": "AGENT_ARTIFACT_NUMERIC_INVALID",
+    }
+    assert nested["projection_status"] == "unavailable"
+    assert nested["unavailable_reason"] == "AGENT_ARTIFACT_NUMERIC_INVALID"
+    assert nested_omitted == ["raw_artifact_payloads", "raw_rows"]
+
+
+@pytest.mark.parametrize("nested_result_count", [32, 1100])
+def test_p7_nested_result_depth_is_bounded_without_recursion_error(
+    nested_result_count: int,
+) -> None:
+    from workbench.agent.context_tools import _public_operation_artifact_result
+
+    payload: dict = {}
+    cursor = payload
+    for _ in range(nested_result_count):
+        child: dict = {}
+        cursor["result"] = child
+        cursor = child
+    cursor["status"] = "complete"
+
+    public, omitted = _public_operation_artifact_result(
+        "p7_analysis", {"result": payload}
+    )
+
+    assert public == {
+        "projection_status": "unavailable",
+        "unavailable_reason": "AGENT_ARTIFACT_NESTING_TOO_DEEP",
+    }
+    assert omitted == ["raw_artifact_payloads", "raw_rows"]
+
+
+def test_p7_nested_valid_result_preserves_typed_evidence_only() -> None:
+    from workbench.agent.context_tools import _public_operation_artifact_result
+
+    public, omitted = _public_operation_artifact_result(
+        "p7_analysis",
+        {
+            "result": {
+                "contract": "glm_extensions.result",
+                "result": {
+                    "status": "complete",
+                    "statistic": 4.2,
+                    "coefficient_estimands": {
+                        "positive_count": {
+                            "x": {
+                                "estimate": 1.2,
+                                "p_value": 0.04,
+                            }
+                        }
+                    },
+                    "unknown_nested": {"secret": "drop"},
+                },
+            }
+        },
+    )
+
+    assert public == {
+        "contract": "glm_extensions.result",
+        "result": {
+            "status": "complete",
+            "statistic": 4.2,
+            "coefficient_estimands": {
+                "positive_count": {
+                    "x": {"estimate": 1.2, "p_value": 0.04}
+                }
+            },
+        },
+    }
+    assert omitted == ["raw_artifact_payloads", "raw_rows"]
 
 
 def test_agent_unavailable_projection_omits_optional_persisted_fields() -> None:

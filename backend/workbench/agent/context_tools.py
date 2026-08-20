@@ -3226,13 +3226,21 @@ def _public_requested_model_coefficients(
 
     public_coefficients: list[dict[str, Any]] = []
     missing_terms: list[str] = []
+    invalid_term = False
     for term in requested_terms:
-        coefficient = coefficients.get(term)
+        term_key = _bounded_term(term)
+        if term_key is None:
+            invalid_term = True
+            continue
+        coefficient = coefficients.get(term_key)
         if not isinstance(coefficient, dict):
-            missing_terms.append(term)
+            missing_terms.append(term_key)
             continue
         bounded = _bounded_agent_coefficient(coefficient, run_id=run_id)
-        public_coefficients.append({"term": term, **bounded})
+        if not _coefficient_has_typed_cell(bounded):
+            invalid_term = True
+            continue
+        public_coefficients.append({"term": term_key, **bounded})
 
     public_model: dict[str, Any] = {
         "run_id": run_id,
@@ -3366,6 +3374,11 @@ def _public_requested_model_coefficients(
         public_model.update({
             "model_metadata_status": "unavailable",
             "model_metadata_unavailable_reason": "AGENT_MODEL_METADATA_INVALID",
+        })
+    if invalid_term:
+        public_model.update({
+            "projection_status": "unavailable",
+            "unavailable_reason": "AGENT_COEFFICIENT_TERM_INVALID",
         })
     return public_model
 
@@ -3681,10 +3694,12 @@ def _bounded_regression_table(
         coefficients = result.get("coefficients")
         if not isinstance(coefficients, dict):
             continue
+        invalid_term = False
         for term, raw_cell in list(coefficients.items())[: max(0, term_limit)]:
-            if not isinstance(raw_cell, dict):
+            term_key = _bounded_term(term)
+            if term_key is None or not isinstance(raw_cell, dict):
+                invalid_term = True
                 continue
-            term_key = str(term)
             row = rows_by_term.setdefault(
                 term_key,
                 {"term": term_key, "label": term_key, "models": {}},
@@ -3700,7 +3715,18 @@ def _bounded_regression_table(
                 )
                 if marker is not None:
                     cell["significance"] = marker
-            row["models"][model_id] = cell
+            if _coefficient_has_typed_cell(cell):
+                row["models"][model_id] = cell
+            else:
+                invalid_term = True
+
+        if invalid_term:
+            model_view.update(
+                {
+                    "projection_status": "unavailable",
+                    "unavailable_reason": "AGENT_COEFFICIENT_TERM_INVALID",
+                }
+            )
 
     if not models:
         return None
@@ -3715,7 +3741,18 @@ def _bounded_regression_table(
         if row["models"]
     ]
     if not rows:
-        return None
+        invalid_models = [
+            model for model in models if model.get("projection_status") == "unavailable"
+        ]
+        if not invalid_models:
+            return None
+        return {
+            "payload_schema": "workbench.regression-table",
+            "schema_version": 1,
+            "models": models,
+            "projection_status": "unavailable",
+            "unavailable_reason": "AGENT_COEFFICIENT_TERM_INVALID",
+        }
     projected = {
         "payload_schema": "workbench.regression-table",
         "schema_version": 1,
@@ -3903,6 +3940,29 @@ def _bounded_label(value: Any) -> str | None:
     return value[:128] if isinstance(value, str) and value else None
 
 
+def _bounded_term(value: Any) -> str | None:
+    """Accept a coefficient term only when its source label is complete."""
+
+    if not isinstance(value, str) or not value or not value.strip() or len(value) > 128:
+        return None
+    return value
+
+
+_PUBLIC_COEFFICIENT_VALUE_FIELDS = frozenset(
+    {"estimate", "ci_lower", "ci_upper", "std_error", "p_value", "confidence_interval"}
+)
+
+
+def _coefficient_has_public_evidence(value: Mapping[str, Any]) -> bool:
+    return any(field in value for field in _PUBLIC_COEFFICIENT_VALUE_FIELDS)
+
+
+def _coefficient_has_typed_cell(value: Mapping[str, Any]) -> bool:
+    return _coefficient_has_public_evidence(value) or any(
+        field in value for field in ("variance_source", "source_id", "warnings")
+    )
+
+
 def _bounded_labels(value: Any, *, limit: int = 16) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -3912,11 +3972,12 @@ def _bounded_labels(value: Any, *, limit: int = 16) -> list[str]:
 def _bounded_agent_coefficient(
     coefficient: Mapping[str, Any], *, budget: _PublicResultBudget | None = None,
     run_id: str | None = None,
+    unavailable_reason: str = "AGENT_COEFFICIENT_VALUE_INVALID",
 ) -> dict[str, Any]:
     """Project coefficient evidence with bounded numbers and provenance."""
     projected = project_survey_coefficient(
         coefficient,
-        unavailable_reason="AGENT_COEFFICIENT_VALUE_INVALID",
+        unavailable_reason=unavailable_reason,
         run_id=run_id,
     )
     # The shared Survey projector marks the whole coefficient unavailable when
@@ -3951,6 +4012,9 @@ def _bounded_agent_coefficient(
         interval = [bounded_survey_number(item) for item in coefficient["confidence_interval"]]
         if all(item is not None for item in interval) and interval[0] <= interval[1]:
             projected["confidence_interval"] = interval
+    if not _coefficient_has_public_evidence(projected) and "projection_status" not in projected:
+        projected["projection_status"] = "unavailable"
+        projected["unavailable_reason"] = unavailable_reason
     return projected
 
 
@@ -4239,13 +4303,19 @@ def _bounded_persisted_model_facts(
         if not isinstance(model_id, str) or not isinstance(coefficients, dict):
             continue
         rows: list[dict[str, Any]] = []
+        invalid_term = False
         for term, coefficient in list(coefficients.items())[:8]:
-            if not isinstance(term, str) or not isinstance(coefficient, dict):
+            term_key = _bounded_term(term)
+            if term_key is None or not isinstance(coefficient, dict):
+                invalid_term = True
                 continue
             bounded = _bounded_agent_coefficient(
                 coefficient, run_id=result.get("run_id")
             )
-            rows.append({"term": term, **bounded})
+            if not _coefficient_has_typed_cell(bounded):
+                invalid_term = True
+                continue
+            rows.append({"term": term_key, **bounded})
         model: dict[str, Any] = {"model_id": model_id}
         for key in ("r_squared", "r_squared_adj"):
             value = _bounded_present_field(result, key, _public_stat_number)
@@ -4255,6 +4325,13 @@ def _bounded_persisted_model_facts(
                 model[key] = value
         if rows:
             model["coefficients"] = rows
+        if invalid_term:
+            model.update(
+                {
+                    "projection_status": "unavailable",
+                    "unavailable_reason": "AGENT_COEFFICIENT_TERM_INVALID",
+                }
+            )
         projected.append(model)
     return projected
 
@@ -4473,6 +4550,22 @@ _PUBLIC_ARTIFACT_VARIABLE_NUMERIC_FIELDS = _PUBLIC_ARTIFACT_NUMERIC_FIELDS | fro
     {"median", "q1", "q3"}
 )
 
+_ARTIFACT_NUMERIC_INVALID_REASON = "AGENT_ARTIFACT_NUMERIC_INVALID"
+_ARTIFACT_NESTING_TOO_DEEP_REASON = "AGENT_ARTIFACT_NESTING_TOO_DEEP"
+_COEFFICIENT_TERM_INVALID_REASON = "AGENT_COEFFICIENT_TERM_INVALID"
+_COEFFICIENT_VALUE_INVALID_REASON = "AGENT_COEFFICIENT_VALUE_INVALID"
+_MAX_PUBLIC_ARTIFACT_NESTING_DEPTH = 32
+_PUBLIC_ARTIFACT_COUNT_FIELDS = frozenset(
+    {"source_row_count", "filtered_row_count", "obs", "nobs", "missing_count"}
+)
+_PUBLIC_ARTIFACT_PROBABILITY_FIELDS = frozenset(
+    {"p_value", "p_value_corrected"}
+)
+_PUBLIC_ARTIFACT_POSITIVE_FIELDS = frozenset({"std_error"})
+_PUBLIC_ARTIFACT_NONNEGATIVE_FIELDS = frozenset(
+    {"df", "degrees_of_freedom", "std_dev", "design_effect", "effective_sample_size"}
+)
+
 
 def _bounded_artifact_provenance(value: Any) -> dict[str, str] | None:
     if not isinstance(value, dict):
@@ -4485,9 +4578,57 @@ def _bounded_artifact_provenance(value: Any) -> dict[str, str] | None:
     return projected or None
 
 
-def _bounded_artifact_variables(value: Any) -> dict[str, Any] | None:
+def _bounded_artifact_numeric_value(key: str, value: Any) -> int | float | None:
+    if key in _PUBLIC_ARTIFACT_COUNT_FIELDS:
+        return bounded_survey_integer(value)
+    if key in _PUBLIC_ARTIFACT_PROBABILITY_FIELDS:
+        return bounded_survey_number(value, probability=True)
+    if key in _PUBLIC_ARTIFACT_POSITIVE_FIELDS:
+        return bounded_survey_number(value, positive=True)
+    if key in _PUBLIC_ARTIFACT_NONNEGATIVE_FIELDS:
+        return bounded_survey_number(value, nonnegative=True)
+    return _public_stat_number(value)
+
+
+def _bounded_artifact_numeric_mapping(
+    value: Mapping[str, Any],
+    *,
+    fields: Iterable[str],
+    invalid_reasons: set[str],
+) -> dict[str, int | float]:
+    projected: dict[str, int | float] = {}
+    for key in fields:
+        if key not in value:
+            continue
+        number = _bounded_artifact_numeric_value(key, value[key])
+        if number is None:
+            invalid_reasons.add(_ARTIFACT_NUMERIC_INVALID_REASON)
+            continue
+        projected[key] = number
+
+    interval_declared = "ci_lower" in value or "ci_upper" in value
+    if interval_declared:
+        lower = projected.get("ci_lower")
+        upper = projected.get("ci_upper")
+        if (
+            "ci_lower" not in value
+            or "ci_upper" not in value
+            or lower is None
+            or upper is None
+            or lower > upper
+        ):
+            projected.pop("ci_lower", None)
+            projected.pop("ci_upper", None)
+            invalid_reasons.add(_ARTIFACT_NUMERIC_INVALID_REASON)
+    return projected
+
+
+def _bounded_artifact_variables(
+    value: Any, *, invalid_reasons: set[str] | None = None
+) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
+    reasons = invalid_reasons if invalid_reasons is not None else set()
     projected: dict[str, Any] = {}
     omitted = max(len(value) - 16, 0)
     for raw_name, raw_variable in list(value.items())[:16]:
@@ -4495,14 +4636,17 @@ def _bounded_artifact_variables(value: Any) -> dict[str, Any] | None:
             omitted += 1
             continue
         bounded: dict[str, Any] = {}
-        for key in _PUBLIC_ARTIFACT_VARIABLE_NUMERIC_FIELDS:
-            if key not in raw_variable:
-                continue
-            number = _public_stat_number(raw_variable[key])
-            if number is not None:
-                bounded[key] = number
-            else:
-                omitted += 1
+        numeric = _bounded_artifact_numeric_mapping(
+            raw_variable,
+            fields=_PUBLIC_ARTIFACT_VARIABLE_NUMERIC_FIELDS,
+            invalid_reasons=reasons,
+        )
+        bounded.update(numeric)
+        omitted += sum(
+            1
+            for key in _PUBLIC_ARTIFACT_VARIABLE_NUMERIC_FIELDS
+            if key in raw_variable and key not in numeric
+        )
         if "dtype" in raw_variable:
             dtype = _bounded_label(raw_variable["dtype"])
             if dtype is not None:
@@ -4518,31 +4662,56 @@ def _bounded_artifact_variables(value: Any) -> dict[str, Any] | None:
     return projected or None
 
 
-def _bounded_artifact_coefficients(value: Any) -> dict[str, Any] | None:
+def _bounded_artifact_coefficients(
+    value: Any, *, invalid_reasons: set[str] | None = None
+) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
+    reasons = invalid_reasons if invalid_reasons is not None else set()
     projected: dict[str, Any] = {}
     for raw_term, raw_coefficient in list(value.items())[:32]:
-        if not isinstance(raw_term, str) or not isinstance(raw_coefficient, dict):
+        term = _bounded_term(raw_term)
+        if term is None:
+            reasons.add(_COEFFICIENT_TERM_INVALID_REASON)
             continue
-        bounded = _bounded_agent_coefficient(raw_coefficient)
-        if bounded:
-            projected[raw_term[:128]] = bounded
+        if not isinstance(raw_coefficient, dict):
+            reasons.add(_COEFFICIENT_VALUE_INVALID_REASON)
+            continue
+        bounded = _bounded_agent_coefficient(
+            raw_coefficient,
+            unavailable_reason=_ARTIFACT_NUMERIC_INVALID_REASON,
+        )
+        if (
+            bounded.get("unavailable_reason") == _ARTIFACT_NUMERIC_INVALID_REASON
+            and any(field in raw_coefficient for field in _PUBLIC_COEFFICIENT_VALUE_FIELDS)
+        ):
+            reasons.add(_ARTIFACT_NUMERIC_INVALID_REASON)
+        if not _coefficient_has_typed_cell(bounded):
+            reasons.add(_COEFFICIENT_VALUE_INVALID_REASON)
+            continue
+        projected[term] = bounded
     return projected or None
 
 
-def _bounded_artifact_coefficient_estimands(value: Any) -> dict[str, Any] | None:
+def _bounded_artifact_coefficient_estimands(
+    value: Any, *, invalid_reasons: set[str] | None = None
+) -> dict[str, Any] | None:
     """Project typed P7 coefficient families without recursing into raw payloads."""
 
     if not isinstance(value, dict):
         return None
+    reasons = invalid_reasons if invalid_reasons is not None else set()
     projected: dict[str, Any] = {}
     for raw_family, raw_coefficients in list(value.items())[:8]:
-        if not isinstance(raw_family, str):
+        family = _bounded_term(raw_family)
+        if family is None:
+            reasons.add(_COEFFICIENT_TERM_INVALID_REASON)
             continue
-        coefficients = _bounded_artifact_coefficients(raw_coefficients)
+        coefficients = _bounded_artifact_coefficients(
+            raw_coefficients, invalid_reasons=reasons
+        )
         if coefficients is not None:
-            projected[raw_family[:128]] = coefficients
+            projected[family] = coefficients
     return projected or None
 
 
@@ -4574,8 +4743,18 @@ def _bounded_artifact_inference(value: Any) -> dict[str, Any] | None:
 def _bounded_declared_artifact_result(
     artifact_type: str,
     result: dict[str, Any],
+    *,
+    _depth: int = 0,
+    _invalid_reasons: set[str] | None = None,
 ) -> dict[str, Any] | None:
     """Project one artifact family through an explicit, typed field registry."""
+
+    invalid_reasons = _invalid_reasons if _invalid_reasons is not None else set()
+    if _depth >= _MAX_PUBLIC_ARTIFACT_NESTING_DEPTH:
+        return {
+            "projection_status": "unavailable",
+            "unavailable_reason": _ARTIFACT_NESTING_TOO_DEEP_REASON,
+        }
 
     projected: dict[str, Any] = {}
     for key in _PUBLIC_ARTIFACT_STRING_FIELDS:
@@ -4587,9 +4766,25 @@ def _bounded_declared_artifact_result(
     for key in _PUBLIC_ARTIFACT_NUMERIC_FIELDS:
         if key not in result:
             continue
-        value = _public_stat_number(result[key])
+        value = _bounded_artifact_numeric_value(key, result[key])
         if value is not None:
             projected[key] = value
+        else:
+            invalid_reasons.add(_ARTIFACT_NUMERIC_INVALID_REASON)
+    interval_declared = "ci_lower" in result or "ci_upper" in result
+    if interval_declared:
+        lower = projected.get("ci_lower")
+        upper = projected.get("ci_upper")
+        if (
+            "ci_lower" not in result
+            or "ci_upper" not in result
+            or lower is None
+            or upper is None
+            or lower > upper
+        ):
+            projected.pop("ci_lower", None)
+            projected.pop("ci_upper", None)
+            invalid_reasons.add(_ARTIFACT_NUMERIC_INVALID_REASON)
 
     if "provenance" in result:
         provenance = _bounded_artifact_provenance(result["provenance"])
@@ -4603,12 +4798,16 @@ def _bounded_declared_artifact_result(
         if design is not None:
             projected["survey_design"] = design
     if "coefficients" in result:
-        coefficients = _bounded_artifact_coefficients(result["coefficients"])
+        coefficients = _bounded_artifact_coefficients(
+            result["coefficients"], invalid_reasons=invalid_reasons
+        )
         if coefficients is not None:
             projected["coefficients"] = coefficients
 
     if artifact_type == "statistical_exploration" and "variables" in result:
-        variables = _bounded_artifact_variables(result["variables"])
+        variables = _bounded_artifact_variables(
+            result["variables"], invalid_reasons=invalid_reasons
+        )
         if variables is not None:
             projected["variables"] = variables
 
@@ -4619,18 +4818,44 @@ def _bounded_declared_artifact_result(
         ):
             if key not in result:
                 continue
-            value = projector(result[key])
+            if key == "coefficient_estimands":
+                value = projector(
+                    result[key], invalid_reasons=invalid_reasons
+                )
+            else:
+                value = projector(result[key])
             if value is not None:
                 projected[key] = value
         nested = result.get("result")
         if isinstance(nested, dict):
             nested_projected = _bounded_declared_artifact_result(
-                "p7_analysis", nested
+                "p7_analysis",
+                nested,
+                _depth=_depth + 1,
+                _invalid_reasons=invalid_reasons,
             )
+            if (
+                nested_projected is not None
+                and nested_projected.get("unavailable_reason")
+                == _ARTIFACT_NESTING_TOO_DEEP_REASON
+            ):
+                return nested_projected
             if nested_projected is not None:
                 projected["result"] = nested_projected
 
-    return projected or None
+    if invalid_reasons:
+        for reason in (
+            _COEFFICIENT_TERM_INVALID_REASON,
+            _ARTIFACT_NUMERIC_INVALID_REASON,
+            _COEFFICIENT_VALUE_INVALID_REASON,
+        ):
+            if reason in invalid_reasons:
+                projected["projection_status"] = "unavailable"
+                projected["unavailable_reason"] = reason
+                break
+    if not projected:
+        return None
+    return projected
 
 
 def _public_operation_artifact_result(
