@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -254,6 +256,228 @@ def test_broken_pyreadstat_import_is_typed_unavailable_for_native_surfaces(
         with pytest.raises(api.InterchangeUnavailableError) as error:
             api._read_frame(target_format, tmp_path / f"missing.{target_format}")
         assert error.value.capability == capability
+
+
+def test_absent_pyreadstat_is_typed_unavailable_across_native_surfaces(
+    tmp_path, monkeypatch
+) -> None:
+    api = _api()
+    from workbench import data_operation_manifest
+
+    frame = pd.DataFrame({"code": [1]})
+    original_verified_import = api._verified_import
+    monkeypatch.setattr(
+        api,
+        "_verified_import",
+        lambda name: None if name == "pyreadstat" else original_verified_import(name),
+    )
+
+    manifest = data_operation_manifest.build_data_operation_manifest().to_dict()
+    native_items = {
+        item["operation_id"]: item
+        for item in manifest["unavailable"]
+        if item["operation_id"] in {
+            "data.interchange.sav",
+            "data.interchange.zsav",
+            "data.interchange.dta",
+        }
+    }
+    assert set(native_items) == {
+        "data.interchange.sav",
+        "data.interchange.zsav",
+        "data.interchange.dta",
+    }
+
+    for target_format in ("sav", "zsav", "dta"):
+        capability = api.interchange_capability(target_format)
+        assert capability.status == "unavailable"
+        assert capability.reason_code == "optional_dependency"
+        assert native_items[f"data.interchange.{target_format}"]["status"] == "unavailable"
+        assert native_items[f"data.interchange.{target_format}"]["reason_code"] == "optional_dependency"
+
+        target = tmp_path / f"absent.{target_format}"
+        write_result = api.write_interchange_frame(
+            frame, target_format=target_format, path=target
+        )
+        round_trip_result = api.round_trip_frame(
+            frame,
+            metadata={},
+            target_format=target_format,
+            directory=tmp_path / f"roundtrip-{target_format}",
+        )
+
+        assert write_result.status == "unavailable"
+        assert write_result.path is None
+        assert round_trip_result.status == "unavailable"
+        assert not target.exists()
+        with pytest.raises(api.InterchangeUnavailableError) as error:
+            api._read_frame(target_format, tmp_path / f"missing.{target_format}")
+        assert error.value.capability == capability
+
+
+def test_runtime_broken_callable_pyreadstat_is_typed_unavailable_everywhere(
+    tmp_path, monkeypatch
+) -> None:
+    api = _api()
+    from workbench import data_operation_manifest
+
+    frame = pd.DataFrame({"code": [1]})
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("adapter operation failed")
+
+    broken_module = SimpleNamespace(
+        read_sav=broken,
+        write_sav=broken,
+        read_dta=broken,
+        write_dta=broken,
+    )
+    original_verified_import = api._verified_import
+    monkeypatch.setattr(
+        api,
+        "_verified_import",
+        lambda name: broken_module if name == "pyreadstat" else original_verified_import(name),
+    )
+
+    manifest = data_operation_manifest.build_data_operation_manifest().to_dict()
+    native_items = {
+        item["operation_id"]: item
+        for item in manifest["unavailable"]
+        if item["operation_id"] in {
+            "data.interchange.sav",
+            "data.interchange.zsav",
+            "data.interchange.dta",
+        }
+    }
+    assert set(native_items) == {
+        "data.interchange.sav",
+        "data.interchange.zsav",
+        "data.interchange.dta",
+    }
+
+    for target_format in ("sav", "zsav", "dta"):
+        capability = api.interchange_capability(target_format)
+        assert capability.status == "unavailable"
+        assert capability.reason_code == "optional_dependency"
+        assert native_items[f"data.interchange.{target_format}"]["status"] == "unavailable"
+        assert native_items[f"data.interchange.{target_format}"]["reason_code"] == "optional_dependency"
+
+        target = tmp_path / f"broken.{target_format}"
+        write_result = api.write_interchange_frame(
+            frame, target_format=target_format, path=target
+        )
+        assert write_result.status == "unavailable"
+        assert write_result.path is None
+        assert not target.exists()
+
+        with pytest.raises(api.InterchangeUnavailableError) as error:
+            api._read_frame(target_format, tmp_path / f"missing.{target_format}")
+        assert error.value.capability == capability
+
+        round_trip_result = api.round_trip_frame(
+            frame,
+            metadata={},
+            target_format=target_format,
+            directory=tmp_path / f"roundtrip-{target_format}",
+        )
+        assert round_trip_result.status == "unavailable"
+        assert round_trip_result.path is None
+        assert round_trip_result.capability == capability
+
+
+def test_native_runtime_failures_after_admission_are_typed_unavailable(
+    tmp_path, monkeypatch
+) -> None:
+    api = _api()
+    frame = pd.DataFrame({"code": [1]})
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("adapter operation failed after admission")
+
+    admitted_runtime_broken = SimpleNamespace(
+        read_sav=broken,
+        write_sav=broken,
+        read_dta=broken,
+        write_dta=broken,
+    )
+    monkeypatch.setattr(api, "_pyreadstat_module", lambda: admitted_runtime_broken)
+
+    capability = api.interchange_capability("sav")
+    assert capability.status == "available"
+
+    write_result = api.write_interchange_frame(
+        frame, target_format="sav", path=tmp_path / "runtime.sav"
+    )
+    assert write_result.status == "unavailable"
+    assert write_result.path is None
+    assert write_result.capability.status == "unavailable"
+    assert write_result.capability.reason_code == "optional_dependency"
+
+    with pytest.raises(api.InterchangeUnavailableError) as error:
+        api._read_frame("sav", tmp_path / "missing.sav")
+    assert error.value.capability.status == "unavailable"
+    assert error.value.capability.reason_code == "optional_dependency"
+
+    round_trip_result = api.round_trip_frame(
+        frame,
+        metadata={},
+        target_format="sav",
+        directory=tmp_path / "roundtrip",
+    )
+    assert round_trip_result.status == "unavailable"
+    assert round_trip_result.path is None
+    assert round_trip_result.capability.status == "unavailable"
+    assert round_trip_result.capability.reason_code == "optional_dependency"
+
+
+def test_pyreadstat_admission_runs_a_bounded_probe_through_the_real_adapter(
+    monkeypatch,
+) -> None:
+    api = _api()
+    real_pyreadstat = pytest.importorskip("pyreadstat")
+    original_verified_import = api._verified_import
+    calls: list[tuple[str, Path]] = []
+
+    def wrapped_write_sav(frame, path, *args, **kwargs):
+        calls.append(("write_sav", Path(path)))
+        return real_write_sav(frame, path, *args, **kwargs)
+
+    def wrapped_read_sav(path, *args, **kwargs):
+        calls.append(("read_sav", Path(path)))
+        return real_read_sav(path, *args, **kwargs)
+
+    def wrapped_write_dta(frame, path, *args, **kwargs):
+        calls.append(("write_dta", Path(path)))
+        return real_write_dta(frame, path, *args, **kwargs)
+
+    def wrapped_read_dta(path, *args, **kwargs):
+        calls.append(("read_dta", Path(path)))
+        return real_read_dta(path, *args, **kwargs)
+
+    real_write_sav = real_pyreadstat.write_sav
+    real_read_sav = real_pyreadstat.read_sav
+    real_write_dta = real_pyreadstat.write_dta
+    real_read_dta = real_pyreadstat.read_dta
+
+    monkeypatch.setattr(real_pyreadstat, "write_sav", wrapped_write_sav)
+    monkeypatch.setattr(real_pyreadstat, "read_sav", wrapped_read_sav)
+    monkeypatch.setattr(real_pyreadstat, "write_dta", wrapped_write_dta)
+    monkeypatch.setattr(real_pyreadstat, "read_dta", wrapped_read_dta)
+    monkeypatch.setattr(
+        api,
+        "_verified_import",
+        lambda name: real_pyreadstat if name == "pyreadstat" else original_verified_import(name),
+    )
+
+    assert api._pyreadstat_module() is real_pyreadstat
+    assert {name for name, _path in calls} == {
+        "write_sav",
+        "read_sav",
+        "write_dta",
+        "read_dta",
+    }
+    assert all(path.parent != Path.cwd() for _name, path in calls)
+    assert all(not path.exists() for _name, path in calls)
 
 
 def test_malformed_column_metadata_is_typed_and_not_reported_verified(tmp_path) -> None:

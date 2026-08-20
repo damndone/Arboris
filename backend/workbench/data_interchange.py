@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import importlib
 from importlib.util import find_spec
 from pathlib import Path
+import tempfile
 from typing import Any, Literal, Mapping
 
 import pandas as pd
@@ -148,14 +149,57 @@ def _parquet_adapter() -> tuple[Any, Any] | None:
     return _verified_pyarrow_adapter()
 
 
+_PYREADSTAT_REQUIRED = ("read_sav", "write_sav", "read_dta", "write_dta")
+_PYREADSTAT_UNAVAILABLE_MESSAGE = (
+    "pyreadstat is unavailable or failed the bounded native statistical-file "
+    "adapter probe."
+)
+
+
+def _pyreadstat_unavailable_capability(target_format: str) -> InterchangeCapabilityV1:
+    return InterchangeCapabilityV1(
+        target_format=target_format,
+        status="unavailable",
+        reason_code="optional_dependency",
+        message=_PYREADSTAT_UNAVAILABLE_MESSAGE,
+    )
+
+
+def _pyreadstat_probe_succeeded(module: Any) -> bool:
+    """Exercise the native adapter with one bounded, private data frame."""
+
+    probe_frame = pd.DataFrame(
+        {"__workbench_probe__": pd.Series([1], dtype="int64")}
+    )
+    with tempfile.TemporaryDirectory(prefix="workbench-pyreadstat-probe-") as directory:
+        root = Path(directory)
+        sav_path = root / "probe.sav"
+        dta_path = root / "probe.dta"
+        module.write_sav(probe_frame, str(sav_path))
+        sav_restored, _sav_meta = module.read_sav(str(sav_path))
+        module.write_dta(probe_frame, str(dta_path), version=15)
+        dta_restored, _dta_meta = module.read_dta(str(dta_path))
+
+    for restored in (sav_restored, dta_restored):
+        if not isinstance(restored, pd.DataFrame):
+            return False
+        if tuple(restored.columns) != tuple(probe_frame.columns):
+            return False
+        if len(restored) != 1 or restored.iloc[0, 0] != 1:
+            return False
+    return True
+
+
 def _pyreadstat_module() -> Any | None:
     module = _verified_import("pyreadstat")
     if module is None:
         return None
-    required = ("read_sav", "write_sav", "read_dta", "write_dta")
-    if not all(callable(getattr(module, name, None)) for name in required):
+    if not all(callable(getattr(module, name, None)) for name in _PYREADSTAT_REQUIRED):
         return None
-    return module
+    try:
+        return module if _pyreadstat_probe_succeeded(module) else None
+    except Exception:
+        return None
 
 
 def _parquet_engine() -> str | None:
@@ -207,12 +251,7 @@ def interchange_capability(target_format: str) -> InterchangeCapabilityV1:
     if normalized == "parquet" and _parquet_engine() is None:
         return _parquet_unavailable_capability()
     if normalized in {"sav", "zsav", "dta"} and _pyreadstat_module() is None:
-        return InterchangeCapabilityV1(
-            normalized,
-            "unavailable",
-            "optional_dependency",
-            "pyreadstat is required for native statistical-file interchange.",
-        )
+        return _pyreadstat_unavailable_capability(normalized)
     return InterchangeCapabilityV1(normalized, "available")
 
 
@@ -285,15 +324,19 @@ def _write_frame(frame: pd.DataFrame, target_format: str, path: Path) -> None:
     if target_format in {"sav", "zsav", "dta"}:
         pyreadstat = _pyreadstat_module()
         if pyreadstat is None:
-            raise InterchangeUnavailableError(interchange_capability(target_format))
+            raise InterchangeUnavailableError(
+                _pyreadstat_unavailable_capability(target_format)
+            )
 
         try:
             if target_format == "dta":
                 pyreadstat.write_dta(frame, str(path), version=15)
             else:
                 pyreadstat.write_sav(frame, str(path), compress=target_format == "zsav")
-        except (ImportError, ModuleNotFoundError) as exc:
-            raise InterchangeUnavailableError(interchange_capability(target_format)) from exc
+        except Exception as exc:
+            raise InterchangeUnavailableError(
+                _pyreadstat_unavailable_capability(target_format)
+            ) from exc
         return
     raise InterchangeUnavailableError(interchange_capability(target_format))
 
@@ -314,15 +357,19 @@ def _read_frame(target_format: str, path: Path) -> pd.DataFrame:
     if target_format in {"sav", "zsav", "dta"}:
         pyreadstat = _pyreadstat_module()
         if pyreadstat is None:
-            raise InterchangeUnavailableError(interchange_capability(target_format))
+            raise InterchangeUnavailableError(
+                _pyreadstat_unavailable_capability(target_format)
+            )
 
         try:
             if target_format == "dta":
                 restored, _meta = pyreadstat.read_dta(str(path))
             else:
                 restored, _meta = pyreadstat.read_sav(str(path))
-        except (ImportError, ModuleNotFoundError) as exc:
-            raise InterchangeUnavailableError(interchange_capability(target_format)) from exc
+        except Exception as exc:
+            raise InterchangeUnavailableError(
+                _pyreadstat_unavailable_capability(target_format)
+            ) from exc
         return restored
     raise InterchangeUnavailableError(interchange_capability(target_format))
 

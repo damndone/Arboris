@@ -388,6 +388,49 @@ def test_manifest_fails_closed_when_pyreadstat_import_is_broken(monkeypatch) -> 
         assert item["reason_code"] == capability.reason_code == "optional_dependency"
 
 
+def test_manifest_fails_closed_when_callable_pyreadstat_runtime_probe_is_broken(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from workbench import data_interchange
+    from workbench.data_operation_manifest import build_data_operation_manifest
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("adapter operation failed")
+
+    broken_module = SimpleNamespace(
+        read_sav=broken,
+        write_sav=broken,
+        read_dta=broken,
+        write_dta=broken,
+    )
+    original_verified_import = data_interchange._verified_import
+    monkeypatch.setattr(
+        data_interchange,
+        "_verified_import",
+        lambda name: broken_module if name == "pyreadstat" else original_verified_import(name),
+    )
+
+    manifest = build_data_operation_manifest().to_dict()
+    native_items = {
+        item["operation_id"]: item
+        for item in manifest["unavailable"]
+        if item["operation_id"] in {
+            "data.interchange.sav",
+            "data.interchange.zsav",
+            "data.interchange.dta",
+        }
+    }
+    assert set(native_items) == {
+        "data.interchange.sav",
+        "data.interchange.zsav",
+        "data.interchange.dta",
+    }
+    assert all(item["status"] == "unavailable" for item in native_items.values())
+    assert all(item["reason_code"] == "optional_dependency" for item in native_items.values())
+
+
 def test_package_runtime_adapter_joins_live_catalog_and_exposes_record_evidence_ports() -> None:
     from workbench.data_operation_manifest import build_data_consumer_runtime_adapter
 
