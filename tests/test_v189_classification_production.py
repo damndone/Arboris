@@ -10,7 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from workbench.api import app
-from workbench.artifacts import sha256_file as _sha256_file
 from workbench.prediction import run_classification_model_v189
 from workbench.canonical import canonical_json_v1, sha256_canonical
 from workbench.predictive_research.classification_contracts import (
@@ -75,6 +74,29 @@ def _production_dependencies(*, include_holdout: bool = True) -> dict[str, objec
             }
         )
     return dependencies
+
+
+def _materialize_classification_run(run_root) -> str:
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({"schema_version": 1, "artifacts": []}),
+        encoding="utf-8",
+    )
+    frame = _ordered_frame([period for period in range(8) for _ in range(2)])
+    run_classification_model_v189(
+        frame,
+        run_root,
+        task=_ordered_task(structure_kind="temporal", split_profile="temporal_rolling"),
+        row_refs=tuple(f"r{index}" for index in range(len(frame))),
+        model_ids=("logistic_regression",),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        **_production_dependencies(),
+    )
+    return next(
+        item["artifact_id"]
+        for item in json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))["artifacts"]
+        if item.get("artifact_type") == "classification_artifacts"
+    )
 
 
 def _grouped_task() -> ClassificationTaskSpecV1:
@@ -790,6 +812,17 @@ def test_runs_artifact_route_serves_classification_only_as_validated_wrapper(tmp
         cv_folds=2,
         **_production_dependencies(),
     )
+    (run_root / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-classification",
+                "mode": "auto",
+                "status": "completed",
+                "lineage": [],
+            }
+        ),
+        encoding="utf-8",
+    )
     artifact_id = next(
         item["artifact_id"]
         for item in json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))["artifacts"]
@@ -807,6 +840,29 @@ def test_runs_artifact_route_serves_classification_only_as_validated_wrapper(tmp
     assert served["payload_schema"] == "workbench.prediction.classification-artifacts-wrapper"
     assert served["receipt"]["receipt_digest"] == served["receipt_digest"]
     assert served["content_digests"]["evidence.metrics"]
+
+    http_response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-classification/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+    )
+    assert http_response.status_code == 200, http_response.text
+    http_served = http_response.json()
+    assert http_served["payload_schema"] == "workbench.prediction.classification-artifacts-wrapper"
+    assert http_served["receipt"]["receipt_digest"] == http_served["receipt_digest"]
+    assert http_served["content_digests"]["evidence.metrics"]
+
+    http_consumer = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-classification",
+        params={"project_root": str(project_root)},
+    )
+    assert http_consumer.status_code == 200, http_consumer.text
+    consumer_body = http_consumer.json()
+    assert consumer_body["classification_evidence"]["payload_schema"] == (
+        "workbench.prediction.classification-artifacts-wrapper"
+    )
+    assert consumer_body["classification_evidence"]["receipt"]["receipt_digest"] == (
+        consumer_body["classification_evidence"]["receipt_digest"]
+    )
 
     listed = runs_routes.list_artifacts_endpoint("run-classification", str(project_root))
     listed_item = next(
@@ -1017,6 +1073,8 @@ def test_runs_artifact_list_rejects_digest_mismatch_at_repository_and_http(tmp_p
 def test_runs_artifact_list_rejects_unreadable_regular_artifact_at_repository_and_http(
     tmp_path, monkeypatch
 ) -> None:
+    from workbench.repository import file_integrity
+
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-unreadable-artifact"
     run_root.mkdir(parents=True)
@@ -1029,10 +1087,13 @@ def test_runs_artifact_list_rejects_unreadable_regular_artifact_at_repository_an
         encoding="utf-8",
     )
 
+    observed = {"calls": 0}
+
     def raise_permission(*_args):
+        observed["calls"] += 1
         raise PermissionError("controlled unreadable artifact probe")
 
-    monkeypatch.setattr(run_repository, "_sha256_artifact_fd", raise_permission, raising=False)
+    monkeypatch.setattr(file_integrity, "open_run_relative_file", raise_permission, raising=True)
 
     with pytest.raises(WorkbenchAPIError) as exc_info:
         runs_routes.list_artifacts_endpoint("run-unreadable-artifact", str(project_root))
@@ -1047,6 +1108,7 @@ def test_runs_artifact_list_rejects_unreadable_regular_artifact_at_repository_an
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
     assert "groups" not in response.json()
+    assert observed["calls"] > 0
 
 
 def test_runs_artifact_list_rejects_external_symlink_artifact_at_repository_and_http(
@@ -1086,6 +1148,8 @@ def test_runs_artifact_list_rejects_external_symlink_artifact_at_repository_and_
 def test_runs_artifact_list_rejects_external_symlink_replacement_after_legacy_path_probe(
     tmp_path, monkeypatch
 ) -> None:
+    from workbench.repository import file_integrity
+
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-toctou-replacement"
     run_root.mkdir(parents=True)
@@ -1103,15 +1167,17 @@ def test_runs_artifact_list_rejects_external_symlink_replacement_after_legacy_pa
         encoding="utf-8",
     )
 
-    original_sha256_file = _sha256_file
+    observed = {"calls": 0}
+    original_open = file_integrity.open_run_relative_file
 
-    def replace_after_path_probe(path):
-        assert path == artifact_path.resolve()
-        artifact_path.unlink()
-        artifact_path.symlink_to(outside)
-        return original_sha256_file(path)
+    def replace_before_safe_open(run_root_arg, relative_path):
+        if relative_path == "data.json" and observed["calls"] == 0:
+            artifact_path.unlink()
+            artifact_path.symlink_to(outside)
+        observed["calls"] += 1
+        return original_open(run_root_arg, relative_path)
 
-    monkeypatch.setattr(run_repository, "sha256_file", replace_after_path_probe, raising=False)
+    monkeypatch.setattr(file_integrity, "open_run_relative_file", replace_before_safe_open, raising=True)
 
     with pytest.raises(WorkbenchAPIError) as exc_info:
         runs_routes.list_artifacts_endpoint("run-toctou-replacement", str(project_root))
@@ -1126,6 +1192,7 @@ def test_runs_artifact_list_rejects_external_symlink_replacement_after_legacy_pa
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
     assert "groups" not in response.json()
+    assert observed["calls"] > 0
 
 
 def test_runs_artifact_list_accepts_canonical_formal_output_over_http(tmp_path) -> None:
@@ -1429,7 +1496,120 @@ def test_runs_artifact_route_does_not_treat_generic_alias_id_as_classification_w
 
     response = runs_routes.download_artifact_endpoint("run-generic-alias", "classification_artifacts", str(project_root))
 
-    assert response.__class__.__name__ == "FileResponse"
+    assert response.__class__.__name__ == "Response"
+    assert response.body == b'{"kind":"generic"}'
+    assert "attachment" in response.headers["content-disposition"]
+
+
+def test_download_artifact_rejects_external_symlink_replacement_at_live_safe_open_http(
+    tmp_path, monkeypatch
+) -> None:
+    from workbench.repository import file_integrity
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-download-replacement"
+    run_root.mkdir(parents=True)
+    artifact_id = _materialize_classification_run(run_root)
+    index = json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))
+    record = next(item for item in index["artifacts"] if item.get("artifact_id") == artifact_id)
+    artifact_path = run_root / record["path"]
+    outside = tmp_path / "outside-classification.json"
+    outside.write_bytes(artifact_path.read_bytes())
+    observed = {"calls": 0}
+    original_open = file_integrity.open_run_relative_file
+
+    def replace_before_safe_open(run_root_arg, relative_path):
+        if relative_path == record["path"]:
+            observed["calls"] += 1
+            if observed["calls"] == 2:
+                assert artifact_path.is_file()
+                artifact_path.unlink()
+                artifact_path.symlink_to(outside)
+        return original_open(run_root_arg, relative_path)
+
+    monkeypatch.setattr(file_integrity, "open_run_relative_file", replace_before_safe_open, raising=True)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/{run_root.name}/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+    )
+
+    assert observed["calls"] > 0
+    assert response.status_code != 200
+    body = response.json()
+    assert observed["calls"] == 2
+    assert body["error"]["code"] == "ARTIFACT_PATH_INVALID"
+    assert "artifact" not in body
+    assert "receipt" not in body
+    assert "content_digests" not in body
+
+
+def test_classification_consumer_rejects_external_symlink_replacement_at_live_safe_open(
+    tmp_path, monkeypatch
+) -> None:
+    from workbench.predictive_research.schema import PayloadContractError
+    from workbench.repository import file_integrity
+
+    run_root = tmp_path / "run-consumer-replacement"
+    run_root.mkdir()
+    _materialize_classification_run(run_root)
+    index = json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))
+    record = next(item for item in index["artifacts"] if item.get("artifact_type") == "classification_artifacts")
+    artifact_path = run_root / record["path"]
+    outside = tmp_path / "outside-consumer-classification.json"
+    outside.write_bytes(artifact_path.read_bytes())
+    observed = {"calls": 0}
+    original_open = file_integrity.open_run_relative_file
+
+    def replace_before_safe_open(run_root_arg, relative_path):
+        if relative_path == record["path"]:
+            observed["calls"] += 1
+            assert artifact_path.is_file()
+            artifact_path.unlink()
+            artifact_path.symlink_to(outside)
+        return original_open(run_root_arg, relative_path)
+
+    monkeypatch.setattr(file_integrity, "open_run_relative_file", replace_before_safe_open, raising=True)
+
+    with pytest.raises(PayloadContractError) as exc_info:
+        read_classification_evidence_from_run_root(run_root, consumer="report")
+
+    assert observed["calls"] > 0
+    assert exc_info.value.code == "ARTIFACT_PATH_INVALID"
+
+
+def test_classification_consumer_rejects_external_symlink_replacement_for_receipt(
+    tmp_path, monkeypatch
+) -> None:
+    from workbench.predictive_research.schema import PayloadContractError
+    from workbench.repository import file_integrity
+
+    run_root = tmp_path / "run-receipt-replacement"
+    run_root.mkdir()
+    _materialize_classification_run(run_root)
+    index = json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))
+    record = next(item for item in index["artifacts"] if item.get("artifact_type") == "classification_artifacts")
+    receipt_path = run_root / record["receipt_path"]
+    outside = tmp_path / "outside-classification-receipt.json"
+    outside.write_bytes(receipt_path.read_bytes())
+    observed = {"calls": 0}
+    original_open = file_integrity.open_run_relative_file
+
+    def replace_before_safe_open(run_root_arg, relative_path):
+        if relative_path == record["receipt_path"]:
+            observed["calls"] += 1
+            assert receipt_path.is_file()
+            receipt_path.unlink()
+            receipt_path.symlink_to(outside)
+        return original_open(run_root_arg, relative_path)
+
+    monkeypatch.setattr(file_integrity, "open_run_relative_file", replace_before_safe_open, raising=True)
+
+    with pytest.raises(PayloadContractError) as exc_info:
+        read_classification_evidence_from_run_root(run_root, consumer="report")
+
+    assert observed["calls"] > 0
+    assert exc_info.value.code == "ARTIFACT_PATH_INVALID"
 
 
 def test_classification_canonical_unicode_vector_matches_backend_contract() -> None:

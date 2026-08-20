@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import string
 import queue
+import string
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,7 +28,7 @@ from ..api_errors import (
     WorkbenchAPIError,
 )
 from ..agent.workflow_runtime import collect_post_estimation_results
-from ..artifacts import read_json, sha256_file
+from ..artifacts import read_json
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..events import get_event_manager
@@ -44,11 +44,11 @@ from ..repository.run_repository import (
     _read_artifact_records,
     _read_errors,
     _read_manifest,
-    _resolve_artifact_path,
     _resolve_project_runs_dir,
     _resolve_run_root,
     _summarize_manifest,
 )
+from ..repository import file_integrity
 from ..report_export import ReportExportError, export_report
 from ..report_contract import ReportContractError, validate_report_packet
 from ..report_quality import validate_report_response_quality
@@ -1061,13 +1061,6 @@ def download_artifact_endpoint(
             message=f"Artifact not found: {artifact_id}",
             details={"artifact_id": artifact_id, "run_id": run_id},
         )
-    path = _resolve_artifact_path(run_root, matched)
-    expected_sha256 = matched.get("sha256")
-    is_valid_sha256 = (
-        isinstance(expected_sha256, str)
-        and len(expected_sha256) == 64
-        and all(character in string.hexdigits for character in expected_sha256)
-    )
     artifact_type = matched.get("artifact_type")
     is_classification_artifacts = (
         artifact_type == "classification_artifacts"
@@ -1113,38 +1106,49 @@ def download_artifact_endpoint(
                     "matched_artifact_id": matched.get("artifact_id"),
                     "returned_artifact_id": wrapper.get("artifact_id"),
                 },
-            )
+        )
         return JSONResponse(content=wrapper)
-    # Legacy non-evidence indexes occasionally contain placeholder digests;
-    # preserve their read compatibility, but never expose a typed
-    # classification packet without a verifiable content hash.
-    if not is_valid_sha256 and (is_classification_artifacts or is_generic_typed_evidence):
+    expected_sha256 = matched.get("sha256")
+    is_valid_sha256 = (
+        isinstance(expected_sha256, str)
+        and len(expected_sha256) == 64
+        and all(character in string.hexdigits for character in expected_sha256)
+    )
+    if not is_valid_sha256 and is_generic_typed_evidence:
         raise WorkbenchAPIError(
             status_code=409,
             code="ARTIFACT_INTEGRITY_UNVERIFIED",
             message="The typed evidence artifact has no valid sha256 digest.",
             details={"artifact_id": artifact_id, "run_id": run_id},
         )
-    if is_valid_sha256:
-        try:
-            actual_sha256 = sha256_file(path)
-        except OSError as exc:
-            raise WorkbenchAPIError(
-                status_code=409,
-                code="ARTIFACT_INTEGRITY_UNAVAILABLE",
-                message="The artifact could not be hashed for integrity verification.",
-                details={"artifact_id": artifact_id, "run_id": run_id},
-            ) from exc
-        if actual_sha256.lower() != expected_sha256.lower():
-            raise WorkbenchAPIError(
-                status_code=409,
-                code="ARTIFACT_INTEGRITY_MISMATCH",
-                message="The artifact bytes do not match the indexed sha256 digest.",
-                details={"artifact_id": artifact_id, "run_id": run_id},
-            )
-    return FileResponse(
-        path,
-        filename=path.name,
+    if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="ARTIFACT_INTEGRITY_UNVERIFIED",
+            message="The artifact has no valid sha256 digest.",
+            details={"artifact_id": artifact_id, "run_id": run_id},
+        )
+    try:
+        with file_integrity.open_run_relative_file(run_root, matched.get("path")) as opened:
+            content, actual_sha256 = opened.read_bytes_and_sha256()
+            filename = opened.name
+    except (OSError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="ARTIFACT_INTEGRITY_UNAVAILABLE",
+            message="The artifact could not be safely opened for integrity verification.",
+            details={"artifact_id": artifact_id, "run_id": run_id},
+        ) from exc
+    if actual_sha256.lower() != expected_sha256.lower():
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="ARTIFACT_INTEGRITY_MISMATCH",
+            message="The artifact bytes do not match the indexed sha256 digest.",
+            details={"artifact_id": artifact_id, "run_id": run_id},
+        )
+    return Response(
+        content=content,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         media_type=None,
     )
 

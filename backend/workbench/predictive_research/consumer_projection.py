@@ -7,8 +7,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..artifacts import read_json, sha256_file
+from ..artifacts import read_json
 from ..canonical import sha256_canonical
+from ..repository import file_integrity
 from workbench.contracts.evidence.envelope import (
     ConsumerProjectionV1,
     EvidenceEnvelopeV1,
@@ -60,7 +61,6 @@ def read_prediction_evidence_from_run_root(
     payloads: list[dict[str, Any]] = []
     legacy_records: list[dict[str, Any]] = []
     seen: set[str] = set()
-    resolved_root = run_root.resolve()
     for raw_record in index["artifacts"]:
         if not isinstance(raw_record, dict):
             continue
@@ -78,17 +78,13 @@ def read_prediction_evidence_from_run_root(
             raise PayloadContractError("ARTIFACT_PAYLOAD_CONTRACT_REQUIRED", "prediction evidence record has no payload contract")
         if contract.get("payload_schema") != payload_schema or contract.get("schema_version") != 1:
             raise PayloadContractError("ARTIFACT_PAYLOAD_CONTRACT_MISMATCH", "prediction evidence record contract is inconsistent")
-        relative_path = Path(str(raw_record.get("path", "")))
-        if relative_path.is_absolute() or ".." in relative_path.parts:
-            raise PayloadContractError("ARTIFACT_PATH_INVALID", "prediction evidence path must stay inside run root")
-        path = (run_root / relative_path).resolve()
-        try:
-            path.relative_to(resolved_root)
-        except ValueError as error:
-            raise PayloadContractError("ARTIFACT_PATH_INVALID", "prediction evidence path escapes run root") from error
-        if not path.is_file() or sha256_file(path) != raw_record.get("sha256"):
-            raise PayloadContractError("ARTIFACT_PAYLOAD_HASH_MISMATCH", "prediction evidence hash does not match index")
-        payload = read_json(path)
+        payload = _read_indexed_json_file(
+            run_root,
+            raw_record.get("path"),
+            raw_record.get("sha256"),
+            hash_error_code="ARTIFACT_PAYLOAD_HASH_MISMATCH",
+            hash_error_message="prediction evidence hash does not match index",
+        )
         if not isinstance(payload, dict) or payload.get("payload_schema") != payload_schema or payload.get("schema_version") != 1:
             raise PayloadContractError("ARTIFACT_PAYLOAD_CONTRACT_MISMATCH", "prediction evidence payload is inconsistent")
         payloads.append(payload)
@@ -102,7 +98,6 @@ def read_prediction_evidence_from_run_root(
         return _project_legacy_prediction_evidence(
             legacy_records,
             run_root=run_root,
-            resolved_root=resolved_root,
             consumer=consumer,
         )
     return project_prediction_evidence(payloads, consumer=consumer)
@@ -123,18 +118,13 @@ def read_classification_artifacts_wrapper_from_run_root(run_root: Path) -> dict[
     contract = record.get("payload_contract")
     if contract != {"payload_schema": _PERSISTED_CLASSIFICATION_SCHEMA, "schema_version": 1}:
         raise ContractError("CLASSIFICATION_PERSISTED_ARTIFACT_CONTRACT_INVALID", "indexed classification artifact contract is invalid")
-    relative_path = Path(str(record.get("path", "")))
-    if relative_path.is_absolute() or ".." in relative_path.parts:
-        raise PayloadContractError("ARTIFACT_PATH_INVALID", "classification evidence path must stay inside run root")
-    resolved_root = Path(run_root).resolve()
-    path = (Path(run_root) / relative_path).resolve()
-    try:
-        path.relative_to(resolved_root)
-    except ValueError as error:
-        raise PayloadContractError("ARTIFACT_PATH_INVALID", "classification evidence path escapes run root") from error
-    if not path.is_file() or sha256_file(path) != record.get("sha256"):
-        raise PayloadContractError("ARTIFACT_PAYLOAD_HASH_MISMATCH", "classification evidence hash does not match index")
-    payload = read_json(path)
+    payload = _read_indexed_json_file(
+        run_root,
+        record.get("path"),
+        record.get("sha256"),
+        hash_error_code="ARTIFACT_PAYLOAD_HASH_MISMATCH",
+        hash_error_message="classification evidence hash does not match index",
+    )
     if not isinstance(payload, Mapping) or payload.get("artifact_id") != record.get("artifact_id"):
         raise ContractError("CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID", "indexed classification artifact identity is stale")
     expected_server_identity = validate_classification_server_identity(record.get("server_identity"), Path(run_root))
@@ -146,14 +136,13 @@ def read_classification_artifacts_wrapper_from_run_root(run_root: Path) -> dict[
     receipt_sha256 = record.get("receipt_sha256")
     if receipt_path != _CLASSIFICATION_RECEIPT_PATH or type(receipt_sha256) is not str:
         raise ContractError("CLASSIFICATION_PERSISTED_RECEIPT_REQUIRED", "classification artifact has no server-owned indexed receipt")
-    receipt_file = (Path(run_root) / receipt_path).resolve()
-    try:
-        receipt_file.relative_to(resolved_root)
-    except ValueError as error:
-        raise PayloadContractError("ARTIFACT_PATH_INVALID", "classification receipt path escapes run root") from error
-    if not receipt_file.is_file() or sha256_file(receipt_file) != receipt_sha256:
-        raise ContractError("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification server receipt hash does not match the index")
-    receipt = read_json(receipt_file)
+    receipt = _read_indexed_json_file(
+        run_root,
+        receipt_path,
+        receipt_sha256,
+        hash_error_code="CLASSIFICATION_PERSISTED_RECEIPT_INVALID",
+        hash_error_message="classification server receipt hash does not match the index",
+    )
     _validate_classification_receipt(
         receipt,
         payload=payload,
@@ -230,6 +219,33 @@ def _read_classification_artifacts_index(run_root: Path) -> dict[str, Any]:
     return index
 
 
+def _read_indexed_json_file(
+    run_root: Path,
+    relative_path: object,
+    expected_sha256: object,
+    *,
+    hash_error_code: str,
+    hash_error_message: str,
+) -> Any:
+    try:
+        with file_integrity.open_run_relative_file(run_root, relative_path) as opened:
+            raw, actual_sha256 = opened.read_bytes_and_sha256()
+    except (OSError, ValueError) as exc:
+        raise PayloadContractError(
+            "ARTIFACT_PATH_INVALID",
+            "indexed evidence path could not be safely opened",
+        ) from exc
+    if actual_sha256 != expected_sha256:
+        raise PayloadContractError(hash_error_code, hash_error_message)
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PayloadContractError(
+            "ARTIFACT_PAYLOAD_VALIDATION_FAILED",
+            "indexed evidence JSON is unreadable",
+        ) from exc
+
+
 def _classification_unavailable_projection(*, consumer: str, code: str) -> dict[str, Any]:
     """Return the one typed unavailable shape for classification index failures."""
 
@@ -254,7 +270,6 @@ def _project_legacy_prediction_evidence(
     records: Iterable[Mapping[str, Any]],
     *,
     run_root: Path,
-    resolved_root: Path,
     consumer: str,
 ) -> dict[str, Any]:
     if consumer not in _CONSUMERS:
@@ -262,17 +277,13 @@ def _project_legacy_prediction_evidence(
     legacy_results: list[dict[str, Any]] = []
     for raw_record in records:
         record = dict(raw_record)
-        relative_path = Path(str(record.get("path", "")))
-        if relative_path.is_absolute() or ".." in relative_path.parts:
-            raise PayloadContractError("ARTIFACT_PATH_INVALID", "legacy prediction path must stay inside run root")
-        path = (run_root / relative_path).resolve()
-        try:
-            path.relative_to(resolved_root)
-        except ValueError as error:
-            raise PayloadContractError("ARTIFACT_PATH_INVALID", "legacy prediction path escapes run root") from error
-        if not path.is_file() or sha256_file(path) != record.get("sha256"):
-            raise PayloadContractError("ARTIFACT_PAYLOAD_HASH_MISMATCH", "legacy prediction hash does not match index")
-        payload = read_json(path)
+        payload = _read_indexed_json_file(
+            run_root,
+            record.get("path"),
+            record.get("sha256"),
+            hash_error_code="ARTIFACT_PAYLOAD_HASH_MISMATCH",
+            hash_error_message="legacy prediction hash does not match index",
+        )
         if not isinstance(payload, dict):
             raise PayloadContractError("ARTIFACT_PAYLOAD_VALIDATION_FAILED", "legacy prediction payload must be an object")
         legacy_results.append(

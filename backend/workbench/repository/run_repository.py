@@ -9,12 +9,8 @@ symbols are re-exported from ``workbench.api`` for backward-compatible imports.
 """
 from __future__ import annotations
 
-import hashlib
 import inspect
 import json
-import os
-import re
-import stat
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -31,17 +27,12 @@ from ..api_errors import (
 from ..artifacts import read_json
 from ..predictive_research.contracts import ContractError
 from ..predictive_research.persistence import validate_classification_server_identity
+from . import file_integrity
 
 # Highest artifacts_index.json schema_version this server understands.
 SUPPORTED_REGISTRY_VERSION = 1
 ERROR_ARTIFACTS_INDEX_UNAVAILABLE = "ARTIFACTS_INDEX_UNAVAILABLE"
 ERROR_ARTIFACTS_INDEX_INVALID = "ARTIFACTS_INDEX_INVALID"
-_ARTIFACT_PATH_COMPONENT = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
-_MAX_ARTIFACT_PATH_COMPONENTS = 64
-_MAX_ARTIFACT_PATH_BYTES = 512
-_O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
-_O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
-_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 _ARTIFACT_RECORD_REQUIRED_FIELDS = frozenset(
     {
@@ -156,59 +147,6 @@ def _validate_artifact_digest(value: Any) -> None:
         raise ValueError("artifact digest is not a lowercase SHA-256 value")
 
 
-def _validate_run_relative_path(_run_root: Path, value: Any) -> tuple[str, ...]:
-    if type(value) is not str or not value or value != value.strip() or "\\" in value:
-        raise ValueError("artifact path is not a normalized relative POSIX path")
-    if len(value.encode("ascii", "strict")) > _MAX_ARTIFACT_PATH_BYTES:
-        raise ValueError("artifact path is too long")
-    parts = tuple(value.split("/"))
-    if len(parts) > _MAX_ARTIFACT_PATH_COMPONENTS or any(
-        part in {".", ".."} or _ARTIFACT_PATH_COMPONENT.fullmatch(part) is None
-        for part in parts
-    ):
-        raise ValueError("artifact path is not normalized")
-    return parts
-
-
-def _sha256_artifact_fd(run_root: Path, relative_parts: tuple[str, ...]) -> str:
-    """Open and hash one indexed artifact without a path-based TOCTOU window."""
-
-    if not _O_NOFOLLOW or not _O_DIRECTORY:
-        raise OSError("safe no-follow directory traversal is unavailable")
-    open_flags = os.O_RDONLY | _O_CLOEXEC | _O_NOFOLLOW
-    directory_fds: list[int] = []
-    artifact_fd = -1
-    try:
-        root_fd = os.open(os.fspath(run_root), open_flags | _O_DIRECTORY)
-        directory_fds.append(root_fd)
-        if not stat.S_ISDIR(os.fstat(root_fd).st_mode):
-            raise OSError("run root is not a directory")
-
-        parent_fd = root_fd
-        for component in relative_parts[:-1]:
-            child_fd = os.open(component, open_flags | _O_DIRECTORY, dir_fd=parent_fd)
-            directory_fds.append(child_fd)
-            if not stat.S_ISDIR(os.fstat(child_fd).st_mode):
-                raise OSError("artifact path component is not a directory")
-            parent_fd = child_fd
-
-        artifact_fd = os.open(relative_parts[-1], open_flags, dir_fd=parent_fd)
-        if not stat.S_ISREG(os.fstat(artifact_fd).st_mode):
-            raise OSError("indexed artifact is not a regular file")
-
-        digest = hashlib.sha256()
-        while True:
-            chunk = os.read(artifact_fd, 1024 * 1024)
-            if not chunk:
-                return digest.hexdigest()
-            digest.update(chunk)
-    finally:
-        if artifact_fd >= 0:
-            os.close(artifact_fd)
-        for directory_fd in reversed(directory_fds):
-            os.close(directory_fd)
-
-
 def _validate_payload_contract(value: Any) -> None:
     if (
         not isinstance(value, dict)
@@ -240,9 +178,9 @@ def _validate_artifact_record(run_root: Path, record: Any) -> dict[str, Any]:
     if type(record["config_hash"]) is not str:
         raise ValueError("artifact record config_hash is invalid")
     _validate_artifact_digest(record["sha256"])
-    relative_parts = _validate_run_relative_path(run_root, record["path"])
     try:
-        actual_sha256 = _sha256_artifact_fd(run_root, relative_parts)
+        with file_integrity.open_run_relative_file(run_root, record["path"]) as opened:
+            actual_sha256 = opened.sha256()
     except OSError as exc:
         raise ValueError("indexed artifact file is unreadable") from exc
     if actual_sha256 != record["sha256"]:
@@ -279,7 +217,7 @@ def _validate_artifact_record(run_root: Path, record: Any) -> dict[str, Any]:
     if has_receipt_path != has_receipt_sha256:
         raise ValueError("artifact receipt path and digest must be supplied together")
     if has_receipt_path:
-        _validate_run_relative_path(run_root, receipt_path)
+        file_integrity.validate_run_relative_path(receipt_path)
         _validate_artifact_digest(receipt_sha256)
     if record["artifact_type"] == "classification_artifacts" and (
         payload_contract is None
@@ -483,24 +421,16 @@ def _resolve_artifact_path(run_root: Path, record: dict) -> Path:
             message="Artifact has no path",
             details={"artifact_id": record.get("artifact_id")},
         )
-    candidate = (run_root / relative).resolve()
     try:
-        candidate.relative_to(run_root.resolve())
+        relative_parts = file_integrity.validate_run_relative_path(relative)
     except ValueError as exc:
         raise WorkbenchAPIError(
             status_code=400,
             code=ERROR_INVALID_PATH,
-            message="Artifact path resolved outside run root",
+            message="Artifact path is not a bounded relative path",
             details={"artifact_id": record.get("artifact_id")},
         ) from exc
-    if not candidate.is_file():
-        raise WorkbenchAPIError(
-            status_code=404,
-            code=ERROR_ARTIFACT_NOT_FOUND,
-            message=f"Artifact file missing on disk: {relative}",
-            details={"artifact_id": record.get("artifact_id")},
-        )
-    return candidate
+    return run_root.joinpath(*relative_parts)
 
 
 def _list_existing_artifacts(run_root: Path) -> list[str]:
