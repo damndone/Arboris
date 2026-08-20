@@ -127,6 +127,34 @@ def test_agent_rejects_tampered_model_result_before_projection(tmp_path):
     assert summary["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
 
 
+def test_invalid_server_owned_model_artifact_omits_optional_result_and_diagnostic_fields(
+    tmp_path,
+):
+    """Invalid real-run evidence keeps typed reason without invented sections."""
+    project, run_id = _run(
+        tmp_path,
+        "invalid-agent-result",
+        "survey/design.csv",
+        model_type="ols",
+        y="y",
+        x=["x1", "x2"],
+    )
+    result_path = project.root / "runs" / run_id / "model_results" / "ols_1.json"
+    payload = json.loads(result_path.read_text())
+    payload["coefficients"]["x1"]["estimate"] = 999.0
+    result_path.write_text(json.dumps(payload))
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    diagnostics = _diagnostics(project, run_id, "model:ols_1")["diagnostics"]
+    for projection in (summary, diagnostics):
+        assert projection["available"] is False
+        assert projection["status"] == "unavailable"
+        assert projection["unavailable_reason"] == "AGENT_RESULT_ARTIFACT_INVALID"
+        assert "survey_design" not in projection
+        assert "regression_table" not in projection
+        assert "marginal_effects" not in projection
+
+
 def test_agent_rejects_foreign_binding_even_when_index_hash_is_rewritten(tmp_path):
     from workbench.artifacts import sha256_file, write_json
 
@@ -443,6 +471,25 @@ def test_a_run_without_a_design_omits_the_optional_field(tmp_path):
     assert "survey_design" not in summary
 
 
+def test_ordinary_non_survey_agent_diagnostics_omit_optional_survey_fields(tmp_path):
+    """A normal run must not advertise absent Survey result sections."""
+    project, run_id = _run(
+        tmp_path,
+        "ordinary-agent-read",
+        "survey/design.csv",
+        model_type="ols",
+        y="y",
+        x=["x1", "x2"],
+    )
+
+    summary = _summary(project, run_id, "model:ols_1")["result_summary"]
+    diagnostics = _diagnostics(project, run_id, "model:ols_1")["diagnostics"]
+    assert "survey_design" not in summary
+    assert "marginal_effects" not in summary
+    assert "survey_design" not in diagnostics
+    assert "marginal_effects" not in diagnostics
+
+
 def test_agent_result_summary_omits_unpersisted_survey_sections(tmp_path):
     """No persisted survey sections means no invented ``None`` or empty list."""
     from workbench.agent.context_tools import _bounded_result_summary
@@ -455,8 +502,19 @@ def test_agent_result_summary_omits_unpersisted_survey_sections(tmp_path):
         run_root=tmp_path / "run-1",
     )
 
-    assert "survey_design" not in projected
-    assert "marginal_effects" not in projected
+    for field in (
+        "survey_design",
+        "regression_table",
+        "marginal_effects",
+        "full_table_ref",
+        "interpretation_mode",
+        "run_status",
+        "persisted_models",
+        "statistical_evidence",
+        "model_family_evidence",
+        "coefficient_rows",
+    ):
+        assert field not in projected
 
 
 def test_the_agent_can_read_an_anova_table(tmp_path):

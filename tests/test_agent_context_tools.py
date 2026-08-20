@@ -11,7 +11,10 @@ import pytest
 
 from workbench.agent.core import AgentCore
 from workbench.agent.chains import ChainStore
-from workbench.agent.context_tools import InspectTimeSeriesSummaryRequest
+from workbench.agent.context_tools import (
+    InspectNotebookWorkflowResultsRequest,
+    InspectTimeSeriesSummaryRequest,
+)
 from workbench.agent.events import AgentEventStream
 from workbench.agent.model import ModelStreamEvent
 from workbench.agent.operations import OperationRecordStore
@@ -232,7 +235,11 @@ def _write_project_run(project_root: Path, *, run_id: str = "run-a") -> None:
     )
 
 
-def _write_notebook_workflow_receipt(project_root: Path) -> None:
+def _write_notebook_workflow_receipt(
+    project_root: Path,
+    *,
+    survey_design: dict | None = None,
+) -> None:
     """Persist one committed Notebook receipt with sibling model runs.
 
     This fixture deliberately uses generic response/exposure-style results.  It
@@ -247,18 +254,14 @@ def _write_notebook_workflow_receipt(project_root: Path) -> None:
     artifacts_root = source_root / "artifacts" / "statistical_test"
     artifacts_root.mkdir(parents=True)
     joint_result = artifacts_root / "joint_test.json"
-    joint_result.write_text(
-        json.dumps(
-            {
-                "result": {
-                    "test_statistic": 12.4,
-                    "p_value": 0.003,
-                    "raw_rows": [{"response": 1.0}],
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
+    result = {
+        "test_statistic": 12.4,
+        "p_value": 0.003,
+        "raw_rows": [{"response": 1.0}],
+    }
+    if survey_design is not None:
+        result["survey_design"] = survey_design
+    joint_result.write_text(json.dumps({"result": result}), encoding="utf-8")
     source_root.joinpath("artifacts_index.json").write_text(
         json.dumps(
             {
@@ -682,7 +685,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     assert summary["metrics"] == {"r_squared": 0.72, "aic": 120.5, "bic": 125.1}
     assert summary["primary_metric_keys"] == ["r_squared", "aic"]
     assert summary["coefficient_rows"] == []
-    assert summary["full_table_ref"] is None
+    assert "full_table_ref" not in summary
     assert result_summary.output["omitted_sections"] == ["raw_model_results"]
 
     artifact_result = asyncio.run(
@@ -788,6 +791,95 @@ def test_notebook_workflow_results_discover_only_committed_sibling_evidence(
     assert "raw_rows" not in json.dumps(workflow["post_estimation_evidence"])
     assert str(project_root) not in public_output
     assert result.output["omitted_sections"] == ["raw_artifact_payloads", "raw_rows"]
+
+
+def test_notebook_survey_packet_projection_is_typed_and_omits_absent_metadata(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_notebook_workflow_receipt(
+        project_root,
+        survey_design={
+            "n_obs": 100,
+            "n_strata": 4,
+            "n_psu": 8,
+            "degf": 4,
+            "variance_method": "linearization",
+            "variance_source": "survey_design",
+            "weight_column": "weight",
+            "replicate_type": "BRR",
+            "replicate_weight_columns": ["repw01", "repw02"],
+            "provenance": {
+                "run_id": "source-run",
+                "artifact_id": "joint-test-result",
+                "producer": "server",
+            },
+            "raw_rows": [{"must_not": "cross"}],
+        },
+    )
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-notebook-survey-projection",
+                "tool_id": "inspect_notebook_workflow_results",
+                "arguments": {
+                    "request_id": "inspect-notebook-survey-projection",
+                    "owner_run_id": "branch-east",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "branch-east",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    projected = result.output["notebook_workflows"][0]["post_estimation_evidence"][0]["result"]
+    assert projected["survey_design"] == {
+        "n_obs": 100,
+        "n_strata": 4,
+        "n_psu": 8,
+        "degf": 4,
+        "variance_method": "linearization",
+        "variance_source": "survey_design",
+        "weight_column": "weight",
+        "replicate_type": "BRR",
+        "replicate_weight_columns": ["repw01", "repw02"],
+        "provenance": {
+            "run_id": "source-run",
+            "artifact_id": "joint-test-result",
+            "producer": "server",
+        },
+    }
+    assert "raw_rows" not in json.dumps(projected)
+
+    project_without_survey = tmp_path / "project-without-survey"
+    _write_notebook_workflow_receipt(project_without_survey)
+    result_without_survey = _load_provider_type()(project_without_survey).inspect_notebook_workflow_results(
+        InspectNotebookWorkflowResultsRequest(
+            request_id="inspect-notebook-survey-absent",
+            owner_run_id="branch-east",
+            op_node_id="model:ols_1",
+            active_head_run_id="branch-east",
+        )
+    )
+    absent_projected = result_without_survey["notebook_workflows"][0]["post_estimation_evidence"][0]["result"]
+    assert "survey_design" not in absent_projected
+
+
+def test_agent_unavailable_projection_omits_optional_persisted_fields() -> None:
+    from workbench.agent.context_tools import _agent_result_unavailable
+
+    projected = _agent_result_unavailable("AGENT_RESULT_ARTIFACT_INVALID")
+
+    assert projected == {
+        "available": False,
+        "status": "unavailable",
+        "summary_status": "unavailable",
+        "unavailable_reason": "AGENT_RESULT_ARTIFACT_INVALID",
+    }
 
 
 def test_global_workflow_reader_discovers_only_committed_visible_branch_evidence(

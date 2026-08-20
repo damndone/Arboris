@@ -1657,8 +1657,12 @@ class NodeOperationContextProvider:
             model_results,
         )
         diagnostics, omitted_sections = _bounded_diagnostics(preview)
-        diagnostics["survey_design"] = _bounded_survey_design(model_results)
-        diagnostics["regression_table"] = _bounded_regression_table(model_results)
+        survey_design = _bounded_survey_design(model_results)
+        if survey_design is not None:
+            diagnostics["survey_design"] = survey_design
+        regression_table = _bounded_regression_table(model_results)
+        if regression_table is not None:
+            diagnostics["regression_table"] = regression_table
         return {
             **canonical,
             "node": _bounded_node(node),
@@ -1776,7 +1780,7 @@ class NodeOperationContextProvider:
             run_root=run_root,
         )
         omitted_sections = ["raw_model_results"]
-        if result_summary["coefficient_rows_omitted"]:
+        if result_summary.get("coefficient_rows_omitted"):
             omitted_sections.append("coefficient_rows")
         return {
             **canonical,
@@ -3559,7 +3563,7 @@ def _bounded_regression_table(
     *,
     model_limit: int = 4,
     term_limit: int = 32,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Project the persisted coefficient packets into the report-table schema.
 
     Agent consumers need the same side-by-side evidence as Report/Table, but
@@ -3568,6 +3572,9 @@ def _bounded_regression_table(
     counts.  Significance markers are derived from the fixed report defaults;
     they are display metadata, never a replacement for the persisted p-value.
     """
+
+    if not model_results:
+        return None
 
     cutoffs = (("***", 0.01), ("**", 0.05), ("*", 0.1))
     models: list[dict[str, Any]] = []
@@ -3622,6 +3629,9 @@ def _bounded_regression_table(
             )
             row["models"][model_id] = cell
 
+    if not models:
+        return None
+
     model_ids = [model["id"] for model in models]
     rows = [
         {
@@ -3670,13 +3680,14 @@ def _bounded_result_summary(
         coefficient_summary if isinstance(coefficient_summary, dict) else {}
     )
     raw_rows = coefficient_summary.get("rows")
-    raw_rows = raw_rows if isinstance(raw_rows, list) else []
-    coefficient_rows = [
-        _bounded_coefficient_row(row)
-        for row in raw_rows
-        if isinstance(row, dict)
-    ]
-    coefficient_rows = [row for row in coefficient_rows if row]
+    coefficient_rows = []
+    if isinstance(raw_rows, list):
+        coefficient_rows = [
+            _bounded_coefficient_row(row)
+            for row in raw_rows
+            if isinstance(row, dict)
+        ]
+        coefficient_rows = [row for row in coefficient_rows if row]
     coefficient_rows_omitted = max(len(coefficient_rows) - 8, 0)
 
     run_status = preview.get("run_status")
@@ -3695,30 +3706,42 @@ def _bounded_result_summary(
             if "unavailable_reason" in summary_projection
             else {}
         ),
-        "run_lifecycle_status": preview.get("run_lifecycle_status"),
-        "trust_label": preview.get("trust_label"),
-        "model_identity": model_identity,
-        "metrics": metrics,
-        "primary_metric_keys": primary_metric_keys,
-        "coefficient_rows": coefficient_rows[:8],
-        "coefficient_row_count": len(coefficient_rows),
-        "coefficient_rows_omitted": coefficient_rows_omitted,
-        "full_table_ref": (
-            coefficient_summary.get("full_table_ref")
-            if isinstance(coefficient_summary.get("full_table_ref"), str)
-            else None
-        ),
-        "interpretation_mode": (
-            coefficient_summary.get("interpretation_mode")
-            if isinstance(coefficient_summary.get("interpretation_mode"), str)
-            else None
-        ),
-        "run_status": run_status if isinstance(run_status, dict) else None,
-        "persisted_models": _bounded_persisted_model_facts(model_results),
-        "statistical_evidence": statistical_evidence,
-        "regression_table": regression_table,
-        "model_family_evidence": model_family_evidence,
     }
+    for key in ("run_lifecycle_status", "trust_label"):
+        value = preview.get(key)
+        if value is not None:
+            projected[key] = value
+    if isinstance(summary, dict) and isinstance(summary.get("model_identity"), dict):
+        projected["model_identity"] = model_identity
+    model_quality = summary.get("model_quality") if isinstance(summary, dict) else None
+    if isinstance(model_quality, dict):
+        if isinstance(model_quality.get("metrics"), dict):
+            projected["metrics"] = metrics
+        if isinstance(model_quality.get("primary_metric_keys"), list):
+            projected["primary_metric_keys"] = primary_metric_keys
+    if isinstance(raw_rows, list):
+        projected.update(
+            {
+                "coefficient_rows": coefficient_rows[:8],
+                "coefficient_row_count": len(coefficient_rows),
+                "coefficient_rows_omitted": coefficient_rows_omitted,
+            }
+        )
+    for key in ("full_table_ref", "interpretation_mode"):
+        value = coefficient_summary.get(key)
+        if isinstance(value, str):
+            projected[key] = value
+    if isinstance(run_status, dict):
+        projected["run_status"] = run_status
+    persisted_models = _bounded_persisted_model_facts(model_results)
+    if persisted_models:
+        projected["persisted_models"] = persisted_models
+    if statistical_evidence is not None:
+        projected["statistical_evidence"] = statistical_evidence
+    if regression_table is not None:
+        projected["regression_table"] = regression_table
+    if model_family_evidence is not None:
+        projected["model_family_evidence"] = model_family_evidence
     # Optional survey sections are evidence-backed. Do not manufacture a None
     # or empty-list marker when the persisted model packet has no such field.
     survey_design = _bounded_survey_design(model_results)
@@ -3791,6 +3814,8 @@ def _project_family_evidence(
         )
     for field in spec.fields:
         origin = sidecars[field.sidecar] if field.sidecar else source
+        if field.key == "marginal_effects" and field.source_key not in origin:
+            continue
         value = origin.get(field.source_key)
         if field.nested_key is not None:
             value = value.get(field.nested_key) if isinstance(value, dict) else {}
@@ -4329,7 +4354,19 @@ def _public_operation_artifact_result(
     result = payload.get("result")
     if not isinstance(result, dict):
         return None, ["raw_artifact_payloads"]
-    return _bounded_public_result_value(result), ["raw_artifact_payloads", "raw_rows"]
+    bounded = _bounded_public_result_value(result)
+    if not isinstance(bounded, dict):
+        return None, ["raw_artifact_payloads"]
+    if "survey_design" in result:
+        survey_design = project_survey_design(
+            result.get("survey_design"),
+            unavailable_reason="AGENT_SURVEY_METADATA_INVALID",
+        )
+        if survey_design is None:
+            bounded.pop("survey_design", None)
+        else:
+            bounded["survey_design"] = survey_design
+    return bounded, ["raw_artifact_payloads", "raw_rows"]
 
 
 def _node_public_result_evidence(
@@ -4920,8 +4957,6 @@ def _agent_result_unavailable(reason: str) -> dict[str, Any]:
         "status": "unavailable",
         "summary_status": "unavailable",
         "unavailable_reason": reason,
-        "survey_design": None,
-        "regression_table": None,
     }
 
 
