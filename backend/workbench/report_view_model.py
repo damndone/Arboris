@@ -408,6 +408,53 @@ def _survey_design_facts(run_root: Path) -> list[str]:
     return []
 
 
+def _empty_legacy_presentation() -> dict[str, Any]:
+    """Return the non-authoritative shape without reading presentation data."""
+
+    return {
+        "title": "Econometrics Report",
+        "presentation_facts": [],
+        "critical_errors": [],
+        "warnings": [],
+        "cautions": [],
+        "system_notes": [],
+        "coefficient_interpretations": [],
+        "causal_caution": "",
+        "descriptive_stats": None,
+        "statistical_tests": None,
+        "statistical_evidence": None,
+        "regression_table": None,
+        "model_family_evidence": None,
+        "exploration": None,
+        "model_diagnostics": {},
+        "model_quality": None,
+    }
+
+
+def _unavailable_legacy_report_view_model() -> dict[str, Any]:
+    """Return typed unavailable state before legacy summary/presentation reads."""
+
+    presentation = _empty_legacy_presentation()
+    reason_code = "EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    return {
+        **presentation,
+        "schemaVersion": 1,
+        "status": "unavailable",
+        "projectionId": "report:unavailable",
+        "commitId": "UNAVAILABLE",
+        "envelopeDigest": "UNAVAILABLE",
+        "validationStatus": "unavailable",
+        "validationSummary": {"status": "unavailable", "reasonCode": reason_code},
+        "provenance": {},
+        "facts": [],
+        "typedFacts": [],
+        "critical_errors": [],
+        "typed_critical_errors": [{"code": reason_code, "severity": "BLOCKER"}],
+        **_projection_identity_fields({}),
+        "reasonCode": reason_code,
+    }
+
+
 def build_report_view_model(
     summary: dict[str, Any],
     run_root: Path,
@@ -482,6 +529,12 @@ def build_report_view_model(
             "typed_critical_errors": [],
         }
 
+    if include_legacy_presentation and evidence_projection is None:
+        # The legacy surface is a presentation projection, not a capability.
+        # Fail before touching summary fields, templates, staged facts, or the
+        # run root so an unadmitted caller cannot turn it into a read port.
+        return _unavailable_legacy_report_view_model()
+
     if include_legacy_presentation:
         presentation = _build_legacy_presentation(
             summary,
@@ -493,24 +546,7 @@ def build_report_view_model(
             exploration=exploration,
         )
     else:
-        presentation = {
-            "title": "Econometrics Report",
-            "presentation_facts": [],
-            "critical_errors": [],
-            "warnings": [],
-            "cautions": [],
-            "system_notes": [],
-            "coefficient_interpretations": [],
-            "causal_caution": "",
-            "descriptive_stats": None,
-            "statistical_tests": None,
-            "statistical_evidence": None,
-            "regression_table": None,
-            "model_family_evidence": None,
-            "exploration": None,
-            "model_diagnostics": {},
-            "model_quality": None,
-        }
+        presentation = _empty_legacy_presentation()
     return {
         **presentation,
         "schemaVersion": 1,

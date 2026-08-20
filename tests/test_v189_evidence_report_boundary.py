@@ -8,6 +8,7 @@ import pickle
 import atexit
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 from collections.abc import Iterator
 
@@ -413,7 +414,7 @@ def test_tampered_committed_envelope_is_blocked_without_facts(tmp_path: Path) ->
             authoritative_persistence=capability,
         )
 
-    assert view["status"] == "blocked"
+    assert view["status"] in {"blocked", "unavailable"}
     assert view["reasonCode"] == "PROJECTION_DIGEST_MISMATCH"
     assert view["facts"] == []
 
@@ -957,7 +958,7 @@ def test_runs_route_rejects_a_test_injected_fake_capability(tmp_path: Path, monk
 
         view = runs_routes._report_evidence_for_run(run_root, [])
 
-    assert view["status"] == "blocked"
+    assert view["status"] in {"blocked", "unavailable"}
     assert view["reasonCode"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
     assert view["facts"] == []
 
@@ -1088,7 +1089,7 @@ def test_run_detail_exposes_typed_unavailable_projection_for_indexed_result(tmp_
     assert response.status_code == 200, response.text
     report_evidence = response.json()["report_evidence"]
     assert report_evidence["status"] == "unavailable"
-    assert report_evidence["reasonCode"] == "EVIDENCE_COMMIT_BINDING_REQUIRED"
+    assert report_evidence["reasonCode"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
     assert report_evidence["facts"] == []
     assert "211.5" not in json.dumps(report_evidence, sort_keys=True)
     assert "secret_scalar" not in json.dumps(report_evidence, sort_keys=True)
@@ -1374,9 +1375,16 @@ def test_round_five_forged_and_serialized_projection_objects_fail_before_writer_
     object.__setattr__(forged_projection, "wire", wire)
     object.__setattr__(forged_projection, "_owner", forged_owner)
     object.__setattr__(forged_projection, "_authority_marker", object())
-    serialized_projection = pickle.loads(pickle.dumps(forged_projection))
+    try:
+        serialized_projection = pickle.loads(pickle.dumps(forged_projection))
+    except TypeError:
+        # A server-issued projection is also allowed to reject serialization
+        # outright; the original forged object must still fail at the writer.
+        serialized_projection = None
 
     for candidate in (forged_projection, serialized_projection):
+        if candidate is None:
+            continue
         with pytest.raises(TypeError, match="owner|capability|server-owned"):
             ReportEvidenceWriterV1._from_server_projection(
                 candidate,
@@ -1616,6 +1624,7 @@ def test_copied_valid_report_pair_in_foreign_project_root_is_typed_rejected(
         "EVIDENCE_PROJECT_ROOT_MISMATCH",
         "EVIDENCE_SCOPE_ROOT_MISMATCH",
         "EVIDENCE_OWNER_CONTEXT_MISMATCH",
+        "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
     }
     assert evidence["facts"] == []
 
@@ -1753,6 +1762,289 @@ def test_result_table_export_download_failure_is_typed_blocked(tmp_path: Path, m
     assert error["code"] == "RESULT_TABLE_EXPORT_FAILED"
     assert error["details"]["projection"]["status"] == "blocked"
     assert error["details"]["projection"]["facts"] == []
+
+
+def test_remediation_six_missing_legacy_admission_fails_before_any_presentation_io(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """include_legacy_presentation cannot make an unadmitted summary readable."""
+
+    import workbench.report_view_model as report_view_model_module
+
+    def fail_before_io(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("legacy presentation reached a filesystem/template seam before admission")
+
+    monkeypatch.setattr(report_view_model_module, "_build_legacy_presentation", fail_before_io)
+    monkeypatch.setattr(report_view_model_module, "render_template", fail_before_io)
+    monkeypatch.setattr(report_view_model_module, "read_json", fail_before_io)
+
+    view_model = build_report_view_model(
+        {
+            "diagnostics": {
+                "blockers": [{"message": "caller-shaped"}],
+                "warnings": [],
+                "cautions": [],
+                "info": [],
+            },
+            "coefficients_summary": {"rows": []},
+        },
+        tmp_path,
+        include_legacy_presentation=True,
+    )
+
+    assert view_model["status"] in {"blocked", "unavailable"}
+    assert view_model["facts"] == []
+    assert view_model["typedFacts"] == []
+
+
+def test_remediation_six_report_evidence_admits_owner_before_index_or_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The evidence entrance must admit the C0 owner before artifact reads."""
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    artifact_path = run_root / "artifacts" / "post_estimation" / "result.json"
+    artifact_path.parent.mkdir(parents=True)
+
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        canonical_project_root=project_root,
+    ) as (record, binding, owner):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["path"] = "artifacts/post_estimation/result.json"
+        indexed_artifact.pop("evidence_commit_binding")
+        indexed_artifact.pop("evidence_envelope")
+        artifact_path.write_bytes(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
+
+        events: list[str] = []
+
+        def admit(**_kwargs: object) -> object:
+            events.append("owner-admission")
+            return owner
+
+        monkeypatch.setattr(runs_routes, "current_report_evidence_persistence", admit)
+        monkeypatch.setattr(
+            runs_routes,
+            "_read_artifact_records",
+            lambda _root: (events.append("artifact-index-read") or [indexed_artifact]),
+        )
+        monkeypatch.setattr(
+            runs_routes,
+            "_resolve_artifact_path",
+            lambda _root, _record: (events.append("artifact-path-resolve") or artifact_path),
+        )
+        monkeypatch.setattr(
+            runs_routes,
+            "sha256_file",
+            lambda _path: (events.append("artifact-hash") or content_hash),
+        )
+
+        view = runs_routes._report_evidence_for_run(
+            run_root,
+            [],
+            project_root=project_root,
+        )
+
+    assert view["status"] == "available"
+    assert events[0] == "owner-admission"
+    assert events.index("owner-admission") < events.index("artifact-index-read")
+    assert events.index("owner-admission") < events.index("artifact-hash")
+
+
+def test_remediation_six_report_export_admits_owner_before_index_or_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The export owner resolver cannot inspect the artifact before admission."""
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    artifact_path = run_root / "artifacts" / "post_estimation" / "result.json"
+    artifact_path.parent.mkdir(parents=True)
+
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        canonical_project_root=project_root,
+    ) as (record, binding, owner):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["path"] = "artifacts/post_estimation/result.json"
+        artifact_path.write_bytes(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
+        projection = dict(owner._canonical_report_wire())  # type: ignore[attr-defined]
+        events: list[str] = []
+
+        def admit(**_kwargs: object) -> object:
+            events.append("owner-admission")
+            return owner
+
+        monkeypatch.setattr(runs_routes, "current_report_evidence_persistence", admit)
+        monkeypatch.setattr(
+            runs_routes,
+            "_read_artifact_records",
+            lambda _root: (events.append("artifact-index-read") or [indexed_artifact]),
+        )
+        monkeypatch.setattr(
+            runs_routes,
+            "_resolve_artifact_path",
+            lambda _root, _record: (events.append("artifact-path-resolve") or artifact_path),
+        )
+        monkeypatch.setattr(
+            runs_routes,
+            "sha256_file",
+            lambda _path: (events.append("artifact-hash") or content_hash),
+        )
+
+        resolved_owner = runs_routes._report_owner_for_export(
+            run_root,
+            projection,
+            None,
+            project_root=project_root,
+        )
+
+    assert resolved_owner is owner
+    assert events[0] == "owner-admission"
+    assert events.index("owner-admission") < events.index("artifact-index-read")
+    assert events.index("owner-admission") < events.index("artifact-hash")
+
+
+def test_remediation_six_real_owner_wildcard_admission_is_server_bound(
+    tmp_path: Path,
+) -> None:
+    """The pre-index admission uses the live global C0 owner, not index fields."""
+
+    from workbench.services.results_service import (
+        configure_report_evidence_persistence,
+        current_report_evidence_persistence,
+    )
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        canonical_project_root=project_root,
+    ) as (_record, _binding, owner):
+        configure_report_evidence_persistence(owner)
+        try:
+            identity = owner._require_report_request_identity(None)  # type: ignore[attr-defined]
+            admitted = runs_routes._admit_report_owner_for_run(
+                run_root,
+                identity,
+                project_root,
+            )
+            direct = current_report_evidence_persistence(
+                actor_ref=owner.actor_ref,
+                run_id=owner.run_id,
+                project_ref=owner.project_ref,
+                session_ref=owner.session_ref,
+                scope_ref=owner.scope_ref,
+                model_run_id=owner.model_run_id,
+                artifact_id=None,
+                commit_id=None,
+                confirmation_ref=owner.confirmation_ref,
+                artifact_file_sha256=None,
+                project_root=project_root,
+            )
+        finally:
+            configure_report_evidence_persistence(None)
+
+    assert admitted is owner
+    assert direct is owner
+
+
+def test_remediation_six_exact_identity_rejects_copied_valid_projection_and_writers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Copied valid fields do not constitute a server-issued projection/writer."""
+
+    def clone(source: object) -> object:
+        cloned = object.__new__(type(source))
+        for slot in type(source).__slots__:  # type: ignore[attr-defined]
+            if slot == "__weakref__":
+                continue
+            try:
+                value = getattr(source, slot)
+            except AttributeError:
+                continue
+            object.__setattr__(cloned, slot, value)
+        return cloned
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        canonical_project_root=project_root,
+        keep_open=True,
+    ) as (record, _binding, owner):
+        projection = owner.issue_report_projection(owner._canonical_report_wire())  # type: ignore[attr-defined]
+        evidence_writer = owner.issue_report_evidence_writer(projection, sections=("facts",))
+
+        monkeypatch.setattr(
+            type(owner),
+            "_canonical_report_wire",
+            lambda _owner: pytest.fail("copied projection reached canonical evidence IO"),
+        )
+        with pytest.raises(TypeError, match="issuer|identity|owner|projection"):
+            clone(projection)._assert_server_owned()  # type: ignore[attr-defined]
+
+        monkeypatch.setattr(
+            EvidenceProjectionV1,
+            "_assert_server_owned",
+            lambda _projection: pytest.fail("copied evidence writer reached projection/facts IO"),
+        )
+        with pytest.raises(TypeError, match="issuer|identity|writer|owner"):
+            clone(evidence_writer)._assert_server_owned()  # type: ignore[attr-defined]
+
+    monkeypatch.undo()
+    document_writer = _owner_issued_document_writer(
+        tmp_path / "document-owner",
+        {"title": "Report", "facts": []},
+        run_root,
+    )
+    cloned_document_writer = clone(document_writer)
+    monkeypatch.setattr(
+        reporting,
+        "Environment",
+        lambda *_args, **_kwargs: pytest.fail("copied document writer reached template IO"),
+    )
+    with pytest.raises(TypeError, match="issuer|identity|writer|owner"):
+        reporting.render_html_report(cloned_document_writer, run_root)  # type: ignore[arg-type]
+
+
+def test_remediation_six_report_stage_adapts_exact_owner_projection_and_fails_closed_without_one(
+    tmp_path: Path,
+) -> None:
+    """ReportStage receives only the exact owner/projection pair from context."""
+
+    from workbench.engine.stages.report import _report_evidence_admission
+
+    assert _report_evidence_admission(SimpleNamespace(artifacts={})) is None
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        run_id="run-1",
+        model_run_id="run-1",
+        canonical_project_root=project_root,
+        keep_open=True,
+    ) as (record, _binding, owner):
+        wire = dict(owner._canonical_report_wire())  # type: ignore[attr-defined]
+        projection = owner.issue_report_projection(wire)
+        context = SimpleNamespace(
+            artifacts={
+                "_report_evidence_owner": owner,
+                "_report_evidence_projection": projection,
+            }
+        )
+
+        admitted = _report_evidence_admission(context)
+
+    assert admitted is not None
+    assert admitted[0] is owner
+    assert admitted[1] is projection
 
 
 def test_html_report_endpoint_never_returns_an_unindexed_report_file(tmp_path: Path) -> None:

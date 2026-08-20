@@ -55,6 +55,7 @@ from ..report_view_model import (
 from ..report_store import list_ai_reports, save_ai_report
 from ..services.results_service import (
     _normalize_issue_stream,
+    EvidenceProjectionError,
     ReportEvidenceRequestIdentityV1,
     ServerOwnedReportEvidencePersistenceV1,
     current_report_evidence_persistence,
@@ -117,6 +118,20 @@ def _report_evidence_for_run(
 ) -> dict[str, object]:
     """Build the typed Report contribution from indexed artifacts only."""
 
+    authoritative_persistence = _admit_report_owner_for_run(
+        run_root,
+        request_identity,
+        project_root,
+    )
+    if type(authoritative_persistence) is not ServerOwnedReportEvidencePersistenceV1:
+        del post_estimation_results
+        return _unavailable_report_evidence(
+            artifact_id=f"run:{run_root.name}",
+            artifact_type="report",
+            reason_code="EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+            request_identity=request_identity,
+        )
+
     views: list[dict[str, object]] = []
     try:
         indexed_records = _read_artifact_records(run_root)
@@ -126,6 +141,8 @@ def _report_evidence_for_run(
         if not isinstance(record, dict):
             continue
         if record.get("artifact_type") not in _REPORT_EVIDENCE_ARTIFACT_TYPES:
+            continue
+        if record.get("artifact_id") != authoritative_persistence.artifact_id:
             continue
         artifact_content_sha256: str | None = None
         artifact_path: Path | None = None
@@ -139,54 +156,12 @@ def _report_evidence_for_run(
             except (OSError, TypeError, ValueError):
                 artifact_content_sha256 = None
 
-        nested = record.get("evidence")
-        nested_record = nested if isinstance(nested, dict) else {}
-
-        def indexed_text(*keys: str) -> str | None:
-            for source in (record, nested_record):
-                for key in keys:
-                    value = source.get(key)
-                    if isinstance(value, str) and value.strip():
-                        return value
-            return None
-
-        authoritative_persistence = current_report_evidence_persistence(
-            actor_ref=(request_identity.actor_ref if request_identity else indexed_text("actor_ref", "evidence_actor_ref")),
-            run_id=run_root.name,
-            project_ref=indexed_text("project_ref", "evidence_project_ref"),
-            session_ref=indexed_text("session_ref", "evidence_session_ref"),
-            scope_ref=indexed_text("scope_ref", "evidence_scope_ref"),
-            model_run_id=indexed_text("model_run_id", "evidence_model_run_id"),
-            artifact_id=indexed_text("evidence_artifact_ref", "artifact_ref"),
-            commit_id=indexed_text(
-                "evidence_commit_ref",
-                "commit_ref",
-                "evidence_commit_id",
-                "commit_id",
-            ),
-            confirmation_ref=(request_identity.confirmation_ref if request_identity else indexed_text("confirmation_ref", "evidence_confirmation_ref")),
-            artifact_file_sha256=artifact_content_sha256,
-            project_root=project_root,
-        )
-        if (
-            project_root is not None
-            and type(authoritative_persistence) is ServerOwnedReportEvidencePersistenceV1
-            and not authoritative_persistence.accepts_project_root(project_root)
-        ):
-            views.append(
-                _unavailable_report_evidence(
-                    artifact_id=str(record.get("artifact_id") or "unknown-artifact"),
-                    artifact_type=str(record.get("artifact_type") or "unknown"),
-                    reason_code="EVIDENCE_PROJECT_ROOT_MISMATCH",
-                    request_identity=request_identity,
-                )
-            )
-            continue
         views.append(
             build_indexed_report_evidence(
                 record,
                 artifact_content_sha256=artifact_content_sha256,
                 authoritative_persistence=authoritative_persistence,
+                request_identity=request_identity,
             )
         )
 
@@ -265,15 +240,44 @@ def _report_identity_for_request(
         return None
     if persistence.run_id != run_id:
         return None
-    return ReportEvidenceRequestIdentityV1(
-        actor_ref=persistence.actor_ref,
-        project_ref=persistence.project_ref,
-        session_ref=persistence.session_ref,
-        scope_ref=persistence.scope_ref,
-        run_id=persistence.run_id,
-        model_run_id=persistence.model_run_id,
-        confirmation_ref=persistence.confirmation_ref,
+    try:
+        return persistence._require_report_request_identity(None)
+    except (AttributeError, TypeError, ValueError, RuntimeError, EvidenceProjectionError):
+        return None
+
+
+def _admit_report_owner_for_run(
+    run_root: Path,
+    request_identity: ReportEvidenceRequestIdentityV1 | None,
+    project_root: Path | str | None,
+) -> ServerOwnedReportEvidencePersistenceV1 | None:
+    """Admit the server owner before opening an artifact index or file."""
+
+    owner = current_report_evidence_persistence(
+        actor_ref=(request_identity.actor_ref if request_identity else None),
+        run_id=run_root.name,
+        project_ref=(request_identity.project_ref if request_identity else None),
+        session_ref=(request_identity.session_ref if request_identity else None),
+        scope_ref=(request_identity.scope_ref if request_identity else None),
+        model_run_id=(request_identity.model_run_id if request_identity else None),
+        artifact_id=None,
+        commit_id=None,
+        confirmation_ref=(request_identity.confirmation_ref if request_identity else None),
+        artifact_file_sha256=None,
+        project_root=project_root,
     )
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        return None
+    try:
+        owner._require_report_authority()
+        owner._require_report_request_identity(request_identity)
+        owner._canonical_report_artifact()
+        owner._canonical_report_wire()
+        if project_root is not None and not owner.accepts_project_root(project_root):
+            return None
+    except (AttributeError, TypeError, ValueError, RuntimeError, EvidenceProjectionError):
+        return None
+    return owner
 
 
 def _report_owner_for_export(
@@ -285,9 +289,15 @@ def _report_owner_for_export(
 ) -> ServerOwnedReportEvidencePersistenceV1:
     """Resolve the owner bound to the indexed artifact before any export."""
 
+    owner = _admit_report_owner_for_run(run_root, request_identity, project_root)
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        raise ReportExportError("REPORT_EVIDENCE_OWNER_UNAVAILABLE")
+
     artifact_id = projection.get("artifactRef")
     if not isinstance(artifact_id, str) or not artifact_id.strip():
         raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_REQUIRED")
+    if artifact_id != owner.artifact_id:
+        raise ReportExportError("REPORT_EVIDENCE_OWNER_CONTEXT_MISMATCH")
     try:
         records = _read_artifact_records(run_root)
     except (OSError, TypeError, ValueError, WorkbenchAPIError) as exc:
@@ -303,21 +313,8 @@ def _report_owner_for_export(
         artifact_file_sha256 = sha256_file(artifact_path)
     except (OSError, TypeError, ValueError, WorkbenchAPIError) as exc:
         raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_INTEGRITY_UNAVAILABLE") from exc
-    owner = current_report_evidence_persistence(
-        actor_ref=(request_identity.actor_ref if request_identity else projection.get("actorRef")),
-        run_id=projection.get("runId"),
-        project_ref=projection.get("projectRef"),
-        session_ref=projection.get("sessionRef"),
-        scope_ref=projection.get("scopeRef"),
-        model_run_id=projection.get("modelRunId"),
-        artifact_id=artifact_id,
-        commit_id=projection.get("commitId"),
-        confirmation_ref=(request_identity.confirmation_ref if request_identity else projection.get("confirmationRef")),
-        artifact_file_sha256=artifact_file_sha256,
-        project_root=project_root,
-    )
-    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
-        raise ReportExportError("REPORT_EVIDENCE_OWNER_UNAVAILABLE")
+    if artifact_file_sha256 != owner.artifact_file_sha256:
+        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_FILE_HASH_MISMATCH")
     return owner
 
 

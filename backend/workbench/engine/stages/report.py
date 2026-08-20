@@ -6,6 +6,28 @@ from typing import Any
 from ..context import ModelingContext, RunEnv
 
 
+def _report_evidence_admission(ctx: ModelingContext) -> tuple[object, object] | None:
+    """Extract the exact C0 Report pair carried by the stage context."""
+
+    from ...report_export import EvidenceProjectionV1
+    from ...services.results_service import ServerOwnedReportEvidencePersistenceV1
+
+    owner = ctx.artifacts.get("_report_evidence_owner")
+    projection = ctx.artifacts.get("_report_evidence_projection")
+    if (
+        type(owner) is not ServerOwnedReportEvidencePersistenceV1
+        or type(projection) is not EvidenceProjectionV1
+        or getattr(projection, "_owner", None) is not owner
+    ):
+        return None
+    try:
+        owner._require_report_authority()  # type: ignore[attr-defined]
+        projection._assert_server_owned()
+    except (AttributeError, TypeError, ValueError, RuntimeError):
+        return None
+    return owner, projection
+
+
 def _xlsx_export_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Serialize structured public-result fields before handing them to XLSX.
 
@@ -319,6 +341,11 @@ class ReportStage:
         report_render_status = "pending"
         report_available = False
         time_series_deliverables: dict[str, Any] | None = None
+        report_admission = _report_evidence_admission(ctx)
+        if report_admission is not None:
+            report_owner, report_projection = report_admission
+            if not report_owner.accepts_canonical_run_root(run_root):  # type: ignore[attr-defined]
+                report_admission = None
         env.step("reporting", "start", "Rendering report...")
         try:
             if primary_type == "time_series.arma_garch":
@@ -329,20 +356,43 @@ class ReportStage:
             else:
                 from ...report_view_model import build_report_view_model
 
+                if report_admission is None:
+                    # This call is intentionally typed unavailable.  It must
+                    # never be converted back into the historical raw summary.
+                    view_model = build_report_view_model(
+                        diagnostic_summary,
+                        run_root,
+                        descriptive_stats=descriptive_stats,
+                        statistical_tests=statistical_test_summaries,
+                        statistical_evidence=statistical_tests.get("evidence"),
+                        regression_table=regression_table,
+                        include_legacy_presentation=True,
+                    )
+                    raise RuntimeError(
+                        "REPORT_EVIDENCE_UNAVAILABLE:"
+                        + str(view_model.get("reasonCode", "EVIDENCE_OWNER_CAPABILITY_REQUIRED"))
+                    )
+                report_owner, report_projection = report_admission
                 view_model = build_report_view_model(
-                    diagnostic_summary, run_root,
+                    diagnostic_summary,
+                    run_root,
                     descriptive_stats=descriptive_stats,
                     statistical_tests=statistical_test_summaries,
                     statistical_evidence=statistical_tests.get("evidence"),
                     regression_table=regression_table,
+                    evidence_projection=report_projection,
                     include_legacy_presentation=True,
+                    owner=report_owner,
+                    artifact_admission=report_owner._canonical_report_artifact(),  # type: ignore[attr-defined]
                 )
-                if view_model.get("status") != "available":
-                    # Presentation facts retain the historical report prose
-                    # surface, while the public `facts` field remains empty
-                    # until a typed committed projection is admitted.
-                    view_model["facts"] = list(view_model.get("presentation_facts", []))
-            render_legacy_html_report(view_model, run_root)
+            if report_admission is None:
+                raise RuntimeError("REPORT_EVIDENCE_UNAVAILABLE:EVIDENCE_OWNER_CAPABILITY_REQUIRED")
+            render_legacy_html_report(
+                view_model,
+                run_root,
+                owner=report_owner,
+                projection=report_projection,
+            )
             report_render_status = "complete"
             report_available = (run_root / "reports" / "report.html").is_file()
             env.step("reporting", "complete", "Rendered HTML report")

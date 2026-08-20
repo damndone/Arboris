@@ -17,6 +17,7 @@ from workbench.narrative.render import render_template
 from workbench.narrative.templates import TEMPLATES
 from workbench.report_view_model import build_report_view_model
 from workbench.variable_roles import infer_variable_roles
+from tests.test_v189_evidence_report_boundary import _server_owned_evidence
 
 # ---------------------------------------------------------------------------
 # Template metadata integrity
@@ -442,9 +443,22 @@ def test_e2e_issue_to_rendered_text(tmp_path: Path):
     assert treatment_row["template_key"] == "coef_warn_joint"
 
     # View model must render
-    view_model = build_report_view_model(
-        summary, tmp_path, include_legacy_presentation=True
-    )
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        canonical_project_root=project_root,
+    ) as (_record, _binding, owner):
+        projection = owner.issue_report_projection(owner._canonical_report_wire())  # type: ignore[attr-defined]
+        view_model = build_report_view_model(
+            summary,
+            run_root,
+            include_legacy_presentation=True,
+            evidence_projection=projection,
+            owner=owner,
+            artifact_admission=owner._canonical_report_artifact(),  # type: ignore[attr-defined]
+        )
     assert any("causal" in cc.lower() for cc in [view_model.get("causal_caution", "")])
 
 

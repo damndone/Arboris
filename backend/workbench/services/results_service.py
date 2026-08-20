@@ -996,46 +996,58 @@ def current_report_evidence_persistence(
     artifact_file_sha256: str | None,
     project_root: Path | str | None = None,
 ) -> ServerOwnedReportEvidencePersistenceV1 | None:
-    """Return only the capability bound to the complete server-owned identity.
+    """Return only the capability bound to a server-owned Report identity.
 
-    A run id is not a capability selector.  The route must provide the full
-    project/session/scope/run/model/artifact/commit/file identity, otherwise no
-    capability is returned and the report projection remains typed unavailable.
+    The artifact/commit/file triple has two modes.  A complete triple verifies
+    a specific indexed artifact.  Three explicit ``None`` values perform the
+    earlier run-owner admission used by HTTP entrances, before they read an
+    artifact index or hash a file.  Partial triples remain invalid.
     """
 
     capability = _REPORT_EVIDENCE_PERSISTENCE
     if type(capability) is not ServerOwnedReportEvidencePersistenceV1:
         return None
-    expected = (
+    context = (
         run_id,
         actor_ref,
         project_ref,
         session_ref,
         scope_ref,
         model_run_id,
-        artifact_id,
-        commit_id,
         confirmation_ref,
-        artifact_file_sha256,
     )
-    if not all(type(value) is str and value.strip() for value in expected):
+    if not all(type(value) is str and value.strip() for value in context):
+        return None
+    artifact_fields = (artifact_id, commit_id, artifact_file_sha256)
+    if not (
+        all(value is None for value in artifact_fields)
+        or all(type(value) is str and value.strip() for value in artifact_fields)
+    ):
         return None
     if (
         capability.actor_ref != actor_ref
-        or
-        capability.run_id != run_id
+        or capability.run_id != run_id
         or capability.project_ref != project_ref
         or capability.session_ref != session_ref
         or capability.scope_ref != scope_ref
         or capability.model_run_id != model_run_id
-        or capability.artifact_id != artifact_id
-        or capability.commit_id != commit_id
         or capability.confirmation_ref != confirmation_ref
-        or capability.artifact_file_sha256 != artifact_file_sha256
         or (
             project_root is not None
             and not capability.accepts_project_root(project_root)
         )
+    ):
+        return None
+    try:
+        capability._require_report_authority()
+    except (AttributeError, TypeError, ValueError, EvidenceProjectionError):
+        return None
+    if all(value is None for value in artifact_fields):
+        return capability
+    if (
+        capability.artifact_id != artifact_id
+        or capability.commit_id != commit_id
+        or capability.artifact_file_sha256 != artifact_file_sha256
     ):
         return None
     return capability

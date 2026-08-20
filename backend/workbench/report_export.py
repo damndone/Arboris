@@ -19,6 +19,7 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import RLock
 from typing import Any
 from xml.sax.saxutils import escape as xml_escape
 
@@ -29,6 +30,15 @@ FIGURE_MARKER = re.compile(r"\[\[fig:([A-Za-z0-9._-]+)\]\]")
 _HEADING = re.compile(r"^(#{1,4})\s+(.*)$")
 _BULLET = re.compile(r"^[-*]\s+(.*)$")
 _ORDERED = re.compile(r"^\d+[.)]\s+(.*)$")
+
+
+# These registries are deliberately keyed by object identity and retain the
+# exact issued object.  Copying the visible fields (including the private
+# marker/token fields) therefore cannot mint a new Report capability.
+_REPORT_PROJECTION_ADMISSIONS: dict[int, tuple[object, object, object]] = {}
+_REPORT_PROJECTION_ADMISSIONS_LOCK = RLock()
+_REPORT_EVIDENCE_WRITER_ADMISSIONS: dict[int, tuple[object, object, object]] = {}
+_REPORT_EVIDENCE_WRITER_ADMISSIONS_LOCK = RLock()
 
 
 class ReportExportError(ValueError):
@@ -104,6 +114,17 @@ def _validate_owner_bound_projection(
     admitted_owner = _require_server_owned_owner(owner)
     if type(projection) is not EvidenceProjectionV1:
         raise TypeError("Report evidence requires EvidenceProjectionV1")
+    issuer_token = getattr(projection, "_issuer_token", None)
+    with _REPORT_PROJECTION_ADMISSIONS_LOCK:
+        admission = _REPORT_PROJECTION_ADMISSIONS.get(id(projection))
+    if (
+        admission is None
+        or admission[0] is not projection
+        or admission[1] is not admitted_owner
+        or admission[2] is not issuer_token
+        or type(issuer_token) is not object
+    ):
+        raise TypeError("Report evidence projection lacks the server-owned exact issuer identity")
     if getattr(projection, "_owner", None) is not admitted_owner:
         raise TypeError("Report evidence projection is not bound to the owner capability")
     if getattr(projection, "_authority_marker", None) is not getattr(
@@ -128,6 +149,7 @@ class EvidenceProjectionV1:
     wire: Mapping[str, Any]
     _owner: object | None = field(init=False, repr=False, compare=False, default=None)
     _authority_marker: object | None = field(init=False, repr=False, compare=False, default=None)
+    _issuer_token: object | None = field(init=False, repr=False, compare=False, default=None)
 
     def __init__(
         self,
@@ -165,6 +187,7 @@ class EvidenceProjectionV1:
         )
         object.__setattr__(instance, "_owner", None)
         object.__setattr__(instance, "_authority_marker", None)
+        object.__setattr__(instance, "_issuer_token", None)
         return instance
 
     @classmethod
@@ -245,10 +268,27 @@ class EvidenceProjectionV1:
             "_authority_marker",
             getattr(admitted_owner, "_report_authority_marker"),
         )
+        issuer_token = object()
+        object.__setattr__(instance, "_issuer_token", issuer_token)
+        with _REPORT_PROJECTION_ADMISSIONS_LOCK:
+            _REPORT_PROJECTION_ADMISSIONS[id(instance)] = (
+                instance,
+                admitted_owner,
+                issuer_token,
+            )
         return instance
 
     def _assert_server_owned(self) -> None:
         _validate_owner_bound_projection(self, getattr(self, "_owner", None))
+
+    def __copy__(self):
+        raise TypeError("server-issued Report evidence projections cannot be copied")
+
+    def __deepcopy__(self, _memo):
+        raise TypeError("server-issued Report evidence projections cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("server-issued Report evidence projections cannot be serialized")
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +298,7 @@ class ReportEvidenceWriterV1:
     projection: EvidenceProjectionV1
     sections: tuple[str, ...] = ("facts",)
     tables_override: dict[str, tuple[dict[str, Any], ...]] | None = None
+    _issuer_token: object | None = field(init=False, repr=False, compare=False, default=None)
 
     def __init__(
         self,
@@ -301,9 +342,28 @@ class ReportEvidenceWriterV1:
         object.__setattr__(instance, "projection", projection)
         object.__setattr__(instance, "sections", tuple(sections))
         object.__setattr__(instance, "tables_override", None)
+        issuer_token = object()
+        object.__setattr__(instance, "_issuer_token", issuer_token)
+        with _REPORT_EVIDENCE_WRITER_ADMISSIONS_LOCK:
+            _REPORT_EVIDENCE_WRITER_ADMISSIONS[id(instance)] = (
+                instance,
+                owner,
+                issuer_token,
+            )
         return instance
 
     def _assert_server_owned(self) -> None:
+        issuer_token = getattr(self, "_issuer_token", None)
+        with _REPORT_EVIDENCE_WRITER_ADMISSIONS_LOCK:
+            admission = _REPORT_EVIDENCE_WRITER_ADMISSIONS.get(id(self))
+        if (
+            admission is None
+            or admission[0] is not self
+            or admission[1] is not getattr(self.projection, "_owner", None)
+            or admission[2] is not issuer_token
+            or type(issuer_token) is not object
+        ):
+            raise TypeError("ReportEvidenceWriterV1 lacks the server-owned exact issuer identity")
         self.projection._assert_server_owned()
         if not self.sections or any(
             type(section) is not str or not section.strip() for section in self.sections
@@ -311,6 +371,15 @@ class ReportEvidenceWriterV1:
             raise TypeError("ReportEvidenceWriterV1 requires named typed sections")
         if self.tables_override is not None:
             raise TypeError("ReportEvidenceWriterV1 rejects caller-owned raw tables")
+
+    def __copy__(self):
+        raise TypeError("server-issued Report evidence writers cannot be copied")
+
+    def __deepcopy__(self, _memo):
+        raise TypeError("server-issued Report evidence writers cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("server-issued Report evidence writers cannot be serialized")
 
     def tables(self) -> dict[str, list[dict[str, Any]]]:
         self._assert_server_owned()

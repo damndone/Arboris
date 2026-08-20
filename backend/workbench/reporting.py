@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 from typing import Any
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -15,6 +16,10 @@ from .report_export import (
 )
 
 
+_REPORT_DOCUMENT_WRITER_ADMISSIONS: dict[int, tuple[object, object, object]] = {}
+_REPORT_DOCUMENT_WRITER_ADMISSIONS_LOCK = RLock()
+
+
 @dataclass(frozen=True, slots=True)
 class ReportDocumentWriterV1:
     """Typed HTML/PDF document writer capability."""
@@ -23,6 +28,7 @@ class ReportDocumentWriterV1:
     projection: EvidenceProjectionV1
     canonical_run_root: Path
     _owner: object | None = field(init=False, repr=False, compare=False, default=None)
+    _issuer_token: object | None = field(init=False, repr=False, compare=False, default=None)
 
     def __init__(
         self,
@@ -64,10 +70,38 @@ class ReportDocumentWriterV1:
         object.__setattr__(instance, "projection", projection)
         object.__setattr__(instance, "canonical_run_root", canonical_run_root.expanduser().resolve(strict=False))
         object.__setattr__(instance, "_owner", owner)
+        issuer_token = object()
+        object.__setattr__(instance, "_issuer_token", issuer_token)
+        with _REPORT_DOCUMENT_WRITER_ADMISSIONS_LOCK:
+            _REPORT_DOCUMENT_WRITER_ADMISSIONS[id(instance)] = (
+                instance,
+                owner,
+                issuer_token,
+            )
         return instance
 
     def _assert_server_owned(self) -> None:
+        issuer_token = getattr(self, "_issuer_token", None)
+        with _REPORT_DOCUMENT_WRITER_ADMISSIONS_LOCK:
+            admission = _REPORT_DOCUMENT_WRITER_ADMISSIONS.get(id(self))
+        if (
+            admission is None
+            or admission[0] is not self
+            or admission[1] is not getattr(self, "_owner", None)
+            or admission[2] is not issuer_token
+            or type(issuer_token) is not object
+        ):
+            raise TypeError("ReportDocumentWriterV1 lacks the server-owned exact issuer identity")
         _validate_owner_bound_projection(self.projection, getattr(self, "_owner", None))
+
+    def __copy__(self):
+        raise TypeError("server-issued Report document writers cannot be copied")
+
+    def __deepcopy__(self, _memo):
+        raise TypeError("server-issued Report document writers cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("server-issued Report document writers cannot be serialized")
 
 
 def _validate_bound_report_view_model(
