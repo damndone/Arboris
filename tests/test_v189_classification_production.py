@@ -1569,6 +1569,11 @@ def test_generic_artifact_range_parser_strictly_rejects_unbounded_decimal_conver
         runs_routes._parse_artifact_range_header(f"bytes={'9' * 5000}-", 10)
 
 
+def test_generic_artifact_range_parser_rejects_present_empty_header() -> None:
+    with pytest.raises(runs_routes._MalformedArtifactRange):
+        runs_routes._parse_artifact_range_header("", 10)
+
+
 def test_generic_artifact_range_parser_mixed_set_filters_only_valid_unsatisfiable_components() -> None:
     assert runs_routes._parse_artifact_range_header("bytes=0-1,999-1000", 10) == [(0, 2)]
     with pytest.raises(runs_routes._UnsatisfiableArtifactRange):
@@ -1703,6 +1708,19 @@ def test_generic_artifact_download_rejects_malformed_range_explicitly(tmp_path, 
     )
 
     assert response.status_code == 400
+
+
+def test_generic_artifact_download_rejects_present_empty_range_header(tmp_path) -> None:
+    project_root, _run_root, artifact_id, _expected = _materialize_generic_artifact_run(tmp_path)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": ""},
+    )
+
+    assert response.status_code == 400
+    assert "content-range" not in response.headers
 
 
 def test_generic_artifact_download_rejects_unsatisfiable_range_explicitly(tmp_path) -> None:

@@ -1260,7 +1260,7 @@ def download_artifact_endpoint(
         range_value = range_header if isinstance(range_header, str) else None
         if_range_value = if_range if isinstance(if_range, str) else None
         ranges: list[tuple[int, int]] = []
-        if range_value and (
+        if range_value is not None and (
             if_range_value is None or if_range_value in {headers["ETag"], headers["Last-Modified"]}
         ):
             try:
