@@ -1,0 +1,124 @@
+schema_version: workbench.v1.8.9.candidate-lock.v1
+stage: C4
+status: candidate_bound_evaluated_not_releasable
+
+# This lock is created after the serial integration commits.  It binds all
+# claims below to one exact product SHA; the acceptance harness remains a
+# sidecar and is not merged into the product candidate.
+baseline_commit: 05362b5697e10eb25fd219da003641f96eeec082
+candidate_commit: 43578a90a8f224649f27c9d1bc816439f6b21d3d
+candidate_parent_commit: 401e01c2f0a9288a807331835f0e8459be47ed3a
+formal_line: v1-8-9-hardening-integration
+
+merge_order:
+  - c0_contract_lock_and_c3_foundation_inherited
+  - p0_legacy_resume
+  - p0_evidence_report
+  - p1_data_consumer
+  - p1_classification_production
+  - p1_survey_extension
+  - integration_legacy_download_repair
+
+merge_commits:
+  p0_legacy_resume: 9270f7c0
+  p0_evidence_report: 98d05a4f
+  p1_data_consumer: c735795e
+  p1_classification_production: f74ca125
+  p1_survey_extension: 401e01c2
+  integration_repair: 43578a90
+
+reviewed_source_tips:
+  p0_legacy_resume: a2b51d5e2cad718795d2c739f10aee1c9fdca10f
+  p0_evidence_report: 623ecfc0a8eed0e2d6665983584b9fdded38567f
+  p1_data_consumer: 48964f575873fd8c73d0303c5c4dbab5e6bbec9d
+  p1_classification_production: 65233cc7a9b3b4c788a00c7488333675929bf5d2
+  p1_survey_extension: c05b2df248656dac4dbb76d18cc90161ddee9834
+
+integration_repairs:
+  legacy_download_index_compatibility:
+    commit: 43578a90
+    rule: strict_artifact_index_remains_default; only_exact_legacy_classification_evidence_download_shape_is_accepted
+    raw_model_results_fallback: forbidden
+  acceptance_cache_boundary:
+    rule: test_caches_are_not_candidate_content
+    cleanup: explicit_pytest_cache_and_pycache_only
+
+provider_catalog:
+  catalog_digest: 97cd7730bf1afefe8d9b33be17a81b434b3613b128e478fac3bf5d12ebb08420
+  coverage_digest: 771e983ae7172a0c467f04f4de69e3d9c00ec473ef03d1e0c8d54a7b872c3f9b
+  provider_count: 7
+  coverage_rows: 15
+  covered_rows: 5
+  blocked_rows: 10
+  provider_ids:
+    - agent.compiler
+    - evidence.core
+    - fixture.contracts
+    - workbench.classification_ml
+    - workbench.consumer_projection
+    - workbench.data_consumer
+    - workflow.post_estimation
+  source_filenames:
+    - agent_compiler.json
+    - evidence_core.json
+    - contract_fixture.json
+    - classification_ml.json
+    - consumer_projection.json
+    - data_consumer.json
+    - workflow_post_estimation.json
+
+candidate_bound_acceptance:
+  harness_tip: 753f5405089aa8c88ee6f28cb16b2c47021e2618
+  harness_merge_policy: sidecar_only_not_in_product_candidate
+  run_id: run-20260820T070540078025Z-d97915649ca1
+  manifest_sha256: 0eadd4bd575c0764b4b6d321fdb2e763310c6b77d6f66463d6d762cd973acc26
+  overall_status: BLOCKED
+  candidate_sha_verified: true
+  candidate_backend: PASS
+  frontend_evaluation: BLOCKED
+  frontend_block_reason: four_required_sidecar_acceptance_files_are_absent_from_candidate
+  matrix_digest: 21c9aadecdd05719669f3ef572f003e3e3b581df43349f68bb1310e495e1132a
+  matrix_rows: 15
+  matrix_covered: 5
+  matrix_blocked: 10
+  blocked_rows_preserved: true
+  provider: NOT_VERIFIED
+  provider_called: false
+  browser: NOT_VERIFIED
+  host_full_gate: FAILED
+  release: NOT_VERIFIED
+
+controlled_host_full_gate:
+  status: FAILED
+  command: WORKBENCH_PYTHON=.venv/bin/python bash scripts/gate.sh --full
+  frontend_full_suite: passed_197_files_1727_tests_9_skipped
+  frontend_typecheck: passed
+  backend_full_suite: failed
+  failure_boundary: legacy_report_writer_calls_removed_model_results_test_hooks_analysis_loop_tests_without_admitted_proposal_store_and_golden_snapshots_expect_pre_cutover_report_artifacts
+  safety_response: do_not_restore_raw_model_results_or_unbound_report_mapping_fallback
+
+focused_tests:
+  - name: classification_evidence_and_consumers
+    status: passed
+    observed: 240 passed, 5 warnings
+  - name: survey_report_and_exports
+    status: passed
+    observed: 156 passed, 2 warnings
+  - name: candidate_backend_production_boundary
+    status: passed
+    observed: 173 passed, 2 warnings
+  - name: frontend_v189_report_and_classification
+    status: passed
+    observed: 4 files, 49 tests passed
+  - name: frontend_typecheck
+    status: passed
+  - name: python_compileall
+    status: passed
+  - name: git_diff_check
+    status: passed
+
+not_verified:
+  - browser_visible_acceptance
+  - real_external_provider_acceptance
+  - restart_durability_and_multi_worker_receipt_consumption
+  - release_merge_tag_and_publish
