@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from workbench.api import app
+from workbench.artifacts import sha256_file as _sha256_file
 from workbench.prediction import run_classification_model_v189
 from workbench.canonical import canonical_json_v1, sha256_canonical
 from workbench.predictive_research.classification_contracts import (
@@ -1028,10 +1029,10 @@ def test_runs_artifact_list_rejects_unreadable_regular_artifact_at_repository_an
         encoding="utf-8",
     )
 
-    def raise_permission(_path):
+    def raise_permission(*_args):
         raise PermissionError("controlled unreadable artifact probe")
 
-    monkeypatch.setattr(run_repository, "sha256_file", raise_permission, raising=False)
+    monkeypatch.setattr(run_repository, "_sha256_artifact_fd", raise_permission, raising=False)
 
     with pytest.raises(WorkbenchAPIError) as exc_info:
         runs_routes.list_artifacts_endpoint("run-unreadable-artifact", str(project_root))
@@ -1040,6 +1041,85 @@ def test_runs_artifact_list_rejects_unreadable_regular_artifact_at_repository_an
 
     response = TestClient(app, raise_server_exceptions=False).get(
         "/runs/run-unreadable-artifact/artifacts",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert "groups" not in response.json()
+
+
+def test_runs_artifact_list_rejects_external_symlink_artifact_at_repository_and_http(
+    tmp_path,
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-external-symlink"
+    run_root.mkdir(parents=True)
+    outside = tmp_path / "outside.json"
+    outside.write_text("outside", encoding="utf-8")
+    (run_root / "data.json").symlink_to(outside)
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "artifacts": [_canonical_artifact_record(
+                sha256=hashlib.sha256(outside.read_bytes()).hexdigest(),
+            )],
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        runs_routes.list_artifacts_endpoint("run-external-symlink", str(project_root))
+
+    assert exc_info.value.code == "ARTIFACTS_INDEX_INVALID"
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-external-symlink/artifacts",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert "groups" not in response.json()
+
+
+def test_runs_artifact_list_rejects_external_symlink_replacement_after_legacy_path_probe(
+    tmp_path, monkeypatch
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-toctou-replacement"
+    run_root.mkdir(parents=True)
+    artifact_path = run_root / "data.json"
+    artifact_path.write_text("inside", encoding="utf-8")
+    outside = tmp_path / "outside.json"
+    outside.write_text("outside", encoding="utf-8")
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "artifacts": [_canonical_artifact_record(
+                sha256=hashlib.sha256(outside.read_bytes()).hexdigest(),
+            )],
+        }),
+        encoding="utf-8",
+    )
+
+    original_sha256_file = _sha256_file
+
+    def replace_after_path_probe(path):
+        assert path == artifact_path.resolve()
+        artifact_path.unlink()
+        artifact_path.symlink_to(outside)
+        return original_sha256_file(path)
+
+    monkeypatch.setattr(run_repository, "sha256_file", replace_after_path_probe, raising=False)
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        runs_routes.list_artifacts_endpoint("run-toctou-replacement", str(project_root))
+
+    assert exc_info.value.code == "ARTIFACTS_INDEX_INVALID"
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-toctou-replacement/artifacts",
         params={"project_root": str(project_root)},
     )
 
@@ -1087,6 +1167,8 @@ def test_runs_artifact_list_accepts_canonical_formal_output_over_http(tmp_path) 
         "null_digest",
         "duplicate_id",
         "path_escape",
+        "path_component_too_long",
+        "non_ascii_path",
         "invalid_digest",
         "tampered_structure",
     ),
@@ -1120,6 +1202,10 @@ def test_runs_artifact_list_rejects_noncanonical_index_records_with_exact_invali
         index["artifacts"].append(_canonical_artifact_record(path="second.json"))  # type: ignore[union-attr]
     elif mutation == "path_escape":
         index["artifacts"][0]["path"] = "../outside.json"  # type: ignore[index]
+    elif mutation == "path_component_too_long":
+        index["artifacts"][0]["path"] = "a" * 129  # type: ignore[index]
+    elif mutation == "non_ascii_path":
+        index["artifacts"][0]["path"] = "数据.json"  # type: ignore[index]
     elif mutation == "invalid_digest":
         index["artifacts"][0]["sha256"] = "not-a-digest"  # type: ignore[index]
     elif mutation == "tampered_structure":
@@ -1193,6 +1279,8 @@ def test_runs_artifact_list_http_boundary_rejects_forged_artifact_type_without_g
         "null_digest",
         "duplicate_id",
         "path_escape",
+        "path_component_too_long",
+        "non_ascii_path",
         "invalid_digest",
         "tampered_structure",
     ),
@@ -1226,6 +1314,10 @@ def test_runs_artifact_list_http_boundary_returns_500_for_every_invalid_mutation
         index["artifacts"].append(_canonical_artifact_record(path="second.json"))  # type: ignore[union-attr]
     elif mutation == "path_escape":
         index["artifacts"][0]["path"] = "../outside.json"  # type: ignore[index]
+    elif mutation == "path_component_too_long":
+        index["artifacts"][0]["path"] = "a" * 129  # type: ignore[index]
+    elif mutation == "non_ascii_path":
+        index["artifacts"][0]["path"] = "数据.json"  # type: ignore[index]
     elif mutation == "invalid_digest":
         index["artifacts"][0]["sha256"] = "not-a-digest"  # type: ignore[index]
     elif mutation == "tampered_structure":

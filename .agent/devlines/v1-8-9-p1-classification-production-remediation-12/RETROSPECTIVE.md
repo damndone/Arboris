@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 1/5 (20.0%; 20.0 per 100 events)
+- Failure frequency: 1/6 (16.7%; 16.7 per 100 events)
 - Repeat rate: 0/1 (0.0%)
 - Recurrence rate: 0/1 (0.0%)
-- MTTR: N/A (sample=0; unresolved=1)
+- MTTR: median=1743000 ms (sample=1; unresolved=0)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/2 (0.0%)
+- Gate waste rate: 0/3 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -61,3 +61,4 @@ COMPLETED
 - #3: `7b2e5d9a-4c61-48f0-a3d7-1e9b6c2f5a85` | 2026-08-20T01:34:36.000Z | GATE/api_artifacts_known_gate | incident=`8c3d6e1f-5a72-4b90-8d24-6f1c9e7a3b05` | lesson_key=`api-artifacts-known-gate` | event_sha256=`8635a935367cd64999075190966c1520235a1f499a81a9bf601c81193a6c54f3`
 - #4: `9d4f2b7c-6a18-4e50-b3d9-1c7a8f2e5b65` | 2026-08-20T01:34:36.000Z | GATE/artifact_integrity_green | incident=`a5c8e1f4-7b29-4d63-9f02-6e3a8c1b5d74` | lesson_key=`artifact-index-integrity-green` | event_sha256=`6ca9ac8c2500285fc0eae67536884fcdb26ca3e0f727ec452aa4c06bf3990a21`
 - #5: `b8e2f5a1-6c3d-4f79-9a02-d7e1c5b8f655` | 2026-08-20T01:34:36.000Z | STATE_CHANGE/artifact_integrity_terminal | incident=`c9f4a7d2-6e1b-48f0-9a53-b7d5c2e8f155` | lesson_key=`formal-remediation-closeout` | event_sha256=`c1404a9bb9de2bee3850f0b25490edc11801816f8d4fcb89c37d87e4fb20bc0c`
+- #6: `4e1f8a2d-7c6b-4a90-b5d3-2f1e6c8a9d04` | 2026-08-20T02:00:28.000Z | GATE/artifact_integrity_red_resolved | incident=`6f5a4c3b-2d1e-49f8-8a7b-6c5d4e3f2a16` | lesson_key=`artifact-integrity-failure-resolved` | event_sha256=`009311ea6e433436e20f026a10aa4f4c1a2dc86fd116eddedb8b19bd87a51558`
