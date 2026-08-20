@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
+import json
 from pathlib import Path
 from typing import Any, Literal
 
@@ -37,21 +38,29 @@ from ..data_operations import (
     DataCastItem,
     DataColumnCastSpecV1,
     DataColumnCastValidationError,
+    DataMetadataUnavailableError,
     DataColumnsCastSpecV1,
     FeatureRecipeOperationSpecV1,
     DataTransformSpecV1,
+    apply_metadata_mutation,
     apply_data_transform,
     apply_feature_recipe_operation,
+    data_operation_transaction,
+    preflight_data_operation,
     preview_data_column_cast,
     preview_data_columns_cast,
     preview_feature_recipe,
     preview_data_transform,
+    preview_metadata_mutation,
+    read_metadata_mutation_record,
     resolve_data_column_cast_context,
+    resolve_metadata_registry,
     _read_frame,
     _resolve_source,
 )
 from ..data_profile import DatasetRefV1, build_data_profile
 from ..metadata import build_metadata_loss_manifest
+from ..metadata import MetadataMutationSpecV1
 from ..code_execution import (
     MAX_CODE_CHARS,
     CodeExecuteSpecV1,
@@ -61,10 +70,6 @@ from ..code_execution import (
 )
 from ..figure_context import FigureContextError, resolve_figure_ai_context
 from ..sandbox import SandboxUnavailableError
-
-# Typed operations that derive a child data node, and whose records the data
-# drawer resolves by child node id for provenance.
-_DATA_OPERATION_IDS = frozenset({"data.column.cast", "data.columns.cast", "code.execute"})
 
 router = APIRouter()
 
@@ -86,6 +91,175 @@ def _public_data_operation_manifest() -> dict[str, Any]:
     return payload
 
 
+def _request_sha256(body: BaseModel, *, exclude: set[str] | None = None) -> str:
+    payload = body.model_dump(
+        mode="json",
+        exclude_none=True,
+        exclude_unset=True,
+        exclude=exclude or set(),
+    )
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _options_sha256(body: BaseModel, *, exclude: set[str] | None = None) -> str:
+    return _request_sha256(
+        body,
+        exclude={
+            "source_run_id",
+            "source_node_id",
+            "source_artifact_id",
+            "preview_fingerprint",
+            "session_id",
+            *(exclude or set()),
+        },
+    )
+
+
+def _data_consumer_catalog_digest() -> str:
+    from ..data_operation_manifest import build_data_consumer_runtime_adapter
+
+    try:
+        return build_data_consumer_runtime_adapter().catalog_digest
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_CONSUMER_RUNTIME_UNAVAILABLE",
+            message="The server-owned data-consumer catalog is unavailable.",
+            details={"reason": str(exc)},
+        ) from exc
+
+
+def _preview_payload(body: BaseModel, preview: Any) -> dict[str, Any]:
+    payload = preview.to_dict()
+    payload["request_sha256"] = _request_sha256(body)
+    payload["options_sha256"] = _options_sha256(body)
+    payload["catalog_digest"] = _data_consumer_catalog_digest()
+    operation_id = payload.get("operation_id")
+    if isinstance(payload.get("method"), str) and payload["method"]:
+        payload["evidence_method"] = payload["method"]
+    elif operation_id == "data.metadata.update":
+        payload["evidence_method"] = "metadata_update"
+    elif operation_id == "data.feature_recipe":
+        payload["evidence_method"] = "feature_recipe"
+    elif isinstance(operation_id, str) and operation_id.startswith("data."):
+        payload["evidence_method"] = operation_id
+    return payload
+
+
+def _confirm_preview_payload(body: BaseModel, preview: Any) -> dict[str, Any]:
+    payload = preview.to_dict()
+    payload["request_sha256"] = _request_sha256(
+        body,
+        exclude={"preview_fingerprint", "session_id"},
+    )
+    payload["options_sha256"] = _options_sha256(body)
+    payload["catalog_digest"] = _data_consumer_catalog_digest()
+    operation_id = payload.get("operation_id")
+    if isinstance(payload.get("method"), str) and payload["method"]:
+        payload["evidence_method"] = payload["method"]
+    elif operation_id == "data.metadata.update":
+        payload["evidence_method"] = "metadata_update"
+    elif operation_id == "data.feature_recipe":
+        payload["evidence_method"] = "feature_recipe"
+    elif isinstance(operation_id, str) and operation_id.startswith("data."):
+        payload["evidence_method"] = operation_id
+    return payload
+
+
+def _require_live_data_operation_descriptor(
+    operation_id: str,
+    *,
+    preview_ref: str | None = None,
+    confirm_ref: str | None = None,
+):
+    """Resolve route authority from the one server-owned live manifest."""
+
+    from .. import data_operation_manifest
+
+    manifest = data_operation_manifest.build_data_operation_manifest()
+    descriptor = next(
+        (item for item in manifest.operations if item.operation_id == operation_id),
+        None,
+    )
+    if descriptor is None:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_NOT_ADVERTISED",
+            message="The requested data operation is not advertised by the live server manifest.",
+            details={"operation_id": operation_id},
+        )
+    if preview_ref is not None and descriptor.preview_ref != preview_ref:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_ROUTE_IDENTITY_MISMATCH",
+            message="The route does not match the live data-operation descriptor.",
+            details={"operation_id": operation_id, "expected": descriptor.preview_ref},
+        )
+    if confirm_ref is not None and descriptor.confirm_ref != confirm_ref:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_ROUTE_IDENTITY_MISMATCH",
+            message="The route does not match the live data-operation descriptor.",
+            details={"operation_id": operation_id, "expected": descriptor.confirm_ref},
+        )
+    return descriptor
+
+
+def _live_data_operation_ids() -> frozenset[str]:
+    """Return the record lookup allowlist from the live manifest projection."""
+
+    payload = _public_data_operation_manifest()
+    return frozenset(
+        str(item["operation_id"])
+        for item in payload["operations"]
+        if isinstance(item, dict) and isinstance(item.get("operation_id"), str)
+    )
+
+
+def _require_live_metadata_loss_unavailable() -> None:
+    """Keep the legacy read-only preview behind the server-owned manifest."""
+
+    from .. import data_operation_manifest
+
+    manifest = data_operation_manifest.build_data_operation_manifest()
+    unavailable = next(
+        (
+            item
+            for item in manifest.unavailable
+            if item.operation_id == "data.metadata.loss"
+        ),
+        None,
+    )
+    if unavailable is None or unavailable.reason_code != "not_executable":
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_NOT_ADVERTISED",
+            message="The metadata-loss preview is not available on the live server surface.",
+            details={"operation_id": "data.metadata.loss"},
+        )
+
+
+def _preflight_or_error(root: Path, spec: Any, preview: Any) -> None:
+    """Keep complete write-free preflight failures inside the HTTP error boundary."""
+
+    try:
+        preflight_data_operation(root, spec, preview)
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The data operation could not be preflighted against the current source.",
+            details={"reason": str(exc)},
+        ) from exc
+
+
 def _resolve_profile(
     root: Path,
     *,
@@ -105,25 +279,19 @@ def _resolve_profile(
     content_sha256 = artifact.get("sha256")
     if not isinstance(content_sha256, str) or not content_sha256:
         content_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    declared_metadata: dict[str, object] = {}
-    try:
-        run_inputs = read_json(_run_root / "run_inputs.json")
-    except (FileNotFoundError, KeyError, TypeError, ValueError):
-        run_inputs = {}
-    form = run_inputs.get("form") if isinstance(run_inputs, dict) else None
-    labels = form.get("labels") if isinstance(form, dict) else None
-    if isinstance(labels, dict):
-        # Labels are server-owned run inputs.  Keep only declarations for the
-        # selected immutable frame: a derived child may legitimately drop a
-        # parent column, but it must never receive a declaration for a column
-        # that is not present.
-        known_columns = set(str(column) for column in frame.columns)
-        for field_name in ("variable_labels", "value_labels", "measurement_level"):
-            mapping = labels.get(field_name)
-            if isinstance(mapping, dict):
-                declared_metadata[field_name] = {
-                    column: value for column, value in mapping.items() if column in known_columns
-                }
+    registry = resolve_metadata_registry(
+        root,
+        source_run_id=source_run_id,
+        source_node_id=source_node_id,
+        source_artifact_id=source_artifact_id,
+    )
+    if registry is None:
+        raise DataMetadataUnavailableError(
+            "profile requires a confirmed server-owned metadata artifact"
+        )
+    declared_metadata = registry.to_profile_metadata(
+        tuple(str(column) for column in frame.columns)
+    )
     profile = build_data_profile(
         frame=frame,
         dataset_ref=DatasetRefV1(
@@ -131,6 +299,8 @@ def _resolve_profile(
             node_id=source_node_id,
             artifact_id=source_artifact_id,
             content_sha256=content_sha256,
+            schema_revision=registry.schema_revision,
+            metadata_revision=registry.metadata_revision,
         ),
         declared_metadata=declared_metadata,
     )
@@ -209,7 +379,21 @@ class DataTransformRequest(BaseModel):
     source_run_id: str = Field(min_length=1, max_length=200)
     source_node_id: str = Field(min_length=1, max_length=300)
     source_artifact_id: str = Field(min_length=1, max_length=200)
-    operation: Literal["merge", "append", "reshape", "subset"]
+    operation: Literal[
+        "merge",
+        "append",
+        "reshape",
+        "subset",
+        "dedupe",
+        "rename",
+        "aggregate",
+        "fill_missing",
+        "tsset",
+        "lag",
+        "sort",
+        "split",
+        "recode",
+    ]
     parameters: dict[str, Any] = Field(default_factory=dict)
     secondary_run_id: str | None = Field(default=None, max_length=200)
     secondary_node_id: str | None = Field(default=None, max_length=300)
@@ -217,6 +401,23 @@ class DataTransformRequest(BaseModel):
 
 
 class DataTransformConfirmRequest(DataTransformRequest):
+    preview_fingerprint: str = Field(min_length=1, max_length=200)
+    session_id: str = Field(default="agent_data_ui", min_length=1, max_length=200)
+
+
+class MetadataMutationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_run_id: str = Field(min_length=1, max_length=200)
+    source_node_id: str = Field(min_length=1, max_length=300)
+    source_artifact_id: str = Field(min_length=1, max_length=200)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    weight: dict[str, Any] | None = None
+    split: dict[str, Any] | None = None
+    group: dict[str, Any] | None = None
+
+
+class MetadataMutationConfirmRequest(MetadataMutationRequest):
     preview_fingerprint: str = Field(min_length=1, max_length=200)
     session_id: str = Field(default="agent_data_ui", min_length=1, max_length=200)
 
@@ -342,6 +543,122 @@ def _batch_preview_or_error(root, spec: DataColumnsCastSpecV1, *, confirm: bool)
         ) from exc
 
 
+async def _confirm_cast_operation(
+    root: Path,
+    body: Any,
+    spec: DataColumnCastSpecV1 | DataColumnsCastSpecV1,
+    preview: Any,
+    *,
+    operation_id: str,
+    proposal_id: str,
+    target: dict[str, Any],
+    preconditions: dict[str, Any],
+    changes: dict[str, Any],
+) -> dict[str, Any]:
+    """Confirm a cast while proposal and OperationRecord share one rollback scope."""
+
+    workbench_root = root / "workbench"
+    with data_operation_transaction(root, spec, preview):
+        repository = JsonlSessionRepository(workbench_root)
+        events = AgentEventStream(workbench_root)
+        chain_id = f"data_chain:{body.source_run_id}"
+        _ensure_data_chain_scope(
+            root,
+            repository,
+            session_id=body.session_id,
+            chain_id=chain_id,
+            active_head_run_id=body.source_run_id,
+        )
+        main_session_id = _ensure_main_session(repository, root)
+        proposal_store = ProposalStore(workbench_root)
+        registry = OperationRegistry()
+        definition = registry.require(operation_id, "v1")
+        try:
+            proposal = proposal_store.latest_revision(proposal_id)
+        except KeyError:
+            proposal = proposal_store.create(
+                session_id=body.session_id,
+                chain_id=chain_id,
+                operation_id=operation_id,
+                operation_version="v1",
+                target=target,
+                preconditions=preconditions,
+                changes=changes,
+                evidence_refs=[f"{operation_id}-preview"],
+                expected_effect=["create one immutable child data artifact"],
+                risks=["downstream model rerun required"],
+                proposal_id=proposal_id,
+            )
+            events.emit(body.session_id, "proposal_ready", proposal.to_dict())
+            events.emit(
+                body.session_id,
+                "needs_confirmation",
+                {"proposal_id": proposal_id, "revision": proposal.revision},
+            )
+        if proposal.target != target or proposal.preconditions != preconditions:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_CONFLICT",
+                message="A different typed proposal already owns this preview fingerprint.",
+                details={"proposal_id": proposal_id},
+            )
+
+        orchestrator = WorkbenchOrchestrator(
+            repository,
+            events,
+            main_session_id=main_session_id,
+            proposal_store=proposal_store,
+            operation_store=OperationRecordStore(workbench_root),
+            operation_registry=registry,
+        )
+        try:
+            confirmation = proposal_store.confirm(
+                proposal_id,
+                revision=proposal.revision,
+                fingerprint=proposal.fingerprint,
+                actor_type="human_ui",
+                current_context_fingerprint=preview.fingerprint,
+                current_active_head_run_id=spec.source_run_id,
+            )
+            record = orchestrator.operation_store.create_pending(
+                confirmation,
+                command_id=confirmation.command_id,
+            )
+            record = await orchestrator.execute_confirmed_operation(
+                record.record_id,
+                project_root=root,
+                current_context_fingerprint=preview.fingerprint,
+                current_active_head_run_id=spec.source_run_id,
+            )
+        except ProposalStaleError as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_STALE",
+                message="The typed data operation became stale before execution.",
+                details={"proposal_id": proposal_id},
+            ) from exc
+        except ProposalConfirmationError as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_CONFLICT",
+                message="The typed data proposal is no longer confirmable.",
+                details={"proposal_id": proposal_id},
+            ) from exc
+        except (DataColumnCastValidationError, FileNotFoundError, KeyError) as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_STALE",
+                message="The typed data operation became stale before execution.",
+                details={"proposal_id": proposal_id, "reason": str(exc)},
+            ) from exc
+
+        return {
+            "proposal": proposal_store.latest_revision(proposal_id).to_dict(),
+            "operation": record.to_dict(),
+            "status": record.status,
+        }
+
+
 def _feature_recipe_spec(body: FeatureRecipeRequest) -> FeatureRecipeOperationSpecV1:
     from ..predictive_research.contracts import FeatureRecipeV1
 
@@ -425,6 +742,54 @@ def _data_transform_preview_or_error(root, spec: DataTransformSpecV1, *, confirm
                 else "The typed data transform cannot be previewed."
             ),
             details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
+        ) from exc
+
+
+def _metadata_mutation_spec(body: MetadataMutationRequest) -> MetadataMutationSpecV1:
+    try:
+        return MetadataMutationSpecV1(
+            source_run_id=body.source_run_id,
+            source_node_id=body.source_node_id,
+            source_artifact_id=body.source_artifact_id,
+            metadata=body.metadata,
+            weight=body.weight,
+            split=body.split,
+            group=body.group,
+        )
+    except (TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_INVALID",
+            message="The typed metadata mutation specification is invalid.",
+            details={"operation_id": "data.metadata.update", "reason": str(exc)},
+        ) from exc
+
+
+def _metadata_mutation_preview_or_error(
+    root,
+    spec: MetadataMutationSpecV1,
+    *,
+    confirm: bool,
+):
+    try:
+        return preview_metadata_mutation(root, spec)
+    except DataMetadataUnavailableError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_METADATA_UNAVAILABLE",
+            message="The selected data artifact has no confirmed server-owned metadata registry.",
+            details={"reason": str(exc)},
+        ) from exc
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409 if confirm else 422,
+            code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            message=(
+                "The metadata source changed before confirmation."
+                if confirm
+                else "The typed metadata mutation cannot be previewed."
+            ),
+            details={"operation_id": "data.metadata.update", "reason": str(exc)},
         ) from exc
 
 
@@ -732,13 +1097,26 @@ def _confirm_direct_data_operation(
 ) -> dict[str, dict[str, Any]]:
     """Bind a legacy direct data route to the server proposal gate.
 
-    FeatureRecipe and the generic transform executor predate the central
-    operation-record handlers.  Until those handlers are wired, this route
-    must still prove server-owned source identity, preview freshness, and
-    Chain head ownership before it writes a derived artifact.  The returned
-    confirmation is deliberately exposed as evidence; it is not represented
-    as a central OperationRecord that does not exist yet.
+    The route keeps the existing proposal gate, then creates the same durable
+    OperationRecord used by the central operation lifecycle.  The package-owned
+    data-consumer adapter completes that record after the immutable effect is
+    committed.
     """
+
+    descriptor = _require_live_data_operation_descriptor(operation_id)
+    from ..data_operation_manifest import build_data_consumer_runtime_adapter
+
+    try:
+        # Validate the server-owned runtime join before the package effect can
+        # be reached.  Completion validates the same join against typed ports.
+        build_data_consumer_runtime_adapter()
+    except (ImportError, OSError, TypeError, ValueError, RuntimeError) as exc:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_CONSUMER_RUNTIME_UNAVAILABLE",
+            message="The server-owned data-consumer runtime is unavailable; execution was blocked.",
+            details={"operation_id": operation_id, "reason": str(exc)},
+        ) from exc
 
     workbench_root = root / "workbench"
     repository = JsonlSessionRepository(workbench_root)
@@ -751,7 +1129,12 @@ def _confirm_direct_data_operation(
         chain_id=chain_id,
         active_head_run_id=source_run_id,
     )
-    definition = OperationRegistry().require(operation_id, "v1")
+    local_operation = descriptor.executor_key.startswith("executor:workbench.data_consumer.")
+    definition = (
+        None
+        if local_operation
+        else OperationRegistry().require(operation_id, descriptor.operation_version)
+    )
     target = {
         "run_id": source_run_id,
         "node_ref": source_node_id,
@@ -771,7 +1154,16 @@ def _confirm_direct_data_operation(
         "active_head_run_id": source_run_id,
         "owner_resolution": "typed_data_node",
     }
-    definition.validate(target=target, preconditions=preconditions, changes=changes)
+    if definition is not None:
+        definition.validate(target=target, preconditions=preconditions, changes=changes)
+    else:
+        if any(not isinstance(value, str) or not value.strip() for value in target.values() if isinstance(value, str)):
+            raise WorkbenchAPIError(
+                status_code=422,
+                code="DATA_OPERATION_INVALID",
+                message="The local data-consumer operation has an invalid identity.",
+                details={"operation_id": operation_id},
+            )
     proposal_store = ProposalStore(workbench_root)
     safe_operation_id = operation_id.replace(".", "_")
     proposal_id = f"proposal_{safe_operation_id}_{preview_fingerprint[:24]}"
@@ -782,7 +1174,7 @@ def _confirm_direct_data_operation(
             session_id=session_id,
             chain_id=chain_id,
             operation_id=operation_id,
-            operation_version="v1",
+            operation_version=descriptor.operation_version,
             target=target,
             preconditions=preconditions,
             changes=changes,
@@ -831,10 +1223,214 @@ def _confirm_direct_data_operation(
             message="The typed data proposal is no longer confirmable.",
             details={"proposal_id": proposal_id},
         ) from exc
+    record_store = OperationRecordStore(workbench_root)
+    operation_record = record_store.create_pending(
+        confirmation,
+        command_id=confirmation.command_id,
+    )
+    if operation_record.status not in {"completed", "failed", "stale", "cancelled"}:
+        operation_record = record_store.claim_execution(
+            operation_record.record_id,
+            execution_key=f"exec_{preview_fingerprint[:32]}",
+            lease_owner="data-consumer-route",
+        )
     return {
         "proposal": proposal_store.latest_revision(proposal_id).to_dict(),
         "confirmation": confirmation.to_dict(),
+        "operation_record": operation_record.to_dict(),
     }
+
+
+def _complete_direct_data_operation(
+    root: Path,
+    confirmation_result: dict[str, Any],
+    effect: Any,
+    *,
+    method: str,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Bind a package effect to OperationRecord and expose bounded evidence ports."""
+
+    from ..data_operation_manifest import (
+        build_data_consumer_runtime_adapter,
+        _issue_data_consumer_derived_port,
+        _issue_data_consumer_evidence_port,
+        _issue_data_consumer_output_ports,
+        _issue_data_consumer_server_evidence,
+    )
+
+    operation_record_payload = confirmation_result.get("operation_record")
+    if not isinstance(operation_record_payload, dict):
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_RECORD_UNAVAILABLE",
+            message="The data operation has no durable OperationRecord.",
+            details={},
+        )
+    record_id = operation_record_payload.get("record_id")
+    if not isinstance(record_id, str) or not record_id:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_RECORD_UNAVAILABLE",
+            message="The data operation record identity is invalid.",
+            details={},
+        )
+    store = OperationRecordStore(root / "workbench")
+    record = store.get(record_id)
+    if record.status == "completed":
+        return record.to_dict()
+    execution_key = record.execution.get("execution_key")
+    if not isinstance(execution_key, str) or not execution_key:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_RECORD_UNAVAILABLE",
+            message="The data operation record has no execution claim.",
+            details={"record_id": record_id},
+        )
+    effect_payload = effect.to_dict()
+    run_id = record.target.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_RECORD_UNAVAILABLE",
+            message="The data operation record has no server-owned run identity.",
+            details={"record_id": record_id},
+        )
+    run_root = root / "runs" / run_id
+    child_node_id = effect_payload.get("child_node_id")
+    if not isinstance(child_node_id, str) or not child_node_id:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_EFFECT_UNCOMMITTED",
+            message="The data operation effect has no committed child identity.",
+            details={"record_id": record_id},
+        )
+    graph_payload = read_json(run_root / "graph.json")
+    if not isinstance(graph_payload.get("nodes"), dict) or child_node_id not in graph_payload["nodes"]:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_EFFECT_UNCOMMITTED",
+            message="The data operation child is not committed to the server graph.",
+            details={"record_id": record_id, "child_node_id": child_node_id},
+        )
+    artifact_rows = read_json(run_root / "artifacts_index.json").get("artifacts", [])
+    if not isinstance(artifact_rows, list):
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="DATA_OPERATION_EFFECT_UNCOMMITTED",
+            message="The server artifact index is malformed.",
+            details={"record_id": record_id},
+        )
+    for field_name in ("artifact_id", "metadata_artifact_id", "recipe_artifact_id", "group_manifest_id"):
+        artifact_id = effect_payload.get(field_name)
+        if artifact_id is None:
+            continue
+        row = next((item for item in artifact_rows if item.get("artifact_id") == artifact_id), None)
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_EFFECT_UNCOMMITTED",
+                message="The data operation effect references an unregistered artifact.",
+                details={"record_id": record_id, "artifact_id": artifact_id},
+            )
+        artifact_path = (run_root / row["path"]).resolve()
+        try:
+            artifact_path.relative_to(run_root.resolve())
+        except ValueError as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_EFFECT_UNCOMMITTED",
+                message="The data operation artifact escapes the run root.",
+                details={"record_id": record_id, "artifact_id": artifact_id},
+            ) from exc
+        if not artifact_path.is_file():
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_EFFECT_UNCOMMITTED",
+                message="The data operation artifact is not committed on disk.",
+                details={"record_id": record_id, "artifact_id": artifact_id},
+            )
+    for path_field in ("artifact_path", "metadata_artifact_path", "recipe_path", "group_manifest_path"):
+        relative = effect_payload.get(path_field)
+        if relative is None:
+            continue
+        if not isinstance(relative, str) or not relative:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_EFFECT_UNCOMMITTED",
+                message="The data operation effect has an invalid committed path.",
+                details={"record_id": record_id, "path_field": path_field},
+            )
+        path = (run_root / relative).resolve()
+        try:
+            path.relative_to(run_root.resolve())
+        except ValueError as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_EFFECT_UNCOMMITTED",
+                message="The data operation effect path escapes the run root.",
+                details={"record_id": record_id, "path_field": path_field},
+            ) from exc
+        if not path.is_file():
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="DATA_OPERATION_EFFECT_UNCOMMITTED",
+                message="The data operation effect path is not committed on disk.",
+                details={"record_id": record_id, "path_field": path_field},
+            )
+    adapter = build_data_consumer_runtime_adapter()
+    derived_port = _issue_data_consumer_derived_port(effect)
+    effect_payload = derived_port.to_dict()
+    bindings = {
+        key: str(value)
+        for key, value in effect_payload.items()
+        if key.endswith("_id") and value is not None
+    }
+    record = store.bind_effect(
+        record_id,
+        execution_key=execution_key,
+        bindings=bindings,
+    )
+    evidence_port = _issue_data_consumer_evidence_port(
+        method,
+        _issue_data_consumer_server_evidence(
+            method,
+            dict(evidence or {}),
+            record_id=record.record_id,
+            operation_id=record.operation_id,
+            execution_key=execution_key,
+            bindings={
+                key: value
+                for key, value in bindings.items()
+                if key not in {"record_id", "operation_id", "execution_key"}
+            },
+        ),
+    )
+    output_ports = _issue_data_consumer_output_ports(
+        record,
+        derived_port,
+        evidence_port,
+    )
+    adapter.adapt_operation_record(record, output_ports)
+    outputs = output_ports.to_dict(catalog_digest=adapter.catalog_digest)
+    record = store.append_status(
+        record_id,
+        "completed",
+        outputs=outputs,
+        diff_ref={
+            "kind": "data-consumer-effect.v1",
+            "artifact_id": effect_payload.get("artifact_id")
+            or effect_payload.get("metadata_artifact_id"),
+        },
+        verification={
+            "passed": True,
+            "mode": "immutable_artifact_and_lineage",
+            "child_node_id": effect_payload.get("child_node_id"),
+        },
+        effect_status="committed",
+        projection_status="committed",
+    )
+    return record.to_dict()
 
 
 @router.get("/data-operations/manifest")
@@ -856,6 +1452,7 @@ def get_data_operation_manifest() -> dict[str, Any]:
 def preview_metadata_loss(body: MetadataLossPreviewRequest) -> dict[str, Any]:
     """Report interchange loss without writing or exporting any file."""
 
+    _require_live_metadata_loss_unavailable()
     try:
         manifest = build_metadata_loss_manifest(
             source_format=body.source_format,
@@ -869,6 +1466,154 @@ def preview_metadata_loss(body: MetadataLossPreviewRequest) -> dict[str, Any]:
             code="METADATA_LOSS_PREVIEW_INVALID",
             message="The metadata-loss preview request is invalid.",
             details={"reason": str(exc)},
+        ) from exc
+
+
+@router.post("/data-operations/metadata/preview")
+def preview_metadata_mutation_route(
+    project_root: str,
+    body: MetadataMutationRequest,
+) -> dict[str, Any]:
+    root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.metadata.update",
+        preview_ref="/data-operations/metadata/preview",
+    )
+    spec = _metadata_mutation_spec(body)
+    preview = _metadata_mutation_preview_or_error(root, spec, confirm=False)
+    return {"spec": spec.to_dict(), "preview": _preview_payload(body, preview)}
+
+
+@router.post("/data-operations/metadata/confirm")
+def confirm_metadata_mutation_route(
+    project_root: str,
+    body: MetadataMutationConfirmRequest,
+) -> dict[str, Any]:
+    root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.metadata.update",
+        confirm_ref="/data-operations/metadata/confirm",
+    )
+    spec = _metadata_mutation_spec(body)
+    preview = _metadata_mutation_preview_or_error(root, spec, confirm=True)
+    if preview.fingerprint != body.preview_fingerprint:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The metadata mutation preview fingerprint no longer matches the source.",
+            details={"expected": preview.fingerprint, "received": body.preview_fingerprint},
+        )
+    _preflight_or_error(root, spec, preview)
+    try:
+        with data_operation_transaction(root, spec, preview):
+            confirmation = _confirm_direct_data_operation(
+                root,
+                operation_id="data.metadata.update",
+                source_run_id=spec.source_run_id,
+                source_node_id=spec.source_node_id,
+                source_artifact_id=spec.source_artifact_id,
+                preview_fingerprint=preview.fingerprint,
+                source_sha256=preview.source_sha256,
+                secondary_source_sha256=None,
+                session_id=body.session_id,
+                target_fields={
+                    "metadata_fingerprint": preview.metadata_fingerprint,
+                    "changed_columns": list(preview.changed_columns),
+                },
+                changes=spec.to_dict(),
+            )
+            effect = apply_metadata_mutation(root, spec, preview)
+            metadata_operation = read_metadata_mutation_record(root, effect.record_id)
+            operation = _complete_direct_data_operation(
+                root,
+                confirmation,
+                effect,
+                method="metadata_update",
+                evidence={
+                    "metadata_artifact_id": effect.metadata_artifact_id,
+                    "metadata_revision": effect.metadata_revision,
+                },
+            )
+    except (DataColumnCastValidationError, FileNotFoundError, KeyError, TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The metadata mutation could not be applied because its source changed.",
+            details={"operation_id": "data.metadata.update", "reason": str(exc)},
+        ) from exc
+    return {
+        "status": "completed",
+        "effect": effect.to_dict(),
+        "preview": _confirm_preview_payload(body, preview),
+        "operation": metadata_operation,
+        "operation_record": operation,
+        **confirmation,
+    }
+
+
+@router.get("/data-operations/metadata/{record_id}")
+def get_metadata_mutation_route(project_root: str, record_id: str) -> dict[str, Any]:
+    root = _root(project_root)
+    try:
+        operation = read_metadata_mutation_record(root, record_id)
+        source = operation.get("source")
+        artifact = operation.get("metadata_artifact")
+        if not isinstance(source, dict) or not isinstance(artifact, dict):
+            raise ValueError("metadata operation record is malformed")
+        run_id = source.get("run_id")
+        artifact_id = artifact.get("artifact_id")
+        record_relative = artifact.get("path")
+        record_sha = artifact.get("sha256")
+        if not isinstance(run_id, str) or not isinstance(artifact_id, str):
+            raise ValueError("metadata operation record has invalid artifact identity")
+        run_root = (root / "runs" / run_id).resolve()
+        index = read_json(run_root / "artifacts_index.json")
+        rows = index.get("artifacts")
+        if not isinstance(rows, list):
+            raise ValueError("metadata artifact index is malformed")
+        index_row = next(
+            (row for row in rows if isinstance(row, dict) and row.get("artifact_id") == artifact_id),
+            None,
+        )
+        if not isinstance(index_row, dict):
+            raise ValueError("metadata artifact is not registered")
+        relative = index_row.get("path")
+        expected_sha = index_row.get("sha256")
+        if (
+            index_row.get("artifact_type") != "metadata"
+            or not isinstance(relative, str)
+            or not isinstance(expected_sha, str)
+            or record_relative != relative
+            or record_sha != expected_sha
+        ):
+            raise ValueError("metadata artifact provenance is not index-bound")
+        artifact_path = (run_root / relative).resolve()
+        artifact_path.relative_to(run_root)
+        if not artifact_path.is_file():
+            raise FileNotFoundError("metadata artifact is missing")
+        from ..artifacts import sha256_file
+
+        if expected_sha != sha256_file(artifact_path):
+            raise ValueError("metadata artifact fingerprint changed")
+        artifact_payload = read_json(artifact_path)
+        metadata = artifact_payload.get("metadata")
+        if not isinstance(metadata, dict):
+            raise ValueError("metadata artifact payload is malformed")
+        reloaded = {
+            "record_id": record_id,
+            "operation_id": operation.get("operation_id"),
+            "source": source,
+            "metadata_fingerprint": operation.get("metadata_fingerprint"),
+            **metadata,
+            "child_node_id": operation.get("child_node_id"),
+        }
+        return {"metadata": reloaded, "operation": operation}
+    except (FileNotFoundError, KeyError, TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=404,
+            code="DATA_OPERATION_NOT_FOUND",
+            message="The typed metadata mutation record was not found or is invalid.",
+            details={"record_id": record_id, "reason": str(exc)},
         ) from exc
 
 
@@ -890,6 +1635,13 @@ def get_data_operation_profile(
             source_artifact_id=source_artifact_id,
         )
         return {"profile": profile}
+    except DataMetadataUnavailableError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_METADATA_UNAVAILABLE",
+            message="The selected data artifact has no confirmed server-owned metadata registry.",
+            details={"reason": str(exc)},
+        ) from exc
     except (DataColumnCastValidationError, FileNotFoundError, KeyError, TypeError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=422,
@@ -902,9 +1654,13 @@ def get_data_operation_profile(
 @router.post("/data-operations/column-cast/preview")
 def preview_column_cast(project_root: str, body: DataColumnCastRequest) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.column.cast",
+        preview_ref="/data-operations/column-cast/preview",
+    )
     spec = _spec(body)
     preview = _preview_or_error(root, spec, confirm=False)
-    return {"spec": spec.to_dict(), "preview": preview.to_dict()}
+    return {"spec": spec.to_dict(), "preview": _preview_payload(body, preview)}
 
 
 @router.post("/data-operations/column-cast/confirm")
@@ -913,6 +1669,10 @@ async def confirm_column_cast(
     body: DataColumnCastConfirmRequest,
 ) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.column.cast",
+        confirm_ref="/data-operations/column-cast/confirm",
+    )
     spec = _spec(body)
     preview = _preview_or_error(root, spec, confirm=True)
     if preview.fingerprint != body.preview_fingerprint:
@@ -929,20 +1689,8 @@ async def confirm_column_cast(
             message="The cast preview has blocking conversion failures.",
             details={"failure_count": preview.failure_count},
         )
+    _preflight_or_error(root, spec, preview)
 
-    workbench_root = root / "workbench"
-    repository = JsonlSessionRepository(workbench_root)
-    events = AgentEventStream(workbench_root)
-    chain_id = f"data_chain:{body.source_run_id}"
-    _ensure_data_chain_scope(
-        root,
-        repository,
-        session_id=body.session_id,
-        chain_id=chain_id,
-        active_head_run_id=body.source_run_id,
-    )
-    main_session_id = _ensure_main_session(repository, root)
-    proposal_store = ProposalStore(workbench_root)
     registry = OperationRegistry()
     definition = registry.require("data.column.cast", "v1")
     target = {
@@ -961,94 +1709,29 @@ async def confirm_column_cast(
     changes = {"column": spec.column, "target_dtype": spec.target_dtype}
     definition.validate(target=target, preconditions=preconditions, changes=changes)
     proposal_id = f"proposal_data_cast_{preview.fingerprint[:24]}"
-    try:
-        proposal = proposal_store.latest_revision(proposal_id)
-    except KeyError:
-        proposal = proposal_store.create(
-            session_id=body.session_id,
-            chain_id=chain_id,
-            operation_id="data.column.cast",
-            operation_version="v1",
-            target=target,
-            preconditions=preconditions,
-            changes=changes,
-            evidence_refs=["data-column-cast-preview"],
-            expected_effect=["create one immutable child data artifact"],
-            risks=["downstream model rerun required"],
-            proposal_id=proposal_id,
-        )
-        events.emit(
-            body.session_id,
-            "proposal_ready",
-            proposal.to_dict(),
-        )
-        events.emit(
-            body.session_id,
-            "needs_confirmation",
-            {"proposal_id": proposal_id, "revision": proposal.revision},
-        )
-    if proposal.target != target or proposal.preconditions != preconditions:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_CONFLICT",
-            message="A different typed proposal already owns this preview fingerprint.",
-            details={"proposal_id": proposal_id},
-        )
-
-    orchestrator = WorkbenchOrchestrator(
-        repository,
-        events,
-        main_session_id=main_session_id,
-        proposal_store=proposal_store,
-        operation_store=OperationRecordStore(workbench_root),
-        operation_registry=registry,
+    return await _confirm_cast_operation(
+        root,
+        body,
+        spec,
+        preview,
+        operation_id="data.column.cast",
+        proposal_id=proposal_id,
+        target=target,
+        preconditions=preconditions,
+        changes=changes,
     )
-    try:
-        confirmation = proposal_store.confirm(
-            proposal_id,
-            revision=proposal.revision,
-            fingerprint=proposal.fingerprint,
-            actor_type="human_ui",
-            current_context_fingerprint=preview.fingerprint,
-            current_active_head_run_id=spec.source_run_id,
-        )
-        record = orchestrator.operation_store.create_pending(
-            confirmation,
-            command_id=confirmation.command_id,
-        )
-        record = await orchestrator.execute_confirmed_operation(
-            record.record_id,
-            project_root=root,
-            current_context_fingerprint=preview.fingerprint,
-            current_active_head_run_id=spec.source_run_id,
-        )
-    except ProposalStaleError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_STALE",
-            message="The typed data operation became stale before execution.",
-            details={"proposal_id": proposal_id},
-        ) from exc
-    except ProposalConfirmationError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_CONFLICT",
-            message="The typed data proposal is no longer confirmable.",
-            details={"proposal_id": proposal_id},
-        ) from exc
-    return {
-        "proposal": proposal_store.latest_revision(proposal_id).to_dict(),
-        "operation": record.to_dict(),
-        "status": record.status,
-    }
 
 
 @router.post("/data-operations/columns-cast/preview")
 def preview_columns_cast(project_root: str, body: DataColumnsCastRequest) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.columns.cast",
+        preview_ref="/data-operations/columns-cast/preview",
+    )
     spec = _batch_spec(body)
     preview = _batch_preview_or_error(root, spec, confirm=False)
-    return {"spec": spec.to_dict(), "preview": preview.to_dict()}
+    return {"spec": spec.to_dict(), "preview": _preview_payload(body, preview)}
 
 
 @router.post("/data-operations/columns-cast/confirm")
@@ -1057,6 +1740,10 @@ async def confirm_columns_cast(
     body: DataColumnsCastConfirmRequest,
 ) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.columns.cast",
+        confirm_ref="/data-operations/columns-cast/confirm",
+    )
     spec = _batch_spec(body)
     preview = _batch_preview_or_error(root, spec, confirm=True)
     if preview.fingerprint != body.preview_fingerprint:
@@ -1077,20 +1764,8 @@ async def confirm_columns_cast(
                 ]
             },
         )
+    _preflight_or_error(root, spec, preview)
 
-    workbench_root = root / "workbench"
-    repository = JsonlSessionRepository(workbench_root)
-    events = AgentEventStream(workbench_root)
-    chain_id = f"data_chain:{body.source_run_id}"
-    _ensure_data_chain_scope(
-        root,
-        repository,
-        session_id=body.session_id,
-        chain_id=chain_id,
-        active_head_run_id=body.source_run_id,
-    )
-    main_session_id = _ensure_main_session(repository, root)
-    proposal_store = ProposalStore(workbench_root)
     registry = OperationRegistry()
     definition = registry.require("data.columns.cast", "v1")
     casts = [item.to_dict() for item in spec.casts]
@@ -1110,90 +1785,29 @@ async def confirm_columns_cast(
     changes = {"casts": casts, "output_format": spec.output_format}
     definition.validate(target=target, preconditions=preconditions, changes=changes)
     proposal_id = f"proposal_data_casts_{preview.fingerprint[:24]}"
-    try:
-        proposal = proposal_store.latest_revision(proposal_id)
-    except KeyError:
-        proposal = proposal_store.create(
-            session_id=body.session_id,
-            chain_id=chain_id,
-            operation_id="data.columns.cast",
-            operation_version="v1",
-            target=target,
-            preconditions=preconditions,
-            changes=changes,
-            evidence_refs=["data-columns-cast-preview"],
-            expected_effect=["create one immutable child data artifact"],
-            risks=["downstream model rerun required"],
-            proposal_id=proposal_id,
-        )
-        events.emit(body.session_id, "proposal_ready", proposal.to_dict())
-        events.emit(
-            body.session_id,
-            "needs_confirmation",
-            {"proposal_id": proposal_id, "revision": proposal.revision},
-        )
-    if proposal.target != target or proposal.preconditions != preconditions:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_CONFLICT",
-            message="A different typed proposal already owns this preview fingerprint.",
-            details={"proposal_id": proposal_id},
-        )
-
-    orchestrator = WorkbenchOrchestrator(
-        repository,
-        events,
-        main_session_id=main_session_id,
-        proposal_store=proposal_store,
-        operation_store=OperationRecordStore(workbench_root),
-        operation_registry=registry,
+    return await _confirm_cast_operation(
+        root,
+        body,
+        spec,
+        preview,
+        operation_id="data.columns.cast",
+        proposal_id=proposal_id,
+        target=target,
+        preconditions=preconditions,
+        changes=changes,
     )
-    try:
-        confirmation = proposal_store.confirm(
-            proposal_id,
-            revision=proposal.revision,
-            fingerprint=proposal.fingerprint,
-            actor_type="human_ui",
-            current_context_fingerprint=preview.fingerprint,
-            current_active_head_run_id=spec.source_run_id,
-        )
-        record = orchestrator.operation_store.create_pending(
-            confirmation,
-            command_id=confirmation.command_id,
-        )
-        record = await orchestrator.execute_confirmed_operation(
-            record.record_id,
-            project_root=root,
-            current_context_fingerprint=preview.fingerprint,
-            current_active_head_run_id=spec.source_run_id,
-        )
-    except ProposalStaleError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_STALE",
-            message="The typed data operation became stale before execution.",
-            details={"proposal_id": proposal_id},
-        ) from exc
-    except ProposalConfirmationError as exc:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_CONFLICT",
-            message="The typed data proposal is no longer confirmable.",
-            details={"proposal_id": proposal_id},
-        ) from exc
-    return {
-        "proposal": proposal_store.latest_revision(proposal_id).to_dict(),
-        "operation": record.to_dict(),
-        "status": record.status,
-    }
 
 
 @router.post("/data-operations/feature-recipe/preview")
 def preview_feature_recipe_route(project_root: str, body: FeatureRecipeRequest) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.feature_recipe",
+        preview_ref="/data-operations/feature-recipe/preview",
+    )
     spec = _feature_recipe_spec(body)
     preview = _feature_recipe_preview_or_error(root, spec, confirm=False)
-    return {"spec": spec.to_dict(), "preview": preview.to_dict()}
+    return {"spec": spec.to_dict(), "preview": _preview_payload(body, preview)}
 
 
 @router.post("/data-operations/feature-recipe/confirm")
@@ -1202,6 +1816,10 @@ def confirm_feature_recipe_route(
     body: FeatureRecipeConfirmRequest,
 ) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        "data.feature_recipe",
+        confirm_ref="/data-operations/feature-recipe/confirm",
+    )
     spec = _feature_recipe_spec(body)
     preview = _feature_recipe_preview_or_error(root, spec, confirm=True)
     if preview.fingerprint != body.preview_fingerprint:
@@ -1218,25 +1836,34 @@ def confirm_feature_recipe_route(
             message="The FeatureRecipe preview has blocking validation failures.",
             details={"reason": preview.reason, "next_step": preview.next_step},
         )
-    confirmation = _confirm_direct_data_operation(
-        root,
-        operation_id="data.feature_recipe",
-        source_run_id=spec.source_run_id,
-        source_node_id=spec.source_node_id,
-        source_artifact_id=spec.source_artifact_id,
-        preview_fingerprint=preview.fingerprint,
-        source_sha256=preview.source_sha256,
-        secondary_source_sha256=None,
-        session_id=body.session_id,
-        target_fields={
-            "recipe_id": spec.recipe.recipe_id,
-            "recipe_operation_id": spec.recipe.operation_id,
-            "output": spec.recipe.outputs[0],
-        },
-        changes=spec.recipe.to_dict(),
-    )
+    _preflight_or_error(root, spec, preview)
     try:
-        effect = apply_feature_recipe_operation(root, spec, preview)
+        with data_operation_transaction(root, spec, preview):
+            confirmation = _confirm_direct_data_operation(
+                root,
+                operation_id="data.feature_recipe",
+                source_run_id=spec.source_run_id,
+                source_node_id=spec.source_node_id,
+                source_artifact_id=spec.source_artifact_id,
+                preview_fingerprint=preview.fingerprint,
+                source_sha256=preview.source_sha256,
+                secondary_source_sha256=None,
+                session_id=body.session_id,
+                target_fields={
+                    "recipe_id": spec.recipe.recipe_id,
+                    "recipe_operation_id": spec.recipe.operation_id,
+                    "output": spec.recipe.outputs[0],
+                },
+                changes=spec.recipe.to_dict(),
+            )
+            effect = apply_feature_recipe_operation(root, spec, preview)
+            operation = _complete_direct_data_operation(
+                root,
+                confirmation,
+                effect,
+                method="feature_recipe",
+                evidence={"recipe_artifact_id": effect.recipe_artifact_id},
+            )
     except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=409,
@@ -1247,7 +1874,8 @@ def confirm_feature_recipe_route(
     return {
         "status": "completed",
         "effect": effect.to_dict(),
-        "preview": preview.to_dict(),
+        "preview": _confirm_preview_payload(body, preview),
+        "operation": operation,
         **confirmation,
     }
 
@@ -1255,9 +1883,13 @@ def confirm_feature_recipe_route(
 @router.post("/data-operations/transform/preview")
 def preview_data_transform_route(project_root: str, body: DataTransformRequest) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        f"data.{body.operation}",
+        preview_ref="/data-operations/transform/preview",
+    )
     spec = _data_transform_spec(body)
     preview = _data_transform_preview_or_error(root, spec, confirm=False)
-    return {"spec": spec.to_dict(), "preview": preview.to_dict()}
+    return {"spec": spec.to_dict(), "preview": _preview_payload(body, preview)}
 
 
 @router.post("/data-operations/transform/confirm")
@@ -1266,6 +1898,10 @@ def confirm_data_transform_route(
     body: DataTransformConfirmRequest,
 ) -> dict[str, Any]:
     root = _root(project_root)
+    _require_live_data_operation_descriptor(
+        f"data.{body.operation}",
+        confirm_ref="/data-operations/transform/confirm",
+    )
     spec = _data_transform_spec(body)
     preview = _data_transform_preview_or_error(root, spec, confirm=True)
     if preview.fingerprint != body.preview_fingerprint:
@@ -1275,26 +1911,35 @@ def confirm_data_transform_route(
             message="The data transform preview fingerprint no longer matches the source data.",
             details={"expected": preview.fingerprint, "received": body.preview_fingerprint},
         )
-    confirmation = _confirm_direct_data_operation(
-        root,
-        operation_id=f"data.{spec.operation}",
-        source_run_id=spec.source_run_id,
-        source_node_id=spec.source_node_id,
-        source_artifact_id=spec.source_artifact_id,
-        preview_fingerprint=preview.fingerprint,
-        source_sha256=preview.source_sha256,
-        secondary_source_sha256=preview.secondary_source_sha256,
-        session_id=body.session_id,
-        target_fields={
-            "operation": spec.operation,
-            "secondary_run_id": spec.secondary_run_id,
-            "secondary_node_id": spec.secondary_node_id,
-            "secondary_artifact_id": spec.secondary_artifact_id,
-        },
-        changes=spec.to_dict(),
-    )
+    _preflight_or_error(root, spec, preview)
     try:
-        effect = apply_data_transform(root, spec, preview)
+        with data_operation_transaction(root, spec, preview):
+            confirmation = _confirm_direct_data_operation(
+                root,
+                operation_id=f"data.{spec.operation}",
+                source_run_id=spec.source_run_id,
+                source_node_id=spec.source_node_id,
+                source_artifact_id=spec.source_artifact_id,
+                preview_fingerprint=preview.fingerprint,
+                source_sha256=preview.source_sha256,
+                secondary_source_sha256=preview.secondary_source_sha256,
+                session_id=body.session_id,
+                target_fields={
+                    "operation": spec.operation,
+                    "secondary_run_id": spec.secondary_run_id,
+                    "secondary_node_id": spec.secondary_node_id,
+                    "secondary_artifact_id": spec.secondary_artifact_id,
+                },
+                changes=spec.to_dict(),
+            )
+            effect = apply_data_transform(root, spec, preview)
+            operation = _complete_direct_data_operation(
+                root,
+                confirmation,
+                effect,
+                method=preview.method or f"data.{spec.operation}",
+                evidence=dict(preview.evidence),
+            )
     except (DataColumnCastValidationError, FileNotFoundError, KeyError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=409,
@@ -1305,7 +1950,8 @@ def confirm_data_transform_route(
     return {
         "status": "completed",
         "effect": effect.to_dict(),
-        "preview": preview.to_dict(),
+        "preview": _confirm_preview_payload(body, preview),
+        "operation": operation,
         **confirmation,
     }
 
@@ -1388,7 +2034,7 @@ def preview_code_execute_route(project_root: str, body: CodeExecuteRequest) -> d
     root = _root(project_root)
     spec = _code_spec(body)
     preview = _code_preview_or_error(root, spec, confirm=False)
-    return {"spec": spec.to_dict(), "preview": preview.to_dict()}
+    return {"spec": spec.to_dict(), "preview": _preview_payload(body, preview)}
 
 
 @router.post("/data-operations/code-execute/risk-authorize")
@@ -1616,7 +2262,7 @@ def get_column_cast_operation_by_child_node(
     matches = [
         record
         for record in store.list_records()
-        if record.operation_id in _DATA_OPERATION_IDS
+        if record.operation_id in _live_data_operation_ids()
         and record.execution.get("bindings", {}).get("data_child_node_id") == child_node_id
     ]
     if not matches:
@@ -1642,7 +2288,7 @@ def get_column_cast_operation(record_id: str, project_root: str) -> dict[str, An
             message="The typed data operation record was not found.",
             details={"record_id": record_id},
         ) from exc
-    if record.operation_id not in _DATA_OPERATION_IDS:
+    if record.operation_id not in _live_data_operation_ids():
         raise WorkbenchAPIError(
             status_code=404,
             code="DATA_OPERATION_NOT_FOUND",

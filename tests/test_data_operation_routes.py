@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
+from workbench.agent.proposals import ProposalStore
+from workbench.artifacts import register_artifact, sha256_file, write_json
+from workbench.data_operations import _register_metadata_authority
+from workbench.graph_store import GraphStore
+from workbench.metadata import metadata_revision_digest
 from tests.test_data_column_cast import _source_project
 from workbench.app import app
 
@@ -24,6 +31,78 @@ def _request(
         "column": column,
         "target_dtype": target_dtype,
     }
+
+
+def _seed_confirmed_metadata(
+    project: Path,
+    run_id: str,
+    source_artifact_id: str,
+    metadata: dict[str, object],
+    *,
+    schema_revision: str = "schema:fixture-v1",
+    metadata_revision: str = "metadata:fixture-v1",
+    confirmed: bool = True,
+) -> str:
+    run_root = project / "runs" / run_id
+    path = run_root / "metadata" / "registry.json"
+    metadata_revision = metadata_revision_digest(metadata, schema_revision=schema_revision)
+    schema_path = run_root / "metadata" / "schema.json"
+    write_json(schema_path, {"schema_revision": schema_revision})
+    schema_artifact_id = f"{source_artifact_id}_schema"
+    register_artifact(
+        run_root,
+        schema_artifact_id,
+        schema_path,
+        "schema",
+        "fixture.schema",
+        [source_artifact_id],
+    )
+    source_row = next(
+        item
+        for item in json.loads((run_root / "artifacts_index.json").read_text())["artifacts"]
+        if item["artifact_id"] == source_artifact_id
+    )
+    source_sha256 = source_row["sha256"]
+    metadata_artifact_id = "source_metadata_registry"
+    payload = {
+        "payload_schema": "workbench.data-metadata",
+        "schema_version": 1,
+        "confirmed": confirmed,
+        "schema_revision": schema_revision,
+        "metadata_revision": metadata_revision,
+        "source": {
+            "run_id": run_id,
+            "node_id": "stage:source",
+            "artifact_id": source_artifact_id,
+            "sha256": source_sha256,
+        },
+        "schema_artifact": {
+            "artifact_id": schema_artifact_id,
+            "sha256": next(
+                item["sha256"]
+                for item in json.loads((run_root / "artifacts_index.json").read_text())["artifacts"]
+                if item["artifact_id"] == schema_artifact_id
+            ),
+        },
+        "metadata": metadata,
+        "provenance": {"fixture": "server-owned"},
+    }
+    write_json(path, payload)
+    register_artifact(
+        run_root,
+        metadata_artifact_id,
+        path,
+        "metadata",
+        "fixture.metadata",
+        [source_artifact_id],
+    )
+    _register_metadata_authority(
+        run_root,
+        metadata_artifact_id=metadata_artifact_id,
+        metadata_path=path,
+        payload=payload,
+    )
+    return metadata_artifact_id
 
 
 def test_column_cast_routes_preview_confirm_and_reload_readback(tmp_path: Path) -> None:
@@ -398,6 +477,131 @@ def test_columns_cast_rejects_duplicate_column(tmp_path: Path) -> None:
     assert resp.status_code == 422
 
 
+def test_profile_rejects_synchronously_resigned_metadata_and_schema_tamper(
+    tmp_path: Path,
+) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {"columns": {"score": {"variable_label": "server label"}}},
+    )
+
+    run_root = project / "runs" / run_id
+    metadata_path = run_root / "metadata" / "registry.json"
+    schema_path = run_root / "metadata" / "schema.json"
+    index_path = run_root / "artifacts_index.json"
+    payload = json.loads(metadata_path.read_text())
+    payload["metadata"]["columns"]["score"]["variable_label"] = "caller forged"
+    payload["schema_revision"] = "schema:caller-forged"
+    payload["metadata_revision"] = metadata_revision_digest(
+        payload["metadata"],
+        schema_revision=payload["schema_revision"],
+    )
+    payload["provenance"] = {"fixture": "caller-forged"}
+    write_json(schema_path, {"schema_revision": payload["schema_revision"]})
+
+    index = json.loads(index_path.read_text())
+    schema_row = next(
+        row for row in index["artifacts"] if row["artifact_id"] == "source_data_schema"
+    )
+    schema_row["sha256"] = sha256_file(schema_path)
+    payload["schema_artifact"]["sha256"] = schema_row["sha256"]
+    write_json(metadata_path, payload)
+    metadata_row = next(
+        row
+        for row in index["artifacts"]
+        if row["artifact_id"] == "source_metadata_registry"
+    )
+    metadata_row["sha256"] = sha256_file(metadata_path)
+    write_json(index_path, index)
+
+    response = TestClient(app).get(
+        "/data-operations/profile",
+        params={
+            "project_root": str(project),
+            "source_run_id": run_id,
+            "source_node_id": "stage:source",
+            "source_artifact_id": artifact_id,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_METADATA_UNAVAILABLE"
+
+
+@pytest.mark.parametrize(
+    ("operation", "request_builder"),
+    [
+        (
+            "data.column.cast",
+            lambda run_id, artifact_id: _request(run_id, artifact_id),
+        ),
+        (
+            "data.columns.cast",
+            lambda run_id, artifact_id: _batch_request(
+                run_id, artifact_id, [("age", "string")]
+            ),
+        ),
+    ],
+)
+def test_cast_stale_conflict_rolls_back_proposal_and_operation_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    request_builder,
+) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"age": ["10", "11"]}),
+    )
+    request = request_builder(run_id, artifact_id)
+    preview_path = (
+        "/data-operations/column-cast/preview"
+        if operation == "data.column.cast"
+        else "/data-operations/columns-cast/preview"
+    )
+    confirm_path = (
+        "/data-operations/column-cast/confirm"
+        if operation == "data.column.cast"
+        else "/data-operations/columns-cast/confirm"
+    )
+    source_path = project / "runs" / run_id / "data.csv"
+    with TestClient(app, raise_server_exceptions=False) as client:
+        preview_response = client.post(
+            preview_path,
+            params={"project_root": str(project)},
+            json=request,
+        )
+        assert preview_response.status_code == 200
+        preview = preview_response.json()["preview"]
+
+        original_create = ProposalStore.create
+
+        def create_then_stale(self, **kwargs):
+            proposal = original_create(self, **kwargs)
+            source_path.write_text(source_path.read_text() + "\n")
+            return proposal
+
+        monkeypatch.setattr(ProposalStore, "create", create_then_stale)
+        response = client.post(
+            confirm_path,
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "DATA_OPERATION_STALE"
+    proposal_dir = project / "workbench" / "proposals"
+    record_dir = project / "workbench" / "operation-records"
+    assert not proposal_dir.exists() or not [path for path in proposal_dir.rglob("*") if path.is_file()]
+    assert not record_dir.exists() or not [path for path in record_dir.rglob("*") if path.is_file()]
+
+
 def test_data_operation_manifest_is_read_only_and_exposes_closed_descriptors() -> None:
     response = TestClient(app).get("/data-operations/manifest")
 
@@ -424,6 +628,14 @@ def test_data_operation_profile_is_bounded_and_keeps_dataset_identity(tmp_path: 
         tmp_path,
         pd.DataFrame({"customer_id": ["a", "b"], "score": [1.0, None]}),
     )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {"columns": {}},
+        schema_revision="schema:source-real",
+        metadata_revision="metadata:source-real",
+    )
 
     response = TestClient(app).get(
         "/data-operations/profile",
@@ -442,6 +654,160 @@ def test_data_operation_profile_is_bounded_and_keeps_dataset_identity(tmp_path: 
     assert profile["dataset_ref"]["artifact_id"] == artifact_id
     assert {column["name"] for column in profile["columns"]} == {"customer_id", "score"}
     assert all(column["inferred"]["confirmed"] is False for column in profile["columns"])
+
+
+def test_profile_rejects_metadata_registered_for_a_foreign_graph_node(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    run_root = project / "runs" / run_id
+    foreign_path = run_root / "metadata" / "foreign.json"
+    write_json(
+        foreign_path,
+        {
+            "payload_schema": "workbench.data-metadata",
+            "schema_version": 1,
+            "confirmed": True,
+            "schema_revision": "schema:foreign",
+            "metadata_revision": metadata_revision_digest(
+                {"columns": {"score": {"variable_label": "forged"}}},
+                schema_revision="schema:foreign",
+            ),
+            "source": {
+                "run_id": run_id,
+                "node_id": "stage:foreign",
+                "artifact_id": artifact_id,
+            },
+            "metadata": {"columns": {"score": {"variable_label": "forged"}}},
+        },
+    )
+    register_artifact(
+        run_root,
+        "foreign_metadata_registry",
+        foreign_path,
+        "metadata",
+        "fixture.metadata",
+        [artifact_id],
+    )
+
+    response = TestClient(app).get(
+        "/data-operations/profile",
+        params={
+            "project_root": str(project),
+            "source_run_id": run_id,
+            "source_node_id": "stage:source",
+            "source_artifact_id": artifact_id,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_METADATA_UNAVAILABLE"
+
+
+def test_profile_reload_rejects_forged_metadata_bytes_and_provenance_on_every_attempt(
+    tmp_path: Path,
+) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {"columns": {"score": {"variable_label": "server label"}}},
+    )
+
+    metadata_path = project / "runs" / run_id / "metadata" / "registry.json"
+    canonical_payload = json.loads(metadata_path.read_text())
+    assert "metadata_artifact" not in canonical_payload
+    assert "metadata_index" not in canonical_payload
+
+    with TestClient(app) as client:
+        initial = client.get(
+            "/data-operations/profile",
+            params={
+                "project_root": str(project),
+                "source_run_id": run_id,
+                "source_node_id": "stage:source",
+                "source_artifact_id": artifact_id,
+            },
+        )
+        canonical_payload["metadata"]["columns"]["score"]["variable_label"] = "caller forged"
+        write_json(metadata_path, canonical_payload)
+        responses = [
+            client.get(
+                "/data-operations/profile",
+                params={
+                    "project_root": str(project),
+                    "source_run_id": run_id,
+                    "source_node_id": "stage:source",
+                    "source_artifact_id": artifact_id,
+                },
+            )
+            for _ in range(2)
+        ]
+
+    assert initial.status_code == 200
+    assert [response.status_code for response in responses] == [422, 422]
+    assert [response.json()["error"]["code"] for response in responses] == [
+        "DATA_METADATA_UNAVAILABLE",
+        "DATA_METADATA_UNAVAILABLE",
+    ]
+
+
+def test_profile_reload_rejects_server_index_sha_tamper(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {"columns": {"score": {"variable_label": "server label"}}},
+    )
+    index_path = project / "runs" / run_id / "artifacts_index.json"
+    index = json.loads(index_path.read_text())
+    metadata_row = next(
+        row for row in index["artifacts"] if row["artifact_id"] == "source_metadata_registry"
+    )
+    metadata_row["sha256"] = "0" * 64
+    write_json(index_path, index)
+
+    response = TestClient(app).get(
+        "/data-operations/profile",
+        params={
+            "project_root": str(project),
+            "source_run_id": run_id,
+            "source_node_id": "stage:source",
+            "source_artifact_id": artifact_id,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_METADATA_UNAVAILABLE"
+
+
+def test_metadata_mutation_without_server_owned_registry_is_typed_unavailable(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    response = TestClient(app).post(
+        "/data-operations/metadata/preview",
+        params={"project_root": str(project)},
+        json={
+            "source_run_id": run_id,
+            "source_node_id": "stage:source",
+            "source_artifact_id": artifact_id,
+            "metadata": {"score": {"variable_label": "caller supplied"}},
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_METADATA_UNAVAILABLE"
 
 
 def test_metadata_loss_preview_is_explicit_and_read_only() -> None:
@@ -463,3 +829,1038 @@ def test_metadata_loss_preview_is_explicit_and_read_only() -> None:
     manifest = response.json()["manifest"]
     assert manifest["has_loss"] is True
     assert {item["status"] for item in manifest["items"]} == {"converted", "dropped"}
+
+
+def test_metadata_mutation_is_preview_confirmed_identity_bound_and_reloadable(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame(
+            {
+                "group": [1, 2, 99],
+                "weight": [1.0, 2.0, 1.0],
+            }
+        ),
+    )
+    _seed_confirmed_metadata(project, run_id, artifact_id, {"columns": {}})
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "metadata": {
+            "group": {
+                "variable_label": "Treatment group",
+                "value_labels": {"1": "Control", "2": "Treated"},
+                "measurement_level": "nominal",
+                "role": "group",
+                "user_missing_values": [99],
+            }
+        },
+        "weight": {"column": "weight", "kind": "frequency"},
+        "split": {"columns": ["group"]},
+        "group": {"columns": ["group"]},
+    }
+
+    with TestClient(app) as client:
+        preview_response = client.post(
+            "/data-operations/metadata/preview",
+            params={"project_root": str(project)},
+            json=request,
+        )
+        assert preview_response.status_code == 200
+        preview = preview_response.json()["preview"]
+        assert preview["status"] == "ready"
+        assert preview["source_artifact_id"] == artifact_id
+        assert preview["metadata_fingerprint"]
+
+        confirm_response = client.post(
+            "/data-operations/metadata/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+        assert confirm_response.status_code == 200
+        operation = confirm_response.json()["operation"]
+        assert operation["operation_id"] == "data.metadata.update"
+        assert operation["status"] == "completed"
+
+        reload_response = client.get(
+            f"/data-operations/metadata/{operation['record_id']}",
+            params={"project_root": str(project)},
+        )
+
+    assert reload_response.status_code == 200
+    reloaded = reload_response.json()["metadata"]
+    assert reloaded["source"]["artifact_id"] == artifact_id
+    assert reloaded["columns"]["group"]["user_missing_values"] == [99]
+    assert reloaded["weight"] == {"column": "weight", "kind": "frequency"}
+    assert reloaded["split"]["columns"] == ["group"]
+
+
+def test_metadata_mutation_replay_is_idempotent_and_stale_source_is_blocked(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    _seed_confirmed_metadata(project, run_id, artifact_id, {"columns": {}})
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "metadata": {"score": {"variable_label": "Score"}},
+    }
+
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/metadata/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+        body = {**request, "preview_fingerprint": preview["fingerprint"]}
+        first = client.post(
+            "/data-operations/metadata/confirm",
+            params={"project_root": str(project)},
+            json=body,
+        )
+        second = client.post(
+            "/data-operations/metadata/confirm",
+            params={"project_root": str(project)},
+            json=body,
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["operation"]["record_id"] == first.json()["operation"]["record_id"]
+    artifacts = json.loads((project / "runs" / run_id / "artifacts_index.json").read_text())[
+        "artifacts"
+    ]
+    assert len(
+        [
+            item
+            for item in artifacts
+            if item["artifact_type"] == "metadata"
+            and item["step"] == "data.metadata.update"
+        ]
+    ) == 1
+
+    source_path = project / "runs" / run_id / "data.csv"
+    source_path.write_text(source_path.read_text() + "3\n", encoding="utf-8")
+    stale = TestClient(app).post(
+        "/data-operations/metadata/confirm",
+        params={"project_root": str(project)},
+        json=body,
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "DATA_OPERATION_STALE"
+
+
+def test_metadata_mutation_reload_rejects_index_sha_tamper(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    _seed_confirmed_metadata(project, run_id, artifact_id, {"columns": {}})
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "metadata": {"score": {"variable_label": "Score"}},
+    }
+
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/metadata/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+        confirmed = client.post(
+            "/data-operations/metadata/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+        assert confirmed.status_code == 200
+        record_id = confirmed.json()["operation"]["record_id"]
+
+        index_path = project / "runs" / run_id / "artifacts_index.json"
+        index = json.loads(index_path.read_text())
+        metadata_row = next(
+            row
+            for row in index["artifacts"]
+            if row["artifact_id"] == confirmed.json()["effect"]["metadata_artifact_id"]
+        )
+        metadata_row["sha256"] = "0" * 64
+        write_json(index_path, index)
+        reloaded = client.get(
+            f"/data-operations/metadata/{record_id}",
+            params={"project_root": str(project)},
+        )
+
+    assert reloaded.status_code == 404
+    assert reloaded.json()["error"]["code"] == "DATA_OPERATION_NOT_FOUND"
+
+
+def test_metadata_confirm_preflights_record_conflict_without_partial_artifacts(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    _seed_confirmed_metadata(project, run_id, artifact_id, {"columns": {"score": {}}})
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "metadata": {"score": {"variable_label": "Score"}},
+    }
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/metadata/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+    suffix = preview["fingerprint"][:32]
+    run_root = project / "runs" / run_id
+    relative_dir = Path("derived") / "data_operations" / "metadata_update" / suffix
+    record_path = run_root / relative_dir / "operation.json"
+    write_json(record_path, {"occupied": True})
+    before_index = json.loads((run_root / "artifacts_index.json").read_text())
+
+    confirmed = TestClient(app).post(
+        "/data-operations/metadata/confirm",
+        params={"project_root": str(project)},
+        json={**request, "preview_fingerprint": preview["fingerprint"]},
+    )
+
+    assert confirmed.status_code == 409
+    assert not (run_root / relative_dir / "metadata.json").exists()
+    assert json.loads(record_path.read_text()) == {"occupied": True}
+    assert json.loads((run_root / "artifacts_index.json").read_text()) == before_index
+    assert "metadata-update:" not in GraphStore(project / "runs").read(run_id).nodes
+
+
+def test_sort_split_and_batch_recode_are_real_previewable_transforms(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame(
+            {
+                "group": ["b", "a", "b", "a"],
+                "score": [2, 4, 1, 3],
+                "code": [1, 2, 3, 99],
+            }
+        ),
+    )
+    requests = {
+        "sort": {
+            "keys": [
+                {"column": "group", "ascending": True},
+                {"column": "score", "ascending": False},
+            ]
+        },
+        "split": {"by": ["group"], "mode": "split_file"},
+        "recode": {
+            "columns": [
+                {
+                    "column": "code",
+                    "rules": [
+                        {"from": 1, "to": "control"},
+                        {"from": 2, "to": "treated"},
+                    ],
+                    "other": "keep",
+                    "missing": "preserve",
+                }
+            ]
+        },
+    }
+
+    with TestClient(app) as client:
+        previews = {}
+        for operation, parameters in requests.items():
+            response = client.post(
+                "/data-operations/transform/preview",
+                params={"project_root": str(project)},
+                json={
+                    "source_run_id": run_id,
+                    "source_node_id": "stage:source",
+                    "source_artifact_id": artifact_id,
+                    "operation": operation,
+                    "parameters": parameters,
+                },
+            )
+            assert response.status_code == 200
+            previews[operation] = response.json()["preview"]
+
+        assert previews["sort"]["row_count_after"] == 4
+        assert previews["split"]["group_count"] == 2
+        assert previews["recode"]["changed_value_count"] == 2
+
+        for operation, parameters in requests.items():
+            response = client.post(
+                "/data-operations/transform/confirm",
+                params={"project_root": str(project)},
+                json={
+                    "source_run_id": run_id,
+                    "source_node_id": "stage:source",
+                    "source_artifact_id": artifact_id,
+                    "operation": operation,
+                    "parameters": parameters,
+                    "preview_fingerprint": previews[operation]["fingerprint"],
+                },
+            )
+            assert response.status_code == 200
+            assert response.json()["effect"]["child_node_id"].startswith(f"data-{operation}:")
+
+
+def test_profile_reload_uses_server_metadata_revisions_after_confirmed_mutation(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"group": [1, 2, 99], "score": [10, 20, 30]}),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {"columns": {"group": {"variable_label": "Group"}}},
+        schema_revision="schema:before-mutation",
+        metadata_revision="metadata:before-mutation",
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "metadata": {
+            "group": {
+                "variable_label": "Group",
+                "user_missing_values": [99],
+            }
+        },
+    }
+
+    with TestClient(app) as client:
+        before = client.get(
+            "/data-operations/profile",
+            params={
+                "project_root": str(project),
+                "source_run_id": run_id,
+                "source_node_id": "stage:source",
+                "source_artifact_id": artifact_id,
+            },
+        )
+        assert before.status_code == 200
+        before_profile = before.json()["profile"]
+        assert before_profile["schema_revision"] == "schema:before-mutation"
+        assert before_profile["metadata_revision"].startswith("metadata:")
+
+        preview = client.post(
+            "/data-operations/metadata/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+        confirmed = client.post(
+            "/data-operations/metadata/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+        assert confirmed.status_code == 200
+        effect = confirmed.json()["effect"]
+        child = client.get(
+            "/data-operations/profile",
+            params={
+                "project_root": str(project),
+                "source_run_id": run_id,
+                "source_node_id": effect["child_node_id"],
+                "source_artifact_id": artifact_id,
+            },
+        )
+
+    assert child.status_code == 200
+    after_profile = child.json()["profile"]
+    assert after_profile["dataset_ref"]["node_id"] == effect["child_node_id"]
+    assert after_profile["metadata_revision"] != before_profile["metadata_revision"]
+    assert after_profile["metadata_revision"] != "v1"
+    assert after_profile["columns"][0]["declared"]["user_missing_values"] == [99]
+
+
+def test_filter_transform_uses_confirmed_user_missing_registry_and_rejects_unknown(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"code": [1, 99, None], "value": [10, 20, 30]}),
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "operation": "subset",
+        "parameters": {
+            "columns": ["code", "value"],
+            "filter_ast": {"column": "code", "op": "is_missing"},
+        },
+    }
+    with TestClient(app) as client:
+        unknown = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json=request,
+        )
+        assert unknown.status_code == 422
+
+        _seed_confirmed_metadata(
+            project,
+            run_id,
+            artifact_id,
+            {"columns": {"code": {"user_missing_values": [99]}}},
+            schema_revision="schema:filter",
+            metadata_revision="metadata:filter-confirmed",
+        )
+        confirmed = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json=request,
+        )
+
+    assert confirmed.status_code == 200
+    assert confirmed.json()["preview"]["row_count_after"] == 2
+
+
+def test_split_confirm_materializes_group_children_manifest_and_lineage(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"group": ["b", "a", "b", "a"], "value": [1, 2, 3, 4]}),
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "operation": "split",
+        "parameters": {"by": ["group"], "mode": "split_file"},
+    }
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+        assert preview["group_counts"] == [
+            {"key": {"group": "a"}, "count": 2},
+            {"key": {"group": "b"}, "count": 2},
+        ]
+        confirmed = client.post(
+            "/data-operations/transform/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+    assert confirmed.status_code == 200
+    effect = confirmed.json()["effect"]
+    assert len(effect["group_artifacts"]) == 2
+    assert len({item["artifact_id"] for item in effect["group_artifacts"]}) == 2
+    manifest_path = project / "runs" / run_id / effect["group_manifest_path"]
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["execution_key"] == effect["execution_key"]
+    assert manifest["group_count"] == 2
+    assert all(
+        (project / "runs" / run_id / item["path"]).is_file()
+        for item in manifest["groups"]
+    )
+    graph = GraphStore(project / "runs").read(run_id)
+    assert all(item["child_node_id"] in graph.nodes for item in effect["group_artifacts"])
+    assert all(
+        any(
+            edge.source_id == effect["child_node_id"]
+            and edge.target_id == item["child_node_id"]
+            for edge in graph.edges.values()
+        )
+        for item in effect["group_artifacts"]
+    )
+
+
+def test_declared_weight_is_consumed_by_supported_aggregate_and_recorded(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame(
+            {
+                "group": ["a", "a", "b"],
+                "value": [10.0, 20.0, 100.0],
+                "weight": [1.0, 3.0, 1.0],
+            }
+        ),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {
+            "columns": {},
+            "weight": {"column": "weight", "kind": "frequency"},
+        },
+        schema_revision="schema:weighted",
+        metadata_revision="metadata:weighted",
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "operation": "aggregate",
+        "parameters": {
+            "group_by": ["group"],
+            "aggregations": [
+                {"column": "value", "func": "mean", "output": "mean_value"}
+            ],
+        },
+    }
+    with TestClient(app) as client:
+        preview_response = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json=request,
+        )
+        assert preview_response.status_code == 200
+        preview = preview_response.json()["preview"]
+        assert preview["method"] == "weighted_mean"
+        assert preview["evidence"]["weight"]["column"] == "weight"
+        confirmed = client.post(
+            "/data-operations/transform/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+        unsupported = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json={
+                **request,
+                "parameters": {
+                    **request["parameters"],
+                    "aggregations": [
+                        {"column": "value", "func": "sum", "output": "sum_value"}
+                    ],
+                },
+            },
+        )
+        assert unsupported.status_code == 422
+        assert "weight" in unsupported.json()["error"]["details"]["reason"]
+
+    assert confirmed.status_code == 200
+    effect = confirmed.json()["effect"]
+    output = pd.read_csv(project / "runs" / run_id / effect["artifact_path"])
+    assert output.set_index("group").loc["a", "mean_value"] == 17.5
+    assert (
+        confirmed.json()["operation"]["outputs"]["ports"]["evidence"]["method"]
+        == "weighted_mean"
+    )
+
+
+def test_transform_child_reloads_all_confirmed_metadata_and_provenance_sidecar(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"code": [1, 2], "group": ["a", "b"], "weight": [1.0, 2.0]}),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {
+            "columns": {
+                "code": {
+                    "variable_label": "Code",
+                    "value_labels": {"1": "One", "2": "Two"},
+                    "user_missing_values": [99],
+                }
+            },
+            "weight": {"column": "weight", "kind": "frequency"},
+            "split": {"columns": ["group"], "mode": "split_file"},
+            "group": {"columns": ["group"], "mode": "group"},
+        },
+        schema_revision="schema:all-metadata",
+        metadata_revision="metadata:all-metadata",
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "operation": "recode",
+        "parameters": {
+            "columns": [
+                {"column": "code", "rules": [{"from": 1, "to": 10}]}
+            ]
+        },
+    }
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+        confirmed = client.post(
+            "/data-operations/transform/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+        assert confirmed.status_code == 200
+        effect = confirmed.json()["effect"]
+        profile = client.get(
+            "/data-operations/profile",
+            params={
+                "project_root": str(project),
+                "source_run_id": run_id,
+                "source_node_id": effect["child_node_id"],
+                "source_artifact_id": effect["artifact_id"],
+            },
+        )
+
+    assert profile.status_code == 200
+    assert effect["metadata_artifact_id"]
+    sidecar = json.loads(
+        (project / "runs" / run_id / effect["metadata_artifact_path"]).read_text()
+    )
+    assert sidecar["metadata"]["columns"]["code"]["value_labels"] == {
+        "1": "One",
+        "2": "Two",
+    }
+    assert sidecar["metadata"]["columns"]["code"]["user_missing_values"] == [99]
+    assert sidecar["metadata"]["weight"] == {"column": "weight", "kind": "frequency"}
+    assert sidecar["metadata"]["split"]["columns"] == ["group"]
+    assert sidecar["metadata"]["group"]["columns"] == ["group"]
+    assert sidecar["provenance"]["source_artifact_id"] == artifact_id
+    assert profile.json()["profile"]["columns"][0]["declared"]["value_labels"] == {
+        "1": "One",
+        "2": "Two",
+    }
+
+
+def test_split_group_children_bind_metadata_sidecars_and_reload_profile(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame(
+            {
+                "code": [1, 2, 1],
+                "group": ["a", "a", "b"],
+                "weight": [1.0, 2.0, 3.0],
+            }
+        ),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {
+            "columns": {
+                "code": {
+                    "variable_label": "Code",
+                    "value_labels": {"1": "One", "2": "Two"},
+                    "user_missing_values": [99],
+                }
+            },
+            "weight": {"column": "weight", "kind": "frequency"},
+            "split": {"columns": ["group"], "mode": "split_file"},
+            "group": {"columns": ["group"], "mode": "group"},
+        },
+        schema_revision="schema:split-group-sidecar",
+        metadata_revision="metadata:split-group-sidecar",
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "operation": "split",
+        "parameters": {"by": ["group"], "mode": "group"},
+    }
+
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+        confirmed = client.post(
+            "/data-operations/transform/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+
+        assert confirmed.status_code == 200
+        effect = confirmed.json()["effect"]
+        for group_artifact in effect["group_artifacts"]:
+            assert group_artifact["metadata_artifact_id"]
+            assert group_artifact["metadata_artifact_path"]
+            sidecar = json.loads(
+                (
+                    project
+                    / "runs"
+                    / run_id
+                    / group_artifact["metadata_artifact_path"]
+                ).read_text()
+            )
+            assert sidecar["source"]["artifact_id"] == group_artifact["artifact_id"]
+            assert sidecar["metadata"]["columns"]["code"]["value_labels"] == {
+                "1": "One",
+                "2": "Two",
+            }
+            assert sidecar["metadata"]["columns"]["code"]["user_missing_values"] == [99]
+            assert sidecar["metadata"]["weight"] == {
+                "column": "weight",
+                "kind": "frequency",
+            }
+
+            profile = client.get(
+                "/data-operations/profile",
+                params={
+                    "project_root": str(project),
+                    "source_run_id": run_id,
+                    "source_node_id": group_artifact["child_node_id"],
+                    "source_artifact_id": group_artifact["artifact_id"],
+                },
+            )
+            assert profile.status_code == 200
+            code = next(
+                column
+                for column in profile.json()["profile"]["columns"]
+                if column["name"] == "code"
+            )
+            assert code["declared"]["variable_label"] == "Code"
+            assert code["declared"]["user_missing_values"] == [99]
+
+
+def test_rename_confirm_preflights_recipe_conflict_before_writing_child_artifacts(
+    tmp_path: Path,
+) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"code": [1, 2], "value": [10, 20]}),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {
+            "columns": {
+                "code": {
+                    "variable_label": "Code",
+                    "value_labels": {"1": "One", "2": "Two"},
+                    "user_missing_values": [99],
+                }
+            }
+        },
+        schema_revision="schema:rename-atomic",
+        metadata_revision="metadata:rename-atomic",
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "operation": "rename",
+        "parameters": {"mapping": {"code": "code_new"}},
+    }
+
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+
+        relative_dir = (
+            Path("derived")
+            / "data_operations"
+            / "rename"
+            / preview["fingerprint"][:32]
+        )
+        recipe_path = project / "runs" / run_id / relative_dir / "recipe.json"
+        write_json(recipe_path, {"occupied": True})
+
+        confirmed = client.post(
+            "/data-operations/transform/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+
+    assert confirmed.status_code == 409
+    run_root = project / "runs" / run_id
+    assert not (run_root / relative_dir / "data.csv").exists()
+    assert not (run_root / relative_dir / "data.schema.json").exists()
+    assert not (run_root / relative_dir / "metadata.json").exists()
+    assert json.loads(recipe_path.read_text()) == {"occupied": True}
+    index = json.loads((run_root / "artifacts_index.json").read_text())
+    assert not any(
+        str(item.get("path", "")).startswith(relative_dir.as_posix())
+        for item in index["artifacts"]
+    )
+
+
+def test_rename_child_reloads_expressible_metadata_and_provenance(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame(
+            {
+                "code": [1, 2],
+                "group": ["a", "b"],
+                "weight": [1.0, 2.0],
+            }
+        ),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {
+            "columns": {
+                "code": {
+                    "variable_label": "Code",
+                    "value_labels": {"1": "One", "2": "Two"},
+                    "user_missing_values": [99],
+                }
+            },
+            "weight": {"column": "weight", "kind": "frequency"},
+            "split": {"columns": ["group"], "mode": "split_file"},
+            "group": {"columns": ["group"], "mode": "group"},
+        },
+        schema_revision="schema:rename-metadata",
+        metadata_revision="metadata:rename-metadata",
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "operation": "rename",
+        "parameters": {"mapping": {"code": "code_new"}},
+    }
+
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+        confirmed = client.post(
+            "/data-operations/transform/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+        assert confirmed.status_code == 200
+        effect = confirmed.json()["effect"]
+        profile = client.get(
+            "/data-operations/profile",
+            params={
+                "project_root": str(project),
+                "source_run_id": run_id,
+                "source_node_id": effect["child_node_id"],
+                "source_artifact_id": effect["artifact_id"],
+            },
+        )
+
+    assert profile.status_code == 200
+    renamed = next(
+        column
+        for column in profile.json()["profile"]["columns"]
+        if column["name"] == "code_new"
+    )
+    assert renamed["declared"]["variable_label"] == "Code"
+    assert renamed["declared"]["value_labels"] == {"1": "One", "2": "Two"}
+    assert renamed["declared"]["user_missing_values"] == [99]
+    sidecar = json.loads(
+        (project / "runs" / run_id / effect["metadata_artifact_path"]).read_text()
+    )
+    assert sidecar["metadata"]["weight"] == {"column": "weight", "kind": "frequency"}
+    assert sidecar["provenance"]["source_artifact_id"] == artifact_id
+    assert sidecar["provenance"]["operation_id"] == "data.rename"
+
+
+def test_transform_route_fails_closed_when_live_manifest_does_not_advertise_operation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from workbench import data_operation_manifest
+
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"code": [1, 2], "value": [10, 20]}),
+    )
+    live = data_operation_manifest.build_data_operation_manifest()
+    monkeypatch.setattr(
+        data_operation_manifest,
+        "build_data_operation_manifest",
+        lambda: data_operation_manifest.DataOperationManifestV1(
+            schema_version=live.schema_version,
+            operations=tuple(
+                item for item in live.operations if item.operation_id != "data.rename"
+            ),
+            unavailable=live.unavailable,
+        ),
+    )
+    response = TestClient(app).post(
+        "/data-operations/transform/preview",
+        params={"project_root": str(project)},
+        json={
+            "source_run_id": run_id,
+            "source_node_id": "stage:source",
+            "source_artifact_id": artifact_id,
+            "operation": "rename",
+            "parameters": {"mapping": {"code": "code_new"}},
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_OPERATION_NOT_ADVERTISED"
+
+
+@pytest.mark.parametrize(
+    ("path", "body", "operation_id"),
+    [
+        (
+            "/data-operations/metadata/preview",
+            {
+                "source_run_id": "run-1",
+                "source_node_id": "stage:source",
+                "source_artifact_id": "artifact-1",
+                "metadata": {},
+            },
+            "data.metadata.update",
+        ),
+        (
+            "/data-operations/column-cast/preview",
+            {
+                "source_run_id": "run-1",
+                "source_node_id": "stage:source",
+                "source_artifact_id": "artifact-1",
+                "column": "score",
+                "target_dtype": "string",
+            },
+            "data.column.cast",
+        ),
+        (
+            "/data-operations/columns-cast/preview",
+            {
+                "source_run_id": "run-1",
+                "source_node_id": "stage:source",
+                "source_artifact_id": "artifact-1",
+                "casts": [{"column": "score", "target_dtype": "string"}],
+            },
+            "data.columns.cast",
+        ),
+        (
+            "/data-operations/feature-recipe/preview",
+            {
+                "source_run_id": "run-1",
+                "source_node_id": "stage:source",
+                "source_artifact_id": "artifact-1",
+                "recipe_id": "recipe",
+                "operation_id": "interaction",
+                "inputs": ["score", "score"],
+                "output": "score2",
+                "parameters": {"left": "score", "right": "score"},
+            },
+            "data.feature_recipe",
+        ),
+    ],
+)
+def test_all_data_preview_routes_require_the_live_manifest(
+    tmp_path: Path,
+    monkeypatch,
+    path: str,
+    body: dict[str, object],
+    operation_id: str,
+) -> None:
+    from workbench import data_operation_manifest
+
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"score": [1, 2]}),
+    )
+    body = {
+        **body,
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+    }
+    live = data_operation_manifest.build_data_operation_manifest()
+    monkeypatch.setattr(
+        data_operation_manifest,
+        "build_data_operation_manifest",
+        lambda: data_operation_manifest.DataOperationManifestV1(
+            schema_version=live.schema_version,
+            operations=tuple(
+                item for item in live.operations if item.operation_id != operation_id
+            ),
+            unavailable=live.unavailable,
+        ),
+    )
+
+    response = TestClient(app).post(
+        path,
+        params={"project_root": str(project)},
+        json=body,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_OPERATION_NOT_ADVERTISED"
+
+
+def test_split_confirm_preflights_all_group_paths_before_any_child_write(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"group": ["a", "b"], "value": [1, 2]}),
+    )
+    request = {
+        "source_run_id": run_id,
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "operation": "split",
+        "parameters": {"by": ["group"], "mode": "group"},
+    }
+    with TestClient(app) as client:
+        preview = client.post(
+            "/data-operations/transform/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+    suffix = preview["fingerprint"][:32]
+    key = {"group": "b"}
+    digest = hashlib.sha256(
+        json.dumps(key, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+    run_root = project / "runs" / run_id
+    conflict = run_root / "derived" / "data_operations" / "split" / suffix / "groups" / f"{digest}.csv"
+    conflict.parent.mkdir(parents=True, exist_ok=True)
+    conflict.write_text("group,value\nconflict,999\n", encoding="utf-8")
+
+    confirmed = TestClient(app).post(
+        "/data-operations/transform/confirm",
+        params={"project_root": str(project)},
+        json={**request, "preview_fingerprint": preview["fingerprint"]},
+    )
+
+    assert confirmed.status_code == 409
+    assert not (run_root / "derived" / "data_operations" / "split" / suffix / "data.csv").exists()
+    assert not (run_root / "derived" / "data_operations" / "split" / suffix / "groups" / f"{digest}.metadata.json").exists()
+    assert conflict.read_text(encoding="utf-8") == "group,value\nconflict,999\n"
+
+    record_dir = project / "workbench" / "operation-records"
+    assert not record_dir.exists() or not list(record_dir.glob("*.jsonl")), (
+        "a failed preflight must not leave a submitted OperationRecord"
+    )
+
+
+def test_metadata_loss_preview_is_denied_when_live_manifest_removes_its_surface() -> None:
+    from workbench import data_operation_manifest
+
+    live = data_operation_manifest.build_data_operation_manifest()
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        data_operation_manifest,
+        "build_data_operation_manifest",
+        lambda: data_operation_manifest.DataOperationManifestV1(
+            schema_version=live.schema_version,
+            operations=live.operations,
+            unavailable=tuple(
+                item for item in live.unavailable if item.operation_id != "data.metadata.loss"
+            ),
+        ),
+    )
+    try:
+        response = TestClient(app).post(
+            "/data-operations/metadata-loss/preview",
+            json={
+                "source_format": "workbench-json",
+                "target_format": "csv",
+                "metadata": {"score": {"variable_label": "Outcome"}},
+            },
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_OPERATION_NOT_ADVERTISED"

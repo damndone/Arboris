@@ -18,7 +18,7 @@ export type DataOperationAction = (
   projectRoot: string,
   descriptor: DataOperationDescriptor,
   request: Record<string, unknown>,
-) => unknown | PromiseLike<unknown>;
+) => Response | PromiseLike<Response>;
 
 export interface DataOperationsSectionProps {
   manifest: unknown;
@@ -45,6 +45,15 @@ interface PreviewPayload {
   [key: string]: unknown;
 }
 
+interface ConfirmPayload {
+  status: string;
+  effect?: Record<string, unknown>;
+  operation?: Record<string, unknown>;
+  reason_code?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
 const EMPTY_VALUE = "";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -63,7 +72,9 @@ function assertSourceIdentity(
   manifest: DataOperationManifest,
   identity: ResolvedSourceIdentity,
 ): void {
-  for (const operation of manifest.operations) {
+  for (const operation of manifest.operations.filter(
+    (candidate) => candidate.availability?.status !== "unavailable",
+  )) {
     const properties = operation.request_schema.properties;
     for (const field of DATA_OPERATION_SOURCE_IDENTITY_FIELDS) {
       const identityValue = identity[field];
@@ -78,10 +89,247 @@ function assertSourceIdentity(
   }
 }
 
-function readPreviewPayload(response: unknown): PreviewPayload | null {
-  const candidate = isObject(response) && isObject(response.preview) ? response.preview : response;
-  if (!isObject(candidate) || typeof candidate.status !== "string") return null;
+async function readPreviewPayload(response: unknown): Promise<PreviewPayload | null> {
+  if (typeof Response === "undefined" || !(response instanceof Response)) return null;
+  if (!response.ok || response.status < 200 || response.status >= 300) return null;
+  const body = await response.json();
+  const candidate = isObject(body) && isObject(body.preview) ? body.preview : null;
+  if (!candidate || typeof candidate.status !== "string") return null;
   return candidate as PreviewPayload;
+}
+
+function isRealResponse(response: unknown): response is Response {
+  return typeof Response !== "undefined" && response instanceof Response;
+}
+
+async function readConfirmPayload(response: unknown): Promise<{
+  payload: ConfirmPayload | null;
+  httpStatus: number | null;
+  httpOk: boolean | null;
+  isHttpResponse: boolean;
+}> {
+  if (isRealResponse(response)) {
+    const httpStatus = response.status;
+    const httpOk = response.ok;
+    const body = await response.json();
+    return {
+      payload: isObject(body) && typeof body.status === "string" ? (body as ConfirmPayload) : null,
+      httpStatus,
+      httpOk,
+      isHttpResponse: true,
+    };
+  }
+  return { payload: null, httpStatus: null, httpOk: null, isHttpResponse: false };
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  if (isObject(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+async function requestSha256(request: Record<string, unknown>): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(request)),
+  );
+  return Array.from(new Uint8Array(digest), (item) => item.toString(16).padStart(2, "0")).join("");
+}
+
+async function optionsSha256(request: Record<string, unknown>): Promise<string> {
+  const {
+    source_run_id: _run,
+    source_node_id: _node,
+    source_artifact_id: _artifact,
+    ...options
+  } = request;
+  return requestSha256(options);
+}
+
+function exactIdentityBindings(effect: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(effect).filter(
+      ([field, value]) => field.endsWith("_id") && typeof value === "string" && value.trim(),
+    ),
+  ) as Record<string, string>;
+}
+
+function confirmedPayloadError(
+  payload: ConfirmPayload | null,
+  descriptor: DataOperationDescriptor,
+  operationId: string,
+  previewFingerprint: string,
+  requestDigest: string,
+  optionsDigest: string,
+  sourceIdentity: ResolvedSourceIdentity,
+  catalogDigest: string,
+): string | null {
+  if (!payload || payload.status !== "completed") {
+    return "CONFIRM_INVALID: confirmation did not return completed status.";
+  }
+  const responsePreview = payload.preview;
+  if (
+    !isObject(responsePreview) ||
+    responsePreview.status !== "ready" ||
+    responsePreview.fingerprint !== previewFingerprint ||
+    responsePreview.request_sha256 !== requestDigest ||
+    responsePreview.options_sha256 !== optionsDigest ||
+    responsePreview.catalog_digest !== catalogDigest ||
+    responsePreview.source_run_id !== sourceIdentity.source_run_id ||
+    responsePreview.source_node_id !== sourceIdentity.source_node_id ||
+    responsePreview.source_artifact_id !== sourceIdentity.source_artifact_id
+  ) {
+    return "CONFIRM_INVALID: completed preview identity is stale or mismatched.";
+  }
+  const effect = payload.effect;
+  if (
+    !effect ||
+    typeof effect.execution_key !== "string" ||
+    !effect.execution_key.trim() ||
+    typeof effect.child_node_id !== "string" ||
+    !effect.child_node_id.trim() ||
+    !(
+      (typeof effect.artifact_id === "string" && effect.artifact_id.trim()) ||
+      (typeof effect.metadata_artifact_id === "string" && effect.metadata_artifact_id.trim())
+    )
+  ) {
+    return "CONFIRM_INVALID: completed effect is missing typed identity.";
+  }
+  const operation = payload.operation;
+  if (
+    !operation ||
+    typeof operation.record_id !== "string" ||
+    !operation.record_id.trim() ||
+    operation.operation_id !== operationId ||
+    operation.operation_version !== descriptor.operation_version ||
+    operation.status !== "completed"
+  ) {
+    return "CONFIRM_INVALID: completed operation identity is not server-verified.";
+  }
+  const target = operation.target;
+  if (
+    !isObject(target) ||
+    target.run_id !== sourceIdentity.source_run_id ||
+    target.node_ref !== sourceIdentity.source_node_id ||
+    target.artifact_id !== sourceIdentity.source_artifact_id
+  ) {
+    return "CONFIRM_INVALID: completed operation target does not match the request.";
+  }
+  const execution = operation.execution;
+  if (!isObject(execution) || execution.execution_key !== effect.execution_key) {
+    return "CONFIRM_INVALID: completed execution identity does not match the effect.";
+  }
+  const bindings = execution.bindings;
+  if (!isObject(bindings)) {
+    return "CONFIRM_INVALID: completed execution bindings are missing.";
+  }
+  const expectedBindings = exactIdentityBindings(effect);
+  if (
+    JSON.stringify(Object.keys(bindings).sort()) !==
+    JSON.stringify(Object.keys(expectedBindings).sort())
+  ) {
+    return "CONFIRM_INVALID: completed effect bindings are not field-exact.";
+  }
+  for (const [field, value] of Object.entries(expectedBindings)) {
+    if (bindings[field] !== value) {
+      return "CONFIRM_INVALID: completed effect binding does not match the OperationRecord.";
+    }
+  }
+  const outputs = operation.outputs;
+  const ports = isObject(outputs) && isObject(outputs.ports) ? outputs.ports : null;
+  const expectedPortNames = descriptor.output_ports.map((port) => port.name).sort();
+  if (
+    !ports ||
+    JSON.stringify(Object.keys(ports).sort()) !== JSON.stringify(expectedPortNames)
+  ) {
+    return "CONFIRM_INVALID: completed output ports do not match the descriptor.";
+  }
+  const derived = ports && isObject(ports.derived) ? ports.derived : null;
+  const operationRecordPort = ports && isObject(ports.operation_record) ? ports.operation_record : null;
+  if (
+    !derived ||
+    derived.execution_key !== effect.execution_key ||
+    derived.child_node_id !== effect.child_node_id ||
+    Object.entries(effect).some(([field, value]) => derived[field] !== value) ||
+    !operationRecordPort ||
+    operationRecordPort.record_id !== operation.record_id ||
+    operationRecordPort.operation_id !== operation.operation_id ||
+    operationRecordPort.operation_version !== descriptor.operation_version
+  ) {
+    return "CONFIRM_INVALID: typed output ports are not bound to the effect and record.";
+  }
+  const slots = isObject(outputs) && isObject(outputs.consumer_slots) ? outputs.consumer_slots : null;
+  const expectedSlots: Record<string, string> = {
+    "data.agent": "derived",
+    "data.notebook": "derived",
+    "data.report": "evidence",
+  };
+  if (
+    !slots ||
+    JSON.stringify(Object.keys(slots).sort()) !== JSON.stringify(Object.keys(expectedSlots).sort())
+  ) {
+    return "CONFIRM_INVALID: typed consumer slots are incomplete.";
+  }
+  for (const [slot, expectedPort] of Object.entries(expectedSlots)) {
+    const value = slots[slot];
+    if (
+      !isObject(value) ||
+      value.record_id !== operation.record_id ||
+      value.port !== expectedPort
+    ) {
+      return "CONFIRM_INVALID: typed consumer slot is not bound to the OperationRecord.";
+    }
+  }
+  const evidence = ports && isObject(ports.evidence) ? ports.evidence : null;
+  if (
+    !evidence ||
+    typeof evidence.method !== "string" ||
+    !evidence.method.trim() ||
+    evidence.record_id !== operation.record_id ||
+    evidence.operation_id !== operationId ||
+    evidence.execution_key !== effect.execution_key ||
+    evidence.child_node_id !== effect.child_node_id
+  ) {
+    return "CONFIRM_INVALID: typed evidence is not bound to the effect and record.";
+  }
+  const expectedMethod =
+    typeof responsePreview.evidence_method === "string"
+      ? responsePreview.evidence_method
+      : typeof responsePreview.method === "string"
+        ? responsePreview.method
+        : operationId;
+  if (evidence.method !== expectedMethod) {
+    return "CONFIRM_INVALID: evidence method is stale or mismatched.";
+  }
+  const expectedEvidence: Record<string, unknown> = {
+    record_id: operation.record_id,
+    operation_id: operationId,
+    execution_key: effect.execution_key,
+    ...expectedBindings,
+  };
+  if (isObject(responsePreview.evidence)) {
+    Object.assign(expectedEvidence, responsePreview.evidence);
+  }
+  for (const [field, value] of Object.entries(expectedEvidence)) {
+    if (evidence[field] !== value) {
+      return "CONFIRM_INVALID: evidence payload is stale or mismatched.";
+    }
+  }
+  if (!isObject(outputs) || outputs.catalog_digest !== catalogDigest) {
+    return "CONFIRM_INVALID: catalog digest is stale or mismatched.";
+  }
+  return null;
+}
+
+function confirmResultText(payload: ConfirmPayload): string {
+  return [payload.status, payload.reason_code, payload.message]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" — ");
 }
 
 function readyFingerprint(preview: PreviewPayload | null): string | null {
@@ -256,17 +504,28 @@ function ParsedDataOperationsSection({
   const [selectedOperationId, setSelectedOperationId] = useState("");
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [previewPayload, setPreviewPayload] = useState<PreviewPayload | null>(null);
+  const [confirmPayload, setConfirmPayload] = useState<ConfirmPayload | null>(null);
   const [status, setStatus] = useState<OperationStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const requestRevision = useRef(0);
 
   const selectedOperation = manifest.operations.find(
-    (operation) => operation.operation_id === selectedOperationId,
+    (operation) =>
+      operation.operation_id === selectedOperationId &&
+      operation.availability?.status !== "unavailable",
   );
+  const availableOperations = manifest.operations.filter(
+    (operation) => operation.availability?.status !== "unavailable",
+  );
+  const unavailableOperations = [
+    ...(manifest.unavailable ?? []),
+    ...manifest.operations.filter((operation) => operation.availability?.status === "unavailable"),
+  ];
 
   function invalidatePreview() {
     requestRevision.current += 1;
     setPreviewPayload(null);
+    setConfirmPayload(null);
     setError(null);
     setStatus("idle");
   }
@@ -276,6 +535,7 @@ function ParsedDataOperationsSection({
     setSelectedOperationId(operationId);
     setValues({});
     setPreviewPayload(null);
+    setConfirmPayload(null);
     setError(null);
     setStatus("idle");
   }
@@ -298,14 +558,21 @@ function ParsedDataOperationsSection({
 
     const revision = requestRevision.current;
     setPreviewPayload(null);
+    setConfirmPayload(null);
     setError(null);
     setStatus("previewing");
     try {
+      const requestDigest = await requestSha256(request);
       const response = await preview(projectRoot, selectedOperation, request);
       if (requestRevision.current !== revision) return;
-      const payload = readPreviewPayload(response);
+      const payload = await readPreviewPayload(response);
       if (!payload) {
         setError("PREVIEW_INVALID: preview response is not a typed preview.");
+        setStatus("error");
+        return;
+      }
+      if (payload.request_sha256 !== requestDigest) {
+        setError("PREVIEW_INVALID: preview request digest is stale or mismatched.");
         setStatus("error");
         return;
       }
@@ -325,12 +592,51 @@ function ParsedDataOperationsSection({
       ...requestFor(sourceIdentity, values),
       preview_fingerprint: fingerprint,
     };
+    const requestWithoutFingerprint = requestFor(sourceIdentity, values);
     const revision = requestRevision.current;
     setError(null);
+    setConfirmPayload(null);
     setStatus("confirming");
     try {
-      await confirm(projectRoot, selectedOperation, request);
+      const response = await confirm(projectRoot, selectedOperation, request);
       if (requestRevision.current !== revision) return;
+      const result = await readConfirmPayload(response);
+      if (requestRevision.current !== revision) return;
+      setConfirmPayload(result.payload);
+      const httpFailed =
+        !result.isHttpResponse ||
+        result.httpStatus === null ||
+        result.httpStatus < 200 ||
+        result.httpStatus >= 300 ||
+        result.httpOk !== true;
+      if (httpFailed) {
+        setError(
+          result.isHttpResponse
+            ? `HTTP ${result.httpStatus}: ${result.payload ? confirmResultText(result.payload) : "typed confirmation response unavailable."}`
+            : "CONFIRM_INVALID: confirmation must be a successful HTTP response.",
+        );
+        setStatus("error");
+        return;
+      }
+      const invalid = confirmedPayloadError(
+        result.payload,
+        selectedOperation,
+        selectedOperation.operation_id,
+        fingerprint,
+        await requestSha256(requestWithoutFingerprint),
+        await optionsSha256(requestWithoutFingerprint),
+        sourceIdentity,
+        typeof previewPayload?.catalog_digest === "string" ? previewPayload.catalog_digest : "",
+      );
+      if (invalid) {
+        if (result.payload && result.payload.status !== "completed") {
+          setStatus("error");
+          return;
+        }
+        setError(invalid);
+        setStatus("error");
+        return;
+      }
       setStatus("complete");
     } catch (reason: unknown) {
       if (requestRevision.current !== revision) return;
@@ -341,22 +647,32 @@ function ParsedDataOperationsSection({
 
   return (
     <section aria-label="Data operations" data-testid="data-operations-section">
-      <label htmlFor="data-operation-select">
-        Data operation
-        <select
-          id="data-operation-select"
-          aria-label="Data operation"
-          value={selectedOperationId}
-          onChange={(event) => selectOperation(event.target.value)}
-        >
-          <option value="">Select operation</option>
-          {manifest.operations.map((operation) => (
-            <option key={operation.operation_id} value={operation.operation_id}>
-              {operation.operation_id}
-            </option>
-          ))}
-        </select>
-      </label>
+      {unavailableOperations.map((operation) => (
+        <div key={operation.operation_id} data-testid="data-operation-unavailable">
+          {operation.operation_id}: {"availability" in operation && isObject(operation.availability)
+            ? `${String(operation.availability.reason_code)} — ${String(operation.availability.message)}`
+            : `${String(operation.reason_code)} — ${String(operation.message)}`}
+        </div>
+      ))}
+
+      {availableOperations.length > 0 && (
+        <label htmlFor="data-operation-select">
+          Data operation
+          <select
+            id="data-operation-select"
+            aria-label="Data operation"
+            value={selectedOperationId}
+            onChange={(event) => selectOperation(event.target.value)}
+          >
+            <option value="">Select operation</option>
+            {availableOperations.map((operation) => (
+              <option key={operation.operation_id} value={operation.operation_id}>
+                {operation.operation_id}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       {selectedOperation && (
         <div data-testid="data-operation-fields">
@@ -404,6 +720,9 @@ function ParsedDataOperationsSection({
       )}
       {previewPayload && previewPayload.status !== "ready" && (
         <div data-testid="data-operation-preview-result">{previewPayload.status}</div>
+      )}
+      {confirmPayload && confirmPayload.status !== "completed" && (
+        <div data-testid="data-operation-result">{confirmResultText(confirmPayload)}</div>
       )}
       {error && <div data-testid="data-operation-error">{error}</div>}
       {status === "complete" && (

@@ -25,8 +25,16 @@
 // The old import path (lineage/detail/sections/sectionRegistry) still
 // works via a thin re-export so consumers don't churn in this PR.
 
-import { createElement, type FC } from "react";
+import { createElement, useEffect, useState, type FC } from "react";
 import type { GraphViewNode } from "../../lineage/api/graphViewTypes";
+import { useProjectRootOptional } from "../ProjectRootContext";
+import {
+  confirmDataOperation,
+  fetchDataColumnCastContext,
+  fetchDataOperationManifest,
+  previewDataOperation,
+} from "../../lineage/dataOperations";
+import { useResolvedNodeOperationContext } from "../../lineage/detail/NodeOperationContextProvider";
 import { TrustBanner } from "../../lineage/detail/sections/TrustBanner";
 import { LineageChainSection } from "../../lineage/detail/sections/LineageChainSection";
 import { BasicInfoSection } from "../../lineage/detail/sections/BasicInfoSection";
@@ -44,6 +52,7 @@ import { DraftEditorSlot } from "../../lineage/detail/sections/DraftEditorSlot";
 import { CodeExecuteSection } from "../../lineage/detail/sections/CodeExecuteSection";
 import { StatisticalExplorationSection } from "../../lineage/detail/sections/StatisticalExplorationSection";
 import { DataColumnCastSection } from "../../lineage/detail/sections/DataColumnCastSection";
+import { DataOperationsSection } from "../../lineage/detail/sections/DataOperationsSection";
 import { ArmaGarchOperationSection } from "../../lineage/detail/sections/ArmaGarchOperationSection";
 import { ArmaGarchResultSection } from "../../lineage/detail/sections/ArmaGarchResultSection";
 import { isAskAIEnabled } from "../featureFlags";
@@ -131,6 +140,88 @@ export const DataConsumerEvidenceSection: FC<{ node: GraphViewNode }> = ({ node 
   );
 };
 
+function dataOperationsUnavailable(message: string) {
+  return createElement(
+    "section",
+    { "aria-label": "Data operations", "data-testid": "data-operations-unavailable" },
+    createElement("div", { className: "ln-section-label" }, "Data operations"),
+    createElement("p", { role: "status" }, message),
+  );
+}
+
+/**
+ * Canonical registry adapter for the server-owned data-operation editor.
+ * It resolves identity and transport only; DataOperationsSection owns all
+ * schema controls, preview gating, and typed completion validation.
+ */
+export const DataOperationsRegistrySection: FC<{ node: GraphViewNode }> = () => {
+  const projectRoot = useProjectRootOptional();
+  const resolved = useResolvedNodeOperationContext();
+  const sourceRunId = resolved?.ok ? resolved.context.ownership.owner_run_id : null;
+  const sourceNodeId = resolved?.ok ? resolved.context.operation_target.op_node_id : null;
+  const [manifest, setManifest] = useState<unknown | null>(null);
+  const [sourceArtifactId, setSourceArtifactId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setManifest(null);
+    setSourceArtifactId(null);
+    setLoadError(null);
+    if (!projectRoot || !sourceRunId || !sourceNodeId) return () => undefined;
+
+    void Promise.all([
+      fetchDataOperationManifest(),
+      fetchDataColumnCastContext(projectRoot, sourceRunId, sourceNodeId),
+    ])
+      .then(([nextManifest, sourceContext]) => {
+        if (!active) return;
+        const artifactId = sourceContext.source_artifact_id;
+        if (typeof artifactId !== "string" || !artifactId.trim()) {
+          setLoadError("SOURCE_ARTIFACT_UNAVAILABLE: server returned no source artifact identity.");
+          return;
+        }
+        setManifest(nextManifest);
+        setSourceArtifactId(artifactId);
+      })
+      .catch((reason: unknown) => {
+        if (!active) return;
+        setLoadError(
+          `DATA_OPERATIONS_UNAVAILABLE: ${reason instanceof Error ? reason.message : String(reason)}`,
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectRoot, sourceRunId, sourceNodeId]);
+
+  if (!projectRoot) return dataOperationsUnavailable("PROJECT_ROOT_UNAVAILABLE");
+  if (!resolved?.ok) {
+    return dataOperationsUnavailable(
+      `NODE_OPERATION_CONTEXT_UNAVAILABLE: ${resolved?.reason ?? "missing_context"}`,
+    );
+  }
+  if (!sourceRunId || !sourceNodeId) {
+    return dataOperationsUnavailable("NODE_OPERATION_CONTEXT_UNAVAILABLE: missing source identity.");
+  }
+  if (loadError) return dataOperationsUnavailable(loadError);
+  if (manifest === null || sourceArtifactId === null) {
+    return dataOperationsUnavailable("LOADING: server-owned data-operation manifest.");
+  }
+
+  return createElement(DataOperationsSection, {
+    manifest,
+    projectRoot,
+    sourceIdentity: {
+      source_run_id: sourceRunId,
+      source_node_id: sourceNodeId,
+      source_artifact_id: sourceArtifactId,
+    },
+    preview: previewDataOperation,
+    confirm: confirmDataOperation,
+  });
+};
+
 /**
  * Trust banner shows whenever the node is not trusted OR any decision
  * needs / has failed review. Mirrors V1.4.1 Inspector.tsx callout logic.
@@ -200,13 +291,14 @@ export const sectionRegistry: SectionEntry[] = [
     Component: CodeExecuteSection,
   },
   {
-    // v1.8.9 Wave C — the consumer surface is a declaration-derived typed
-    // projection. It does not recompute filters, aggregates or evidence.
-    id: "dataConsumerEvidence",
+    // v1.8.9 P1 remediation — canonical user-operated data editor. The
+    // server-owned manifest and node-operation context supply identity; the
+    // section itself keeps preview/confirm and typed completion checks.
+    id: "dataOperations",
     order: 29.25,
     shouldRender: (n) =>
       n.kind === "dataset_stage" && !n.isDraft && !isGeneratedArmaGarchStage(n),
-    Component: DataConsumerEvidenceSection,
+    Component: DataOperationsRegistrySection,
   },
   {
     id: "statisticalExploration",

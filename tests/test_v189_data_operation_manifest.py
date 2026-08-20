@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from workbench.agent.operations import OperationRegistry
 from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
 from workbench.contracts.agent.planning import DraftAgentPlanV1
@@ -10,12 +12,18 @@ from workbench.providers.catalog import load_builtin_catalog
 
 
 EXPECTED_OPERATION_IDS = (
+    "data.aggregate",
     "data.append",
     "data.column.cast",
     "data.columns.cast",
     "data.feature_recipe",
     "data.merge",
+    "data.metadata.update",
+    "data.recode",
+    "data.rename",
     "data.reshape",
+    "data.sort",
+    "data.split",
     "data.subset",
 )
 
@@ -39,8 +47,27 @@ def test_manifest_is_derived_from_the_single_live_data_operation_surface() -> No
 
     registry = OperationRegistry()
     for operation_id in EXPECTED_OPERATION_IDS:
-        definition = registry.require(operation_id)
         descriptor = descriptors[operation_id]
+        if operation_id in {
+            "data.metadata.update",
+            "data.sort",
+            "data.split",
+            "data.recode",
+            "data.rename",
+        }:
+            assert descriptor.operation_version == "v1"
+            assert descriptor.effect_level == "mutation"
+            assert descriptor.risk_level == "mutating"
+            assert descriptor.confirmation_policy == "required"
+            assert descriptor.executor_key.startswith("executor:workbench.data_consumer.")
+            assert descriptor.reconciler_key.startswith("reconciler:workbench.data_consumer.")
+            assert descriptor.validator_key == operation_id
+            assert descriptor.request_schema["additionalProperties"] is False
+            assert set(("source_run_id", "source_node_id", "source_artifact_id")) <= set(
+                descriptor.request_schema["properties"]
+            )
+            continue
+        definition = registry.require(operation_id)
         contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
 
         assert descriptor.operation_version == definition.operation_version
@@ -273,3 +300,361 @@ def test_agent_notebook_composition_fixtures_are_draft_planning_only() -> None:
             node["name"] in EXPECTED_OPERATION_IDS for node in fixture.plan.nodes
         )
         assert not hasattr(fixture, "execute")
+
+
+def test_manifest_advertises_only_real_data_consumer_extensions() -> None:
+    manifest, descriptors = _descriptors()
+
+    assert {
+        "data.metadata.update",
+        "data.sort",
+        "data.split",
+        "data.recode",
+    } <= set(descriptors)
+    for operation_id in ("data.metadata.update", "data.sort", "data.split", "data.recode"):
+        descriptor = descriptors[operation_id]
+        assert descriptor.preview_ref.endswith("/preview")
+        assert descriptor.confirm_ref.endswith("/confirm")
+        assert descriptor.request_schema["additionalProperties"] is False
+        assert descriptor.request_schema["properties"]["source_artifact_id"]["type"] == "string"
+
+    from workbench.data_interchange import interchange_capability
+
+    unavailable = manifest.to_dict().get("unavailable", [])
+    native_items = {
+        item["operation_id"]: item
+        for item in unavailable
+        if item["operation_id"] in {
+            "data.interchange.sav",
+            "data.interchange.zsav",
+            "data.interchange.dta",
+        }
+    }
+    assert set(native_items) == {
+        "data.interchange.sav",
+        "data.interchange.zsav",
+        "data.interchange.dta",
+    }
+    for operation_id, item in native_items.items():
+        capability = interchange_capability(operation_id.rsplit(".", 1)[-1])
+        assert item["status"] == "unavailable"
+        assert item["reason_code"] == capability.reason_code
+
+
+def test_manifest_fails_closed_when_pyreadstat_import_is_broken(monkeypatch) -> None:
+    import importlib
+
+    from workbench import data_operation_manifest as api
+    from workbench import data_interchange
+
+    real_import_module = importlib.import_module
+    original_has_module = data_interchange._has_module
+
+    monkeypatch.setattr(
+        data_interchange,
+        "_has_module",
+        lambda name: True if name == "pyreadstat" else original_has_module(name),
+    )
+
+    def broken_import(name: str, package: str | None = None):
+        if name == "pyreadstat":
+            raise ModuleNotFoundError("pyreadstat is installed but cannot be imported")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", broken_import)
+
+    manifest = api.build_data_operation_manifest()
+    unavailable = manifest.to_dict().get("unavailable", [])
+
+    native_items = {
+        item["operation_id"]: item
+        for item in unavailable
+        if item["operation_id"] in {
+            "data.interchange.sav",
+            "data.interchange.zsav",
+            "data.interchange.dta",
+        }
+    }
+    assert set(native_items) == {
+        "data.interchange.sav",
+        "data.interchange.zsav",
+        "data.interchange.dta",
+    }
+    for operation_id, item in native_items.items():
+        capability = data_interchange.interchange_capability(
+            operation_id.rsplit(".", 1)[-1]
+        )
+        assert item["status"] == "unavailable"
+        assert item["reason_code"] == capability.reason_code == "optional_dependency"
+
+
+def test_manifest_fails_closed_when_callable_pyreadstat_runtime_probe_is_broken(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from workbench import data_interchange
+    from workbench.data_operation_manifest import build_data_operation_manifest
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("adapter operation failed")
+
+    broken_module = SimpleNamespace(
+        read_sav=broken,
+        write_sav=broken,
+        read_dta=broken,
+        write_dta=broken,
+    )
+    original_verified_import = data_interchange._verified_import
+    monkeypatch.setattr(
+        data_interchange,
+        "_verified_import",
+        lambda name: broken_module if name == "pyreadstat" else original_verified_import(name),
+    )
+
+    manifest = build_data_operation_manifest().to_dict()
+    native_items = {
+        item["operation_id"]: item
+        for item in manifest["unavailable"]
+        if item["operation_id"] in {
+            "data.interchange.sav",
+            "data.interchange.zsav",
+            "data.interchange.dta",
+        }
+    }
+    assert set(native_items) == {
+        "data.interchange.sav",
+        "data.interchange.zsav",
+        "data.interchange.dta",
+    }
+    assert all(item["status"] == "unavailable" for item in native_items.values())
+    assert all(item["reason_code"] == "optional_dependency" for item in native_items.values())
+
+
+def test_manifest_fails_closed_when_zsav_probe_mode_is_broken(monkeypatch) -> None:
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from workbench import data_interchange
+    from workbench.data_operation_manifest import build_data_operation_manifest
+
+    def write_sav(frame, path, *, compress=False):
+        Path(path).write_bytes(b"sav")
+        if compress:
+            raise RuntimeError("ZSAV mode is unavailable")
+
+    def read_sav(_path):
+        return frame.copy(), None
+
+    def write_dta(_frame, path, *, version):
+        Path(path).write_bytes(b"dta")
+
+    def read_dta(_path):
+        return frame.copy(), None
+
+    frame = pd.DataFrame({"code": [1]})
+    broken_zsav_module = SimpleNamespace(
+        read_sav=read_sav,
+        write_sav=write_sav,
+        read_dta=read_dta,
+        write_dta=write_dta,
+    )
+    original_verified_import = data_interchange._verified_import
+    monkeypatch.setattr(
+        data_interchange,
+        "_verified_import",
+        lambda name: broken_zsav_module
+        if name == "pyreadstat"
+        else original_verified_import(name),
+    )
+
+    manifest = build_data_operation_manifest().to_dict()
+    native_items = {
+        item["operation_id"]: item
+        for item in manifest["unavailable"]
+        if item["operation_id"] in {
+            "data.interchange.sav",
+            "data.interchange.zsav",
+            "data.interchange.dta",
+        }
+    }
+    assert set(native_items) == {
+        "data.interchange.sav",
+        "data.interchange.zsav",
+        "data.interchange.dta",
+    }
+    assert all(item["status"] == "unavailable" for item in native_items.values())
+    assert all(item["reason_code"] == "optional_dependency" for item in native_items.values())
+
+
+def test_package_runtime_adapter_joins_live_catalog_and_exposes_record_evidence_ports() -> None:
+    from workbench.data_operation_manifest import build_data_consumer_runtime_adapter
+
+    adapter = build_data_consumer_runtime_adapter()
+    catalog = load_builtin_catalog()
+    provider = next(
+        item for item in catalog.providers if item.provider_id == "workbench.data_consumer"
+    )
+    declaration = next(
+        item
+        for item in provider.adapter_declarations
+        if item.adapter_id == "workbench.data_consumer.adapter"
+    )
+
+    assert adapter.provider_id == provider.provider_id
+    assert adapter.adapter_id == declaration.adapter_id
+    assert adapter.catalog_digest == catalog.catalog_digest
+    assert adapter.executor_ref == declaration.executor_ref
+    assert {"data.agent", "data.notebook", "data.report"} <= set(adapter.consumer_slots)
+    assert {"derived", "operation_record", "evidence"} <= set(adapter.output_ports)
+    assert callable(adapter.adapt_operation_record)
+
+
+def test_package_runtime_adapter_rejects_caller_authored_operation_record_mapping() -> None:
+    from workbench.data_operation_manifest import build_data_consumer_runtime_adapter
+
+    adapter = build_data_consumer_runtime_adapter()
+
+    with pytest.raises((TypeError, ValueError), match="typed|OperationRecord|server"):
+        adapter.adapt_operation_record(
+            {
+                "record_id": "caller-record",
+                "operation_id": "data.sort",
+                "outputs": {
+                    "ports": {
+                        "derived": {"child_node_id": "caller-child"},
+                        "operation_record": {"record_id": "caller-record"},
+                        "evidence": {"method": "caller-authored"},
+                    },
+                    "consumer_slots": {
+                        "data.agent": {"record_id": "caller-record"},
+                        "data.notebook": {"record_id": "caller-record"},
+                        "data.report": {"record_id": "caller-record"},
+                    },
+                },
+            }
+        )
+
+
+def test_package_runtime_adapter_rejects_caller_authored_evidence_mapping() -> None:
+    from workbench.data_operation_manifest import DataConsumerEvidencePortV1
+
+    with pytest.raises(TypeError, match="typed|server"):
+        DataConsumerEvidencePortV1.from_server(
+            "caller-authored",
+            {"weight_consumed": True},
+        )
+
+
+def test_package_runtime_adapter_rejects_invalid_executor_identity() -> None:
+    from workbench.data_operation_manifest import DataConsumerRuntimeAdapterV1
+
+    with pytest.raises(ValueError, match="executor"):
+        DataConsumerRuntimeAdapterV1(
+            provider_id="workbench.data_consumer",
+            adapter_id="workbench.data_consumer.adapter",
+            catalog_digest="a" * 64,
+            executor_ref="python:caller.authored",
+            consumer_slots=("data.agent",),
+            output_ports=("derived", "operation_record", "evidence"),
+            operation_ids=("data.sort",),
+        )
+
+
+def test_server_evidence_and_derived_ports_cannot_be_caller_constructed() -> None:
+    from workbench.data_operation_manifest import (
+        DataConsumerDerivedPortV1,
+        DataConsumerServerEvidenceV1,
+    )
+
+    with pytest.raises((TypeError, ValueError), match="server|factory|capability"):
+        DataConsumerServerEvidenceV1(method="data.sort", payload={})
+
+    with pytest.raises((TypeError, ValueError), match="server|factory|capability"):
+        DataConsumerDerivedPortV1(effect=object())
+
+
+def test_from_server_rejects_caller_authored_typed_effect_and_evidence() -> None:
+    from workbench.data_operation_manifest import (
+        DataConsumerDerivedPortV1,
+        DataConsumerServerEvidenceV1,
+    )
+    from workbench.data_operations import DataColumnCastEffect
+
+    effect = DataColumnCastEffect(
+        execution_key="caller-execution",
+        artifact_id="caller-artifact",
+        artifact_path="derived/caller.csv",
+        recipe_artifact_id="caller-recipe",
+        recipe_path="derived/caller.recipe.json",
+        child_node_id="caller-child",
+    )
+    with pytest.raises((TypeError, ValueError), match="server|issuer|factory|capability"):
+        DataConsumerDerivedPortV1.from_server(effect)
+
+    with pytest.raises((TypeError, ValueError), match="server|issuer|factory|capability"):
+        DataConsumerServerEvidenceV1.from_server(
+            "caller-authored",
+            {},
+            record_id="caller-record",
+            operation_id="data.sort",
+            execution_key="caller-execution",
+            bindings={},
+        )
+
+
+def test_public_executor_registry_cannot_be_replaced_by_caller() -> None:
+    import workbench.data_operation_manifest as manifest_module
+
+    with pytest.raises((TypeError, AttributeError), match="immutable|item|mapping|read-only"):
+        manifest_module.SERVER_OWNED_EXECUTOR_REGISTRY[
+            "executor:workbench.data_consumer.adapter"
+        ] = lambda record, outputs: outputs
+
+
+def test_runtime_adapter_rejects_unregistered_executor_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+    import workbench.data_operation_manifest as manifest_module
+
+    with pytest.raises((TypeError, AttributeError), match="immutable|item|mapping|read-only"):
+        manifest_module.SERVER_OWNED_EXECUTOR_REGISTRY[
+            "executor:workbench.data_consumer.adapter"
+        ] = None
+    adapter = manifest_module.build_data_consumer_runtime_adapter()
+    assert adapter.executor_ref == "executor:workbench.data_consumer.adapter"
+
+
+def test_package_runtime_adapter_rejects_duck_typed_fake_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    import workbench.providers.catalog as catalog_module
+    from workbench.data_operation_manifest import build_data_consumer_runtime_adapter
+
+    class FakeDeclaration:
+        adapter_id = "workbench.data_consumer.adapter"
+        executor_ref = "executor:workbench.data_consumer.adapter"
+
+    class FakeProvider:
+        provider_id = "workbench.data_consumer"
+        adapter_declarations = (FakeDeclaration(),)
+
+    class FakeCatalog:
+        providers = (FakeProvider(),)
+        catalog_digest = "fake-catalog"
+
+    monkeypatch.setattr(catalog_module, "load_builtin_catalog", lambda: FakeCatalog())
+
+    with pytest.raises((TypeError, ValueError), match="catalog|server-owned|typed"):
+        build_data_consumer_runtime_adapter()
+
+
+def test_catalog_fixture_digest_is_recomputed_from_live_provider_catalog() -> None:
+    from workbench.canonical import sha256_canonical
+
+    catalog = load_builtin_catalog()
+    provider = next(
+        item for item in catalog.providers if item.provider_id == "workbench.data_consumer"
+    )
+    assert catalog.catalog_digest == sha256_canonical(catalog.digest_payload())
+    assert provider.to_dict()["adapter_declarations"][0]["executor_ref"] == (
+        "executor:workbench.data_consumer.adapter"
+    )

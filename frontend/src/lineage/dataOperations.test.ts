@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   authorizeCodeExecuteRisk,
+  confirmDataOperation,
   confirmDataColumnCast,
   confirmCodeExecute,
   fetchDataColumnCastContext,
+  fetchDataOperationManifest,
+  previewDataOperation,
   previewDataColumnCast,
   startModelFromDataNode,
 } from "./dataOperations";
+import type { DataOperationDescriptor } from "./dataOperationManifest";
 
 describe("data column cast API", () => {
   it("starts the existing model lifecycle from a materialized data node", async () => {
@@ -112,6 +116,45 @@ describe("data column cast API", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "/api/data-operations/column-cast/confirm?project_root=%2Ftmp%2Fproject",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("uses server-owned descriptor routes and preserves raw HTTP transport", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ operations: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ preview: { status: "ready" } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "completed" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const descriptor = {
+      preview_ref: "/data-operations/example/preview",
+      confirm_ref: "/data-operations/example/confirm",
+    } as DataOperationDescriptor;
+    const request = { source_run_id: "run-1", label: "x" };
+
+    const manifest = await fetchDataOperationManifest();
+    const preview = await previewDataOperation("/tmp/project", descriptor, request);
+    const confirm = await confirmDataOperation("/tmp/project", descriptor, {
+      ...request,
+      preview_fingerprint: "fp-1",
+    });
+
+    expect(manifest).toEqual({ operations: [] });
+    expect(preview).toBeInstanceOf(Response);
+    expect(confirm).toBeInstanceOf(Response);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/data-operations/manifest",
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/data-operations/example/preview?project_root=%2Ftmp%2Fproject",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(request) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/data-operations/example/confirm?project_root=%2Ftmp%2Fproject",
       expect.objectContaining({ method: "POST" }),
     );
   });

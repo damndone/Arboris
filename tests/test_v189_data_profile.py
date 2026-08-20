@@ -16,7 +16,14 @@ def _profile_api():
 
 
 def _dataset_ref(api):
-    return api.DatasetRefV1("run-a", "node-a", "artifact-a", "a" * 64)
+    return api.DatasetRefV1(
+        "run-a",
+        "node-a",
+        "artifact-a",
+        "a" * 64,
+        "schema:fixture",
+        "metadata:fixture",
+    )
 
 
 def test_profile_keeps_observed_declared_and_inferred_metadata_distinct() -> None:
@@ -39,8 +46,14 @@ def test_profile_keeps_observed_declared_and_inferred_metadata_distinct() -> Non
     assert group.inferred.confirmed is False
     assert group.inferred.method
     assert profile.shape == (3, 2)
-    assert profile.dataset_ref.schema_revision == "v1"
-    assert profile.dataset_ref.metadata_revision == "v1"
+    assert profile.dataset_ref.schema_revision == "schema:fixture"
+    assert profile.dataset_ref.metadata_revision == "metadata:fixture"
+
+
+def test_dataset_ref_rejects_implicit_v1_revisions() -> None:
+    api = _profile_api()
+    with pytest.raises(api.DataProfileError, match="revision"):
+        api.DatasetRefV1("run-a", "node-a", "artifact-a", "a" * 64, "v1", "v1")
 
 
 def test_missing_declared_metadata_stays_unknown_and_inference_is_advisory() -> None:
@@ -121,9 +134,41 @@ def test_dataset_identity_rejects_non_digest_content_fingerprints() -> None:
     api = _profile_api()
 
     with pytest.raises(api.DataProfileError) as exc_info:
-        api.DatasetRefV1("run-a", "node-a", "artifact-a", "sha256:truncated")
+        api.DatasetRefV1(
+            "run-a",
+            "node-a",
+            "artifact-a",
+            "sha256:truncated",
+            "schema:fixture",
+            "metadata:fixture",
+        )
 
     assert exc_info.value.code == "DATA_PROFILE_DIGEST_INVALID"
+
+
+def test_profile_keeps_typed_user_missing_and_weight_declarations() -> None:
+    api = _profile_api()
+    profile = api.build_data_profile(
+        frame=pd.DataFrame({"group": [1, 2, 99], "weight": [1.0, 2.0, 1.0]}),
+        dataset_ref=_dataset_ref(api),
+        declared_metadata={
+            "group": {
+                "role": "group",
+                "measurement_level": "nominal",
+                "user_missing_values": [99],
+            },
+            "__dataset__": {
+                "weight": {"column": "weight", "kind": "frequency"},
+                "split": {"columns": ["group"]},
+            },
+        },
+    )
+
+    group = profile.column("group")
+    assert group.declared.user_missing_values == (99,)
+    assert group.declared.role == "group"
+    assert profile.declarations.weight.column == "weight"
+    assert profile.declarations.split.columns == ("group",)
 
 
 def test_metadata_loss_manifest_never_claims_csv_round_trip_for_custom_metadata() -> None:
@@ -166,3 +211,53 @@ def test_metadata_loss_manifest_marks_unknown_target_format_not_supported() -> N
     assert len(manifest.items) == 1
     assert manifest.items[0].status == "not_supported"
     assert "future-format" in manifest.items[0].reason
+
+
+def test_metadata_registry_requires_server_owned_content_schema_and_index_provenance() -> None:
+    from workbench.metadata import MetadataRegistryV1, metadata_revision_digest
+
+    metadata = {"columns": {"score": {"variable_label": "caller forged"}}}
+    payload = {
+        "payload_schema": "workbench.data-metadata",
+        "schema_version": 1,
+        "confirmed": True,
+        "schema_revision": "schema:server",
+        "metadata_revision": metadata_revision_digest(metadata, schema_revision="schema:server"),
+        "source": {
+            "run_id": "run-a",
+            "node_id": "node-a",
+            "artifact_id": "artifact-a",
+            "sha256": "f" * 64,
+        },
+        "schema_artifact": {
+            "artifact_id": "schema-artifact",
+            "sha256": "e" * 64,
+        },
+        "metadata": metadata,
+    }
+
+    with pytest.raises(Exception, match="server-owned|provenance|source|artifact|index"):
+        MetadataRegistryV1.from_payload(
+            payload,
+            source_run_id="run-a",
+            source_node_id="node-a",
+            source_artifact_id="artifact-a",
+            source_content_sha256="a" * 64,
+            schema_artifact_id="schema-artifact",
+            schema_artifact_sha256="e" * 64,
+            metadata_artifact_id="metadata-artifact",
+            metadata_artifact_path="metadata/registry.json",
+            metadata_artifact_sha256="d" * 64,
+            metadata_index_sha256="c" * 64,
+        )
+
+
+def test_metadata_declarations_reject_value_label_and_total_payload_overflow() -> None:
+    from workbench.metadata import normalize_declared_metadata
+
+    labels = {str(index): "label" for index in range(300)}
+    with pytest.raises(Exception, match="bound|label|size|exceed"):
+        normalize_declared_metadata(
+            {"score": {"value_labels": labels}},
+            columns=("score",),
+        )

@@ -163,6 +163,53 @@ def test_filter_ast_enforces_depth_node_and_list_limits() -> None:
         )
 
 
+def test_filter_ast_uses_declared_user_missing_values_for_missing_predicates() -> None:
+    from workbench.filter_ast import bind_filter_ast, execute_filter_ast
+    from workbench.metadata import MetadataRegistryV1
+
+    frame = pd.DataFrame({"score": [99, 1, None]})
+    registry = MetadataRegistryV1(
+        source_run_id="run-1",
+        source_node_id="node-1",
+        source_artifact_id="artifact-1",
+        schema_revision="schema:fixture",
+        metadata_revision="metadata:fixture",
+        metadata={"columns": {"score": {"user_missing_values": [99]}}},
+        source_content_sha256="a" * 64,
+        schema_artifact_id="schema:fixture",
+        schema_artifact_sha256="d" * 64,
+        metadata_artifact_id="metadata:fixture-artifact",
+        metadata_artifact_path="metadata/registry.json",
+        metadata_artifact_sha256="b" * 64,
+        metadata_index_entry_sha256="c" * 64,
+    )
+    expression = {"op": "is_missing", "column": "score"}
+
+    bound = bind_filter_ast(expression, frame.columns)
+
+    assert execute_filter_ast(frame, bound, metadata_registry=registry).tolist() == [True, False, True]
+
+
+def test_filter_ast_rejects_caller_authored_frame_metadata_even_when_marked_confirmed() -> None:
+    frame = pd.DataFrame({"score": [99, 1, None]})
+    frame.attrs["user_missing_values"] = {"score": [99]}
+    frame.attrs["metadata_confirmed"] = True
+
+    with pytest.raises(FilterValidationError, match="server-owned registry"):
+        execute_filter_ast(frame, {"op": "is_missing", "column": "score"})
+
+
+def test_filter_ast_rejects_unconfirmed_user_missing_values() -> None:
+    from workbench.filter_ast import FilterValidationError, execute_filter_ast
+
+    with pytest.raises(FilterValidationError, match="confirmed metadata"):
+        execute_filter_ast(
+            pd.DataFrame({"score": [99, 1, None]}),
+            {"op": "is_missing", "column": "score"},
+            user_missing_values={"score": [99]},
+        )
+
+
 def test_subset_integrates_bound_filter_ast_before_projection(tmp_path: Path) -> None:
     project, run_id, artifact_id = _source_project(
         tmp_path,

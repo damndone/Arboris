@@ -59,7 +59,7 @@ describe("sectionRegistry", () => {
       "analysisLoop",
       "dataColumnCast",
       "codeExecute",
-      "dataConsumerEvidence",
+      "dataOperations",
       "statisticalExploration",
       "operation",
       "armaGarchOperation",

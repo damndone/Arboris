@@ -6,67 +6,67 @@
       "kind": "capability",
       "logical_id": "workbench.data_consumer.capability",
       "semantic_version": "1.0",
-      "contract_digest": "7e0104b5aef8ec4c5b3469b3c84b28086bbc7f1e8d96a66beda8bf1654823881"
+      "contract_digest": "5c50cacae63372f8cd1e43bccc7afdd9537e729b88c81aa4ea3d53e38b459c41"
     },
     {
       "kind": "operation",
       "logical_id": "workbench.data_consumer.operation",
       "semantic_version": "1.0",
-      "contract_digest": "e08e0c4451e497ca7a9ed1e14695554384acbe6b84309e58dc9bc2dbeecee168"
+      "contract_digest": "3e5f82da8387489457a96e30d8c53f6760c295eca2a58bac99a3be381fc61cc1"
     },
     {
       "kind": "step",
       "logical_id": "workbench.data_consumer.step",
       "semantic_version": "1.0",
-      "contract_digest": "f1e02da20ab271a18c9c73a4b680dd1592a28715cd7951ef604fc8da373a6fdc"
+      "contract_digest": "d199be7d4ce3625801df776bb0a81fc63a2c2a35b2f49d4e4518876d4380fa3c"
     },
     {
       "kind": "schema",
       "logical_id": "workbench.data_consumer.schema",
       "semantic_version": "1.0",
-      "contract_digest": "b20453f420d782493ae224b6a73d8b12057dd9cdb7be4a5e0824fefafb0cfd97"
+      "contract_digest": "db9e4aa2b8fe51d8e3d1a785c21f23f0dc67a66fdc56a66a554c82a769971575"
     },
     {
       "kind": "validator",
       "logical_id": "workbench.data_consumer.validator",
       "semantic_version": "1.0",
-      "contract_digest": "bf1202880b1af40f30839cbc95babcfe55785a95a3743923655bd4e4e8d4450f"
+      "contract_digest": "6e900cba937e1da7cd352860d67454a47f23256c827f45e5d020c7d429b94641"
     },
     {
       "kind": "adapter",
       "logical_id": "workbench.data_consumer.adapter",
       "semantic_version": "1.0",
-      "contract_digest": "fbd1918bff81fa0cbdd232915dfac4c8e48a8aedebdb1c6c4f6bee6cceeda763"
+      "contract_digest": "9027310c2976d4d855d22e6ee1fd054c84f5b3f0d5ce851df532f90c482769a1"
     },
     {
       "kind": "output",
       "logical_id": "workbench.data_consumer.output",
       "semantic_version": "1.0",
-      "contract_digest": "6db86a5d6b3a5d713e1c185c5653309f8179ad87840020e0eb3a156a6652b4e2"
+      "contract_digest": "5f4c9bae0d37a8ed2732da21d01f11714ef7e13633894e502fdfe8d62ecf7364"
     },
     {
       "kind": "evidence",
       "logical_id": "workbench.data_consumer.evidence",
       "semantic_version": "1.0",
-      "contract_digest": "b3cea5c571515bfd6a7d8dac42f1d9a5daecc0fb0cc567cd36b6b13c237780de"
+      "contract_digest": "ad5fb2d4167f9a192bf1cd651f364897ae77eaaa2af5939aca3401c469bec87d"
     },
     {
       "kind": "projection",
       "logical_id": "workbench.data_consumer.projection",
       "semantic_version": "1.0",
-      "contract_digest": "f9211002ebeb8f02119ec5679674695a9ec35320eb723ad9a89eba8febc98723"
+      "contract_digest": "96dd6d42d1fced07f6979a59d972a22dfadd9cd5c177512f80eab69ef54ee40a"
     },
     {
       "kind": "renderer",
       "logical_id": "workbench.data_consumer.renderer",
       "semantic_version": "1.0",
-      "contract_digest": "440a77e1155f057613b1bbc27257de050f36a36310c035060dca1135afa99595"
+      "contract_digest": "cbe84238d55117f2a85b23008dc27d021f6395e6d09ce1851a35785089fe5e22"
     },
     {
       "kind": "policy",
       "logical_id": "workbench.data_consumer.policy",
       "semantic_version": "1.0",
-      "contract_digest": "cb74a05d9fb0dd03dc8cd8f4fbc66721c494d39280bb87dd39eefe9f7748bdfe"
+      "contract_digest": "4a2c4a3318a4892e60be7c853d49dee15f3d7bca1a33e04195bf4287c5b13823"
     }
   ],
   "exposure_paths": [
@@ -78,33 +78,33 @@
         "kind": "capability",
         "logical_id": "workbench.data_consumer.capability",
         "semantic_version": "1.0",
-        "contract_digest": "7e0104b5aef8ec4c5b3469b3c84b28086bbc7f1e8d96a66beda8bf1654823881"
+      "contract_digest": "5c50cacae63372f8cd1e43bccc7afdd9537e729b88c81aa4ea3d53e38b459c41"
       },
       "operation_ref": {
         "kind": "operation",
         "logical_id": "workbench.data_consumer.operation",
         "semantic_version": "1.0",
-        "contract_digest": "e08e0c4451e497ca7a9ed1e14695554384acbe6b84309e58dc9bc2dbeecee168"
+      "contract_digest": "3e5f82da8387489457a96e30d8c53f6760c295eca2a58bac99a3be381fc61cc1"
       },
       "step_contract_ref": {
         "kind": "step",
         "logical_id": "workbench.data_consumer.step",
         "semantic_version": "1.0",
-        "contract_digest": "f1e02da20ab271a18c9c73a4b680dd1592a28715cd7951ef604fc8da373a6fdc"
+      "contract_digest": "d199be7d4ce3625801df776bb0a81fc63a2c2a35b2f49d4e4518876d4380fa3c"
       },
       "family_contract_ref": null,
       "execution_adapter_ref": {
         "kind": "adapter",
         "logical_id": "workbench.data_consumer.adapter",
         "semantic_version": "1.0",
-        "contract_digest": "fbd1918bff81fa0cbdd232915dfac4c8e48a8aedebdb1c6c4f6bee6cceeda763"
+      "contract_digest": "9027310c2976d4d855d22e6ee1fd054c84f5b3f0d5ce851df532f90c482769a1"
       },
       "result_contract_refs": [
         {
           "kind": "output",
           "logical_id": "workbench.data_consumer.output",
           "semantic_version": "1.0",
-          "contract_digest": "6db86a5d6b3a5d713e1c185c5653309f8179ad87840020e0eb3a156a6652b4e2"
+      "contract_digest": "5f4c9bae0d37a8ed2732da21d01f11714ef7e13633894e502fdfe8d62ecf7364"
         }
       ],
       "evidence_contract_refs": [
@@ -112,7 +112,7 @@
           "kind": "evidence",
           "logical_id": "workbench.data_consumer.evidence",
           "semantic_version": "1.0",
-          "contract_digest": "b3cea5c571515bfd6a7d8dac42f1d9a5daecc0fb0cc567cd36b6b13c237780de"
+      "contract_digest": "ad5fb2d4167f9a192bf1cd651f364897ae77eaaa2af5939aca3401c469bec87d"
         }
       ],
       "projection_refs": {
@@ -120,7 +120,7 @@
           "kind": "projection",
           "logical_id": "workbench.data_consumer.projection",
           "semantic_version": "1.0",
-          "contract_digest": "f9211002ebeb8f02119ec5679674695a9ec35320eb723ad9a89eba8febc98723"
+      "contract_digest": "96dd6d42d1fced07f6979a59d972a22dfadd9cd5c177512f80eab69ef54ee40a"
         }
       }
     }
@@ -133,27 +133,27 @@
         "kind": "schema",
         "logical_id": "workbench.data_consumer.schema",
         "semantic_version": "1.0",
-        "contract_digest": "b20453f420d782493ae224b6a73d8b12057dd9cdb7be4a5e0824fefafb0cfd97"
+      "contract_digest": "db9e4aa2b8fe51d8e3d1a785c21f23f0dc67a66fdc56a66a554c82a769971575"
       },
       "executor_ref": "executor:workbench.data_consumer.adapter",
       "result_validator_ref": {
         "kind": "validator",
         "logical_id": "workbench.data_consumer.validator",
         "semantic_version": "1.0",
-        "contract_digest": "bf1202880b1af40f30839cbc95babcfe55785a95a3743923655bd4e4e8d4450f"
+      "contract_digest": "6e900cba937e1da7cd352860d67454a47f23256c827f45e5d020c7d429b94641"
       },
       "output_refs": [
         {
           "kind": "output",
           "logical_id": "workbench.data_consumer.output",
           "semantic_version": "1.0",
-          "contract_digest": "6db86a5d6b3a5d713e1c185c5653309f8179ad87840020e0eb3a156a6652b4e2"
+      "contract_digest": "5f4c9bae0d37a8ed2732da21d01f11714ef7e13633894e502fdfe8d62ecf7364"
         },
         {
           "kind": "evidence",
           "logical_id": "workbench.data_consumer.evidence",
           "semantic_version": "1.0",
-          "contract_digest": "b3cea5c571515bfd6a7d8dac42f1d9a5daecc0fb0cc567cd36b6b13c237780de"
+      "contract_digest": "ad5fb2d4167f9a192bf1cd651f364897ae77eaaa2af5939aca3401c469bec87d"
         }
       ]
     }
@@ -163,7 +163,7 @@
       "kind": "projection",
       "logical_id": "workbench.data_consumer.projection",
       "semantic_version": "1.0",
-      "contract_digest": "f9211002ebeb8f02119ec5679674695a9ec35320eb723ad9a89eba8febc98723"
+      "contract_digest": "96dd6d42d1fced07f6979a59d972a22dfadd9cd5c177512f80eab69ef54ee40a"
     }
   ],
   "renderer_refs": [
@@ -171,7 +171,7 @@
       "kind": "renderer",
       "logical_id": "workbench.data_consumer.renderer",
       "semantic_version": "1.0",
-      "contract_digest": "440a77e1155f057613b1bbc27257de050f36a36310c035060dca1135afa99595"
+      "contract_digest": "cbe84238d55117f2a85b23008dc27d021f6395e6d09ce1851a35785089fe5e22"
     }
   ],
   "policy_refs": [
@@ -179,7 +179,7 @@
       "kind": "policy",
       "logical_id": "workbench.data_consumer.policy",
       "semantic_version": "1.0",
-      "contract_digest": "cb74a05d9fb0dd03dc8cd8f4fbc66721c494d39280bb87dd39eefe9f7748bdfe"
+      "contract_digest": "4a2c4a3318a4892e60be7c853d49dee15f3d7bca1a33e04195bf4287c5b13823"
     }
   ]
 }

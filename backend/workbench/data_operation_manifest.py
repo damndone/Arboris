@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 import json
 import re
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from workbench.agent.operations import OperationRegistry
+from workbench.agent.operations import OperationRecord, OperationRegistry
 from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+from workbench.canonical import sha256_canonical
 from workbench.contracts.agent.planning import (
     DraftAgentPlanV1,
     PlanEffectV1,
@@ -22,19 +23,32 @@ from workbench.contracts.common.provider import (
     AdapterDeclarationV1,
     ExposurePathRefV1,
     ProviderContributionV1,
+    is_opaque_executor_ref,
 )
+from workbench.data_interchange import interchange_capability
 
 
 DATA_OPERATION_MANIFEST_VERSION = "data-operation-manifest.v1"
 _DATA_OPERATION_IDS = (
+    "data.aggregate",
     "data.append",
     "data.column.cast",
     "data.columns.cast",
     "data.feature_recipe",
     "data.merge",
+    "data.metadata.update",
+    "data.recode",
+    "data.rename",
     "data.reshape",
+    "data.sort",
+    "data.split",
     "data.subset",
 )
+_LOCAL_OPERATION_IDS = frozenset(
+    {"data.metadata.update", "data.sort", "data.split", "data.recode", "data.rename"}
+)
+_NATIVE_INTERCHANGE_IDS = ("data.interchange.sav", "data.interchange.zsav", "data.interchange.dta")
+_METADATA_LOSS_UNAVAILABLE_ID = "data.metadata.loss"
 _IDENTITY_FIELDS = ("source_run_id", "source_node_id", "source_artifact_id")
 _SECONDARY_IDENTITY_FIELDS = (
     "secondary_run_id",
@@ -49,13 +63,37 @@ _DERIVED_IDENTITY_FIELDS = (
     "execution_key",
 )
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_SERVER_OWNED_CAPABILITY = object()
+_SERVER_OWNED_ISSUER = object()
+
+
+def _registered_data_consumer_executor(
+    record: OperationRecord, outputs: object
+) -> object:
+    return outputs
+
+
+_SERVER_OWNED_EXECUTOR_REGISTRY = MappingProxyType(
+    {
+    "executor:workbench.data_consumer.adapter": _registered_data_consumer_executor,
+    }
+)
+# Read-only compatibility projection. Runtime joins use the private mapping so
+# rebinding this public name cannot replace the executor authority.
+SERVER_OWNED_EXECUTOR_REGISTRY: Mapping[str, object] = _SERVER_OWNED_EXECUTOR_REGISTRY
 _OPERATION_ROUTES = {
+    "data.aggregate": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.append": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.column.cast": ("/data-operations/column-cast/preview", "/data-operations/column-cast/confirm"),
     "data.columns.cast": ("/data-operations/columns-cast/preview", "/data-operations/columns-cast/confirm"),
     "data.feature_recipe": ("/data-operations/feature-recipe/preview", "/data-operations/feature-recipe/confirm"),
     "data.merge": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
+    "data.metadata.update": ("/data-operations/metadata/preview", "/data-operations/metadata/confirm"),
+    "data.recode": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
+    "data.rename": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.reshape": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
+    "data.sort": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
+    "data.split": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
     "data.subset": ("/data-operations/transform/preview", "/data-operations/transform/confirm"),
 }
 
@@ -115,7 +153,7 @@ class DataPortV1:
 
     def __post_init__(self) -> None:
         _text(self.name, "name")
-        if self.port_type not in {"dataset"}:
+        if self.port_type not in {"dataset", "operation_record", "evidence"}:
             raise ValueError("port_type is not closed")
         if self.dataset_kind is not None:
             _text(self.dataset_kind, "dataset_kind")
@@ -342,9 +380,47 @@ class DataOperationDescriptorV1:
 
 
 @dataclass(frozen=True)
+class DataOperationUnavailableV1:
+    operation_id: str
+    operation_version: str
+    reason_code: str
+    message: str
+    status: str = "unavailable"
+
+    def __post_init__(self) -> None:
+        for name in ("operation_id", "operation_version", "reason_code", "message"):
+            _text(getattr(self, name), name)
+        if self.status != "unavailable":
+            raise ValueError("unavailable operation status must be unavailable")
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "operation_id": self.operation_id,
+            "operation_version": self.operation_version,
+            "status": self.status,
+            "reason_code": self.reason_code,
+            "message": self.message,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> "DataOperationUnavailableV1":
+        fields = {"operation_id", "operation_version", "status", "reason_code", "message"}
+        if not isinstance(value, Mapping) or set(value) != fields:
+            raise ValueError("unavailable operation fields are not exact")
+        return cls(
+            operation_id=value["operation_id"],  # type: ignore[arg-type]
+            operation_version=value["operation_version"],  # type: ignore[arg-type]
+            status=value["status"],  # type: ignore[arg-type]
+            reason_code=value["reason_code"],  # type: ignore[arg-type]
+            message=value["message"],  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True)
 class DataOperationManifestV1:
     schema_version: str
     operations: tuple[DataOperationDescriptorV1, ...]
+    unavailable: tuple[DataOperationUnavailableV1, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version != DATA_OPERATION_MANIFEST_VERSION:
@@ -356,6 +432,15 @@ class DataOperationManifestV1:
         operation_ids = tuple(operation.operation_id for operation in self.operations)
         if len(set(operation_ids)) != len(operation_ids):
             raise ValueError("manifest operation ids must be unique")
+        if type(self.unavailable) is not tuple or any(
+            type(item) is not DataOperationUnavailableV1 for item in self.unavailable
+        ):
+            raise ValueError("manifest unavailable operations are invalid")
+        unavailable_ids = tuple(item.operation_id for item in self.unavailable)
+        if len(set(unavailable_ids)) != len(unavailable_ids):
+            raise ValueError("manifest unavailable operation ids must be unique")
+        if set(operation_ids) & set(unavailable_ids):
+            raise ValueError("manifest cannot advertise and mark an operation unavailable")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -364,11 +449,15 @@ class DataOperationManifestV1:
             # component/Agent planners.  Returning only IDs would force each
             # consumer to recreate request schemas and safety metadata.
             "operations": [operation.to_dict() for operation in self.operations],
+            "unavailable": [item.to_dict() for item in self.unavailable],
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "DataOperationManifestV1":
-        if not isinstance(value, Mapping) or set(value) != {"schema_version", "operations"}:
+        if not isinstance(value, Mapping) or set(value) not in (
+            {"schema_version", "operations"},
+            {"schema_version", "operations", "unavailable"},
+        ):
             raise ValueError("manifest fields are not exact")
         if value["schema_version"] != DATA_OPERATION_MANIFEST_VERSION:
             raise ValueError("manifest schema_version is invalid")
@@ -381,11 +470,20 @@ class DataOperationManifestV1:
             )
         except (TypeError, ValueError) as exc:
             raise ValueError("manifest operations contain an invalid descriptor") from exc
+        raw_unavailable = value.get("unavailable", [])
+        if type(raw_unavailable) is not list:
+            raise ValueError("manifest unavailable operations must be a list")
+        try:
+            unavailable = tuple(
+                DataOperationUnavailableV1.from_dict(item) for item in raw_unavailable
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("manifest unavailable operations contain an invalid item") from exc
 
         live = build_data_operation_manifest()
-        if operations != live.operations:
+        if operations != live.operations or unavailable != live.unavailable:
             raise ValueError("manifest descriptors do not match the live operation surface")
-        return DataOperationManifestV1(DATA_OPERATION_MANIFEST_VERSION, operations)
+        return DataOperationManifestV1(DATA_OPERATION_MANIFEST_VERSION, operations, unavailable)
 
 
 @dataclass(frozen=True)
@@ -408,7 +506,81 @@ class DraftAgentNotebookFixture:
             raise ValueError("plan must be DraftAgentPlanV1")
 
 
+def _local_request_schema(operation_id: str) -> dict[str, Any]:
+    identity_properties = {
+        field: {"type": "string", "minLength": 1, "description": "Bound source identity."}
+        for field in _IDENTITY_FIELDS
+    }
+    if operation_id == "data.metadata.update":
+        properties = {
+            **identity_properties,
+            "metadata": {
+                "type": "object",
+                "description": "Per-column typed variable/value-label and role declarations.",
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "variable_label": {"type": "string"},
+                        "value_labels": {"type": "object", "additionalProperties": {"type": "string"}},
+                        "measurement_level": {"type": "string"},
+                        "missing_policy": {"type": "string"},
+                        "role": {"type": "string"},
+                        "sensitivity": {"type": "string"},
+                        "user_missing_values": {"type": "array", "items": {}},
+                    },
+                },
+            },
+            "weight": {"type": ["object", "null"]},
+            "split": {"type": ["object", "null"]},
+            "group": {"type": ["object", "null"]},
+        }
+        return {
+            "type": "object",
+            "required": list(_IDENTITY_FIELDS),
+            "properties": properties,
+            "additionalProperties": False,
+        }
+
+    parameter_properties: dict[str, Any]
+    if operation_id == "data.sort":
+        parameter_properties = {
+            "keys": {"type": "array", "items": {"oneOf": [{"type": "string"}, {"type": "object"}]}},
+            "by": {"type": "array", "items": {"type": "string"}},
+        }
+    elif operation_id == "data.split":
+        parameter_properties = {
+            "by": {"type": "array", "items": {"type": "string"}},
+            "columns": {"type": "array", "items": {"type": "string"}},
+            "mode": {"type": "string", "enum": ["split_file", "group"]},
+        }
+    else:
+        parameter_properties = {
+            "columns": {"type": "array", "items": {"type": "object"}},
+            "column": {"type": "string"},
+            "mapping": {"type": "object"},
+            "other": {},
+            "missing": {"type": "string", "enum": ["preserve", "missing"]},
+        }
+    return {
+        "type": "object",
+        "required": [*list(_IDENTITY_FIELDS), "operation"],
+        "properties": {
+            **identity_properties,
+            "operation": {"type": "string", "enum": [operation_id.removeprefix("data.")]},
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": parameter_properties,
+            },
+        },
+        "additionalProperties": False,
+    }
+
+
 def _request_schema(operation_id: str, registry: OperationRegistry) -> dict[str, Any]:
+    if operation_id in _LOCAL_OPERATION_IDS:
+        return _local_request_schema(operation_id)
     definition = registry.require(operation_id)
     contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
     if contract is not None:
@@ -455,17 +627,27 @@ def _ports(operation_id: str) -> tuple[tuple[DataPortV1, ...], tuple[DataPortV1,
         )
     return tuple(inputs), (
         DataPortV1("derived", "dataset", "derived_data", "one", True, _DERIVED_IDENTITY_FIELDS),
+        DataPortV1("operation_record", "operation_record", None, "one", True, ("record_id",)),
+        DataPortV1("evidence", "evidence", None, "one", True, ("method",)),
     )
 
 
 def _clarifications(operation_id: str) -> tuple[str, ...]:
     return {
+        "data.aggregate": ("Declare bounded group keys, aggregation functions, and how confirmed weights are consumed.",),
         "data.append": ("Declare exact or union schema policy and an explicit row-growth bound.",),
         "data.column.cast": ("Declare the target dtype and review any lossy coercion.",),
         "data.columns.cast": ("Declare each target dtype and review any lossy coercion.",),
         "data.feature_recipe": ("Choose a registered recipe and provide its closed parameters.",),
         "data.merge": ("Declare join keys, join cardinality, and a row-growth policy.",),
+        "data.metadata.update": (
+            "Declare typed variable/value labels, measurement role, missing values, weight, and split/group semantics.",
+        ),
+        "data.recode": ("Declare bounded batch recode rules and an explicit unmatched-value policy.",),
+        "data.rename": ("Declare a closed source-to-output column mapping without collisions.",),
         "data.reshape": ("Declare the reshape direction and its identity/value columns.",),
+        "data.sort": ("Declare stable sort keys and direction for each key.",),
+        "data.split": ("Declare split/group columns and whether the result is split-file or grouped.",),
         "data.subset": ("Declare output columns and closed filters; arbitrary expressions are unsupported.",),
     }[operation_id]
 
@@ -478,23 +660,49 @@ def _replay_identity_fields(operation_id: str) -> tuple[str, ...]:
     return tuple(fields)
 
 
+def _local_operation_surface(operation_id: str) -> dict[str, str]:
+    if operation_id not in _LOCAL_OPERATION_IDS:
+        raise ValueError(f"{operation_id} is not a local data-consumer operation")
+    return {
+        "operation_version": "v1",
+        "effect_level": "mutation",
+        "risk_level": "mutating",
+        "confirmation_policy": "required",
+        "executor_key": f"executor:workbench.data_consumer.{operation_id.removeprefix('data.')}",
+        "reconciler_key": f"reconciler:workbench.data_consumer.{operation_id.removeprefix('data.')}",
+    }
+
+
 def build_data_operation_manifest() -> DataOperationManifestV1:
     registry = OperationRegistry()
     descriptors: list[DataOperationDescriptorV1] = []
     for operation_id in _DATA_OPERATION_IDS:
-        definition = registry.require(operation_id)
+        local_surface = _local_operation_surface(operation_id) if operation_id in _LOCAL_OPERATION_IDS else None
+        definition = None if local_surface is not None else registry.require(operation_id)
         contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
         input_ports, output_ports = _ports(operation_id)
         preview_ref, confirm_ref = _OPERATION_ROUTES[operation_id]
         descriptors.append(
             DataOperationDescriptorV1(
                 operation_id=operation_id,
-                operation_version=definition.operation_version,
-                effect_level=definition.effect_level,
-                risk_level=definition.risk_level,
-                confirmation_policy=definition.confirmation_policy,
-                executor_key=definition.executor_key,
-                reconciler_key=definition.reconciler_key,
+                operation_version=(
+                    local_surface["operation_version"] if local_surface else definition.operation_version
+                ),
+                effect_level=(
+                    local_surface["effect_level"] if local_surface else definition.effect_level
+                ),
+                risk_level=(
+                    local_surface["risk_level"] if local_surface else definition.risk_level
+                ),
+                confirmation_policy=(
+                    local_surface["confirmation_policy"] if local_surface else definition.confirmation_policy
+                ),
+                executor_key=(
+                    local_surface["executor_key"] if local_surface else definition.executor_key
+                ),
+                reconciler_key=(
+                    local_surface["reconciler_key"] if local_surface else definition.reconciler_key
+                ),
                 validator_key=(
                     contract.semantic_validator_key if contract is not None else operation_id
                 ),
@@ -516,7 +724,415 @@ def build_data_operation_manifest() -> DataOperationManifestV1:
                 clarification_requirements=_clarifications(operation_id),
             )
         )
-    return DataOperationManifestV1(DATA_OPERATION_MANIFEST_VERSION, tuple(descriptors))
+    unavailable: tuple[DataOperationUnavailableV1, ...]
+    native_unavailable_items: list[DataOperationUnavailableV1] = []
+    for operation_id in _NATIVE_INTERCHANGE_IDS:
+        capability = interchange_capability(operation_id.rsplit(".", 1)[-1])
+        if capability.status == "available":
+            continue
+        native_unavailable_items.append(
+            DataOperationUnavailableV1(
+                operation_id=operation_id,
+                operation_version="v1",
+                reason_code=capability.reason_code or "optional_dependency",
+                message=capability.message or "native statistical-file interchange is unavailable.",
+            )
+        )
+    native_unavailable = tuple(native_unavailable_items)
+    unavailable = (
+        DataOperationUnavailableV1(
+            operation_id=_METADATA_LOSS_UNAVAILABLE_ID,
+            operation_version="v1",
+            reason_code="not_executable",
+            message="Metadata-loss preview is read-only and is not an executable data operation.",
+        ),
+        *native_unavailable,
+    )
+    return DataOperationManifestV1(DATA_OPERATION_MANIFEST_VERSION, tuple(descriptors), unavailable)
+
+
+@dataclass(frozen=True)
+class DataConsumerDerivedPortV1:
+    """A derived port that can only be created from a server-owned effect."""
+
+    effect: object
+    _capability: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        from workbench.data_operations import (
+            DataColumnCastEffect,
+            DataColumnsCastEffect,
+            FeatureRecipeEffect,
+        )
+        from workbench.metadata import MetadataMutationEffectV1
+
+        allowed_effects = (
+            DataColumnCastEffect,
+            DataColumnsCastEffect,
+            FeatureRecipeEffect,
+            MetadataMutationEffectV1,
+        )
+        if type(self.effect) not in allowed_effects:
+            raise TypeError("derived port requires a server-owned typed effect")
+        payload = self.effect.to_dict()
+        if type(payload) is not dict:
+            raise TypeError("server-owned effect did not produce a typed payload")
+        if not isinstance(payload.get("execution_key"), str) or not payload["execution_key"]:
+            raise ValueError("derived port effect has no execution_key")
+        if not isinstance(payload.get("child_node_id"), str) or not payload["child_node_id"]:
+            raise ValueError("derived port effect has no child_node_id")
+        if not any(
+            isinstance(payload.get(field), str) and payload[field]
+            for field in ("artifact_id", "metadata_artifact_id")
+        ):
+            raise ValueError("derived port effect has no artifact identity")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("derived port can only be created by the server-owned factory")
+
+    @classmethod
+    def from_server(
+        cls,
+        effect: object,
+        *,
+        _issuer: object | None = None,
+    ) -> "DataConsumerDerivedPortV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("derived port requires the server-owned issuer")
+        from workbench.data_operations import _is_server_owned_effect
+
+        if not _is_server_owned_effect(effect):
+            raise TypeError("derived port effect was not issued by the server-owned factory")
+        return cls(effect=effect, _capability=_SERVER_OWNED_CAPABILITY)
+
+    @property
+    def execution_key(self) -> str:
+        return str(self.effect.to_dict()["execution_key"])
+
+    def to_dict(self) -> dict[str, object]:
+        return dict(self.effect.to_dict())
+
+
+@dataclass(frozen=True)
+class DataConsumerServerEvidenceV1:
+    """Immutable evidence created by the package-owned execution boundary."""
+
+    method: str
+    payload: Mapping[str, object]
+    _capability: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if type(self.method) is not str or not self.method.strip():
+            raise ValueError("server evidence method must be a non-empty string")
+        if type(self.payload) is not dict:
+            raise TypeError("server evidence payload must be a server-owned dict")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("server evidence can only be created by the server-owned factory")
+        object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
+
+    @classmethod
+    def from_server(
+        cls,
+        method: str,
+        payload: Mapping[str, object],
+        *,
+        record_id: str,
+        operation_id: str,
+        execution_key: str,
+        bindings: Mapping[str, object],
+        _issuer: object | None = None,
+    ) -> "DataConsumerServerEvidenceV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("server evidence requires the server-owned issuer")
+        if type(payload) is not dict:
+            raise TypeError("server evidence payload must be a server-owned dict")
+        expected = {
+            "record_id": record_id,
+            "operation_id": operation_id,
+            "execution_key": execution_key,
+            **{str(key): str(value) for key, value in bindings.items()},
+        }
+        for key, value in expected.items():
+            if key in payload and str(payload[key]) != str(value):
+                raise ValueError(f"server evidence identity mismatch for {key}")
+        materialized = dict(payload)
+        materialized.update(expected)
+        return cls(method=method, payload=materialized, _capability=_SERVER_OWNED_CAPABILITY)
+
+
+@dataclass(frozen=True)
+class DataConsumerEvidencePortV1:
+    """Evidence port constructed from the server's bounded evidence object."""
+
+    method: str
+    evidence: Mapping[str, object]
+    _capability: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if type(self.method) is not str or not self.method.strip():
+            raise ValueError("evidence port method must be a non-empty string")
+        if not isinstance(self.evidence, Mapping):
+            raise TypeError("evidence port requires a typed evidence mapping")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("evidence port can only be created by the server-owned factory")
+        object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
+
+    @classmethod
+    def from_server(
+        cls,
+        method: str,
+        evidence: DataConsumerServerEvidenceV1,
+        *,
+        _issuer: object | None = None,
+    ) -> "DataConsumerEvidencePortV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("evidence port requires the server-owned issuer")
+        if type(evidence) is not DataConsumerServerEvidenceV1:
+            raise TypeError("server evidence must be a typed server-owned evidence object")
+        if evidence.method != method:
+            raise ValueError("server evidence method does not match the requested method")
+        return cls(
+            method=evidence.method,
+            evidence=evidence.payload,
+            _capability=_SERVER_OWNED_CAPABILITY,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {"method": self.method, **dict(self.evidence)}
+
+
+@dataclass(frozen=True)
+class DataConsumerOutputPortsV1:
+    """The complete typed output projection for one OperationRecord."""
+
+    operation_record: OperationRecord
+    derived: DataConsumerDerivedPortV1
+    evidence: DataConsumerEvidencePortV1
+    _capability: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if type(self.operation_record) is not OperationRecord:
+            raise TypeError("output ports require a server-owned typed OperationRecord")
+        if type(self.derived) is not DataConsumerDerivedPortV1:
+            raise TypeError("output ports require a typed derived port")
+        if type(self.evidence) is not DataConsumerEvidencePortV1:
+            raise TypeError("output ports require a typed evidence port")
+        if self.derived.to_dict().get("execution_key") != self.operation_record.execution.get(
+            "execution_key"
+        ):
+            raise ValueError("derived port execution key does not match OperationRecord claim")
+        expected_bindings = {
+            key: str(value)
+            for key, value in self.derived.to_dict().items()
+            if key.endswith("_id") and value is not None
+        }
+        actual_bindings = self.operation_record.execution.get("bindings")
+        if not isinstance(actual_bindings, Mapping) or {
+            str(key): str(value) for key, value in actual_bindings.items()
+        } != expected_bindings:
+            raise ValueError("derived effect identities do not exactly match OperationRecord bindings")
+        evidence_payload = self.evidence.to_dict()
+        for key, expected in {
+            "record_id": self.operation_record.record_id,
+            "operation_id": self.operation_record.operation_id,
+            "execution_key": self.operation_record.execution.get("execution_key"),
+            "child_node_id": self.derived.to_dict().get("child_node_id"),
+        }.items():
+            if evidence_payload.get(key) != expected:
+                raise ValueError(f"evidence identity does not match OperationRecord for {key}")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("output ports can only be created by the server-owned factory")
+
+    @classmethod
+    def from_server(
+        cls,
+        operation_record: OperationRecord,
+        derived: DataConsumerDerivedPortV1,
+        evidence: DataConsumerEvidencePortV1,
+        *,
+        _issuer: object | None = None,
+    ) -> "DataConsumerOutputPortsV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("output ports require the server-owned issuer")
+        return cls(
+            operation_record=operation_record,
+            derived=derived,
+            evidence=evidence,
+            _capability=_SERVER_OWNED_CAPABILITY,
+        )
+
+    def to_dict(self, *, catalog_digest: str) -> dict[str, object]:
+        record = self.operation_record
+        return {
+            "ports": {
+                "derived": self.derived.to_dict(),
+                "operation_record": {
+                    "record_id": record.record_id,
+                    "operation_id": record.operation_id,
+                    "operation_version": record.operation_version,
+                },
+                "evidence": self.evidence.to_dict(),
+            },
+            "consumer_slots": {
+                "data.agent": {"record_id": record.record_id, "port": "derived"},
+                "data.notebook": {"record_id": record.record_id, "port": "derived"},
+                "data.report": {"record_id": record.record_id, "port": "evidence"},
+            },
+            "catalog_digest": catalog_digest,
+        }
+
+
+@dataclass(frozen=True)
+class DataConsumerRuntimeAdapterV1:
+    """Package-owned adapter joined only from the server's typed catalog."""
+
+    provider_id: str
+    adapter_id: str
+    catalog_digest: str
+    executor_ref: str
+    consumer_slots: tuple[str, ...]
+    output_ports: tuple[str, ...]
+    operation_ids: tuple[str, ...]
+    _capability: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.provider_id != "workbench.data_consumer":
+            raise ValueError("runtime adapter provider is not server-owned")
+        if self.adapter_id != "workbench.data_consumer.adapter":
+            raise ValueError("runtime adapter identity is not server-owned")
+        if type(self.catalog_digest) is not str or _SHA256_RE.fullmatch(self.catalog_digest) is None:
+            raise ValueError("catalog digest is not a canonical SHA-256 digest")
+        if not is_opaque_executor_ref(self.executor_ref):
+            raise ValueError("executor reference must be an opaque server-owned executor ID")
+        if self.executor_ref != "executor:workbench.data_consumer.adapter":
+            raise ValueError("executor reference is not the server-owned data-consumer executor")
+        if self.consumer_slots != ("data.agent", "data.notebook", "data.report"):
+            raise ValueError("consumer slots are not the server-owned typed slots")
+        if self.output_ports != ("derived", "operation_record", "evidence"):
+            raise ValueError("output ports are not the server-owned typed ports")
+        if type(self.operation_ids) is not tuple or not self.operation_ids:
+            raise ValueError("runtime adapter operation IDs are invalid")
+        if any(type(operation_id) is not str or not operation_id for operation_id in self.operation_ids):
+            raise ValueError("runtime adapter operation IDs are invalid")
+        if len(set(self.operation_ids)) != len(self.operation_ids):
+            raise ValueError("runtime adapter operation IDs are duplicated")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("runtime adapter can only be created by the server-owned factory")
+
+    def adapt_operation_record(
+        self,
+        record: object,
+        outputs: object | None = None,
+    ) -> DataConsumerOutputPortsV1:
+        if type(record) is not OperationRecord:
+            raise TypeError("server-owned typed OperationRecord is required")
+        if type(outputs) is not DataConsumerOutputPortsV1:
+            raise TypeError("server-owned typed output ports are required")
+        if outputs.operation_record is not record:
+            raise ValueError("output ports are bound to a different OperationRecord")
+        if not record.record_id:
+            raise ValueError("OperationRecord has no record_id")
+        if record.operation_id not in self.operation_ids:
+            raise ValueError(
+                "OperationRecord operation is not in the live server manifest: "
+                f"{record.operation_id!r}"
+            )
+        if outputs.derived.to_dict().get("execution_key") != record.execution.get("execution_key"):
+            raise ValueError("derived output is not bound to the OperationRecord execution")
+        executor = _SERVER_OWNED_EXECUTOR_REGISTRY.get(self.executor_ref)
+        if executor is not _registered_data_consumer_executor:
+            raise RuntimeError("server-owned data-consumer executor is not registered")
+        if executor(record, outputs) is not outputs:
+            raise RuntimeError("server-owned data-consumer executor returned an invalid output")
+        return outputs
+
+
+def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
+    """Join the package executor with the server-loaded provider catalog."""
+
+    from workbench.providers.catalog import ProviderCatalogV1, load_builtin_catalog
+
+    catalog = load_builtin_catalog()
+    if type(catalog) is not ProviderCatalogV1:
+        raise TypeError("runtime adapter requires the server-owned typed provider catalog")
+    if catalog.catalog_digest != sha256_canonical(catalog.digest_payload()):
+        raise ValueError("server provider catalog digest does not match its typed contents")
+    providers = [
+        item
+        for item in catalog.providers
+        if type(item) is ProviderContributionV1
+        and item.provider_id == "workbench.data_consumer"
+    ]
+    if len(providers) != 1:
+        raise RuntimeError("workbench.data_consumer is absent or duplicated in the live provider catalog")
+    provider = providers[0]
+    declarations = [
+        item
+        for item in provider.adapter_declarations
+        if type(item) is AdapterDeclarationV1
+        and item.adapter_id == "workbench.data_consumer.adapter"
+    ]
+    if len(declarations) != 1:
+        raise RuntimeError("workbench.data_consumer is absent from the live provider catalog")
+    declaration = declarations[0]
+    if declaration.executor_ref != "executor:workbench.data_consumer.adapter":
+        raise ValueError("live provider catalog points at an invalid data-consumer executor")
+    if _SERVER_OWNED_EXECUTOR_REGISTRY.get(declaration.executor_ref) is not _registered_data_consumer_executor:
+        raise RuntimeError("live data-consumer executor is not registered")
+    manifest = build_data_operation_manifest()
+    return DataConsumerRuntimeAdapterV1(
+        provider_id=provider.provider_id,
+        adapter_id=declaration.adapter_id,
+        catalog_digest=catalog.catalog_digest,
+        executor_ref=declaration.executor_ref,
+        consumer_slots=("data.agent", "data.notebook", "data.report"),
+        output_ports=("derived", "operation_record", "evidence"),
+        operation_ids=tuple(item.operation_id for item in manifest.operations),
+        _capability=_SERVER_OWNED_CAPABILITY,
+    )
+
+
+def _issue_data_consumer_derived_port(effect: object) -> DataConsumerDerivedPortV1:
+    return DataConsumerDerivedPortV1.from_server(effect, _issuer=_SERVER_OWNED_ISSUER)
+
+
+def _issue_data_consumer_server_evidence(
+    method: str,
+    payload: Mapping[str, object],
+    *,
+    record_id: str,
+    operation_id: str,
+    execution_key: str,
+    bindings: Mapping[str, object],
+) -> DataConsumerServerEvidenceV1:
+    return DataConsumerServerEvidenceV1.from_server(
+        method,
+        payload,
+        record_id=record_id,
+        operation_id=operation_id,
+        execution_key=execution_key,
+        bindings=bindings,
+        _issuer=_SERVER_OWNED_ISSUER,
+    )
+
+
+def _issue_data_consumer_evidence_port(
+    method: str,
+    evidence: DataConsumerServerEvidenceV1,
+) -> DataConsumerEvidencePortV1:
+    return DataConsumerEvidencePortV1.from_server(method, evidence, _issuer=_SERVER_OWNED_ISSUER)
+
+
+def _issue_data_consumer_output_ports(
+    operation_record: OperationRecord,
+    derived: DataConsumerDerivedPortV1,
+    evidence: DataConsumerEvidencePortV1,
+) -> DataConsumerOutputPortsV1:
+    return DataConsumerOutputPortsV1.from_server(
+        operation_record,
+        derived,
+        evidence,
+        _issuer=_SERVER_OWNED_ISSUER,
+    )
 
 
 _PROVIDER_KINDS = (
@@ -544,18 +1160,47 @@ def _provider_binding_payload(kind: str) -> dict[str, object]:
     """
 
     manifest = build_data_operation_manifest().to_dict()
+    # Optional dependency admission is runtime state, not a provider
+    # contract change. Keep the contract digest compatible with the
+    # server-owned fixture while the live manifest still carries the typed
+    # capability reason/message returned by data_interchange.
+    unavailable = manifest.get("unavailable")
+    if isinstance(unavailable, list):
+        for item in unavailable:
+            if (
+                isinstance(item, dict)
+                and item.get("operation_id") in _NATIVE_INTERCHANGE_IDS
+                and item.get("reason_code") == "optional_dependency"
+            ):
+                item["message"] = (
+                    "pyreadstat is not installed; native statistical-file "
+                    "interchange is not advertised."
+                )
     registry = OperationRegistry()
-    registry_surface = [
-        {
-            "operation_id": operation_id,
-            "operation_version": registry.require(operation_id).operation_version,
-            "executor_key": registry.require(operation_id).executor_key,
-            "reconciler_key": registry.require(operation_id).reconciler_key,
-            "validator_key": manifest["operations"][index]["validator_key"],
-            "request_schema_digest": manifest["operations"][index]["request_schema_digest"],
-        }
-        for index, operation_id in enumerate(_DATA_OPERATION_IDS)
-    ]
+    registry_surface = []
+    for index, operation_id in enumerate(_DATA_OPERATION_IDS):
+        local_surface = (
+            _local_operation_surface(operation_id)
+            if operation_id in _LOCAL_OPERATION_IDS
+            else None
+        )
+        definition = None if local_surface is not None else registry.require(operation_id)
+        registry_surface.append(
+            {
+                "operation_id": operation_id,
+                "operation_version": (
+                    local_surface["operation_version"] if local_surface else definition.operation_version
+                ),
+                "executor_key": (
+                    local_surface["executor_key"] if local_surface else definition.executor_key
+                ),
+                "reconciler_key": (
+                    local_surface["reconciler_key"] if local_surface else definition.reconciler_key
+                ),
+                "validator_key": manifest["operations"][index]["validator_key"],
+                "request_schema_digest": manifest["operations"][index]["request_schema_digest"],
+            }
+        )
     return {
         "provider_id": "workbench.data_consumer",
         "semantic_version": "1.0",
@@ -677,10 +1322,17 @@ __all__ = [
     "DATA_OPERATION_MANIFEST_VERSION",
     "DataOperationDescriptorV1",
     "DataOperationManifestV1",
+    "DataOperationUnavailableV1",
     "DataPortV1",
+    "DataConsumerDerivedPortV1",
+    "DataConsumerEvidencePortV1",
+    "DataConsumerServerEvidenceV1",
+    "DataConsumerOutputPortsV1",
+    "DataConsumerRuntimeAdapterV1",
     "DraftAgentNotebookFixture",
     "ReplayContractV1",
     "build_builtin_provider_payload",
     "build_data_operation_manifest",
+    "build_data_consumer_runtime_adapter",
     "draft_agent_notebook_composition_fixtures",
 ]
