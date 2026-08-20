@@ -210,25 +210,8 @@ class ProposalDecision:
 
 _PROPOSAL_STORE_PROCESS_GENERATION = object()
 _PROPOSAL_STORE_CAPABILITY_LOCK = RLock()
-_PROPOSAL_STORE_ISSUER_ADMISSIONS: dict[
-    int, tuple[object, str, object, object, int, object, object, object]
-] = {}
-_PROPOSAL_STORE_CAPABILITY_ADMISSIONS: dict[
-    int,
-    tuple[
-        object,
-        object,
-        object,
-        str,
-        object,
-        object | None,
-        object,
-        object,
-        int,
-        object,
-        tuple[int, int],
-    ],
-] = {}
+_PROPOSAL_STORE_ISSUER_ADMISSIONS: dict[int, tuple[object, ...]] = {}
+_PROPOSAL_STORE_CAPABILITY_ADMISSIONS: dict[int, tuple[object, ...]] = {}
 
 
 class ProposalStoreCapabilityError(ProposalError):
@@ -250,6 +233,8 @@ class ProposalStoreCapabilityIssuerV1:
         "_generation",
         "_owner_identity",
         "_authority_secret",
+        "_authority",
+        "_authority_registry",
     )
 
     def __init__(self) -> None:
@@ -259,21 +244,34 @@ class ProposalStoreCapabilityIssuerV1:
         self._generation = _PROPOSAL_STORE_PROCESS_GENERATION
         self._owner_identity: object | None = None
         self._authority_secret: object | None = None
+        self._authority: object | None = None
+        self._authority_registry: object | None = None
 
     def _require_live(self) -> None:
         with _PROPOSAL_STORE_CAPABILITY_LOCK:
             admission = _PROPOSAL_STORE_ISSUER_ADMISSIONS.get(id(self))
-        if (
-            admission is None
-            or admission[0] is not self
-            or admission[1] != self._issuer_nonce
-            or admission[3] is not self._mutation_admission
-            or admission[4] != self._process_id
-            or admission[5] is not self._generation
-            or admission[6] is not self._owner_identity
-            or admission[7] is not self._authority_secret
-            or self._process_id != os.getpid()
-        ):
+        try:
+            invalid = (
+                admission is None
+                or admission[0] is not self
+                or admission[1] is not self._authority
+                or admission[2] is not self._authority_registry
+                or admission[3] is not self._authority_secret
+                or admission[4] != self._issuer_nonce
+                or admission[5] is not self._mutation_admission
+                or admission[6] != self._process_id
+                or admission[7] is not self._generation
+                or admission[8] is not self._owner_identity
+                or self._authority is not _PROPOSAL_STORE_SERVER_AUTHORITY
+                or self._authority_registry
+                is not _PROPOSAL_STORE_SERVER_AUTHORITY._authority_registry
+                or self._process_id != os.getpid()
+            )
+        except AttributeError as exc:
+            raise ProposalStoreCapabilityError(
+                "server proposal capability issuer is malformed"
+            ) from exc
+        if invalid:
             raise ProposalStoreCapabilityError(
                 "server proposal capability issuer is not current"
             )
@@ -300,14 +298,29 @@ class ProposalStoreCapabilityIssuerV1:
         )
 
     def _require_service_admission(self, service_admission: object) -> None:
+        if type(service_admission) is not _ProposalStoreServiceEntryV1:
+            raise ProposalStoreCapabilityError(
+                "server proposal capability service admission is required"
+            )
         with _PROPOSAL_STORE_CAPABILITY_LOCK:
             current = _PROPOSAL_STORE_ISSUER_ADMISSIONS.get(id(self))
         if (
             current is None
             or current[0] is not self
-            or current[1] != self._issuer_nonce
-            or current[2] is not service_admission
-            or type(service_admission) is not _ProposalStoreServiceEntryV1
+            or current[1] is not self._authority
+            or current[2] is not self._authority_registry
+            or current[3] is not self._authority_secret
+            or current[4] != self._issuer_nonce
+            or current[5] is not self._mutation_admission
+            or current[6] != self._process_id
+            or current[7] is not self._generation
+            or current[8] is not self._owner_identity
+            or current[9] is not service_admission
+            or current[10] is not service_admission._entry_nonce
+            or current[2] is not _PROPOSAL_STORE_SERVER_AUTHORITY._authority_registry
+            or current[3] is not _PROPOSAL_STORE_SERVER_AUTHORITY._authority_secret
+            or service_admission._authority is not self._authority
+            or service_admission._authority_registry is not self._authority_registry
             or service_admission._issuer_nonce != self._issuer_nonce
             or service_admission._owner_identity is not self._owner_identity
             or service_admission._authority_secret is not self._authority_secret
@@ -336,6 +349,8 @@ class _ProposalStoreServiceEntryV1:
         "_authority_secret",
         "_process_id",
         "_generation",
+        "_authority",
+        "_authority_registry",
     )
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
@@ -357,15 +372,43 @@ class _ProposalStoreServiceEntryV1:
 class _ProposalStoreServerAuthorityV1:
     """Process-local authority that alone can register issuers and handles."""
 
-    __slots__ = ("_authority_secret", "_process_id", "_generation")
+    __slots__ = (
+        "_authority_secret",
+        "_authority_registry",
+        "_process_id",
+        "_generation",
+    )
 
     def __init__(self) -> None:
-        self._authority_secret = object()
-        self._process_id = os.getpid()
-        self._generation = _PROPOSAL_STORE_PROCESS_GENERATION
+        raise TypeError("server proposal authority is module-owned")
+
+    def __copy__(self) -> "_ProposalStoreServerAuthorityV1":
+        raise TypeError("server proposal authority cannot be copied")
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> "_ProposalStoreServerAuthorityV1":
+        raise TypeError("server proposal authority cannot be copied")
+
+    def __reduce__(self) -> tuple[object, ...]:
+        raise TypeError("server proposal authority cannot be serialized")
+
+    def __reduce_ex__(self, _protocol: int) -> tuple[object, ...]:
+        raise TypeError("server proposal authority cannot be serialized")
 
     def issue(self) -> tuple[ProposalStoreCapabilityIssuerV1, object]:
-        if self._process_id != os.getpid() or self._generation is not _PROPOSAL_STORE_PROCESS_GENERATION:
+        try:
+            invalid = (
+                self is not _PROPOSAL_STORE_SERVER_AUTHORITY
+                or self._authority_registry
+                is not _PROPOSAL_STORE_SERVER_AUTHORITY._authority_registry
+                or self._authority_secret is not _PROPOSAL_STORE_SERVER_AUTHORITY._authority_secret
+                or self._process_id != os.getpid()
+                or self._generation is not _PROPOSAL_STORE_PROCESS_GENERATION
+            )
+        except AttributeError as exc:
+            raise ProposalStoreCapabilityError(
+                "server proposal authority is malformed"
+            ) from exc
+        if invalid:
             raise ProposalStoreCapabilityError("server proposal authority is not current")
         issuer = object.__new__(ProposalStoreCapabilityIssuerV1)
         issuer._issuer_nonce = secrets.token_hex(32)
@@ -374,6 +417,8 @@ class _ProposalStoreServerAuthorityV1:
         issuer._generation = self._generation
         issuer._owner_identity = object()
         issuer._authority_secret = self._authority_secret
+        issuer._authority = self
+        issuer._authority_registry = self._authority_registry
         service_entry = object.__new__(_ProposalStoreServiceEntryV1)
         service_entry._entry_nonce = secrets.token_hex(32)
         service_entry._issuer_nonce = issuer._issuer_nonce
@@ -381,21 +426,35 @@ class _ProposalStoreServerAuthorityV1:
         service_entry._authority_secret = self._authority_secret
         service_entry._process_id = self._process_id
         service_entry._generation = self._generation
+        service_entry._authority = self
+        service_entry._authority_registry = self._authority_registry
         with _PROPOSAL_STORE_CAPABILITY_LOCK:
             _PROPOSAL_STORE_ISSUER_ADMISSIONS[id(issuer)] = (
                 issuer,
+                self,
+                self._authority_registry,
+                self._authority_secret,
                 issuer._issuer_nonce,
-                service_entry,
                 issuer._mutation_admission,
                 issuer._process_id,
                 issuer._generation,
                 issuer._owner_identity,
-                self._authority_secret,
+                service_entry,
+                service_entry._entry_nonce,
             )
         return issuer, service_entry
 
 
-_PROPOSAL_STORE_SERVER_AUTHORITY = _ProposalStoreServerAuthorityV1()
+def _initialize_server_authority() -> _ProposalStoreServerAuthorityV1:
+    authority = object.__new__(_ProposalStoreServerAuthorityV1)
+    authority._authority_secret = object()
+    authority._authority_registry = object()
+    authority._process_id = os.getpid()
+    authority._generation = _PROPOSAL_STORE_PROCESS_GENERATION
+    return authority
+
+
+_PROPOSAL_STORE_SERVER_AUTHORITY = _initialize_server_authority()
 
 
 def _issue_server_owned_proposal_store_authority() -> tuple[ProposalStoreCapabilityIssuerV1, object]:
@@ -443,6 +502,9 @@ class ProposalStoreCapabilityV1:
         "_generation",
         "_owner_identity",
         "_authority_secret",
+        "_authority",
+        "_authority_registry",
+        "_entry_nonce",
     )
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
@@ -474,6 +536,9 @@ class ProposalStoreCapabilityV1:
             ("_generation", generation),
             ("_owner_identity", issuer._owner_identity),
             ("_authority_secret", issuer._authority_secret),
+            ("_authority", issuer._authority),
+            ("_authority_registry", issuer._authority_registry),
+            ("_entry_nonce", service_admission._entry_nonce),
         ):
             object.__setattr__(capability, name, value)
         with _PROPOSAL_STORE_CAPABILITY_LOCK:
@@ -481,6 +546,8 @@ class ProposalStoreCapabilityV1:
                 capability,
                 store,
                 issuer,
+                issuer._authority,
+                issuer._authority_registry,
                 issuer._issuer_nonce,
                 service_admission,
                 issuer._mutation_admission,
@@ -489,6 +556,7 @@ class ProposalStoreCapabilityV1:
                 process_id,
                 generation,
                 store._root_identity,
+                service_admission._entry_nonce,
             )
         return capability
 
@@ -506,6 +574,8 @@ class ProposalStoreCapabilityV1:
             _capability,
             store,
             admitted_issuer,
+            authority,
+            authority_registry,
             issuer_nonce,
             service_admission,
             mutation_admission,
@@ -514,6 +584,7 @@ class ProposalStoreCapabilityV1:
             process_id,
             generation,
             root_identity,
+            entry_nonce,
         ) = admission
         if issuer is not None and issuer is not admitted_issuer:
             raise ProposalStoreCapabilityError(
@@ -528,6 +599,12 @@ class ProposalStoreCapabilityV1:
             or self._mutation_admission is not mutation_admission
             or self._owner_identity is not owner_identity
             or self._authority_secret is not authority_secret
+            or self._authority is not authority
+            or self._authority_registry is not authority_registry
+            or authority is not _PROPOSAL_STORE_SERVER_AUTHORITY
+            or authority_registry is not _PROPOSAL_STORE_SERVER_AUTHORITY._authority_registry
+            or self._entry_nonce != entry_nonce
+            or self._entry_nonce != self._service_admission._entry_nonce
             or self._root_identity != store._root_identity
             or self._root_identity != root_identity
             or self._process_id != process_id
