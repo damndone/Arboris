@@ -91,10 +91,10 @@ Files:
 - Create docs/superpowers/handoff/2026-08-20-v1.8.9-p1-survey-remediation-3-handoff.md
 - Modify only through CLI: .agent/devlines/v1-8-9-p1-survey-remediation-3/*
 
-- [ ] Commit only product/tests and capture exact product tip.
-- [ ] Freeze final handoff, compute exact digest, append final CLI state event
+- [x] Commit only product/tests and capture exact product tip.
+- [x] Freeze final handoff, compute exact digest, append final CLI state event
   referencing that digest.
-- [ ] Run formal verify and retrospective, then commit handoff and formal
+- [x] Run formal verify and retrospective, then commit handoff and formal
   records in the same final commit; make no post-closeout doc-only commit.
-- [ ] Recompute current state-chain mismatch, confirm owned unresolved=0,
+- [x] Recompute current state-chain mismatch, confirm owned unresolved=0,
   confirm old rem2 events unchanged, and report exact tip/manifest/commands.
