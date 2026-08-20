@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import os
+import pickle
 from pathlib import Path
 
 import pytest
@@ -147,6 +148,24 @@ def test_copied_authority_cannot_issue_before_side_effects(tmp_path: Path) -> No
             service_admission=service_entry,
         )
         _decline(repository, events, capability, issuer, proposal.proposal_id)
+
+    assert _snapshot(repository, events, raw_store, proposal.proposal_id) == before
+
+
+def test_live_authority_copy_and_pickle_are_rejected_before_side_effects(
+    tmp_path: Path,
+) -> None:
+    raw_store = ProposalStore(tmp_path / "workbench")
+    proposal = _proposal(raw_store, proposal_id="serialized-authority")
+    repository, events = _world(tmp_path)
+    before = _snapshot(repository, events, raw_store, proposal.proposal_id)
+    authority = proposals_module._PROPOSAL_STORE_SERVER_AUTHORITY
+
+    with pytest.raises(TypeError, match="cannot be copied"):
+        copy.copy(authority)
+
+    with pytest.raises(TypeError, match="cannot be serialized"):
+        pickle.dumps(authority)
 
     assert _snapshot(repository, events, raw_store, proposal.proposal_id) == before
 
