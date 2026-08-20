@@ -1,0 +1,75 @@
+{
+  "schema": "workbench-v1.8.9.c4-hardening-input-review.v1",
+  "baseline": "05362b5697e10eb25fd219da003641f96eeec082",
+  "inputs": {
+    "legacy_resume": {
+      "tip": "a2b51d5e",
+      "full_tip": "a2b51d5e2cad718795d2c739f10aee1c9fdca10f",
+      "formal_lines": [
+        "v1-8-9-p0-legacy-resume-remediation-8",
+        "v1-8-9-p0-legacy-resume-remediation-9",
+        "v1-8-9-p0-legacy-resume-remediation-10"
+      ],
+      "spec_review": "approved",
+      "quality_review": "approved"
+    },
+    "evidence_report": {
+      "tip": "623ecfc0",
+      "full_tip": "623ecfc0a8eed0e2d6665983584b9fdded38567f",
+      "formal_lines": [
+        "v1-8-9-p0-evidence-report-remediation-8",
+        "v1-8-9-p0-evidence-report-remediation-9",
+        "v1-8-9-p0-evidence-report-remediation-10"
+      ],
+      "spec_review": "approved",
+      "quality_review": "approved"
+    },
+    "data_consumer": {
+      "tip": "48964f57",
+      "full_tip": "48964f575873fd8c73d0303c5c4dbab5e6bbec9d",
+      "formal_lines": [
+        "v1-8-9-p1-data-consumer-remediation-1",
+        "v1-8-9-p1-data-consumer-remediation-2",
+        "v1-8-9-p1-data-consumer-remediation-3"
+      ],
+      "spec_review": "approved",
+      "quality_review": "approved"
+    },
+    "classification_production": {
+      "tip": "65233cc7",
+      "full_tip": "65233cc7a9b3b4c788a00c7488333675929bf5d2",
+      "formal_lines": [
+        "v1-8-9-p1-classification-production-remediation-17",
+        "v1-8-9-p1-classification-production-remediation-18",
+        "v1-8-9-p1-classification-production-remediation-19"
+      ],
+      "spec_review": "approved",
+      "quality_review": "approved"
+    },
+    "survey_extension": {
+      "tip": "c05b2df2",
+      "full_tip": "c05b2df248656dac4dbb76d18cc90161ddee9834",
+      "formal_lines": [
+        "v1-8-9-p1-survey-remediation-4",
+        "v1-8-9-p1-survey-remediation-5",
+        "v1-8-9-p1-survey-remediation-6"
+      ],
+      "spec_review": "approved",
+      "quality_review": "approved"
+    }
+  },
+  "merge_order": [
+    "legacy_resume",
+    "evidence_report",
+    "data_consumer",
+    "classification_production",
+    "survey_extension"
+  ],
+  "boundaries": {
+    "browser": "NOT_VERIFIED",
+    "provider": "NOT_VERIFIED",
+    "host_full_gate": "NOT_VERIFIED",
+    "release": "NOT_VERIFIED",
+    "push": "NOT_AUTHORIZED"
+  }
+}
