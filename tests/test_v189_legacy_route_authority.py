@@ -6,6 +6,12 @@ from types import SimpleNamespace
 import pytest
 
 from workbench.api_errors import WorkbenchAPIError
+from workbench.agent.orchestrator import ServerConfirmationReceiptV1
+from workbench.contracts.agent.planning import (
+    CompilationRecordReferenceV1,
+    ConfirmationBindingV1,
+)
+from workbench.contracts.common.envelope import ContractError
 from workbench.http import agent_routes, notebook_routes
 
 
@@ -406,6 +412,9 @@ def test_reused_legacy_compilation_confirmation_cannot_execute_a_second_proposal
     confirmation = SimpleNamespace(
         confirmation_id="confirmation-a",
         compilation_record_id=record_id,
+        proposal_id="proposal-a",
+        proposal_revision=1,
+        proposal_fingerprint="fingerprint-a",
         semantic_plan_hash=semantic_plan_hash,
         actor_ref=actor_ref,
         session_ref=session_id,
@@ -423,6 +432,308 @@ def test_reused_legacy_compilation_confirmation_cannot_execute_a_second_proposal
         )
 
     assert error.value.code == "AGENT_LEGACY_PROPOSAL_BINDING_REPLAY"
+    assert compiler_calls == []
+
+
+def test_first_legacy_claim_uses_server_receipt_proposal_identity_before_execute(
+    tmp_path, monkeypatch
+) -> None:
+    """A receipt for proposal A cannot be claimed by proposal B on first use."""
+
+    session_id = "session-1"
+    project_ref = f"project:{tmp_path.resolve()}"
+    actor_ref = f"actor:agent:{session_id}"
+    record_id = "record-a"
+    semantic_plan_hash = "a" * 64
+    proposal_b = SimpleNamespace(
+        proposal_id="proposal-b",
+        revision=1,
+        fingerprint="fingerprint-b",
+        chain_id="chain-1",
+        operation_id="model.rerun",
+        preconditions={
+            "server_compilation": {
+                "compilation_record_id": record_id,
+                "confirmation_id": "confirmation-a",
+                # These are untrusted compatibility hints and must not become
+                # the binding authority for the retained receipt.
+                "proposal_id": "proposal-b",
+                "proposal_revision": 1,
+                "proposal_fingerprint": "fingerprint-b",
+                "operation_id": "model.rerun",
+                "semantic_plan_hash": semantic_plan_hash,
+                "actor_ref": actor_ref,
+                "session_ref": session_id,
+                "project_ref": project_ref,
+                "data_snapshot_digest": "d" * 64,
+            }
+        },
+    )
+    compiler_calls: list[str] = []
+
+    class Compiler:
+        def record(self, _record_id):
+            return SimpleNamespace(
+                record_id=record_id,
+                semantic_plan_hash=semantic_plan_hash,
+                principal_ref=actor_ref,
+                session_ref=session_id,
+                project_ref=project_ref,
+            )
+
+        def execute(self, *_args, **_kwargs):
+            compiler_calls.append(record_id)
+            return SimpleNamespace(
+                to_dict=lambda: {"operation_id": "model.rerun", "status": "completed"}
+            )
+
+    store = agent_routes.AgentNotebookCutoverAuthorityStoreV1()
+    store.confirmations[(project_ref, session_id, record_id)] = SimpleNamespace(
+        confirmation_id="confirmation-a",
+        compilation_record_id=record_id,
+        proposal_id="proposal-a",
+        proposal_revision=1,
+        proposal_fingerprint="fingerprint-a",
+        semantic_plan_hash=semantic_plan_hash,
+        actor_ref=actor_ref,
+        session_ref=session_id,
+        project_ref=project_ref,
+    )
+    monkeypatch.setattr(agent_routes, "_cutover_authority", lambda *_args, **_kwargs: Compiler())
+    monkeypatch.setattr(agent_routes, "_cutover_store", lambda **_kwargs: store)
+    monkeypatch.setattr(
+        agent_routes,
+        "_legacy_agent_route_scope",
+        lambda *_args, **_kwargs: (actor_ref, session_id, project_ref),
+    )
+
+    with pytest.raises(WorkbenchAPIError) as error:
+        agent_routes._execute_legacy_agent_proposal_via_server_boundary(
+            proposal_b,
+            proposal_id=proposal_b.proposal_id,
+            root=tmp_path,
+            session_id=session_id,
+            request=None,
+        )
+
+    assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
+    assert compiler_calls == []
+    assert store.legacy_proposal_bindings == {}
+
+
+def test_server_confirmation_receipt_serializes_proposal_identity() -> None:
+    receipt = ServerConfirmationReceiptV1(
+        confirmation_id="confirmation:a",
+        confirmation_digest="c" * 64,
+        compilation_record_id="record-a",
+        proposal_id="proposal-a",
+        proposal_revision=2,
+        proposal_fingerprint="fingerprint-a",
+        semantic_plan_hash="a" * 64,
+        actor_ref="actor:agent:session-1",
+        session_ref="session-1",
+        project_ref="project:test",
+        _authority_token=object(),
+    )
+
+    payload = receipt.to_dict()
+
+    assert payload["proposal_id"] == "proposal-a"
+    assert payload["proposal_revision"] == 2
+    assert payload["proposal_fingerprint"] == "fingerprint-a"
+
+
+def test_confirmation_binding_serialization_tamper_rejects_proposal_identity() -> None:
+    binding = ConfirmationBindingV1(
+        confirmation_id="confirmation:a",
+        compilation_record_ref=CompilationRecordReferenceV1(
+            record_id="record-a",
+            record_digest="d" * 64,
+            semantic_plan_hash="a" * 64,
+        ),
+        actor_ref="actor:agent:session-1",
+        session_ref="session-1",
+        project_ref="project:test",
+        semantic_plan_hash="a" * 64,
+        method_snapshot_ref="method:snapshot:1",
+        risk_snapshot_ref="risk:snapshot:1",
+        policy_snapshot_ref="policy:snapshot:1",
+        confirmed_at="2026-08-19T19:00:00+00:00",
+        expires_at="2026-08-19T20:00:00+00:00",
+        proposal_id="proposal-a",
+        proposal_revision=1,
+        proposal_fingerprint="fingerprint-a",
+    )
+
+    restored = ConfirmationBindingV1.from_dict(binding.to_dict())
+    assert restored.proposal_id == "proposal-a"
+    tampered = binding.to_dict()
+    tampered["proposal_id"] = "proposal-b"
+    with pytest.raises(ContractError, match="digest"):
+        ConfirmationBindingV1.from_dict(tampered)
+
+
+def test_same_legacy_proposal_can_claim_once_but_replay_fails_closed(
+    tmp_path, monkeypatch
+) -> None:
+    session_id = "session-1"
+    project_ref = f"project:{tmp_path.resolve()}"
+    actor_ref = f"actor:agent:{session_id}"
+    record_id = "record-a"
+    semantic_plan_hash = "a" * 64
+    proposal = SimpleNamespace(
+        proposal_id="proposal-a",
+        revision=1,
+        fingerprint="fingerprint-a",
+        operation_id="model.rerun",
+        preconditions={
+            "server_compilation": {
+                "compilation_record_id": record_id,
+                "confirmation_id": "confirmation-a",
+                "proposal_id": "proposal-a",
+                "proposal_revision": 1,
+                "proposal_fingerprint": "fingerprint-a",
+                "operation_id": "model.rerun",
+                "semantic_plan_hash": semantic_plan_hash,
+                "actor_ref": actor_ref,
+                "session_ref": session_id,
+                "project_ref": project_ref,
+            }
+        },
+    )
+    compiler_calls: list[str] = []
+
+    class Compiler:
+        def record(self, _record_id):
+            return SimpleNamespace(
+                record_id=record_id,
+                semantic_plan_hash=semantic_plan_hash,
+                principal_ref=actor_ref,
+                session_ref=session_id,
+                project_ref=project_ref,
+            )
+
+        def execute(self, *_args, **_kwargs):
+            compiler_calls.append(record_id)
+            return SimpleNamespace(
+                to_dict=lambda: {"operation_id": "model.rerun", "status": "completed"}
+            )
+
+    store = agent_routes.AgentNotebookCutoverAuthorityStoreV1()
+    store.confirmations[(project_ref, session_id, record_id)] = SimpleNamespace(
+        confirmation_id="confirmation-a",
+        compilation_record_id=record_id,
+        proposal_id="proposal-a",
+        proposal_revision=1,
+        proposal_fingerprint="fingerprint-a",
+        semantic_plan_hash=semantic_plan_hash,
+        actor_ref=actor_ref,
+        session_ref=session_id,
+        project_ref=project_ref,
+    )
+    monkeypatch.setattr(agent_routes, "_cutover_authority", lambda *_args, **_kwargs: Compiler())
+    monkeypatch.setattr(agent_routes, "_cutover_store", lambda **_kwargs: store)
+    monkeypatch.setattr(
+        agent_routes,
+        "_legacy_agent_route_scope",
+        lambda *_args, **_kwargs: (actor_ref, session_id, project_ref),
+    )
+
+    result = agent_routes._execute_legacy_agent_proposal_via_server_boundary(
+        proposal,
+        proposal_id=proposal.proposal_id,
+        root=tmp_path,
+        session_id=session_id,
+        request=None,
+    )
+    assert result["status"] == "completed"
+
+    with pytest.raises(WorkbenchAPIError) as error:
+        agent_routes._execute_legacy_agent_proposal_via_server_boundary(
+            proposal,
+            proposal_id=proposal.proposal_id,
+            root=tmp_path,
+            session_id=session_id,
+            request=None,
+        )
+
+    assert error.value.code == "AGENT_LEGACY_PROPOSAL_BINDING_REPLAY"
+    assert compiler_calls == [record_id]
+
+
+def test_serialized_legacy_confirmation_handle_cannot_execute(
+    tmp_path, monkeypatch
+) -> None:
+    session_id = "session-1"
+    project_ref = f"project:{tmp_path.resolve()}"
+    actor_ref = f"actor:agent:{session_id}"
+    record_id = "record-a"
+    proposal = SimpleNamespace(
+        proposal_id="proposal-a",
+        revision=1,
+        fingerprint="fingerprint-a",
+        operation_id="model.rerun",
+        preconditions={
+            "server_compilation": {
+                "compilation_record_id": record_id,
+                "confirmation_id": "confirmation-a",
+                "proposal_id": "proposal-a",
+                "proposal_revision": 1,
+                "proposal_fingerprint": "fingerprint-a",
+                "operation_id": "model.rerun",
+                "semantic_plan_hash": "a" * 64,
+                "actor_ref": actor_ref,
+                "session_ref": session_id,
+                "project_ref": project_ref,
+            }
+        },
+    )
+    compiler_calls: list[str] = []
+
+    class Compiler:
+        def record(self, _record_id):
+            return SimpleNamespace(
+                record_id=record_id,
+                semantic_plan_hash="a" * 64,
+                principal_ref=actor_ref,
+                session_ref=session_id,
+                project_ref=project_ref,
+            )
+
+        def execute(self, *_args, **_kwargs):
+            compiler_calls.append(record_id)
+            return SimpleNamespace(to_dict=lambda: {"operation_id": "model.rerun", "status": "completed"})
+
+    store = agent_routes.AgentNotebookCutoverAuthorityStoreV1()
+    store.confirmations[(project_ref, session_id, record_id)] = {
+        "confirmation_id": "confirmation-a",
+        "compilation_record_id": record_id,
+        "proposal_id": "proposal-a",
+        "proposal_revision": 1,
+        "proposal_fingerprint": "fingerprint-a",
+        "semantic_plan_hash": "a" * 64,
+        "actor_ref": actor_ref,
+        "session_ref": session_id,
+        "project_ref": project_ref,
+    }
+    monkeypatch.setattr(agent_routes, "_cutover_authority", lambda *_args, **_kwargs: Compiler())
+    monkeypatch.setattr(agent_routes, "_cutover_store", lambda **_kwargs: store)
+    monkeypatch.setattr(
+        agent_routes,
+        "_legacy_agent_route_scope",
+        lambda *_args, **_kwargs: (actor_ref, session_id, project_ref),
+    )
+
+    with pytest.raises(WorkbenchAPIError) as error:
+        agent_routes._execute_legacy_agent_proposal_via_server_boundary(
+            proposal,
+            proposal_id=proposal.proposal_id,
+            root=tmp_path,
+            session_id=session_id,
+            request=None,
+        )
+
+    assert error.value.code == "SERVER_CONFIRMATION_UNKNOWN"
     assert compiler_calls == []
 
 

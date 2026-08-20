@@ -2560,6 +2560,11 @@ def _execute_legacy_agent_proposal_via_server_boundary(
     confirmation_mismatches = []
     if confirmation is None:
         confirmation_mismatches.append("confirmation_id")
+    elif isinstance(confirmation, Mapping):
+        # A serialized receipt is data, not a server authority object.  It
+        # must never be promoted back into an executable handle by a legacy
+        # compatibility route.
+        confirmation_mismatches.append("receipt_type")
     else:
         for field_name, expected in (
             ("confirmation_id", binding["confirmation_id"]),
@@ -2571,33 +2576,96 @@ def _execute_legacy_agent_proposal_via_server_boundary(
         ):
             if _object_value(confirmation, field_name) != expected:
                 confirmation_mismatches.append(field_name)
+        for field_name in (
+            "proposal_id",
+            "proposal_revision",
+            "proposal_fingerprint",
+        ):
+            if _object_value(confirmation, field_name) is None:
+                confirmation_mismatches.append(field_name)
     if confirmation_mismatches:
         raise WorkbenchAPIError(
             status_code=409,
             code=(
                 "SERVER_CONFIRMATION_UNKNOWN"
-                if confirmation is None
+                if confirmation is None or isinstance(confirmation, Mapping)
                 else "AGENT_LEGACY_BINDING_MISMATCH"
             ),
             message="The legacy proposal has no matching server-retained confirmation handle.",
             details={"compilation_record_id": record_id, "fields": confirmation_mismatches},
         )
-    proposal_binding = {
-        "proposal_id": expected_proposal["proposal_id"],
-        "proposal_revision": expected_proposal["proposal_revision"],
-        "proposal_fingerprint": expected_proposal["proposal_fingerprint"],
-        "operation_id": expected_proposal["operation_id"],
-        "semantic_plan_hash": binding["semantic_plan_hash"],
-        "confirmation_id": binding["confirmation_id"],
-        "actor_ref": canonical_actor,
-        "session_ref": canonical_session,
-        "project_ref": canonical_project,
+    receipt_binding = {
+        "proposal_id": _object_value(confirmation, "proposal_id"),
+        "proposal_revision": _object_value(confirmation, "proposal_revision"),
+        "proposal_fingerprint": _object_value(confirmation, "proposal_fingerprint"),
+        "semantic_plan_hash": _object_value(confirmation, "semantic_plan_hash"),
+        "confirmation_id": _object_value(confirmation, "confirmation_id"),
+        "compilation_record_id": _object_value(confirmation, "compilation_record_id"),
+        "actor_ref": _object_value(confirmation, "actor_ref"),
+        "session_ref": _object_value(confirmation, "session_ref"),
+        "project_ref": _object_value(confirmation, "project_ref"),
     }
     binding_key = (canonical_project, canonical_session, record_id)
     cutover_store = _cutover_store(request=request)
     with cutover_store.lock:
+        if cutover_store.legacy_proposal_bindings.get(binding_key) is not None:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_LEGACY_PROPOSAL_BINDING_REPLAY",
+                message=(
+                    "The retained compilation confirmation has already been used. "
+                    "Recompile and reconfirm."
+                ),
+                details={"compilation_record_id": record_id},
+            )
+    receipt_proposal_mismatches = [
+        name
+        for name, expected in {
+            "proposal_id": expected_proposal["proposal_id"],
+            "proposal_revision": expected_proposal["proposal_revision"],
+            "proposal_fingerprint": expected_proposal["proposal_fingerprint"],
+        }.items()
+        if receipt_binding.get(name) != expected
+    ]
+    if receipt_proposal_mismatches:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The server confirmation receipt is not bound to this Agent proposal.",
+            details={"fields": receipt_proposal_mismatches},
+        )
+    receipt_scope_mismatches = [
+        name
+        for name, expected in {
+            "compilation_record_id": record_id,
+            "semantic_plan_hash": _object_value(record, "semantic_plan_hash"),
+            "actor_ref": canonical_actor,
+            "session_ref": canonical_session,
+            "project_ref": canonical_project,
+        }.items()
+        if receipt_binding.get(name) != expected
+    ]
+    if receipt_scope_mismatches:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="AGENT_LEGACY_BINDING_MISMATCH",
+            message="The server confirmation receipt is not bound to the canonical Agent scope.",
+            details={"fields": receipt_scope_mismatches},
+        )
+    proposal_binding = {
+        "proposal_id": receipt_binding["proposal_id"],
+        "proposal_revision": receipt_binding["proposal_revision"],
+        "proposal_fingerprint": receipt_binding["proposal_fingerprint"],
+        "operation_id": expected_proposal["operation_id"],
+        "semantic_plan_hash": receipt_binding["semantic_plan_hash"],
+        "confirmation_id": receipt_binding["confirmation_id"],
+        "actor_ref": canonical_actor,
+        "session_ref": canonical_session,
+        "project_ref": canonical_project,
+    }
+    with cutover_store.lock:
         retained = cutover_store.legacy_proposal_bindings.get(binding_key)
-        if retained is not None and retained != proposal_binding:
+        if retained is not None:
             raise WorkbenchAPIError(
                 status_code=409,
                 code="AGENT_LEGACY_PROPOSAL_BINDING_REPLAY",

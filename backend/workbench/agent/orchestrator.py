@@ -3057,11 +3057,31 @@ class ServerConfirmationReceiptV1:
     confirmation_id: str
     confirmation_digest: str
     compilation_record_id: str
+    proposal_id: str
+    proposal_revision: int
+    proposal_fingerprint: str
     semantic_plan_hash: str
     actor_ref: str
     session_ref: str
     project_ref: str
     _authority_token: object = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("confirmation_id", self.confirmation_id),
+            ("confirmation_digest", self.confirmation_digest),
+            ("compilation_record_id", self.compilation_record_id),
+            ("proposal_id", self.proposal_id),
+            ("proposal_fingerprint", self.proposal_fingerprint),
+            ("semantic_plan_hash", self.semantic_plan_hash),
+            ("actor_ref", self.actor_ref),
+            ("session_ref", self.session_ref),
+            ("project_ref", self.project_ref),
+        ):
+            if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+                raise CutoverCompilerError("SERVER_CONFIRMATION_INVALID", f"{name} is invalid")
+        if type(self.proposal_revision) is not int or self.proposal_revision <= 0:
+            raise CutoverCompilerError("SERVER_CONFIRMATION_INVALID", "proposal_revision is invalid")
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -3069,6 +3089,9 @@ class ServerConfirmationReceiptV1:
             "confirmation_id": self.confirmation_id,
             "confirmation_digest": self.confirmation_digest,
             "compilation_record_id": self.compilation_record_id,
+            "proposal_id": self.proposal_id,
+            "proposal_revision": self.proposal_revision,
+            "proposal_fingerprint": self.proposal_fingerprint,
             "semantic_plan_hash": self.semantic_plan_hash,
             "actor_ref": self.actor_ref,
             "session_ref": self.session_ref,
@@ -3589,7 +3612,14 @@ class AgentNotebookCompilerV1:
     def operation(self, operation_id: str, *, entrypoint: str | None = None) -> Any:
         return self._operations.require(operation_id, entrypoint=entrypoint)
 
-    def confirm(self, compilation_record_id: str) -> ServerConfirmationReceiptV1:
+    def confirm(
+        self,
+        compilation_record_id: str,
+        *,
+        proposal_id: str | None = None,
+        proposal_revision: int | None = None,
+        proposal_fingerprint: str | None = None,
+    ) -> ServerConfirmationReceiptV1:
         from ..contracts.agent.planning import ConfirmationBindingV1
 
         record = self.record(compilation_record_id)
@@ -3599,6 +3629,24 @@ class AgentNotebookCompilerV1:
         operation = self._operations.require(operation_id)
         if operation.state != "compiled":
             raise CutoverCompilerError("OPERATION_CONFIRMATION_STATE_INVALID")
+        supplied_proposal_binding = (proposal_id, proposal_revision, proposal_fingerprint)
+        if any(value is not None for value in supplied_proposal_binding):
+            if (
+                type(proposal_id) is not str
+                or not proposal_id
+                or type(proposal_revision) is not int
+                or proposal_revision <= 0
+                or type(proposal_fingerprint) is not str
+                or not proposal_fingerprint
+            ):
+                raise CutoverCompilerError("PROPOSAL_BINDING_REQUIRED")
+        else:
+            # Generic cutover callers have no legacy ProposalRevision.  Give
+            # them a server-generated identity while keeping legacy execution
+            # fail-closed unless a real proposal identity was bound.
+            proposal_id = f"proposal:{record.record_id}"
+            proposal_revision = 1
+            proposal_fingerprint = record.compiled_workflow.preview_fingerprint
         now = self.clock()
         binding = ConfirmationBindingV1(
             confirmation_id=f"confirmation:{uuid4().hex}",
@@ -3612,6 +3660,9 @@ class AgentNotebookCompilerV1:
             policy_snapshot_ref=self.policy_snapshot_ref,
             confirmed_at=now.isoformat(),
             expires_at=record.expires_at,
+            proposal_id=proposal_id,
+            proposal_revision=proposal_revision,
+            proposal_fingerprint=proposal_fingerprint,
         )
         issued = self._confirmation_store.issue(binding)
         self._confirmations[record.record_id] = issued
@@ -3625,6 +3676,9 @@ class AgentNotebookCompilerV1:
             confirmation_id=issued.confirmation_id,
             confirmation_digest=issued.confirmation_digest,
             compilation_record_id=record.record_id,
+            proposal_id=proposal_id,
+            proposal_revision=proposal_revision,
+            proposal_fingerprint=proposal_fingerprint,
             semantic_plan_hash=record.semantic_plan_hash,
             actor_ref=record.principal_ref,
             session_ref=record.session_ref,
@@ -3665,6 +3719,12 @@ class AgentNotebookCompilerV1:
             raise CutoverCompilerError("SERVER_CONFIRMATION_UNKNOWN")
         if binding.confirmation_id != confirmation.confirmation_id or binding.confirmation_digest != confirmation.confirmation_digest:
             raise CutoverCompilerError("CONFIRMATION_DIGEST_MISMATCH")
+        if (
+            binding.proposal_id != confirmation.proposal_id
+            or binding.proposal_revision != confirmation.proposal_revision
+            or binding.proposal_fingerprint != confirmation.proposal_fingerprint
+        ):
+            raise CutoverCompilerError("CONFIRMATION_PROPOSAL_BINDING_MISMATCH")
         expected_digest = record.source_commitments.get("data_snapshot")
         if current_data_snapshot_digest is not None and current_data_snapshot_digest != expected_digest:
             raise CutoverCompilerError("DATA_SNAPSHOT_CHANGED", "data snapshot changed after compilation")
