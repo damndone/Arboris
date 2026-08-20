@@ -46,6 +46,20 @@ def _rewrite_indexed_classification_artifact(run_root, mutate, *, update_outer_i
     return payload
 
 
+def _canonical_artifact_record(**overrides: object) -> dict[str, object]:
+    return {
+        "artifact_id": "artifact:data",
+        "path": "data.json",
+        "artifact_type": "data",
+        "step": "ingest",
+        "sha256": "a" * 64,
+        "inputs": [],
+        "config_hash": "",
+        "code_version": "1.8.9",
+        **overrides,
+    }
+
+
 def _production_dependencies(*, include_holdout: bool = True) -> dict[str, object]:
     from workbench.contracts.prediction.holdout import HoldoutMetricBundleStoreV1, HoldoutSealStoreV1
 
@@ -682,10 +696,7 @@ def test_persisted_classification_artifact_rejects_copy_into_foreign_project_run
     with pytest.raises(ContractError) as exc_info:
         read_classification_evidence_from_run_root(foreign_root, consumer="report")
 
-    assert exc_info.value.code in {
-        "CLASSIFICATION_SERVER_IDENTITY_MISMATCH",
-        "CLASSIFICATION_PERSISTED_ARTIFACT_IDENTITY_INVALID",
-    }
+    assert exc_info.value.code == "CLASSIFICATION_SERVER_IDENTITY_MISMATCH"
 
 
 def test_classification_consumer_rejects_in_memory_evidence_bypass(tmp_path) -> None:
@@ -860,6 +871,85 @@ def test_runs_artifact_list_http_boundary_returns_typed_error_without_raw_except
     assert "JSONDecodeError" not in response.text
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "missing_artifacts",
+        "null_artifacts",
+        "unknown_record_type",
+        "missing_required_field",
+        "null_path",
+        "null_digest",
+        "duplicate_id",
+        "path_escape",
+        "invalid_digest",
+        "tampered_structure",
+    ),
+)
+def test_runs_artifact_list_rejects_noncanonical_index_records_with_exact_invalid_code(
+    tmp_path, mutation: str
+) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-artifact-schema"
+    run_root.mkdir(parents=True)
+    (run_root / "data.json").write_text("{}", encoding="utf-8")
+    index: dict[str, object] = {
+        "schema_version": 1,
+        "artifacts": [_canonical_artifact_record()],
+    }
+    if mutation == "missing_artifacts":
+        index.pop("artifacts")
+    elif mutation == "null_artifacts":
+        index["artifacts"] = None
+    elif mutation == "unknown_record_type":
+        index["artifacts"][0]["record_type"] = "unknown"  # type: ignore[index]
+    elif mutation == "missing_required_field":
+        index["artifacts"][0].pop("inputs")  # type: ignore[index]
+    elif mutation == "null_path":
+        index["artifacts"][0]["path"] = None  # type: ignore[index]
+    elif mutation == "null_digest":
+        index["artifacts"][0]["sha256"] = None  # type: ignore[index]
+    elif mutation == "duplicate_id":
+        index["artifacts"].append(_canonical_artifact_record(path="second.json"))  # type: ignore[union-attr]
+    elif mutation == "path_escape":
+        index["artifacts"][0]["path"] = "../outside.json"  # type: ignore[index]
+    elif mutation == "invalid_digest":
+        index["artifacts"][0]["sha256"] = "not-a-digest"  # type: ignore[index]
+    elif mutation == "tampered_structure":
+        index["artifacts"][0]["inputs"] = {"artifact_id": "forged"}  # type: ignore[index]
+    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        runs_routes.list_artifacts_endpoint("run-artifact-schema", str(project_root))
+
+    assert exc_info.value.code == "ARTIFACTS_INDEX_INVALID"
+
+
+def test_runs_artifact_list_http_boundary_rejects_tampered_record_without_raw_exception(tmp_path) -> None:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-artifact-http-schema"
+    run_root.mkdir(parents=True)
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "artifacts": [{
+                **_canonical_artifact_record(),
+                "path": "../../etc/passwd",
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/runs/run-artifact-http-schema/artifacts",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert "JSONDecodeError" not in response.text
+
+
 def test_runs_artifact_route_rejects_classification_contract_alias_returning_another_wrapper(tmp_path) -> None:
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-classification"
@@ -940,12 +1030,12 @@ def test_runs_artifact_route_does_not_treat_generic_alias_id_as_classification_w
             {
                 "schema_version": 1,
                 "artifacts": [
-                    {
-                        "artifact_id": "classification_artifacts",
-                        "artifact_type": "generic_result",
-                        "path": "generic.json",
-                        "sha256": payload_sha256,
-                    }
+                    _canonical_artifact_record(
+                        artifact_id="classification_artifacts",
+                        artifact_type="generic_result",
+                        path="generic.json",
+                        sha256=payload_sha256,
+                    )
                 ],
             }
         ),

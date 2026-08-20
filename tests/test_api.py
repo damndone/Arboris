@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -624,7 +625,16 @@ def test_artifacts_index_missing_schema_version_is_ok(tmp_path: Path):
     create_project(tmp_path, "proj")
     run_root = project / "runs" / "r1"
     run_root.mkdir(parents=True)
-    index = {"artifacts": [{"artifact_id": "a", "path": "a.txt", "artifact_type": "data", "step": "ingest", "sha256": "x"}]}
+    index = {"artifacts": [{
+        "artifact_id": "a",
+        "path": "a.txt",
+        "artifact_type": "data",
+        "step": "ingest",
+        "sha256": hashlib.sha256(b"content").hexdigest(),
+        "inputs": [],
+        "config_hash": "",
+        "code_version": "1.8.9",
+    }]}
     (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
     (run_root / "a.txt").write_text("content", encoding="utf-8")
 
@@ -641,7 +651,16 @@ def test_artifacts_index_version_1_is_ok(tmp_path: Path):
     create_project(tmp_path, "proj")
     run_root = project / "runs" / "r1"
     run_root.mkdir(parents=True)
-    index = {"schema_version": 1, "artifacts": [{"artifact_id": "a", "path": "a.txt", "artifact_type": "data", "step": "ingest", "sha256": "x"}]}
+    index = {"schema_version": 1, "artifacts": [{
+        "artifact_id": "a",
+        "path": "a.txt",
+        "artifact_type": "data",
+        "step": "ingest",
+        "sha256": hashlib.sha256(b"content").hexdigest(),
+        "inputs": [],
+        "config_hash": "",
+        "code_version": "1.8.9",
+    }]}
     (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
     (run_root / "a.txt").write_text("content", encoding="utf-8")
 

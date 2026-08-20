@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 
 from ..api_errors import (
@@ -23,11 +24,165 @@ from ..api_errors import (
     WorkbenchAPIError,
 )
 from ..artifacts import read_json
+from ..predictive_research.contracts import ContractError
+from ..predictive_research.persistence import validate_classification_server_identity
 
 # Highest artifacts_index.json schema_version this server understands.
 SUPPORTED_REGISTRY_VERSION = 1
 ERROR_ARTIFACTS_INDEX_UNAVAILABLE = "ARTIFACTS_INDEX_UNAVAILABLE"
 ERROR_ARTIFACTS_INDEX_INVALID = "ARTIFACTS_INDEX_INVALID"
+
+_ARTIFACT_RECORD_REQUIRED_FIELDS = frozenset(
+    {
+        "artifact_id",
+        "path",
+        "artifact_type",
+        "step",
+        "sha256",
+        "inputs",
+        "config_hash",
+        "code_version",
+    }
+)
+_ARTIFACT_RECORD_OPTIONAL_FIELDS = frozenset(
+    {
+        "payload_contract",
+        "payload_schema",
+        "schema_version",
+        "server_identity",
+        "receipt_path",
+        "receipt_sha256",
+    }
+)
+_ARTIFACT_INDEX_FIELDS = frozenset(
+    {"schema_version", "artifacts", "classification_server_identity"}
+)
+
+
+def _validate_artifact_digest(value: Any) -> None:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError("artifact digest is not a lowercase SHA-256 value")
+
+
+def _validate_run_relative_path(run_root: Path, value: Any) -> None:
+    if type(value) is not str or not value or value != value.strip() or "\\" in value:
+        raise ValueError("artifact path is not a normalized relative POSIX path")
+    if len(value.encode("utf-8")) > 512:
+        raise ValueError("artifact path is too long")
+    parsed = PurePosixPath(value)
+    if (
+        parsed.is_absolute()
+        or parsed.as_posix() != value
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+    ):
+        raise ValueError("artifact path is not normalized")
+    candidate = (run_root / value).resolve()
+    try:
+        candidate.relative_to(run_root.resolve())
+    except ValueError as exc:
+        raise ValueError("artifact path escapes the run root") from exc
+
+
+def _validate_payload_contract(value: Any) -> None:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"payload_schema", "schema_version"}
+        or type(value.get("payload_schema")) is not str
+        or not value["payload_schema"]
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] != 1
+    ):
+        raise ValueError("artifact payload contract is invalid")
+
+
+def _validate_artifact_record(run_root: Path, record: Any) -> dict[str, Any]:
+    if not isinstance(record, dict):
+        raise ValueError("artifact record is not an object")
+    if not _ARTIFACT_RECORD_REQUIRED_FIELDS.issubset(record) or set(record) - (
+        _ARTIFACT_RECORD_REQUIRED_FIELDS | _ARTIFACT_RECORD_OPTIONAL_FIELDS
+    ):
+        raise ValueError("artifact record shape is not canonical")
+    for field in ("artifact_id", "path", "artifact_type", "step", "code_version"):
+        if type(record[field]) is not str or not record[field].strip():
+            raise ValueError(f"artifact record field {field} is invalid")
+    if record["artifact_type"] == "unknown":
+        raise ValueError("artifact record kind is unknown")
+    if not isinstance(record["inputs"], list) or any(
+        type(item) is not str or not item.strip() for item in record["inputs"]
+    ):
+        raise ValueError("artifact record inputs are invalid")
+    if type(record["config_hash"]) is not str:
+        raise ValueError("artifact record config_hash is invalid")
+    _validate_artifact_digest(record["sha256"])
+    _validate_run_relative_path(run_root, record["path"])
+
+    payload_contract = record.get("payload_contract")
+    if "payload_contract" in record:
+        _validate_payload_contract(payload_contract)
+    if "payload_schema" in record or "schema_version" in record:
+        if "payload_schema" not in record or "schema_version" not in record:
+            raise ValueError("indexed payload schema fields must be supplied together")
+        if (
+            type(record["payload_schema"]) is not str
+            or not record["payload_schema"]
+            or type(record["schema_version"]) is not int
+            or record["schema_version"] != 1
+        ):
+            raise ValueError("indexed payload schema is invalid")
+        if payload_contract is not None and (
+            record["payload_schema"] != payload_contract["payload_schema"]
+            or record["schema_version"] != payload_contract["schema_version"]
+        ):
+            raise ValueError("indexed payload schema disagrees with its payload contract")
+
+    server_identity = record.get("server_identity")
+    if "server_identity" in record:
+        if not isinstance(server_identity, dict) or type(server_identity.get("schema_version")) is not int:
+            raise ValueError("artifact server identity is invalid")
+        validate_classification_server_identity(server_identity, run_root)
+    has_receipt_path = "receipt_path" in record
+    has_receipt_sha256 = "receipt_sha256" in record
+    receipt_path = record.get("receipt_path")
+    receipt_sha256 = record.get("receipt_sha256")
+    if has_receipt_path != has_receipt_sha256:
+        raise ValueError("artifact receipt path and digest must be supplied together")
+    if has_receipt_path:
+        _validate_run_relative_path(run_root, receipt_path)
+        _validate_artifact_digest(receipt_sha256)
+    if record["artifact_type"] == "classification_artifacts" and (
+        payload_contract is None
+        or server_identity is None
+        or receipt_path is None
+        or receipt_sha256 is None
+    ):
+        raise ValueError("classification artifact record lacks its server-owned identity or receipt")
+    return record
+
+
+def _validate_artifacts_index(run_root: Path, data: Any) -> None:
+    if not isinstance(data, dict) or set(data) - _ARTIFACT_INDEX_FIELDS or "artifacts" not in data:
+        raise ValueError("artifacts_index.json has a noncanonical top-level shape")
+    records = data["artifacts"]
+    if not isinstance(records, list):
+        raise ValueError("artifacts_index.json artifacts must be a list")
+    top_identity = data.get("classification_server_identity")
+    if "classification_server_identity" in data:
+        if not isinstance(top_identity, dict) or type(top_identity.get("schema_version")) is not int:
+            raise ValueError("classification server identity is invalid")
+        validate_classification_server_identity(top_identity, run_root)
+    seen_ids: set[str] = set()
+    for record in records:
+        validated = _validate_artifact_record(run_root, record)
+        artifact_id = validated["artifact_id"]
+        if artifact_id in seen_ids:
+            raise ValueError("artifact_id is duplicated")
+        seen_ids.add(artifact_id)
+        if top_identity is not None and validated.get("server_identity") is not None and validated["server_identity"] != top_identity:
+            raise ValueError("artifact server identity disagrees with the index identity")
 
 
 def _resolve_project_root(run_root: Path) -> Path:
@@ -127,17 +282,15 @@ def _read_artifacts_index(run_root: Path) -> dict:
             message="artifacts_index.json is malformed",
             details={"run_id": run_root.name},
         ) from exc
-    if (
-        not isinstance(data, dict)
-        or not isinstance(data.get("artifacts", []), list)
-        or not all(isinstance(record, dict) for record in data.get("artifacts", []))
-    ):
+    try:
+        _validate_artifacts_index(run_root, data)
+    except (ContractError, OSError, TypeError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=500,
             code=ERROR_ARTIFACTS_INDEX_INVALID,
-            message="artifacts_index.json has an invalid artifact list",
+            message="artifacts_index.json has an invalid canonical artifact list",
             details={"run_id": run_root.name},
-        )
+        ) from exc
     raw = data.get("schema_version", 1)
     if not isinstance(raw, int) or isinstance(raw, bool):
         raise WorkbenchAPIError(
