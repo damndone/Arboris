@@ -7,8 +7,10 @@ calibration and policy decisions remain in the classification protocol.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Any, Callable
 import warnings
+import weakref
 
 import numpy as np
 import pandas as pd
@@ -16,16 +18,46 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
 
+from workbench.providers.catalog import load_builtin_catalog
+from workbench.canonical import sha256_canonical
+
 from .contracts import ContractError
+
+
+CLASSIFICATION_PROVIDER_ID = "workbench.classification_ml"
+CLASSIFICATION_RUNTIME_ADAPTER_ID = "workbench.classification_ml.adapter"
+CLASSIFICATION_EXECUTOR_REF = "executor:workbench.classification_ml.adapter"
+CLASSIFICATION_PRODUCTION_ENTRYPOINT = "workbench.prediction.run_classification_model_v189"
+
+
+# The registry object, not a caller-controlled digest or a copied set of
+# declaration strings, is the authority marker for this production join. A
+# weak map avoids putting a mutable marker on the registry itself, while still
+# allowing the entrypoint to verify the exact contribution installed by this
+# factory before it dispatches.
+_CLASSIFICATION_TRUSTED_REGISTRIES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 def _numeric_matrix(frame: pd.DataFrame) -> np.ndarray:
     if not isinstance(frame, pd.DataFrame) or not frame.columns.tolist():
         raise ContractError("CLASSIFICATION_FEATURES_REQUIRED", "adapter features must be a non-empty DataFrame")
-    converted = frame.apply(pd.to_numeric, errors="coerce")
-    if converted.isna().any().any():
-        raise ContractError("CLASSIFICATION_FEATURE_TYPE_BLOCKED", "non-numeric or missing adapter input requires a fold-local recipe")
-    return converted.to_numpy(dtype=float, copy=True)
+    unsupported = [
+        str(column)
+        for column in frame.columns
+        if not pd.api.types.is_numeric_dtype(frame[column])
+    ]
+    if unsupported:
+        raise ContractError(
+            "CLASSIFICATION_FEATURE_TYPE_BLOCKED",
+            f"non-numeric feature columns require an explicit typed preprocessing recipe: {unsupported}",
+        )
+    try:
+        matrix = frame.to_numpy(dtype=float, copy=True)
+    except (TypeError, ValueError) as exc:
+        raise ContractError("CLASSIFICATION_FEATURE_TYPE_BLOCKED", "features must be numeric") from exc
+    if not np.isfinite(matrix).all():
+        raise ContractError("CLASSIFICATION_FEATURE_TYPE_BLOCKED", "missing or non-finite features require a fold-local recipe")
+    return matrix
 
 
 @dataclass(frozen=True)
@@ -100,8 +132,13 @@ class ClassificationAdapterV1:
             raise ContractError("CLASSIFICATION_SINGLE_CLASS", "classification fit requires at least two classes")
         if sample_weight is not None:
             weights = np.asarray(sample_weight, dtype=float)
-            if len(weights) != len(labels) or not np.isfinite(weights).all() or (weights < 0).any():
-                raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "sample_weight must be finite, non-negative and aligned")
+            if (
+                len(weights) != len(labels)
+                or not np.isfinite(weights).all()
+                or (weights < 0).any()
+                or float(weights.sum()) <= 0
+            ):
+                raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "sample_weight must be finite, non-negative, positive and aligned")
         else:
             weights = None
         try:
@@ -215,6 +252,212 @@ _ADAPTERS = {
 }
 
 
+def _classification_provider_declaration(catalog: Any) -> tuple[Any, Any]:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+    providers = tuple(getattr(catalog, "providers", ()))
+    matches = [provider for provider in providers if provider.provider_id == CLASSIFICATION_PROVIDER_ID]
+    if len(matches) != 1:
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_DECLARATION_INVALID",
+            "classification provider declaration must be unique",
+        )
+    declarations = tuple(matches[0].adapter_declarations)
+    matching = [declaration for declaration in declarations if declaration.adapter_id == CLASSIFICATION_RUNTIME_ADAPTER_ID]
+    if len(matching) != 1 or matching[0].executor_ref != CLASSIFICATION_EXECUTOR_REF:
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_DECLARATION_INVALID",
+            "classification adapter declaration identity is not the production runtime identity",
+        )
+    return matches[0], matching[0]
+
+
+def _validate_classification_runtime_request(request: Mapping[str, Any]) -> Mapping[str, Any]:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+    if not isinstance(request, Mapping):
+        raise TrustedExecutorRegistryError("RUNTIME_REQUEST_INVALID", "classification runtime request must be a mapping")
+    model_id = request.get("model_id")
+    if type(model_id) is not str or model_id not in _ADAPTERS:
+        raise TrustedExecutorRegistryError("RUNTIME_REQUEST_INVALID", "classification runtime request has an unsupported model_id")
+    return {"model_id": model_id}
+
+
+def _execute_classification_runtime_binding(context: Any, request: Mapping[str, Any]) -> Mapping[str, Any]:
+    model_id = request["model_id"]
+    declaration = _ADAPTERS[model_id].declaration
+    return {
+        "provider_id": CLASSIFICATION_PROVIDER_ID,
+        "adapter_id": CLASSIFICATION_RUNTIME_ADAPTER_ID,
+        "executor_ref": CLASSIFICATION_EXECUTOR_REF,
+        "production_entrypoint": CLASSIFICATION_PRODUCTION_ENTRYPOINT,
+        "model_id": model_id,
+        "adapter_version": declaration.version,
+        "execution_instance_hash": context.execution_instance_hash,
+    }
+
+
+def _validate_classification_runtime_result(result: Mapping[str, Any]) -> None:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+    expected = {
+        "provider_id": CLASSIFICATION_PROVIDER_ID,
+        "adapter_id": CLASSIFICATION_RUNTIME_ADAPTER_ID,
+        "executor_ref": CLASSIFICATION_EXECUTOR_REF,
+        "production_entrypoint": CLASSIFICATION_PRODUCTION_ENTRYPOINT,
+    }
+    if not isinstance(result, Mapping) or any(result.get(key) != value for key, value in expected.items()):
+        raise TrustedExecutorRegistryError("RUNTIME_RESULT_INVALID", "classification runtime result identity is inconsistent")
+    if type(result.get("model_id")) is not str or result["model_id"] not in _ADAPTERS:
+        raise TrustedExecutorRegistryError("RUNTIME_RESULT_INVALID", "classification runtime result model_id is invalid")
+
+
+def classification_runtime_registry(catalog: Any | None = None) -> TrustedExecutorRegistry:
+    """Build the server-owned classification runtime join.
+
+    The JSON manifest contributes only opaque contract identities.  This
+    factory supplies the trusted callable and binds it to the fixed builtin
+    catalog before a production entrypoint may accept the registry.
+    """
+
+    from workbench.agent.trusted_executor_registry import (
+        ProviderRuntimeContributionV1,
+        TrustedExecutorRegistry,
+    )
+
+    source_catalog = load_builtin_catalog() if catalog is None else catalog
+    provider, declaration = _classification_provider_declaration(source_catalog)
+    contribution = ProviderRuntimeContributionV1(
+        provider_id=provider.provider_id,
+        adapter_id=declaration.adapter_id,
+        executor_ref=declaration.executor_ref,
+        owner="workbench.server.classification",
+        signature="workbench.classification_ml.runtime.v1",
+        effect="read_only",
+        request_contract_ref=declaration.request_schema_ref,
+        result_contract_refs=declaration.output_refs,
+        executor=_execute_classification_runtime_binding,
+        request_validator=_validate_classification_runtime_request,
+        result_validator=_validate_classification_runtime_result,
+        metadata={
+            "production_entrypoint": CLASSIFICATION_PRODUCTION_ENTRYPOINT,
+            "provider_id": CLASSIFICATION_PROVIDER_ID,
+            "adapter_id": CLASSIFICATION_RUNTIME_ADAPTER_ID,
+        },
+    )
+    if len(tuple(source_catalog.providers)) == 1:
+        bind_catalog = source_catalog
+    else:
+        from workbench.contracts.common.contract_ref import ContractRefResolverV1
+        from workbench.providers.catalog import ProviderCatalogV1
+
+        bind_catalog = ProviderCatalogV1(
+            providers=(provider,),
+            source_filenames=("classification_ml.json",),
+            contract_resolver=ContractRefResolverV1(provider.contract_refs),
+            catalog_digest=sha256_canonical([{"filename": "classification_ml.json", "contribution": provider.to_dict()}]),
+        )
+    registry = TrustedExecutorRegistry((contribution,))
+    registry.bind_catalog(bind_catalog)
+    bound_digest = getattr(registry, "_bound_catalog_digest", None)
+    if type(bound_digest) is not str or not bound_digest:
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_DECLARATION_INVALID",
+            "classification runtime catalog did not produce a bound digest",
+        )
+    _CLASSIFICATION_TRUSTED_REGISTRIES[registry] = (contribution, bound_digest)
+    return registry
+
+
+def server_owned_classification_runtime_registry() -> TrustedExecutorRegistry:
+    """Return the only registry seam used by the production entrypoint."""
+
+    return classification_runtime_registry()
+
+
+def dispatch_classification_runtime_binding(
+    runtime_registry: Any,
+    *,
+    task_hash: str,
+) -> dict[str, Any]:
+    """Validate and dispatch the server-owned classification runtime join."""
+
+    from workbench.agent.trusted_executor_registry import (
+        ProviderRuntimeContextV1,
+        TrustedExecutorRegistry,
+        TrustedExecutorRegistryError,
+    )
+
+    if type(runtime_registry) is not TrustedExecutorRegistry:
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_RUNTIME_JOIN_REQUIRED",
+            "production classification requires the factory-created TrustedExecutorRegistry",
+        )
+    trusted_binding = _CLASSIFICATION_TRUSTED_REGISTRIES.get(runtime_registry)
+    try:
+        contribution = runtime_registry.require(CLASSIFICATION_EXECUTOR_REF)
+    except TrustedExecutorRegistryError as exc:
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_RUNTIME_JOIN_REQUIRED",
+            str(exc),
+        ) from exc
+    bound_digest = getattr(runtime_registry, "_bound_catalog_digest", None)
+    if (
+        trusted_binding is None
+        or contribution is not trusted_binding[0]
+        or bound_digest != trusted_binding[1]
+        or contribution.provider_id != CLASSIFICATION_PROVIDER_ID
+        or contribution.adapter_id != CLASSIFICATION_RUNTIME_ADAPTER_ID
+        or contribution.executor_ref != CLASSIFICATION_EXECUTOR_REF
+        or contribution.owner != "workbench.server.classification"
+        or contribution.signature != "workbench.classification_ml.runtime.v1"
+        or contribution.effect != "read_only"
+        or contribution.executor is not _execute_classification_runtime_binding
+        or contribution.request_validator is not _validate_classification_runtime_request
+        or contribution.result_validator is not _validate_classification_runtime_result
+        or dict(contribution.metadata) != {
+            "production_entrypoint": CLASSIFICATION_PRODUCTION_ENTRYPOINT,
+            "provider_id": CLASSIFICATION_PROVIDER_ID,
+            "adapter_id": CLASSIFICATION_RUNTIME_ADAPTER_ID,
+        }
+    ):
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_RUNTIME_JOIN_MISMATCH",
+            "catalog declaration, trusted contribution, registry identity, and executor implementation disagree",
+        )
+
+    context = ProviderRuntimeContextV1(
+        compilation_record_id=f"classification-production:{task_hash}",
+        execution_instance_hash=f"classification-runtime:{task_hash}",
+        actor_ref="workbench.server.classification",
+        session_ref=CLASSIFICATION_PRODUCTION_ENTRYPOINT,
+        project_ref=f"classification-project:{task_hash}",
+        effect="read_only",
+        evidence_required=True,
+    )
+    try:
+        result = runtime_registry.dispatch(
+            CLASSIFICATION_EXECUTOR_REF,
+            context,
+            {"model_id": "logistic_regression"},
+            catalog_digest=bound_digest,
+        )
+    except TrustedExecutorRegistryError:
+        raise
+    if (
+        result.get("provider_id") != CLASSIFICATION_PROVIDER_ID
+        or result.get("adapter_id") != CLASSIFICATION_RUNTIME_ADAPTER_ID
+        or result.get("executor_ref") != CLASSIFICATION_EXECUTOR_REF
+        or result.get("production_entrypoint") != CLASSIFICATION_PRODUCTION_ENTRYPOINT
+        or result.get("execution_instance_hash") != context.execution_instance_hash
+    ):
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_RUNTIME_JOIN_MISMATCH",
+            "classification runtime dispatch returned an inconsistent identity",
+        )
+    return result
+
+
 def adapter_registry() -> dict[str, AdapterDeclarationV1]:
     return {model_id: adapter.declaration for model_id, adapter in _ADAPTERS.items()}
 
@@ -233,9 +476,16 @@ def get_classification_adapter(
 
 __all__ = [
     "AdapterDeclarationV1",
+    "CLASSIFICATION_EXECUTOR_REF",
+    "CLASSIFICATION_PRODUCTION_ENTRYPOINT",
+    "CLASSIFICATION_PROVIDER_ID",
+    "CLASSIFICATION_RUNTIME_ADAPTER_ID",
     "ClassificationAdapterV1",
     "LogisticRegressionAdapterV1",
     "RandomForestAdapterV1",
     "adapter_registry",
+    "classification_runtime_registry",
+    "dispatch_classification_runtime_binding",
     "get_classification_adapter",
+    "server_owned_classification_runtime_registry",
 ]

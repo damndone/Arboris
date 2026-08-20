@@ -48,7 +48,12 @@ import {
   createReportRevision,
   editReportRevision,
 } from "./reportDocument";
-import { fetchArtifactJson, fetchRunArtifacts, fetchRunDetail } from "../api";
+import {
+  ApiError,
+  fetchArtifactJson,
+  fetchRunArtifacts,
+  fetchRunDetail,
+} from "../api";
 import type {
   ModelResult,
   PostEstimationResult,
@@ -56,31 +61,44 @@ import type {
 } from "../api";
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
+import {
+  isPersistedClassificationArtifact,
+  type ClassificationActiveScope,
+  type ClassificationArtifactsWrapper,
+} from "./ClassificationEvidence";
 
 const CLASSIFICATION_EVIDENCE_SCHEMA = "workbench.prediction.classification-evidence";
 const CLASSIFICATION_ARTIFACTS_SCHEMA = "workbench.prediction.classification-artifacts";
-const CLASSIFICATION_ARTIFACT_TYPES = new Set(["classification_evidence", "classification_artifacts"]);
-const CLASSIFICATION_ARTIFACT_IDS = new Set(["classification_evidence", "classification_artifacts"]);
-const CLASSIFICATION_EVIDENCE_REQUIRED_FIELDS = [
-  "task",
-  "split",
-  "metrics",
-  "calibration",
-  "baselines",
-  "controls",
-  "comparison",
-  "explanations",
-  "stability",
-  "shift",
-  "decision_policy",
-  "blocked_reasons",
-  "evidence_refs",
-] as const;
-
+const CLASSIFICATION_ARTIFACT_TYPES = new Set(["classification_artifacts"]);
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function artifactInventoryFailureMessage(error: unknown): string {
+  const code = error instanceof ApiError ? error.code : null;
+  if (code === "ARTIFACTS_INDEX_UNAVAILABLE" || code === "ARTIFACTS_INDEX_INVALID") {
+    return `Unable to load the figure inventory (server artifact index: ${code}); report generation is disabled.`;
+  }
+  return "Unable to load the figure inventory; report generation is disabled.";
+}
+
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((item, index) => sameJsonValue(item, right[index]));
+  }
+  const leftRecord = asRecord(left);
+  const rightRecord = asRecord(right);
+  if (leftRecord === null || rightRecord === null) return false;
+  const keys = new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)]);
+  return keys.size === Object.keys(leftRecord).length
+    && keys.size === Object.keys(rightRecord).length
+    && [...keys].every((key) => sameJsonValue(leftRecord[key], rightRecord[key]));
 }
 
 function indexedClassificationArtifactId(value: unknown): string | null {
@@ -122,57 +140,37 @@ function indexedClassificationArtifactId(value: unknown): string | null {
     || (contractVersion !== undefined && indexedVersion !== undefined && contractVersion !== indexedVersion)
   ) return null;
 
-  // The current artifact-list endpoint exposes the server-owned artifact type,
-  // id, path and hash but older deployments omit payload_contract. In that
-  // narrow compatibility case, only the two canonical ids or the
-  // content-addressed classification id are eligible; arbitrary ids/titles
-  // never become a report input. When the contract is present, it is checked
-  // above and the id remains an opaque server-issued identity.
-  if (schemas.length === 0 && !CLASSIFICATION_ARTIFACT_IDS.has(artifactId) && !/^sha256:[0-9a-f]{64}$/.test(artifactId)) {
-    return null;
-  }
+  if (schemas.length === 0 || contractSchema !== CLASSIFICATION_ARTIFACTS_SCHEMA) return null;
   return artifactId;
 }
 
-function isTypedClassificationEvidencePacket(value: unknown): value is Record<string, unknown> {
-  const packet = asRecord(value);
+/** Return only the typed evidence packet, including its server-owned family identity. */
+export function readClassificationEvidencePacket(
+  value: unknown,
+  indexedArtifact?: unknown,
+  activeScope?: ClassificationActiveScope,
+): ClassificationArtifactsWrapper | null {
+  if (!isPersistedClassificationArtifact(value, activeScope)) return null;
+  const item = asRecord(indexedArtifact);
+  const contract = asRecord(item?.payload_contract);
+  const indexedSchema = item?.payload_schema ?? contract?.payload_schema;
+  const indexedVersion = item?.schema_version ?? contract?.schema_version;
   if (
-    !packet
-    || packet.payload_schema !== CLASSIFICATION_EVIDENCE_SCHEMA
-    || packet.schema_version !== 1
-    || CLASSIFICATION_EVIDENCE_REQUIRED_FIELDS.some((field) => !(field in packet))
-    || asRecord(packet.task) === null
-    || asRecord(packet.split) === null
-    || asRecord(packet.metrics) === null
-    || asRecord(packet.calibration) === null
-    || !Array.isArray(packet.baselines)
-    || !Array.isArray(packet.controls)
-    || asRecord(packet.comparison) === null
-    || asRecord(packet.explanations) === null
-    || asRecord(packet.stability) === null
-    || asRecord(packet.shift) === null
-    || asRecord(packet.decision_policy) === null
-    || !Array.isArray(packet.blocked_reasons)
-    || asRecord(packet.evidence_refs) === null
-  ) return false;
-  return true;
-}
-
-/** Return only the typed evidence packet; never retain an unknown outer payload. */
-export function readClassificationEvidencePacket(value: unknown): Record<string, unknown> | null {
-  if (isTypedClassificationEvidencePacket(value)) return value;
-  const envelope = asRecord(value);
-  for (const nested of [envelope?.evidence, envelope?.payload]) {
-    if (isTypedClassificationEvidencePacket(nested)) return nested;
-  }
-  if (
-    envelope?.payload_schema === CLASSIFICATION_ARTIFACTS_SCHEMA
-    && envelope.schema_version === 1
-    && isTypedClassificationEvidencePacket(envelope.evidence)
-  ) {
-    return envelope.evidence;
-  }
-  return null;
+    item === null
+    || item.artifact_type !== "classification_artifacts"
+    || contract === null
+    || contract.payload_schema !== CLASSIFICATION_ARTIFACTS_SCHEMA
+    || contract.schema_version !== 1
+    || item.artifact_id !== value.artifact_id
+    || indexedSchema !== CLASSIFICATION_ARTIFACTS_SCHEMA
+    || indexedVersion !== 1
+    || item.path !== value.artifact_path
+    || item.sha256 !== value.artifact_sha256
+    || item.receipt_path !== value.receipt_path
+    || item.receipt_sha256 !== value.receipt_sha256
+    || !sameJsonValue(item.server_identity, value.server_identity)
+  ) return null;
+  return value as unknown as ClassificationArtifactsWrapper;
 }
 
 type FactTable = ReturnType<typeof buildFactTable>;
@@ -519,13 +517,15 @@ export function ReportWorkspaceProvider({
           try {
             return readClassificationEvidencePacket(
               await fetchArtifactJson(projectRoot, runId, item.artifact_id),
+              item,
+              { projectRoot, runId },
             );
           } catch {
             return null;
           }
         }));
         const validClassificationPackets = loadedClassification.filter(
-          (packet): packet is Record<string, unknown> => packet !== null,
+          (packet): packet is ClassificationArtifactsWrapper => packet !== null,
         );
         const classificationEntry = classificationItems.length > 0
           ? [[
@@ -547,8 +547,11 @@ export function ReportWorkspaceProvider({
           );
         }
       })
-      .catch(() => {
-        if (!cancelled) setFamilyEvidenceArtifacts({});
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setFamilyEvidenceArtifacts({});
+          setFigureInventoryError(artifactInventoryFailureMessage(error));
+        }
       });
     return () => {
       cancelled = true;
@@ -638,11 +641,11 @@ export function ReportWorkspaceProvider({
           setTimeSeriesArtifacts({});
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setReportFigures([]);
           setTimeSeriesArtifacts({});
-          setFigureInventoryError("Unable to load the run figure inventory; report generation is disabled.");
+          setFigureInventoryError(artifactInventoryFailureMessage(error));
         }
       })
       .finally(() => {
@@ -780,6 +783,10 @@ export function ReportWorkspaceProvider({
 
   async function handleGenerate(options: ReportGenerationOptions = {}): Promise<boolean> {
     if (!table) return false;
+    if (figureInventoryError !== null) {
+      setError(figureInventoryError);
+      return false;
+    }
     const evidence = options.evidence ?? {
       facts: allFacts.map(cloneFact),
       scope: {

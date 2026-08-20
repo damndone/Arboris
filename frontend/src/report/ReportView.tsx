@@ -21,7 +21,8 @@ import {
 } from "./FamilyEvidence";
 import {
   ClassificationEvidence,
-  type ClassificationEvidencePacket,
+  type ClassificationActiveScope,
+  type ClassificationArtifactsWrapper,
 } from "./ClassificationEvidence";
 import {
   ReportWorkspaceProvider,
@@ -34,12 +35,24 @@ import type { ReportRecord } from "./reportHistory";
 import "./report.css";
 
 /** Resolve only known classification evidence envelopes; never dump unknown JSON. */
-export function readTypedClassificationEvidence(value: unknown): ClassificationEvidencePacket | null {
-  return readClassificationEvidencePacket(value) as ClassificationEvidencePacket | null;
+export function readTypedClassificationEvidence(
+  value: unknown,
+  indexedArtifact?: unknown,
+  activeScope?: ClassificationActiveScope,
+): ClassificationArtifactsWrapper | null {
+  return readClassificationEvidencePacket(value, indexedArtifact, activeScope) as ClassificationArtifactsWrapper | null;
 }
 
-export function ReportClassificationEvidenceMount({ evidence }: { evidence: unknown }) {
-  const packet = readTypedClassificationEvidence(evidence);
+export function ReportClassificationEvidenceMount({
+  evidence,
+  indexedArtifact,
+  activeScope,
+}: {
+  evidence: unknown;
+  indexedArtifact?: unknown;
+  activeScope?: ClassificationActiveScope;
+}) {
+  const packet = readTypedClassificationEvidence(evidence, indexedArtifact, activeScope);
   return (
     <section
       aria-label="Classification evidence"
@@ -103,9 +116,19 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
     workspace.reportEvidenceProjection,
   );
   const classificationEvidenceArtifact = workspace.familyEvidenceArtifacts.classification_evidence;
-  const resultFamilies = workspace.reportEvidenceProjection
-    ? [`${workspace.reportEvidenceProjection.consumerId}:${workspace.reportEvidenceProjection.status}`]
-    : [];
+  const classificationEvidenceIndex = (
+    classificationEvidenceArtifact !== null
+    && typeof classificationEvidenceArtifact === "object"
+    && !Array.isArray(classificationEvidenceArtifact)
+  )
+    ? (classificationEvidenceArtifact as { index?: unknown }).index
+    : undefined;
+  const resultFamilies = [
+    ...(workspace.reportEvidenceProjection
+      ? [`${workspace.reportEvidenceProjection.consumerId}:${workspace.reportEvidenceProjection.status}`]
+      : []),
+    ...(classificationEvidenceArtifact !== undefined ? ["classification"] : []),
+  ];
   const hasCurrentReport = workspace.current !== null;
   const promptValue = hasCurrentReport ? workspace.revisionInstruction : workspace.instruction;
   const promptChange = hasCurrentReport
@@ -296,7 +319,13 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         evidence={workspace.reportEvidenceProjection}
       />
       {classificationEvidenceArtifact !== undefined && (
-        <ReportClassificationEvidenceMount evidence={classificationEvidenceArtifact} />
+        <ReportClassificationEvidenceMount
+          evidence={classificationEvidenceArtifact}
+          indexedArtifact={classificationEvidenceIndex}
+          activeScope={workspace.projectRoot && activeRunId
+            ? { projectRoot: workspace.projectRoot, runId: activeRunId }
+            : undefined}
+        />
       )}
 
       <div data-testid="report-evidence-divider" className="report-evidence-divider">

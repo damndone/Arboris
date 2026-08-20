@@ -83,6 +83,34 @@ def test_manifest_records_purge_and_embargo_basis_and_hash() -> None:
     assert all(item["partition"] != "final_holdout" or item["cv_fold"] is None for item in payload["assignments"])
 
 
+@pytest.mark.parametrize(
+    ("gap_name", "expected_code"),
+    (
+        ("purge_gap", "CLASSIFICATION_PURGE_GAP_INVALID"),
+        ("embargo", "CLASSIFICATION_EMBARGO_INVALID"),
+    ),
+)
+def test_negative_purge_and_embargo_gaps_fail_before_overlap_logic(gap_name: str, expected_code: str) -> None:
+    kwargs: dict[str, object] = {
+        "row_refs": tuple(f"r{i}" for i in range(8)),
+        "labels": (0, 1, 0, 1, 0, 1, 0, 1),
+        "profile": "temporal_rolling",
+        "final_holdout_fraction": 0.25,
+        "cv_folds": 2,
+        "random_seed": 3,
+        "periods": tuple(range(8)),
+    }
+    if gap_name == "purge_gap":
+        kwargs.update({"label_windows": tuple((index, index + 1) for index in range(8)), "purge_gap": -1})
+    else:
+        kwargs.update({"embargo": -1, "embargo_basis": "declared_serial_dependence:v1"})
+
+    with pytest.raises(ContractError) as exc_info:
+        build_classification_split_manifest(**kwargs)
+
+    assert exc_info.value.code == expected_code
+
+
 def test_fold_local_preprocessing_records_only_training_row_refs() -> None:
     kernel = ClassificationFoldPreprocessingV1(
         steps=(

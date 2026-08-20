@@ -520,3 +520,11 @@ def project_persisted_evidence_for_notebook(
         destination="local",
         requested_fact_ids=requested_fact_ids,
     ).to_dict()
+
+
+def read_classification_evidence_for_notebook(run_root: Path) -> dict[str, object]:
+    """Read Notebook classification evidence from the shared indexed receipt."""
+
+    from ...predictive_research.consumer_projection import read_classification_evidence_from_run_root
+
+    return read_classification_evidence_from_run_root(run_root, consumer="notebook")

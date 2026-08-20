@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
-from typing import Any
+from typing import Any, Sequence
 
+import numpy as np
 import pandas as pd
 
 from .contracts import ContractError
@@ -147,11 +148,26 @@ class ClassificationFittedPreprocessorV1:
                 key = f"{step.step_id}:{column}"
                 if key not in self.state or column not in result.columns:
                     raise ContractError("CLASSIFICATION_PREPROCESSING_STATE_MISSING", key)
-                values = pd.to_numeric(result[column], errors="coerce")
+                if not pd.api.types.is_numeric_dtype(result[column]):
+                    raise ContractError(
+                        "CLASSIFICATION_FEATURE_TYPE_BLOCKED",
+                        f"feature column {column!r} is not numeric",
+                    )
+                values = result[column].astype(float)
                 if step.kind == "mean_impute":
                     result[column] = values.fillna(self.state[key]["mean"])
                 else:
+                    if values.isna().any():
+                        raise ContractError(
+                            "CLASSIFICATION_PREPROCESSING_MISSING_UNHANDLED",
+                            f"standard_scale received missing values in {column!r} without an imputation step",
+                        )
                     result[column] = (values - self.state[key]["mean"]) / (self.state[key]["scale"] or 1.0)
+        try:
+            if not np.isfinite(result.to_numpy(dtype=float, copy=True)).all():
+                raise ContractError("CLASSIFICATION_PREPROCESSING_FEATURE_INVALID", "preprocessing produced non-finite features")
+        except (TypeError, ValueError) as exc:
+            raise ContractError("CLASSIFICATION_FEATURE_TYPE_BLOCKED", "preprocessing output must be numeric") from exc
         return result
 
 
@@ -169,6 +185,7 @@ class ClassificationFoldPreprocessingV1:
         fit_row_refs: tuple[str, ...] | list[str],
         fit_rows: dict[str, dict[str, Any]],
         weight_name: str | None = None,
+        sample_weight: Sequence[float] | None = None,
     ) -> ClassificationFittedPreprocessorV1:
         refs = tuple(fit_row_refs)
         if not refs or len(set(refs)) != len(refs) or set(refs) != set(fit_rows):
@@ -179,6 +196,16 @@ class ClassificationFoldPreprocessingV1:
             if weight_name is not None and not step.supports_weight:
                 raise ContractError("CLASSIFICATION_WEIGHT_UNSUPPORTED", f"step {step.step_id!r} ignores weights")
         fit_frame = pd.DataFrame([fit_rows[ref] for ref in refs])
+        weights: np.ndarray | None = None
+        if sample_weight is not None:
+            weights = np.asarray(sample_weight, dtype=float)
+            if (
+                len(weights) != len(refs)
+                or not np.isfinite(weights).all()
+                or (weights < 0).any()
+                or float(weights.sum()) <= 0
+            ):
+                raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "preprocessing weights must be finite, non-negative, positive and aligned")
         state: dict[str, dict[str, Any]] = {}
         output_schema: list[str] = []
         for step in self.steps:
@@ -187,11 +214,26 @@ class ClassificationFoldPreprocessingV1:
             for column in step.columns:
                 if column not in fit_frame.columns:
                     raise ContractError("CLASSIFICATION_PREPROCESSING_COLUMN_MISSING", column)
-                values = pd.to_numeric(fit_frame[column], errors="coerce")
+                if not pd.api.types.is_numeric_dtype(fit_frame[column]):
+                    raise ContractError(
+                        "CLASSIFICATION_FEATURE_TYPE_BLOCKED",
+                        f"feature column {column!r} is not numeric",
+                    )
+                values = fit_frame[column].astype(float)
                 if values.isna().all():
                     raise ContractError("CLASSIFICATION_PREPROCESSING_ALL_MISSING", column)
-                mean = float(values.mean())
-                scale = float(values.std(ddof=0)) if step.kind == "standard_scale" else 0.0
+                valid = ~values.isna()
+                value_array = values[valid].to_numpy(dtype=float, copy=True)
+                weight_array = None if weights is None else weights[valid.to_numpy()]
+                if weight_array is None:
+                    mean = float(value_array.mean())
+                    scale = float(value_array.std(ddof=0)) if step.kind == "standard_scale" else 0.0
+                else:
+                    if float(weight_array.sum()) <= 0:
+                        raise ContractError("CLASSIFICATION_WEIGHT_INVALID", f"no positive preprocessing weight remains for {column!r}")
+                    mean = float(np.average(value_array, weights=weight_array))
+                    variance = float(np.average((value_array - mean) ** 2, weights=weight_array))
+                    scale = float(np.sqrt(variance)) if step.kind == "standard_scale" else 0.0
                 state[f"{step.step_id}:{column}"] = {"mean": mean, "scale": scale}
                 output_schema.append(column)
         receipt = {
@@ -201,6 +243,8 @@ class ClassificationFoldPreprocessingV1:
             "seed": self.seed,
             "output_schema": output_schema,
             "weight_name": weight_name,
+            "weighted_fit": sample_weight is not None,
+            "weight_sum": None if weights is None else float(weights.sum()),
         }
         return ClassificationFittedPreprocessorV1(
             steps=self.steps,

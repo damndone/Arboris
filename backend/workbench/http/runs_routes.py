@@ -10,22 +10,29 @@ Thin: parse the request, delegate to services (dispatch / results) and repositor
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
-import string
+import mimetypes
 import queue
+import secrets
+import string
 import tempfile
 from datetime import datetime, timezone
+from email.utils import formatdate
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
     WorkbenchAPIError,
 )
+from ..agent.workflow_runtime import collect_post_estimation_results
+from ..agent.workflow import WorkflowExecutionError
 from ..artifacts import read_json, sha256_file
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
@@ -44,6 +51,7 @@ from ..repository.run_repository import (
     _resolve_run_root,
     _summarize_manifest,
 )
+from ..repository import file_integrity
 from ..report_export import EvidenceProjectionV1, ReportExportError, export_report
 from ..report_contract import ReportContractError, validate_report_packet
 from ..report_quality import validate_report_response_quality
@@ -61,8 +69,10 @@ from ..services.results_service import (
     current_report_evidence_persistence,
 )
 from ..predictive_research.consumer_projection import (
+    read_classification_artifacts_wrapper_from_run_root,
     read_prediction_evidence_from_run_root,
 )
+from ..predictive_research.contracts import ContractError as PredictiveContractError
 from ..predictive_research.schema import PayloadContractError
 from ..services.run_deletion import RunDeletionConfirmationError, RunDeletionService
 from ..services.run_service import (
@@ -78,6 +88,105 @@ from ..services.run_service import (
 from ._deps import BYTES_PER_GB
 
 router = APIRouter()
+
+
+MAX_ARTIFACT_RANGE_HEADER_BYTES = 64 * 1024
+MAX_ARTIFACT_RANGE_COUNT = 64
+
+
+class _MalformedArtifactRange(ValueError):
+    def __init__(self, content: str = "Malformed range header.") -> None:
+        self.content = content
+        super().__init__(content)
+
+
+class _UnsatisfiableArtifactRange(ValueError):
+    pass
+
+
+def _parse_artifact_decimal(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise _MalformedArtifactRange("Range header: numeric component is too large") from exc
+
+
+def _parse_artifact_range_header(http_range: str, file_size: int) -> list[tuple[int, int]]:
+    """Parse a bounded byte-range header into half-open offsets.
+
+    This is deliberately Workbench-owned so the generic artifact stream does
+    not depend on Starlette's private parser or a path-backed response.  The
+    header and range count are bounded before any range list is materialized;
+    every range component is syntax-checked before satisfiability is applied,
+    and the returned offsets are safe for the already-opened descriptor.
+    """
+
+    if not isinstance(http_range, str) or not isinstance(file_size, int) or isinstance(file_size, bool):
+        raise _MalformedArtifactRange()
+    try:
+        header_bytes = len(http_range.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise _MalformedArtifactRange() from exc
+    if header_bytes > MAX_ARTIFACT_RANGE_HEADER_BYTES:
+        raise _MalformedArtifactRange("Range header exceeds the bounded header size.")
+    if file_size < 0:
+        raise _MalformedArtifactRange()
+
+    try:
+        units, range_value = http_range.split("=", 1)
+    except ValueError as exc:
+        raise _MalformedArtifactRange() from exc
+    if units.strip().lower() != "bytes":
+        raise _MalformedArtifactRange("Only support bytes range")
+
+    range_parts = range_value.split(",")
+    if len(range_parts) > MAX_ARTIFACT_RANGE_COUNT:
+        raise _MalformedArtifactRange("Range header contains too many ranges.")
+
+    ranges: list[tuple[int, int]] = []
+    for part in range_parts:
+        part = part.strip()
+        if not part or part.count("-") != 1:
+            raise _MalformedArtifactRange("Range header: invalid range specification")
+        start_text, end_text = part.split("-", 1)
+        if start_text:
+            if not start_text.isascii() or not start_text.isdigit():
+                raise _MalformedArtifactRange("Range header: invalid range specification")
+            start = _parse_artifact_decimal(start_text)
+            if end_text:
+                if not end_text.isascii() or not end_text.isdigit():
+                    raise _MalformedArtifactRange("Range header: invalid range specification")
+                last = _parse_artifact_decimal(end_text)
+                if last < start:
+                    raise _MalformedArtifactRange(
+                        "Range header: start must be less than end"
+                    )
+                end = last + 1 if last < file_size else file_size
+            else:
+                end = file_size
+        else:
+            if not end_text.isascii() or not end_text.isdigit():
+                raise _MalformedArtifactRange("Range header: invalid range specification")
+            suffix_length = _parse_artifact_decimal(end_text)
+            start = max(file_size - suffix_length, 0)
+            end = file_size
+        ranges.append((start, end))
+
+    satisfiable_ranges = [(start, end) for start, end in ranges if 0 <= start < file_size]
+    if not satisfiable_ranges:
+        raise _UnsatisfiableArtifactRange()
+    if len(satisfiable_ranges) == 1:
+        return satisfiable_ranges
+
+    satisfiable_ranges.sort()
+    merged: list[tuple[int, int]] = [satisfiable_ranges[0]]
+    for start, end in satisfiable_ranges[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 class ReportExportFigure(BaseModel):
@@ -110,6 +219,38 @@ _REPORT_EVIDENCE_ARTIFACT_TYPES = frozenset(
 )
 
 
+def _read_report_index_records(run_root: Path) -> list[dict[str, Any]]:
+    """Read only the candidate records needed by the owner-bound Report path.
+
+    The repository reader is intentionally strict for the generic artifact
+    inventory.  Older committed evidence records predate the generic
+    ``inputs/config_hash/code_version`` fields, so the Report boundary keeps a
+    narrow compatibility read.  The returned records are still admitted only
+    after the server-owned owner, artifact hash, commit binding, and evidence
+    projection checks below succeed; this helper never makes an artifact
+    citable by itself.
+    """
+
+    try:
+        records = _read_artifact_records(run_root)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError):
+        try:
+            raw_index = read_json(run_root / "artifacts_index.json")
+        except (OSError, TypeError, ValueError, WorkbenchAPIError):
+            return []
+        if not isinstance(raw_index, dict):
+            return []
+        if set(raw_index) - {"schema_version", "artifacts", "classification_server_identity"}:
+            return []
+        schema_version = raw_index.get("schema_version", 1)
+        if type(schema_version) is not int or schema_version != 1:
+            return []
+        records = raw_index.get("artifacts")
+        if not isinstance(records, list):
+            return []
+    return [record for record in records if isinstance(record, dict)]
+
+
 def _report_evidence_for_run(
     run_root: Path,
     post_estimation_results: list[dict[str, Any]],
@@ -133,10 +274,7 @@ def _report_evidence_for_run(
         )
 
     views: list[dict[str, object]] = []
-    try:
-        indexed_records = _read_artifact_records(run_root)
-    except (OSError, TypeError, ValueError, WorkbenchAPIError):
-        indexed_records = []
+    indexed_records = _read_report_index_records(run_root)
     for record in indexed_records:
         if not isinstance(record, dict):
             continue
@@ -298,10 +436,13 @@ def _report_owner_for_export(
         raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_REQUIRED")
     if artifact_id != owner.artifact_id:
         raise ReportExportError("REPORT_EVIDENCE_OWNER_CONTEXT_MISMATCH")
-    try:
-        records = _read_artifact_records(run_root)
-    except (OSError, TypeError, ValueError, WorkbenchAPIError) as exc:
-        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_INDEX_UNAVAILABLE") from exc
+    # Keep the export path on the same narrow compatibility reader as the
+    # Report projection.  Evidence records committed before the generic
+    # artifact inventory added ``inputs/config_hash/code_version`` are still
+    # valid C0 records.  They remain admissible here only after the owner,
+    # artifact path, and file digest are rebound below; this does not weaken
+    # the classification/generic repository validator.
+    records = _read_report_index_records(run_root)
     record = next(
         (item for item in records if isinstance(item, dict) and item.get("artifact_id") == artifact_id),
         None,
@@ -732,7 +873,16 @@ def get_run_endpoint(run_id: str, project_root: str, request: Request) -> dict:
             )
         except (PayloadContractError, OSError, ValueError):
             prediction_evidence = {"status": "unavailable"}
-    post_estimation_results: list[dict[str, Any]] = []
+    try:
+        post_estimation_results = collect_post_estimation_results(
+            run_root.parent.parent,
+            run_id,
+        )
+    except (OSError, TypeError, ValueError, WorkbenchAPIError, WorkflowExecutionError):
+        # This is a compatibility projection, not an authority source.  A
+        # missing or malformed registry must remain an empty typed surface;
+        # it must never turn a safe run-detail response into a 500.
+        post_estimation_results = []
     report_evidence = _report_evidence_for_run(
         run_root,
         post_estimation_results,
@@ -743,6 +893,24 @@ def get_run_endpoint(run_id: str, project_root: str, request: Request) -> dict:
         artifact_counts = _artifact_counts(run_root)
     except (OSError, TypeError, ValueError, WorkbenchAPIError):
         artifact_counts = {}
+    classification_evidence = None
+    try:
+        classification_records = _read_artifact_records(run_root)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError):
+        classification_records = []
+    if any(
+        isinstance(record, dict) and record.get("artifact_type") == "classification_artifacts"
+        for record in classification_records
+    ):
+        try:
+            classification_evidence = read_classification_artifacts_wrapper_from_run_root(run_root)
+        except (PayloadContractError, PredictiveContractError, OSError, ValueError) as exc:
+            classification_evidence = {
+                "payload_schema": "workbench.prediction.classification-artifacts-wrapper.unavailable",
+                "schema_version": 0,
+                "status": "UNAVAILABLE",
+                "reason": getattr(exc, "code", "CLASSIFICATION_EVIDENCE_UNAVAILABLE"),
+            }
     return {
         **summary,
         "lineage": manifest.get("lineage", []),
@@ -758,6 +926,7 @@ def get_run_endpoint(run_id: str, project_root: str, request: Request) -> dict:
         "model_family_evidence": model_family_evidence,
         "model_family_evidence_authority": "non-authoritative",
         "prediction_evidence": prediction_evidence,
+        "classification_evidence": classification_evidence,
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the
         # run surface show that answer instead of leaving it in an artifact.
@@ -1143,13 +1312,37 @@ def list_ai_reports_endpoint(run_id: str, project_root: str) -> dict[str, Any]:
 def list_artifacts_endpoint(run_id: str, project_root: str) -> dict:
     run_root = _resolve_run_root(project_root, run_id)
     records = _read_artifact_records(run_root)
-    return {"groups": _group_artifacts(records)}
+    groups = _group_artifacts(records)
+    # The generic grouping projection intentionally exposes only the common
+    # artifact fields.  ReportWorkspace needs the server-owned classification
+    # index join fields as well; preserve those exact indexed values without
+    # changing the generic artifact envelope or selecting a second authority.
+    classification_records = {
+        record.get("artifact_id"): record
+        for record in records
+        if isinstance(record, dict)
+        and record.get("artifact_type") == "classification_artifacts"
+        and isinstance(record.get("artifact_id"), str)
+    }
+    for group in groups:
+        for item in group.get("items", []):
+            record = classification_records.get(item.get("artifact_id"))
+            if record is None:
+                continue
+            for field in ("payload_contract", "payload_schema", "schema_version", "receipt_path", "receipt_sha256", "server_identity"):
+                if field in record:
+                    item[field] = record[field]
+    return {"groups": groups}
 
 
 @router.get("/runs/{run_id}/artifacts/{artifact_id}")
 def download_artifact_endpoint(
-    run_id: str, artifact_id: str, project_root: str
-) -> FileResponse:
+    run_id: str,
+    artifact_id: str,
+    project_root: str,
+    range_header: str | None = Header(default=None, alias="Range"),
+    if_range: str | None = Header(default=None, alias="If-Range"),
+) -> Response:
     run_root = _resolve_run_root(project_root, run_id)
     records = _read_artifact_records(run_root)
     matched = next(
@@ -1163,46 +1356,78 @@ def download_artifact_endpoint(
             message=f"Artifact not found: {artifact_id}",
             details={"artifact_id": artifact_id, "run_id": run_id},
         )
-    path = _resolve_artifact_path(run_root, matched)
+    artifact_type = matched.get("artifact_type")
+    is_classification_artifacts = (
+        artifact_type == "classification_artifacts"
+        or (
+            isinstance(matched.get("payload_contract"), dict)
+            and matched["payload_contract"].get("payload_schema")
+            in {
+                "workbench.prediction.classification-artifacts",
+            }
+        )
+    )
+    is_generic_typed_evidence = (
+        artifact_type == "classification_evidence"
+        or (
+            isinstance(matched.get("payload_contract"), dict)
+            and matched["payload_contract"].get("payload_schema")
+            == "workbench.prediction.classification-evidence"
+        )
+    )
+    if is_classification_artifacts:
+        try:
+            wrapper = read_classification_artifacts_wrapper_from_run_root(run_root)
+        except (PayloadContractError, PredictiveContractError, OSError, ValueError) as exc:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code=getattr(exc, "code", "CLASSIFICATION_EVIDENCE_UNAVAILABLE"),
+                message="The server-owned classification evidence wrapper is unavailable.",
+                details={"artifact_id": artifact_id, "run_id": run_id},
+            ) from exc
+        wrapper_index = wrapper.get("index")
+        if (
+            matched.get("artifact_id") != artifact_id
+            or wrapper.get("artifact_id") != matched.get("artifact_id")
+            or not isinstance(wrapper_index, dict)
+            or wrapper_index.get("artifact_id") != matched.get("artifact_id")
+        ):
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="CLASSIFICATION_ARTIFACT_IDENTITY_MISMATCH",
+                message="The requested classification artifact is not the server-indexed wrapper artifact.",
+                details={
+                    "requested_artifact_id": artifact_id,
+                    "matched_artifact_id": matched.get("artifact_id"),
+                    "returned_artifact_id": wrapper.get("artifact_id"),
+                },
+        )
+        return JSONResponse(content=wrapper)
     expected_sha256 = matched.get("sha256")
     is_valid_sha256 = (
         isinstance(expected_sha256, str)
         and len(expected_sha256) == 64
         and all(character in string.hexdigits for character in expected_sha256)
     )
-    artifact_type = matched.get("artifact_type")
-    is_classification_evidence = (
-        artifact_type in {"classification_evidence", "classification_artifacts"}
-        or artifact_id in {"classification_evidence", "classification_artifacts"}
-        or (
-            isinstance(matched.get("payload_contract"), dict)
-            and matched["payload_contract"].get("payload_schema")
-            in {
-                "workbench.prediction.classification-evidence",
-                "workbench.prediction.classification-artifacts",
-            }
-        )
-    )
-    # Legacy non-evidence indexes occasionally contain placeholder digests;
-    # preserve their read compatibility, but never expose a typed
-    # classification packet without a verifiable content hash.
-    if not is_valid_sha256 and is_classification_evidence:
+    if not is_valid_sha256 and is_generic_typed_evidence:
         raise WorkbenchAPIError(
             status_code=409,
             code="ARTIFACT_INTEGRITY_UNVERIFIED",
             message="The typed evidence artifact has no valid sha256 digest.",
             details={"artifact_id": artifact_id, "run_id": run_id},
         )
-    if is_valid_sha256:
-        try:
-            actual_sha256 = sha256_file(path)
-        except OSError as exc:
-            raise WorkbenchAPIError(
-                status_code=409,
-                code="ARTIFACT_INTEGRITY_UNAVAILABLE",
-                message="The artifact could not be hashed for integrity verification.",
-                details={"artifact_id": artifact_id, "run_id": run_id},
-            ) from exc
+    if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="ARTIFACT_INTEGRITY_UNVERIFIED",
+            message="The artifact has no valid sha256 digest.",
+            details={"artifact_id": artifact_id, "run_id": run_id},
+        )
+    opened = None
+    try:
+        opened = file_integrity.open_run_relative_file(run_root, matched.get("path"))
+        opened.stat_result()
+        actual_sha256 = opened.sha256()
         if actual_sha256.lower() != expected_sha256.lower():
             raise WorkbenchAPIError(
                 status_code=409,
@@ -1210,11 +1435,145 @@ def download_artifact_endpoint(
                 message="The artifact bytes do not match the indexed sha256 digest.",
                 details={"artifact_id": artifact_id, "run_id": run_id},
             )
-    return FileResponse(
-        path,
-        filename=path.name,
-        media_type=None,
+        stat_result = opened.stat_result()
+        filename = opened.name
+        media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        headers = _artifact_download_headers(filename, stat_result, len_bytes=stat_result.st_size)
+        range_value = range_header if isinstance(range_header, str) else None
+        if_range_value = if_range if isinstance(if_range, str) else None
+        ranges: list[tuple[int, int]] = []
+        if range_value is not None:
+            try:
+                ranges = _parse_artifact_range_header(range_value, stat_result.st_size)
+            except _MalformedArtifactRange as exc:
+                opened.close()
+                opened = None
+                return Response(content=exc.content, status_code=400, media_type="text/plain")
+            except _UnsatisfiableArtifactRange:
+                opened.close()
+                opened = None
+                return Response(
+                    status_code=416,
+                    headers={"Content-Range": f"bytes */{stat_result.st_size}"},
+                )
+            if if_range_value is not None and if_range_value not in {
+                headers["ETag"],
+                headers["Last-Modified"],
+            }:
+                ranges = []
+
+        status_code = 200
+        body_ranges: tuple[tuple[int, int], ...] = ()
+        response_media_type = media_type
+        if len(ranges) == 1:
+            status_code = 206
+            body_ranges = (ranges[0],)
+            start, end = ranges[0]
+            headers["Content-Range"] = f"bytes {start}-{end - 1}/{stat_result.st_size}"
+            headers["Content-Length"] = str(end - start)
+        elif len(ranges) > 1:
+            status_code = 206
+            body_ranges = tuple(ranges)
+            boundary = secrets.token_hex(13)
+            response_media_type = f"multipart/byteranges; boundary={boundary}"
+            headers["Content-Length"] = str(
+                _multipart_content_length(body_ranges, boundary, stat_result.st_size, media_type)
+            )
+        body = _iter_opened_artifact(
+            opened,
+            body_ranges,
+            boundary=boundary if len(ranges) > 1 else None,
+            file_size=stat_result.st_size,
+            media_type=media_type,
+        )
+        response = StreamingResponse(
+            body,
+            status_code=status_code,
+            headers=headers,
+            media_type=response_media_type,
+        )
+        opened = None
+        return response
+    except WorkbenchAPIError:
+        if opened is not None:
+            opened.close()
+        raise
+    except (OSError, ValueError) as exc:
+        if opened is not None:
+            opened.close()
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="ARTIFACT_INTEGRITY_UNAVAILABLE",
+            message="The artifact could not be safely opened for integrity verification.",
+            details={"artifact_id": artifact_id, "run_id": run_id},
+        ) from exc
+
+
+def _artifact_download_headers(
+    filename: str,
+    stat_result,
+    *,
+    len_bytes: int,
+) -> dict[str, str]:
+    etag_base = f"{stat_result.st_mtime}-{stat_result.st_size}"
+    etag = f'"{hashlib.md5(etag_base.encode(), usedforsecurity=False).hexdigest()}"'
+    quoted_filename = quote(filename)
+    disposition = (
+        f"attachment; filename=\"{filename}\""
+        if quoted_filename == filename
+        else f"attachment; filename*=utf-8''{quoted_filename}"
     )
+    return {
+        "Content-Disposition": disposition,
+        "Content-Length": str(len_bytes),
+        "Accept-Ranges": "bytes",
+        "Last-Modified": formatdate(stat_result.st_mtime, usegmt=True),
+        "ETag": etag,
+    }
+
+
+def _multipart_part_header(start: int, end: int, file_size: int, boundary: str, media_type: str) -> bytes:
+    return (
+        f"--{boundary}\r\n"
+        f"Content-Type: {media_type}\r\n"
+        f"Content-Range: bytes {start}-{end - 1}/{file_size}\r\n"
+        "\r\n"
+    ).encode("latin-1")
+
+
+def _multipart_content_length(
+    ranges: tuple[tuple[int, int], ...], boundary: str, file_size: int, media_type: str
+) -> int:
+    return sum(
+        len(_multipart_part_header(start, end, file_size, boundary, media_type))
+        + (end - start)
+        + 2
+        for start, end in ranges
+    ) + len(f"--{boundary}--".encode("latin-1"))
+
+
+def _iter_opened_artifact(
+    opened: file_integrity.OpenedRunFile,
+    ranges: tuple[tuple[int, int], ...],
+    *,
+    boundary: str | None,
+    file_size: int,
+    media_type: str,
+):
+    try:
+        if not ranges:
+            yield from opened.iter_bytes()
+        elif len(ranges) == 1:
+            yield from opened.iter_bytes(*ranges[0])
+        else:
+            assert boundary is not None
+            for start, end in ranges:
+                yield _multipart_part_header(start, end, file_size, boundary, media_type)
+                yield from opened.iter_bytes(start, end)
+                yield b"\r\n"
+            yield f"--{boundary}--".encode("latin-1")
+    finally:
+        opened.close()
 
 
 @router.get("/runs/{run_id}/report")

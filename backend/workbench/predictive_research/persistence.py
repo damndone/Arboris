@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from .. import __version__
+from ..canonical import sha256_canonical
 from ..domain import ArtifactRecord
 from .schema import PayloadContractError, default_v1_prediction_registry
 from .contracts import ContractError
@@ -20,6 +21,9 @@ from .contracts import ContractError
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+_CLASSIFICATION_SERVER_NAMESPACE = "workbench.prediction.classification-artifacts.v1"
+_CLASSIFICATION_RECEIPT_SCHEMA = "workbench.prediction.classification-receipt"
+_CLASSIFICATION_RECEIPT_PATH = "classification_receipt.json"
 
 
 def _safe_part(part: str) -> str:
@@ -50,6 +54,135 @@ def classification_artifact_id(**identity_parts: str) -> str:
     return "sha256:" + _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
 
 
+def classification_server_identity(run_root: Path) -> dict[str, Any]:
+    """Derive the server-owned project/run/namespace binding for one run root.
+
+    The binding is intentionally derived from the admitted run location rather
+    than accepted from a caller payload.  A copied packet/index therefore keeps
+    its source binding and fails when a consumer recomputes the binding for the
+    destination project or run.
+    """
+
+    resolved_run_root = Path(run_root).resolve()
+    if not resolved_run_root.is_absolute() or not resolved_run_root.name:
+        raise ContractError("CLASSIFICATION_SERVER_IDENTITY_INVALID", "classification run root is invalid")
+    project_root = (
+        resolved_run_root.parent.parent
+        if resolved_run_root.parent.name == "runs"
+        else resolved_run_root.parent
+    )
+    project_id = "project:sha256:" + _sha256(str(project_root).encode("utf-8"))
+    run_id = resolved_run_root.name
+    if not run_id or run_id in {".", ".."} or "/" in run_id or "\\" in run_id:
+        raise ContractError("CLASSIFICATION_SERVER_IDENTITY_INVALID", "classification run id is invalid")
+    base = {
+        "schema_version": 1,
+        "project_id": project_id,
+        "run_id": run_id,
+        "namespace": _CLASSIFICATION_SERVER_NAMESPACE,
+    }
+    digest = "sha256:" + sha256_canonical(base)
+    return {**base, "digest": digest}
+
+
+def _validate_server_identity_shape(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {"schema_version", "project_id", "run_id", "namespace", "digest"}:
+        raise ContractError("CLASSIFICATION_SERVER_IDENTITY_INVALID", "classification server identity shape is invalid")
+    base = {
+        "schema_version": value.get("schema_version"),
+        "project_id": value.get("project_id"),
+        "run_id": value.get("run_id"),
+        "namespace": value.get("namespace"),
+    }
+    if value.get("schema_version") != 1 or any(type(base[key]) is not str or not base[key] for key in ("project_id", "run_id", "namespace")):
+        raise ContractError("CLASSIFICATION_SERVER_IDENTITY_INVALID", "classification server identity fields are invalid")
+    expected_digest = "sha256:" + sha256_canonical(base)
+    if value.get("digest") != expected_digest:
+        raise ContractError("CLASSIFICATION_SERVER_IDENTITY_INVALID", "classification server identity digest is invalid")
+    return dict(value)
+
+
+def validate_classification_server_identity_shape(value: Any) -> dict[str, Any]:
+    """Validate the self-digest without binding it to a destination run root."""
+
+    return _validate_server_identity_shape(value)
+
+
+def validate_classification_server_identity(value: Any, run_root: Path) -> dict[str, Any]:
+    _validate_server_identity_shape(value)
+    expected = classification_server_identity(run_root)
+    if value != expected:
+        raise ContractError(
+            "CLASSIFICATION_SERVER_IDENTITY_MISMATCH",
+            "classification artifact is bound to another server project, run or namespace",
+        )
+    return expected
+
+
+def _classification_content_receipt(payload: Mapping[str, Any], *, artifact_sha256: str, server_identity: Mapping[str, Any]) -> dict[str, Any]:
+    """Create the server-owned receipt for every classification consumer field.
+
+    The receipt is deliberately derived after the persistence seam has
+    injected the destination server identity.  Callers may provide arbitrary
+    packet-local digest fields, but those fields are never trusted here.
+    """
+
+    evidence = payload.get("evidence")
+    evaluation = payload.get("evaluation")
+    models = payload.get("models")
+    fit = payload.get("fit")
+    if isinstance(evidence, Mapping) and isinstance(evaluation, Mapping) and isinstance(models, Mapping) and isinstance(fit, Mapping):
+        model_metadata = {
+            str(model_id): model.get("metadata")
+            for model_id, model in models.items()
+            if isinstance(model_id, str) and isinstance(model, Mapping)
+        }
+        model_warnings = {
+            model_id: metadata.get("warnings")
+            for model_id, metadata in model_metadata.items()
+            if isinstance(metadata, Mapping)
+        }
+        content_digests = {
+            "artifact": artifact_sha256,
+            "evidence": sha256_canonical(evidence),
+            "evidence.metrics": sha256_canonical(evidence.get("metrics")),
+            "evaluation": sha256_canonical(evaluation),
+            "evaluation.metrics": sha256_canonical(evaluation.get("metrics")),
+            "models": sha256_canonical(models),
+            "models.metadata": sha256_canonical(model_metadata),
+            "models.warnings": sha256_canonical(model_warnings),
+            "fit": sha256_canonical(fit),
+            "fold_receipts": sha256_canonical(
+                {
+                    str(model_id): model.get("fold_receipts")
+                    for model_id, model in fit.get("models", {}).items()
+                    if isinstance(model_id, str) and isinstance(model, Mapping)
+                }
+            ),
+        }
+    else:
+        # Keep the low-level persistence helper usable by contract tests and
+        # migration tooling.  Such an incomplete packet can be persisted for
+        # inspection, but it cannot pass the production consumer validator.
+        content_digests = {"artifact": artifact_sha256, "payload": sha256_canonical(payload)}
+    base = {
+        "payload_schema": _CLASSIFICATION_RECEIPT_SCHEMA,
+        "schema_version": 1,
+        "receipt_id": f"classification-receipt:{uuid4().hex}",
+        "artifact_path": "classification_artifacts.json",
+        "artifact_id": payload.get("artifact_id"),
+        "artifact_sha256": artifact_sha256,
+        "payload_contract": {
+            "payload_schema": payload.get("payload_schema"),
+            "schema_version": payload.get("schema_version"),
+        },
+        "server_identity": dict(server_identity),
+        "content_digests": content_digests,
+        "issuer": "workbench.server.classification-persistence",
+    }
+    return {**base, "receipt_digest": sha256_canonical(base)}
+
+
 def persist_classification_artifacts(run_root: Path, artifacts: Mapping[str, Any]) -> dict[str, Any]:
     """Persist one classification packet through the existing FD-only admission."""
 
@@ -65,10 +198,32 @@ def persist_classification_artifacts(run_root: Path, artifacts: Mapping[str, Any
         )
     payload["payload_schema"] = declared_schema
     payload["schema_version"] = declared_version
+    server_identity = classification_server_identity(Path(run_root))
+    if "server_identity" in payload and payload["server_identity"] != server_identity:
+        raise ContractError(
+            "CLASSIFICATION_SERVER_IDENTITY_MISMATCH",
+            "classification artifact server identity is not server-owned",
+        )
+    payload["server_identity"] = server_identity
     content = _json_bytes(payload)
     with PredictionPersistenceAdmission.admit(Path(run_root)) as admission:
         digest = admission.write_json(("classification_artifacts.json",), payload)
-    return {"status": "persisted", "path": "classification_artifacts.json", "sha256": digest, "content_size": len(content)}
+        receipt = _classification_content_receipt(
+            payload,
+            artifact_sha256=digest,
+            server_identity=server_identity,
+        )
+        receipt_sha256 = admission.write_json((_CLASSIFICATION_RECEIPT_PATH,), receipt)
+    return {
+        "status": "persisted",
+        "path": "classification_artifacts.json",
+        "sha256": digest,
+        "content_size": len(content),
+        "server_identity": server_identity,
+        "receipt_path": _CLASSIFICATION_RECEIPT_PATH,
+        "receipt_sha256": receipt_sha256,
+        "receipt": receipt,
+    }
 
 
 @dataclass
@@ -224,6 +379,9 @@ class PredictionPersistenceAdmission:
         inputs: list[str],
         sha256: str,
         payload_contract: Mapping[str, Any],
+        server_identity: Mapping[str, Any] | None = None,
+        receipt_path: str | None = None,
+        receipt_sha256: str | None = None,
     ) -> None:
         contract = {
             "payload_schema": payload_contract.get("payload_schema"),
@@ -251,5 +409,15 @@ class PredictionPersistenceAdmission:
             code_version=__version__,
             payload_contract=contract,
         )
-        index["artifacts"].append(record.to_dict())
+        record_payload = record.to_dict()
+        if server_identity is not None:
+            _validate_server_identity_shape(server_identity)
+            record_payload["server_identity"] = dict(server_identity)
+            index["classification_server_identity"] = dict(server_identity)
+        if receipt_path is not None or receipt_sha256 is not None:
+            if not isinstance(receipt_path, str) or not isinstance(receipt_sha256, str):
+                raise PayloadContractError("ARTIFACT_RECEIPT_INVALID", "receipt path and digest must be supplied together")
+            record_payload["receipt_path"] = _safe_part(receipt_path)
+            record_payload["receipt_sha256"] = receipt_sha256
+        index["artifacts"].append(record_payload)
         self._atomic_write(("artifacts_index.json",), _json_bytes(index))

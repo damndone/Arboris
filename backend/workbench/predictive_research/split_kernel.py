@@ -84,6 +84,7 @@ class ClassificationSplitManifestV1:
     embargo: Any | None
     embargo_basis: str | None
     effective_parameters: dict[str, Any]
+    training_row_refs_by_fold: tuple[tuple[str, ...], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +98,7 @@ class ClassificationSplitManifestV1:
             "embargo": self.embargo,
             "embargo_basis": self.embargo_basis,
             "effective_parameters": self.effective_parameters,
+            "training_row_refs_by_fold": [list(rows) for rows in self.training_row_refs_by_fold],
         }
 
     @property
@@ -111,22 +113,44 @@ class ClassificationSplitManifestV1:
             if item.partition == partition and (fold is None or item.cv_fold == fold)
         )
 
+    def training_rows_for_fold(self, fold: int) -> tuple[str, ...]:
+        if not isinstance(fold, int) or isinstance(fold, bool) or fold < 0:
+            raise ContractError("CLASSIFICATION_SPLIT_FOLD_INVALID", "fold must be a non-negative integer")
+        if fold >= len(self.training_row_refs_by_fold):
+            raise ContractError("CLASSIFICATION_SPLIT_FOLD_INVALID", "fold is outside the split manifest")
+        return self.training_row_refs_by_fold[fold]
+
 
 def _ordered_before(left: Any, right: Any) -> bool:
     try:
         return bool(left <= right)
-    except TypeError:
-        return str(left) <= str(right)
+    except (TypeError, ValueError) as exc:
+        raise ContractError("CLASSIFICATION_TIME_ORDER_INVALID", "ordered period values must share a comparable type") from exc
 
 
 def _strictly_after(left: Any, right: Any) -> bool:
     try:
         return bool(left > right)
-    except TypeError:
-        return str(left) > str(right)
+    except (TypeError, ValueError) as exc:
+        raise ContractError("CLASSIFICATION_TIME_ORDER_INVALID", "ordered period values must share a comparable type") from exc
+
+
+def _reject_negative_gap(value: Any | None, *, code: str, label: str) -> None:
+    if value is None:
+        return
+    try:
+        negative = bool(value < (value - value))
+    except (TypeError, ValueError):
+        try:
+            negative = bool(value < 0)
+        except (TypeError, ValueError):
+            return
+    if negative:
+        raise ContractError(code, f"{label} must be non-negative")
 
 
 def _interval_overlaps(left: tuple[Any, Any], right: tuple[Any, Any], gap: Any | None) -> bool:
+    _reject_negative_gap(gap, code="CLASSIFICATION_PURGE_GAP_INVALID", label="purge_gap")
     left_start, left_end = left
     right_start, right_end = right
     if not _ordered_before(left_start, left_end) or not _ordered_before(right_start, right_end):
@@ -134,12 +158,18 @@ def _interval_overlaps(left: tuple[Any, Any], right: tuple[Any, Any], gap: Any |
     try:
         boundary = left_end + (gap or 0)
         return not _strictly_after(right_start, boundary) and not _strictly_after(left_start, right_end + (gap or 0))
-    except TypeError:
-        return not _strictly_after(right_start, left_end) and not _strictly_after(left_start, right_end)
+    except TypeError as exc:
+        raise ContractError(
+            "CLASSIFICATION_PURGE_GAP_INVALID",
+            "purge_gap must be executable with the declared label-window type",
+        ) from exc
 
 
 def _holdout_indices_for_periods(periods: Sequence[Any], fraction: float) -> tuple[set[int], list[Any], list[Any]]:
-    unique = list(dict.fromkeys(sorted(periods)))
+    try:
+        unique = list(dict.fromkeys(sorted(periods)))
+    except (TypeError, ValueError) as exc:
+        raise ContractError("CLASSIFICATION_TIME_ORDER_INVALID", "period values must share a comparable type") from exc
     count = max(1, math.ceil(len(unique) * fraction))
     holdout_periods = unique[-count:]
     return {index for index, period in enumerate(periods) if period in holdout_periods}, unique[:-count], holdout_periods
@@ -172,6 +202,8 @@ def build_classification_split_manifest(
         raise ContractError("CLASSIFICATION_ROW_IDENTITY_INVALID", "row_refs and labels must align and contain unique rows")
     if not 0 < final_holdout_fraction < 1 or not isinstance(cv_folds, int) or cv_folds < 2:
         raise ContractError("CLASSIFICATION_SPLIT_PARAMETERS_INVALID", "holdout fraction and cv_folds are invalid")
+    _reject_negative_gap(purge_gap, code="CLASSIFICATION_PURGE_GAP_INVALID", label="purge_gap")
+    _reject_negative_gap(embargo, code="CLASSIFICATION_EMBARGO_INVALID", label="embargo")
     if embargo is not None and (not isinstance(embargo_basis, str) or not embargo_basis.strip()):
         raise ContractError("CLASSIFICATION_EMBARGO_BASIS_REQUIRED", "embargo requires an explicit serial-dependence basis")
     if embargo is not None and profile not in {"temporal_rolling", "panel_known_entity_future", "panel_new_entity"}:
@@ -220,8 +252,15 @@ def build_classification_split_manifest(
         holdout_entities = set(randomized_entities[:count])
         holdout = {index for index, entity in enumerate(entities) if entity in holdout_entities}
         development = [index for index in range(n) if index not in holdout]
-        for position, index in enumerate(development):
-            fold_by_index[index] = position % cv_folds
+        development_entities = list(dict.fromkeys(entities[index] for index in development))
+        if len(development_entities) < cv_folds:
+            raise ContractError("CLASSIFICATION_SPLIT_GROUP_SUPPORT", "development entities are fewer than cv_folds")
+        fold_by_entity = {
+            entity: position % cv_folds
+            for position, entity in enumerate(development_entities)
+        }
+        for index in development:
+            fold_by_index[index] = fold_by_entity[entities[index]]
     else:
         assert periods is not None
         holdout, development_periods, holdout_periods = _holdout_indices_for_periods(periods, final_holdout_fraction)
@@ -347,6 +386,34 @@ def build_classification_split_manifest(
         )
         for index in range(n)
     )
+    training_row_refs_by_fold: list[tuple[str, ...]] = []
+    for fold in range(cv_folds):
+        validation_indices = [
+            index
+            for index, assignment in enumerate(assignments)
+            if assignment.partition == "development" and assignment.cv_fold == fold
+        ]
+        if profile in {"temporal_rolling", "panel_known_entity_future", "panel_new_entity"}:
+            if not validation_indices:
+                training_indices: list[int] = []
+            else:
+                validation_periods = [periods[index] for index in validation_indices]  # type: ignore[index]
+                earliest_validation = min(validation_periods)
+                training_indices = [
+                    index
+                    for index, assignment in enumerate(assignments)
+                    if assignment.partition == "development"
+                    and periods is not None
+                    and _strictly_after(earliest_validation, periods[index])
+                ]
+        else:
+            validation_set = set(validation_indices)
+            training_indices = [
+                index
+                for index, assignment in enumerate(assignments)
+                if assignment.partition == "development" and index not in validation_set
+            ]
+        training_row_refs_by_fold.append(tuple(row_refs[index] for index in training_indices))
     return ClassificationSplitManifestV1(
         profile=profile,
         assignments=tuple(assignments),
@@ -361,7 +428,50 @@ def build_classification_split_manifest(
             "random_seed": random_seed,
             "shuffle": profile == "iid_stratified",
         },
+        training_row_refs_by_fold=tuple(training_row_refs_by_fold),
     )
+
+
+def validate_classification_development_fold_windows(
+    manifest: ClassificationSplitManifestV1,
+    *,
+    label_windows: Sequence[tuple[Any, Any]] | None,
+    purge_gap: Any | None,
+) -> None:
+    """Fail closed when a development training row overlaps its validation fold.
+
+    Holdout-only purge records cannot make a development overlap safe. Every
+    validation fold must be separated from the rows used to fit that fold.
+    """
+
+    if label_windows is None:
+        return
+    index_by_ref = {assignment.row_ref: index for index, assignment in enumerate(manifest.assignments)}
+    folds = sorted(
+        {
+            assignment.cv_fold
+            for assignment in manifest.assignments
+            if assignment.partition == "development" and assignment.cv_fold is not None
+        }
+    )
+    for fold in folds:
+        validation_refs = {
+            assignment.row_ref
+            for assignment in manifest.assignments
+            if assignment.partition == "development" and assignment.cv_fold == fold
+        }
+        training_refs = set(manifest.training_rows_for_fold(fold))
+        for training_ref in sorted(training_refs):
+            for validation_ref in sorted(validation_refs):
+                if _interval_overlaps(
+                    label_windows[index_by_ref[training_ref]],
+                    label_windows[index_by_ref[validation_ref]],
+                    purge_gap,
+                ):
+                    raise ContractError(
+                        "CLASSIFICATION_PURGE_WINDOW_TRAIN_VALIDATION_OVERLAP",
+                        f"fold {fold} has overlapping training/validation label windows: {training_ref}, {validation_ref}",
+                    )
 
 
 def build_split_plan(
