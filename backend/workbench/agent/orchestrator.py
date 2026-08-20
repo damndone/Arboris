@@ -67,6 +67,7 @@ from .proposals import (
     ProposalStoreCapabilityError,
     ProposalStoreCapabilityIssuerV1,
     ProposalStoreCapabilityV1,
+    _issue_server_owned_proposal_store_authority,
 )
 from .risk import (
     RiskAuthorizationReplay,
@@ -3374,11 +3375,10 @@ class AgentNotebookCompilerV1:
         self._confirmation_store = None
         self._admission_gate = None
         self._authority_token = object()
-        self._proposal_store_issuer = ProposalStoreCapabilityIssuerV1()
-        self._proposal_store_issuer._grant_mutation_admission()
-        self._proposal_store_service_admission = (
-            self._proposal_store_issuer._register_service_admission()
-        )
+        (
+            self._proposal_store_issuer,
+            self._proposal_store_service_admission,
+        ) = _issue_server_owned_proposal_store_authority()
         self._records: dict[str, Any] = {}
         self._server_refs: dict[str, Any] = {}
         self._descriptors: dict[str, Any] = {}

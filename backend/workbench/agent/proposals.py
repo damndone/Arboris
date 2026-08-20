@@ -211,10 +211,23 @@ class ProposalDecision:
 _PROPOSAL_STORE_PROCESS_GENERATION = object()
 _PROPOSAL_STORE_CAPABILITY_LOCK = RLock()
 _PROPOSAL_STORE_ISSUER_ADMISSIONS: dict[
-    int, tuple[object, str, int, object, object]
+    int, tuple[object, str, object, object, int, object, object, object]
 ] = {}
 _PROPOSAL_STORE_CAPABILITY_ADMISSIONS: dict[
-    int, tuple[object, object, object, str, object, object | None, int, object, tuple[int, int]]
+    int,
+    tuple[
+        object,
+        object,
+        object,
+        str,
+        object,
+        object | None,
+        object,
+        object,
+        int,
+        object,
+        tuple[int, int],
+    ],
 ] = {}
 
 
@@ -230,21 +243,22 @@ class ProposalStoreCapabilityIssuerV1:
     store-root identity all match the server registry snapshot.
     """
 
-    __slots__ = ("_issuer_nonce", "_mutation_admission", "_process_id", "_generation")
+    __slots__ = (
+        "_issuer_nonce",
+        "_mutation_admission",
+        "_process_id",
+        "_generation",
+        "_owner_identity",
+        "_authority_secret",
+    )
 
     def __init__(self) -> None:
         self._issuer_nonce = secrets.token_hex(32)
         self._mutation_admission: object | None = None
         self._process_id = os.getpid()
         self._generation = _PROPOSAL_STORE_PROCESS_GENERATION
-        with _PROPOSAL_STORE_CAPABILITY_LOCK:
-            _PROPOSAL_STORE_ISSUER_ADMISSIONS[id(self)] = (
-                self,
-                self._issuer_nonce,
-                None,
-                self._process_id,
-                self._generation,
-            )
+        self._owner_identity: object | None = None
+        self._authority_secret: object | None = None
 
     def _require_live(self) -> None:
         with _PROPOSAL_STORE_CAPABILITY_LOCK:
@@ -253,8 +267,11 @@ class ProposalStoreCapabilityIssuerV1:
             admission is None
             or admission[0] is not self
             or admission[1] != self._issuer_nonce
-            or admission[3] != self._process_id
-            or admission[4] is not self._generation
+            or admission[3] is not self._mutation_admission
+            or admission[4] != self._process_id
+            or admission[5] is not self._generation
+            or admission[6] is not self._owner_identity
+            or admission[7] is not self._authority_secret
             or self._process_id != os.getpid()
         ):
             raise ProposalStoreCapabilityError(
@@ -276,24 +293,11 @@ class ProposalStoreCapabilityIssuerV1:
         )
 
     def _register_service_admission(self) -> object:
-        """Create one opaque service-entry handle outside the issuer object."""
+        """Reject caller attempts to create a service-entry handle."""
 
-        self._require_live()
-        service_admission = object()
-        with _PROPOSAL_STORE_CAPABILITY_LOCK:
-            current = _PROPOSAL_STORE_ISSUER_ADMISSIONS.get(id(self))
-            if current is None or current[0] is not self:
-                raise ProposalStoreCapabilityError(
-                    "server proposal capability issuer is not current"
-                )
-            _PROPOSAL_STORE_ISSUER_ADMISSIONS[id(self)] = (
-                self,
-                self._issuer_nonce,
-                service_admission,
-                self._process_id,
-                self._generation,
-            )
-        return service_admission
+        raise ProposalStoreCapabilityError(
+            "service-entry handles are issued by server-owned authority"
+        )
 
     def _require_service_admission(self, service_admission: object) -> None:
         with _PROPOSAL_STORE_CAPABILITY_LOCK:
@@ -303,26 +307,110 @@ class ProposalStoreCapabilityIssuerV1:
             or current[0] is not self
             or current[1] != self._issuer_nonce
             or current[2] is not service_admission
+            or type(service_admission) is not _ProposalStoreServiceEntryV1
+            or service_admission._issuer_nonce != self._issuer_nonce
+            or service_admission._owner_identity is not self._owner_identity
+            or service_admission._authority_secret is not self._authority_secret
+            or service_admission._process_id != self._process_id
+            or service_admission._generation is not self._generation
         ):
             raise ProposalStoreCapabilityError(
                 "server proposal capability service admission is required"
             )
 
     def _grant_mutation_admission(self) -> None:
-        """Register this issuer as a live server mutation authority."""
+        """Reject caller attempts to upgrade an issuer."""
 
-        self._require_live()
-        self._mutation_admission = object()
+        raise ProposalStoreCapabilityError(
+            "mutation admission is issued by server-owned authority"
+        )
+
+
+class _ProposalStoreServiceEntryV1:
+    """Opaque service-entry handle issued only by the server authority."""
+
+    __slots__ = (
+        "_entry_nonce",
+        "_issuer_nonce",
+        "_owner_identity",
+        "_authority_secret",
+        "_process_id",
+        "_generation",
+    )
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("service-entry handles are issued by server admission")
+
+    def __copy__(self) -> "_ProposalStoreServiceEntryV1":
+        raise TypeError("service-entry handles cannot be copied")
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> "_ProposalStoreServiceEntryV1":
+        raise TypeError("service-entry handles cannot be copied")
+
+    def __reduce__(self) -> tuple[object, ...]:
+        raise TypeError("service-entry handles cannot be serialized")
+
+    def __reduce_ex__(self, _protocol: int) -> tuple[object, ...]:
+        raise TypeError("service-entry handles cannot be serialized")
+
+
+class _ProposalStoreServerAuthorityV1:
+    """Process-local authority that alone can register issuers and handles."""
+
+    __slots__ = ("_authority_secret", "_process_id", "_generation")
+
+    def __init__(self) -> None:
+        self._authority_secret = object()
+        self._process_id = os.getpid()
+        self._generation = _PROPOSAL_STORE_PROCESS_GENERATION
+
+    def issue(self) -> tuple[ProposalStoreCapabilityIssuerV1, object]:
+        if self._process_id != os.getpid() or self._generation is not _PROPOSAL_STORE_PROCESS_GENERATION:
+            raise ProposalStoreCapabilityError("server proposal authority is not current")
+        issuer = object.__new__(ProposalStoreCapabilityIssuerV1)
+        issuer._issuer_nonce = secrets.token_hex(32)
+        issuer._mutation_admission = object()
+        issuer._process_id = self._process_id
+        issuer._generation = self._generation
+        issuer._owner_identity = object()
+        issuer._authority_secret = self._authority_secret
+        service_entry = object.__new__(_ProposalStoreServiceEntryV1)
+        service_entry._entry_nonce = secrets.token_hex(32)
+        service_entry._issuer_nonce = issuer._issuer_nonce
+        service_entry._owner_identity = issuer._owner_identity
+        service_entry._authority_secret = self._authority_secret
+        service_entry._process_id = self._process_id
+        service_entry._generation = self._generation
+        with _PROPOSAL_STORE_CAPABILITY_LOCK:
+            _PROPOSAL_STORE_ISSUER_ADMISSIONS[id(issuer)] = (
+                issuer,
+                issuer._issuer_nonce,
+                service_entry,
+                issuer._mutation_admission,
+                issuer._process_id,
+                issuer._generation,
+                issuer._owner_identity,
+                self._authority_secret,
+            )
+        return issuer, service_entry
+
+
+_PROPOSAL_STORE_SERVER_AUTHORITY = _ProposalStoreServerAuthorityV1()
+
+
+def _issue_server_owned_proposal_store_authority() -> tuple[ProposalStoreCapabilityIssuerV1, object]:
+    """Return one issuer and its opaque server-issued service-entry handle."""
+
+    return _PROPOSAL_STORE_SERVER_AUTHORITY.issue()
 
 
 # The HTTP route owns this exact issuer identity. It is intentionally shared
 # with the orchestrator's default route binding, while every capability still
 # carries its own nonce/root/process snapshot in the registry.
-DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER = ProposalStoreCapabilityIssuerV1()
-DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER._grant_mutation_admission()
-_DEFAULT_ROUTE_PROPOSAL_STORE_SERVICE_ADMISSION = (
-    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER._register_service_admission()
-)
+(
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    _DEFAULT_ROUTE_PROPOSAL_STORE_SERVICE_ADMISSION,
+) = _issue_server_owned_proposal_store_authority()
 
 
 def issue_route_proposal_store(root: Path | str) -> "ProposalStoreCapabilityV1":
@@ -353,6 +441,8 @@ class ProposalStoreCapabilityV1:
         "_root_identity",
         "_process_id",
         "_generation",
+        "_owner_identity",
+        "_authority_secret",
     )
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
@@ -382,6 +472,8 @@ class ProposalStoreCapabilityV1:
             ("_root_identity", store._root_identity),
             ("_process_id", process_id),
             ("_generation", generation),
+            ("_owner_identity", issuer._owner_identity),
+            ("_authority_secret", issuer._authority_secret),
         ):
             object.__setattr__(capability, name, value)
         with _PROPOSAL_STORE_CAPABILITY_LOCK:
@@ -392,6 +484,8 @@ class ProposalStoreCapabilityV1:
                 issuer._issuer_nonce,
                 service_admission,
                 issuer._mutation_admission,
+                issuer._owner_identity,
+                issuer._authority_secret,
                 process_id,
                 generation,
                 store._root_identity,
@@ -415,6 +509,8 @@ class ProposalStoreCapabilityV1:
             issuer_nonce,
             service_admission,
             mutation_admission,
+            owner_identity,
+            authority_secret,
             process_id,
             generation,
             root_identity,
@@ -430,6 +526,8 @@ class ProposalStoreCapabilityV1:
             or self._issuer_nonce != issuer_nonce
             or self._service_admission is not service_admission
             or self._mutation_admission is not mutation_admission
+            or self._owner_identity is not owner_identity
+            or self._authority_secret is not authority_secret
             or self._root_identity != store._root_identity
             or self._root_identity != root_identity
             or self._process_id != process_id
