@@ -26,6 +26,7 @@ from workbench.agent.workflow_contracts import (
     AnalysisClarificationV1,
     OperationValidationError,
 )
+from workbench.agent.proposals import ProposalStore
 from workbench.api_errors import WorkbenchAPIError
 from workbench.http.agent_routes import (
     AgentNotebookCutoverCompileRequest,
@@ -245,6 +246,62 @@ def test_agent_and_notebook_share_semantic_plan_but_not_execution_instance() -> 
     assert agent_plan.server_execution_identity != notebook_plan.server_execution_identity
     assert agent_plan.plan_diff["entrypoint"] == "agent"
     assert notebook_plan.plan_diff["entrypoint"] == "notebook"
+
+
+def test_compiler_confirmation_uses_a_server_proposal_identity_not_record_id() -> None:
+    _catalog, compiler = _cutover()
+    plan = compiler.compile(_intent(), entrypoint="agent")
+
+    receipt = compiler.confirm(plan.compilation_record_id)
+
+    assert receipt.proposal_id != f"proposal:{plan.compilation_record_id}"
+    assert receipt.proposal_revision == 1
+    assert receipt.proposal_fingerprint
+
+
+def test_compiler_confirmation_rejects_caller_supplied_proposal_identity() -> None:
+    _catalog, compiler = _cutover()
+    plan = compiler.compile(_intent(), entrypoint="agent")
+
+    with pytest.raises(TypeError):
+        compiler.confirm(
+            plan.compilation_record_id,
+            proposal_id="proposal:caller",
+            proposal_revision=1,
+            proposal_fingerprint="caller-fingerprint",
+        )
+
+
+def test_persisted_proposal_revision_is_bound_before_confirmation(tmp_path) -> None:
+    _catalog, compiler = _cutover()
+    proposal_store = ProposalStore(tmp_path)
+    proposal = proposal_store.create(
+        session_id="session:1",
+        chain_id="chain:1",
+        operation_id="model.rerun",
+        target={"run_id": "run:1"},
+        preconditions={},
+        changes={},
+        evidence_refs=(),
+        expected_effect=("rerun",),
+        risks=(),
+    )
+
+    plan = compiler.compile_for_persisted_proposal(
+        _intent(),
+        proposal_store=proposal_store,
+        proposal_id=proposal.proposal_id,
+        entrypoint="agent",
+    )
+    receipt = compiler.confirm(plan.compilation_record_id)
+
+    assert receipt.proposal_id == proposal.proposal_id
+    assert receipt.proposal_revision == proposal.revision
+    assert receipt.proposal_fingerprint == proposal.fingerprint
+    assert receipt.semantic_plan_hash == plan.semantic_plan_hash
+    assert receipt.actor_ref == "principal:user:1"
+    assert receipt.session_ref == "session:1"
+    assert receipt.project_ref == "project:1"
 
 
 def test_confirmation_and_evidence_gate_execution() -> None:

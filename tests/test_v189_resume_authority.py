@@ -52,6 +52,78 @@ def _first_pass(step, _previous):
     )
 
 
+def test_resume_validates_terminal_model_branches_before_any_callback_or_write(
+    tmp_path,
+) -> None:
+    draft = compile_fixture_workflow(
+        workflow_id="wf-resume-terminal-model-branch",
+        steps=[
+            {
+                "step_id": "model",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "ols",
+                    "covariance": "unadjusted",
+                    "branches": [
+                        {
+                            "branch_id": "m1",
+                            "outcome": "outcome",
+                            "predictors": ["rate_a"],
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    def first_pass(_step, _previous):
+        return WorkflowStepResult(
+            artifact_ids=["ols_1"],
+            lineage={
+                "branches": [
+                    {
+                        "branch_id": "m1",
+                        "run_id": "run-1",
+                        "artifact_ids": ["ols_1"],
+                        "model_artifact_id": "ols_1",
+                        "workflow_id": draft.workflow_id,
+                        "workflow_step_id": "model",
+                        "source_run_id": "run-1",
+                        "source_artifact_id": "raw-1",
+                        "source_sha256": "sha256:source-1",
+                        "branch_spec": {
+                            "model_family": "ols",
+                            "outcome": "forged-outcome",
+                            "predictors": ["rate_a"],
+                            "covariance": "unadjusted",
+                        },
+                    }
+                ]
+            },
+        )
+
+    first = _execute(tmp_path, draft, first_pass)
+    assert first.status == "completed"
+    evidence_path = (
+        tmp_path
+        / "workbench"
+        / "workflows"
+        / f"{draft.workflow_id}.evidence.jsonl"
+    )
+    before_resume = evidence_path.read_text(encoding="utf-8")
+    callback_steps: list[str] = []
+
+    def resume_pass(step, _previous):
+        callback_steps.append(step.step_id)
+        return WorkflowStepResult(artifact_ids=[])
+
+    with pytest.raises(WorkflowExecutionError, match="compiled model step"):
+        _execute(tmp_path, draft, resume_pass)
+
+    assert callback_steps == []
+    assert evidence_path.read_text(encoding="utf-8") == before_resume
+
+
 def test_resume_rejects_tampered_persisted_artifact_before_dependent_callback(tmp_path) -> None:
     draft = _resume_fixture("wf-resume-artifact-authority")
     first = _execute(tmp_path, draft, _first_pass)

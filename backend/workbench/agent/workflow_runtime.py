@@ -2266,6 +2266,33 @@ class EvidencePersistencePort:
                 "WORKFLOW_RESUME_AUTHORITY_REQUIRED: persisted row_counts differ from the server completion"
             )
 
+        # Resume is itself an authority boundary. A terminal model step may
+        # have no downstream consumer to trigger _dependent_model_branch(), so
+        # validate every persisted model branch here before staging any
+        # artifact row or returning the result to a callback.
+        model_operations = {"model.genesis", "model.auto", "model.custom"}
+        if step.operation_id in model_operations:
+            raw_branches = completion_lineage.get("branches")
+            if raw_branches is None:
+                model_output = completion_bindings.get("model_branches")
+                if isinstance(model_output, Mapping):
+                    raw_branches = model_output.get("branches")
+            if not isinstance(raw_branches, list) or not raw_branches:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed model step has no persisted branches"
+                )
+            for branch in raw_branches:
+                if not isinstance(branch, Mapping):
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_EVIDENCE_CORRUPT: persisted model branch is malformed"
+                    )
+                _validate_persisted_model_branch(
+                    self.project_root,
+                    draft,
+                    step.step_id,
+                    branch,
+                )
+
         staged_rows: dict[tuple[str, str, str], dict[str, Any]] = {}
         previous_rows: dict[tuple[str, str, str], dict[str, Any] | None] = {}
         target_run_id = _require_workflow_opaque_ref(

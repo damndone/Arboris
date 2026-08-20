@@ -3051,6 +3051,36 @@ class CutoverCompilationPreviewV1:
 
 
 @dataclass(frozen=True)
+class ServerProposalBindingV1:
+    """Server-owned proposal identity attached before confirmation issuance."""
+
+    proposal_id: str
+    proposal_revision: int
+    proposal_fingerprint: str
+    semantic_plan_hash: str
+    actor_ref: str
+    session_ref: str
+    project_ref: str
+    _authority_token: object = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("proposal_id", self.proposal_id),
+            ("proposal_fingerprint", self.proposal_fingerprint),
+            ("semantic_plan_hash", self.semantic_plan_hash),
+            ("actor_ref", self.actor_ref),
+            ("session_ref", self.session_ref),
+            ("project_ref", self.project_ref),
+        ):
+            if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+                raise CutoverCompilerError("SERVER_PROPOSAL_BINDING_INVALID", f"{name} is invalid")
+        if type(self.proposal_revision) is not int or self.proposal_revision <= 0:
+            raise CutoverCompilerError(
+                "SERVER_PROPOSAL_BINDING_INVALID", "proposal_revision is invalid"
+            )
+
+
+@dataclass(frozen=True)
 class ServerConfirmationReceiptV1:
     """A server-issued confirmation handle; its private token is authority."""
 
@@ -3083,7 +3113,7 @@ class ServerConfirmationReceiptV1:
         if type(self.proposal_revision) is not int or self.proposal_revision <= 0:
             raise CutoverCompilerError("SERVER_CONFIRMATION_INVALID", "proposal_revision is invalid")
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": "server-confirmation-receipt.v1",
             "confirmation_id": self.confirmation_id,
@@ -3174,6 +3204,7 @@ class AgentNotebookCompilerV1:
         self._server_refs: dict[str, Any] = {}
         self._descriptors: dict[str, Any] = {}
         self._operation_by_record: dict[str, str] = {}
+        self._proposal_bindings: dict[str, ServerProposalBindingV1] = {}
         self._confirmations: dict[str, Any] = {}
         self._operations = CutoverOperationStoreV1()
         self.method_snapshot_ref = "method:snapshot:1"
@@ -3526,6 +3557,7 @@ class AgentNotebookCompilerV1:
         self._server_refs[record.record_id] = server_ref
         self._descriptors[record.record_id] = descriptor
         self._operation_by_record[record.record_id] = operation_id
+        self._proposal_bindings[record.record_id] = self._new_server_proposal_binding(record)
         return CutoverCompilationPreviewV1(
             entrypoint=entrypoint,
             operation_id=operation_id,
@@ -3543,6 +3575,108 @@ class AgentNotebookCompilerV1:
                 "evidence_required": True,
             },
         )
+
+    def _new_server_proposal_binding(self, record: Any) -> ServerProposalBindingV1:
+        """Create a non-caller-controlled identity at compile creation time."""
+
+        from ..canonical import sha256_canonical
+
+        proposal_id = f"server-proposal:{uuid4().hex}"
+        return ServerProposalBindingV1(
+            proposal_id=proposal_id,
+            proposal_revision=1,
+            proposal_fingerprint=sha256_canonical(
+                {
+                    "schema": "server-proposal-binding.v1",
+                    "proposal_id": proposal_id,
+                    "compilation_record_id": record.record_id,
+                    "record_digest": record.record_digest,
+                    "semantic_plan_hash": record.semantic_plan_hash,
+                }
+            ),
+            semantic_plan_hash=record.semantic_plan_hash,
+            actor_ref=record.principal_ref,
+            session_ref=record.session_ref,
+            project_ref=record.project_ref,
+            _authority_token=self._authority_token,
+        )
+
+    def bind_proposal(self, compilation_record_id: str, proposal: ProposalRevision) -> None:
+        """Bind a route-owned persisted ProposalRevision before confirmation."""
+
+        if type(proposal) is not ProposalRevision:
+            raise CutoverCompilerError(
+                "SERVER_PROPOSAL_REQUIRED",
+                "proposal binding must come from a server-owned ProposalRevision",
+            )
+        record = self.record(compilation_record_id)
+        if proposal.session_id != record.session_ref:
+            raise CutoverCompilerError("PROPOSAL_SCOPE_MISMATCH")
+        if self._confirmations.get(record.record_id) is not None:
+            raise CutoverCompilerError("PROPOSAL_BINDING_REBIND_FORBIDDEN")
+        self._proposal_bindings[record.record_id] = ServerProposalBindingV1(
+            proposal_id=proposal.proposal_id,
+            proposal_revision=proposal.revision,
+            proposal_fingerprint=proposal.fingerprint,
+            semantic_plan_hash=record.semantic_plan_hash,
+            actor_ref=record.principal_ref,
+            session_ref=record.session_ref,
+            project_ref=record.project_ref,
+            _authority_token=self._authority_token,
+        )
+
+    def bind_persisted_proposal(
+        self,
+        compilation_record_id: str,
+        proposal_store: ProposalStore,
+        proposal_id: str,
+    ) -> None:
+        """Load the exact latest revision from the server-owned ProposalStore."""
+
+        if type(proposal_store) is not ProposalStore:
+            raise CutoverCompilerError("SERVER_PROPOSAL_STORE_REQUIRED")
+        try:
+            proposal = proposal_store.latest_revision(proposal_id)
+        except (KeyError, OSError, TypeError, ValueError) as exc:
+            raise CutoverCompilerError("SERVER_PROPOSAL_UNKNOWN") from exc
+        if proposal.proposal_id != proposal_id:
+            raise CutoverCompilerError("SERVER_PROPOSAL_UNKNOWN")
+        self.bind_proposal(compilation_record_id, proposal)
+
+    def compile_for_proposal(
+        self,
+        intent: Any,
+        *,
+        proposal: ProposalRevision,
+        entrypoint: str,
+    ) -> CutoverCompilationPreviewV1:
+        """Compile and bind one route-owned proposal in the same server flow."""
+
+        preview = self.compile(intent, entrypoint=entrypoint)
+        if preview.compilation_record_id is None:
+            return preview
+        self.bind_proposal(preview.compilation_record_id, proposal)
+        return preview
+
+    def compile_for_persisted_proposal(
+        self,
+        intent: Any,
+        *,
+        proposal_store: ProposalStore,
+        proposal_id: str,
+        entrypoint: str,
+    ) -> CutoverCompilationPreviewV1:
+        """Compile and bind from the exact revision stored by the server."""
+
+        preview = self.compile(intent, entrypoint=entrypoint)
+        if preview.compilation_record_id is None:
+            return preview
+        self.bind_persisted_proposal(
+            preview.compilation_record_id,
+            proposal_store,
+            proposal_id,
+        )
+        return preview
 
     def compile_natural_language(
         self,
@@ -3615,10 +3749,6 @@ class AgentNotebookCompilerV1:
     def confirm(
         self,
         compilation_record_id: str,
-        *,
-        proposal_id: str | None = None,
-        proposal_revision: int | None = None,
-        proposal_fingerprint: str | None = None,
     ) -> ServerConfirmationReceiptV1:
         from ..contracts.agent.planning import ConfirmationBindingV1
 
@@ -3629,24 +3759,15 @@ class AgentNotebookCompilerV1:
         operation = self._operations.require(operation_id)
         if operation.state != "compiled":
             raise CutoverCompilerError("OPERATION_CONFIRMATION_STATE_INVALID")
-        supplied_proposal_binding = (proposal_id, proposal_revision, proposal_fingerprint)
-        if any(value is not None for value in supplied_proposal_binding):
-            if (
-                type(proposal_id) is not str
-                or not proposal_id
-                or type(proposal_revision) is not int
-                or proposal_revision <= 0
-                or type(proposal_fingerprint) is not str
-                or not proposal_fingerprint
-            ):
-                raise CutoverCompilerError("PROPOSAL_BINDING_REQUIRED")
-        else:
-            # Generic cutover callers have no legacy ProposalRevision.  Give
-            # them a server-generated identity while keeping legacy execution
-            # fail-closed unless a real proposal identity was bound.
-            proposal_id = f"proposal:{record.record_id}"
-            proposal_revision = 1
-            proposal_fingerprint = record.compiled_workflow.preview_fingerprint
+        proposal_binding = self._proposal_bindings.get(record.record_id)
+        if (
+            type(proposal_binding) is not ServerProposalBindingV1
+            or proposal_binding._authority_token is not self._authority_token
+        ):
+            raise CutoverCompilerError(
+                "PROPOSAL_BINDING_REQUIRED",
+                "confirmation requires a server-owned proposal binding",
+            )
         now = self.clock()
         binding = ConfirmationBindingV1(
             confirmation_id=f"confirmation:{uuid4().hex}",
@@ -3660,9 +3781,9 @@ class AgentNotebookCompilerV1:
             policy_snapshot_ref=self.policy_snapshot_ref,
             confirmed_at=now.isoformat(),
             expires_at=record.expires_at,
-            proposal_id=proposal_id,
-            proposal_revision=proposal_revision,
-            proposal_fingerprint=proposal_fingerprint,
+            proposal_id=proposal_binding.proposal_id,
+            proposal_revision=proposal_binding.proposal_revision,
+            proposal_fingerprint=proposal_binding.proposal_fingerprint,
         )
         issued = self._confirmation_store.issue(binding)
         self._confirmations[record.record_id] = issued
@@ -3676,9 +3797,9 @@ class AgentNotebookCompilerV1:
             confirmation_id=issued.confirmation_id,
             confirmation_digest=issued.confirmation_digest,
             compilation_record_id=record.record_id,
-            proposal_id=proposal_id,
-            proposal_revision=proposal_revision,
-            proposal_fingerprint=proposal_fingerprint,
+            proposal_id=proposal_binding.proposal_id,
+            proposal_revision=proposal_binding.proposal_revision,
+            proposal_fingerprint=proposal_binding.proposal_fingerprint,
             semantic_plan_hash=record.semantic_plan_hash,
             actor_ref=record.principal_ref,
             session_ref=record.session_ref,
@@ -3714,6 +3835,13 @@ class AgentNotebookCompilerV1:
         if confirmation.compilation_record_id != compilation_record_id:
             raise CutoverCompilerError("CONFIRMATION_SCOPE_MISMATCH")
         record = self.record(compilation_record_id)
+        if (
+            confirmation.semantic_plan_hash != record.semantic_plan_hash
+            or confirmation.actor_ref != record.principal_ref
+            or confirmation.session_ref != record.session_ref
+            or confirmation.project_ref != record.project_ref
+        ):
+            raise CutoverCompilerError("CONFIRMATION_SCOPE_MISMATCH")
         binding = self._confirmations.get(compilation_record_id)
         if type(binding) is not ConfirmationBindingV1:
             raise CutoverCompilerError("SERVER_CONFIRMATION_UNKNOWN")
@@ -3847,5 +3975,6 @@ __all__ = [
     "CutoverCompilationPreviewV1",
     "CutoverCompilerError",
     "CutoverExecutionResultV1",
+    "ServerProposalBindingV1",
     "ServerConfirmationReceiptV1",
 ]

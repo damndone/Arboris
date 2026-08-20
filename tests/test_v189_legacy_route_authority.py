@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,33 @@ from workbench.contracts.agent.planning import (
 )
 from workbench.contracts.common.envelope import ContractError
 from workbench.http import agent_routes, notebook_routes
+
+
+def _server_receipt(
+    *,
+    confirmation_id: str,
+    compilation_record_id: str,
+    proposal_id: str,
+    proposal_revision: int,
+    proposal_fingerprint: str,
+    semantic_plan_hash: str,
+    actor_ref: str,
+    session_ref: str,
+    project_ref: str,
+) -> ServerConfirmationReceiptV1:
+    return ServerConfirmationReceiptV1(
+        confirmation_id=confirmation_id,
+        confirmation_digest="c" * 64,
+        compilation_record_id=compilation_record_id,
+        proposal_id=proposal_id,
+        proposal_revision=proposal_revision,
+        proposal_fingerprint=proposal_fingerprint,
+        semantic_plan_hash=semantic_plan_hash,
+        actor_ref=actor_ref,
+        session_ref=session_ref,
+        project_ref=project_ref,
+        _authority_token=object(),
+    )
 
 
 def test_historical_agent_confirm_requires_server_compilation_before_orchestrator(
@@ -409,7 +437,7 @@ def test_reused_legacy_compilation_confirmation_cannot_execute_a_second_proposal
         "_legacy_agent_route_scope",
         lambda *_args, **_kwargs: (actor_ref, session_id, project_ref),
     )
-    confirmation = SimpleNamespace(
+    confirmation = _server_receipt(
         confirmation_id="confirmation-a",
         compilation_record_id=record_id,
         proposal_id="proposal-a",
@@ -469,10 +497,13 @@ def test_first_legacy_claim_uses_server_receipt_proposal_identity_before_execute
             }
         },
     )
+    authority_calls: list[tuple[str, str]] = []
+    record_calls: list[str] = []
     compiler_calls: list[str] = []
 
     class Compiler:
         def record(self, _record_id):
+            record_calls.append(_record_id)
             return SimpleNamespace(
                 record_id=record_id,
                 semantic_plan_hash=semantic_plan_hash,
@@ -488,7 +519,7 @@ def test_first_legacy_claim_uses_server_receipt_proposal_identity_before_execute
             )
 
     store = agent_routes.AgentNotebookCutoverAuthorityStoreV1()
-    store.confirmations[(project_ref, session_id, record_id)] = SimpleNamespace(
+    store.confirmations[(project_ref, session_id, record_id)] = _server_receipt(
         confirmation_id="confirmation-a",
         compilation_record_id=record_id,
         proposal_id="proposal-a",
@@ -499,7 +530,13 @@ def test_first_legacy_claim_uses_server_receipt_proposal_identity_before_execute
         session_ref=session_id,
         project_ref=project_ref,
     )
-    monkeypatch.setattr(agent_routes, "_cutover_authority", lambda *_args, **_kwargs: Compiler())
+    monkeypatch.setattr(
+        agent_routes,
+        "_cutover_authority",
+        lambda project, session, **_kwargs: (
+            authority_calls.append((project, session)) or Compiler()
+        ),
+    )
     monkeypatch.setattr(agent_routes, "_cutover_store", lambda **_kwargs: store)
     monkeypatch.setattr(
         agent_routes,
@@ -517,6 +554,8 @@ def test_first_legacy_claim_uses_server_receipt_proposal_identity_before_execute
         )
 
     assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
+    assert authority_calls == []
+    assert record_calls == []
     assert compiler_calls == []
     assert store.legacy_proposal_bindings == {}
 
@@ -620,7 +659,7 @@ def test_same_legacy_proposal_can_claim_once_but_replay_fails_closed(
             )
 
     store = agent_routes.AgentNotebookCutoverAuthorityStoreV1()
-    store.confirmations[(project_ref, session_id, record_id)] = SimpleNamespace(
+    store.confirmations[(project_ref, session_id, record_id)] = _server_receipt(
         confirmation_id="confirmation-a",
         compilation_record_id=record_id,
         proposal_id="proposal-a",
@@ -735,6 +774,78 @@ def test_serialized_legacy_confirmation_handle_cannot_execute(
 
     assert error.value.code == "SERVER_CONFIRMATION_UNKNOWN"
     assert compiler_calls == []
+
+
+def test_tampered_retained_receipt_fails_before_authority_or_claim(
+    tmp_path, monkeypatch
+) -> None:
+    session_id = "session-1"
+    project_ref = f"project:{tmp_path.resolve()}"
+    actor_ref = f"actor:agent:{session_id}"
+    record_id = "record-a"
+    semantic_plan_hash = "a" * 64
+    proposal = SimpleNamespace(
+        proposal_id="proposal-a",
+        revision=1,
+        fingerprint="fingerprint-a",
+        operation_id="model.rerun",
+        preconditions={
+            "server_compilation": {
+                "compilation_record_id": record_id,
+                "confirmation_id": "confirmation-a",
+                "proposal_id": "proposal-a",
+                "proposal_revision": 1,
+                "proposal_fingerprint": "fingerprint-a",
+                "operation_id": "model.rerun",
+                "semantic_plan_hash": semantic_plan_hash,
+                "actor_ref": actor_ref,
+                "session_ref": session_id,
+                "project_ref": project_ref,
+            }
+        },
+    )
+    store = agent_routes.AgentNotebookCutoverAuthorityStoreV1()
+    receipt = _server_receipt(
+        confirmation_id="confirmation-a",
+        compilation_record_id=record_id,
+        proposal_id="proposal-a",
+        proposal_revision=1,
+        proposal_fingerprint="fingerprint-a",
+        semantic_plan_hash=semantic_plan_hash,
+        actor_ref=actor_ref,
+        session_ref=session_id,
+        project_ref=project_ref,
+    )
+    store.retain_confirmation(project_ref, session_id, record_id, receipt)
+    store.confirmations[(project_ref, session_id, record_id)] = replace(
+        receipt,
+        confirmation_digest="d" * 64,
+    )
+    authority_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        agent_routes,
+        "_cutover_authority",
+        lambda project, session, **_kwargs: authority_calls.append((project, session)),
+    )
+    monkeypatch.setattr(agent_routes, "_cutover_store", lambda **_kwargs: store)
+    monkeypatch.setattr(
+        agent_routes,
+        "_legacy_agent_route_scope",
+        lambda *_args, **_kwargs: (actor_ref, session_id, project_ref),
+    )
+
+    with pytest.raises(WorkbenchAPIError) as error:
+        agent_routes._execute_legacy_agent_proposal_via_server_boundary(
+            proposal,
+            proposal_id=proposal.proposal_id,
+            root=tmp_path,
+            session_id=session_id,
+            request=None,
+        )
+
+    assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
+    assert authority_calls == []
+    assert store.legacy_proposal_bindings == {}
 
 
 def test_legacy_reconcile_fails_closed_before_constructing_old_orchestrator(
