@@ -63,6 +63,15 @@ export interface ReportEvidenceIdentity {
   readonly confirmationRef: string;
 }
 
+/** Independent server transport anchor for a citable Report projection. */
+export interface ReportEvidenceServerReceipt {
+  readonly schemaVersion: 1;
+  readonly kind: "evidence.report.server-receipt.v1";
+  readonly projectionDigest: string;
+  readonly identity: ReportEvidenceIdentity;
+  readonly provenance: ReportEvidenceProvenance;
+}
+
 export type ReportEvidenceProjection = EvidenceViewModel & {
   readonly schemaVersion: 1;
   /** Server-owned canonical digest; unavailable projections use a typed sentinel. */
@@ -309,10 +318,51 @@ export function reportProjectionDigest(candidate: Record<string, unknown>): stri
   return sha256Hex(canonicalJsonV1(withoutDigest));
 }
 
+function readReportEvidenceServerReceipt(
+  value: unknown,
+): ReportEvidenceServerReceipt | null {
+  const record = asEvidenceRecord(value);
+  if (!record
+    || record.schemaVersion !== 1
+    || record.kind !== "evidence.report.server-receipt.v1"
+    || typeof record.projectionDigest !== "string"
+    || !/^[0-9a-f]{64}$/.test(record.projectionDigest)) {
+    return null;
+  }
+  const identityRecord = asEvidenceRecord(record.identity);
+  if (!identityRecord) return null;
+  const identityKeys = [
+    "actorRef",
+    "projectRef",
+    "sessionRef",
+    "scopeRef",
+    "runId",
+    "modelRunId",
+    "artifactRef",
+    "commitId",
+    "confirmationRef",
+  ] as const;
+  if (identityKeys.some((key) => typeof identityRecord[key] !== "string" || !(identityRecord[key] as string).trim())) {
+    return null;
+  }
+  const provenance = readEvidenceProvenance(record.provenance);
+  if (!provenance) return null;
+  return {
+    schemaVersion: 1,
+    kind: "evidence.report.server-receipt.v1",
+    projectionDigest: record.projectionDigest,
+    identity: Object.fromEntries(
+      identityKeys.map((key) => [key, identityRecord[key]]),
+    ) as unknown as ReportEvidenceIdentity,
+    provenance,
+  };
+}
+
 /** Parse the server-owned report projection, including its provenance gate. */
 export function readReportEvidenceProjection(
   value: unknown,
   expectedIdentity?: Partial<ReportEvidenceIdentity>,
+  serverReceiptValue?: unknown,
 ): ReportEvidenceProjection | null {
   const base = readReportEvidence(value);
   if (!base || !asEvidenceRecord(value)) return null;
@@ -322,11 +372,6 @@ export function readReportEvidenceProjection(
     typeof candidate.projectionDigest !== "string"
     || !/^[0-9a-f]{64}$/.test(candidate.projectionDigest)
   ) return null;
-  try {
-    if (candidate.projectionDigest !== reportProjectionDigest(candidate)) return null;
-  } catch {
-    return null;
-  }
   const identityKeys = [
     "actorRef",
     "projectRef",
@@ -373,6 +418,14 @@ export function readReportEvidenceProjection(
     }
   }
   if (parsedStatus === "available") {
+    const serverReceipt = readReportEvidenceServerReceipt(serverReceiptValue);
+    if (!serverReceipt || serverReceipt.projectionDigest !== candidate.projectionDigest) return null;
+    if (identityKeys.some((key) => serverReceipt.identity[key] !== candidate[key])) return null;
+    try {
+      if (canonicalJsonV1(serverReceipt.provenance) !== canonicalJsonV1(provenance)) return null;
+    } catch {
+      return null;
+    }
     if (
       candidate.availability !== "available"
       || candidate.executionStatus !== "completed"

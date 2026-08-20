@@ -187,7 +187,6 @@ def _report_evidence_for_run(
                 record,
                 artifact_content_sha256=artifact_content_sha256,
                 authoritative_persistence=authoritative_persistence,
-                request_identity=request_identity,
             )
         )
 
@@ -205,6 +204,44 @@ def _report_evidence_for_run(
             "artifact_type": "report",
         },
     )
+
+
+def _report_evidence_server_receipt(
+    view: dict[str, object],
+) -> dict[str, object] | None:
+    """Expose an independent server transport anchor for available evidence."""
+
+    digest = view.get("projectionDigest")
+    provenance = view.get("provenance")
+    if (
+        view.get("status") != "available"
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(char not in "0123456789abcdef" for char in digest)
+        or not isinstance(provenance, dict)
+    ):
+        return None
+    identity_keys = (
+        "actorRef",
+        "projectRef",
+        "sessionRef",
+        "scopeRef",
+        "runId",
+        "modelRunId",
+        "artifactRef",
+        "commitId",
+        "confirmationRef",
+    )
+    identity = {key: view.get(key) for key in identity_keys}
+    if any(not isinstance(value, str) or not value.strip() for value in identity.values()):
+        return None
+    return {
+        "schemaVersion": 1,
+        "kind": "evidence.report.server-receipt.v1",
+        "projectionDigest": digest,
+        "identity": identity,
+        "provenance": dict(provenance),
+    }
 
 
 def _report_identity_for_request(
@@ -729,6 +766,7 @@ def get_run_endpoint(run_id: str, project_root: str, request: Request) -> dict:
         # run surface show that answer instead of leaving it in an artifact.
         "post_estimation_results": post_estimation_results,
         "report_evidence": report_evidence,
+        "report_evidence_receipt": _report_evidence_server_receipt(report_evidence),
     }
 
 

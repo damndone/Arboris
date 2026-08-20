@@ -441,9 +441,11 @@ export function ReportWorkspaceProvider({
           setPostEstimation(detail.post_estimation_results ?? []);
           setPredictionEvidence(detail.prediction_evidence ?? null);
           setModelResults(detail.model_results ?? []);
+          const detailRecord = detail as unknown as Record<string, unknown>;
           const reportEvidence = readReportEvidenceProjection(
             detail.report_evidence,
             { runId },
+            detailRecord.report_evidence_receipt,
           );
           setReportEvidenceProjection(
             reportEvidence ?? unavailableReportEvidence("REPORT_EVIDENCE_SCHEMA_INVALID", `run:${runId}`),

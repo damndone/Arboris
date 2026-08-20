@@ -8,6 +8,7 @@ import {
   reportProjectionDigest,
   unavailableReportEvidence,
   type ReportEvidenceProjection,
+  type ReportEvidenceServerReceipt,
 } from "./factTable";
 import { readReportEvidenceProjection } from "./factTable";
 import { FamilyEvidence } from "./FamilyEvidence";
@@ -108,6 +109,24 @@ const committedProjection: ReportEvidenceProjection = {
   committedProjection as unknown as Record<string, unknown>,
 );
 
+const committedServerReceipt: ReportEvidenceServerReceipt = {
+  schemaVersion: 1,
+  kind: "evidence.report.server-receipt.v1",
+  projectionDigest: committedProjection.projectionDigest,
+  identity: {
+    actorRef: committedProjection.actorRef,
+    projectRef: committedProjection.projectRef,
+    sessionRef: committedProjection.sessionRef,
+    scopeRef: committedProjection.scopeRef,
+    runId: committedProjection.runId,
+    modelRunId: committedProjection.modelRunId,
+    artifactRef: committedProjection.artifactRef,
+    commitId: committedProjection.commitId,
+    confirmationRef: committedProjection.confirmationRef,
+  },
+  provenance: committedProjection.provenance,
+};
+
 const validatedProjection = {
   ...committedProjection,
   validationStatus: "met",
@@ -140,31 +159,31 @@ describe("Report evidence boundary v1.8.9", () => {
       modelRunId: "run-1",
       artifactRef: "artifact-1",
       commitId: "evidence-commit-1",
-    })).toBeNull();
+    }, committedServerReceipt)).toBeNull();
     expect(readReportEvidenceProjection({
       ...committedProjection,
       schemaVersion: 1,
       status: "degraded",
       availability: "available",
       validationStatus: "met",
-    })).toBeNull();
+    }, undefined, committedServerReceipt)).toBeNull();
     expect(readReportEvidenceProjection({
       ...committedProjection,
       schemaVersion: 1,
       status: "available",
       availability: "unavailable",
-    })).toBeNull();
+    }, undefined, committedServerReceipt)).toBeNull();
     expect(readReportEvidenceProjection({
       ...committedProjection,
       provenance: { ...committedProjection.provenance, commitId: "commit-foreign" },
-    })).toBeNull();
+    }, undefined, committedServerReceipt)).toBeNull();
     expect(readReportEvidenceProjection({
       ...committedProjection,
       provenance: {
         ...committedProjection.provenance,
         resultIdentity: { runId: "run-foreign", modelRunId: "run-1" },
       },
-    })).toBeNull();
+    }, undefined, committedServerReceipt)).toBeNull();
   });
 
   it("does not make an indexed uncommitted result citable", () => {
@@ -231,7 +250,23 @@ describe("Report evidence boundary v1.8.9", () => {
     expect(readReportEvidenceProjection({
       ...committedProjection,
       projectionDigest: "b".repeat(64),
-    })).toBeNull();
+    }, undefined, committedServerReceipt)).toBeNull();
+  });
+
+  it("rejects a caller-rehashed forged facts pair without a server receipt", () => {
+    const forged = {
+      ...committedProjection,
+      facts: [{ factId: "fact-forged", statisticId: "sample-mean", value: 999 }],
+      projectionDigest: "",
+    } as Record<string, unknown>;
+    forged.projectionDigest = reportProjectionDigest(forged);
+
+    expect(readReportEvidenceProjection(forged, { runId: "run-1" })).toBeNull();
+    expect(readReportEvidenceProjection(
+      forged,
+      { runId: "run-1" },
+      committedServerReceipt,
+    )).toBeNull();
   });
 
   it("rejects a self-consistent digest when canonical provenance is incomplete", () => {
@@ -241,7 +276,7 @@ describe("Report evidence boundary v1.8.9", () => {
     } as Record<string, unknown>;
     delete (incomplete.provenance as Record<string, unknown>).commitId;
     incomplete.projectionDigest = reportProjectionDigest(incomplete);
-    expect(readReportEvidenceProjection(incomplete)).toBeNull();
+    expect(readReportEvidenceProjection(incomplete, undefined, committedServerReceipt)).toBeNull();
   });
 
   it("rejects a self-consistent digest when identity and provenance disagree", () => {
@@ -250,11 +285,11 @@ describe("Report evidence boundary v1.8.9", () => {
       provenance: { ...committedProjection.provenance, scopeRef: "scope:foreign" },
     } as Record<string, unknown>;
     inconsistent.projectionDigest = reportProjectionDigest(inconsistent);
-    expect(readReportEvidenceProjection(inconsistent)).toBeNull();
+    expect(readReportEvidenceProjection(inconsistent, undefined, committedServerReceipt)).toBeNull();
   });
 
   it("parses and renders validation independently from execution and availability", () => {
-    const parsed = readReportEvidenceProjection(validatedProjection);
+    const parsed = readReportEvidenceProjection(validatedProjection, undefined, committedServerReceipt);
     expect(parsed).toMatchObject({
       validationStatus: "met",
       validationSummary: expect.objectContaining({ requirement_status: "met" }),

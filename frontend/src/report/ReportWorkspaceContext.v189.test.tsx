@@ -125,6 +125,23 @@ const typedReportEvidence = {
   projectionDigest: "",
 } as Record<string, unknown>;
 typedReportEvidence.projectionDigest = reportProjectionDigest(typedReportEvidence);
+const typedReportEvidenceReceipt = {
+  schemaVersion: 1,
+  kind: "evidence.report.server-receipt.v1",
+  projectionDigest: typedReportEvidence.projectionDigest,
+  identity: {
+    actorRef: typedReportEvidence.actorRef,
+    projectRef: typedReportEvidence.projectRef,
+    sessionRef: typedReportEvidence.sessionRef,
+    scopeRef: typedReportEvidence.scopeRef,
+    runId: typedReportEvidence.runId,
+    modelRunId: typedReportEvidence.modelRunId,
+    artifactRef: typedReportEvidence.artifactRef,
+    commitId: typedReportEvidence.commitId,
+    confirmationRef: typedReportEvidence.confirmationRef,
+  },
+  provenance: typedReportEvidence.provenance,
+};
 
 function indexedClassificationItem(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -270,7 +287,11 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
       ...evidencePacket,
       raw_classification_secret: "RAW_CLASSIFICATION_SECRET",
     });
-    mockRunDetail.current = { ...mockRunDetail.current, report_evidence: typedReportEvidence };
+    mockRunDetail.current = {
+      ...mockRunDetail.current,
+      report_evidence: typedReportEvidence,
+      report_evidence_receipt: typedReportEvidenceReceipt,
+    };
 
     renderWorkspace();
 

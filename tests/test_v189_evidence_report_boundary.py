@@ -39,6 +39,7 @@ from workbench.report_view_model import (
 )
 from workbench.services.results_service import (
     PersistedEvidenceResultsFacadeV1,
+    ReportEvidenceRequestIdentityV1,
     ServerOwnedReportEvidencePersistenceV1,
     UnavailableReportEvidenceCapabilityV1,
 )
@@ -426,7 +427,7 @@ def test_unbound_projection_is_unavailable_without_server_identity_and_admission
     view = build_persisted_evidence_report_view(projection)
 
     assert view["status"] == "unavailable"
-    assert view["reasonCode"] == "EVIDENCE_OWNER_CONTEXT_REQUIRED"
+    assert view["reasonCode"] == "EVIDENCE_OWNER_CAPABILITY_REQUIRED"
     assert view["commitId"] == "UNAVAILABLE"
     assert view["facts"] == []
     assert {
@@ -445,6 +446,102 @@ def test_unbound_projection_is_unavailable_without_server_identity_and_admission
         "projectionRef",
         "resultIdentity",
     } <= set(view["provenance"])
+
+
+def test_remediation_four_caller_created_request_identity_cannot_admit_report_view(
+    tmp_path: Path,
+) -> None:
+    with _server_owned_evidence(tmp_path / "owner-store") as (record, _binding, owner):
+        projection = default_projection_registry().project(
+            owner._canonical_record,  # type: ignore[attr-defined]
+            consumer_id="report",
+            destination="local",
+        )
+        caller_identity = ReportEvidenceRequestIdentityV1(
+            actor_ref=owner.actor_ref,
+            project_ref=owner.project_ref,
+            session_ref=owner.session_ref,
+            scope_ref=owner.scope_ref,
+            run_id=owner.run_id,
+            model_run_id=owner.model_run_id,
+            confirmation_ref=owner.confirmation_ref,
+        )
+
+        caller_view = build_persisted_evidence_report_view(
+            projection,
+            owner=owner,
+            request_identity=caller_identity,
+            artifact_admission=owner._canonical_report_artifact(),  # type: ignore[attr-defined]
+        )
+        valid_view = build_persisted_evidence_report_view(
+            projection,
+            owner=owner,
+            artifact_admission=owner._canonical_report_artifact(),  # type: ignore[attr-defined]
+        )
+
+    assert caller_view["status"] in {"blocked", "unavailable"}
+    assert caller_view["facts"] == []
+    assert caller_view["reasonCode"] == "EVIDENCE_OWNER_REQUEST_REQUIRED"
+    assert valid_view["status"] == "available"
+    assert valid_view["facts"]
+    assert record.artifact_id == valid_view["artifactRef"]
+
+
+def test_remediation_four_object_new_projection_is_typed_unavailable_before_report_facts(
+    tmp_path: Path,
+) -> None:
+    from workbench.evidence.consumer_adapters import EvidenceProjectionV1
+
+    with _server_owned_evidence(tmp_path / "owner-store") as (_record, _binding, owner):
+        forged_projection = object.__new__(EvidenceProjectionV1)
+        view = build_persisted_evidence_report_view(
+            forged_projection,
+            owner=owner,
+            artifact_admission=owner._canonical_report_artifact(),  # type: ignore[attr-defined]
+        )
+
+    assert view["status"] in {"blocked", "unavailable"}
+    assert view["facts"] == []
+    assert view["reasonCode"] == "EVIDENCE_PROJECTION_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("outer_field", "nested_field", "outer_value"),
+    (
+        ("evidence_commit_binding", "evidence_commit_binding", None),
+        ("evidence_envelope", "evidence_envelope", {}),
+        ("evidence_envelope_ref", "envelope_ref", ""),
+    ),
+)
+def test_remediation_four_present_invalid_outer_wire_never_falls_back_to_nested(
+    tmp_path: Path,
+    outer_field: str,
+    nested_field: str,
+    outer_value: object,
+) -> None:
+    with _server_owned_evidence(tmp_path / outer_field) as (record, binding, owner):
+        indexed_artifact, payload, content_hash = _canonical_indexed_artifact(record, binding)
+        indexed_artifact["evidence"] = {
+            nested_field: (
+                binding.to_dict()
+                if nested_field == "evidence_commit_binding"
+                else record.envelope.to_dict()
+                if nested_field == "evidence_envelope"
+                else f"evidence-envelope:{record.envelope_digest}"
+            )
+        }
+        indexed_artifact[outer_field] = outer_value
+
+        view = build_indexed_report_evidence(
+            indexed_artifact,
+            payload,
+            artifact_content_sha256=content_hash,
+            authoritative_persistence=owner,
+        )
+
+    assert view["status"] in {"blocked", "unavailable"}
+    assert view["facts"] == []
+    assert view["reasonCode"] == "EVIDENCE_WIRE_FIELD_INVALID"
 
 
 def test_remediation_three_report_provenance_is_complete_and_canonical(tmp_path: Path) -> None:
@@ -939,7 +1036,11 @@ def test_default_app_lifespan_uses_the_server_owned_report_capability(tmp_path: 
             configure_report_evidence_owner(None)
 
     assert response.status_code == 200, response.text
-    assert response.json()["report_evidence"]["status"] == "available"
+    body = response.json()
+    assert body["report_evidence"]["status"] == "available"
+    assert body["report_evidence_receipt"]["kind"] == "evidence.report.server-receipt.v1"
+    assert body["report_evidence_receipt"]["projectionDigest"] == body["report_evidence"]["projectionDigest"]
+    assert body["report_evidence_receipt"]["provenance"] == body["report_evidence"]["provenance"]
     app.state.report_evidence_persistence = None
 
 
@@ -990,7 +1091,10 @@ def test_round_three_default_lifespan_installs_a_real_c0_owner_without_manual_co
             app.state.report_evidence_persistence = None
 
     assert response.status_code == 200, response.text
-    assert response.json()["report_evidence"]["status"] == "available"
+    body = response.json()
+    assert body["report_evidence"]["status"] == "available"
+    assert body["report_evidence_receipt"]["kind"] == "evidence.report.server-receipt.v1"
+    assert body["report_evidence_receipt"]["projectionDigest"] == body["report_evidence"]["projectionDigest"]
 
 
 def test_round_three_public_projection_and_writer_seams_reject_forged_inputs() -> None:

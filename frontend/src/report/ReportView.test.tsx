@@ -147,6 +147,29 @@ function typedReportEvidence(
   return projection;
 }
 
+function reportEvidenceFields(projection: ReportEvidenceProjection = typedReportEvidence()) {
+  return {
+    report_evidence: projection,
+    report_evidence_receipt: {
+      schemaVersion: 1,
+      kind: "evidence.report.server-receipt.v1",
+      projectionDigest: projection.projectionDigest,
+      identity: {
+        actorRef: projection.actorRef,
+        projectRef: projection.projectRef,
+        sessionRef: projection.sessionRef,
+        scopeRef: projection.scopeRef,
+        runId: projection.runId,
+        modelRunId: projection.modelRunId,
+        artifactRef: projection.artifactRef,
+        commitId: projection.commitId,
+        confirmationRef: projection.confirmationRef,
+      },
+      provenance: projection.provenance,
+    },
+  };
+}
+
 describe("ReportView", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -168,7 +191,7 @@ describe("ReportView", () => {
       model_results: [],
       post_estimation_results: [],
       prediction_evidence: null,
-      report_evidence: typedReportEvidence(),
+      ...reportEvidenceFields(),
     });
     mockFigureArtifacts.groups = [];
     mockFigureArtifactsError.current = null;
@@ -223,12 +246,12 @@ describe("ReportView", () => {
       model_results: [],
       post_estimation_results: [],
       prediction_evidence: null,
-      report_evidence: typedReportEvidence([
+      ...reportEvidenceFields(typedReportEvidence([
         { statisticId: "ts:arma:selected_candidate", value: "arma-p1-q1-n" },
         { statisticId: "ts:validation:rmse", value: 7.4 },
         { statisticId: "ts:contract:transform", value: "log_return_pct" },
         { statisticId: "ts:data:analysis_observations", value: 2542 },
-      ]),
+      ])),
     });
 
     render(<ReportView projectRoot="/tmp/projA" />);
@@ -262,7 +285,7 @@ describe("ReportView", () => {
       ],
       post_estimation_results: [],
       prediction_evidence: null,
-      report_evidence: typedReportEvidence([
+      ...reportEvidenceFields(typedReportEvidence([
         { statisticId: "model:ols_1:coefficient:x:estimate", value: 1.25 },
         { statisticId: "model:ols_1:meta:label", value: "Baseline" },
         { statisticId: "model:ols_1:meta:nobs", value: 100 },
@@ -270,7 +293,7 @@ describe("ReportView", () => {
         { statisticId: "model:ols_1:coefficient:x:p_value", value: 0.04 },
         { statisticId: "model:ols_1:coefficient:x:ci_lower", value: 0.8 },
         { statisticId: "model:ols_1:coefficient:x:ci_upper", value: 1.7 },
-      ]),
+      ])),
     });
 
     render(<ReportView projectRoot="/tmp/projA" />);
@@ -314,10 +337,10 @@ describe("ReportView", () => {
       }],
       post_estimation_results: [],
       prediction_evidence: null,
-      report_evidence: typedReportEvidence([
+      ...reportEvidenceFields(typedReportEvidence([
         { statisticId: "family:ordinal_logit:education:odds_ratio", value: 2.15 },
         { statisticId: "model:ordinal_logit_1:coefficient:education:estimate", value: 0.76 },
-      ]),
+      ])),
     });
     mockFigureArtifacts.groups = [{
       artifact_type: "model_diagnostic",
@@ -864,7 +887,7 @@ describe("ReportView curation & history (C-3)", () => {
       model_results: [],
       post_estimation_results: [],
       prediction_evidence: null,
-      report_evidence: typedReportEvidence(),
+      ...reportEvidenceFields(),
     });
   });
 

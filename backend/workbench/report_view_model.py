@@ -7,6 +7,7 @@ from typing import Any
 
 from .artifacts import read_json
 from .canonical import sha256_canonical
+from .evidence.consumer_adapters import EvidenceProjectionError
 # Kept as a module attribute for legacy test/import compatibility.  The typed
 # report consumer below never invokes narrative rendering.
 from .narrative.render import render_template
@@ -579,30 +580,70 @@ def _design_summary(design: Any) -> str:
 def build_persisted_evidence_report_view(
     projection: "EvidenceProjectionV1",
     *,
+    owner: object | None = None,
     request_identity: ReportEvidenceRequestIdentityV1 | None = None,
     artifact_admission: "ArtifactAdmissionV1" | None = None,
 ) -> dict[str, object]:
-    """Expose a bounded report view by copying a typed projection only."""
+    """Expose a bounded report view only after exact C0 owner admission."""
 
-    from .evidence.consumer_adapters import EvidenceProjectionV1
+    from .evidence.consumer_adapters import (
+        EvidenceProjectionError,
+        EvidenceProjectionV1,
+        default_projection_registry,
+    )
     from .evidence.contracts import ArtifactAdmissionV1
+    from .services.results_service import ServerOwnedReportEvidencePersistenceV1
 
-    if type(projection) is not EvidenceProjectionV1:
-        raise TypeError("projection must be EvidenceProjectionV1")
-    if type(request_identity) is not ReportEvidenceRequestIdentityV1:
+    raw_artifact_id = getattr(projection, "artifact_ref", None)
+    artifact_id = raw_artifact_id if type(raw_artifact_id) is str and raw_artifact_id else "unknown-artifact"
+
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
         return _unavailable_report_evidence(
-            artifact_id=projection.artifact_ref,
+            artifact_id=artifact_id,
             artifact_type="unknown",
-            reason_code="EVIDENCE_OWNER_CONTEXT_REQUIRED",
-            request_identity=None,
+            reason_code="EVIDENCE_OWNER_CAPABILITY_REQUIRED",
         )
-    if type(artifact_admission) is not ArtifactAdmissionV1:
+
+    try:
+        owner._require_report_authority()
+        bound_identity = owner._require_report_request_identity(request_identity)
+        canonical_artifact = owner._canonical_report_artifact()
+        if type(artifact_admission) is not ArtifactAdmissionV1 or artifact_admission is not canonical_artifact:
+            raise EvidenceProjectionError(
+                "EVIDENCE_PROVENANCE_REQUIRED",
+                "Report provenance must be the exact owner-admitted artifact",
+            )
+        if type(projection) is not EvidenceProjectionV1:
+            raise EvidenceProjectionError(
+                "EVIDENCE_PROJECTION_INVALID",
+                "Report projection must be an admitted typed projection",
+            )
+        expected_projection = default_projection_registry().project(
+            owner._canonical_record,  # type: ignore[attr-defined]
+            consumer_id="report",
+            destination="local",
+        )
+        if projection.to_dict() != expected_projection.to_dict():
+            raise EvidenceProjectionError(
+                "EVIDENCE_PROJECTION_CANONICAL_MISMATCH",
+                "Report projection is not the owner-admitted canonical projection",
+            )
+    except EvidenceProjectionError as exc:
         return _unavailable_report_evidence(
-            artifact_id=projection.artifact_ref,
+            artifact_id=artifact_id,
             artifact_type="unknown",
-            reason_code="EVIDENCE_PROVENANCE_REQUIRED",
-            request_identity=request_identity,
+            reason_code=exc.code,
+            status="blocked",
         )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return _unavailable_report_evidence(
+            artifact_id=artifact_id,
+            artifact_type="unknown",
+            reason_code="EVIDENCE_PROJECTION_INVALID",
+            status="blocked",
+        )
+
+    request_identity = bound_identity
     if (
         artifact_admission.artifact_id != projection.artifact_ref
         or artifact_admission.envelope_digest != projection.envelope_digest
@@ -767,35 +808,88 @@ def _unavailable_report_evidence(
     }
 
 
+def _nested_evidence_record(value: Mapping[str, object]) -> Mapping[str, object]:
+    if "evidence" not in value:
+        return {}
+    nested = value["evidence"]
+    if not isinstance(nested, Mapping):
+        raise EvidenceProjectionError(
+            "EVIDENCE_WIRE_FIELD_INVALID",
+            "the nested evidence record must be an object",
+        )
+    return nested
+
+
+def _strict_index_field(
+    outer: Mapping[str, object],
+    nested: Mapping[str, object],
+    keys: Sequence[str],
+    *,
+    invalid_code: str = "EVIDENCE_WIRE_FIELD_INVALID",
+    conflict_code: str = "EVIDENCE_WIRE_FIELD_CONFLICT",
+) -> object | None:
+    """Resolve aliases without hiding a present invalid or conflicting value."""
+
+    observed: list[object] = []
+    for source in (outer, nested):
+        for key in keys:
+            if key not in source:
+                continue
+            candidate = source[key]
+            if candidate is None or (
+                type(candidate) is str and not candidate.strip()
+            ) or (
+                isinstance(candidate, Mapping) and not candidate
+            ):
+                raise EvidenceProjectionError(
+                    invalid_code,
+                    f"indexed {key} is present but invalid",
+                )
+            observed.append(candidate)
+    if not observed:
+        return None
+    first = observed[0]
+    if any(candidate != first for candidate in observed[1:]):
+        raise EvidenceProjectionError(
+            conflict_code,
+            "outer and nested indexed evidence fields disagree",
+        )
+    return first
+
+
 def _evidence_wire_fields(
     value: Mapping[str, object],
 ) -> tuple[object | None, object | None, object | None, object | None, object | None]:
-    """Read only explicitly named canonical evidence fields from an index row."""
+    """Read canonical wire fields with strict outer/nested presence semantics."""
 
-    nested = value.get("evidence")
-    nested_record = nested if isinstance(nested, Mapping) else {}
-    binding = (
-        value.get("evidence_commit_binding")
-        or value.get("commit_binding")
-        or value.get("binding")
-        or nested_record.get("evidence_commit_binding")
-        or nested_record.get("commit_binding")
-        or nested_record.get("binding")
+    nested_record = _nested_evidence_record(value)
+    return (
+        _strict_index_field(
+            value,
+            nested_record,
+            ("evidence_commit_binding", "commit_binding", "binding"),
+        ),
+        _strict_index_field(
+            value,
+            nested_record,
+            ("evidence_envelope", "envelope"),
+        ),
+        _strict_index_field(
+            value,
+            nested_record,
+            ("evidence_envelope_ref", "envelope_ref"),
+        ),
+        _strict_index_field(
+            value,
+            nested_record,
+            ("evidence_sensitivity", "sensitivity"),
+        ),
+        _strict_index_field(
+            value,
+            nested_record,
+            ("evidence_artifact_ref", "artifact_ref"),
+        ),
     )
-    envelope = (
-        value.get("evidence_envelope")
-        or value.get("envelope")
-        or nested_record.get("evidence_envelope")
-        or nested_record.get("envelope")
-    )
-    envelope_ref = (
-        value.get("evidence_envelope_ref")
-        or nested_record.get("evidence_envelope_ref")
-        or nested_record.get("envelope_ref")
-    )
-    sensitivity = value.get("evidence_sensitivity") or nested_record.get("sensitivity")
-    artifact_ref = value.get("evidence_artifact_ref") or nested_record.get("artifact_ref")
-    return binding, envelope, envelope_ref, sensitivity, artifact_ref
 
 
 def _evidence_identity_fields(
@@ -822,53 +916,42 @@ def _evidence_identity_fields(
     but it cannot supply the authoritative artifact admission or content hash.
     """
 
-    nested = value.get("evidence")
-    nested_record = nested if isinstance(nested, Mapping) else {}
+    nested_record = _nested_evidence_record(value)
 
-    def first(*keys: str) -> object | None:
-        for source in (value, nested_record):
-            for key in keys:
-                candidate = source.get(key)
-                if candidate is not None:
-                    return candidate
-        return None
+    def strict(*keys: str, invalid_code: str, conflict_code: str) -> object | None:
+        return _strict_index_field(
+            value,
+            nested_record,
+            keys,
+            invalid_code=invalid_code,
+            conflict_code=conflict_code,
+        )
 
-    def all_values(*keys: str) -> list[object]:
-        values: list[object] = []
-        for source in (value, nested_record):
-            for key in keys:
-                candidate = source.get(key)
-                if candidate is not None:
-                    values.append(candidate)
-        return values
-
-    content_hash_values = all_values(
+    indexed_content_hash = strict(
         "evidence_content_hash",
         "content_hash",
         "evidence_artifact_content_hash",
         "artifact_content_hash",
-    )
-    content_hash_conflict = any(
-        candidate != content_hash_values[0]
-        for candidate in content_hash_values[1:]
+        invalid_code="EVIDENCE_ARTIFACT_CONTENT_HASH_REQUIRED",
+        conflict_code="EVIDENCE_ARTIFACT_CONTENT_HASH_MISMATCH",
     )
 
     return (
-        first("actor_ref", "evidence_actor_ref"),
-        first("evidence_commit_ref", "commit_ref", "evidence_commit_id", "commit_id"),
-        first("evidence_artifact_admission_ref", "artifact_admission_ref"),
-        first("project_ref", "evidence_project_ref"),
-        first("session_ref", "evidence_session_ref"),
-        first("scope_ref", "evidence_scope_ref"),
-        first("confirmation_ref", "evidence_confirmation_ref"),
-        first("run_id", "evidence_run_id"),
-        first("model_run_id", "evidence_model_run_id"),
-        first("evidence_run_id"),
-        first("evidence_model_run_id"),
-        first("evidence_content_hash", "content_hash", "evidence_artifact_content_hash", "artifact_content_hash"),
-        content_hash_conflict,
-        first("sha256", "artifact_sha256"),
-        first("evidence_artifact_ref", "artifact_ref"),
+        strict("actor_ref", "evidence_actor_ref", invalid_code="EVIDENCE_ACTOR_REF_REQUIRED", conflict_code="EVIDENCE_OWNER_CONTEXT_MISMATCH"),
+        strict("evidence_commit_ref", "commit_ref", "evidence_commit_id", "commit_id", invalid_code="EVIDENCE_COMMIT_REF_REQUIRED", conflict_code="EVIDENCE_COMMIT_REF_MISMATCH"),
+        strict("evidence_artifact_admission_ref", "artifact_admission_ref", invalid_code="EVIDENCE_ARTIFACT_ADMISSION_REF_REQUIRED", conflict_code="EVIDENCE_ARTIFACT_ADMISSION_MISMATCH"),
+        strict("project_ref", "evidence_project_ref", invalid_code="EVIDENCE_PROJECT_REF_REQUIRED", conflict_code="EVIDENCE_OWNER_CONTEXT_MISMATCH"),
+        strict("session_ref", "evidence_session_ref", invalid_code="EVIDENCE_SESSION_REF_REQUIRED", conflict_code="EVIDENCE_OWNER_CONTEXT_MISMATCH"),
+        strict("scope_ref", "evidence_scope_ref", invalid_code="EVIDENCE_SCOPE_REF_REQUIRED", conflict_code="EVIDENCE_OWNER_CONTEXT_MISMATCH"),
+        strict("confirmation_ref", "evidence_confirmation_ref", invalid_code="EVIDENCE_CONFIRMATION_REF_REQUIRED", conflict_code="EVIDENCE_OWNER_CONTEXT_MISMATCH"),
+        strict("run_id", "evidence_run_id", invalid_code="EVIDENCE_RUN_ID_REQUIRED", conflict_code="EVIDENCE_RUN_ID_MISMATCH"),
+        strict("model_run_id", "evidence_model_run_id", invalid_code="EVIDENCE_MODEL_RUN_ID_REQUIRED", conflict_code="EVIDENCE_RUN_ID_MISMATCH"),
+        strict("evidence_run_id", invalid_code="EVIDENCE_RUN_ID_REQUIRED", conflict_code="EVIDENCE_RUN_ID_MISMATCH"),
+        strict("evidence_model_run_id", invalid_code="EVIDENCE_MODEL_RUN_ID_REQUIRED", conflict_code="EVIDENCE_RUN_ID_MISMATCH"),
+        indexed_content_hash,
+        False,
+        strict("sha256", "artifact_sha256", invalid_code="EVIDENCE_ARTIFACT_FILE_HASH_REQUIRED", conflict_code="EVIDENCE_ARTIFACT_FILE_HASH_MISMATCH"),
+        strict("evidence_artifact_ref", "artifact_ref", invalid_code="EVIDENCE_ARTIFACT_REF_REQUIRED", conflict_code="EVIDENCE_ARTIFACT_ID_MISMATCH"),
     )
 
 
@@ -915,25 +998,33 @@ def build_indexed_report_evidence(
     # The artifact payload is deliberately not a source for identity, binding,
     # envelope, or facts.  It is an untrusted compatibility input retained in
     # the function signature so old callers fail closed through the same gate.
-    binding_raw, envelope_raw, *_ = _evidence_wire_fields(indexed_artifact)
+    try:
+        binding_raw, envelope_raw, *_ = _evidence_wire_fields(indexed_artifact)
 
-    (
-        actor_ref_raw,
-        commit_ref_raw,
-        admission_ref_raw,
-        project_ref_raw,
-        session_ref_raw,
-        scope_ref_raw,
-        confirmation_ref_raw,
-        run_id_raw,
-        model_run_id_raw,
-        evidence_run_id_raw,
-        evidence_model_run_id_raw,
-        indexed_content_hash_raw,
-        indexed_content_hash_conflict,
-        indexed_raw_sha256,
-        indexed_artifact_ref_raw,
-    ) = _evidence_identity_fields(indexed_artifact)
+        (
+            actor_ref_raw,
+            commit_ref_raw,
+            admission_ref_raw,
+            project_ref_raw,
+            session_ref_raw,
+            scope_ref_raw,
+            confirmation_ref_raw,
+            run_id_raw,
+            model_run_id_raw,
+            evidence_run_id_raw,
+            evidence_model_run_id_raw,
+            indexed_content_hash_raw,
+            indexed_content_hash_conflict,
+            indexed_raw_sha256,
+            indexed_artifact_ref_raw,
+        ) = _evidence_identity_fields(indexed_artifact)
+    except EvidenceProjectionError as exc:
+        return _unavailable_report_evidence(
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            reason_code=exc.code,
+            status="blocked",
+        )
 
     if binding_raw is None and (
         envelope_raw is not None
@@ -948,10 +1039,7 @@ def build_indexed_report_evidence(
 
     from .contracts.evidence.envelope import EvidenceEnvelopeV1
     from .contracts.evidence.persistence import EvidenceCommitBindingV1
-    from .evidence.consumer_adapters import (
-        EvidenceProjectionError,
-        default_projection_registry,
-    )
+    from .evidence.consumer_adapters import default_projection_registry
     from .services.results_service import ServerOwnedReportEvidencePersistenceV1
 
     try:
@@ -1005,23 +1093,22 @@ def build_indexed_report_evidence(
                 "indexed artifact file hash differs from persisted content",
             )
 
-        nested_index = indexed_artifact.get("evidence")
-        nested_index = nested_index if isinstance(nested_index, Mapping) else {}
+        nested_index = _nested_evidence_record(indexed_artifact)
 
         def required_index_provenance(*keys: str, reason_code: str) -> object:
-            for source in (indexed_artifact, nested_index):
-                for key in keys:
-                    if key in source:
-                        candidate = source[key]
-                        if candidate is None or (
-                            type(candidate) is str and not candidate.strip()
-                        ):
-                            break
-                        return candidate
-            raise EvidenceProjectionError(
-                reason_code,
-                "canonical indexed artifact provenance is required",
+            candidate = _strict_index_field(
+                indexed_artifact,
+                nested_index,
+                keys,
+                invalid_code=reason_code,
+                conflict_code="EVIDENCE_PROVENANCE_CONFLICT",
             )
+            if candidate is None:
+                raise EvidenceProjectionError(
+                    reason_code,
+                    "canonical indexed artifact provenance is required",
+                )
+            return candidate
 
         source_ref = required_text(
             required_index_provenance(
@@ -1088,6 +1175,8 @@ def build_indexed_report_evidence(
                 "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
                 "Report evidence requires the server-owned persistence capability",
             )
+        if request_identity is not None:
+            authoritative_persistence._require_report_request_identity(request_identity)
 
         candidate_binding: EvidenceCommitBindingV1 | None = None
         if binding_raw is not None:
@@ -1163,18 +1252,9 @@ def build_indexed_report_evidence(
             consumer_id="report",
             destination="local",
         )
-        identity = request_identity or ReportEvidenceRequestIdentityV1(
-            actor_ref=actor_ref,
-            project_ref=project_ref,
-            session_ref=session_ref,
-            scope_ref=scope_ref,
-            run_id=run_id,
-            model_run_id=model_run_id,
-            confirmation_ref=confirmation_ref,
-        )
         canonical_view = build_persisted_evidence_report_view(
             projection,
-            request_identity=identity,
+            owner=authoritative_persistence,
             artifact_admission=authoritative_persistence._canonical_report_artifact(),
         )
         # Some historical index/payload writers copied the projected facts and

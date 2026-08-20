@@ -287,6 +287,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         "_authority_handle",
         "_authority_request",
         "_authority_proof",
+        "_report_request_identity",
         "_canonical_artifact",
         "_report_authority_marker",
         "__weakref__",
@@ -445,6 +446,15 @@ class ServerOwnedReportEvidencePersistenceV1:
         self._authority_handle = authority_handle
         self._authority_request = authority_request
         self._authority_proof = authority_proof
+        self._report_request_identity = ReportEvidenceRequestIdentityV1(
+            actor_ref=self._actor_ref,
+            project_ref=self._project_ref,
+            session_ref=self._session_ref,
+            scope_ref=self._scope_ref,
+            run_id=self._run_id,
+            model_run_id=self._model_run_id,
+            confirmation_ref=self._confirmation_ref,
+        )
         self._canonical_artifact = artifact
         self._report_authority_marker = object()
         with _REPORT_OWNER_ADMISSIONS_LOCK:
@@ -601,6 +611,20 @@ class ServerOwnedReportEvidencePersistenceV1:
     def __reduce__(self):
         raise TypeError("host-bound Report evidence owner capabilities cannot be serialized")
 
+    def _require_report_request_identity(
+        self,
+        candidate: ReportEvidenceRequestIdentityV1 | None,
+    ) -> ReportEvidenceRequestIdentityV1:
+        """Return only the request identity created during host admission."""
+
+        self._require_report_authority()
+        if candidate is not None and candidate is not self._report_request_identity:
+            raise EvidenceProjectionError(
+                "EVIDENCE_OWNER_REQUEST_REQUIRED",
+                "Report request identity must be the exact owner-bound server identity",
+            )
+        return self._report_request_identity
+
     @classmethod
     def _from_host(cls, *args: object, **kwargs: object) -> "ServerOwnedReportEvidencePersistenceV1":
         """Construct only with the C0 host-issued capability supplied by the server."""
@@ -692,15 +716,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         )
         return build_persisted_evidence_report_view(
             projection,
-            request_identity=ReportEvidenceRequestIdentityV1(
-                actor_ref=self._actor_ref,
-                project_ref=self._project_ref,
-                session_ref=self._session_ref,
-                scope_ref=self._scope_ref,
-                run_id=self._run_id,
-                model_run_id=self._model_run_id,
-                confirmation_ref=self._confirmation_ref,
-            ),
+            owner=self,
             artifact_admission=self._canonical_artifact,
         )
 
