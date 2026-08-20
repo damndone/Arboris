@@ -64,6 +64,8 @@ from .proposals import (
     ProposalRevision,
     ProposalStaleError,
     ProposalStore,
+    ProposalStoreCapabilityError,
+    ProposalStoreCapabilityV1,
 )
 from .risk import (
     RiskAuthorizationReplay,
@@ -3164,6 +3166,7 @@ class ServerProposalBindingV1:
     actor_ref: str
     session_ref: str
     project_ref: str
+    confirmation_id: str
     _authority_token: object = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -3174,6 +3177,7 @@ class ServerProposalBindingV1:
             ("actor_ref", self.actor_ref),
             ("session_ref", self.session_ref),
             ("project_ref", self.project_ref),
+            ("confirmation_id", self.confirmation_id),
         ):
             if type(value) is not str or not value or value != value.strip() or "\x00" in value:
                 raise CutoverCompilerError("SERVER_PROPOSAL_BINDING_INVALID", f"{name} is invalid")
@@ -3309,6 +3313,7 @@ class AgentNotebookCompilerV1:
         self._operation_by_record: dict[str, str] = {}
         self._proposal_bindings: dict[str, ServerProposalBindingV1] = {}
         self._confirmations: dict[str, Any] = {}
+        self._issued_receipts: dict[str, ServerConfirmationReceiptV1] = {}
         self._operations = CutoverOperationStoreV1()
         self.method_snapshot_ref = "method:snapshot:1"
         self.risk_snapshot_ref = "risk:snapshot:1"
@@ -3684,18 +3689,30 @@ class AgentNotebookCompilerV1:
 
         return canonical_proposal_fingerprint(proposal)
 
-    @staticmethod
+    def server_proposal_store(self, root: Path | str) -> ProposalStoreCapabilityV1:
+        """Issue the only ProposalStore view accepted by this compiler authority."""
+
+        return ProposalStore._issue_server_capability(root, owner_token=self._authority_token)
+
     def _load_persisted_proposal(
-        proposal_store: ProposalStore,
+        self,
+        proposal_store: ProposalStoreCapabilityV1,
         proposal_id: str,
     ) -> ProposalRevision:
         """Read and integrity-check one exact server-owned latest revision."""
 
-        if type(proposal_store) is not ProposalStore:
+        if type(proposal_store) is not ProposalStoreCapabilityV1:
             raise CutoverCompilerError(
-                "SERVER_PROPOSAL_STORE_REQUIRED",
-                "proposal binding requires the server-owned ProposalStore",
+                "SERVER_PROPOSAL_STORE_CAPABILITY_REQUIRED",
+                "proposal binding requires an opaque ProposalStore capability issued by this authority",
             )
+        try:
+            proposal_store._require_admitted(self._authority_token)
+        except ProposalStoreCapabilityError as exc:
+            raise CutoverCompilerError(
+                "SERVER_PROPOSAL_STORE_CAPABILITY_REQUIRED",
+                "proposal binding requires an opaque ProposalStore capability issued by this authority",
+            ) from exc
         if type(proposal_id) is not str or not proposal_id.strip():
             raise CutoverCompilerError("SERVER_PROPOSAL_ID_REQUIRED")
         try:
@@ -3724,7 +3741,7 @@ class AgentNotebookCompilerV1:
     def _bind_persisted_proposal(
         self,
         compilation_record_id: str,
-        proposal_store: ProposalStore,
+        proposal_store: ProposalStoreCapabilityV1,
         proposal_id: str,
     ) -> None:
         proposal = self._load_persisted_proposal(proposal_store, proposal_id)
@@ -3755,29 +3772,30 @@ class AgentNotebookCompilerV1:
             actor_ref=record.principal_ref,
             session_ref=record.session_ref,
             project_ref=record.project_ref,
+            confirmation_id=server_compilation["confirmation_id"],
             _authority_token=self._authority_token,
         )
 
     def bind_proposal(
         self,
         compilation_record_id: str,
-        proposal_store: ProposalStore | object,
+        proposal_store: ProposalStoreCapabilityV1 | object,
         proposal_id: str | None = None,
     ) -> None:
         """Bind only the exact latest revision held by the server ProposalStore."""
 
-        if type(proposal_store) is not ProposalStore or proposal_id is None:
+        if type(proposal_store) is not ProposalStoreCapabilityV1 or proposal_id is None:
             raise CutoverCompilerError(
-                "SERVER_PROPOSAL_STORE_REQUIRED",
+                "SERVER_PROPOSAL_STORE_CAPABILITY_REQUIRED",
                 "caller-created ProposalRevision values are not proposal authority; "
-                "supply ProposalStore and exact proposal_id",
+                "supply the server-issued ProposalStore capability and exact proposal_id",
             )
         self._bind_persisted_proposal(compilation_record_id, proposal_store, proposal_id)
 
     def bind_persisted_proposal(
         self,
         compilation_record_id: str,
-        proposal_store: ProposalStore,
+        proposal_store: ProposalStoreCapabilityV1,
         proposal_id: str,
     ) -> None:
         """Load the exact latest revision from the server-owned ProposalStore."""
@@ -3788,18 +3806,18 @@ class AgentNotebookCompilerV1:
         self,
         intent: Any,
         *,
-        proposal_store: ProposalStore | object | None = None,
+        proposal_store: ProposalStoreCapabilityV1 | object | None = None,
         proposal_id: str | None = None,
         entrypoint: str = "agent",
         proposal: object | None = None,
     ) -> CutoverCompilationPreviewV1:
         """Compile and bind one exact ProposalStore revision in one server flow."""
 
-        if proposal is not None or type(proposal_store) is not ProposalStore or proposal_id is None:
+        if proposal is not None or type(proposal_store) is not ProposalStoreCapabilityV1 or proposal_id is None:
             raise CutoverCompilerError(
-                "SERVER_PROPOSAL_STORE_REQUIRED",
+                "SERVER_PROPOSAL_STORE_CAPABILITY_REQUIRED",
                 "caller-created ProposalRevision values are not accepted; "
-                "supply ProposalStore and exact proposal_id",
+                "supply the server-issued ProposalStore capability and exact proposal_id",
             )
         self._load_persisted_proposal(proposal_store, proposal_id)
         preview = self.compile(intent, entrypoint=entrypoint)
@@ -3812,7 +3830,7 @@ class AgentNotebookCompilerV1:
         self,
         intent: Any,
         *,
-        proposal_store: ProposalStore,
+        proposal_store: ProposalStoreCapabilityV1,
         proposal_id: str,
         entrypoint: str,
     ) -> CutoverCompilationPreviewV1:
@@ -3917,7 +3935,7 @@ class AgentNotebookCompilerV1:
             )
         now = self.clock()
         binding = ConfirmationBindingV1(
-            confirmation_id=f"confirmation:{uuid4().hex}",
+            confirmation_id=proposal_binding.confirmation_id,
             compilation_record_ref=record.reference,
             actor_ref=record.principal_ref,
             session_ref=record.session_ref,
@@ -3940,7 +3958,7 @@ class AgentNotebookCompilerV1:
             state="confirmed",
             confirmation_id=issued.confirmation_id,
         )
-        return ServerConfirmationReceiptV1(
+        receipt = ServerConfirmationReceiptV1(
             confirmation_id=issued.confirmation_id,
             confirmation_digest=issued.confirmation_digest,
             compilation_record_id=record.record_id,
@@ -3953,6 +3971,8 @@ class AgentNotebookCompilerV1:
             project_ref=record.project_ref,
             _authority_token=self._authority_token,
         )
+        self._issued_receipts[record.record_id] = receipt
+        return receipt
 
     def execute(
         self,

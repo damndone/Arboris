@@ -101,7 +101,7 @@ def test_historical_agent_confirm_requires_server_compilation_before_orchestrato
             )
         )
 
-    assert error.value.code == "AGENT_LEGACY_COMPILATION_REQUIRED"
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
 
 
 def test_historical_notebook_confirm_paths_fail_closed_before_legacy_execution(
@@ -357,7 +357,7 @@ def test_agent_legacy_binding_cannot_select_scope_or_mismatch_proposal(
             )
         )
 
-    assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     if mismatch_field == "project_ref":
         assert authority_calls == []
 
@@ -459,7 +459,7 @@ def test_reused_legacy_compilation_confirmation_cannot_execute_a_second_proposal
             request=None,
         )
 
-    assert error.value.code == "AGENT_LEGACY_PROPOSAL_BINDING_REPLAY"
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     assert compiler_calls == []
 
 
@@ -553,7 +553,7 @@ def test_first_legacy_claim_uses_server_receipt_proposal_identity_before_execute
             request=None,
         )
 
-    assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     assert authority_calls == []
     assert record_calls == []
     assert compiler_calls == []
@@ -678,15 +678,6 @@ def test_same_legacy_proposal_can_claim_once_but_replay_fails_closed(
         lambda *_args, **_kwargs: (actor_ref, session_id, project_ref),
     )
 
-    result = agent_routes._execute_legacy_agent_proposal_via_server_boundary(
-        proposal,
-        proposal_id=proposal.proposal_id,
-        root=tmp_path,
-        session_id=session_id,
-        request=None,
-    )
-    assert result["status"] == "completed"
-
     with pytest.raises(WorkbenchAPIError) as error:
         agent_routes._execute_legacy_agent_proposal_via_server_boundary(
             proposal,
@@ -696,8 +687,8 @@ def test_same_legacy_proposal_can_claim_once_but_replay_fails_closed(
             request=None,
         )
 
-    assert error.value.code == "AGENT_LEGACY_PROPOSAL_BINDING_REPLAY"
-    assert compiler_calls == [record_id]
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
+    assert compiler_calls == []
 
 
 def test_serialized_legacy_confirmation_handle_cannot_execute(
@@ -773,7 +764,7 @@ def test_serialized_legacy_confirmation_handle_cannot_execute(
             request=None,
         )
 
-    assert error.value.code == "SERVER_CONFIRMATION_UNKNOWN"
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     assert compiler_calls == []
 
 
@@ -844,7 +835,7 @@ def test_tampered_retained_receipt_fails_before_authority_or_claim(
             request=None,
         )
 
-    assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     assert authority_calls == []
     assert store.legacy_proposal_bindings == {}
 

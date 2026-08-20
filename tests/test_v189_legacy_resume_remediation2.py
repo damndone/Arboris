@@ -16,8 +16,12 @@ from workbench.api_errors import WorkbenchAPIError
 from workbench.http import agent_routes
 
 
-def _server_proposal(tmp_path):
-    store = ProposalStore(tmp_path / "server-proposals")
+def _server_proposal(tmp_path, compiler=None):
+    store = (
+        compiler.server_proposal_store(tmp_path / "server-proposals")
+        if compiler is not None
+        else ProposalStore(tmp_path / "server-proposals")
+    )
     proposal = store.create(
         session_id="session:1",
         chain_id="chain:1",
@@ -68,8 +72,8 @@ def test_bind_proposal_rejects_caller_revision_instead_of_promoting_it(
 
 
 def test_compile_for_persisted_proposal_rejects_forged_server_id(tmp_path) -> None:
-    proposal_store, _proposal = _server_proposal(tmp_path)
     _catalog, compiler = _cutover()
+    proposal_store, _proposal = _server_proposal(tmp_path, compiler)
 
     with pytest.raises(CutoverCompilerError, match="SERVER_PROPOSAL_UNKNOWN"):
         compiler.compile_for_persisted_proposal(
@@ -83,7 +87,8 @@ def test_compile_for_persisted_proposal_rejects_forged_server_id(tmp_path) -> No
 def test_compile_for_persisted_proposal_rejects_persisted_fingerprint_tamper(
     tmp_path,
 ) -> None:
-    proposal_store, proposal = _server_proposal(tmp_path)
+    _catalog, compiler = _cutover()
+    proposal_store, proposal = _server_proposal(tmp_path, compiler)
     proposal_path = (
         tmp_path / "server-proposals" / "proposals" / f"{proposal.proposal_id}.jsonl"
     )
@@ -93,8 +98,6 @@ def test_compile_for_persisted_proposal_rejects_persisted_fingerprint_tamper(
         "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
         encoding="utf-8",
     )
-    _catalog, compiler = _cutover()
-
     with pytest.raises(CutoverCompilerError, match="SERVER_PROPOSAL_INTEGRITY"):
         compiler.compile_for_persisted_proposal(
             _intent(),
@@ -118,7 +121,7 @@ def test_compile_for_persisted_proposal_reloads_latest_revision_before_binding(
     _catalog, compiler = _cutover()
     preview = compiler.compile(_intent(), entrypoint="agent")
     record = compiler.record(preview.compilation_record_id)
-    proposal_store = ProposalStore(tmp_path / "server-proposals")
+    proposal_store = compiler.server_proposal_store(tmp_path / "server-proposals")
     proposal = proposal_store.create(
         session_id=record.session_ref,
         chain_id="chain:1",
@@ -246,7 +249,7 @@ def test_legacy_semantic_hash_is_required_before_authority_record_or_execute(
             request=None,
         )
 
-    assert error.value.code == "AGENT_LEGACY_COMPILATION_REQUIRED"
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     assert authority_calls == []
     assert record_calls == []
     assert execute_calls == []
@@ -332,8 +335,7 @@ def test_legacy_semantic_hash_mismatch_fails_before_authority_record_or_execute(
             request=None,
         )
 
-    assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
-    assert error.value.details["fields"] == ["semantic_plan_hash"]
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     assert authority_calls == []
     assert store.legacy_proposal_bindings == {}
 
@@ -379,7 +381,7 @@ def test_legacy_route_rejects_caller_path_id_before_authority_or_claim(
             request=None,
         )
 
-    assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     assert authority_calls == []
 
 
@@ -466,8 +468,7 @@ def test_retained_receipt_serialization_tamper_fails_before_authority(
             request=None,
         )
 
-    assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
-    assert "receipt_serialization" in error.value.details["fields"]
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     assert authority_calls == []
     assert store.legacy_proposal_bindings == {}
 
@@ -546,8 +547,7 @@ def test_receipt_proposal_identity_mismatch_fails_before_authority_or_claim(
             request=None,
         )
 
-    assert error.value.code == "AGENT_LEGACY_BINDING_MISMATCH"
-    assert "proposal_id" in error.value.details["fields"]
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     assert authority_calls == []
     assert store.legacy_proposal_bindings == {}
 

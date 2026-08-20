@@ -156,10 +156,10 @@ def _intent(*, actor: str = "principal:user:1", session: str = "session:1") -> A
     )
 
 
-def _persisted_plan(compiler: AgentNotebookCompilerV1, root) -> tuple[ProposalStore, object]:
+def _persisted_plan(compiler: AgentNotebookCompilerV1, root) -> tuple[object, object]:
     plan = compiler.compile(_intent(), entrypoint="agent")
     record = compiler.record(plan.compilation_record_id)
-    proposal_store = ProposalStore(root)
+    proposal_store = compiler.server_proposal_store(root)
     proposal = proposal_store.create(
         session_id="session:1",
         chain_id="chain:1",
@@ -309,7 +309,7 @@ def test_persisted_proposal_revision_is_bound_before_confirmation(tmp_path) -> N
     _catalog, compiler = _cutover()
     plan = compiler.compile(_intent(), entrypoint="agent")
     record = compiler.record(plan.compilation_record_id)
-    proposal_store = ProposalStore(tmp_path)
+    proposal_store = compiler.server_proposal_store(tmp_path)
     proposal = proposal_store.create(
         session_id="session:1",
         chain_id="chain:1",

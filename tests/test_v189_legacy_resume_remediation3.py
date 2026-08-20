@@ -19,13 +19,19 @@ def _proposal_store(
     tmp_path,
     *,
     preconditions: dict[str, object],
+    compiler=None,
     target: dict[str, object] | None = None,
     chain_id: str = "chain:1",
     operation_id: str = "model.rerun",
     session_id: str = "session:1",
     store_root=None,
 ):
-    store = ProposalStore(store_root or (tmp_path / "server-proposals"))
+    store_root = store_root or (tmp_path / "server-proposals")
+    store = (
+        compiler.server_proposal_store(store_root)
+        if compiler is not None
+        else ProposalStore(store_root)
+    )
     proposal = store.create(
         session_id=session_id,
         chain_id=chain_id,
@@ -59,6 +65,7 @@ def _record_backed_proposal(tmp_path):
     store, proposal = _proposal_store(
         tmp_path,
         preconditions={"server_compilation": server_compilation},
+        compiler=compiler,
         target=target,
         session_id=record.session_ref,
     )
@@ -68,8 +75,8 @@ def _record_backed_proposal(tmp_path):
 def test_compile_rejects_generic_proposal_without_server_compilation_before_binding(
     tmp_path, monkeypatch
 ) -> None:
-    store, proposal = _proposal_store(tmp_path, preconditions={})
     _catalog, compiler = _cutover()
+    store, proposal = _proposal_store(tmp_path, preconditions={}, compiler=compiler)
     compile_calls: list[str] = []
     monkeypatch.setattr(
         compiler,
@@ -118,6 +125,7 @@ def test_bind_rejects_incomplete_server_compilation_fields_before_binding(
         preconditions={"server_compilation": incomplete},
         target={"run_id": "run:1"},
         session_id=record.session_ref,
+        compiler=compiler,
     )
 
     with pytest.raises(CutoverCompilerError) as error:
@@ -152,6 +160,7 @@ def test_bind_rejects_target_chain_operation_cross_scope_before_binding(
         chain_id="chain:1",
         operation_id="model.rerun",
         session_id=record.session_ref,
+        compiler=compiler,
     )
 
     with pytest.raises(CutoverCompilerError) as error:
@@ -535,6 +544,6 @@ def test_replayed_route_binding_fails_before_authority_record_execute_or_write(
             request=None,
         )
 
-    assert error.value.code == "AGENT_LEGACY_PROPOSAL_BINDING_REPLAY"
+    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
     assert authority_calls == []
     assert store.legacy_proposal_bindings[key] == binding

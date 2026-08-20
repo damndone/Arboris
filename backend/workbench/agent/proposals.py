@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -206,6 +207,143 @@ class ProposalDecision:
         )
 
 
+_PROPOSAL_STORE_PROCESS_GENERATION = object()
+_PROPOSAL_STORE_CAPABILITY_LOCK = RLock()
+_PROPOSAL_STORE_CAPABILITY_ADMISSIONS: dict[int, tuple[object, object, object, int, tuple[int, int]]] = {}
+
+
+class ProposalStoreCapabilityError(ProposalError):
+    """A raw or forged ProposalStore was supplied where server admission is required."""
+
+
+class ProposalStoreCapabilityV1:
+    """A non-serializable, server-issued view of one ProposalStore.
+
+    ``ProposalStore`` remains the append-only file implementation used by
+    historical persistence code.  Compiler and route authority seams accept
+    this capability instead of trusting a caller-created store merely because
+    it has the same Python type or points at a complete JSONL file.
+    """
+
+    __slots__ = ("_store", "_owner_token", "_root_identity", "_process_id", "_generation")
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("proposal store capabilities are issued by server admission")
+
+    @classmethod
+    def _issue(cls, store: "ProposalStore", *, owner_token: object) -> "ProposalStoreCapabilityV1":
+        if type(store) is not ProposalStore or owner_token is None:
+            raise ProposalStoreCapabilityError("server proposal store admission is invalid")
+        capability = object.__new__(cls)
+        process_id = os.getpid()
+        generation = _PROPOSAL_STORE_PROCESS_GENERATION
+        for name, value in (
+            ("_store", store),
+            ("_owner_token", owner_token),
+            ("_root_identity", store._root_identity),
+            ("_process_id", process_id),
+            ("_generation", generation),
+        ):
+            object.__setattr__(capability, name, value)
+        with _PROPOSAL_STORE_CAPABILITY_LOCK:
+            _PROPOSAL_STORE_CAPABILITY_ADMISSIONS[id(capability)] = (
+                capability,
+                store,
+                owner_token,
+                process_id,
+                generation,
+            )
+        return capability
+
+    def _require_admitted(self, owner_token: object | None = None) -> "ProposalStore":
+        if type(self) is not ProposalStoreCapabilityV1:
+            raise ProposalStoreCapabilityError("server proposal store capability is required")
+        with _PROPOSAL_STORE_CAPABILITY_LOCK:
+            admission = _PROPOSAL_STORE_CAPABILITY_ADMISSIONS.get(id(self))
+        if admission is None or admission[0] is not self:
+            raise ProposalStoreCapabilityError("proposal store capability was not server-admitted")
+        _capability, store, admitted_owner, process_id, generation = admission
+        if (
+            self._store is not store
+            or self._owner_token is not admitted_owner
+            or self._root_identity != store._root_identity
+            or self._process_id != process_id
+            or self._generation is not generation
+            or process_id != os.getpid()
+            or (owner_token is not None and owner_token is not admitted_owner)
+        ):
+            raise ProposalStoreCapabilityError("server proposal store capability binding changed")
+        try:
+            root_info = store.root.resolve().stat()
+        except (OSError, RuntimeError) as exc:
+            raise ProposalStoreCapabilityError("server proposal store root is unavailable") from exc
+        if (int(root_info.st_dev), int(root_info.st_ino)) != store._root_identity:
+            raise ProposalStoreCapabilityError("server proposal store root identity changed")
+        return store
+
+    @property
+    def root(self) -> Path:
+        return self._require_admitted().root
+
+    def create(self, *args: object, **kwargs: object) -> ProposalRevision:
+        store = self._require_admitted()
+        preconditions = kwargs.get("preconditions")
+        if type(preconditions) is dict:
+            server_compilation = preconditions.get("server_compilation")
+            if type(server_compilation) is dict:
+                server_preconditions = dict(preconditions)
+                server_compilation = dict(server_compilation)
+                # The confirmation identity is issued by this admitted server
+                # capability. A caller may describe the compilation record,
+                # but cannot choose the receipt identity bound to it.
+                server_compilation["confirmation_id"] = f"confirmation:{uuid4().hex}"
+                server_preconditions["server_compilation"] = server_compilation
+                kwargs["preconditions"] = server_preconditions
+        return store.create(*args, **kwargs)
+
+    def revise(self, *args: object, **kwargs: object) -> ProposalRevision:
+        return self._require_admitted().revise(*args, **kwargs)
+
+    def confirm(self, *args: object, **kwargs: object) -> ProposalConfirmation:
+        return self._require_admitted().confirm(*args, **kwargs)
+
+    def decline(self, *args: object, **kwargs: object) -> ProposalDecision:
+        return self._require_admitted().decline(*args, **kwargs)
+
+    def latest_revision(self, *args: object, **kwargs: object) -> ProposalRevision:
+        return self._require_admitted().latest_revision(*args, **kwargs)
+
+    def latest_revisions_for_session(self, *args: object, **kwargs: object) -> list[ProposalRevision]:
+        return self._require_admitted().latest_revisions_for_session(*args, **kwargs)
+
+    def revisions(self, *args: object, **kwargs: object) -> list[ProposalRevision]:
+        return self._require_admitted().revisions(*args, **kwargs)
+
+    def latest_confirmation(self, *args: object, **kwargs: object) -> ProposalConfirmation | None:
+        return self._require_admitted().latest_confirmation(*args, **kwargs)
+
+    def latest_decision(self, *args: object, **kwargs: object) -> ProposalDecision | None:
+        return self._require_admitted().latest_decision(*args, **kwargs)
+
+    def validate_confirmation_preconditions(self, *args: object, **kwargs: object) -> ProposalConfirmation:
+        return self._require_admitted().validate_confirmation_preconditions(*args, **kwargs)
+
+    def latest_status(self, *args: object, **kwargs: object) -> str:
+        return self._require_admitted().latest_status(*args, **kwargs)
+
+    def __copy__(self) -> "ProposalStoreCapabilityV1":
+        raise TypeError("proposal store capabilities cannot be copied")
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> "ProposalStoreCapabilityV1":
+        raise TypeError("proposal store capabilities cannot be copied")
+
+    def __reduce__(self) -> tuple[object, ...]:
+        raise TypeError("proposal store capabilities cannot be serialized")
+
+    def __reduce_ex__(self, _protocol: int) -> tuple[object, ...]:
+        raise TypeError("proposal store capabilities cannot be serialized")
+
+
 class ProposalStore:
     """Project-local append-only proposal and confirmation store."""
 
@@ -215,6 +353,24 @@ class ProposalStore:
         if create:
             self.proposals_dir.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
+        try:
+            root_info = self.root.resolve().stat()
+        except (OSError, RuntimeError) as exc:
+            raise ProposalStoreCapabilityError("proposal store root is unavailable") from exc
+        if not self.root.resolve().is_dir():
+            raise ProposalStoreCapabilityError("proposal store root must be a directory")
+        self._root_identity = (int(root_info.st_dev), int(root_info.st_ino))
+
+    @classmethod
+    def _issue_server_capability(
+        cls,
+        root: Path | str,
+        *,
+        owner_token: object,
+    ) -> ProposalStoreCapabilityV1:
+        """Issue a capability only to a server authority that owns ``owner_token``."""
+
+        return ProposalStoreCapabilityV1._issue(cls(root), owner_token=owner_token)
 
     def create(
         self,
