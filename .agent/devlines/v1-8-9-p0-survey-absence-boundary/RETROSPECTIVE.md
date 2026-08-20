@@ -6,24 +6,24 @@
 
 ## Final status
 
-STARTED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: N/A (sample=0)
-- Repeat rate: N/A (sample=0)
-- Recurrence rate: N/A (sample=0)
-- MTTR: N/A (sample=0; unresolved=0)
+- Failure frequency: 1/5 (20.0%; 20.0 per 100 events)
+- Repeat rate: 0/1 (0.0%)
+- Recurrence rate: 0/1 (0.0%)
+- MTTR: median=421391 ms (sample=1; unresolved=0)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/2 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
 ## All failures
 
-- None recorded.
+- #2 2026-08-20T08:15:06.150Z `survey_optional_absence_tdd_red`; cause_status: `known`; cause: The new HTTP regression probe shows that an omitted survey subpopulation is forwarded as an empty string, so ordinary runs cannot distinguish absence from an invalid declared expression.; resolution: `open`; lesson: Optional typed declarations must preserve omission separately from explicitly invalid values at every transport boundary.
 
 ## All errors
 
@@ -39,20 +39,24 @@ STARTED
 
 ## Root causes and solutions
 
-- None recorded.
+- `survey-optional-absence-boundary`: occurrences=1; cause_status: `known`; root cause: The new HTTP regression probe shows that an omitted survey subpopulation is forwarded as an empty string, so ordinary runs cannot distinguish absence from an invalid declared expression.; solution: `open`
 
 ## Added tests
 
-- No test evidence recorded.
+- `tests/test_survey_design_wiring_v187.py`
 
 ## New rules
 
-- No rule candidate recorded.
+- `survey-optional-absence-boundary`: line experience occurrence(s)=1
 
 ## Future guidance
 
-- No guidance recorded.
+- Optional typed declarations must preserve omission separately from explicitly invalid values at every transport boundary.
 
 ## Event index
 
 - #1: `b47e120a-874a-49c8-a2a3-1fda05d515d2` | 2026-08-20T08:13:21.380Z | STATE_CHANGE/line_started | incident=`99ff64a2-324d-46a8-a061-c2da3b67c841` | lesson_key=`frozen-context-before-start` | event_sha256=`29d2b88ef577f22316180cae74c05929a67b4fc8abc2f7cf109543b4ea9064a3`
+- #2: `1c9d5e72-4a8b-46f0-9d13-7e2c5b8a1046` | 2026-08-20T08:15:06.150Z | FAILURE/survey_optional_absence_tdd_red | incident=`7f4b2c19-8e63-4a5d-9c71-2b0f6d8e3a14` | lesson_key=`survey-optional-absence-boundary` | event_sha256=`ed08eab9db6dfddd0b4e3b41ed631c217fedc144bdab62a6a76f5819d4e86997`
+- #3: `2e7a4c91-6b35-48d0-a2f7-9c1e5b6d8034` | 2026-08-20T08:19:21.966Z | GATE/survey_optional_absence_green | incident=`4a8e2c71-5d93-46b0-9f18-7c2e6a4d0b35` | lesson_key=`survey-optional-absence-green` | event_sha256=`cf8a07fb530b0108761bab182a6f6df79c7efc943381ecf6144077bdf29cc65d`
+- #4: `5b1e7c94-2d68-4a30-9f75-6c3e8b1a204d` | 2026-08-20T08:21:26.557Z | STATE_CHANGE/survey_absence_boundary_completed | incident=`8c4a1e73-5b92-46d0-9f27-3e6a8b1c5d40` | lesson_key=`survey-absence-boundary-closeout` | event_sha256=`a4e0c8cc63b1be3f826c7680985b289fc0ffab23a38d6d7ccd722de0a1ddb027`
+- #5: `6c2a8e51-4d97-40b3-9f76-1e5a7c2d804b` | 2026-08-20T08:22:07.541Z | GATE/survey_optional_absence_red_resolved | incident=`7f4b2c19-8e63-4a5d-9c71-2b0f6d8e3a14` | lesson_key=`survey-optional-absence-red-resolved` | event_sha256=`79f8b5287326c5aa92d32eb5cbed0135791b5e3ab7deb781a4244cb3fdde35ad`
