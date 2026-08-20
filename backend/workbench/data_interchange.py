@@ -18,6 +18,7 @@ from .metadata import MetadataLossManifestV1, build_metadata_loss_manifest
 
 
 InterchangeStatus = Literal["available", "unavailable"]
+WriteStatus = Literal["written", "unavailable"]
 RoundTripStatus = Literal["verified", "unavailable"]
 SUPPORTED_INTERCHANGE_FORMATS = ("csv", "xlsx", "parquet", "sav", "zsav", "dta")
 
@@ -47,11 +48,28 @@ class InterchangeCapabilityV1:
 
 
 @dataclass(frozen=True)
+class InterchangeWriteResultV1:
+    target_format: str
+    status: WriteStatus
+    path: str | None
+    capability: InterchangeCapabilityV1
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "target_format": self.target_format,
+            "status": self.status,
+            "path": self.path,
+            "capability": self.capability.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
 class RoundTripResultV1:
     target_format: str
     status: RoundTripStatus
     frame_equal: bool
     dtype_equal: bool
+    schema_equal: bool
     path: str | None
     metadata_loss: MetadataLossManifestV1
     capability: InterchangeCapabilityV1
@@ -62,6 +80,7 @@ class RoundTripResultV1:
             "status": self.status,
             "frame_equal": self.frame_equal,
             "dtype_equal": self.dtype_equal,
+            "schema_equal": self.schema_equal,
             "path": self.path,
             "metadata_loss": self.metadata_loss.to_dict(),
             "capability": self.capability.to_dict(),
@@ -73,6 +92,14 @@ def _has_module(name: str) -> bool:
         return find_spec(name) is not None
     except (ImportError, ModuleNotFoundError, ValueError):
         return False
+
+
+def _parquet_engine() -> str | None:
+    if _has_module("pyarrow"):
+        return "pyarrow"
+    if _has_module("fastparquet"):
+        return "fastparquet"
+    return None
 
 
 def interchange_capability(target_format: str) -> InterchangeCapabilityV1:
@@ -93,7 +120,7 @@ def interchange_capability(target_format: str) -> InterchangeCapabilityV1:
             "optional_dependency",
             "openpyxl is required for XLSX interchange.",
         )
-    if normalized == "parquet" and not (_has_module("pyarrow") or _has_module("fastparquet")):
+    if normalized == "parquet" and _parquet_engine() is None:
         return InterchangeCapabilityV1(
             normalized,
             "unavailable",
@@ -131,40 +158,93 @@ def _loss_metadata(metadata: Mapping[str, Any]) -> dict[str, Mapping[str, object
     return result
 
 
-def _frames_equal(left: pd.DataFrame, right: pd.DataFrame) -> tuple[bool, bool]:
+def _frames_equal(left: pd.DataFrame, right: pd.DataFrame) -> tuple[bool, bool, bool]:
     left = left.reset_index(drop=True)
     right = right.reset_index(drop=True)
     dtype_equal = tuple(str(dtype) for dtype in left.dtypes) == tuple(
         str(dtype) for dtype in right.dtypes
     )
+    schema_equal = tuple(left.columns) == tuple(right.columns) and dtype_equal
     try:
         pd.testing.assert_frame_equal(left, right, check_dtype=False, check_exact=True)
     except (AssertionError, TypeError, ValueError):
-        return False, dtype_equal
-    return True, dtype_equal
+        return False, dtype_equal, schema_equal
+    return True, dtype_equal, schema_equal
 
 
-def _write_and_read(frame: pd.DataFrame, target_format: str, path: Path) -> pd.DataFrame:
+def _write_frame(frame: pd.DataFrame, target_format: str, path: Path) -> None:
     if target_format == "csv":
         frame.to_csv(path, index=False)
-        return pd.read_csv(path)
+        return
     if target_format == "xlsx":
         frame.to_excel(path, index=False)
-        return pd.read_excel(path)
+        return
     if target_format == "parquet":
-        frame.to_parquet(path, index=False)
-        return pd.read_parquet(path)
+        engine = _parquet_engine()
+        if engine is None:
+            raise InterchangeUnavailableError(interchange_capability(target_format))
+        frame.to_parquet(path, index=False, engine=engine)
+        return
     if target_format in {"sav", "zsav", "dta"}:
         import pyreadstat
 
         if target_format == "dta":
             pyreadstat.write_dta(frame, str(path), version=15)
-            restored, _meta = pyreadstat.read_dta(str(path))
         else:
             pyreadstat.write_sav(frame, str(path), compress=target_format == "zsav")
+        return
+    raise InterchangeUnavailableError(interchange_capability(target_format))
+
+
+def _read_frame(target_format: str, path: Path) -> pd.DataFrame:
+    if target_format == "csv":
+        return pd.read_csv(path)
+    if target_format == "xlsx":
+        return pd.read_excel(path)
+    if target_format == "parquet":
+        engine = _parquet_engine()
+        if engine is None:
+            raise InterchangeUnavailableError(interchange_capability(target_format))
+        return pd.read_parquet(path, engine=engine)
+    if target_format in {"sav", "zsav", "dta"}:
+        import pyreadstat
+
+        if target_format == "dta":
+            restored, _meta = pyreadstat.read_dta(str(path))
+        else:
             restored, _meta = pyreadstat.read_sav(str(path))
         return restored
     raise InterchangeUnavailableError(interchange_capability(target_format))
+
+
+def write_interchange_frame(
+    frame: pd.DataFrame,
+    *,
+    target_format: str,
+    path: Path | str,
+) -> InterchangeWriteResultV1:
+    """Write one real interchange artifact or return typed unavailability."""
+
+    if not isinstance(frame, pd.DataFrame):
+        raise TypeError("frame must be a pandas DataFrame")
+    normalized = str(target_format).strip().casefold()
+    capability = interchange_capability(normalized)
+    if capability.status != "available":
+        return InterchangeWriteResultV1(
+            target_format=normalized,
+            status="unavailable",
+            path=None,
+            capability=capability,
+        )
+    target_path = Path(path).expanduser()
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_frame(frame, normalized, target_path)
+    return InterchangeWriteResultV1(
+        target_format=normalized,
+        status="written",
+        path=str(target_path),
+        capability=capability,
+    )
 
 
 def round_trip_frame(
@@ -189,6 +269,7 @@ def round_trip_frame(
             status="unavailable",
             frame_equal=False,
             dtype_equal=False,
+            schema_equal=False,
             path=None,
             metadata_loss=loss,
             capability=capability,
@@ -196,8 +277,20 @@ def round_trip_frame(
     target_dir = Path(directory).expanduser().resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / f"roundtrip.{normalized}"
-    restored = _write_and_read(frame, normalized, path)
-    frame_equal, dtype_equal = _frames_equal(frame, restored)
+    write_result = write_interchange_frame(frame, target_format=normalized, path=path)
+    if write_result.status != "written":
+        return RoundTripResultV1(
+            target_format=normalized,
+            status="unavailable",
+            frame_equal=False,
+            dtype_equal=False,
+            schema_equal=False,
+            path=None,
+            metadata_loss=loss,
+            capability=write_result.capability,
+        )
+    restored = _read_frame(normalized, path)
+    frame_equal, dtype_equal, schema_equal = _frames_equal(frame, restored)
     if not frame_equal:
         raise ValueError(f"{normalized} round-trip changed values or column order")
     return RoundTripResultV1(
@@ -205,6 +298,7 @@ def round_trip_frame(
         status="verified",
         frame_equal=True,
         dtype_equal=dtype_equal,
+        schema_equal=schema_equal,
         path=str(path),
         metadata_loss=loss,
         capability=capability,
@@ -214,8 +308,10 @@ def round_trip_frame(
 __all__ = [
     "InterchangeCapabilityV1",
     "InterchangeUnavailableError",
+    "InterchangeWriteResultV1",
     "RoundTripResultV1",
     "SUPPORTED_INTERCHANGE_FORMATS",
     "interchange_capability",
     "round_trip_frame",
+    "write_interchange_frame",
 ]

@@ -1,4 +1,5 @@
 import { apiUrl, readResponse } from "../api";
+import type { DataOperationDescriptor } from "./dataOperationManifest";
 
 export type DataColumnCastTarget = "numeric" | "string" | "datetime";
 
@@ -371,6 +372,46 @@ export interface CodeExecuteRiskAuthorizationResponse {
 
 function projectQuery(projectRoot: string): string {
   return `?project_root=${encodeURIComponent(projectRoot)}`;
+}
+
+function serverOperationUrl(projectRoot: string, route: string): string {
+  if (!route.startsWith("/") || route.startsWith("//") || route.includes("://")) {
+    throw new Error("DATA_OPERATION_ROUTE_INVALID: operation routes must be same-origin paths.");
+  }
+  const separator = route.includes("?") ? "&" : "?";
+  return apiUrl(`${route}${separator}project_root=${encodeURIComponent(projectRoot)}`);
+}
+
+/** Fetch the live server-owned operation catalog; parsing stays in the editor. */
+export async function fetchDataOperationManifest(): Promise<unknown> {
+  const response = await fetch(apiUrl("/data-operations/manifest"));
+  return readResponse<unknown>(response);
+}
+
+/** Return the raw HTTP transport so DataOperationsSection can verify its type. */
+export async function previewDataOperation(
+  projectRoot: string,
+  descriptor: DataOperationDescriptor,
+  request: Record<string, unknown>,
+): Promise<Response> {
+  return fetch(serverOperationUrl(projectRoot, descriptor.preview_ref), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+}
+
+/** Confirm only through the route selected by the server-owned descriptor. */
+export async function confirmDataOperation(
+  projectRoot: string,
+  descriptor: DataOperationDescriptor,
+  request: Record<string, unknown>,
+): Promise<Response> {
+  return fetch(serverOperationUrl(projectRoot, descriptor.confirm_ref), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
 }
 
 export async function previewCodeExecute(

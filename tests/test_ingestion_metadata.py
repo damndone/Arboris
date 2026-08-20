@@ -1,3 +1,4 @@
+import builtins
 from pathlib import Path
 
 import pandas as pd
@@ -5,7 +6,8 @@ import pytest
 
 from workbench.artifacts import read_json
 from workbench.config import WorkbenchConfig
-from workbench.ingestion import ingest_files
+from workbench.data_interchange import InterchangeUnavailableError
+from workbench.ingestion import ingest_files, read_frame_bounded
 from workbench.metadata import infer_schema
 from workbench.projects import create_project, create_run
 
@@ -77,6 +79,26 @@ def test_excel_sheet_limit_is_checked_before_registration(tmp_path: Path):
         ingest_files([source], run.root, WorkbenchConfig(max_excel_sheets=1))
     assert not (run.root / "raw_snapshot" / "source.xlsx").exists()
     assert read_json(run.root / "artifacts_index.json") == {"schema_version": 1, "artifacts": []}
+
+
+def test_parquet_bounded_ingestion_reports_typed_optional_dependency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    real_import = builtins.__import__
+
+    def missing_pyarrow(name, *args, **kwargs):
+        if name == "pyarrow" or name.startswith("pyarrow."):
+            raise ModuleNotFoundError("pyarrow is intentionally unavailable for this test")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing_pyarrow)
+
+    with pytest.raises(InterchangeUnavailableError) as error:
+        read_frame_bounded(tmp_path / "source.parquet", max_rows=10)
+
+    assert error.value.capability.target_format == "parquet"
+    assert error.value.capability.status == "unavailable"
+    assert error.value.capability.reason_code == "optional_dependency"
 
 
 def test_metadata_candidates_are_deduplicated_across_files(tmp_path: Path):

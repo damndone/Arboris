@@ -7,6 +7,7 @@ import pandas as pd
 
 from .artifacts import register_artifact
 from .config import WorkbenchConfig
+from .data_interchange import InterchangeCapabilityV1, InterchangeUnavailableError
 
 
 def _ensure_unique_basenames(paths: list[Path]) -> None:
@@ -89,8 +90,13 @@ def read_frame_bounded(
             import pyarrow as pa
             import pyarrow.parquet as pq
         except (ImportError, ModuleNotFoundError) as exc:
-            raise ValueError(
-                "parquet bounded ingestion requires the optional pyarrow dependency"
+            raise InterchangeUnavailableError(
+                InterchangeCapabilityV1(
+                    target_format="parquet",
+                    status="unavailable",
+                    reason_code="optional_dependency",
+                    message="pyarrow is required for bounded Parquet ingestion.",
+                )
             ) from exc
         parquet_file = pq.ParquetFile(path)
         batches = parquet_file.iter_batches(batch_size=max_rows + 1)
