@@ -1565,7 +1565,12 @@ class EvidencePersistencePort:
     def _read_file_snapshot(path: Path) -> tuple[str, tuple[int, int]]:
         """Hash and identify one regular file through an O_NOFOLLOW FD."""
 
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if type(nofollow) is not int:
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: no-follow file access is unavailable"
+            )
+        flags = os.O_RDONLY | nofollow
         try:
             file_fd = os.open(path, flags)
         except OSError as exc:
@@ -1591,6 +1596,89 @@ class EvidencePersistencePort:
             ) from exc
         finally:
             os.close(file_fd)
+
+    @staticmethod
+    def _read_project_artifact_snapshot(
+        project_root: Path,
+        run_id: str,
+        relative: Path,
+        *,
+        include_content: bool = False,
+    ) -> tuple[str, tuple[int, int]] | tuple[bytes, str, tuple[int, int]]:
+        """Read a registered artifact through a no-follow directory-FD walk.
+
+        A pathname check followed by a pathname open is not sufficient here:
+        an attacker could replace a checked parent directory between those two
+        operations. Holding each directory FD while opening the next component
+        binds the final file to the project-owned run tree for the whole read.
+        """
+
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        directory = getattr(os, "O_DIRECTORY", None)
+        if type(nofollow) is not int or type(directory) is not int:
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: no-follow directory access is unavailable"
+            )
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(component in {"", ".", ".."} for component in relative.parts)
+            or any("\x00" in component for component in relative.parts)
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: registered artifact path is invalid"
+            )
+        root_flags = os.O_RDONLY | directory | nofollow
+        file_fd: int | None = None
+        parent_fd: int | None = None
+        runs_fd: int | None = None
+        try:
+            runs_fd = os.open(project_root / "runs", root_flags)
+            parent_fd = os.open(run_id, root_flags, dir_fd=runs_fd)
+            for component in relative.parts[:-1]:
+                child_fd = os.open(component, root_flags, dir_fd=parent_fd)
+                os.close(parent_fd)
+                parent_fd = child_fd
+            file_fd = os.open(
+                relative.parts[-1], os.O_RDONLY | nofollow, dir_fd=parent_fd
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            if parent_fd is not None:
+                os.close(parent_fd)
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: admitted artifact is unavailable"
+            ) from exc
+        finally:
+            if runs_fd is not None:
+                os.close(runs_fd)
+        try:
+            file_stat = os.fstat(file_fd)
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: admitted artifact is not a regular file"
+                )
+            digest = hashlib.sha256()
+            content = bytearray() if include_content else None
+            while True:
+                chunk = os.read(file_fd, 1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                if content is not None:
+                    content.extend(chunk)
+            identity = (file_stat.st_dev, file_stat.st_ino)
+            if content is not None:
+                return bytes(content), digest.hexdigest(), identity
+            return digest.hexdigest(), identity
+        except OSError as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: admitted artifact cannot be read"
+            ) from exc
+        finally:
+            if file_fd is not None:
+                os.close(file_fd)
+            if parent_fd is not None:
+                os.close(parent_fd)
 
     @staticmethod
     def _read_file_snapshot_from_target(
@@ -1702,7 +1790,9 @@ class EvidencePersistencePort:
                 )
             digest, file_identity = self._read_file_snapshot_from_target(output_target)
         else:
-            digest, file_identity = self._read_file_snapshot(Path(path))
+            digest, file_identity = self._read_project_artifact_snapshot(
+                self.project_root, run_id, relative
+            )
         target_run_id = _require_workflow_opaque_ref(
             draft.target.get("run_id"), "workflow target run_id"
         )
@@ -1961,7 +2051,9 @@ class EvidencePersistencePort:
         run_root = self.project_root / "runs" / run_id
         _artifact_path_without_following(self.project_root, run_id, run_root / relative)
         path = run_root / relative
-        digest, file_identity = self._read_file_snapshot(path)
+        digest, file_identity = self._read_project_artifact_snapshot(
+            self.project_root, run_id, relative
+        )
         expected_identity = row.get("file_identity")
         if (
             not isinstance(expected_identity, list)
@@ -2017,7 +2109,9 @@ class EvidencePersistencePort:
             )
         path = run_root / relative_path
         _artifact_path_without_following(self.project_root, run_id, path)
-        actual_sha256, file_identity = self._read_file_snapshot(path)
+        actual_sha256, file_identity = self._read_project_artifact_snapshot(
+            self.project_root, run_id, Path(relative_path)
+        )
         if not _digest_matches(record.get("sha256"), actual_sha256):
             raise WorkflowExecutionError(
                 "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: registered artifact digest changed"
@@ -2040,7 +2134,9 @@ class EvidencePersistencePort:
         run_root, relative = _artifact_path_without_following(
             self.project_root, run_id, path
         )
-        actual_sha256, file_identity = self._read_file_snapshot(path)
+        actual_sha256, file_identity = self._read_project_artifact_snapshot(
+            self.project_root, run_id, relative
+        )
         if not _digest_matches(record.get("sha256"), actual_sha256):
             raise WorkflowExecutionError(
                 "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: server artifact digest changed"
@@ -2275,28 +2371,42 @@ class EvidencePersistencePort:
         # have no downstream consumer to trigger _dependent_model_branch(), so
         # validate every persisted model branch here before staging any
         # artifact row or returning the result to a callback.
-        model_operations = {"model.genesis", "model.auto", "model.custom"}
-        if step.operation_id in model_operations:
-            raw_branches = completion_lineage.get("branches")
-            if raw_branches is None:
-                model_output = completion_bindings.get("model_branches")
-                if isinstance(model_output, Mapping):
-                    raw_branches = model_output.get("branches")
-            if not isinstance(raw_branches, list) or not raw_branches:
-                raise WorkflowExecutionError(
-                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed model step has no persisted branches"
-                )
-            for branch in raw_branches:
-                if not isinstance(branch, Mapping):
-                    raise WorkflowExecutionError(
-                        "WORKFLOW_EVIDENCE_CORRUPT: persisted model branch is malformed"
-                    )
-                _validate_persisted_model_branch(
+        if _model_step_requires_branch_binding(
+            step,
+            bindings=draft.bindings,
+        ):
+            model_output = completion_bindings.get("model_branches")
+            if "model_branches" in completion_bindings:
+                _validate_canonical_model_branch_binding(
                     self.project_root,
                     draft,
                     step.step_id,
-                    branch,
+                    model_output,
+                    legacy_branches=completion_lineage.get("branches"),
+                    completion_artifact_ids=completion_artifacts,
+                    receipt_id=receipt.receipt_id,
+                    records=records,
                 )
+            else:
+                # Explicit bounded compatibility path for pre-canonical
+                # lineage-only states. Missing legacy branches still fails
+                # closed; it is never normalized to an empty map.
+                raw_branches = completion_lineage.get("branches")
+                if not isinstance(raw_branches, list) or not raw_branches:
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed model step has no persisted branches"
+                    )
+                for branch in raw_branches:
+                    if not isinstance(branch, Mapping):
+                        raise WorkflowExecutionError(
+                            "WORKFLOW_EVIDENCE_CORRUPT: persisted model branch is malformed"
+                        )
+                    _validate_persisted_model_branch(
+                        self.project_root,
+                        draft,
+                        step.step_id,
+                        branch,
+                    )
 
         staged_rows: dict[tuple[str, str, str], dict[str, Any]] = {}
         previous_rows: dict[tuple[str, str, str], dict[str, Any] | None] = {}
@@ -3404,6 +3514,15 @@ class EvidencePersistencePort:
                 raise WorkflowExecutionError(
                     "WORKFLOW_ADMISSION_ABORTED: aborted receipt cannot complete"
                 )
+            _validate_canonical_model_branch_completion(
+                admission,
+                receipt=receipt,
+                artifact_ids=_validated_artifact_ids(record["artifact_ids"]),
+                output_bindings=record["output_bindings"],
+                lineage=record["lineage"],
+                project_root=self.project_root,
+                server_artifact_registry=self._server_artifact_registry,
+            )
             self._validate_completion_artifacts(
                 admission,
                 receipt=receipt,
@@ -5241,6 +5360,7 @@ def _execute_model_auto(
         raw_source_frame=frame,
         admission_receipt=admission_receipt,
         evidence_port=evidence_port,
+        admitted_step=step,
     )
     return WorkflowStepResult(
         artifact_ids=list(result.artifact_ids),
@@ -5252,6 +5372,7 @@ def _execute_model_auto(
             "resolved_model_family": resolved_family,
             "resolved_y_type": y_type,
         },
+        output_bindings=dict(result.output_bindings),
         lineage=dict(result.lineage),
     )
 
@@ -5352,7 +5473,8 @@ def build_workflow_step_executor(
         source_node_id=str(draft.target["node_ref"]),
         source_artifact_id=str(draft.target["artifact_id"]),
     )
-    source_run_root = root / "runs" / str(draft.target["run_id"])
+    source_run_id = str(draft.target["run_id"])
+    source_run_root = root / "runs" / source_run_id
     dependency_graph = {item.step_id: item.depends_on for item in draft.steps}
 
     def execute(
@@ -5365,7 +5487,7 @@ def build_workflow_step_executor(
         # Dispatch on the declared operation identity, never on a step number:
         # a plan with a different shape or length must run on the same runtime.
         operation_id = step.operation_id
-        dispatcher_key = workflow_dispatcher_key(operation_id)
+        dispatcher_key = workflow_dispatcher_key(operation_id, spec=step.spec)
         step_frame = _workflow_input_frame(
             source_frame, draft, step, dependency_graph, previous, root
         )
@@ -5708,6 +5830,7 @@ def _execute_model_genesis_branches(
     raw_source_frame: pd.DataFrame | None = None,
     admission_receipt: WorkflowAdmissionReceipt | None = None,
     evidence_port: EvidencePersistencePort | None = None,
+    admitted_step: Any | None = None,
 ) -> WorkflowStepResult:
     _require_active_write_context()
     if (
@@ -5719,7 +5842,11 @@ def _execute_model_genesis_branches(
             "WORKFLOW_ADMISSION_RECEIPT_REQUIRED: model family workflow requires an admitted server receipt"
         )
     evidence_port.require_receipt(admission_receipt)
-    evidence_port.validate_execution_snapshot(admission_receipt, draft, step)
+    evidence_port.validate_execution_snapshot(
+        admission_receipt,
+        draft,
+        step if admitted_step is None else admitted_step,
+    )
     source_run_id = str(draft.target["run_id"])
     source_run_root = root / "runs" / source_run_id
     inputs = read_run_inputs(source_run_root)
@@ -5788,15 +5915,28 @@ def _execute_model_genesis_branches(
         for summary in store.list():
             candidate = store.get(summary["draft_id"])
             context = candidate.draft.get("exploration_context") or {}
-            # Legacy keys are still read so a draft created before the rename
-            # still resumes instead of re-estimating under a new identity.
+            # Legacy keys are still read for the branch/workflow/step rename,
+            # but a candidate is reusable only when the complete server-owned
+            # source and model identity also matches.  A partial old context
+            # must create a fresh draft; reusing it would estimate against a
+            # different dataset or plan while retaining the old child run.
             context_workflow = context.get("workflow_id", context.get("class3_workflow_id"))  # legacy-compat
             context_branch = context.get("branch_id", context.get("class3_branch_id"))  # legacy-compat
             context_step = context.get("workflow_step_id")
+            exact_context = {
+                "source_node_id": str(lineage["node_ref"]),
+                "source_run_id": source_run_id,
+                "source_artifact_id": str(lineage["artifact_id"]),
+                "source_sha256": str(lineage["sha256"]),
+                "model_family": model_family,
+                "covariance": branch_covariance,
+                "workflow_plan_fingerprint": draft.plan_fingerprint,
+            }
             if (
                 context_workflow == draft.workflow_id
                 and context_branch == branch_id
                 and context_step == workflow_step_id
+                and all(context.get(key) == value for key, value in exact_context.items())
             ):
                 stored = candidate
                 break
@@ -5868,6 +6008,7 @@ def _execute_model_genesis_branches(
             raise WorkflowExecutionError(
                 f"{model_family} Draft validation failed for {branch_id}: {validation.get('checks')}"
             )
+        execution_key = f"{draft.workflow_id}:{workflow_step_id}:{branch_id}"
         result = execute_genesis_draft(
             stored.draft["draft_id"],
             root,
@@ -5875,14 +6016,19 @@ def _execute_model_genesis_branches(
             stored,
             validated_draft_hash=compute_executable_draft_hash(stored.draft),
             execution_mode="genesis",
-            idempotency_key=f"{draft.workflow_id}:{workflow_step_id}:{branch_id}",
+            idempotency_key=execution_key,
         )
         run_id = str(result["run_id"])
+        _require_workflow_opaque_ref(run_id, "completed model branch run_ref")
         _wait_for_run(root, run_id)
         run_root = root / "runs" / run_id
         manifest = read_json(run_root / "run_manifest.json")
         if manifest.get("status") != "completed":
             raise WorkflowExecutionError(f"{model_family} branch {branch_id} did not complete")
+        if manifest.get("run_id") not in {None, run_id}:
+            raise WorkflowExecutionError(
+                f"{model_family} branch {branch_id} completed under another run identity"
+            )
         run_artifacts = _read_artifacts_index(run_root).get("artifacts", [])
         ids = [str(item["artifact_id"]) for item in run_artifacts if item.get("artifact_id")]
         missing_artifacts = sorted(set(family_contract.expected_artifacts) - set(ids))
@@ -5939,12 +6085,31 @@ def _execute_model_genesis_branches(
                 },
                 expected_artifacts=ids,
             )
-        artifact_ids.extend(f"{run_id}:{artifact_id}" for artifact_id in ids)
+        artifact_refs = [f"{run_id}:{artifact_id}" for artifact_id in ids]
+        if any(
+            (admission_receipt.receipt_id, run_id, artifact_id)
+            not in evidence_port._server_artifact_registry
+            for artifact_id in ids
+        ):
+            raise WorkflowExecutionError(
+                f"{model_family} branch {branch_id} has an artifact outside its admission"
+            )
+        artifact_ids.extend(artifact_refs)
         branch_outputs.append(
             {
                 "branch_id": branch_id,
                 "run_id": run_id,
                 "artifact_ids": ids,
+                "run_ref": run_id,
+                "artifact_refs": artifact_refs,
+                "evidence_refs": list(artifact_refs),
+                "source_refs": {
+                    "run_id": source_run_id,
+                    "artifact_id": str(lineage["artifact_id"]),
+                    "content_sha256": str(lineage["sha256"]),
+                },
+                "execution_key": execution_key,
+                "model_family": model_family,
                 "model_artifact_id": primary_model_artifact_id,
                 "workflow_id": draft.workflow_id,
                 "workflow_step_id": workflow_step_id,
@@ -5980,6 +6145,14 @@ def _execute_model_genesis_branches(
         artifact_ids=artifact_ids,
         row_counts={"source": len(source_frame)},
         payload={"branches": branch_outputs},
+        output_bindings={
+            "model_branches": {
+                "binding_type": "model_branches",
+                "workflow_id": draft.workflow_id,
+                "workflow_step_id": workflow_step_id,
+                "branches": branch_outputs,
+            }
+        },
         lineage={"branches": branch_outputs},
     )
 
@@ -6188,15 +6361,28 @@ def _validate_compiled_model_branch_declaration(
         raise WorkflowExecutionError(
             "completed model branch cannot bind to a compiled model step without a spec"
         )
-    if model_step.operation_id == "model.auto":
-        raise WorkflowExecutionError(
-            "completed model branch cannot bind to a compiled model step whose family is unresolved"
-        )
-    if model_step.operation_id != "model.genesis":
+    if model_step.operation_id not in {"model.genesis", "model.auto"}:
         raise WorkflowExecutionError(
             "completed model branch is not bound to a compiled model step"
         )
     compiled_family = compiled_spec.get("model_family")
+    persisted_spec = branch.get("branch_spec")
+    if model_step.operation_id == "model.auto":
+        if not isinstance(persisted_spec, Mapping):
+            raise WorkflowExecutionError(
+                "completed model.auto branch lacks its resolved family declaration"
+            )
+        compiled_family = persisted_spec.get("model_family")
+        if not isinstance(compiled_family, str) or not compiled_family:
+            raise WorkflowExecutionError(
+                "completed model.auto branch lacks its resolved model family"
+            )
+        try:
+            model_family_contract(compiled_family)
+        except Exception as exc:
+            raise WorkflowExecutionError(
+                "completed model.auto branch resolved to an unregistered model family"
+            ) from exc
     compiled_branches = compiled_spec.get("branches")
     if not isinstance(compiled_family, str) or not compiled_family:
         raise WorkflowExecutionError(
@@ -6220,7 +6406,6 @@ def _validate_compiled_model_branch_declaration(
         raise WorkflowExecutionError(
             "completed model branch is not declared by the compiled model step"
         )
-    persisted_spec = branch.get("branch_spec")
     if not isinstance(persisted_spec, Mapping):
         raise WorkflowExecutionError(
             "completed model branch lacks a declaration bound to the compiled model step"
@@ -6240,6 +6425,11 @@ def _validate_compiled_model_branch_declaration(
     compiled_covariance = compiled_branch.get("covariance")
     if compiled_covariance is None:
         compiled_covariance = compiled_spec.get("covariance")
+    if compiled_covariance is None and model_step.operation_id in {
+        "model.auto",
+        "model.genesis",
+    }:
+        compiled_covariance = "unadjusted"
     if type(compiled_covariance) is not str or not compiled_covariance:
         raise WorkflowExecutionError(
             "compiled model step branch covariance is incomplete"
@@ -6312,12 +6502,15 @@ def _validate_persisted_model_branch(
     family = branch_spec.get("model_family")
     if not isinstance(family, str) or not family:
         raise WorkflowExecutionError("completed model branch lacks its family identity")
-    try:
-        family_contract = model_family_contract(family)
-    except Exception as exc:
-        raise WorkflowExecutionError(
-            "completed model branch family identity is not registered"
-        ) from exc
+    custom_model = compiled_step is not None and compiled_step.operation_id == "model.custom"
+    family_contract = None
+    if not custom_model:
+        try:
+            family_contract = model_family_contract(family)
+        except Exception as exc:
+            raise WorkflowExecutionError(
+                "completed model branch family identity is not registered"
+            ) from exc
     model_run_id = branch.get("run_id")
     model_run_id = _require_workflow_opaque_ref(
         model_run_id, "opaque model run reference"
@@ -6355,7 +6548,8 @@ def _validate_persisted_model_branch(
         raise WorkflowExecutionError(
             "completed model branch model run identity is inconsistent"
         )
-    source_run_root = root / "runs" / str(draft.target["run_id"])
+    source_run_id = str(draft.target["run_id"])
+    source_run_root = root / "runs" / source_run_id
     try:
         source_index = _read_artifacts_index(source_run_root)
     except (OSError, TypeError, ValueError, WorkbenchAPIError) as exc:
@@ -6383,7 +6577,7 @@ def _validate_persisted_model_branch(
         raise WorkflowExecutionError(
             "completed model branch source artifact path escapes its run"
         )
-    source_path = (source_run_root / source_relative).resolve()
+    source_path = source_run_root / source_relative
     if source_run_root.is_symlink() or not source_run_root.is_dir():
         raise WorkflowExecutionError(
             "completed model branch source run is not project-owned"
@@ -6394,13 +6588,11 @@ def _validate_persisted_model_branch(
         raise WorkflowExecutionError(
             "completed model branch source artifact path escapes its run"
         ) from exc
-    if source_path.is_symlink() or not source_path.is_file():
-        raise WorkflowExecutionError(
-            "completed model branch source artifact is unavailable"
-        )
     try:
-        actual_source_sha256 = sha256_file(source_path)
-    except OSError as exc:
+        actual_source_sha256, _source_file_identity = EvidencePersistencePort._read_project_artifact_snapshot(
+            root, source_run_id, source_relative
+        )
+    except WorkflowExecutionError as exc:
         raise WorkflowExecutionError(
             "completed model branch source artifact digest cannot be read"
         ) from exc
@@ -6419,10 +6611,16 @@ def _validate_persisted_model_branch(
         raise WorkflowExecutionError(
             "completed model branch model artifact identity is not declared"
         )
-    if model_artifact_id != str(family_contract.expected_artifacts[0]):
-        raise WorkflowExecutionError(
-            "completed model branch model artifact does not match its family"
-        )
+    if family_contract is not None:
+        if model_artifact_id != str(family_contract.expected_artifacts[0]):
+            raise WorkflowExecutionError(
+                "completed model branch model artifact does not match its family"
+            )
+    elif compiled_step is not None and compiled_step.expected_artifacts:
+        if model_artifact_id not in set(compiled_step.expected_artifacts):
+            raise WorkflowExecutionError(
+                "completed model.custom model artifact is not declared by its server step"
+            )
     matching = [
         item
         for item in index.get("artifacts", [])
@@ -6442,25 +6640,16 @@ def _validate_persisted_model_branch(
         raise WorkflowExecutionError(
             "completed model branch model artifact path escapes its run"
         )
-    raw_artifact_path = model_root / artifact_relative
-    if raw_artifact_path.is_symlink():
-        raise WorkflowExecutionError(
-            "completed model branch model artifact is not project-owned"
-        )
-    artifact_path = raw_artifact_path.resolve()
     try:
-        artifact_path.relative_to(model_root.resolve())
-    except ValueError as exc:
-        raise WorkflowExecutionError(
-            "completed model branch model artifact escapes its run scope"
-        ) from exc
-    if not artifact_path.is_file():
-        raise WorkflowExecutionError(
-            "completed model branch model artifact is not persisted"
+        model_artifact_bytes, actual_model_artifact_sha256, _model_file_identity = (
+            EvidencePersistencePort._read_project_artifact_snapshot(
+                root,
+                model_run_id,
+                artifact_relative,
+                include_content=True,
+            )
         )
-    try:
-        actual_model_artifact_sha256 = sha256_file(artifact_path)
-    except OSError as exc:
+    except WorkflowExecutionError as exc:
         raise WorkflowExecutionError(
             "completed model branch model artifact digest cannot be read"
         ) from exc
@@ -6469,16 +6658,558 @@ def _validate_persisted_model_branch(
             "completed model branch model artifact digest changed"
         )
     try:
-        model_result = read_json(artifact_path)
-    except (OSError, TypeError, ValueError) as exc:
+        model_result = json.loads(model_artifact_bytes)
+    except (TypeError, ValueError) as exc:
         raise WorkflowExecutionError(
             "completed model branch model artifact is unreadable"
         ) from exc
-    if isinstance(model_result, Mapping):
+    if family_contract is not None and isinstance(model_result, Mapping):
         declared_family = model_result.get("model_family")
         if declared_family is not None and declared_family != family:
             raise WorkflowExecutionError(
                 "completed model branch artifact family identity changed"
+            )
+
+
+def _canonical_model_branch_list(
+    binding: Any,
+    *,
+    workflow_id: str | None = None,
+    workflow_step_id: str | None = None,
+) -> list[Mapping[str, Any]]:
+    """Read the canonical model binding without consulting legacy aliases."""
+
+    if not isinstance(binding, Mapping):
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch binding is malformed"
+        )
+    if binding.get("binding_type") != "model_branches":
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch binding type is invalid"
+        )
+    if workflow_id is not None and binding.get("workflow_id") != workflow_id:
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch workflow identity changed"
+        )
+    if workflow_step_id is not None and binding.get("workflow_step_id") != workflow_step_id:
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch step identity changed"
+        )
+    branches = binding.get("branches")
+    if not isinstance(branches, list) or not branches:
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch binding has no branches"
+        )
+    if any(not isinstance(branch, Mapping) for branch in branches):
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_CORRUPT: canonical model branch is malformed"
+        )
+    return branches
+
+
+def _validate_server_source_artifact_reference(
+    project_root: Path,
+    *,
+    source_run_id: Any,
+    source_artifact_id: Any,
+    expected_digest: Any,
+) -> None:
+    """Bind a branch source to a registered project file and its real digest."""
+
+    run_id = _require_workflow_opaque_ref(
+        source_run_id, "canonical model branch source run_id"
+    )
+    artifact_id = _require_workflow_artifact_ref(
+        source_artifact_id, "canonical model branch source artifact_id"
+    )
+    if not isinstance(expected_digest, str) or not expected_digest:
+        raise WorkflowExecutionError(
+            "WORKFLOW_TARGET_MISMATCH: canonical model branch source digest is missing"
+        )
+    source_run_root = project_root / "runs" / run_id
+    try:
+        source_index = _read_artifacts_index(source_run_root)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError) as exc:
+        raise WorkflowExecutionError(
+            "WORKFLOW_TARGET_MISMATCH: canonical model branch source artifact registry is unavailable"
+        ) from exc
+    matches = [
+        item
+        for item in source_index.get("artifacts", [])
+        if isinstance(item, Mapping) and item.get("artifact_id") == artifact_id
+    ]
+    if len(matches) != 1:
+        raise WorkflowExecutionError(
+            "WORKFLOW_TARGET_MISMATCH: canonical model branch source artifact is not uniquely registered"
+        )
+    source_record = matches[0]
+    relative_value = source_record.get("path")
+    if not isinstance(relative_value, str) or not relative_value:
+        raise WorkflowExecutionError(
+            "WORKFLOW_TARGET_MISMATCH: canonical model branch source artifact path is invalid"
+        )
+    relative = Path(relative_value)
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise WorkflowExecutionError(
+            "WORKFLOW_TARGET_MISMATCH: canonical model branch source artifact path escapes its run"
+        )
+    try:
+        actual_digest, _file_identity = EvidencePersistencePort._read_project_artifact_snapshot(
+            project_root, run_id, relative
+        )
+    except WorkflowExecutionError as exc:
+        raise WorkflowExecutionError(
+            "WORKFLOW_TARGET_MISMATCH: canonical model branch source digest cannot be read"
+        ) from exc
+    if not _digest_matches(source_record.get("sha256"), actual_digest) or not _digest_matches(
+        expected_digest, actual_digest
+    ):
+        raise WorkflowExecutionError(
+            "WORKFLOW_TARGET_MISMATCH: canonical model branch source content digest changed"
+        )
+
+
+def _model_step_requires_branch_binding(
+    step: Any,
+    *,
+    bindings: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether this admitted model variant produces model branches."""
+
+    if isinstance(step, Mapping):
+        operation_id = step.get("operation_id")
+        step_id = step.get("step_id")
+        spec = step.get("spec")
+    else:
+        operation_id = getattr(step, "operation_id", None)
+        step_id = getattr(step, "step_id", None)
+        spec = getattr(step, "spec", None)
+    if operation_id == "model.genesis":
+        return True
+    if operation_id == "model.auto":
+        contract = WORKFLOW_STEP_SPEC_CONTRACTS.get("model.auto")
+        if contract is None or not isinstance(spec, Mapping):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: model.auto variant declaration is unavailable"
+            )
+        try:
+            variant = contract.resolve_variant(spec)
+        except ValueError as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: model.auto variant declaration is invalid"
+            ) from exc
+        return variant is None or variant.variant_id == "selector"
+    if operation_id == "model.custom":
+        declarations = bindings.get("server_model_declarations") if isinstance(bindings, Mapping) else None
+        declaration = (
+            declarations.get(step_id)
+            if isinstance(declarations, Mapping) and isinstance(step_id, str)
+            else None
+        )
+        return isinstance(declaration, Mapping) and declaration.get("branch_producing") is True
+    return False
+
+
+def _validate_canonical_model_branch_completion(
+    admission: Mapping[str, Any],
+    *,
+    receipt: Any,
+    artifact_ids: list[str],
+    output_bindings: Mapping[str, Any],
+    lineage: Mapping[str, Any],
+    project_root: Path,
+    server_artifact_registry: Mapping[tuple[str, str, str], Mapping[str, Any]],
+) -> None:
+    """Validate branch identity before a completion record is durably written.
+
+    Resume performs the deeper model-run/source-digest validation because it has
+    the current compiled draft. Completion still needs an immediate identity
+    gate so a producer cannot publish a branch whose evidence refs, source, or
+    execution key disagree with the server admission.
+    """
+
+    step = admission.get("step")
+    if not isinstance(step, Mapping) or step.get("operation_id") not in {
+        "model.genesis",
+        "model.auto",
+        "model.custom",
+    }:
+        return
+    operation_id = step.get("operation_id")
+    custom_declarations = (
+        admission.get("bindings", {}).get("server_model_declarations")
+        if isinstance(admission.get("bindings"), Mapping)
+        else None
+    )
+    custom_declaration = (
+        custom_declarations.get(admission.get("step_id"))
+        if isinstance(custom_declarations, Mapping)
+        else None
+    )
+    step_for_binding = {
+        **step,
+        "step_id": step.get("step_id") or admission.get("step_id"),
+    }
+    if not _model_step_requires_branch_binding(
+        step_for_binding,
+        bindings=admission.get("bindings") if isinstance(admission.get("bindings"), Mapping) else None,
+    ):
+        return
+    if "model_branches" not in output_bindings:
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: live branch-producing model completion requires canonical model branch binding"
+        )
+
+    workflow_id = admission.get("workflow_id")
+    workflow_step_id = admission.get("step_id")
+    branches = _canonical_model_branch_list(
+        output_bindings.get("model_branches"),
+        workflow_id=workflow_id if isinstance(workflow_id, str) else None,
+        workflow_step_id=workflow_step_id if isinstance(workflow_step_id, str) else None,
+    )
+    legacy_branches = lineage.get("branches") if isinstance(lineage, Mapping) else None
+    if legacy_branches is not None and (
+        not isinstance(legacy_branches, list) or branches != legacy_branches
+    ):
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_CORRUPT: canonical model branch body differs from its lineage alias"
+        )
+
+    admitted_step_payload = admission.get("step")
+    admitted_target = admission.get("target")
+    admitted_preconditions = admission.get("preconditions")
+    admitted_bindings = admission.get("bindings")
+    if not isinstance(admitted_step_payload, Mapping):
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: model branch admission step is unavailable"
+        )
+    if not isinstance(admitted_target, Mapping):
+        raise WorkflowExecutionError(
+            "WORKFLOW_TARGET_MISMATCH: model branch admission target is unavailable"
+        )
+    if not isinstance(admitted_preconditions, Mapping):
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: model branch admission preconditions are unavailable"
+        )
+    if not isinstance(admitted_bindings, Mapping):
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: model branch admission bindings are unavailable"
+        )
+    try:
+        admitted_model_step = WorkflowStep(
+            step_id=str(admitted_step_payload["step_id"]),
+            operation_id=str(admitted_step_payload["operation_id"]),
+            operation_version=str(admitted_step_payload["operation_version"]),
+            depends_on=tuple(admitted_step_payload.get("depends_on", ())),
+            spec=dict(admitted_step_payload["spec"]),
+            expected_artifacts=tuple(admitted_step_payload.get("expected_artifacts", ())),
+            fingerprint=str(admitted_step_payload["fingerprint"]),
+        )
+        admitted_model_draft = WorkflowDraft(
+            workflow_id=str(admission["workflow_id"]),
+            workflow_template=str(admission.get("workflow_template", "")),
+            target=dict(admitted_target),
+            preconditions=dict(admitted_preconditions),
+            bindings=dict(admitted_bindings),
+            steps=(admitted_model_step,),
+            plan_fingerprint=str(admission["plan_fingerprint"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: model branch admission step is malformed"
+        ) from exc
+    for branch in branches:
+        _validate_compiled_model_branch_declaration(
+            admitted_model_draft, admitted_model_step, branch
+        )
+
+    completion_refs = set(artifact_ids)
+    admitted_refs: set[str] = set()
+    admitted_rows: dict[str, Mapping[str, Any]] = {}
+    for key, row in server_artifact_registry.items():
+        if (
+            isinstance(key, tuple)
+            and len(key) == 3
+            and key[0] == receipt.receipt_id
+            and isinstance(row, Mapping)
+        ):
+            ref = f"{key[1]}:{key[2]}"
+            admitted_refs.add(ref)
+            admitted_rows[ref] = row
+
+    seen_branch_ids: set[str] = set()
+    for branch in branches:
+        branch_id = branch.get("branch_id")
+        if (
+            not isinstance(branch_id, str)
+            or not branch_id
+            or branch_id in seen_branch_ids
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch identity is not unique"
+            )
+        seen_branch_ids.add(branch_id)
+
+        run_id = _require_workflow_opaque_ref(
+            branch.get("run_id"), "canonical model branch run_id"
+        )
+        run_ref = _require_workflow_opaque_ref(
+            branch.get("run_ref"), "canonical model branch run_ref"
+        )
+        if run_ref != run_id:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch run identity changed"
+            )
+
+        branch_artifact_ids = _validated_artifact_ids(branch.get("artifact_ids"))
+        if not branch_artifact_ids or len(set(branch_artifact_ids)) != len(branch_artifact_ids):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch artifact identity is invalid"
+            )
+        expected_refs = [f"{run_id}:{artifact_id}" for artifact_id in branch_artifact_ids]
+        if branch.get("artifact_refs") != expected_refs:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch artifact identity changed"
+            )
+        if any(reference not in completion_refs for reference in expected_refs):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch artifact is not in completion"
+            )
+        if branch.get("evidence_refs") != expected_refs or any(
+            reference not in admitted_refs for reference in expected_refs
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch evidence is not bound to its admission"
+            )
+        for reference in expected_refs:
+            admitted_row = admitted_rows[reference]
+            if (
+                admitted_row.get("workflow_id") != workflow_id
+                or admitted_row.get("workflow_step_id") != workflow_step_id
+                or admitted_row.get("receipt_id") != receipt.receipt_id
+            ):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch evidence belongs to another step"
+                )
+
+        source_refs = branch.get("source_refs")
+        expected_source_refs = {
+            "run_id": branch.get("source_run_id"),
+            "artifact_id": branch.get("source_artifact_id"),
+            "content_sha256": branch.get("source_sha256"),
+        }
+        if source_refs != expected_source_refs:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch source identity changed"
+            )
+        if (
+            not isinstance(source_refs, Mapping)
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_TARGET_MISMATCH: canonical model branch source identity is malformed"
+            )
+        target = admission.get("target")
+        if not isinstance(target, Mapping):
+            raise WorkflowExecutionError(
+                "WORKFLOW_TARGET_MISMATCH: model branch admission target is unavailable"
+            )
+        target_run_id = _require_workflow_opaque_ref(
+            target.get("run_id"), "model branch admission target run_id"
+        )
+        target_artifact_id = _require_workflow_artifact_ref(
+            target.get("artifact_id"), "model branch admission target artifact_id"
+        )
+        if (
+            source_refs.get("run_id") != target_run_id
+            or source_refs.get("artifact_id") != target_artifact_id
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_TARGET_MISMATCH: canonical model branch source is not bound to the admission target"
+            )
+        _validate_server_source_artifact_reference(
+            project_root,
+            source_run_id=source_refs.get("run_id"),
+            source_artifact_id=source_refs.get("artifact_id"),
+            expected_digest=source_refs.get("content_sha256"),
+        )
+
+        expected_execution_key = f"{workflow_id}:{workflow_step_id}:{branch_id}"
+        if branch.get("execution_key") != expected_execution_key:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch execution identity changed"
+            )
+        branch_spec = branch.get("branch_spec")
+        family = branch_spec.get("model_family") if isinstance(branch_spec, Mapping) else None
+        if not isinstance(family, str) or not family or branch.get("model_family") != family:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch family identity changed"
+            )
+        if operation_id == "model.custom":
+            declared_branches = (
+                custom_declaration.get("branches")
+                if isinstance(custom_declaration, Mapping)
+                else None
+            )
+            declared = next(
+                (
+                    candidate
+                    for candidate in declared_branches or []
+                    if isinstance(candidate, Mapping)
+                    and candidate.get("branch_id") == branch_id
+                ),
+                None,
+            )
+            if not isinstance(declared, Mapping) or declared.get("model_family") != family:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: custom model branch family is not server-declared"
+                )
+            expected_primary = branch.get("model_artifact_id")
+            expected_outputs = {
+                str(item)
+                for item in (step.get("expected_artifacts") or [])
+                if isinstance(item, str) and item
+            }
+        else:
+            try:
+                family_contract = model_family_contract(family)
+            except Exception as exc:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch family is not registered"
+                ) from exc
+            expected_primary = str(family_contract.expected_artifacts[0])
+            expected_outputs = set(family_contract.expected_artifacts)
+        if (
+            not isinstance(expected_primary, str)
+            or expected_primary not in branch_artifact_ids
+            or branch.get("model_artifact_id") != expected_primary
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch artifact does not match its family"
+            )
+        if expected_outputs and expected_primary not in expected_outputs:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch artifact is not declared by its model contract"
+            )
+        for reference in expected_refs:
+            artifact_id = reference.split(":", 1)[1]
+            row = admitted_rows[reference]
+            if operation_id == "model.custom":
+                if row.get("producer_operation_id") != "model.custom":
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_RESUME_AUTHORITY_REQUIRED: custom model evidence was produced by another operation"
+                    )
+                continue
+            provenance = row.get("provenance")
+            if (
+                not isinstance(provenance, Mapping)
+                or provenance.get("branch_id") != branch_id
+                or provenance.get("model_run_id") != run_id
+                or provenance.get("model_artifact_id") != expected_primary
+                or artifact_id not in set(provenance.get("expected_artifacts") or [])
+            ):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: model evidence lacks server-bound family provenance"
+                )
+
+
+def _validate_canonical_model_branch_binding(
+    root: Path,
+    draft: WorkflowDraft,
+    model_step_id: str,
+    binding: Any,
+    *,
+    legacy_branches: Any,
+    completion_artifact_ids: list[str],
+    receipt_id: str,
+    records: Iterable[Mapping[str, Any]],
+) -> None:
+    """Validate the canonical branch envelope and every server-bound identity."""
+
+    branches = _canonical_model_branch_list(
+        binding,
+        workflow_id=draft.workflow_id,
+        workflow_step_id=model_step_id,
+    )
+    if legacy_branches is not None and not isinstance(legacy_branches, list):
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_CORRUPT: legacy model branch alias is malformed"
+        )
+    if isinstance(legacy_branches, list) and branches != legacy_branches:
+        raise WorkflowExecutionError(
+            "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch body differs from its lineage alias"
+        )
+
+    completion_refs = set(completion_artifact_ids)
+    admitted_refs = {
+        f"{record.get('run_id')}:{record.get('artifact_id')}"
+        for record in records
+        if record.get("record_type") == "workflow_artifact_admission"
+        and record.get("receipt_id") == receipt_id
+        and isinstance(record.get("run_id"), str)
+        and isinstance(record.get("artifact_id"), str)
+    }
+    seen_branch_ids: set[str] = set()
+    for branch in branches:
+        _validate_persisted_model_branch(root, draft, model_step_id, branch)
+        branch_id = branch.get("branch_id")
+        if not isinstance(branch_id, str) or not branch_id or branch_id in seen_branch_ids:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch identity is not unique"
+            )
+        seen_branch_ids.add(branch_id)
+
+        run_id = _require_workflow_opaque_ref(
+            branch.get("run_id"), "canonical model branch run_id"
+        )
+        run_ref = _require_workflow_opaque_ref(
+            branch.get("run_ref"), "canonical model branch run_ref"
+        )
+        if run_ref != run_id:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch run identity changed"
+            )
+
+        artifact_ids = _validated_artifact_ids(branch.get("artifact_ids"))
+        expected_artifact_refs = [f"{run_id}:{artifact_id}" for artifact_id in artifact_ids]
+        artifact_refs = branch.get("artifact_refs")
+        if artifact_refs != expected_artifact_refs:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch artifact identity changed"
+            )
+        if any(reference not in completion_refs for reference in expected_artifact_refs):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch artifact is not in completion"
+            )
+
+        evidence_refs = branch.get("evidence_refs")
+        if evidence_refs != expected_artifact_refs or any(
+            reference not in admitted_refs for reference in expected_artifact_refs
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch evidence is not bound to its admission"
+            )
+
+        source_refs = branch.get("source_refs")
+        expected_source_refs = {
+            "run_id": branch.get("source_run_id"),
+            "artifact_id": branch.get("source_artifact_id"),
+            "content_sha256": branch.get("source_sha256"),
+        }
+        if source_refs != expected_source_refs:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch source identity changed"
+            )
+
+        expected_execution_key = f"{draft.workflow_id}:{model_step_id}:{branch_id}"
+        if branch.get("execution_key") != expected_execution_key:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch execution identity changed"
+            )
+        branch_spec = branch.get("branch_spec")
+        family = branch_spec.get("model_family") if isinstance(branch_spec, Mapping) else None
+        if branch.get("model_family") != family:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: canonical model branch family identity changed"
             )
 
 
@@ -6496,14 +7227,35 @@ def _dependent_model_branch(
     matched_dependency_id: str | None = None
     for dependency_id in step.depends_on:
         dependency = previous.get(dependency_id)
-        branches = dependency.payload.get("branches") if dependency is not None else None
-        if not isinstance(branches, list) and dependency is not None:
-            lineage = dependency.lineage or dependency.payload.get("lineage")
+        if dependency is None:
+            continue
+        typed_outputs = dependency.output_bindings
+        if isinstance(typed_outputs, Mapping) and "model_branches" in typed_outputs:
+            # A present canonical binding is authoritative. Any malformed
+            # body must fail closed rather than revive a legacy alias.
+            branches = _canonical_model_branch_list(
+                typed_outputs.get("model_branches")
+            )
+        else:
+            # Bounded compatibility path for old results that predate typed
+            # model bindings. Only a result explicitly reconstructed from
+            # persisted state may use these aliases; a live producer without a
+            # canonical binding is rejected before any post-estimation read.
+            if not dependency.restored_from_state:
+                raise WorkflowExecutionError(
+                    "completed model branch has no canonical binding; a persisted model run is required"
+                )
+            lineage = dependency.lineage
             branches = lineage.get("branches") if isinstance(lineage, Mapping) else None
-        if not isinstance(branches, list) and dependency is not None:
-            typed_outputs = dependency.output_bindings or dependency.payload.get("output_bindings")
-            model_output = typed_outputs.get("model_branches") if isinstance(typed_outputs, Mapping) else None
-            branches = model_output.get("branches") if isinstance(model_output, Mapping) else None
+            if not isinstance(branches, list):
+                legacy_lineage = dependency.payload.get("lineage")
+                branches = (
+                    legacy_lineage.get("branches")
+                    if isinstance(legacy_lineage, Mapping)
+                    else None
+                )
+            if not isinstance(branches, list):
+                branches = dependency.payload.get("branches")
         if not isinstance(branches, list):
             continue
         for branch in branches:
@@ -6862,6 +7614,13 @@ def _persist_workflow_capability_result(
     if execution.output_frame is None:
         artifact_id = f"workflow_capability_{operation_token}_{token}"
         artifact_path = run_root / "artifacts" / "workflow_capability" / f"{artifact_id}.json"
+        contract = WORKFLOW_STEP_SPEC_CONTRACTS[step.operation_id]
+        variant = contract.resolve_variant(step.spec)
+        result_schema_ref = (
+            variant.output_schema_ref
+            if variant is not None
+            else contract.output_schema_ref
+        )
         result_digest = hashlib.sha256(
             json.dumps(result_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
         ).hexdigest()
@@ -6880,9 +7639,7 @@ def _persist_workflow_capability_result(
             },
             "request": dict(request),
             "request_fingerprint": request_fingerprint,
-            "result_schema": str(step.contract.output_schema_ref) if hasattr(step, "contract") else str(
-                WORKFLOW_STEP_SPEC_CONTRACTS[step.operation_id].output_schema_ref
-            ),
+            "result_schema": str(result_schema_ref),
             "result_sha256": result_digest,
             "result": result_payload,
         }

@@ -13,6 +13,7 @@ from workbench.agent.workflow import (
     WorkflowStepResult,
     WorkflowStateStore,
 )
+from workbench.agent.workflow_runtime import _completion_seal
 
 
 def _resume_fixture(workflow_id: str):
@@ -52,7 +53,7 @@ def _first_pass(step, _previous):
     )
 
 
-def test_resume_validates_terminal_model_branches_before_any_callback_or_write(
+def test_live_model_completion_rejects_legacy_branches_before_persisting_completion(
     tmp_path,
 ) -> None:
     draft = compile_fixture_workflow(
@@ -100,28 +101,89 @@ def test_resume_validates_terminal_model_branches_before_any_callback_or_write(
                     }
                 ]
             },
+            output_bindings={
+                "legacy_model_branches": {
+                    "binding_type": "legacy_model_branches",
+                    "branches": [
+                        {
+                            "branch_id": "m1",
+                            "run_id": "run-1",
+                            "artifact_ids": ["ols_1"],
+                            "model_artifact_id": "ols_1",
+                            "workflow_id": draft.workflow_id,
+                            "workflow_step_id": "model",
+                            "source_run_id": "run-1",
+                            "source_artifact_id": "raw-1",
+                            "source_sha256": "sha256:source-1",
+                            "branch_spec": {
+                                "model_family": "ols",
+                                "outcome": "forged-outcome",
+                                "predictors": ["rate_a"],
+                                "covariance": "unadjusted",
+                            },
+                        }
+                    ],
+                }
+            },
         )
 
     first = _execute(tmp_path, draft, first_pass)
-    assert first.status == "completed"
+    assert first.status == "failed"
+    assert first.steps["model"].status == "failed"
+    assert "canonical model branch binding" in first.steps["model"].error
     evidence_path = (
         tmp_path
         / "workbench"
         / "workflows"
         / f"{draft.workflow_id}.evidence.jsonl"
     )
-    before_resume = evidence_path.read_text(encoding="utf-8")
-    callback_steps: list[str] = []
+    evidence = evidence_path.read_text(encoding="utf-8")
+    assert '"record_type": "workflow_completion"' not in evidence
+    assert '"record_type": "workflow_abort"' in evidence
 
-    def resume_pass(step, _previous):
-        callback_steps.append(step.step_id)
-        return WorkflowStepResult(artifact_ids=[])
 
-    with pytest.raises(WorkflowExecutionError, match="compiled model step"):
-        _execute(tmp_path, draft, resume_pass)
+def test_generic_resume_preserves_empty_completion_metadata_compatibility(tmp_path) -> None:
+    """A legacy generic completion without optional metadata remains readable."""
 
-    assert callback_steps == []
-    assert evidence_path.read_text(encoding="utf-8") == before_resume
+    draft = _resume_fixture("wf-resume-empty-completion-metadata")
+
+    def first_pass(step, _previous):
+        if step.step_id == "consume":
+            raise WorkflowExecutionError("stop after generic publish")
+        return WorkflowStepResult(artifact_ids=["artifact-publish"])
+
+    first = _execute(tmp_path, draft, first_pass)
+    assert first.status == "failed"
+    evidence_path = (
+        tmp_path
+        / "workbench"
+        / "workflows"
+        / f"{draft.workflow_id}.evidence.jsonl"
+    )
+
+    def remove_optional_completion_metadata(records):
+        matches = [
+            record
+            for record in records
+            if record.get("record_type") == "workflow_completion"
+            and record.get("step_id") == "publish"
+        ]
+        assert len(matches) == 1
+        matches[0].pop("output_bindings", None)
+        matches[0]["completion_seal"] = _completion_seal(matches[0])
+
+    _rewrite_evidence_records(evidence_path, remove_optional_completion_metadata)
+
+    second_calls: list[str] = []
+
+    def second_pass(step, _previous):
+        second_calls.append(step.step_id)
+        return WorkflowStepResult(artifact_ids=[f"artifact-{step.step_id}"])
+
+    second = _execute(tmp_path, draft, second_pass)
+
+    assert second.status == "completed"
+    assert second_calls == ["consume"]
 
 
 def test_resume_rejects_tampered_persisted_artifact_before_dependent_callback(tmp_path) -> None:

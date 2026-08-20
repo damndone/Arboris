@@ -12,6 +12,7 @@ import dataclasses
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
@@ -24,13 +25,21 @@ from workbench.exports import export_pdf, export_xlsx
 from workbench.agent.workflow import (
     WorkflowExecutionError,
     WorkflowExecutor,
+    WorkflowExecutionState,
+    WorkflowStep,
     WorkflowStepResult,
+    WorkflowStateStore,
+    WorkflowStepState,
     compile_workflow,
 )
 from workbench.agent.workflow_runtime import (
     _admit_workflow_host_endpoint_from_supervisor,
     issue_server_evidence_port,
     _execute_ols_branches,
+    _dependent_model_branch,
+    _completion_seal,
+    _validate_canonical_model_branch_completion,
+    _validate_compiled_model_branch_declaration,
     _execute_workflow_report,
     _WRITE_CONTEXT,
     build_workflow_step_executor,
@@ -459,6 +468,79 @@ def test_ols_step_uses_native_genesis_and_persists_one_run_per_branch(tmp_path) 
     execute = build_workflow_step_executor(project, draft, evidence_port=port)
     receipt = port.admit(draft, model_step)
     result = execute(model_step, {}, admission_receipt=receipt)
+
+    # Simulate a child run that completed before the parent workflow could
+    # publish its completion record. A retry with the same branch key must
+    # reuse the child run rather than create a second model directory.
+    first_child_runs = {
+        branch["branch_id"]: branch["run_id"] for branch in result.payload["branches"]
+    }
+    retry_result = execute(model_step, {}, admission_receipt=receipt)
+    assert {
+        branch["branch_id"]: branch["run_id"] for branch in retry_result.payload["branches"]
+    } == first_child_runs
+    assert len(
+        [path for path in (project / "runs").iterdir() if path.name not in {run_id}]
+    ) == 2
+
+    canonical = result.output_bindings["model_branches"]
+    forged_branches = [
+        {**branch, "evidence_refs": ["forged:artifact"]}
+        for branch in canonical["branches"]
+    ]
+    forged_result = dataclasses.replace(
+        result,
+        output_bindings={
+            **result.output_bindings,
+            "model_branches": {**canonical, "branches": forged_branches},
+        },
+    )
+    with pytest.raises(WorkflowExecutionError, match="canonical|evidence|admission"):
+        port.complete(receipt, forged_result)
+
+    forged_source_branches = [
+        {
+            **branch,
+            "source_sha256": "sha256:forged-source",
+            "source_refs": {
+                **branch["source_refs"],
+                "content_sha256": "sha256:forged-source",
+            },
+        }
+        for branch in canonical["branches"]
+    ]
+    forged_source_result = dataclasses.replace(
+        result,
+        output_bindings={
+            **result.output_bindings,
+            "model_branches": {**canonical, "branches": forged_source_branches},
+        },
+        lineage={"branches": forged_source_branches},
+    )
+    with pytest.raises(WorkflowExecutionError, match="digest|source|target"):
+        port.complete(receipt, forged_source_result)
+
+    forged_semantic_branches = [
+        {
+            **branch,
+            "branch_spec": {
+                **branch["branch_spec"],
+                "outcome": "forged-outcome",
+            },
+        }
+        for branch in canonical["branches"]
+    ]
+    forged_semantic_result = dataclasses.replace(
+        result,
+        output_bindings={
+            **result.output_bindings,
+            "model_branches": {**canonical, "branches": forged_semantic_branches},
+        },
+        lineage={"branches": forged_semantic_branches},
+    )
+    with pytest.raises(WorkflowExecutionError, match="compiled model step"):
+        port.complete(receipt, forged_semantic_result)
+
     port.complete(receipt, result)
 
     assert len(result.payload["branches"]) == 2
@@ -467,6 +549,539 @@ def test_ols_step_uses_native_genesis_and_persists_one_run_per_branch(tmp_path) 
     assert result.lineage["branches"] == result.payload["branches"]
     assert all(branch["model_artifact_id"] == "ols_1" for branch in result.lineage["branches"])
     assert all(branch["branch_spec"]["model_family"] == "ols" for branch in result.lineage["branches"])
+
+    resume_port = EvidencePersistencePort(project)
+    persisted_step = WorkflowStepState(
+        step_id=model_step.step_id,
+        fingerprint=model_step.fingerprint,
+        status="completed",
+        artifact_ids=tuple(result.artifact_ids),
+        row_counts=dict(result.row_counts),
+        result_fingerprint=result.result_fingerprint or model_step.fingerprint,
+        output_bindings=dict(result.output_bindings),
+        lineage=dict(result.lineage),
+    )
+    WorkflowStateStore(project, draft.workflow_id).append(
+        WorkflowExecutionState(
+            workflow_id=draft.workflow_id,
+            plan_fingerprint=draft.plan_fingerprint,
+            status="completed",
+            steps={model_step.step_id: persisted_step},
+        )
+    )
+    resumed = resume_port.validate_resumed_step_state(
+        draft, model_step, persisted_step
+    )
+    assert resumed.output_bindings["model_branches"][
+        "branches"
+    ] == result.output_bindings["model_branches"]["branches"]
+
+    forged_step = dataclasses.replace(
+        persisted_step, output_bindings={}
+    )
+    with pytest.raises(WorkflowExecutionError, match="output_bindings|canonical"):
+        resume_port.validate_resumed_step_state(draft, model_step, forged_step)
+
+    binding = result.output_bindings["model_branches"]
+    assert binding["binding_type"] == "model_branches"
+    assert binding["branches"] == result.lineage["branches"]
+    assert binding["workflow_id"] == draft.workflow_id
+    assert binding["workflow_step_id"] == model_step.step_id
+    for branch in binding["branches"]:
+        assert branch["run_ref"] == branch["run_id"]
+        assert branch["artifact_refs"] == [
+            f"{branch['run_id']}:{artifact_id}" for artifact_id in branch["artifact_ids"]
+        ]
+        assert branch["evidence_refs"] == branch["artifact_refs"]
+        assert branch["source_refs"] == {
+            "run_id": branch["source_run_id"],
+            "artifact_id": branch["source_artifact_id"],
+            "content_sha256": branch["source_sha256"],
+        }
+        assert branch["execution_key"] == (
+            f"{draft.workflow_id}:{model_step.step_id}:{branch['branch_id']}"
+        )
+        assert branch["model_family"] == branch["branch_spec"]["model_family"]
+
+    # Prove the explicit bounded migration path: a valid pre-canonical
+    # lineage-only completion remains resumable after its seal is recomputed.
+    evidence_path = (
+        project
+        / "workbench"
+        / "workflows"
+        / f"{draft.workflow_id}.evidence.jsonl"
+    )
+    records = [
+        json.loads(line)
+        for line in evidence_path.read_text(encoding="utf-8").splitlines()
+    ]
+    completions = [
+        record
+        for record in records
+        if record.get("record_type") == "workflow_completion"
+        and record.get("step_id") == model_step.step_id
+    ]
+    assert len(completions) == 1
+    completions[0].pop("output_bindings", None)
+    completions[0]["completion_seal"] = _completion_seal(completions[0])
+    evidence_path.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+        encoding="utf-8",
+    )
+    legacy_state = dataclasses.replace(persisted_step, output_bindings={})
+    legacy_resumed = resume_port.validate_resumed_step_state(
+        draft, model_step, legacy_state
+    )
+    assert legacy_resumed.output_bindings == {}
+    assert legacy_resumed.lineage == result.lineage
+
+
+def test_model_auto_preserves_canonical_model_branch_binding(tmp_path) -> None:
+    """The selector adapter must not discard Genesis' typed branch identity."""
+
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    frame = _frame(12)
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = SimpleNamespace(workflow_id="wf-model-auto-binding")
+    step = WorkflowStep(
+        step_id="select_model",
+        operation_id="model.auto",
+        operation_version="v1",
+        depends_on=(),
+        spec={
+            "branches": [
+                {
+                    "branch_id": "auto",
+                    "outcome": "outcome",
+                    "predictors": ["rate_a"],
+                }
+            ]
+        },
+        expected_artifacts=(),
+        fingerprint="step-fingerprint",
+    )
+    expected_bindings = {
+        "model_branches": {
+            "binding_type": "model_branches",
+            "branches": [{"branch_id": "auto"}],
+        }
+    }
+    genesis_result = WorkflowStepResult(
+        artifact_ids=["run:model"],
+        row_counts={"source": len(frame)},
+        payload={"branches": [{"branch_id": "auto"}]},
+        output_bindings=expected_bindings,
+        lineage={"branches": [{"branch_id": "auto"}]},
+    )
+
+    with (
+        patch.object(workflow_runtime, "_require_active_write_context"),
+        patch.object(
+            workflow_runtime,
+            "_execute_model_genesis_branches",
+            return_value=genesis_result,
+        ),
+    ):
+        result = workflow_runtime._execute_model_auto(
+            root=project,
+            draft=draft,
+            lineage={"run_id": run_id, "artifact_id": artifact_id},
+            step=step,
+            frame=frame,
+            admission_receipt=SimpleNamespace(),
+            evidence_port=SimpleNamespace(),
+        )
+
+    assert result.output_bindings == expected_bindings
+    assert result.lineage == genesis_result.lineage
+
+
+def test_model_auto_resolved_family_is_a_resume_bound_declaration() -> None:
+    draft = SimpleNamespace(bindings={})
+    step = WorkflowStep(
+        step_id="select_model",
+        operation_id="model.auto",
+        operation_version="v1",
+        depends_on=(),
+        spec={
+            "branches": [
+                {
+                    "branch_id": "auto",
+                    "outcome": "outcome",
+                    "predictors": ["rate_a"],
+                }
+            ]
+        },
+        expected_artifacts=(),
+        fingerprint="step-fingerprint",
+    )
+    branch = {
+        "branch_id": "auto",
+        "branch_spec": {
+            "model_family": "ols",
+            "covariance": "unadjusted",
+            "outcome": "outcome",
+            "predictors": ["rate_a"],
+        },
+    }
+
+    _validate_compiled_model_branch_declaration(draft, step, branch)
+
+
+def test_model_auto_selector_plan_compiles_without_breaking_capability_contract() -> None:
+    """The selector and generic adapter forms must share one safe operation id."""
+
+    draft = compile_workflow(
+        workflow_id="wf-model-auto-selector-contract",
+        target={"run_id": "run-1", "node_ref": "stage:source", "artifact_id": "raw-1"},
+        preconditions={
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": "sha256:model-auto-selector-contract",
+            "active_head_run_id": "run-1",
+            "owner_resolution": "single_candidate",
+        },
+        steps=[
+            {
+                "step_id": "select_model",
+                "operation_id": "model.auto",
+                "spec": {
+                    "branches": [
+                        {
+                            "branch_id": "auto",
+                            "outcome": "outcome",
+                            "predictors": ["rate_a"],
+                        }
+                    ]
+                },
+            }
+        ],
+        available_columns=["outcome", "rate_a"],
+    )
+
+    assert draft.steps[0].operation_id == "model.auto"
+    assert draft.steps[0].spec["branches"][0]["outcome"] == "outcome"
+    from workbench.agent.workflow_contracts import (
+        WORKFLOW_STEP_SPEC_CONTRACTS,
+        workflow_dispatcher_key,
+    )
+
+    contract = WORKFLOW_STEP_SPEC_CONTRACTS["model.auto"]
+    assert {variant.variant_id for variant in contract.variants} == {
+        "selector",
+        "generic_capability",
+    }
+    assert workflow_dispatcher_key("model.auto", spec=draft.steps[0].spec) == (
+        "workbench.agent.workflow_runtime.model_auto"
+    )
+    schema_variants = contract.to_schema()["oneOf"]
+    assert [variant["required"] for variant in schema_variants] == [
+        ["branches"],
+        ["input_mode", "column_bindings", "options"],
+    ]
+    assert schema_variants[0]["additionalProperties"] is False
+    assert schema_variants[1]["additionalProperties"] is False
+
+
+def test_model_auto_variant_mixing_fails_closed() -> None:
+    """The compiler must not guess between selector and adapter semantics."""
+
+    from workbench.agent.workflow_contracts import validate_workflow_steps
+    from workbench.agent.operations import OperationValidationError
+
+    with pytest.raises(OperationValidationError, match="exactly one variant"):
+        validate_workflow_steps(
+            [
+                {
+                    "step_id": "ambiguous_auto",
+                    "operation_id": "model.auto",
+                    "spec": {
+                        "branches": [
+                            {
+                                "branch_id": "auto",
+                                "outcome": "outcome",
+                                "predictors": ["rate_a"],
+                            }
+                        ],
+                        "input_mode": "frame",
+                        "column_bindings": {"outcome": "outcome", "features": ["rate_a"]},
+                        "options": {},
+                    },
+                }
+            ]
+        )
+
+
+def test_model_auto_selector_executes_and_resumes_canonical_binding(tmp_path) -> None:
+    """The compiled selector variant reaches the real model Resume boundary."""
+
+    frame = _frame(60)
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="fixture-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-model-auto-selector-runtime",
+        steps=[
+            {
+                "step_id": "models",
+                "operation_id": "model.auto",
+                "spec": {
+                    "branches": [
+                        {"branch_id": "auto", "outcome": "outcome", "predictors": ["rate_a"]}
+                    ]
+                },
+            }
+        ],
+    )
+    model_step = draft.steps[0]
+    port = EvidencePersistencePort(project)
+    execute = build_workflow_step_executor(project, draft, evidence_port=port)
+    receipt = port.admit(draft, model_step)
+    result = execute(model_step, {}, admission_receipt=receipt)
+    port.complete(receipt, result)
+
+    assert result.payload["resolved_model_family"] == "ols"
+    assert result.output_bindings["model_branches"]["branches"][0]["model_family"] == "ols"
+
+    persisted_step = WorkflowStepState(
+        step_id=model_step.step_id,
+        fingerprint=model_step.fingerprint,
+        status="completed",
+        artifact_ids=tuple(result.artifact_ids),
+        row_counts=dict(result.row_counts),
+        result_fingerprint=result.result_fingerprint or model_step.fingerprint,
+        output_bindings=dict(result.output_bindings),
+        lineage=dict(result.lineage),
+    )
+    resumed = EvidencePersistencePort(project).validate_resumed_step_state(
+        draft, model_step, persisted_step
+    )
+    assert resumed.output_bindings["model_branches"] == result.output_bindings["model_branches"]
+
+
+def test_model_auto_generic_executes_and_completes_without_branch_binding(tmp_path) -> None:
+    """The generic capability variant remains a normal typed result, not a model branch producer."""
+
+    frame = _frame(24)
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-model-auto-generic-runtime",
+        steps=[
+            {
+                "step_id": "estimate",
+                "operation_id": "model.auto",
+                "spec": {
+                    "input_mode": "frame",
+                    "column_bindings": {"outcome": "outcome", "features": ["rate_a"]},
+                    "options": {},
+                },
+            }
+        ],
+    )
+    model_step = draft.steps[0]
+    port = EvidencePersistencePort(project)
+    execute = build_workflow_step_executor(project, draft, evidence_port=port)
+    receipt = port.admit(draft, model_step)
+    result = execute(model_step, {}, admission_receipt=receipt)
+
+    port.complete(receipt, result)
+
+    assert "model_branches" not in result.output_bindings
+    assert result.payload["result"]["selected_model_type"] == "ols"
+
+
+def test_project_artifact_snapshot_rejects_parent_symlink(tmp_path) -> None:
+    """Source validation must not follow a replaced parent directory."""
+
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "data.json").write_text("outside", encoding="utf-8")
+    (run_root / "nested").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(WorkflowExecutionError, match="admitted artifact|no-follow"):
+        workflow_runtime.EvidencePersistencePort._read_project_artifact_snapshot(
+            project_root, "run-1", Path("nested/data.json")
+        )
+
+
+def test_file_snapshot_fails_closed_without_nofollow(monkeypatch, tmp_path) -> None:
+    """A platform without no-follow support must not silently downgrade safety."""
+
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    monkeypatch.delattr(workflow_runtime.os, "O_NOFOLLOW", raising=False)
+    with pytest.raises(WorkflowExecutionError, match="no-follow"):
+        workflow_runtime.EvidencePersistencePort._read_file_snapshot(
+            tmp_path / "missing.json"
+        )
+
+
+def test_branch_producing_custom_model_requires_canonical_completion_binding() -> None:
+    admission = {
+        "workflow_id": "wf-custom-canonical-required",
+        "step_id": "custom",
+        "step": {"operation_id": "model.custom"},
+        "target": {"run_id": "run-1", "artifact_id": "raw-1"},
+        "bindings": {
+            "server_model_declarations": {
+                "custom": {"operation_id": "model.custom", "branch_producing": True}
+            }
+        },
+    }
+    with pytest.raises(WorkflowExecutionError, match="canonical|model branch"):
+        _validate_canonical_model_branch_completion(
+            admission,
+            receipt=SimpleNamespace(receipt_id="receipt-1"),
+            artifact_ids=["model_summary"],
+            output_bindings={},
+            lineage={},
+            project_root=Path("."),
+            server_artifact_registry={},
+        )
+
+
+def test_dependent_model_branch_prefers_canonical_binding_over_legacy_aliases() -> None:
+    legacy = {
+        "branch_id": "m1",
+        "branch_spec": {
+            "model_family": "ols",
+            "covariance": "unadjusted",
+            "outcome": "legacy_outcome",
+            "predictors": ["rate_a"],
+        },
+        "term_groups": {},
+    }
+    canonical = {
+        **legacy,
+        "branch_spec": {**legacy["branch_spec"], "outcome": "canonical_outcome"},
+    }
+    dependency = WorkflowStepResult(
+        payload={"branches": [legacy]},
+        lineage={"branches": [legacy]},
+        output_bindings={
+            "model_branches": {
+                "binding_type": "model_branches",
+                "branches": [canonical],
+            }
+        },
+    )
+    step = SimpleNamespace(
+        step_id="white",
+        depends_on=("model",),
+        operation_id="model.white_test",
+        spec={"branch_id": "m1", "output_id": "result"},
+    )
+
+    resolved = _dependent_model_branch(step, {"model": dependency})
+
+    assert resolved["branch_spec"]["outcome"] == "canonical_outcome"
+
+
+def test_dependent_model_branch_rejects_malformed_canonical_binding_without_legacy_fallback() -> None:
+    legacy = {
+        "branch_id": "m1",
+        "branch_spec": {
+            "model_family": "ols",
+            "covariance": "unadjusted",
+            "outcome": "legacy_outcome",
+            "predictors": ["rate_a"],
+        },
+        "term_groups": {},
+    }
+    dependency = WorkflowStepResult(
+        payload={"branches": [legacy]},
+        lineage={"branches": [legacy]},
+        output_bindings={
+            "model_branches": {
+                "binding_type": "model_branches",
+                "branches": "forged-not-a-list",
+            }
+        },
+    )
+    step = SimpleNamespace(
+        step_id="white",
+        depends_on=("model",),
+        operation_id="model.white_test",
+        spec={"branch_id": "m1", "output_id": "result"},
+    )
+
+    with pytest.raises(WorkflowExecutionError, match="canonical model branch"):
+        _dependent_model_branch(step, {"model": dependency})
+
+
+def test_dependent_model_branch_rejects_live_legacy_alias_without_canonical_binding() -> None:
+    legacy = {
+        "branch_id": "m1",
+        "branch_spec": {
+            "model_family": "ols",
+            "covariance": "unadjusted",
+            "outcome": "legacy_outcome",
+            "predictors": ["rate_a"],
+        },
+        "term_groups": {
+            "linear": {"rate_a": ["rate_a"]},
+            "polynomial": {},
+            "categorical": {},
+        },
+    }
+    dependency = WorkflowStepResult(payload={"branches": [legacy]})
+    step = SimpleNamespace(
+        step_id="white",
+        depends_on=("model",),
+        operation_id="model.white_test",
+        spec={"branch_id": "m1", "output_id": "result"},
+    )
+
+    with pytest.raises(WorkflowExecutionError, match="persisted model run"):
+        _dependent_model_branch(step, {"model": dependency})
+
+
+def test_dependent_model_branch_allows_only_restored_legacy_alias() -> None:
+    legacy = {
+        "branch_id": "m1",
+        "branch_spec": {
+            "model_family": "ols",
+            "covariance": "unadjusted",
+            "outcome": "legacy_outcome",
+            "predictors": ["rate_a"],
+        },
+        "term_groups": {
+            "linear": {"rate_a": ["rate_a"]},
+            "polynomial": {},
+            "categorical": {},
+        },
+    }
+    dependency = WorkflowStepResult(
+        payload={"branches": [legacy]}, restored_from_state=True
+    )
+    step = SimpleNamespace(
+        step_id="white",
+        depends_on=("model",),
+        operation_id="model.white_test",
+        spec={"branch_id": "m1", "output_id": "result"},
+    )
+
+    assert _dependent_model_branch(step, {"model": dependency}) == legacy
 
 
 def test_legacy_ols_helper_cannot_write_without_an_admitted_workflow(tmp_path) -> None:
@@ -1989,7 +2604,15 @@ def test_model_custom_requires_an_authorized_gateway_and_can_be_injected(tmp_pat
                 "custom_capability": {
                     "operation_id": "model.custom",
                     "branch_producing": True,
-                    "branches": [{"branch_id": "custom"}],
+                    "branches": [
+                        {
+                            "branch_id": "custom",
+                            "model_family": "custom.count",
+                            "outcome": "outcome",
+                            "predictors": ["rate_a"],
+                            "covariance": "unadjusted",
+                        }
+                    ],
                 }
             }
         },
@@ -2033,11 +2656,48 @@ def test_model_custom_requires_an_authorized_gateway_and_can_be_injected(tmp_pat
             )
         finally:
             output.close()
+        source_digest = sha256_file(project_root / "runs" / run_id / "data.csv")
+        branch = {
+            "branch_id": "custom",
+            "run_id": run_id,
+            "artifact_ids": ["model_summary"],
+            "run_ref": run_id,
+            "artifact_refs": [f"{run_id}:model_summary"],
+            "evidence_refs": [f"{run_id}:model_summary"],
+            "source_refs": {
+                "run_id": run_id,
+                "artifact_id": artifact_id,
+                "content_sha256": source_digest,
+            },
+            "execution_key": f"{draft.workflow_id}:{step.step_id}:custom",
+            "model_family": "custom.count",
+            "model_artifact_id": "model_summary",
+            "workflow_id": draft.workflow_id,
+            "workflow_step_id": step.step_id,
+            "source_run_id": run_id,
+            "source_artifact_id": artifact_id,
+            "source_sha256": source_digest,
+            "branch_spec": {
+                "model_family": "custom.count",
+                "outcome": "outcome",
+                "predictors": ["rate_a"],
+                "covariance": "unadjusted",
+            },
+        }
         return WorkflowStepResult(
-            artifact_ids=["model_summary"],
+            artifact_ids=[f"{run_id}:model_summary"],
             row_counts={"source": len(frame)},
             result_fingerprint="sha256:custom-result",
-            payload={"status": "completed"},
+            output_bindings={
+                "model_branches": {
+                    "binding_type": "model_branches",
+                    "workflow_id": draft.workflow_id,
+                    "workflow_step_id": step.step_id,
+                    "branches": [branch],
+                }
+            },
+            lineage={"branches": [branch]},
+            payload={"status": "completed", "branches": [branch]},
         )
 
     state = WorkflowExecutor(project).execute(
@@ -2051,5 +2711,5 @@ def test_model_custom_requires_an_authorized_gateway_and_can_be_injected(tmp_pat
     )
 
     assert state.status == "completed"
-    assert state.steps["custom_capability"].artifact_ids == ("model_summary",)
+    assert state.steps["custom_capability"].artifact_ids == (f"{run_id}:model_summary",)
     assert calls and calls[0][1:3] == ("wf-custom-gateway", "custom_capability")

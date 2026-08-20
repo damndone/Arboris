@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.workflow_fixtures import compile_fixture_workflow
+from tests.workflow_fixtures import compile_fixture_workflow, composed_plan
 from workbench.artifacts import initialize_artifact_index, register_artifact, sha256_file
 from workbench.agent.workflow import (
     WorkflowExecutionError,
@@ -53,6 +53,23 @@ def _test_evidence_port(project_root):
 
 
 EvidencePersistencePortFactory = _test_evidence_port
+
+
+def _non_model_composed_plan() -> list[dict]:
+    """Keep generic resume tests away from the model-family authority path."""
+
+    return [
+        {
+            **spec,
+            "depends_on": [
+                dependency
+                for dependency in spec.get("depends_on", [])
+                if dependency != "models"
+            ],
+        }
+        for spec in composed_plan()
+        if spec["operation_id"] != "model.genesis"
+    ]
 
 
 def _ok(step_id: str) -> WorkflowStepResult:
@@ -127,7 +144,9 @@ def _execute(project_root, draft, callback):
 
 def test_failed_step_blocks_dependents_and_preserves_completed_steps(tmp_path) -> None:
     """A dependent of a failed step is blocked, never quietly skipped."""
-    draft = compile_fixture_workflow(workflow_id="wf-resume-a")
+    draft = compile_fixture_workflow(
+        workflow_id="wf-resume-a", steps=_non_model_composed_plan()
+    )
     calls: list[str] = []
 
     def execute(step, _results):
@@ -152,7 +171,9 @@ def test_failed_step_blocks_dependents_and_preserves_completed_steps(tmp_path) -
 
 
 def test_resume_reuses_completed_steps_and_rejects_a_changed_source(tmp_path) -> None:
-    draft = compile_fixture_workflow(workflow_id="wf-resume-b")
+    draft = compile_fixture_workflow(
+        workflow_id="wf-resume-b", steps=_non_model_composed_plan()
+    )
 
     def failing(step, _results):
         if step.step_id == "detail":
@@ -180,7 +201,9 @@ def test_resume_reuses_completed_steps_and_rejects_a_changed_source(tmp_path) ->
         _execute(
             tmp_path,
             compile_fixture_workflow(
-                workflow_id="wf-resume-b", source_fingerprint="sha256:source-2"
+                workflow_id="wf-resume-b",
+                source_fingerprint="sha256:source-2",
+                steps=_non_model_composed_plan(),
             ),
             succeeding,
         )

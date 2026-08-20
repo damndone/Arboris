@@ -183,6 +183,57 @@ def validate_workflow_operation(
 # traceable to one of them.
 _REPORTED_PERCENTILES = (1, 5, 10, 25, 50, 75, 90, 95, 99)
 
+
+@dataclass(frozen=True)
+class StepSpecVariant:
+    """One closed request shape for a shared workflow operation identity."""
+
+    variant_id: str
+    required: tuple[str, ...]
+    allowed_fields: frozenset[str] = frozenset()
+    semantic_validator_key: str | None = None
+    reference_resolver_key: str | None = None
+    column_extractor_key: str | None = None
+    output_schema_ref: str | None = None
+    dispatcher_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.variant_id) is not str or not self.variant_id.strip():
+            raise ValueError("workflow step variant_id must be a non-empty string")
+        if not isinstance(self.required, tuple) or not self.required:
+            raise ValueError("workflow step variant required fields must be non-empty")
+        if any(type(field_name) is not str or not field_name for field_name in self.required):
+            raise ValueError("workflow step variant required fields must be non-empty strings")
+        if len(set(self.required)) != len(self.required):
+            raise ValueError("workflow step variant required fields must be unique")
+        if any(type(field_name) is not str or not field_name for field_name in self.allowed_fields):
+            raise ValueError("workflow step variant allowed fields must be non-empty strings")
+        if self.allowed_fields and not set(self.required) <= set(self.allowed_fields):
+            raise ValueError("workflow step variant required fields must be allowed")
+
+    def matches(self, spec: Mapping[str, Any]) -> bool:
+        request_fields = set(spec) - {"source_artifact_fingerprint"}
+        return (
+            (not self.allowed_fields or request_fields <= set(self.allowed_fields))
+            and all(
+                field_name in spec and spec[field_name] is not None
+                for field_name in self.required
+            )
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "variant_id": self.variant_id,
+            "required": list(self.required),
+            "allowed_fields": sorted(self.allowed_fields),
+            "semantic_validator_key": self.semantic_validator_key,
+            "reference_resolver_key": self.reference_resolver_key,
+            "column_extractor_key": self.column_extractor_key,
+            "output_schema_ref": self.output_schema_ref,
+            "dispatcher_key": self.dispatcher_key,
+        }
+
+
 @dataclass(frozen=True)
 class StepSpecContract:
     """What one composable step accepts, in one declarative place.
@@ -197,6 +248,15 @@ class StepSpecContract:
     summary: str
     fields: Mapping[str, str]
     required: tuple[str, ...] = ()
+    #: Alternative required-field groups for one operation that deliberately
+    #: exposes more than one typed request shape.  Each input must match
+    #: exactly one group; this keeps a shared operation id from becoming an
+    #: unvalidated bag of optional fields.
+    required_any_of: tuple[tuple[str, ...], ...] = ()
+    #: Explicit alternative request shapes for one public operation identity.
+    #: The compiler must resolve exactly one before using validator, extractor,
+    #: dispatcher or output-schema metadata.
+    variants: tuple[StepSpecVariant, ...] = ()
     field_types: Mapping[str, str] = field(default_factory=dict)
     semantic_validator_key: str | None = None
     reference_resolver_key: str | None = None
@@ -258,6 +318,35 @@ class StepSpecContract:
                 "workflow step required field(s) are undeclared: "
                 + ", ".join(sorted(unknown_required))
             )
+        for group in self.required_any_of:
+            if not isinstance(group, tuple) or not group:
+                raise ValueError("workflow step required_any_of groups must be non-empty tuples")
+            unknown_group = set(group) - field_names
+            if unknown_group:
+                raise ValueError(
+                    "workflow step required_any_of field(s) are undeclared: "
+                    + ", ".join(sorted(unknown_group))
+                )
+            if len(set(group)) != len(group):
+                raise ValueError("workflow step required_any_of groups must not repeat fields")
+        if any(not isinstance(variant, StepSpecVariant) for variant in self.variants):
+            raise ValueError("workflow step variants must contain StepSpecVariant instances")
+        variant_ids = [variant.variant_id for variant in self.variants]
+        if len(set(variant_ids)) != len(variant_ids):
+            raise ValueError("workflow step variants must have unique variant_id values")
+        for variant in self.variants:
+            unknown_variant = set(variant.required) - field_names
+            if unknown_variant:
+                raise ValueError(
+                    "workflow step variant required field(s) are undeclared: "
+                    + ", ".join(sorted(unknown_variant))
+                )
+            unknown_variant_fields = set(variant.allowed_fields) - field_names
+            if unknown_variant_fields:
+                raise ValueError(
+                    "workflow step variant allowed field(s) are undeclared: "
+                    + ", ".join(sorted(unknown_variant_fields))
+                )
         unknown_types = set(self.field_types) - field_names
         if unknown_types:
             raise ValueError(
@@ -318,10 +407,27 @@ class StepSpecContract:
     def allowed(self) -> frozenset[str]:
         return frozenset(self.fields)
 
+    def resolve_variant(self, spec: Mapping[str, Any]) -> StepSpecVariant | None:
+        """Resolve one explicit request variant, or fail closed."""
+
+        if not self.variants:
+            return None
+        matches = [variant for variant in self.variants if variant.matches(spec)]
+        if len(matches) != 1:
+            expected = " or ".join(
+                "{" + ", ".join(variant.required) + "}" for variant in self.variants
+            )
+            raise ValueError(
+                "workflow step spec must match exactly one variant: " + expected
+            )
+        return matches[0]
+
     def to_payload(self) -> dict[str, Any]:
         return {
             "summary": self.summary,
             "required": list(self.required),
+            "required_any_of": [list(group) for group in self.required_any_of],
+            "variants": [variant.to_payload() for variant in self.variants],
             "fields": dict(self.fields),
             "optional": sorted(set(self.fields) - set(self.required)),
             "field_types": dict(self.field_types),
@@ -382,12 +488,30 @@ class StepSpecContract:
             if name in self.field_enums:
                 field_schema["enum"] = list(self.field_enums[name])
             properties[name] = field_schema
-        return {
+        schema = {
             "type": "object",
             "required": list(self.required),
             "properties": properties,
             "additionalProperties": False,
         }
+        if self.variants:
+            schema["oneOf"] = [
+                {
+                    "required": list(variant.required),
+                    "properties": {
+                        field_name: properties[field_name]
+                        for field_name in variant.allowed_fields
+                        if field_name in properties
+                    },
+                    "additionalProperties": False,
+                }
+                for variant in self.variants
+            ]
+        elif self.required_any_of:
+            schema["oneOf"] = [
+                {"required": list(group)} for group in self.required_any_of
+            ]
+        return schema
 
 
 def pack_step_contract(
@@ -1986,6 +2110,86 @@ def _p5_workflow_step_contracts() -> dict[str, StepSpecContract]:
     return contracts
 
 
+def _merge_model_auto_step_contracts(
+    selector: StepSpecContract,
+    capability: StepSpecContract,
+) -> StepSpecContract:
+    """Keep the historical selector and generic adapter under one safe seam.
+
+    ``model.auto`` predates the generic capability registry as a selector with
+    ``branches``.  The capability registry later reused the same public id for
+    a typed adapter request.  Replacing one contract with the other made one
+    of the two valid request shapes unreachable.  A closed two-variant
+    contract preserves the public id while keeping validation, vocabulary and
+    dispatch explicit.
+    """
+
+    overlapping_fields = set(selector.fields) & set(capability.fields)
+    if overlapping_fields:
+        raise ValueError(
+            "model.auto contract variants have overlapping field names: "
+            + ", ".join(sorted(overlapping_fields))
+        )
+    return StepSpecContract(
+        summary=(
+            "Either resolve an automatic model selector from declared branches, "
+            "or execute the typed generic auto-model adapter; exactly one request "
+            "shape is required."
+        ),
+        fields={**selector.fields, **capability.fields},
+        required=(),
+        variants=(
+            StepSpecVariant(
+                variant_id="selector",
+                required=("branches",),
+                allowed_fields=frozenset(selector.fields),
+                semantic_validator_key=selector.semantic_validator_key,
+                reference_resolver_key=selector.reference_resolver_key,
+                column_extractor_key=selector.column_extractor_key,
+                output_schema_ref=selector.output_schema_ref,
+                dispatcher_key=selector.dispatcher_key,
+            ),
+            StepSpecVariant(
+                variant_id="generic_capability",
+                required=("input_mode", "column_bindings", "options"),
+                allowed_fields=frozenset(capability.fields),
+                semantic_validator_key=capability.semantic_validator_key,
+                reference_resolver_key=capability.reference_resolver_key,
+                column_extractor_key=capability.column_extractor_key,
+                output_schema_ref=capability.output_schema_ref,
+                dispatcher_key=capability.dispatcher_key,
+            ),
+        ),
+        field_types={**selector.field_types, **capability.field_types},
+        field_enums={**selector.field_enums, **capability.field_enums},
+        field_schemas={**selector.field_schemas, **capability.field_schemas},
+        semantic_validator_key=None,
+        reference_resolver_key=None,
+        column_extractor_key=None,
+        risk_class=selector.risk_class,
+        confirmation_policy=selector.confirmation_policy,
+        output_schema_ref="workbench.model.auto/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.model_auto.variant",
+        effect_level=selector.effect_level,
+        scope_requirements=selector.scope_requirements,
+        scope=selector.scope,
+        risk_level=selector.risk_level,
+        reconciler_key=selector.reconciler_key,
+        diff_builder_key=selector.diff_builder_key,
+        verification_builder_key=selector.verification_builder_key,
+        ui_description=selector.ui_description,
+        example_prompts=selector.example_prompts,
+        natural_language_enabled=selector.natural_language_enabled,
+        produces_dataset=capability.produces_dataset,
+        produced_dataset_kind=capability.produced_dataset_kind,
+        accepted_dataset_kinds=capability.accepted_dataset_kinds,
+        consumes_input_frame=selector.consumes_input_frame,
+        replayable_by_recipe=selector.replayable_by_recipe,
+        capability_kind=selector.capability_kind,
+        top_level_exposure_note=selector.top_level_exposure_note,
+    )
+
+
 WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContractRegistry({
     "statistical.explore": StepSpecContract(
         summary=(
@@ -2380,7 +2584,46 @@ from .workflow_capability_registry import workflow_capability_step_contracts  # 
 
 WORKFLOW_STEP_SPEC_CONTRACTS.update(_p5_workflow_step_contracts())
 WORKFLOW_STEP_SPEC_CONTRACTS.update(p7_workflow_step_contracts())
-WORKFLOW_STEP_SPEC_CONTRACTS.update(workflow_capability_step_contracts())
+_workflow_capability_contracts = workflow_capability_step_contracts()
+_model_auto_capability_contract = _workflow_capability_contracts.pop("model.auto", None)
+_workflow_capability_collisions = set(_workflow_capability_contracts) & set(
+    WORKFLOW_STEP_SPEC_CONTRACTS
+)
+_declared_workflow_capability_overlays = frozenset(
+    {
+        "imputation.mice",
+        "model.time_series.arma_garch",
+        "model.time_series.ets",
+        "prediction.prediction_lasso",
+        "prediction.prediction_random_forest",
+        "prediction.prediction_ridge",
+        "resample.oversample",
+        "resample.smote",
+        "resample.undersample",
+        "test.anova",
+        "test.chi_square",
+        "test.correlations",
+        "test.evidence",
+        "test.fisher_exact",
+        "test.nonparametric",
+        "test.rank_correlations",
+        "test.t_tests",
+    }
+)
+_unexpected_workflow_capability_collisions = (
+    _workflow_capability_collisions - _declared_workflow_capability_overlays
+)
+if _unexpected_workflow_capability_collisions:
+    raise ValueError(
+        "workflow capability contract identity collision: "
+        + ", ".join(sorted(_unexpected_workflow_capability_collisions))
+    )
+WORKFLOW_STEP_SPEC_CONTRACTS.update(_workflow_capability_contracts)
+if _model_auto_capability_contract is not None:
+    WORKFLOW_STEP_SPEC_CONTRACTS["model.auto"] = _merge_model_auto_step_contracts(
+        WORKFLOW_STEP_SPEC_CONTRACTS["model.auto"],
+        _model_auto_capability_contract,
+    )
 _refresh_workflow_contract_views()
 
 
@@ -2896,14 +3139,28 @@ def workflow_step_vocabulary() -> dict[str, Any]:
     }
 
 
-def workflow_dispatcher_key(operation_id: str) -> str:
-    """Return the trusted runtime key published by one step contract."""
+def workflow_dispatcher_key(
+    operation_id: str,
+    *,
+    spec: Mapping[str, Any] | None = None,
+) -> str:
+    """Return the trusted runtime key for an operation and request variant."""
 
     contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
     if contract is None or not contract.dispatcher_key:
         raise OperationValidationError(
             f"workflow step operation has no trusted dispatcher: {operation_id!r}"
         )
+    if spec is not None and contract.variants:
+        try:
+            variant = contract.resolve_variant(spec)
+        except ValueError as exc:
+            raise OperationValidationError(f"{operation_id}: {exc}") from exc
+        if not variant.dispatcher_key:
+            raise OperationValidationError(
+                f"workflow step variant has no trusted dispatcher: {operation_id!r}"
+            )
+        return variant.dispatcher_key
     return contract.dispatcher_key
 
 _STEP_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -2916,10 +3173,19 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
     """Every source column a step spec references, for schema checking."""
 
     columns: set[str] = set()
+    contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
+    variant = None
+    if contract is not None and contract.variants:
+        try:
+            variant = contract.resolve_variant(spec)
+        except ValueError:
+            # The full step validator emits the typed compile error. Keep this
+            # extractor conservative if called independently on malformed data.
+            return columns
     extractor_key = (
-        WORKFLOW_STEP_SPEC_CONTRACTS[operation_id].column_extractor_key
-        if operation_id in WORKFLOW_STEP_SPEC_CONTRACTS
-        else None
+        variant.column_extractor_key
+        if variant is not None
+        else contract.column_extractor_key if contract is not None else None
     )
     if extractor_key == "statistical.explore":
         columns.update(str(item) for item in spec.get("selected_columns", []) or [])
@@ -3041,6 +3307,26 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
             if spec.get(field_name):
                 columns.add(str(spec[field_name]))
     elif extractor_key == "model.auto":
+        if "branches" not in spec:
+            from .workflow_capability_registry import workflow_capability_registry
+
+            operation = workflow_capability_registry().require(operation_id)
+            request = operation.validate(
+                {
+                    "operation_id": operation_id,
+                    "input_mode": spec.get("input_mode"),
+                    "column_bindings": spec.get("column_bindings"),
+                    "options": spec.get("options"),
+                }
+            )
+            for value in request["column_bindings"].values():
+                if isinstance(value, str) and value:
+                    columns.add(value)
+                elif isinstance(value, list):
+                    columns.update(
+                        str(item) for item in value if isinstance(item, str) and item
+                    )
+            return columns
         for branch in spec.get("branches", []) or []:
             if isinstance(branch, Mapping):
                 if branch.get("outcome"):
@@ -3110,10 +3396,17 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
             + ". Supported fields: "
             + ", ".join(sorted(allowed))
         )
+    variant = None
     if contract is not None:
+        if contract.variants:
+            try:
+                variant = contract.resolve_variant(spec)
+            except ValueError as exc:
+                raise OperationValidationError(f"{operation_id}: {exc}") from exc
+        required_fields = variant.required if variant is not None else contract.required
         missing = sorted(
             field_name
-            for field_name in contract.required
+            for field_name in required_fields
             if field_name not in spec or spec[field_name] is None
         )
         if missing:
@@ -3121,8 +3414,25 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
                 f"{operation_id} spec is missing required field(s): "
                 + ", ".join(missing)
             )
+        if contract.required_any_of and variant is None:
+            matching_groups = [
+                group
+                for group in contract.required_any_of
+                if all(field_name in spec and spec[field_name] is not None for field_name in group)
+            ]
+            if len(matching_groups) != 1:
+                expected = " or ".join(
+                    "{" + ", ".join(group) + "}" for group in contract.required_any_of
+                )
+                raise OperationValidationError(
+                    f"{operation_id} spec must match exactly one typed request shape: {expected}"
+                )
         _validate_declared_field_types(operation_id, spec, contract)
-    validator_key = contract.semantic_validator_key if contract is not None else None
+    validator_key = (
+        variant.semantic_validator_key
+        if variant is not None
+        else contract.semantic_validator_key if contract is not None else None
+    )
     if validator_key and validator_key.startswith("data."):
         _validate_data_management_step(operation_id, spec)
         return
@@ -3445,7 +3755,25 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
     elif validator_key == "model.time_series.recipe":
         _validate_recipe_workflow_spec(operation_id, spec)
     elif validator_key in {"model.auto"}:
-        _validate_auto_workflow_spec(operation_id, spec)
+        if "branches" in spec:
+            _validate_auto_workflow_spec(operation_id, spec)
+        else:
+            from .workflow_capability_registry import workflow_capability_registry
+
+            try:
+                operation = workflow_capability_registry().require(operation_id)
+                operation.validate(
+                    {
+                        "operation_id": operation_id,
+                        "input_mode": spec.get("input_mode"),
+                        "column_bindings": spec.get("column_bindings"),
+                        "options": spec.get("options"),
+                    }
+                )
+            except Exception as exc:
+                raise OperationValidationError(
+                    f"invalid workflow capability {operation_id} spec: {exc}"
+                ) from exc
 
 
 def _validate_positive_integer_field(
@@ -4391,6 +4719,7 @@ __all__ = [
     "WORKFLOW_STEP_SPEC_CONTRACTS",
     "WORKFLOW_TEMPLATE",
     "StepSpecContract",
+    "StepSpecVariant",
     "WorkflowStepContractRegistry",
     "data_preparation_workflow_step_contracts",
     "pack_step_contract",
