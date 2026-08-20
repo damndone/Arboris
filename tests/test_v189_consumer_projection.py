@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -75,40 +76,14 @@ def _persisted_record(*, sensitivity: str = "public") -> PersistedEvidenceEnvelo
     )
 
 
-class _BindingStore:
-    def __init__(self, binding: EvidenceCommitBindingV1) -> None:
-        self.binding = binding
-        self.calls: list[str] = []
-
-    def load(self, commit_id: str) -> EvidenceCommitBindingV1 | None:
-        self.calls.append(commit_id)
-        return self.binding if commit_id == self.binding.commit_id else None
+class _FakeLoadPort:
+    def load(self, _commit_id: str) -> object:
+        return {"facts": {"fact-mean": 99}}
 
 
-class _EnvelopeStore:
-    def __init__(self, record: PersistedEvidenceEnvelopeV1) -> None:
-        self.record = record
-        self.calls: list[str] = []
-
-    def load(self, commit_id: str) -> PersistedEvidenceEnvelopeV1 | None:
-        self.calls.append(commit_id)
-        return self.record if commit_id == self.record.commit_id else None
-
-
-def test_results_facade_reads_only_persisted_committed_envelope() -> None:
-    record = _persisted_record()
-    binding_store = _BindingStore(record.binding)
-    envelope_store = _EnvelopeStore(record)
-    facade = PersistedEvidenceResultsFacadeV1(binding_store, envelope_store)
-
-    loaded = facade.read("evidence-commit-1")
-
-    assert loaded.envelope.to_dict() == record.envelope.to_dict()
-    assert loaded.envelope.numeric_facts[0].value == 2.0
-    assert binding_store.calls == ["evidence-commit-1"]
-    assert envelope_store.calls == ["evidence-commit-1"]
-    with pytest.raises(EvidenceProjectionError, match="client facts"):
-        facade.read("evidence-commit-1", client_facts={"fact-mean": 99})
+def test_retired_results_facade_rejects_fake_load_ports() -> None:
+    with pytest.raises(EvidenceProjectionError, match="EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"):
+        PersistedEvidenceResultsFacadeV1(_FakeLoadPort(), _FakeLoadPort())
 
 
 def test_cross_consumer_projection_preserves_identity_values_and_status_axes() -> None:
@@ -198,6 +173,31 @@ def test_agent_notebook_and_report_contributions_share_the_same_fact_values() ->
     )
 
     assert [row["value"] for row in agent["facts"]] == [row["value"] for row in notebook["facts"]]
-    assert [row["value"] for row in agent["facts"]] == [row["value"] for row in report["facts"]]
+    assert report["status"] == "unavailable"
+    assert report["facts"] == []
     assert agent["artifact_ref"] == notebook["artifact_ref"] == report["artifactRef"] == "artifact-1"
-    assert agent["envelope_digest"] == notebook["envelope_digest"] == report["envelopeDigest"]
+    assert agent["envelope_digest"] == notebook["envelope_digest"]
+
+
+def test_agent_notebook_report_projection_replay_is_stable_under_concurrency() -> None:
+    record = _persisted_record()
+    registry = default_projection_registry()
+
+    def project_all() -> tuple[dict[str, object], ...]:
+        return tuple(
+            registry.project(record, consumer_id=consumer_id, destination="local").to_dict()
+            for consumer_id in ("agent", "notebook", "report")
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        replays = list(pool.map(lambda _index: project_all(), range(8)))
+
+    assert all(replay == replays[0] for replay in replays)
+    assert {
+        replay[0]["artifact_ref"]
+        for replay in replays
+    } == {"artifact-1"}
+    assert {
+        replay[2]["envelope_digest"]
+        for replay in replays
+    } == {record.binding.envelope_digest}

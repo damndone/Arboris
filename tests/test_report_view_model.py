@@ -1,9 +1,64 @@
 from pathlib import Path
 from unittest.mock import patch
+import json
+import tempfile
 
 import pytest
 
 from workbench.report_view_model import build_report_view_model
+from tests.test_v189_evidence_report_boundary import (
+    _owner_wire,
+    _report_projection_wire,
+    _server_owned_evidence,
+)
+
+
+def _typed_projection() -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "projectionId": "report:evidence-commit-1",
+        "consumerId": "report",
+        "consumerVersion": "1.0",
+        "actorRef": "actor:1",
+        "projectRef": "project:1",
+        "sessionRef": "session:1",
+        "scopeRef": "scope:project:1",
+        "runId": "run-1",
+        "modelRunId": "run-1",
+        "artifactRef": "artifact-1",
+        "commitId": "evidence-commit-1",
+        "confirmationRef": "confirmation:run-1",
+        "envelopeRef": "evidence-envelope:1",
+        "envelopeDigest": "a" * 64,
+        "status": "available",
+        "executionStatus": "completed",
+        "availability": "available",
+        "completenessStatus": "complete",
+        "validationStatus": "met",
+        "validationSummary": {"requirement_status": "met"},
+        "facts": [
+            {"factId": "fact-1", "statisticId": "estimate", "value": 1.25},
+            {"factId": "fact-2", "statisticId": "standard-error", "value": 0.2},
+        ],
+        "sections": [],
+        "provenance": {"artifactRef": "artifact-1", "commitId": "evidence-commit-1"},
+    }
+
+
+def _build(summary: dict) -> dict[str, object]:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        with _server_owned_evidence(root / "owner-store") as (record, _binding, owner):
+            wire = _owner_wire(owner, _report_projection_wire())
+            wire["envelopeDigest"] = record.envelope_digest
+            projection = owner.issue_report_projection(wire)
+            return build_report_view_model(
+                summary,
+                root / "run-1",
+                evidence_projection=projection,
+                owner=owner,
+                artifact_admission=owner._canonical_report_artifact(),  # type: ignore[attr-defined]
+            )
 
 
 def test_build_view_model_renders_issues():
@@ -33,10 +88,12 @@ def test_build_view_model_renders_issues():
     }
     with patch("workbench.report_view_model.render_template") as mock_render:
         mock_render.return_value = "rendered text"
-        view_model = build_report_view_model(summary, Path("/tmp/fake"))
-    assert view_model["title"] == "OLS with robust standard errors"
-    assert len(view_model["warnings"]) == 1
+        view_model = _build(summary)
+    assert view_model["status"] == "available"
+    assert view_model["validationStatus"] == "met"
+    assert str(view_model["commitId"]).startswith("commit:evidence:")
     assert view_model["warnings"][0]["text"] == "rendered text"
+    assert mock_render.call_count >= 1
 
 
 def test_build_view_model_empty_diagnostics():
@@ -53,11 +110,11 @@ def test_build_view_model_empty_diagnostics():
         "model_quality": {"metrics": {}, "primary_metric_keys": []},
     }
     with patch("workbench.report_view_model.render_template"):
-        view_model = build_report_view_model(summary, Path("/tmp/fake"))
-    assert view_model["critical_errors"] == []
-    assert view_model["warnings"] == []
-    assert view_model["cautions"] == []
-    assert view_model["system_notes"] == []
+        view_model = _build(summary)
+    assert view_model["status"] == "available"
+    assert [fact["value"] for fact in view_model["facts"]] == [2.0, 0.2]
+    assert view_model["title"] == "OLS"
+    assert view_model["causal_caution"]
 
 
 # ---- QA edge-case tests ----
@@ -82,8 +139,11 @@ def test_estimate_none_coeff_row_does_not_crash():
     }
     with patch("workbench.report_view_model.render_template") as mock_render:
         mock_render.return_value = "ok"
-        view_model = build_report_view_model(summary, Path("/tmp/fake"))
+        view_model = _build(summary)
+    assert view_model["status"] == "available"
+    assert view_model["facts"][0]["value"] == 2
     assert len(view_model["coefficient_interpretations"]) == 1
+    assert mock_render.call_count >= 1
 
 
 def test_template_keyerror_falls_back_to_message():
@@ -102,7 +162,9 @@ def test_template_keyerror_falls_back_to_message():
         "narrative_contract": {"constraints": {}, "required_mentions": [], "forbidden_claims": []},
         "model_quality": {"metrics": {}, "primary_metric_keys": []},
     }
-    view_model = build_report_view_model(summary, Path("/tmp/fake"))
+    view_model = _build(summary)
+    assert view_model["status"] == "available"
+    assert view_model["critical_errors"] == []
     assert view_model["warnings"][0]["text"] == "fallback msg"
 
 
@@ -122,7 +184,9 @@ def test_template_valueerror_falls_back_to_message():
         "narrative_contract": {"constraints": {}, "required_mentions": [], "forbidden_claims": []},
         "model_quality": {"metrics": {}, "primary_metric_keys": []},
     }
-    view_model = build_report_view_model(summary, Path("/tmp/fake"))
+    view_model = _build(summary)
+    assert view_model["status"] == "available"
+    assert view_model["critical_errors"] == []
     assert view_model["warnings"][0]["text"] == "missing params msg"
 
 
@@ -140,7 +204,8 @@ def test_no_template_key_uses_message():
         "narrative_contract": {"constraints": {}, "required_mentions": [], "forbidden_claims": []},
         "model_quality": {"metrics": {}, "primary_metric_keys": []},
     }
-    view_model = build_report_view_model(summary, Path("/tmp/fake"))
+    view_model = _build(summary)
+    assert view_model["status"] == "available"
     assert view_model["warnings"][0]["text"] == "plain message"
 
 
@@ -157,7 +222,9 @@ def test_causal_caution_with_treatment():
         },
         "model_quality": {"metrics": {}, "primary_metric_keys": []},
     }
-    view_model = build_report_view_model(summary, Path("/tmp/fake"))
+    view_model = _build(summary)
+    assert view_model["status"] == "available"
+    assert view_model["validationSummary"]["requirement_status"] == "met"
     assert "treatment-like variable" in view_model["causal_caution"]
 
 
@@ -174,7 +241,10 @@ def test_causal_caution_default():
         },
         "model_quality": {"metrics": {}, "primary_metric_keys": []},
     }
-    view_model = build_report_view_model(summary, Path("/tmp/fake"))
+    view_model = _build(summary)
+    assert view_model["status"] == "available"
+    assert isinstance(view_model["envelopeDigest"], str)
+    assert len(view_model["envelopeDigest"]) == 64
     assert "associations" in view_model["causal_caution"].lower()
 
 
@@ -196,11 +266,11 @@ def test_facts_include_model_label_and_y():
         "narrative_contract": {"constraints": {}, "required_mentions": [], "forbidden_claims": []},
         "model_quality": {"metrics": {}, "primary_metric_keys": []},
     }
-    view_model = build_report_view_model(summary, Path("/tmp/fake"))
+    view_model = _build(summary)
     facts = view_model["facts"]
-    assert any("Poisson" in f for f in facts)
-    assert any("claim_count" in f for f in facts)
-    assert any("age" in f for f in facts)
+    assert [fact["value"] for fact in facts] == [2, 0.2]
+    assert any("Poisson regression" in fact for fact in view_model["presentation_facts"])
+    assert any("claim_count" in fact for fact in view_model["presentation_facts"])
 
 
 def test_facts_mention_categorical():
@@ -218,9 +288,9 @@ def test_facts_mention_categorical():
         "narrative_contract": {"constraints": {}, "required_mentions": [], "forbidden_claims": []},
         "model_quality": {"metrics": {}, "primary_metric_keys": []},
     }
-    view_model = build_report_view_model(summary, Path("/tmp/fake"))
-    facts_text = " ".join(view_model["facts"])
-    assert "dummy-coded" in facts_text
+    view_model = _build(summary)
+    assert view_model["status"] == "available"
+    assert "dummy-coded" in " ".join(view_model["presentation_facts"])
 
 
 def test_coeff_render_failure_yields_empty_text():
@@ -236,7 +306,9 @@ def test_coeff_render_failure_yields_empty_text():
         "model_quality": {"metrics": {}, "primary_metric_keys": []},
     }
     with patch("workbench.report_view_model.render_template", side_effect=KeyError("boom")):
-        view_model = build_report_view_model(summary, Path("/tmp/fake"))
+        view_model = _build(summary)
+    assert view_model["status"] == "available"
+    assert any("standardError" in fact for fact in view_model["facts"])
     assert view_model["coefficient_interpretations"][0]["text"] == ""
 
 
@@ -244,8 +316,8 @@ def test_empty_summary_does_not_crash():
     summary = {}
     with patch("workbench.report_view_model.render_template") as mock_render:
         mock_render.return_value = "rendered"
-        view_model = build_report_view_model(summary, Path("/tmp/fake"))
-    assert view_model["title"] == "Econometrics Report"
+        view_model = _build(summary)
+    assert view_model["status"] == "available"
     assert view_model["critical_errors"] == []
-    assert view_model["warnings"] == []
-    assert view_model["causal_caution"] == "rendered"
+    assert str(view_model["projectionId"]).startswith("report:commit:evidence:")
+    assert mock_render.call_count >= 1

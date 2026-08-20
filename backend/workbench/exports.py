@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import io
 import json
 import os
 from pathlib import Path
@@ -12,8 +13,12 @@ from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
+from .artifacts import register_artifact, write_bytes_durable
+from .report_export import ReportEvidenceWriterV1
+from .reporting import ReportDocumentWriterV1, _assert_report_output_path
+
 def export_pdf(
-    report: Mapping[str, Any],
+    writer: ReportDocumentWriterV1,
     run_root: Path,
     *,
     filename: str = "report.pdf",
@@ -22,77 +27,47 @@ def export_pdf(
     evidence_port: Any = None,
     admission_receipt: Any = None,
 ) -> Path:
-    from .agent.workflow_runtime import (
-        prepare_formal_workflow_output,
-        record_formal_workflow_artifact,
-    )
-
-    output = prepare_formal_workflow_output(
-        evidence_port,
-        admission_receipt,
-        run_root=run_root,
-        directory_name="reports",
-        filename=filename,
-    )
-    try:
-        with output.open_binary() as stream:
-            pdf = canvas.Canvas(stream, pagesize=letter, pageCompression=0)
-            _, height = letter
-            y = height - 72
-            if report.get("report_kind") == "arma_garch":
-                _draw_arma_garch_pdf(pdf, report, y)
-            else:
-                pdf.setFont("Helvetica-Bold", 14)
-                pdf.drawString(72, y, str(report.get("title", "Report")))
-                y -= 32
-
-                y = _draw_section(pdf, "Facts", report.get("facts", []), y)
-                y = _draw_section(pdf, "Descriptive statistics", report.get("descriptive_stats", []), y)
-                regression_table = report.get("regression_table")
-                if isinstance(regression_table, Mapping):
-                    y = _draw_section(
-                        pdf,
-                        "Regression table",
-                        _regression_pdf_items(regression_table),
-                        y,
-                    )
-                y = _draw_section(pdf, "Interpretation", report.get("claims", []), y)
-                st = report.get("statistical_tests")
-                if isinstance(st, Mapping):
-                    y = _draw_section(pdf, "Statistical tests (outcome-related)", st.get("y_related", []), y)
-                    other = st.get("other", [])
-                    truncated = st.get("other_truncated", 0)
-                    if other:
-                        y = _draw_section(pdf, f"Other tests (+{truncated} truncated)", other, y)
-                else:
-                    y = _draw_section(pdf, "Statistical tests", st or [], y)
-                _draw_section(pdf, "Warnings", report.get("warnings", []), y)
-            pdf.save()
-            stream.flush()
-            os.fsync(stream.fileno())
-        pdf_path = output.commit()
-    except Exception:
-        output.abort()
-        raise
-    try:
-        record_formal_workflow_artifact(
-            evidence_port,
-            admission_receipt,
-            run_root=run_root,
-            artifact_id=artifact_id,
-            path=pdf_path,
-            artifact_type="report",
-            producer_step="export",
-            inputs=inputs,
-            output_target=output,
-        )
-    finally:
-        output.close()
+    if type(writer) is not ReportDocumentWriterV1:
+        raise TypeError("export_pdf requires ReportDocumentWriterV1")
+    writer._assert_server_owned()
+    if writer.canonical_run_root != run_root.expanduser().resolve(strict=False):
+        raise ValueError("REPORT_WRITER_RUN_ROOT_MISMATCH")
+    report = writer.view_model
+    output = io.BytesIO()
+    pdf = canvas.Canvas(output, pagesize=letter, pageCompression=0)
+    _, height = letter
+    y = height - 72
+    if report.get("report_kind") == "arma_garch":
+        _draw_arma_garch_pdf(pdf, report, y)
+    else:
+        pdf.setFont("Helvetica-Bold", 14)
+        pdf.drawString(72, y, str(report.get("title", "Report")))
+        y -= 32
+        y = _draw_section(pdf, "Facts", report.get("presentation_facts", report.get("facts", [])), y)
+        y = _draw_section(pdf, "Descriptive statistics", report.get("descriptive_stats", []), y)
+        regression_table = report.get("regression_table")
+        if isinstance(regression_table, Mapping):
+            y = _draw_section(pdf, "Regression table", _regression_pdf_items(regression_table), y)
+        y = _draw_section(pdf, "Interpretation", report.get("claims", []), y)
+        st = report.get("statistical_tests")
+        if isinstance(st, Mapping):
+            y = _draw_section(pdf, "Statistical tests (outcome-related)", st.get("y_related", []), y)
+            other = st.get("other", [])
+            if other:
+                y = _draw_section(pdf, f"Other tests (+{st.get('other_truncated', 0)} truncated)", other, y)
+        else:
+            y = _draw_section(pdf, "Statistical tests", st or [], y)
+        _draw_section(pdf, "Warnings", report.get("warnings", []), y)
+    pdf.save()
+    pdf_path = run_root / "reports" / filename
+    _assert_report_output_path(run_root, pdf_path)
+    write_bytes_durable(pdf_path, output.getvalue())
+    register_artifact(run_root, artifact_id, pdf_path, "report", "export", list(inputs))
     return pdf_path
 
 
 def export_xlsx(
-    tables: Mapping[str, Sequence[Mapping[str, Any]]],
+    writer: ReportEvidenceWriterV1,
     run_root: Path,
     *,
     filename: str = "tables.xlsx",
@@ -101,63 +76,47 @@ def export_xlsx(
     evidence_port: Any = None,
     admission_receipt: Any = None,
 ) -> Path:
-    from .agent.workflow_runtime import (
-        prepare_formal_workflow_output,
-        record_formal_workflow_artifact,
-    )
-
-    output = prepare_formal_workflow_output(
-        evidence_port,
-        admission_receipt,
-        run_root=run_root,
-        directory_name="exports",
-        filename=filename,
-    )
-
-    try:
-        workbook = Workbook()
-        default_sheet = workbook.active
-        workbook.remove(default_sheet)
-        for name, rows in tables.items():
-            worksheet = workbook.create_sheet(title=_sheet_title(name))
-            normalized_rows = list(rows)
-            headers = _headers(normalized_rows)
-            worksheet.append(headers)
-            worksheet.freeze_panes = "A2"
-            for cell in worksheet[1]:
-                cell.font = Font(bold=True, color="FFFFFF")
-                cell.fill = PatternFill("solid", fgColor="1F4E78")
-            for row in normalized_rows:
-                worksheet.append([_excel_value(row.get(header, "")) for header in headers])
-            worksheet.auto_filter.ref = worksheet.dimensions
-            for index, header in enumerate(headers, start=1):
-                values = [str(header)] + [str(row.get(header, "")) for row in normalized_rows[:200]]
-                worksheet.column_dimensions[get_column_letter(index)].width = min(48, max(12, max(map(len, values)) + 2))
-        if not workbook.worksheets:
-            workbook.create_sheet(title="tables")
-        with output.open_binary() as stream:
-            workbook.save(stream)
-            stream.flush()
-            os.fsync(stream.fileno())
-        xlsx_path = output.commit()
-    except Exception:
-        output.abort()
-        raise
-    try:
-        record_formal_workflow_artifact(
-            evidence_port,
-            admission_receipt,
-            run_root=run_root,
-            artifact_id=artifact_id,
-            path=xlsx_path,
-            artifact_type="table_export",
-            producer_step="export",
-            inputs=inputs,
-            output_target=output,
-        )
-    finally:
-        output.close()
+    xlsx_bytes = render_typed_xlsx(writer)
+    xlsx_path = run_root / "exports" / filename
+    _assert_report_output_path(run_root, xlsx_path)
+    write_bytes_durable(xlsx_path, xlsx_bytes)
+    register_artifact(run_root, artifact_id, xlsx_path, "table_export", "export", list(inputs))
     return xlsx_path
+
+
+def render_typed_xlsx(
+    writer: ReportEvidenceWriterV1,
+) -> bytes:
+    """Render a workbook only from the server-owned typed writer capability."""
+
+    if type(writer) is not ReportEvidenceWriterV1:
+        raise TypeError("render_typed_xlsx requires ReportEvidenceWriterV1")
+    writer._assert_server_owned()
+    tables = writer.tables()
+
+    workbook = Workbook()
+    default_sheet = workbook.active
+    workbook.remove(default_sheet)
+    for name, rows in tables.items():
+        worksheet = workbook.create_sheet(title=_sheet_title(name))
+        normalized_rows = list(rows)
+        headers = _headers(normalized_rows)
+        worksheet.append(headers)
+        worksheet.freeze_panes = "A2"
+        for cell in worksheet[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="1F4E78")
+        for row in normalized_rows:
+            worksheet.append([_excel_value(row.get(header, "")) for header in headers])
+        worksheet.auto_filter.ref = worksheet.dimensions
+        for index, header in enumerate(headers, start=1):
+            values = [str(header)] + [str(row.get(header, "")) for row in normalized_rows[:200]]
+            worksheet.column_dimensions[get_column_letter(index)].width = min(48, max(12, max(map(len, values)) + 2))
+    if not workbook.worksheets:
+        workbook.create_sheet(title="tables")
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 
 def _draw_section(pdf: canvas.Canvas, title: str, items: Any, y: float) -> float:

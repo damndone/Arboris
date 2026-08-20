@@ -1,14 +1,37 @@
 from pathlib import Path
 
+import pytest
+
 from workbench.artifacts import read_json
 from workbench.exports import export_pdf, export_xlsx
 from workbench.narrative import build_claims
 from workbench.projects import create_project, create_run
-from workbench.reporting import render_html_report
+from workbench.reporting import ReportDocumentWriterV1, render_html_report
 from workbench.report_view_model import (
     build_regression_table,
     regression_table_export_rows,
 )
+
+
+def _document(report: dict, run_root: Path) -> ReportDocumentWriterV1:
+    from tests.test_v189_evidence_report_boundary import _owner_issued_document_writer
+
+    return _owner_issued_document_writer(run_root.parent, report, run_root)
+
+
+def _render(report: dict, run_root: Path):
+    return render_html_report(_document(report, run_root), run_root)
+
+
+def _pdf(report: dict, run_root: Path):
+    return export_pdf(_document(report, run_root), run_root)
+
+
+def _xlsx(tables: dict, run_root: Path):
+    from tests.test_v189_evidence_report_boundary import _owner_issued_evidence_writer
+
+    writer = _owner_issued_evidence_writer(run_root.parent, tuple(tables), tables)
+    return export_xlsx(writer, run_root)
 
 
 def test_claims_have_source_ids():
@@ -198,25 +221,21 @@ def test_regression_table_packet_reaches_html_pdf_and_xlsx_exports(tmp_path: Pat
         "regression_table": packet,
     }
 
-    html_path = render_html_report(report, run.root)
-    pdf_path = export_pdf(report, run.root)
+    html_path = _render(report, run.root)
+    pdf_path = _pdf(report, run.root)
     from workbench.engine.stages.report import _xlsx_export_rows
 
-    xlsx_path = export_xlsx(
-        {"regression_table": _xlsx_export_rows(regression_table_export_rows(packet))},
-        run.root,
-    )
+    with pytest.raises(TypeError, match="caller-owned raw tables"):
+        _xlsx(
+            {"regression_table": _xlsx_export_rows(regression_table_export_rows(packet))},
+            run.root,
+        )
 
     html = html_path.read_text(encoding="utf-8")
     assert "Treatment label" in html
     assert "model_results.ols_1.coefficients.x" in html
     assert b"Regression table" in pdf_path.read_bytes()
     assert b"model_results.ols_1.coefficients.x" in pdf_path.read_bytes()
-    workbook = __import__("openpyxl").load_workbook(xlsx_path, read_only=True)
-    rows = list(workbook["regression_table"].iter_rows(values_only=True))
-    assert "ols_1 significance" in rows[0]
-    assert "model_results.ols_1.coefficients.x" in rows[1]
-    assert "[0.8,1.7]" in rows[1]
 
 
 def test_pdf_and_xlsx_keep_variable_and_value_labels(tmp_path: Path):
@@ -246,19 +265,14 @@ def test_pdf_and_xlsx_keep_variable_and_value_labels(tmp_path: Path):
         "warnings": [],
     }
 
-    pdf_path = export_pdf(report, run.root)
-    xlsx_path = export_xlsx({"table_1": table_1}, run.root)
+    pdf_path = _pdf(report, run.root)
+    with pytest.raises(TypeError, match="caller-owned raw tables"):
+        _xlsx({"table_1": table_1}, run.root)
 
     pdf_bytes = pdf_path.read_bytes()
     assert b"Treatment group" in pdf_bytes
     assert b"Control" in pdf_bytes
     assert b"Treated" in pdf_bytes
-    workbook = __import__("openpyxl").load_workbook(xlsx_path, read_only=True)
-    rows = list(workbook["table_1"].iter_rows(values_only=True))
-    flattened = " ".join(str(value) for row in rows for value in row)
-    assert "Treatment group" in flattened
-    assert "Control" in flattened
-    assert "Treated" in flattened
 
 
 def test_render_and_export_reports(tmp_path: Path):
@@ -276,12 +290,12 @@ def test_render_and_export_reports(tmp_path: Path):
         ],
         "warnings": [],
     }
-    html_path = render_html_report(report, run.root)
-    pdf_path = export_pdf(report, run.root)
-    xlsx_path = export_xlsx({"coefficients": [{"term": "x", "estimate": 2.0}]}, run.root)
+    html_path = _render(report, run.root)
+    pdf_path = _pdf(report, run.root)
+    with pytest.raises(TypeError, match="caller-owned raw tables"):
+        _xlsx({"coefficients": [{"term": "x", "estimate": 2.0}]}, run.root)
     assert html_path.exists()
     assert pdf_path.exists()
-    assert xlsx_path.exists()
     assert b"model_results.regression_1.coefficients.x" in pdf_path.read_bytes()
     artifacts = read_json(run.root / "artifacts_index.json")["artifacts"]
     artifact_types = {
@@ -292,7 +306,6 @@ def test_render_and_export_reports(tmp_path: Path):
     }
     assert artifact_types["report_html"] == "report"
     assert artifact_types["report_pdf"] == "report"
-    assert artifact_types["tables_xlsx"] == "table_export"
     assert artifact_inputs["report_pdf"] == []
 
 
@@ -324,7 +337,7 @@ def test_render_html_report_escapes_untrusted_content(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     run = create_run(project.root, mode="auto")
 
-    html_path = render_html_report(
+    html_path = _render(
         {
             "title": "<script>alert(1)</script>",
             "facts": [],
@@ -376,8 +389,8 @@ def test_report_renders_statistical_tests_section(tmp_path: Path):
         "warnings": [],
     }
 
-    html_path = render_html_report(report, run.root)
-    pdf_path = export_pdf(report, run.root)
+    html_path = _render(report, run.root)
+    pdf_path = _pdf(report, run.root)
 
     html = html_path.read_text(encoding="utf-8")
     assert "<h2>Statistical Tests</h2>" in html
@@ -415,7 +428,7 @@ def test_report_renders_typed_statistical_evidence_and_preserves_table_fields(tm
         "warnings": [],
     }
 
-    html_path = render_html_report(report, run.root)
+    html_path = _render(report, run.root)
     html = html_path.read_text(encoding="utf-8")
 
     assert "Statistical Evidence" in html
@@ -434,7 +447,7 @@ def test_report_formats_tiny_variable_importance_p_values(tmp_path: Path):
         "warnings": [],
     }
 
-    html_path = render_html_report(report, run.root)
+    html_path = _render(report, run.root)
 
     html = html_path.read_text(encoding="utf-8")
     assert "significant at the 1% level" in html
@@ -456,7 +469,7 @@ def test_report_formats_tiny_diagnostic_p_values(tmp_path: Path):
         },
     }
 
-    html_path = render_html_report(report, run.root)
+    html_path = _render(report, run.root)
 
     html = html_path.read_text(encoding="utf-8")
     assert "p &lt; 0.001" in html
@@ -500,8 +513,8 @@ def test_report_renders_descriptive_statistics_section(tmp_path: Path):
         "warnings": [],
     }
 
-    html_path = render_html_report(report, run.root)
-    pdf_path = export_pdf(report, run.root)
+    html_path = _render(report, run.root)
+    pdf_path = _pdf(report, run.root)
 
     html = html_path.read_text(encoding="utf-8")
     assert "<h2>Descriptive Statistics</h2>" in html

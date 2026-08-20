@@ -9,7 +9,7 @@ fsynced tail anchor.  A missing or mismatched anchor fails closed.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import fcntl
 import hashlib
 import json
@@ -163,7 +163,12 @@ def append_event(devlines_root: Path, line_id: str, event: Mapping[str, Any]) ->
                 if source_event_id in duplicate_ids:
                     raise EventValidationError("duplicate event_id")
                 previous_sha256 = existing[-1]["event_sha256"] if existing else ZERO_SHA256
-                appended = validate_event(event, previous_sha256=previous_sha256)
+                if isinstance(event, Mapping):
+                    source_event = dict(event)
+                    source_event["timestamp"] = _next_append_timestamp(existing)
+                else:
+                    source_event = event
+                appended = validate_event(source_event, previous_sha256=previous_sha256)
                 encoded = canonical_event_bytes(appended) + b"\n"
                 _write_all(event_fd, encoded)
                 os.fsync(event_fd)
@@ -430,6 +435,7 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def _verify_events(events: list[dict[str, Any]]) -> None:
     seen_ids: set[str] = set()
     previous_sha256 = ZERO_SHA256
+    previous_timestamp: datetime | None = None
     for index, event in enumerate(events, start=1):
         event_id = event.get("event_id")
         if event_id in seen_ids:
@@ -437,8 +443,26 @@ def _verify_events(events: list[dict[str, Any]]) -> None:
         validated = validate_event(event, previous_sha256=previous_sha256)
         if validated != event:
             raise EventValidationError(f"events.jsonl line {index} changed during validation")
+        timestamp = datetime.fromisoformat(validated["timestamp"].replace("Z", "+00:00"))
+        if previous_timestamp is not None and timestamp <= previous_timestamp:
+            raise EventValidationError(
+                f"event timestamps must be strictly increasing at line {index}"
+            )
         seen_ids.add(event_id)
         previous_sha256 = validated["event_sha256"]
+        previous_timestamp = timestamp
+
+
+def _next_append_timestamp(events: list[dict[str, Any]]) -> str:
+    """Generate a server-owned millisecond timestamp strictly after the tail."""
+
+    now = datetime.now(UTC)
+    candidate = now.replace(microsecond=(now.microsecond // 1000) * 1000)
+    if events:
+        tail = datetime.fromisoformat(events[-1]["timestamp"].replace("Z", "+00:00"))
+        if candidate <= tail:
+            candidate = tail + timedelta(milliseconds=1)
+    return candidate.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _write_all(fd: int, content: bytes) -> None:

@@ -12,10 +12,11 @@ import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
 import { REPORT_REVIEW_TAB_ID } from "../workbench/state/tabsSchema";
 import {
   buildFactTable,
-  buildFigureFacts,
-  buildPostEstimationFacts,
-  buildTimeSeriesFacts,
+  buildReportEvidenceFacts,
+  readReportEvidenceProjection,
+  unavailableReportEvidence,
   type CitableFact,
+  type ReportEvidenceProjection,
 } from "./factTable";
 import {
   displayEvidenceLabel,
@@ -47,26 +48,14 @@ import {
   createReportRevision,
   editReportRevision,
 } from "./reportDocument";
-import {
-  fetchArtifactJson,
-  fetchRunArtifacts,
-  fetchRunDetail,
+import { fetchArtifactJson, fetchRunArtifacts, fetchRunDetail } from "../api";
+import type {
+  ModelResult,
+  PostEstimationResult,
+  PredictionResearchEvidence,
 } from "../api";
-import type { ModelResult, PostEstimationResult, PredictionResearchEvidence } from "../api";
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
-
-const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
-  "ts.analysis_contract",
-  "ts.data_audit",
-  "ts.arma_selection",
-  "ts.volatility_selection",
-  "ts.final_model",
-  "ts.parameters",
-  "ts.final_diagnostics",
-  "ts.forecast_metrics",
-  "ts.next_forecast",
-]);
 
 const CLASSIFICATION_EVIDENCE_SCHEMA = "workbench.prediction.classification-evidence";
 const CLASSIFICATION_ARTIFACTS_SCHEMA = "workbench.prediction.classification-artifacts";
@@ -235,6 +224,17 @@ function cloneReportFigure(figure: ReportFigure): ReportFigure {
   return cloneJson(figure);
 }
 
+/** Only artifact identity crosses the Report writer boundary.  Source and
+ * preview_json remain diagnostic compatibility data and are never sent as
+ * writer evidence. */
+function writerFigureReference(figure: ReportFigure): ReportFigure {
+  return {
+    artifact_id: figure.artifact_id,
+    chart_type: figure.chart_type,
+    ...(figure.path ? { path: figure.path } : {}),
+  };
+}
+
 function generationEvidenceFromRecord(record: ReportRecord): ReportGenerationEvidence {
   const source = record.revision?.source;
   const facts = source?.facts ?? record.facts;
@@ -276,9 +276,8 @@ function reportEvidenceFingerprint(input: {
   scope: ReportRecord["scope"];
   facts: CitableFact[];
   figures: ReportFigure[];
-  modelResults: ModelResult[];
   timeSeriesArtifacts: Record<string, unknown>;
-  postEstimation: PostEstimationResult[];
+  reportEvidence: ReportEvidenceProjection | null;
 }): string {
   return `report-evidence-v1:${hashText(canonicalJson(input))}`;
 }
@@ -328,6 +327,7 @@ export interface ReportWorkspaceContextValue {
   postEstimation: PostEstimationResult[];
   modelResults: ModelResult[];
   familyEvidenceArtifacts: Record<string, unknown>;
+  reportEvidenceProjection: ReportEvidenceProjection | null;
   reportContextLines: string[];
   reportContextDetails: string[];
   reportContextUsedTokens: number;
@@ -420,6 +420,7 @@ export function ReportWorkspaceProvider({
   const [predictionEvidence, setPredictionEvidence] = useState<PredictionResearchEvidence | null>(null);
   const [modelResults, setModelResults] = useState<ModelResult[]>([]);
   const [familyEvidenceArtifacts, setFamilyEvidenceArtifacts] = useState<Record<string, unknown>>({});
+  const [reportEvidenceProjection, setReportEvidenceProjection] = useState<ReportEvidenceProjection | null>(null);
 
   useEffect(() => {
     if (!reportWorkspaceRequested) return undefined;
@@ -428,6 +429,7 @@ export function ReportWorkspaceProvider({
       setPostEstimation([]);
       setPredictionEvidence(null);
       setModelResults([]);
+      setReportEvidenceProjection(null);
       setPostEstimationLoadError(null);
       return;
     }
@@ -439,6 +441,15 @@ export function ReportWorkspaceProvider({
           setPostEstimation(detail.post_estimation_results ?? []);
           setPredictionEvidence(detail.prediction_evidence ?? null);
           setModelResults(detail.model_results ?? []);
+          const detailRecord = detail as unknown as Record<string, unknown>;
+          const reportEvidence = readReportEvidenceProjection(
+            detail.report_evidence,
+            { runId },
+            detailRecord.report_evidence_receipt,
+          );
+          setReportEvidenceProjection(
+            reportEvidence ?? unavailableReportEvidence("REPORT_EVIDENCE_SCHEMA_INVALID", `run:${runId}`),
+          );
           setPostEstimationLoadError(null);
         }
       })
@@ -447,6 +458,9 @@ export function ReportWorkspaceProvider({
           setPostEstimation([]);
           setPredictionEvidence(null);
           setModelResults([]);
+          setReportEvidenceProjection(
+            unavailableReportEvidence("REPORT_EVIDENCE_LOAD_FAILED", `run:${runId}`),
+          );
           const message = err instanceof Error ? err.message : "server-owned result evidence is unavailable";
           setPostEstimationLoadError(
             `Unable to load server-owned result evidence; report generation is disabled: ${message}`,
@@ -602,37 +616,26 @@ export function ReportWorkspaceProvider({
       .then(async (response) => {
         const allItems = response.groups.flatMap((group) => group.items);
         const items = allItems.filter((item) => item.artifact_type === "figure");
-        const timeSeriesItems = allItems.filter((item) => REPORT_TIME_SERIES_ARTIFACT_IDS.has(item.artifact_id));
-        const [resolved, resolvedTimeSeries] = await Promise.all([
-          Promise.all(items.map(async (item) => {
+        const resolved = await Promise.all(items.map(async (item) => {
             try {
               const context = await fetchFigureAiContext(projectRoot, runId, item.artifact_id);
               return {
                 artifact_id: item.artifact_id,
                 chart_type: context.figure.chart_type,
                 path: context.figure.path,
-                source: context.source,
               } satisfies ReportFigure;
             } catch {
               return {
                 artifact_id: item.artifact_id,
                 chart_type: item.artifact_id,
-                source: null,
               } satisfies ReportFigure;
             }
-          })),
-          Promise.all(timeSeriesItems.map(async (item) => {
-            try {
-              const value = await fetchArtifactJson(projectRoot, runId, item.artifact_id);
-              return [item.artifact_id, value] as const;
-            } catch {
-              return null;
-            }
-          })),
-        ]);
+          }));
         if (!cancelled) {
           setReportFigures(resolved);
-          setTimeSeriesArtifacts(Object.fromEntries(resolvedTimeSeries.filter((item) => item !== null)));
+          // Raw time-series JSON is never loaded into Report state. Typed
+          // facts arrive only through report_evidence above.
+          setTimeSeriesArtifacts({});
         }
       })
       .catch(() => {
@@ -655,51 +658,29 @@ export function ReportWorkspaceProvider({
     return buildFactTable(forest.forest, forest.activeRunId);
   }, [forest]);
 
-  const figureFacts = useMemo(
-    () => buildFigureFacts(reportFigures, table?.facts.length ?? 0),
-    [reportFigures, table?.facts.length],
-  );
-  const timeSeriesProvenance = useMemo(() => {
-    const modelNode = forest?.forest.nodes.find(
-      (node) =>
-        (node.runs ?? []).includes(forest.activeRunId ?? "")
-        && node.opType === "time_series.arma_garch"
-        && node.kind === "model",
-    );
-    return modelNode
-      ? { nodeKey: modelNode.nodeKey, nodeLabel: modelNode.title }
-      : { nodeKey: "model:arma_garch_1", nodeLabel: "ARMA-GARCH" };
-  }, [forest]);
-  const timeSeriesFacts = useMemo(
-    () => buildTimeSeriesFacts(
-      timeSeriesArtifacts,
-      (table?.facts.length ?? 0) + figureFacts.length,
-      timeSeriesProvenance,
-    ),
-    [figureFacts.length, table?.facts.length, timeSeriesArtifacts, timeSeriesProvenance],
-  );
   const postEstimationFacts = useMemo(
-    () => buildPostEstimationFacts(
-      postEstimation,
-      (table?.facts.length ?? 0) + figureFacts.length + timeSeriesFacts.length,
+    () => buildReportEvidenceFacts(
+      reportEvidenceProjection,
+      0,
     ),
-    [figureFacts.length, postEstimation, table?.facts.length, timeSeriesFacts.length],
+    [reportEvidenceProjection],
   );
   const allFacts = useMemo(
-    () => (table ? [...table.facts, ...figureFacts, ...timeSeriesFacts, ...postEstimationFacts] : []),
-    [figureFacts, postEstimationFacts, table, timeSeriesFacts],
+    () => (table ? postEstimationFacts : []),
+    [postEstimationFacts, table],
   );
   const includedFigures = includedReportFigures(reportFigures, [...excludedFigureIds]);
   const includedFacts = includedReportFacts(allFacts, [...excludedIds], [...excludedFigureIds]);
-  const resultFamilies = [...new Set(modelResults.map((result) => result.model_type?.trim() || "unknown model"))];
+  const resultFamilies = reportEvidenceProjection
+    ? [`${reportEvidenceProjection.consumerId}:${reportEvidenceProjection.status}`]
+    : [];
   const activeEvidenceFingerprint = table
     ? reportEvidenceFingerprint({
         scope: table.scope,
         facts: allFacts,
         figures: reportFigures,
-        modelResults,
         timeSeriesArtifacts,
-        postEstimation,
+        reportEvidence: reportEvidenceProjection,
       })
     : null;
   const activeReportFingerprints = table
@@ -832,7 +813,7 @@ export function ReportWorkspaceProvider({
         facts: includedEvidenceFacts,
         scope: evidence.scope,
         fingerprints: evidence.fingerprints,
-        figures: includedEvidenceFigures,
+        figures: includedEvidenceFigures.map(writerFigureReference),
         instruction: normalizedInstruction,
         reportStandard: "journal_full_v1",
         requiredCapabilities,
@@ -1083,6 +1064,7 @@ export function ReportWorkspaceProvider({
     postEstimation,
     modelResults,
     familyEvidenceArtifacts,
+    reportEvidenceProjection,
     reportContextLines,
     reportContextDetails,
     reportContextUsedTokens,

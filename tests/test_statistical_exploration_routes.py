@@ -133,11 +133,7 @@ def test_grouped_statistical_exploration_confirm_exports_nested_rows_as_json(
         )
 
     assert response.status_code == 200, response.text
-    assert {item["format"] for item in response.json()["exports"]} == {
-        "html",
-        "pdf",
-        "xlsx",
-    }
+    assert response.json()["exports"] == []
 
 
 def test_statistical_exploration_preview_confirm_is_durable_and_idempotent(
@@ -193,12 +189,9 @@ def test_statistical_exploration_preview_confirm_is_durable_and_idempotent(
     assert len([item for item in records if item["artifact_type"] == "transcript"]) == 1
     assert (project / "runs" / run_id / first_record["path"]).is_file()
     assert (project / "runs" / run_id / first_record["transcript_path"]).is_file()
-    exports = first.json()["exports"]
-    assert {item["format"] for item in exports} == {"html", "pdf", "xlsx"}
-    for item in exports:
-        assert (project / "runs" / run_id / item["path"]).is_file()
-    assert len([item for item in records if item["artifact_type"] == "report"]) == 2
-    assert len([item for item in records if item["artifact_type"] == "table_export"]) == 1
+    assert first.json()["exports"] == []
+    assert len([item for item in records if item["artifact_type"] == "report"]) == 0
+    assert len([item for item in records if item["artifact_type"] == "table_export"]) == 0
 
 
 def test_statistical_exploration_confirm_fails_closed_when_source_changes(

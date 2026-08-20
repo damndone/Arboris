@@ -236,6 +236,8 @@ export type RunDetail = RunSummary & {
   diagnostic_summary_preview?: DiagnosticSummaryPreview;
   post_estimation_results?: PostEstimationResult[];
   prediction_evidence?: PredictionResearchEvidence | null;
+  /** Server-owned typed Report projection; parsed again at the consumer boundary. */
+  report_evidence?: unknown;
   /** Durable deterministic report packets projected from diagnostic_summary. */
   table_1?: Array<Record<string, unknown>>;
   statistical_evidence?: Record<string, unknown> | null;

@@ -39,6 +39,11 @@ from .domain_memory.trace_contracts import (
 )
 from .native_containment.trace_contracts import _EVENT_FIELDS as _CONTAINMENT_EVENT_FIELDS
 from .services.execution_profile import current_execution_profile
+from .services.results_service import (
+    ServerOwnedReportEvidencePersistenceV1,
+    UnavailableReportEvidenceCapabilityV1,
+    configure_report_evidence_persistence,
+)
 from .http.agent_routes import (
     configure_agent_notebook_cutover_authority,
     new_agent_notebook_cutover_authority_store,
@@ -59,7 +64,38 @@ from .http.statistical_exploration_routes import router as statistical_explorati
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     _validate_supported_deployment()
-    yield
+    persistence = getattr(
+        _app.state,
+        "report_evidence_persistence",
+        None,
+    )
+    if persistence is None:
+        # ``None`` means that the deployment did not inject the host-issued
+        # capability.  Only at this explicit capability check do we produce a
+        # typed unavailable result; the application state never advertises the
+        # unavailable sentinel as its default product owner.
+        persistence = UnavailableReportEvidenceCapabilityV1()
+    if type(persistence) not in {
+        ServerOwnedReportEvidencePersistenceV1,
+        UnavailableReportEvidenceCapabilityV1,
+    }:
+        raise TypeError(
+            "report_evidence_persistence must be a server-owned C0 capability"
+        )
+    _app.state.report_evidence_persistence = persistence
+    configure_report_evidence_persistence(persistence)
+    try:
+        yield
+    finally:
+        configure_report_evidence_persistence(None)
+        # After shutdown, retain only the typed bootstrap result.  The
+        # pre-start state remains empty and therefore cannot be mistaken for a
+        # configured product owner.
+        _app.state.report_evidence_persistence = (
+            persistence
+            if type(persistence) is UnavailableReportEvidenceCapabilityV1
+            else UnavailableReportEvidenceCapabilityV1("EVIDENCE_HOST_AUTHORITY_CLOSED")
+        )
 
 
 app = FastAPI(title="Local Econometrics Workbench", lifespan=_lifespan)
@@ -71,6 +107,11 @@ app.state.agent_notebook_cutover_store = new_agent_notebook_cutover_authority_st
 # this same object. There is no second authority or confirmation map.
 set_default_agent_notebook_cutover_authority_store(app.state.agent_notebook_cutover_store)
 app.state.notebook_cutover_identity_resolver = None
+# The deployment host must inject a real C0 owner before lifespan startup.
+# Keep the pre-start state empty so an unavailable result cannot masquerade as
+# the product's default persistence owner.
+app.state.report_evidence_persistence = None
+app.state.report_evidence_identity_resolver = None
 app.state.capability_factory_runtime = None
 app.state.domain_memory_service = None
 app.state.domain_memory_review_service = None
@@ -90,7 +131,33 @@ def _bootstrap_app(app_instance: FastAPI | None) -> FastAPI:
         target.state.agent_notebook_cutover_store = new_agent_notebook_cutover_authority_store()
     if not hasattr(target.state, "notebook_cutover_identity_resolver"):
         target.state.notebook_cutover_identity_resolver = None
+    if not hasattr(target.state, "report_evidence_persistence"):
+        target.state.report_evidence_persistence = None
+    if not hasattr(target.state, "report_evidence_identity_resolver"):
+        target.state.report_evidence_identity_resolver = None
     return target
+
+
+def configure_report_evidence_owner(
+    persistence: ServerOwnedReportEvidencePersistenceV1 | UnavailableReportEvidenceCapabilityV1 | None,
+    *,
+    identity_resolver: Callable[..., object] | None = None,
+    app_instance: FastAPI | None = None,
+) -> None:
+    """Install the server-owned C0 Report capability and request identity seam."""
+
+    target = _bootstrap_app(app_instance)
+    if persistence is not None and type(persistence) not in {
+        ServerOwnedReportEvidencePersistenceV1,
+        UnavailableReportEvidenceCapabilityV1,
+    }:
+        raise TypeError(
+            "persistence must be a server-owned Report capability or None"
+        )
+    if identity_resolver is not None and not callable(identity_resolver):
+        raise TypeError("identity_resolver must be callable or None")
+    target.state.report_evidence_persistence = persistence
+    target.state.report_evidence_identity_resolver = identity_resolver
 
 
 def register_v183_trace_catalogs() -> None:

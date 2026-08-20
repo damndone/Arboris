@@ -8,10 +8,10 @@ import {
 } from "./reportSelection";
 
 const figures: FigureFactInput[] = [
-  { artifact_id: "histograms", chart_type: "histogram", source: null },
-  { artifact_id: "coef_plot", chart_type: "coefficient plot", source: null },
-  { artifact_id: "residuals_fitted", chart_type: "residuals versus fitted", source: null },
-  { artifact_id: "scatter_plots", chart_type: "scatter plot", source: null },
+  { artifact_id: "histograms", chart_type: "histogram" },
+  { artifact_id: "coef_plot", chart_type: "coefficient plot" },
+  { artifact_id: "residuals_fitted", chart_type: "residuals versus fitted" },
+  { artifact_id: "scatter_plots", chart_type: "scatter plot" },
 ];
 
 describe("report evidence selection", () => {

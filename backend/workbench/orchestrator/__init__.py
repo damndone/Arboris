@@ -686,6 +686,30 @@ def _run_workflow(
         x_cols=list(x),
         requested_model_type=model_type,
     )
+
+    # ReportStage may consume Report evidence only after the deployment has
+    # injected the exact server-owned capability.  Issue the opaque projection
+    # here, at the real orchestrator-to-pipeline boundary; never synthesize a
+    # caller-shaped owner or projection when the run is not bound to it.
+    from ..app import app as workbench_app
+    from ..report_export import EvidenceProjectionV1
+    from ..services.results_service import ServerOwnedReportEvidencePersistenceV1
+
+    report_owner = getattr(workbench_app.state, "report_evidence_persistence", None)
+    if type(report_owner) is ServerOwnedReportEvidencePersistenceV1:
+        try:
+            if report_owner.accepts_canonical_run_root(run_root):
+                report_projection = report_owner.issue_report_projection(
+                    report_owner._canonical_report_wire()
+                )
+                if type(report_projection) is EvidenceProjectionV1:
+                    ctx.artifacts["_report_evidence_owner"] = report_owner
+                    ctx.artifacts["_report_evidence_projection"] = report_projection
+        except (AttributeError, TypeError, ValueError, RuntimeError):
+            # A missing or stale host admission remains typed unavailable at
+            # the ReportStage boundary; no raw fallback is permitted here.
+            pass
+
     ctx.artifacts["_input_files"] = input_files
     ctx.artifacts["_config"] = config
     ctx.artifacts["_sheet_name"] = sheet_name

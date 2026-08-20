@@ -13,12 +13,11 @@ import { ReportFigureSelection } from "./ReportFigureSelection";
 import { ReportComposer } from "./ReportComposer";
 import { PredictionResearchReportSections } from "./PredictionResearchReportSections";
 import {
-  buildRegressionTablePacket,
+  buildRegressionTablePacketFromEvidence,
   RegressionTable,
 } from "./RegressionTable";
 import {
   FamilyEvidence,
-  type FamilyModelResult,
 } from "./FamilyEvidence";
 import {
   ClassificationEvidence,
@@ -47,6 +46,12 @@ export function ReportClassificationEvidenceMount({ evidence }: { evidence: unkn
       data-testid="report-classification-evidence"
       style={{ marginBottom: 16 }}
     >
+      <p
+        data-testid="report-classification-evidence-non-citable"
+        style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "0 0 6px" }}
+      >
+        NON-CITABLE: classification artifact JSON is display-only and is excluded from Report facts, writer input, and LLM context.
+      </p>
       {packet ? (
         <ClassificationEvidence evidence={packet} />
       ) : (
@@ -91,11 +96,16 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
     wb.dispatch.setView("graph");
     wb.dispatch.selectByCanvasClick(nodeKey);
   };
-  const regressionTable = buildRegressionTablePacket(workspace.modelResults);
+  // Legacy model_results remains on the workspace for API compatibility, but
+  // it is not a Report source.  The formal result surface is the typed C0
+  // evidence projection below; an absent projection is explicitly unavailable.
+  const regressionTable = buildRegressionTablePacketFromEvidence(
+    workspace.reportEvidenceProjection,
+  );
   const classificationEvidenceArtifact = workspace.familyEvidenceArtifacts.classification_evidence;
-  const resultFamilies = [...new Set(
-    workspace.modelResults.map((result) => result.model_type?.trim() || "unknown model"),
-  )];
+  const resultFamilies = workspace.reportEvidenceProjection
+    ? [`${workspace.reportEvidenceProjection.consumerId}:${workspace.reportEvidenceProjection.status}`]
+    : [];
   const hasCurrentReport = workspace.current !== null;
   const promptValue = hasCurrentReport ? workspace.revisionInstruction : workspace.instruction;
   const promptChange = hasCurrentReport
@@ -164,9 +174,8 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         disabled={
           workspace.figureContextLoading
           || workspace.figureInventoryError !== null
-          || workspace.includedFacts.length === 0
         }
-        submitDisabled={workspace.postEstimationLoadError !== null}
+        submitDisabled={workspace.postEstimationLoadError !== null || workspace.includedFacts.length === 0}
       />
 
       <ReportActionBar />
@@ -264,11 +273,27 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         </div>
       )}
 
-      <PredictionResearchReportSections evidence={workspace.predictionEvidence} />
+      {workspace.predictionEvidence && (
+        <section
+          data-testid="report-prediction-evidence-non-citable"
+          aria-label="Non-citable predictive compatibility evidence"
+          style={{ marginBottom: 12 }}
+        >
+          <p style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "0 0 6px" }}>
+            NON-CITABLE: predictive research compatibility evidence is display-only and is not included in the Report writer facts.
+          </p>
+          <PredictionResearchReportSections evidence={workspace.predictionEvidence} />
+        </section>
+      )}
       <RegressionTable packet={regressionTable} />
+      <p
+        data-testid="legacy-report-results-unavailable"
+        style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "0 0 12px" }}
+      >
+        Legacy model_results: NON-AUTHORITATIVE / UNAVAILABLE for citable Report results.
+      </p>
       <FamilyEvidence
-        modelResults={workspace.modelResults as unknown as FamilyModelResult[]}
-        artifacts={workspace.familyEvidenceArtifacts}
+        evidence={workspace.reportEvidenceProjection}
       />
       {classificationEvidenceArtifact !== undefined && (
         <ReportClassificationEvidenceMount evidence={classificationEvidenceArtifact} />
@@ -279,7 +304,7 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
           Report evidence (what the AI may reference)
         </span>
         <span className="report-evidence-divider__note">
-          Regression evidence above is source output; this section is the citable report context.
+          Only the typed server-owned projection in this section is citable; legacy model_results are non-authoritative.
         </span>
       </div>
       <FactTablePreview

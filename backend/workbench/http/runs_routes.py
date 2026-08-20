@@ -18,44 +18,48 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
-    ERROR_REPORT_NOT_FOUND,
     WorkbenchAPIError,
 )
-from ..agent.workflow_runtime import collect_post_estimation_results
 from ..artifacts import read_json, sha256_file
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..events import get_event_manager
-from ..exports import export_xlsx
+from ..exports import render_typed_xlsx
 from ..ingestion import _read_frame
 from ..model_options import ModelOptionsError, parse_model_options
 from ..orchestrator import run_batch_y_workflow
 from ..repository.run_repository import (
     _artifact_counts,
-    _detect_failed_stage,
     _group_artifacts,
-    _list_existing_artifacts,
     _read_artifact_records,
-    _read_errors,
     _read_manifest,
     _resolve_artifact_path,
     _resolve_project_runs_dir,
     _resolve_run_root,
     _summarize_manifest,
 )
-from ..report_export import ReportExportError, export_report
+from ..report_export import EvidenceProjectionV1, ReportExportError, export_report
 from ..report_contract import ReportContractError, validate_report_packet
 from ..report_quality import validate_report_response_quality
-from ..report_view_model import build_regression_table, regression_table_export_rows
+from ..report_view_model import (
+    _unavailable_report_evidence,
+    build_indexed_report_evidence,
+    build_report_evidence_bundle,
+)
 from ..report_store import list_ai_reports, save_ai_report
-from ..services.lmm_result_adapter import VersionedResultReadError
-from ..services.results_service import _model_results, _normalize_issue_stream
+from ..services.results_service import (
+    _normalize_issue_stream,
+    EvidenceProjectionError,
+    ReportEvidenceRequestIdentityV1,
+    ServerOwnedReportEvidencePersistenceV1,
+    current_report_evidence_persistence,
+)
 from ..predictive_research.consumer_projection import (
     read_prediction_evidence_from_run_root,
 )
@@ -100,6 +104,234 @@ _RESULT_TABLE_SECTIONS = frozenset(
         "model_family_evidence",
     }
 )
+
+_REPORT_EVIDENCE_ARTIFACT_TYPES = frozenset(
+    {"post_estimation", "statistical_test", "p7_analysis", "workflow_capability_result"}
+)
+
+
+def _report_evidence_for_run(
+    run_root: Path,
+    post_estimation_results: list[dict[str, Any]],
+    request_identity: ReportEvidenceRequestIdentityV1 | None = None,
+    project_root: Path | str | None = None,
+) -> dict[str, object]:
+    """Build the typed Report contribution from indexed artifacts only."""
+
+    authoritative_persistence = _admit_report_owner_for_run(
+        run_root,
+        request_identity,
+        project_root,
+    )
+    if type(authoritative_persistence) is not ServerOwnedReportEvidencePersistenceV1:
+        del post_estimation_results
+        return _unavailable_report_evidence(
+            artifact_id=f"run:{run_root.name}",
+            artifact_type="report",
+            reason_code="EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+            request_identity=request_identity,
+        )
+
+    views: list[dict[str, object]] = []
+    try:
+        indexed_records = _read_artifact_records(run_root)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError):
+        indexed_records = []
+    for record in indexed_records:
+        if not isinstance(record, dict):
+            continue
+        if record.get("artifact_type") not in _REPORT_EVIDENCE_ARTIFACT_TYPES:
+            continue
+        if record.get("artifact_id") != authoritative_persistence.artifact_id:
+            continue
+        artifact_content_sha256: str | None = None
+        artifact_path: Path | None = None
+        try:
+            artifact_path = _resolve_artifact_path(run_root, record)
+        except (OSError, TypeError, ValueError, WorkbenchAPIError):
+            artifact_path = None
+        if artifact_path is not None:
+            try:
+                artifact_content_sha256 = sha256_file(artifact_path)
+            except (OSError, TypeError, ValueError):
+                artifact_content_sha256 = None
+
+        views.append(
+            build_indexed_report_evidence(
+                record,
+                artifact_content_sha256=artifact_content_sha256,
+                authoritative_persistence=authoritative_persistence,
+                request_identity=request_identity,
+            )
+        )
+
+    # ``post_estimation_results`` is a legacy response field.  It is
+    # intentionally not a Report evidence fallback: raw result entries cannot
+    # create a typed projection or citable facts.
+    del post_estimation_results
+
+    bundle = build_report_evidence_bundle(views)
+    if bundle is not None:
+        return bundle
+    return build_indexed_report_evidence(
+        {
+            "artifact_id": f"run:{run_root.name}",
+            "artifact_type": "report",
+        },
+    )
+
+
+def _report_evidence_server_receipt(
+    view: dict[str, object],
+) -> dict[str, object] | None:
+    """Expose an independent server transport anchor for available evidence."""
+
+    digest = view.get("projectionDigest")
+    provenance = view.get("provenance")
+    if (
+        view.get("status") != "available"
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(char not in "0123456789abcdef" for char in digest)
+        or not isinstance(provenance, dict)
+    ):
+        return None
+    identity_keys = (
+        "actorRef",
+        "projectRef",
+        "sessionRef",
+        "scopeRef",
+        "runId",
+        "modelRunId",
+        "artifactRef",
+        "commitId",
+        "confirmationRef",
+    )
+    identity = {key: view.get(key) for key in identity_keys}
+    if any(not isinstance(value, str) or not value.strip() for value in identity.values()):
+        return None
+    return {
+        "schemaVersion": 1,
+        "kind": "evidence.report.server-receipt.v1",
+        "projectionDigest": digest,
+        "identity": identity,
+        "provenance": dict(provenance),
+    }
+
+
+def _report_identity_for_request(
+    request: Request,
+    run_id: str,
+) -> ReportEvidenceRequestIdentityV1 | None:
+    """Resolve identity from the server owner seam, never from query fields."""
+
+    resolver = getattr(request.app.state, "report_evidence_identity_resolver", None)
+    if resolver is not None:
+        if not callable(resolver):
+            return None
+        try:
+            identity = resolver(request, run_id)
+        except Exception:
+            return None
+        return identity if type(identity) is ReportEvidenceRequestIdentityV1 else None
+
+    persistence = getattr(request.app.state, "report_evidence_persistence", None)
+    if type(persistence) is not ServerOwnedReportEvidencePersistenceV1:
+        return None
+    if persistence.run_id != run_id:
+        return None
+    try:
+        return persistence._require_report_request_identity(None)
+    except (AttributeError, TypeError, ValueError, RuntimeError, EvidenceProjectionError):
+        return None
+
+
+def _admit_report_owner_for_run(
+    run_root: Path,
+    request_identity: ReportEvidenceRequestIdentityV1 | None,
+    project_root: Path | str | None,
+) -> ServerOwnedReportEvidencePersistenceV1 | None:
+    """Admit the server owner before opening an artifact index or file."""
+
+    owner = current_report_evidence_persistence(
+        actor_ref=(request_identity.actor_ref if request_identity else None),
+        run_id=run_root.name,
+        project_ref=(request_identity.project_ref if request_identity else None),
+        session_ref=(request_identity.session_ref if request_identity else None),
+        scope_ref=(request_identity.scope_ref if request_identity else None),
+        model_run_id=(request_identity.model_run_id if request_identity else None),
+        artifact_id=None,
+        commit_id=None,
+        confirmation_ref=(request_identity.confirmation_ref if request_identity else None),
+        artifact_file_sha256=None,
+        project_root=project_root,
+    )
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        return None
+    try:
+        owner._require_report_authority()
+        owner._require_report_request_identity(request_identity)
+        owner._canonical_report_artifact()
+        owner._canonical_report_wire()
+        if project_root is not None and not owner.accepts_project_root(project_root):
+            return None
+    except (AttributeError, TypeError, ValueError, RuntimeError, EvidenceProjectionError):
+        return None
+    return owner
+
+
+def _report_owner_for_export(
+    run_root: Path,
+    projection: dict[str, object],
+    request_identity: ReportEvidenceRequestIdentityV1 | None,
+    *,
+    project_root: Path | str,
+) -> ServerOwnedReportEvidencePersistenceV1:
+    """Resolve the owner bound to the indexed artifact before any export."""
+
+    owner = _admit_report_owner_for_run(run_root, request_identity, project_root)
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        raise ReportExportError("REPORT_EVIDENCE_OWNER_UNAVAILABLE")
+
+    artifact_id = projection.get("artifactRef")
+    if not isinstance(artifact_id, str) or not artifact_id.strip():
+        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_REQUIRED")
+    if artifact_id != owner.artifact_id:
+        raise ReportExportError("REPORT_EVIDENCE_OWNER_CONTEXT_MISMATCH")
+    try:
+        records = _read_artifact_records(run_root)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError) as exc:
+        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_INDEX_UNAVAILABLE") from exc
+    record = next(
+        (item for item in records if isinstance(item, dict) and item.get("artifact_id") == artifact_id),
+        None,
+    )
+    if record is None:
+        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_NOT_INDEXED")
+    try:
+        artifact_path = _resolve_artifact_path(run_root, record)
+        artifact_file_sha256 = sha256_file(artifact_path)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError) as exc:
+        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_INTEGRITY_UNAVAILABLE") from exc
+    if artifact_file_sha256 != owner.artifact_file_sha256:
+        raise ReportExportError("REPORT_EVIDENCE_ARTIFACT_FILE_HASH_MISMATCH")
+    return owner
+
+
+def _issue_report_projection_for_export(
+    run_root: Path,
+    projection: dict[str, object],
+    request_identity: ReportEvidenceRequestIdentityV1 | None,
+    *,
+    project_root: Path | str,
+) -> EvidenceProjectionV1:
+    owner = _report_owner_for_export(
+        run_root,
+        projection,
+        request_identity,
+        project_root=project_root,
+    )
+    return owner.issue_report_projection(projection)
 
 
 class ResultTableExportRequest(BaseModel):
@@ -479,62 +711,19 @@ def list_runs_endpoint(project_root: str) -> dict:
 
 
 @router.get("/runs/{run_id}")
-def get_run_endpoint(run_id: str, project_root: str) -> dict:
+def get_run_endpoint(run_id: str, project_root: str, request: Request) -> dict:
     run_root = _resolve_run_root(project_root, run_id)
     manifest = _read_manifest(run_root)
     _mark_interrupted_if_dead(run_root, manifest)
     summary = _summarize_manifest(manifest, run_id=run_id)
     errors_path = run_root / "errors.json"
     errors = read_json(errors_path) if errors_path.is_file() else {"issues": []}
-    try:
-        model_results = _model_results(run_root)
-    except VersionedResultReadError as exc:
-        details = (
-            {"artifact_path": exc.artifact_path}
-            if exc.artifact_path is not None
-            else {}
-        )
-        raise WorkbenchAPIError(
-            status_code=422,
-            code=exc.code,
-            message="The versioned model result cannot be read.",
-            details=details,
-        ) from exc
+    # Raw model-result packets are never a Report or consumer input.  Keep the
+    # compatibility fields empty and build all evidence from the typed index.
+    model_results: list[dict[str, Any]] = []
     errors = _normalize_issue_stream(errors, model_results)
     preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
-    diagnostic_summary = {}
-    diagnostic_summary_path = run_root / "diagnostic_summary.json"
-    if diagnostic_summary_path.is_file():
-        try:
-            candidate = read_json(diagnostic_summary_path)
-            if isinstance(candidate, dict):
-                diagnostic_summary = candidate
-        except (OSError, TypeError, ValueError):
-            diagnostic_summary = {}
-    model_family_evidence = diagnostic_summary.get("model_family_evidence")
-    primary_family_result = next(
-        (
-            result
-            for result in model_results
-            if result.get("model_type") in {
-                "ordinal_logit",
-                "multinomial_logit",
-                "survival_cox",
-                "quantile_regression",
-            }
-        ),
-        None,
-    )
-    if isinstance(primary_family_result, dict):
-        # Keep the packet's original diagnostic shape while adding the full
-        # model result fields (OR/RRR/probabilities/effects or quantile fits)
-        # to the same user-facing RunDetail projection.  No numeric value is
-        # recomputed or reduced at this boundary.
-        merged_family_evidence = dict(primary_family_result)
-        if isinstance(model_family_evidence, dict):
-            merged_family_evidence.update(model_family_evidence)
-            merged_family_evidence["diagnostics"] = model_family_evidence
-        model_family_evidence = merged_family_evidence
+    model_family_evidence = None
     prediction_evidence = None
     if (run_root / "prediction_results").is_dir():
         try:
@@ -543,24 +732,38 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
             )
         except (PayloadContractError, OSError, ValueError):
             prediction_evidence = {"status": "unavailable"}
+    post_estimation_results: list[dict[str, Any]] = []
+    report_evidence = _report_evidence_for_run(
+        run_root,
+        post_estimation_results,
+        _report_identity_for_request(request, run_id),
+        project_root=project_root,
+    )
+    try:
+        artifact_counts = _artifact_counts(run_root)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError):
+        artifact_counts = {}
     return {
         **summary,
         "lineage": manifest.get("lineage", []),
-        "artifact_counts": _artifact_counts(run_root),
+        "artifact_counts": artifact_counts,
         "errors": errors,
         "model_results": model_results,
+        "model_results_authority": "non-authoritative",
+        "model_results_status": "unavailable",
         "diagnostic_summary_preview": preview,
-        "table_1": diagnostic_summary.get("table_1", []),
-        "statistical_evidence": diagnostic_summary.get("statistical_evidence"),
-        "labels": diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
+        "table_1": [],
+        "statistical_evidence": None,
+        "labels": {"variable_labels": {}, "value_labels": {}},
         "model_family_evidence": model_family_evidence,
+        "model_family_evidence_authority": "non-authoritative",
         "prediction_evidence": prediction_evidence,
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the
         # run surface show that answer instead of leaving it in an artifact.
-        "post_estimation_results": collect_post_estimation_results(
-            run_root.parent.parent, run_id
-        ),
+        "post_estimation_results": post_estimation_results,
+        "report_evidence": report_evidence,
+        "report_evidence_receipt": _report_evidence_server_receipt(report_evidence),
     }
 
 
@@ -630,14 +833,28 @@ def export_report_endpoint(
     run_id: str,
     project_root: str,
     format: str,
-    request: ReportExportRequest,
+    payload: ReportExportRequest,
+    http_request: Request,
 ) -> Response:
     run_root = _resolve_run_root(project_root, run_id)
-    markdown = request.markdown
-    figures = [figure.model_dump() for figure in request.figures]
-    if request.report_id is not None:
+    projection = _report_evidence_for_run(
+        run_root,
+        [],
+        _report_identity_for_request(http_request, run_id),
+        project_root=project_root,
+    )
+    if projection.get("status") != "available":
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="REPORT_EVIDENCE_UNAVAILABLE",
+            message="The report export requires a committed typed evidence projection.",
+            details={"run_id": run_id, "projection": projection},
+        )
+    markdown = payload.markdown
+    figures = [figure.model_dump() for figure in payload.figures]
+    if payload.report_id is not None:
         stored = next(
-            (record for record in list_ai_reports(run_root) if record.get("id") == request.report_id),
+            (record for record in list_ai_reports(run_root) if record.get("id") == payload.report_id),
             None,
         )
         if stored is None:
@@ -645,7 +862,7 @@ def export_report_endpoint(
                 status_code=404,
                 code="AI_REPORT_NOT_FOUND",
                 message="The selected report revision is not stored for this run.",
-                details={"report_id": request.report_id, "run_id": run_id},
+                details={"report_id": payload.report_id, "run_id": run_id},
             )
         stored_facts = stored.get("facts") or []
         stored_figures = stored.get("figures") or []
@@ -668,12 +885,12 @@ def export_report_endpoint(
         # figure-source previews are server-owned provenance fields and may be
         # omitted by the lightweight export request model; the actual bytes
         # below are always read from the persisted report snapshot.
-        if request.markdown != stored.get("text") or requested_figure_identity != stored_figure_identity:
+        if payload.markdown != stored.get("text") or requested_figure_identity != stored_figure_identity:
             raise WorkbenchAPIError(
                 status_code=409,
                 code="AI_REPORT_SOURCE_MISMATCH",
                 message="Export must use the persisted report revision and evidence snapshot.",
-                details={"report_id": request.report_id},
+                details={"report_id": payload.report_id},
             )
         try:
             contract = validate_report_packet(
@@ -692,7 +909,7 @@ def export_report_endpoint(
                 status_code=422,
                 code="REPORT_EXPORT_NOT_ALLOWED",
                 message="The stored report revision has an invalid evidence contract.",
-                details={"report_id": request.report_id, "violations": list(exc.violations)},
+                details={"report_id": payload.report_id, "violations": list(exc.violations)},
             ) from exc
         if not quality.is_exportable:
             details = quality.to_dict()
@@ -701,7 +918,7 @@ def export_report_endpoint(
                 status_code=422,
                 code="REPORT_EXPORT_NOT_ALLOWED",
                 message="The report revision is not exportable until its quality issues are fixed.",
-                details={"report_id": request.report_id, "quality": details},
+                details={"report_id": payload.report_id, "quality": details},
             )
         markdown = str(stored["text"])
         figures = list(included_figures)
@@ -711,6 +928,12 @@ def export_report_endpoint(
             markdown=markdown,
             figures=figures,
             format=format,
+            evidence_projection=_issue_report_projection_for_export(
+                run_root,
+                projection,
+                _report_identity_for_request(http_request, run_id),
+                project_root=project_root,
+            ),
         )
     except ReportExportError as exc:
         raise WorkbenchAPIError(
@@ -731,13 +954,9 @@ def export_result_table_endpoint(
     run_id: str,
     project_root: str,
     request: ResultTableExportRequest,
-) -> FileResponse:
-    """Export selected result tables from the immutable Run evidence.
-
-    The request contains only presentation sections.  It deliberately has no
-    rows or numeric fields: every value is re-read from the persisted
-    diagnostic summary and typed model-result packets on the server.
-    """
+    http_request: Request,
+) -> Response:
+    """Export selected result tables from the bounded typed evidence view."""
 
     run_root = _resolve_run_root(project_root, run_id)
     sections = request.sections or ["regression_table", "table_1", "statistical_evidence", "model_family_evidence"]
@@ -757,139 +976,59 @@ def export_result_table_endpoint(
             details={"sections": sections},
         )
 
-    summary_path = run_root / "diagnostic_summary.json"
-    try:
-        summary = read_json(summary_path)
-    except (OSError, ValueError, TypeError) as exc:
+    projection = _report_evidence_for_run(
+        run_root,
+        [],
+        _report_identity_for_request(http_request, run_id),
+        project_root=project_root,
+    )
+    if projection.get("status") != "available":
         raise WorkbenchAPIError(
-            status_code=422,
+            status_code=409,
             code="RESULT_TABLE_EXPORT_UNAVAILABLE",
-            message="The run has no readable diagnostic summary for export.",
-            details={"run_id": run_id},
-        ) from exc
-    if not isinstance(summary, dict):
-        raise WorkbenchAPIError(
-            status_code=422,
-            code="RESULT_TABLE_EXPORT_UNAVAILABLE",
-            message="The run diagnostic summary is not an object.",
-            details={"run_id": run_id},
+            message="The selected result tables require committed typed evidence.",
+            details={"run_id": run_id, "projection": projection},
         )
 
-    try:
-        model_results = _model_results(run_root)
-    except VersionedResultReadError as exc:
+    typed_facts = projection.get("facts")
+    if not isinstance(typed_facts, list) or not typed_facts:
+        unavailable = dict(projection)
+        unavailable.update({"status": "unavailable", "facts": [], "reasonCode": "EVIDENCE_FACTS_UNAVAILABLE"})
         raise WorkbenchAPIError(
-            status_code=422,
-            code=exc.code,
-            message="The versioned model result cannot be read for export.",
-            details={"run_id": run_id},
-        ) from exc
-
-    labels = summary.get("labels", {})
-    variable_labels = labels.get("variable_labels", {}) if isinstance(labels, dict) else {}
-    model_pairs = [
-        (str(result.get("model_id")), result)
-        for result in model_results
-        if isinstance(result, dict) and isinstance(result.get("model_id"), str)
-    ]
-    tables: dict[str, list[dict[str, Any]]] = {}
-    if "regression_table" in sections:
-        regression_table = build_regression_table(
-            model_pairs,
-            variable_labels=variable_labels if isinstance(variable_labels, dict) else {},
-        )
-        tables["regression_table"] = _scalarize_result_rows(
-            regression_table_export_rows(regression_table)
-        )
-    if "coefficients" in sections:
-        tables["coefficients"] = _scalarize_result_rows(
-            _coefficient_export_rows(model_results)
-        )
-    if "table_1" in sections:
-        tables["table_1"] = _scalarize_result_rows(_list_value(summary.get("table_1")))
-    if "statistical_evidence" in sections:
-        evidence = summary.get("statistical_evidence")
-        evidence_rows = evidence.get("results") if isinstance(evidence, dict) else []
-        tables["statistical_evidence"] = _scalarize_result_rows(_list_value(evidence_rows))
-    if "model_family_evidence" in sections:
-        family_evidence = summary.get("model_family_evidence")
-        tables["model_family_evidence"] = _scalarize_result_rows(
-            [{"evidence": family_evidence}] if isinstance(family_evidence, dict) else []
-        )
-
-    if not any(tables.values()):
-        raise WorkbenchAPIError(
-            status_code=422,
+            status_code=409,
             code="RESULT_TABLE_EXPORT_UNAVAILABLE",
-            message="The selected result-table sections contain no persisted evidence.",
-            details={"sections": sections},
+            message="The committed projection contains no bounded facts for export.",
+            details={"run_id": run_id, "projection": unavailable},
         )
 
     slug = "-".join(sections)
     filename = f"result-table-{slug}.xlsx"
-    artifact_id = f"report_result_table_{'_'.join(sections)}_xlsx"
-    output_path = run_root / "exports" / filename
-    if not output_path.is_file() or not _artifact_registered(run_root, artifact_id):
-        try:
-            export_xlsx(
-                tables,
-                run_root,
-                filename=filename,
-                artifact_id=artifact_id,
-                inputs=["diagnostic_summary", *[f"model_results:{model_id}" for model_id, _ in model_pairs]],
-            )
-        except (OSError, ValueError) as exc:
-            raise WorkbenchAPIError(
-                status_code=422,
-                code="RESULT_TABLE_EXPORT_FAILED",
-                message="The result table could not be exported.",
-                details={"run_id": run_id},
-            ) from exc
-    return FileResponse(
-        output_path,
-        filename=filename,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
-
-def _list_value(value: Any) -> list[dict[str, Any]]:
-    return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
-
-
-def _coefficient_export_rows(model_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for result in model_results:
-        model_id = result.get("model_id")
-        coefficients = result.get("coefficients")
-        if not isinstance(model_id, str) or not isinstance(coefficients, dict):
-            continue
-        for term, value in coefficients.items():
-            if isinstance(value, dict):
-                rows.append({"model_id": model_id, "term": term, **value})
-    return rows
-
-
-def _scalarize_result_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            key: json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            if isinstance(value, (dict, list, tuple))
-            else value
-            for key, value in row.items()
-        }
-        for row in rows
-    ]
-
-
-def _artifact_registered(run_root: Path, artifact_id: str) -> bool:
     try:
-        index = read_json(run_root / "artifacts_index.json")
-    except (OSError, ValueError, TypeError):
-        return False
-    return isinstance(index, dict) and any(
-        record.get("artifact_id") == artifact_id
-        for record in index.get("artifacts", [])
-        if isinstance(record, dict)
+        owner = _report_owner_for_export(
+            run_root,
+            projection,
+            _report_identity_for_request(http_request, run_id),
+            project_root=project_root,
+        )
+        typed_projection = owner.issue_report_projection(projection)
+        writer = owner.issue_report_evidence_writer(
+            typed_projection,
+            sections=tuple(sections),
+        )
+        xlsx_payload = render_typed_xlsx(writer)
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        unavailable = dict(projection)
+        unavailable.update({"status": "blocked", "facts": [], "reasonCode": "RESULT_TABLE_EXPORT_FAILED"})
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="RESULT_TABLE_EXPORT_FAILED",
+            message="The typed result table could not be downloaded or exported.",
+            details={"run_id": run_id, "projection": unavailable},
+        ) from exc
+    return Response(
+        content=xlsx_payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -1079,25 +1218,58 @@ def download_artifact_endpoint(
 
 
 @router.get("/runs/{run_id}/report")
-def get_report_endpoint(run_id: str, project_root: str) -> FileResponse:
+def get_report_endpoint(run_id: str, project_root: str, request: Request) -> Response:
     run_root = _resolve_run_root(project_root, run_id)
-    report_path = run_root / "reports" / "report.html"
-    if not report_path.is_file():
-        existing_artifacts = _list_existing_artifacts(run_root)
-        errors = _read_errors(run_root)
-        failed_stage = _detect_failed_stage(run_root, existing_artifacts)
+    projection = _report_evidence_for_run(
+        run_root,
+        [],
+        _report_identity_for_request(request, run_id),
+        project_root=project_root,
+    )
+    if projection.get("status") != "available":
         raise WorkbenchAPIError(
-            status_code=404,
-            code=ERROR_REPORT_NOT_FOUND,
-            message="report.html not found for this run",
-            details={
-                "run_id": run_id,
-                "failed_stage": failed_stage,
-                "existing_artifacts": existing_artifacts,
-                "errors": errors,
-            },
+            status_code=409,
+            code="REPORT_EVIDENCE_UNAVAILABLE",
+            message="The HTML report requires a committed typed evidence projection.",
+            details={"run_id": run_id, "projection": projection},
         )
-    return FileResponse(report_path, media_type="text/html")
+    facts = projection.get("facts", [])
+    lines = [
+        "# Persisted report evidence",
+        f"Status: {projection.get('status')}",
+        f"Validation: {projection.get('validationStatus')}",
+        f"Commit: {projection.get('commitId')}",
+        f"Digest: {projection.get('envelopeDigest')}",
+    ]
+    if isinstance(facts, list):
+        for fact in facts:
+            if not isinstance(fact, dict):
+                continue
+            lines.append(
+                f"- {fact.get('statisticId', 'fact')}: {fact.get('value')}"
+                + (f" ({fact.get('unit')})" if fact.get('unit') else "")
+            )
+    try:
+        payload, media_type, _filename = export_report(
+            run_root,
+            markdown="\n".join(lines),
+            figures=[],
+            format="html",
+            evidence_projection=_issue_report_projection_for_export(
+                run_root,
+                projection,
+                _report_identity_for_request(request, run_id),
+                project_root=project_root,
+            ),
+        )
+    except ReportExportError as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="REPORT_EXPORT_FAILED",
+            message=str(exc),
+            details={"run_id": run_id, "projection": projection},
+        ) from exc
+    return Response(content=payload, media_type=media_type)
 
 
 @router.get("/runs/{run_id}/events")
