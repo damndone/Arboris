@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import hashlib
 import shutil
@@ -59,6 +60,39 @@ def _canonical_artifact_record(**overrides: object) -> dict[str, object]:
         "code_version": "1.8.9",
         **overrides,
     }
+
+
+def _materialize_generic_artifact_run(
+    tmp_path,
+    *,
+    relative_path: str = "large.bin",
+    payload: bytes | None = None,
+) -> tuple[object, object, str, bytes]:
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-generic-stream"
+    run_root.mkdir(parents=True)
+    expected = payload if payload is not None else bytes(range(251)) * 790 + b"tail"
+    artifact_path = run_root / relative_path
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_bytes(expected)
+    artifact_id = "artifact:generic-stream"
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artifacts": [
+                    _canonical_artifact_record(
+                        artifact_id=artifact_id,
+                        artifact_type="generic_result",
+                        path=relative_path,
+                        sha256=hashlib.sha256(expected).hexdigest(),
+                    )
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return project_root, run_root, artifact_id, expected
 
 
 def _production_dependencies(*, include_holdout: bool = True) -> dict[str, object]:
@@ -1496,9 +1530,299 @@ def test_runs_artifact_route_does_not_treat_generic_alias_id_as_classification_w
 
     response = runs_routes.download_artifact_endpoint("run-generic-alias", "classification_artifacts", str(project_root))
 
-    assert response.__class__.__name__ == "Response"
-    assert response.body == b'{"kind":"generic"}'
+    assert response.__class__.__name__ == "StreamingResponse"
+
+    async def drain() -> bytes:
+        chunks = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    assert asyncio.run(drain()) == b'{"kind":"generic"}'
     assert "attachment" in response.headers["content-disposition"]
+
+
+def test_generic_artifact_download_uses_bounded_stream_and_compatibility_headers(
+    tmp_path, monkeypatch
+) -> None:
+    project_root, _run_root, artifact_id, expected = _materialize_generic_artifact_run(
+        tmp_path,
+        payload=(bytes(range(251)) * 790 + b"tail"),
+    )
+    from workbench.repository import file_integrity
+
+    observed = {"whole_file_reads": 0}
+    chunk_sizes: list[int] = []
+
+    def reject_whole_file_read(_self):
+        observed["whole_file_reads"] += 1
+        raise AssertionError("generic downloads must not read the whole artifact")
+
+    monkeypatch.setattr(
+        file_integrity.OpenedRunFile,
+        "read_bytes_and_sha256",
+        reject_whole_file_read,
+        raising=True,
+    )
+    original_iter_bytes = file_integrity.OpenedRunFile.iter_bytes
+
+    def observe_chunks(self, start=0, end=None):
+        for chunk in original_iter_bytes(self, start, end):
+            chunk_sizes.append(len(chunk))
+            yield chunk
+
+    monkeypatch.setattr(file_integrity.OpenedRunFile, "iter_bytes", observe_chunks, raising=True)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 200
+    assert response.content == expected
+    assert response.headers["content-type"] == "application/octet-stream"
+    assert response.headers["content-length"] == str(len(expected))
+    assert response.headers["accept-ranges"] == "bytes"
+    assert 'attachment; filename="large.bin"' == response.headers["content-disposition"]
+    assert observed["whole_file_reads"] == 0
+    assert chunk_sizes
+    assert max(chunk_sizes) <= file_integrity.MAX_ARTIFACT_STREAM_CHUNK_BYTES
+
+
+def test_generic_artifact_download_preserves_single_range_compatibility(tmp_path) -> None:
+    project_root, _run_root, artifact_id, expected = _materialize_generic_artifact_run(tmp_path)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": "bytes=5-19"},
+    )
+
+    assert response.status_code == 206
+    assert response.content == expected[5:20]
+    assert response.headers["content-range"] == f"bytes 5-19/{len(expected)}"
+    assert response.headers["content-length"] == "15"
+    assert response.headers["content-type"] == "application/octet-stream"
+    assert response.headers["accept-ranges"] == "bytes"
+    assert 'attachment; filename="large.bin"' == response.headers["content-disposition"]
+
+
+def test_generic_artifact_download_preserves_multipart_range_compatibility(tmp_path) -> None:
+    project_root, _run_root, artifact_id, expected = _materialize_generic_artifact_run(tmp_path)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": "bytes=0-2,10-12"},
+    )
+
+    assert response.status_code == 206
+    assert response.headers["content-type"].startswith("multipart/byteranges; boundary=")
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["content-length"] == str(len(response.content))
+    assert b"Content-Range: bytes 0-2/" in response.content
+    assert b"Content-Range: bytes 10-12/" in response.content
+    assert expected[0:3] in response.content
+    assert expected[10:13] in response.content
+
+
+def test_generic_artifact_download_honors_if_range_and_falls_back_to_full_stream(tmp_path) -> None:
+    project_root, _run_root, artifact_id, expected = _materialize_generic_artifact_run(tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    base = client.get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+    )
+
+    matching = client.get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": "bytes=5-19", "If-Range": base.headers["etag"]},
+    )
+    stale = client.get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": "bytes=5-19", "If-Range": '"stale"'},
+    )
+
+    assert matching.status_code == 206
+    assert matching.content == expected[5:20]
+    assert stale.status_code == 200
+    assert stale.content == expected
+
+
+@pytest.mark.parametrize("range_header", ("bytes=oops", "items=0-1"))
+def test_generic_artifact_download_rejects_malformed_range_explicitly(tmp_path, range_header: str) -> None:
+    project_root, _run_root, artifact_id, _expected = _materialize_generic_artifact_run(tmp_path)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": range_header},
+    )
+
+    assert response.status_code == 400
+
+
+def test_generic_artifact_download_rejects_unsatisfiable_range_explicitly(tmp_path) -> None:
+    project_root, _run_root, artifact_id, expected = _materialize_generic_artifact_run(tmp_path)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+        headers={"Range": f"bytes={len(expected)}-{len(expected) + 5}"},
+    )
+
+    assert response.status_code == 416
+    assert response.headers["content-range"] == f"bytes */{len(expected)}"
+
+
+def test_generic_artifact_download_rejects_artifact_over_stream_size_policy(tmp_path) -> None:
+    project_root, run_root, artifact_id, _expected = _materialize_generic_artifact_run(
+        tmp_path,
+        payload=b"small",
+    )
+    from workbench.repository import file_integrity
+
+    artifact_path = run_root / "large.bin"
+    artifact_path.unlink()
+    artifact_path.touch()
+    artifact_path.write_bytes(b"small")
+    with artifact_path.open("r+b") as handle:
+        handle.truncate(file_integrity.MAX_ARTIFACT_STREAM_BYTES + 1)
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["artifacts"][0]["sha256"] = hashlib.sha256(b"small").hexdigest()
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/{run_root.name}/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code in {409, 500}
+    assert response.json()["error"]["code"] in {
+        "ARTIFACT_INTEGRITY_UNAVAILABLE",
+        "ARTIFACTS_INDEX_INVALID",
+    }
+
+
+def test_generic_artifact_download_rejects_intermediate_directory_symlink(tmp_path) -> None:
+    project_root, run_root, artifact_id, expected = _materialize_generic_artifact_run(
+        tmp_path,
+        relative_path="nested/data.bin",
+        payload=b"inside",
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "data.bin").write_bytes(expected)
+    nested = run_root / "nested"
+    (nested / "data.bin").unlink()
+    nested.rmdir()
+    nested.symlink_to(outside, target_is_directory=True)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/{run_root.name}/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["error"]["code"] == "ARTIFACTS_INDEX_INVALID"
+    assert response.json().get("groups") is None
+
+
+def test_generic_artifact_download_closes_fd_when_hash_fails(tmp_path, monkeypatch) -> None:
+    project_root, _run_root, artifact_id, _expected = _materialize_generic_artifact_run(tmp_path)
+    from workbench.repository import file_integrity
+
+    captured = []
+    original_open = file_integrity.open_run_relative_file
+
+    def capture_open(run_root, relative_path):
+        opened = original_open(run_root, relative_path)
+        captured.append(opened)
+        return opened
+
+    hash_calls = {"count": 0}
+
+    def raise_hash(_self):
+        hash_calls["count"] += 1
+        if hash_calls["count"] == 1:
+            return hashlib.sha256(_expected).hexdigest()
+        raise OSError("controlled hash failure")
+
+    monkeypatch.setattr(file_integrity, "open_run_relative_file", capture_open, raising=True)
+    monkeypatch.setattr(file_integrity.OpenedRunFile, "sha256", raise_hash, raising=True)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/runs/run-generic-stream/artifacts/{artifact_id}",
+        params={"project_root": str(project_root)},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "ARTIFACT_INTEGRITY_UNAVAILABLE"
+    assert captured
+    assert all(opened._closed for opened in captured)
+
+
+def test_generic_artifact_stream_fails_closed_on_read_time_size_change(tmp_path, monkeypatch) -> None:
+    project_root, run_root, artifact_id, _expected = _materialize_generic_artifact_run(
+        tmp_path,
+        payload=(bytes(range(251)) * 790 + b"tail"),
+    )
+    from workbench.repository import file_integrity
+
+    captured = []
+    original_open = file_integrity.open_run_relative_file
+    original_sha256 = file_integrity.OpenedRunFile.sha256
+    original_pread = file_integrity.os.pread
+    state = {"hash_calls": 0, "hashed": False, "mutated": False, "pread_calls": 0}
+
+    def capture_open(run_root, relative_path):
+        opened = original_open(run_root, relative_path)
+        captured.append(opened)
+        return opened
+
+    def arm_after_hash(self):
+        result = original_sha256(self)
+        state["hash_calls"] += 1
+        state["hashed"] = state["hash_calls"] >= 2
+        return result
+
+    def truncate_after_first_stream_read(fd, size, offset):
+        chunk = original_pread(fd, size, offset)
+        if state["hashed"]:
+            state["pread_calls"] += 1
+            if state["pread_calls"] == 1:
+                import os
+
+                os.truncate(run_root / "large.bin", 1)
+                state["mutated"] = True
+        return chunk
+
+    monkeypatch.setattr(file_integrity, "open_run_relative_file", capture_open, raising=True)
+    monkeypatch.setattr(file_integrity.OpenedRunFile, "sha256", arm_after_hash, raising=True)
+    monkeypatch.setattr(file_integrity.os, "pread", truncate_after_first_stream_read, raising=True)
+
+    response = runs_routes.download_artifact_endpoint(
+        "run-generic-stream",
+        artifact_id,
+        str(project_root),
+    )
+
+    async def drain() -> list[bytes]:
+        chunks = []
+        with pytest.raises(OSError):
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+        return chunks
+
+    yielded = asyncio.run(drain())
+
+    assert state["mutated"], state
+    assert captured
+    assert yielded == []
+    assert all(opened._closed for opened in captured)
 
 
 def test_download_artifact_rejects_external_symlink_replacement_at_live_safe_open_http(

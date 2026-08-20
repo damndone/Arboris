@@ -10,17 +10,28 @@ Thin: parse the request, delegate to services (dispatch / results) and repositor
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import mimetypes
 import queue
+import secrets
 import string
 import tempfile
 from datetime import datetime, timezone
+from email.utils import formatdate
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    Response,
+    StreamingResponse,
+)
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.responses import MalformedRangeHeader, RangeNotSatisfiable
 
 from ..api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
@@ -1046,7 +1057,11 @@ def list_artifacts_endpoint(run_id: str, project_root: str) -> dict:
 
 @router.get("/runs/{run_id}/artifacts/{artifact_id}")
 def download_artifact_endpoint(
-    run_id: str, artifact_id: str, project_root: str
+    run_id: str,
+    artifact_id: str,
+    project_root: str,
+    range_header: str | None = Header(default=None, alias="Range"),
+    if_range: str | None = Header(default=None, alias="If-Range"),
 ) -> Response:
     run_root = _resolve_run_root(project_root, run_id)
     records = _read_artifact_records(run_root)
@@ -1128,29 +1143,154 @@ def download_artifact_endpoint(
             message="The artifact has no valid sha256 digest.",
             details={"artifact_id": artifact_id, "run_id": run_id},
         )
+    opened = None
     try:
-        with file_integrity.open_run_relative_file(run_root, matched.get("path")) as opened:
-            content, actual_sha256 = opened.read_bytes_and_sha256()
-            filename = opened.name
+        opened = file_integrity.open_run_relative_file(run_root, matched.get("path"))
+        opened.stat_result()
+        actual_sha256 = opened.sha256()
+        if actual_sha256.lower() != expected_sha256.lower():
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="ARTIFACT_INTEGRITY_MISMATCH",
+                message="The artifact bytes do not match the indexed sha256 digest.",
+                details={"artifact_id": artifact_id, "run_id": run_id},
+            )
+        stat_result = opened.stat_result()
+        filename = opened.name
+        media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        headers = _artifact_download_headers(filename, stat_result, len_bytes=stat_result.st_size)
+        range_value = range_header if isinstance(range_header, str) else None
+        if_range_value = if_range if isinstance(if_range, str) else None
+        ranges: list[tuple[int, int]] = []
+        if range_value and (
+            if_range_value is None or if_range_value in {headers["ETag"], headers["Last-Modified"]}
+        ):
+            try:
+                ranges = FileResponse._parse_range_header(range_value, stat_result.st_size)
+            except MalformedRangeHeader as exc:
+                opened.close()
+                opened = None
+                return Response(content=exc.content, status_code=400, media_type="text/plain")
+            except RangeNotSatisfiable:
+                opened.close()
+                opened = None
+                return Response(
+                    status_code=416,
+                    headers={"Content-Range": f"bytes */{stat_result.st_size}"},
+                )
+
+        status_code = 200
+        body_ranges: tuple[tuple[int, int], ...] = ()
+        response_media_type = media_type
+        if len(ranges) == 1:
+            status_code = 206
+            body_ranges = (ranges[0],)
+            start, end = ranges[0]
+            headers["Content-Range"] = f"bytes {start}-{end - 1}/{stat_result.st_size}"
+            headers["Content-Length"] = str(end - start)
+        elif len(ranges) > 1:
+            status_code = 206
+            body_ranges = tuple(ranges)
+            boundary = secrets.token_hex(13)
+            response_media_type = f"multipart/byteranges; boundary={boundary}"
+            headers["Content-Length"] = str(
+                _multipart_content_length(body_ranges, boundary, stat_result.st_size, media_type)
+            )
+        body = _iter_opened_artifact(
+            opened,
+            body_ranges,
+            boundary=boundary if len(ranges) > 1 else None,
+            file_size=stat_result.st_size,
+            media_type=media_type,
+        )
+        response = StreamingResponse(
+            body,
+            status_code=status_code,
+            headers=headers,
+            media_type=response_media_type,
+        )
+        opened = None
+        return response
+    except WorkbenchAPIError:
+        if opened is not None:
+            opened.close()
+        raise
     except (OSError, ValueError) as exc:
+        if opened is not None:
+            opened.close()
         raise WorkbenchAPIError(
             status_code=409,
             code="ARTIFACT_INTEGRITY_UNAVAILABLE",
             message="The artifact could not be safely opened for integrity verification.",
             details={"artifact_id": artifact_id, "run_id": run_id},
         ) from exc
-    if actual_sha256.lower() != expected_sha256.lower():
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="ARTIFACT_INTEGRITY_MISMATCH",
-            message="The artifact bytes do not match the indexed sha256 digest.",
-            details={"artifact_id": artifact_id, "run_id": run_id},
-        )
-    return Response(
-        content=content,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        media_type=None,
+
+
+def _artifact_download_headers(
+    filename: str,
+    stat_result,
+    *,
+    len_bytes: int,
+) -> dict[str, str]:
+    etag_base = f"{stat_result.st_mtime}-{stat_result.st_size}"
+    etag = f'"{hashlib.md5(etag_base.encode(), usedforsecurity=False).hexdigest()}"'
+    quoted_filename = quote(filename)
+    disposition = (
+        f"attachment; filename=\"{filename}\""
+        if quoted_filename == filename
+        else f"attachment; filename*=utf-8''{quoted_filename}"
     )
+    return {
+        "Content-Disposition": disposition,
+        "Content-Length": str(len_bytes),
+        "Accept-Ranges": "bytes",
+        "Last-Modified": formatdate(stat_result.st_mtime, usegmt=True),
+        "ETag": etag,
+    }
+
+
+def _multipart_part_header(start: int, end: int, file_size: int, boundary: str, media_type: str) -> bytes:
+    return (
+        f"--{boundary}\r\n"
+        f"Content-Type: {media_type}\r\n"
+        f"Content-Range: bytes {start}-{end - 1}/{file_size}\r\n"
+        "\r\n"
+    ).encode("latin-1")
+
+
+def _multipart_content_length(
+    ranges: tuple[tuple[int, int], ...], boundary: str, file_size: int, media_type: str
+) -> int:
+    return sum(
+        len(_multipart_part_header(start, end, file_size, boundary, media_type))
+        + (end - start)
+        + 2
+        for start, end in ranges
+    ) + len(f"--{boundary}--".encode("latin-1"))
+
+
+def _iter_opened_artifact(
+    opened: file_integrity.OpenedRunFile,
+    ranges: tuple[tuple[int, int], ...],
+    *,
+    boundary: str | None,
+    file_size: int,
+    media_type: str,
+):
+    try:
+        if not ranges:
+            yield from opened.iter_bytes()
+        elif len(ranges) == 1:
+            yield from opened.iter_bytes(*ranges[0])
+        else:
+            assert boundary is not None
+            for start, end in ranges:
+                yield _multipart_part_header(start, end, file_size, boundary, media_type)
+                yield from opened.iter_bytes(start, end)
+                yield b"\r\n"
+            yield f"--{boundary}--".encode("latin-1")
+    finally:
+        opened.close()
 
 
 @router.get("/runs/{run_id}/report")

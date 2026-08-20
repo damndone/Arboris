@@ -17,6 +17,8 @@ _O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _READ_CHUNK_BYTES = 1024 * 1024
+MAX_ARTIFACT_STREAM_CHUNK_BYTES = 64 * 1024
+MAX_ARTIFACT_STREAM_BYTES = 512 * 1024 * 1024
 
 
 def validate_run_relative_path(value: object) -> tuple[str, ...]:
@@ -46,6 +48,7 @@ class OpenedRunFile:
     fd: int
     relative_parts: tuple[str, ...]
     _closed: bool = False
+    _verified_stat: os.stat_result | None = None
 
     @property
     def relative_path(self) -> str:
@@ -74,13 +77,13 @@ class OpenedRunFile:
         before = os.fstat(self.fd)
         if not stat.S_ISREG(before.st_mode):
             raise OSError("opened run file is not regular")
-        chunks: list[bytes] = []
+        data = bytearray()
         offset = 0
         while offset < before.st_size:
             chunk = os.pread(self.fd, min(_READ_CHUNK_BYTES, before.st_size - offset), offset)
             if not chunk:
                 raise OSError("opened run file changed while it was read")
-            chunks.append(chunk)
+            data.extend(chunk)
             offset += len(chunk)
         after = os.fstat(self.fd)
         if (
@@ -90,15 +93,70 @@ class OpenedRunFile:
             or after.st_size != before.st_size
         ):
             raise OSError("opened run file changed while it was read")
-        return b"".join(chunks)
+        return bytes(data)
+
+    @staticmethod
+    def _same_file(before: os.stat_result, after: os.stat_result) -> bool:
+        return (
+            stat.S_ISREG(after.st_mode)
+            and after.st_dev == before.st_dev
+            and after.st_ino == before.st_ino
+            and after.st_size == before.st_size
+        )
+
+    def _stream_stat(self) -> os.stat_result:
+        if self._closed:
+            raise OSError("opened run file is closed")
+        current = os.fstat(self.fd)
+        if not stat.S_ISREG(current.st_mode):
+            raise OSError("opened run file is not regular")
+        if current.st_size > MAX_ARTIFACT_STREAM_BYTES:
+            raise OSError("indexed artifact exceeds the bounded stream size")
+        return current
+
+    def _assert_stream_stable(self, expected: os.stat_result) -> os.stat_result:
+        current = self._stream_stat()
+        if not self._same_file(expected, current):
+            raise OSError("opened run file changed while it was read")
+        return current
+
+    def stat_result(self) -> os.stat_result:
+        """Return bounded metadata for the opened descriptor itself."""
+
+        current = self._stream_stat()
+        if self._verified_stat is not None:
+            self._assert_stream_stable(self._verified_stat)
+        return current
+
+    def iter_bytes(self, start: int = 0, end: int | None = None):
+        """Yield bounded chunks from this descriptor without reopening it."""
+
+        initial = self.stat_result()
+        if start < 0 or end is not None and (end < start or end > initial.st_size):
+            raise ValueError("opened run file range is outside the stable file size")
+        stream_end = initial.st_size if end is None else end
+        offset = start
+        while offset < stream_end:
+            self._assert_stream_stable(initial)
+            expected_size = min(MAX_ARTIFACT_STREAM_CHUNK_BYTES, stream_end - offset)
+            chunk = os.pread(self.fd, expected_size, offset)
+            if len(chunk) != expected_size:
+                raise OSError("opened run file changed while it was read")
+            self._assert_stream_stable(initial)
+            offset += len(chunk)
+            yield chunk
 
     def read_bytes_and_sha256(self) -> tuple[bytes, str]:
         data = self._read_snapshot_from_fd()
         return data, hashlib.sha256(data).hexdigest()
 
     def sha256(self) -> str:
-        data = self._read_snapshot_from_fd()
-        return hashlib.sha256(data).hexdigest()
+        initial = self.stat_result()
+        digest = hashlib.sha256()
+        for chunk in self.iter_bytes(0, initial.st_size):
+            digest.update(chunk)
+        self._verified_stat = self._assert_stream_stable(initial)
+        return digest.hexdigest()
 
 
 def open_run_relative_file(run_root: Path, relative_path: object) -> OpenedRunFile:
