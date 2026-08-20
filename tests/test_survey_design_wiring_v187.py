@@ -326,6 +326,68 @@ def test_replicate_weight_columns_without_a_method_fail_closed(tmp_path):
     assert not (run_root / "model_results" / "ols_1.json").exists()
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "expected_code", "extra"),
+    [
+        ("survey_strata_col", 0, "SURVEY_STRATA_INVALID", {}),
+        ("survey_psu_col", False, "SURVEY_PSU_INVALID", {}),
+        ("survey_lonely_psu", 0, "SURVEY_LONELY_PSU_INVALID", {}),
+        ("survey_weight_frame", 0, "SURVEY_WEIGHT_FRAME_INVALID", {}),
+        ("survey_subpop", False, "SURVEY_SUBPOP_INVALID", {}),
+        ("sampling_weight", 0, "SURVEY_SAMPLING_WEIGHT_INVALID", {}),
+        (
+            "survey_replicate_type",
+            False,
+            "SURVEY_REPLICATE_TYPE_INVALID",
+            {"survey_replicate_weights": ["rw1"]},
+        ),
+        (
+            "survey_replicate_weights",
+            False,
+            "SURVEY_REPLICATE_COLUMNS_INVALID",
+            {"survey_replicate_type": "provided"},
+        ),
+    ],
+    ids=[
+        "falsey-strata",
+        "falsey-psu",
+        "falsey-lonely-psu",
+        "falsey-weight-frame",
+        "falsey-subpopulation",
+        "falsey-sampling-weight",
+        "falsey-replicate-type",
+        "falsey-replicate-columns",
+    ],
+)
+def test_falsey_survey_declarations_fail_closed_at_real_workflow_entry(
+    tmp_path, field, value, expected_code, extra
+):
+    """Declared falsey survey values cannot become absent/default declarations."""
+    project, source = _project(tmp_path, f"falsey-{field}")
+    kwargs = {
+        "sampling_weight": "weight",
+        "survey_strata_col": "region",
+        "survey_psu_col": "cluster",
+        field: value,
+        **extra,
+    }
+    outcome = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        model_type="ols",
+        y="y",
+        x=["x"],
+        **kwargs,
+    )
+
+    assert outcome["status"] == "failed", outcome
+    run_root = project.root / "runs" / outcome["run_id"]
+    errors = read_json(run_root / "errors.json")
+    assert any(issue["code"] == expected_code for issue in errors["issues"])
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+
+
 # --------------------------------------------------------------------------
 # 4. measurement_level rides the existing labels channel
 # --------------------------------------------------------------------------

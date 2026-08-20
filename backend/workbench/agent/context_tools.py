@@ -3683,7 +3683,7 @@ def _bounded_result_summary(
     statistical_evidence = _bounded_statistics_evidence(run_root)
     model_family_evidence = _bounded_model_family_evidence(run_root, model_results)
     regression_table = _bounded_regression_table(model_results)
-    return {
+    projected = {
         "available": (
             summary_projection.get("projection_status") == "available"
             and preview.get("available") is True
@@ -3695,13 +3695,6 @@ def _bounded_result_summary(
             if "unavailable_reason" in summary_projection
             else {}
         ),
-        # v1.8.7. Without these an Agent reads a design-based standard error as
-        # an ordinary one: it would speak about the precision of the estimate
-        # with no way to know the interval uses 8 degrees of freedom rather than
-        # 80 observations. `None` when no design was declared, so absence reads
-        # as absence rather than as a field that failed to load.
-        "survey_design": _bounded_survey_design(model_results),
-        "marginal_effects": _bounded_average_marginal_effects(model_results),
         "run_lifecycle_status": preview.get("run_lifecycle_status"),
         "trust_label": preview.get("trust_label"),
         "model_identity": model_identity,
@@ -3726,6 +3719,15 @@ def _bounded_result_summary(
         "regression_table": regression_table,
         "model_family_evidence": model_family_evidence,
     }
+    # Optional survey sections are evidence-backed. Do not manufacture a None
+    # or empty-list marker when the persisted model packet has no such field.
+    survey_design = _bounded_survey_design(model_results)
+    if survey_design is not None:
+        projected["survey_design"] = survey_design
+    marginal_effects = _bounded_average_marginal_effects(model_results)
+    if marginal_effects is not None:
+        projected["marginal_effects"] = marginal_effects
+    return projected
 
 
 def _bounded_model_family_evidence(
@@ -5330,7 +5332,7 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
 
 def _bounded_average_marginal_effects(
     model_results: list[dict[str, Any]], *, limit: int = 16
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]] | None:
     """A GLM coefficient is a log-odds; the marginal effect is what gets quoted.
 
     v1.8.7 computes these for logit/probit/poisson and nothing exposed them, so
@@ -5339,9 +5341,11 @@ def _bounded_average_marginal_effects(
     for result in model_results:
         if not isinstance(result, dict):
             continue
+        if "marginal_effects" not in result:
+            continue
         effects = result.get("marginal_effects")
         if not isinstance(effects, list):
-            continue
+            return None
         rows: list[dict[str, Any]] = []
         for row in effects[:limit]:
             if not isinstance(row, dict):
@@ -5354,7 +5358,7 @@ def _bounded_average_marginal_effects(
                 )
             )
         return rows
-    return []
+    return None
 
 
 def project_persisted_evidence_for_agent(

@@ -61,15 +61,18 @@ def build_regression_table(
             "nobs": bounded_nobs,
             "r_squared": model_result.get("r_squared"),
             "adjusted_r_squared": model_result.get("adjusted_r_squared"),
-            # The terms every standard error in this column is conditional
-            # on. A table pasted into a paper without them reports a
-            # precision the analysis did not have.
-            "survey_design": _design_summary(model_result.get("survey_design")),
-            "survey_provenance": _bounded_survey_design(
-                model_result.get("survey_design"),
-                run_id=model_result.get("run_id"),
-            ),
         }
+        # The terms every standard error in this column is conditional on are
+        # optional persisted evidence; absent design metadata stays absent.
+        survey_provenance = _bounded_survey_design(
+            model_result.get("survey_design"),
+            run_id=model_result.get("run_id"),
+        )
+        if survey_provenance is not None:
+            model_view["survey_design"] = _design_summary(
+                model_result.get("survey_design")
+            )
+            model_view["survey_provenance"] = survey_provenance
         if invalid_nobs:
             model_view.update(
                 {

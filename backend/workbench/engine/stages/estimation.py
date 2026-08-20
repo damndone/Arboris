@@ -388,9 +388,11 @@ def _survey_design_declared(ctx) -> bool:
     no family appears here, and none may.  Which families can *use* the design is
     derived from what each declares, in `_survey_estimator_for`.
     """
-    return bool(
-        str(ctx.artifacts.get("_survey_strata_col") or "").strip()
-        or str(ctx.artifacts.get("_survey_psu_col") or "").strip()
+    from ...survey.adapters import is_declared_survey_value
+
+    return any(
+        is_declared_survey_value(ctx.artifacts.get(key))
+        for key in ("_survey_strata_col", "_survey_psu_col")
     )
 
 

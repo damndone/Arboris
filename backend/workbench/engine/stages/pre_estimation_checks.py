@@ -87,6 +87,7 @@ class PreEstimationChecksStage:
         # being allowed to masquerade as an ordinary predictor.
         from ...survey.adapters import (
             build_design_from_artifacts,
+            is_declared_survey_value,
             validate_poisson_exposure,
         )
 
@@ -95,11 +96,7 @@ class PreEstimationChecksStage:
         # turn an object-sized integer into inf/OverflowError.  This keeps the
         # constructor, engine, and real workflow on the same typed boundary.
         survey_declaration = any(
-            (
-                ctx.artifacts.get(key) is not None
-                if key == "_survey_subpop"
-                else bool(str(ctx.artifacts.get(key) or "").strip())
-            )
+            is_declared_survey_value(ctx.artifacts.get(key))
             for key in (
                 "_sampling_weight",
                 "_survey_strata_col",
@@ -110,7 +107,7 @@ class PreEstimationChecksStage:
                 "_survey_weight_frame",
                 "_survey_subpop",
             )
-        ) or bool(ctx.artifacts.get("_survey_replicate_weights"))
+        )
         if survey_declaration:
             try:
                 build_design_from_artifacts(cleaned, ctx.artifacts)

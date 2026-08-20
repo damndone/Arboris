@@ -717,7 +717,14 @@ def _run_workflow(
     ctx.artifacts["_survey_strata_col"] = survey_strata_col
     ctx.artifacts["_survey_psu_col"] = survey_psu_col
     ctx.artifacts["_survey_fpc_col"] = survey_fpc_col
-    ctx.artifacts["_survey_replicate_weights"] = list(survey_replicate_weights or [])
+    if survey_replicate_weights is None:
+        ctx.artifacts["_survey_replicate_weights"] = []
+    elif isinstance(survey_replicate_weights, (list, tuple)):
+        ctx.artifacts["_survey_replicate_weights"] = list(survey_replicate_weights)
+    else:
+        # Preserve a declared wrong-type value for the typed Survey adapter;
+        # ``or []`` would silently turn False/0 into an absent declaration.
+        ctx.artifacts["_survey_replicate_weights"] = survey_replicate_weights
     ctx.artifacts["_survey_replicate_type"] = survey_replicate_type
     ctx.artifacts["_survey_lonely_psu"] = survey_lonely_psu
     ctx.artifacts["_survey_weight_frame"] = survey_weight_frame

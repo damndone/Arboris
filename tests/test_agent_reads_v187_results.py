@@ -433,14 +433,30 @@ def test_agent_diagnostics_rejects_invalid_scalars_even_with_rebound_summary_dig
     assert diagnostics["unavailable_reason"] == "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
 
 
-def test_a_run_without_a_design_says_so_rather_than_omitting_the_field(tmp_path):
-    """Absence must be readable as absence, not as a field that failed to load."""
+def test_a_run_without_a_design_omits_the_optional_field(tmp_path):
+    """Absent persisted design metadata must not be synthesized as ``None``."""
     project, run_id = _run(
         tmp_path, "plain", "survey/design.csv",
         model_type="ols", y="y", x=["x1", "x2"],
     )
     summary = _summary(project, run_id, "model:ols_1")["result_summary"]
-    assert summary.get("survey_design") is None
+    assert "survey_design" not in summary
+
+
+def test_agent_result_summary_omits_unpersisted_survey_sections(tmp_path):
+    """No persisted survey sections means no invented ``None`` or empty list."""
+    from workbench.agent.context_tools import _bounded_result_summary
+
+    projected = _bounded_result_summary(
+        None,
+        summary_status="missing",
+        preview={"available": False},
+        model_results=[],
+        run_root=tmp_path / "run-1",
+    )
+
+    assert "survey_design" not in projected
+    assert "marginal_effects" not in projected
 
 
 def test_the_agent_can_read_an_anova_table(tmp_path):

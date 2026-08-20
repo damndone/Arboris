@@ -65,6 +65,30 @@ def test_build_view_model_empty_diagnostics():
     assert view_model["system_notes"] == []
 
 
+def test_report_projection_omits_absent_survey_fields():
+    """Report packets must not invent optional survey metadata placeholders."""
+    packet = build_regression_table(
+        [
+            (
+                "ols_1",
+                {
+                    "model_id": "ols_1",
+                    "model_type": "ols",
+                    "coefficients": {"x": {"estimate": 1.0}},
+                },
+            )
+        ]
+    )
+
+    model = packet["models"][0]
+    assert "survey_design" not in model
+    assert "survey_provenance" not in model
+    assert all(
+        "ols_1 survey design" not in row
+        for row in regression_table_export_rows(packet)
+    )
+
+
 # ---- QA edge-case tests ----
 
 

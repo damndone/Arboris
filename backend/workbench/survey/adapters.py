@@ -230,16 +230,29 @@ def supports_glm_family(glm_family: str | None) -> bool:
     return isinstance(glm_family, str) and glm_family in _GLM_FAMILIES
 
 
+def is_declared_survey_value(value: object) -> bool:
+    """Return presence semantics for a survey declaration.
+
+    Empty strings and empty column lists are absent values. Every other
+    non-``None`` value, including ``0`` and ``False``, is present and must be
+    type-checked rather than coerced into a default.
+    """
+
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple)):
+        return bool(value)
+    return True
+
+
 def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyDesign | None:
     """Assemble a design from the declarations block 1 wired into ctx.
 
     Returns None when nothing was declared, which is what keeps every existing
     run byte-identical: no declaration, no design, no change of path.
     """
-    def text_value(key: str) -> str:
-        value = artifacts.get(key)
-        return value.strip() if isinstance(value, str) else value
-
     def declared_text(key: str, *, invalid_code: str, label: str) -> str:
         """Read a typed declaration without treating falsey values as absent."""
         value = artifacts.get(key)
@@ -254,9 +267,21 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
             )
         return value.strip()
 
-    strata = text_value("_survey_strata_col") or ""
-    psu = text_value("_survey_psu_col") or ""
-    weight = text_value("_sampling_weight") or ""
+    strata = declared_text(
+        "_survey_strata_col",
+        invalid_code="SURVEY_STRATA_INVALID",
+        label="survey_strata_col",
+    )
+    psu = declared_text(
+        "_survey_psu_col",
+        invalid_code="SURVEY_PSU_INVALID",
+        label="survey_psu_col",
+    )
+    weight = declared_text(
+        "_sampling_weight",
+        invalid_code="SURVEY_SAMPLING_WEIGHT_INVALID",
+        label="sampling_weight",
+    )
     fpc = declared_text(
         "_survey_fpc_col",
         invalid_code="SURVEY_FPC_INVALID",
@@ -267,13 +292,31 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
         replicate_columns = []
     elif isinstance(raw_replicate_columns, (list, tuple)):
         replicate_columns = list(raw_replicate_columns)
+        if any(
+            not isinstance(column, str) or not column.strip()
+            for column in replicate_columns
+        ):
+            raise SurveyEngineError(
+                "SURVEY_REPLICATE_COLUMNS_INVALID",
+                "replicate weight columns must contain non-empty strings",
+                reason="declared_value_type",
+            )
+        replicate_columns = [column.strip() for column in replicate_columns]
     else:
         raise SurveyEngineError(
             "SURVEY_REPLICATE_COLUMNS_INVALID",
             "replicate weight columns must be a list of column names",
         )
-    replicate_type = text_value("_survey_replicate_type") or ""
-    lonely_psu = text_value("_survey_lonely_psu") or ""
+    replicate_type = declared_text(
+        "_survey_replicate_type",
+        invalid_code="SURVEY_REPLICATE_TYPE_INVALID",
+        label="survey_replicate_type",
+    )
+    lonely_psu = declared_text(
+        "_survey_lonely_psu",
+        invalid_code="SURVEY_LONELY_PSU_INVALID",
+        label="survey_lonely_psu",
+    )
     raw_subpopulation = artifacts.get("_survey_subpop")
     subpopulation = (
         raw_subpopulation.strip()
