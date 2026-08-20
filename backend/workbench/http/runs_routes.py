@@ -251,6 +251,50 @@ def _read_report_index_records(run_root: Path) -> list[dict[str, Any]]:
     return [record for record in records if isinstance(record, dict)]
 
 
+def _read_download_index_records(run_root: Path) -> list[dict[str, Any]]:
+    """Read the artifact list while preserving the legacy evidence seam.
+
+    The generic repository validator now requires the complete producer-owned
+    record (``inputs``, ``config_hash`` and ``code_version``).  Older
+    ``classification_evidence`` files were intentionally smaller, but the
+    download route still has an independent path/hash gate below.  Admit only
+    that exact legacy shape here; every other malformed index continues to
+    raise the strict repository error.
+    """
+
+    try:
+        return _read_artifact_records(run_root)
+    except (OSError, TypeError, ValueError, WorkbenchAPIError) as strict_error:
+        try:
+            raw_index = read_json(run_root / "artifacts_index.json")
+        except (OSError, TypeError, ValueError, WorkbenchAPIError):
+            raise strict_error
+        if not isinstance(raw_index, dict):
+            raise strict_error
+        if set(raw_index) - {"schema_version", "artifacts"}:
+            raise strict_error
+        schema_version = raw_index.get("schema_version", 1)
+        records = raw_index.get("artifacts")
+        if type(schema_version) is not int or schema_version != 1 or not isinstance(records, list):
+            raise strict_error
+
+        legacy_required = {"artifact_id", "path", "artifact_type", "step", "sha256"}
+        legacy_allowed = legacy_required | {
+            "payload_contract",
+            "payload_schema",
+            "schema_version",
+        }
+        if not all(
+            isinstance(record, dict)
+            and record.get("artifact_type") == "classification_evidence"
+            and legacy_required.issubset(record)
+            and set(record).issubset(legacy_allowed)
+            for record in records
+        ):
+            raise strict_error
+        return [record for record in records if isinstance(record, dict)]
+
+
 def _report_evidence_for_run(
     run_root: Path,
     post_estimation_results: list[dict[str, Any]],
@@ -1344,7 +1388,7 @@ def download_artifact_endpoint(
     if_range: str | None = Header(default=None, alias="If-Range"),
 ) -> Response:
     run_root = _resolve_run_root(project_root, run_id)
-    records = _read_artifact_records(run_root)
+    records = _read_download_index_records(run_root)
     matched = next(
         (record for record in records if record.get("artifact_id") == artifact_id),
         None,
