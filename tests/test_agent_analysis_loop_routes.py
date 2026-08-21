@@ -12,6 +12,10 @@ from workbench.agent.core import AgentCore
 from workbench.agent.events import AgentEventStream
 from workbench.agent.orchestrator import WorkbenchOrchestrator
 from workbench.agent.context_tools import NodeOperationContextProvider
+from workbench.agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    issue_route_proposal_store,
+)
 from workbench.agent.session import JsonlSessionRepository
 from workbench.app import app
 
@@ -275,6 +279,8 @@ def test_chain_tool_registry_creates_canonical_analysis_loop_proposal_from_exact
         repository,
         events,
         main_session_id="main",
+        proposal_store=issue_route_proposal_store(repository.root),
+        proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
         context_provider=FakeProvider(project_root),
     )
     orchestrator.register_chain("chain-a", "chain-session", agent)
@@ -423,10 +429,18 @@ def test_analysis_loop_proposal_route_resolves_persisted_source_without_executio
         assert not (project_root / "workbench" / "operations").exists()
 
 
-def test_analysis_loop_confirmation_rejects_tampered_canonical_payload(
+def test_analysis_loop_confirmation_rejects_unbound_legacy_payload_before_execution(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """A legacy proposal cannot reach the old payload-tamper branch.
+
+    The v1.8.9 route requires a server-owned compiler binding before any
+    confirmation or execution authority is consulted.  This fixture creates
+    the historical analysis-loop proposal shape, so the expected result is
+    the typed fail-closed boundary rather than the pre-cutover payload-hash
+    check.
+    """
     from test_agent_analysis_loop_resolver import _write_source
     from workbench.http import agent_routes
 
@@ -482,7 +496,7 @@ def test_analysis_loop_confirmation_rejects_tampered_canonical_payload(
         )
 
     assert confirmed.status_code == 409
-    assert confirmed.json()["error"]["code"] == "CONFIRMED_PAYLOAD_MISMATCH"
+    assert confirmed.json()["error"]["code"] == "AGENT_LEGACY_COMPILATION_REQUIRED"
 
 
 def test_analysis_loop_packet_route_returns_bounded_source_facts_without_building_packets(

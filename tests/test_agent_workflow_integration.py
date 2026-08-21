@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -13,7 +15,14 @@ from workbench.agent.core import AgentCore
 from workbench.agent.events import AgentEventStream
 from workbench.agent.model import ModelRequest, ModelStreamEvent
 from workbench.agent.orchestrator import WorkbenchOrchestrator
+from workbench.agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    issue_route_proposal_store,
+)
 from workbench.agent.session import JsonlSessionRepository
+import workbench.agent.workflow_runtime as workflow_runtime
+from workbench.agent.workflow_runtime import _admit_workflow_host_endpoint_from_supervisor
+from workbench.artifacts import initialize_artifact_index, register_artifact
 from workbench.graph_model import Graph, Node, NodeKind, Stage
 from workbench.graph_store import GraphStore
 from workbench.lineage.run_inputs import write_run_inputs
@@ -234,6 +243,8 @@ def test_main_to_chain_multi_tool_workflow_stops_at_confirmation_then_completes(
             repository,
             events,
             main_session_id="main-session",
+            proposal_store=issue_route_proposal_store(workbench_root),
+            proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
             context_provider=NodeOperationContextProvider(project_root),
         )
         orchestrator.register_chain("chain-a", "chain-session", chain_agent)
@@ -262,13 +273,19 @@ def test_main_to_chain_multi_tool_workflow_stops_at_confirmation_then_completes(
         assert proposal.operation_id == "model.rerun"
         assert orchestrator.proposal_store.latest_status(proposal.proposal_id) == "pending"
 
-        record = orchestrator.confirm_proposal(
+        proposal_store = orchestrator.proposal_store
+        assert proposal_store is not None
+        confirmation = proposal_store.confirm(
             proposal.proposal_id,
             revision=proposal.revision,
             fingerprint=proposal.fingerprint,
             actor_type="user",
             current_context_fingerprint=adapter.context_fingerprint,
             current_active_head_run_id="run-a",
+        )
+        record = orchestrator.operation_store.create_pending(
+            confirmation,
+            command_id=proposal.command_id,
         )
 
         executed_requests = []
@@ -306,7 +323,8 @@ def test_main_to_chain_multi_tool_workflow_stops_at_confirmation_then_completes(
             for entry in repository.get_branch(completed.execution["child_session_id"])
         )
         event_types = [event.event_type for event in events.replay("chain-session")]
-        assert event_types.index("proposal_ready") < event_types.index("proposal_confirmed")
+        assert "proposal_ready" in event_types
+        assert proposal_store.latest_status(proposal.proposal_id) == "confirmed"
         assert "operation_completed" in event_types
 
     asyncio.run(scenario())
@@ -315,7 +333,7 @@ def test_main_to_chain_multi_tool_workflow_stops_at_confirmation_then_completes(
 def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
     tmp_path: Path,
 ) -> None:
-    """The normal Agent confirmation path, not a test-only executor, owns the run."""
+    """A server-issued confirmation owns the workflow and post-estimation run."""
 
     async def scenario() -> None:
         rows = 44
@@ -334,6 +352,16 @@ def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
             }
         )
         project_root, run_id, artifact_id = _source_project(tmp_path, frame)
+        run_root = project_root / "runs" / run_id
+        initialize_artifact_index(run_root)
+        register_artifact(
+            run_root,
+            artifact_id,
+            run_root / "data.csv",
+            "raw_data",
+            "fixture",
+            [],
+        )
         upload_sha = store_upload_bytes(
             project_root,
             frame.to_csv(index=False).encode("utf-8"),
@@ -359,6 +387,8 @@ def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
             repository,
             events,
             main_session_id="main-session",
+            proposal_store=issue_route_proposal_store(workbench_root),
+            proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
             context_provider=NodeOperationContextProvider(project_root),
         )
         orchestrator.register_chain("chain-a", "chain-session", agent)
@@ -431,7 +461,9 @@ def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
         before_confirmation = list(orchestrator.operation_store.list_records())
         assert before_confirmation == []
 
-        record = orchestrator.confirm_proposal(
+        proposal_store = orchestrator.proposal_store
+        assert proposal_store is not None
+        confirmation = proposal_store.confirm(
             proposal.proposal_id,
             revision=proposal.revision,
             fingerprint=proposal.fingerprint,
@@ -439,13 +471,35 @@ def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
             current_context_fingerprint=context_fingerprint,
             current_active_head_run_id=run_id,
         )
-        completed = await orchestrator.execute_confirmed_operation(
-            record.record_id,
-            project_root=project_root,
-            current_context_fingerprint=context_fingerprint,
-            current_active_head_run_id=run_id,
-            allow_recovery=True,
+        record = orchestrator.operation_store.create_pending(
+            confirmation,
+            command_id=proposal.command_id,
         )
+        workflow_directory = project_root / "workbench" / "workflows"
+        workflow_directory.mkdir(parents=True, exist_ok=True)
+        endpoint_fd = os.open(
+            workflow_directory,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            endpoint = _admit_workflow_host_endpoint_from_supervisor(
+                project_root,
+                endpoint_fd,
+            )
+            with patch.object(
+                workflow_runtime,
+                "_deployment_host_endpoint_from_supervisor",
+                return_value=endpoint,
+            ):
+                completed = await orchestrator.execute_confirmed_operation(
+                    record.record_id,
+                    project_root=project_root,
+                    current_context_fingerprint=context_fingerprint,
+                    current_active_head_run_id=run_id,
+                    allow_recovery=True,
+                )
+        finally:
+            os.close(endpoint_fd)
 
         assert completed.status == "completed"
         state = completed.outputs["workflow_state"]
