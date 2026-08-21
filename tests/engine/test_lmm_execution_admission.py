@@ -368,6 +368,7 @@ def test_estimation_does_not_fall_back_to_generic_lifecycle_after_handled_lmm_in
     import workbench.orchestrator as orchestrator
     from workbench.engine.context import DataHandle, ModelingContext, RunEnv
     from workbench.engine.packs.linear_mixed_effects.input import LmmInputError
+    from workbench.engine.registry import TYPED_PACKET_RESULT_BINDING_KEY
 
     ctx = ModelingContext(
         data=DataHandle.of(
@@ -391,7 +392,10 @@ def test_estimation_does_not_fall_back_to_generic_lifecycle_after_handled_lmm_in
         raise LmmInputError("LMM_SUBJECT_ID_MISSING", "private path /secret/input.csv")
 
     monkeypatch.setattr(estimation, "resolve", lambda _: SimpleNamespace(
-        model_type="linear_mixed_effects", validate_model_options=None, fit=handled_input_block,
+        model_type="linear_mixed_effects",
+        validate_model_options=None,
+        fit=handled_input_block,
+        result_binding_key=TYPED_PACKET_RESULT_BINDING_KEY,
     ))
     monkeypatch.setattr(artifacts, "write_json", lambda *args, **kwargs: pytest.fail("generic errors.json must not run"))
     monkeypatch.setattr(orchestrator, "_write_manifest", lambda *args, **kwargs: pytest.fail("generic manifest must not run"))
