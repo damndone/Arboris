@@ -22,7 +22,12 @@ from workbench.agent.operations import (
     OperationRegistry,
     UnknownOperationError,
 )
-from workbench.agent.proposals import ProposalConfirmationError, ProposalStaleError
+from workbench.agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    ProposalConfirmationError,
+    ProposalStaleError,
+    issue_route_proposal_store,
+)
 from workbench.agent.session import EntryRef, JsonlSessionRepository
 
 
@@ -91,6 +96,8 @@ def make_orchestrator(
         repository,
         events,
         main_session_id="main-session",
+        proposal_store=issue_route_proposal_store(repository.root),
+        proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
     )
     orchestrator.register_chain("chain-a", "chain-session", agent)
     return orchestrator
@@ -187,6 +194,34 @@ def proposal_kwargs() -> dict:
     }
 
 
+def confirm_proposal(
+    orchestrator: WorkbenchOrchestrator,
+    proposal_id: str,
+    *,
+    revision: int,
+    fingerprint: str,
+    actor_type: str,
+    current_context_fingerprint: str | None,
+    current_active_head_run_id: str | None,
+):
+    """Confirm through the server capability and create its pending record."""
+
+    proposal_store = orchestrator.proposal_store
+    assert proposal_store is not None
+    confirmation = proposal_store.confirm(
+        proposal_id,
+        revision=revision,
+        fingerprint=fingerprint,
+        actor_type=actor_type,
+        current_context_fingerprint=current_context_fingerprint,
+        current_active_head_run_id=current_active_head_run_id,
+    )
+    return orchestrator.operation_store.create_pending(
+        confirmation,
+        command_id=confirmation.command_id,
+    )
+
+
 def test_proposal_revision_and_confirmation_create_pending_audit_record_without_run(
     tmp_path: Path,
 ) -> None:
@@ -205,7 +240,8 @@ def test_proposal_revision_and_confirmation_create_pending_audit_record_without_
     assert revised.fingerprint != first.fingerprint
 
     with pytest.raises(ProposalConfirmationError):
-        orchestrator.confirm_proposal(
+        confirm_proposal(
+            orchestrator,
             first.proposal_id,
             revision=first.revision,
             fingerprint=first.fingerprint,
@@ -214,7 +250,8 @@ def test_proposal_revision_and_confirmation_create_pending_audit_record_without_
             current_active_head_run_id="run-1",
         )
 
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         revised.proposal_id,
         revision=revised.revision,
         fingerprint=revised.fingerprint,
@@ -222,7 +259,8 @@ def test_proposal_revision_and_confirmation_create_pending_audit_record_without_
         current_context_fingerprint="ctx-1",
         current_active_head_run_id="run-1",
     )
-    duplicate = orchestrator.confirm_proposal(
+    duplicate = confirm_proposal(
+        orchestrator,
         revised.proposal_id,
         revision=revised.revision,
         fingerprint=revised.fingerprint,
@@ -246,7 +284,8 @@ def test_stale_context_blocks_confirmation_and_leaves_no_pending_operation(
     proposal = orchestrator.create_proposal(**proposal_kwargs())
 
     with pytest.raises(ProposalStaleError):
-        orchestrator.confirm_proposal(
+        confirm_proposal(
+            orchestrator,
             proposal.proposal_id,
             revision=proposal.revision,
             fingerprint=proposal.fingerprint,
@@ -259,12 +298,13 @@ def test_stale_context_blocks_confirmation_and_leaves_no_pending_operation(
     assert orchestrator.operation_store.list_records() == []
 
 
-def test_proposal_and_confirmation_are_persisted_as_typed_session_messages(
+def test_proposal_and_capability_confirmation_are_persisted_as_typed_audit_records(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
-    orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -274,16 +314,15 @@ def test_proposal_and_confirmation_are_persisted_as_typed_session_messages(
     )
 
     entries = orchestrator.repository.get_branch("chain-session")
-    assert [entry.entry_type for entry in entries] == ["custom_message", "custom_message"]
-    assert [entry.payload["message_type"] for entry in entries] == [
-        "operation_proposal",
-        "operation_confirmation",
-    ]
+    assert [entry.entry_type for entry in entries] == ["custom_message"]
+    assert [entry.payload["message_type"] for entry in entries] == ["operation_proposal"]
+    assert record.confirmation["record_type"] == "confirmation"
+    assert record.confirmation["status"] == "confirmed"
+    assert orchestrator.proposal_store.latest_status(proposal.proposal_id) == "confirmed"
     event_types = [event.event_type for event in orchestrator.events.replay("chain-session")]
     assert event_types == [
         "proposal_ready",
         "needs_confirmation",
-        "proposal_confirmed",
     ]
 
 
@@ -294,7 +333,8 @@ def test_proposal_api_is_async_safe_when_confirmation_calls_are_repeated(tmp_pat
     async def confirm_twice():
         return await asyncio.gather(
             asyncio.to_thread(
-                orchestrator.confirm_proposal,
+                confirm_proposal,
+                orchestrator,
                 proposal.proposal_id,
                 revision=proposal.revision,
                 fingerprint=proposal.fingerprint,
@@ -303,7 +343,8 @@ def test_proposal_api_is_async_safe_when_confirmation_calls_are_repeated(tmp_pat
                 current_active_head_run_id="run-1",
             ),
             asyncio.to_thread(
-                orchestrator.confirm_proposal,
+                confirm_proposal,
+                orchestrator,
                 proposal.proposal_id,
                 revision=proposal.revision,
                 fingerprint=proposal.fingerprint,
@@ -323,7 +364,8 @@ def test_operation_record_state_is_append_only_and_cannot_move_backwards(
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -458,7 +500,8 @@ def test_confirmed_proposal_creates_child_branch_and_is_idempotent(
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -510,7 +553,8 @@ def test_confirmed_proposal_rechecks_preconditions_before_creating_branch(
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -541,7 +585,8 @@ def test_confirmed_proposal_records_executor_failure_and_is_idempotent(
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -622,7 +667,8 @@ def test_submitted_child_is_reconciled_before_operation_completion(
         "canonical_patch_hash": "patch-hash",
     }
     proposal = orchestrator.create_proposal(**kwargs)
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -691,7 +737,8 @@ def test_reconciled_child_failure_marks_operation_and_branch_failed(
     )
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -750,7 +797,8 @@ def test_recover_operations_reconciles_interrupted_child_without_resubmitting(
     )
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -789,7 +837,8 @@ def test_recover_operations_fails_interrupted_submission_without_retry(
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -836,7 +885,8 @@ def test_recover_operations_fails_when_recorded_child_is_missing(
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -911,7 +961,8 @@ def test_graph_fork_recovery_after_durable_lifecycle_crash_binds_one_effect(
         expected_effect=["create child Chain"],
         risks=["no child run yet"],
     )
-    record = orchestrator.confirm_proposal(
+    record = confirm_proposal(
+        orchestrator,
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
@@ -936,6 +987,8 @@ def test_graph_fork_recovery_after_durable_lifecycle_crash_binds_one_effect(
         orchestrator.repository,
         orchestrator.events,
         main_session_id="main-session",
+        proposal_store=issue_route_proposal_store(orchestrator.repository.root),
+        proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
     )
     recovered = asyncio.run(
         restarted.recover_operations(project_root=tmp_path / "project")

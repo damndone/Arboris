@@ -5,7 +5,7 @@ from pathlib import Path
 
 from workbench.agent.navigation import AgentNavigationProjector
 from workbench.agent.operations import OperationRecordStore
-from workbench.agent.proposals import ProposalStore
+from workbench.agent.proposals import issue_route_proposal_store
 from workbench.dev_fixtures.agent_navigation import (
     seed_agent_navigation_fixture,
     seed_agent_rerun_smoke_fixture,
@@ -41,7 +41,8 @@ def test_seed_agent_navigation_fixture_creates_real_linked_records(tmp_path: Pat
     assert operation.outputs["target_run_id"] == fixture.child_run_id
     assert operation.verification["passed"] is True
 
-    proposal = ProposalStore(fixture.project_root / "workbench").latest_revision(
+    proposal_store = issue_route_proposal_store(fixture.project_root / "workbench")
+    proposal = proposal_store.latest_revision(
         fixture.proposal_id
     )
     assert proposal.status == "pending"
@@ -124,7 +125,7 @@ def test_seed_agent_rerun_smoke_fixture_leaves_one_pending_typed_proposal(
         input_file=DATASET,
     )
 
-    proposal_store = ProposalStore(fixture.project_root / "workbench")
+    proposal_store = issue_route_proposal_store(fixture.project_root / "workbench")
     proposal = proposal_store.latest_revision(fixture.proposal_id)
 
     assert proposal.operation_id == "model.rerun"

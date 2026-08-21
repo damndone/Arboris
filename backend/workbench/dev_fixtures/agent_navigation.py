@@ -21,6 +21,10 @@ from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
 from ..agent.navigation import AgentNavigationProjector
 from ..agent.orchestrator import WorkbenchOrchestrator
+from ..agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    issue_route_proposal_store,
+)
 from ..agent.session import JsonlSessionRepository
 from ..artifacts import read_json, write_json
 from ..events import get_event_manager
@@ -226,6 +230,8 @@ def seed_agent_navigation_fixture(
             repository,
             events,
             main_session_id=main_session_id,
+            proposal_store=issue_route_proposal_store(workbench_root),
+            proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
             context_provider=NodeOperationContextProvider(root),
         )
         orchestrator.register_chain(source_chain_id, source_session_id, agent)
@@ -255,13 +261,20 @@ def seed_agent_navigation_fixture(
             command_id="command_navigation_smoke",
             proposal_id="proposal_navigation_smoke",
         )
-        operation = orchestrator.confirm_proposal(
+        proposal_store = orchestrator.proposal_store
+        if proposal_store is None:
+            raise RuntimeError("fixture proposal store capability is unavailable")
+        confirmation = proposal_store.confirm(
             proposal.proposal_id,
             revision=proposal.revision,
             fingerprint=proposal.fingerprint,
             actor_type="user",
             current_context_fingerprint=context.context_fingerprint,
             current_active_head_run_id=source_run_id,
+        )
+        operation = orchestrator.operation_store.create_pending(
+            confirmation,
+            command_id=proposal.command_id,
         )
         operation = asyncio.run(
             orchestrator.execute_confirmed_proposal(
@@ -395,6 +408,8 @@ def seed_agent_rerun_smoke_fixture(
             repository,
             events,
             main_session_id=main_session_id,
+            proposal_store=issue_route_proposal_store(workbench_root),
+            proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
             context_provider=NodeOperationContextProvider(root),
         )
         orchestrator.register_chain(chain_id, session_id, agent)

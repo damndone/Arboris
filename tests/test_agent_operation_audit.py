@@ -7,7 +7,11 @@ from workbench.agent.events import AgentEventStream
 from workbench.agent.orchestrator import WorkbenchOrchestrator, _workflow_failure_message
 from workbench.agent.workflow_contracts import workflow_authorization
 from workbench.agent.operations import OperationRecordStore
-from workbench.agent.proposals import ProposalConfirmation
+from workbench.agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    ProposalConfirmation,
+    issue_route_proposal_store,
+)
 from workbench.agent.session import JsonlSessionRepository
 from tests.workflow_fixtures import composed_plan, compile_fixture_workflow
 from workbench.agent.workflow import WorkflowExecutionState, WorkflowStepState
@@ -99,7 +103,13 @@ def test_completed_workflow_persists_authorized_child_records(tmp_path, monkeypa
     repository.create_session("main", chain_id="project", role="main")
     repository.create_session("chain-session", chain_id="chain-1", role="chain")
     agent = AgentCore(repository, events, object(), session_id="chain-session")
-    orchestrator = WorkbenchOrchestrator(repository, events, main_session_id="main")
+    orchestrator = WorkbenchOrchestrator(
+        repository,
+        events,
+        main_session_id="main",
+        proposal_store=issue_route_proposal_store(repository.root),
+        proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    )
     orchestrator.register_chain("chain-1", "chain-session", agent)
     steps = composed_plan()
     draft = compile_fixture_workflow(
@@ -138,13 +148,19 @@ def test_completed_workflow_persists_authorized_child_records(tmp_path, monkeypa
         expected_effect=[f"{len(steps)} workflow steps"],
         risks=["creates model runs and report artifacts"],
     )
-    record = orchestrator.confirm_proposal(
+    proposal_store = orchestrator.proposal_store
+    assert proposal_store is not None
+    confirmation = proposal_store.confirm(
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
         actor_type="user",
         current_context_fingerprint="ctx-1",
         current_active_head_run_id="run-1",
+    )
+    record = orchestrator.operation_store.create_pending(
+        confirmation,
+        command_id=proposal.command_id,
     )
 
     completed = asyncio.run(
