@@ -5,17 +5,7 @@ import pandas as pd
 from ...artifacts import register_artifact, write_json
 from ...imputation import run_mice_imputation
 from ..context import DataHandle, ModelingContext, RunEnv
-from ..imputation_registry import ImputationMethod, register_imputation_method
-
-
-register_imputation_method(ImputationMethod(
-    key="mice",
-    label="MICE (Multiple Imputation)",
-    description=(
-        "Multiple Imputation by Chained Equations. Recommended when more than "
-        "5-10% of rows would otherwise be dropped due to missing values."
-    ),
-))
+from ..imputation_registry import MICE_IMPUTATION_METHOD
 
 
 class ImputationStage:
@@ -48,7 +38,7 @@ class ImputationStage:
         method = request.get("method") if isinstance(request, dict) else config.imputation_method
 
         imputation_summary: dict | None = None
-        if method == "mice":
+        if method == MICE_IMPUTATION_METHOD.key:
             imputation_summary = run_mice_imputation(
                 cleaned,
                 run_root,
