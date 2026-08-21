@@ -4860,6 +4860,64 @@ def _admit_persisted_workflow_artifacts(
             )
 
 
+def _admit_data_operation_artifacts(
+    root: Path,
+    draft: WorkflowDraft,
+    step: Any,
+    *,
+    artifact_ids: Iterable[str],
+    source_artifact_id: str,
+    producer_step: str,
+    artifact_types: Mapping[str, str],
+) -> None:
+    """Bind indexed data-operation outputs to the active server receipt."""
+
+    evidence_port, receipt, active_draft, active_step = _require_active_write_context()
+    if active_draft is not draft or active_step is not step:
+        raise WorkflowExecutionError(
+            "WORKFLOW_ADMISSION_MISMATCH: data-operation artifacts are outside the active workflow step"
+        )
+    run_id = _require_workflow_opaque_ref(
+        draft.target.get("run_id"), "workflow data-operation run_id"
+    )
+    expected_artifacts = tuple(
+        _require_workflow_artifact_ref(artifact_id, "workflow data-operation artifact_id")
+        for artifact_id in artifact_ids
+    )
+    if not expected_artifacts or len(set(expected_artifacts)) != len(expected_artifacts):
+        raise WorkflowExecutionError(
+            "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: data-operation outputs are not unique"
+        )
+    for artifact_id in expected_artifacts:
+        record, path = evidence_port._artifact_index_record(run_id, artifact_id)
+        if record.get("step") != producer_step:
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: data-operation producer binding changed"
+            )
+        if record.get("artifact_type") != artifact_types.get(artifact_id):
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: data-operation artifact type changed"
+            )
+        inputs = record.get("inputs")
+        if (
+            not isinstance(inputs, list)
+            or source_artifact_id not in inputs
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: data-operation producer input binding changed"
+            )
+        evidence_port._admit_server_artifact(
+            receipt,
+            run_id=run_id,
+            artifact_id=artifact_id,
+            path=path,
+            artifact_type=str(record["artifact_type"]),
+            producer_step=producer_step,
+            inputs=inputs,
+            expected_artifacts=expected_artifacts,
+        )
+
+
 def _exploration_step(
     *,
     root: Path,
@@ -4899,7 +4957,7 @@ def _persist_data_management_step(
     source_node_id = str(lineage["node_ref"])
     source_artifact_id = str(lineage["artifact_id"])
     run_root = root / "runs" / source_run_id
-    execution_key = f"exec_{step.fingerprint}"
+    execution_key = f"exec_{step.fingerprint.removeprefix('sha256:')}"
     if operation == "feature_recipe":
         recipe = FeatureRecipeV1(
             recipe_id=str(step.spec["recipe_id"]),
@@ -4966,8 +5024,25 @@ def _persist_data_management_step(
             f"{operation_id} service returned a missing persisted dataset: {effect.artifact_path}"
         )
     content_sha256 = sha256_file(data_path)
+    result_artifact_ids = [effect.artifact_id, effect.recipe_artifact_id]
+    _admit_data_operation_artifacts(
+        root,
+        draft,
+        step,
+        artifact_ids=result_artifact_ids,
+        source_artifact_id=source_artifact_id,
+        producer_step=(
+            str(step.spec["recipe_operation_id"])
+            if operation == "feature_recipe"
+            else operation_id
+        ),
+        artifact_types={
+            effect.artifact_id: "derived_data",
+            effect.recipe_artifact_id: "metadata",
+        },
+    )
     return WorkflowStepResult(
-        artifact_ids=[effect.artifact_id, effect.recipe_artifact_id],
+        artifact_ids=result_artifact_ids,
         row_counts={"source": int(row_count_before), "output": int(row_count_after)},
         result_fingerprint=fingerprint,
         payload={
