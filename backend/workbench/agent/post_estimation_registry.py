@@ -145,11 +145,39 @@ class PostEstimationRegistry:
                 POST_ESTIMATION_UNKNOWN_FAMILY,
                 "completed model branch has no model family",
             )
-        return self.resolve(
+        adapter = self.resolve(
             model_family=family,
             operation_id=operation_id,
             output_id=output_id,
         )
+        # Current canonical branches carry the family twice: once as the
+        # branch identity and once inside the persisted branch specification.
+        # The latter is the historical source for this registry, but trusting
+        # it alone lets a foreign top-level identity borrow an OLS adapter.
+        # Older restored aliases may omit the top-level field, so absence
+        # remains a bounded compatibility case; an explicit value must agree
+        # with the registered specification.
+        if "model_family" not in branch:
+            return adapter
+        branch_family = branch.get("model_family")
+        if not isinstance(branch_family, str) or not branch_family:
+            raise PostEstimationRegistryError(
+                POST_ESTIMATION_UNKNOWN_FAMILY,
+                "completed model branch has an invalid model family identity",
+            )
+        if branch_family != family:
+            # Resolve the foreign identity independently so known unsupported
+            # families and unknown families retain their existing typed codes.
+            self.resolve(
+                model_family=branch_family,
+                operation_id=operation_id,
+                output_id=output_id,
+            )
+            raise PostEstimationRegistryError(
+                POST_ESTIMATION_UNSUPPORTED_FAMILY,
+                f"branch model family {branch_family!r} does not match its specification {family!r}",
+            )
+        return adapter
 
 
 post_estimation_registry = PostEstimationRegistry()

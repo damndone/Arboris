@@ -1645,6 +1645,103 @@ def test_model_post_estimation_rejects_unpersisted_cross_scope_branch(tmp_path) 
     assert not (tmp_path / "runs" / "run-1" / "artifacts").exists()
 
 
+def test_model_post_estimation_rejects_foreign_family_before_ols_refit_or_persistence(
+    tmp_path, monkeypatch
+) -> None:
+    """A conflicting branch identity cannot reach the OLS-only adapters."""
+
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    draft = compile_fixture_workflow(
+        workflow_id="wf-foreign-post-estimation-family",
+        steps=[
+            {
+                "step_id": "estimate",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "ols",
+                    "covariance": "unadjusted",
+                    "branches": [
+                        {"branch_id": "main", "outcome": "outcome", "predictors": ["rate_a"]}
+                    ],
+                },
+            },
+            {
+                "step_id": "white",
+                "operation_id": "model.white_test",
+                "depends_on": ["estimate"],
+                "spec": {"branch_id": "main"},
+            },
+        ],
+    )
+    foreign_branch = {
+        "branch_id": "main",
+        # The persisted branch identity is foreign even though the nested
+        # specification is forged to look like an OLS branch.
+        "model_family": "panel_ols",
+        "run_id": "foreign-model-run",
+        "artifact_ids": ["ols_1"],
+        "model_artifact_id": "ols_1",
+        "workflow_id": draft.workflow_id,
+        "workflow_step_id": "estimate",
+        "source_run_id": "run-1",
+        "source_artifact_id": "raw-1",
+        "source_sha256": "sha256:source-1",
+        "branch_spec": {
+            "model_family": "ols",
+            "covariance": "unadjusted",
+            "outcome": "outcome",
+            "predictors": ["rate_a"],
+            "categorical": [],
+            "polynomials": [],
+        },
+        "predictor_columns": ["rate_a"],
+        "term_groups": {"linear": {"rate_a": ["rate_a"]}, "polynomial": {}, "categorical": {}},
+    }
+    previous = {
+        "estimate": WorkflowStepResult(
+            payload={"branches": [foreign_branch]},
+            output_bindings={
+                "model_branches": {
+                    "binding_type": "model_branches",
+                    "branches": [foreign_branch],
+                }
+            },
+        )
+    }
+
+    monkeypatch.setattr(
+        workflow_runtime,
+        "_refit_completed_ols_branch",
+        lambda *_args, **_kwargs: pytest.fail("foreign branch reached OLS refit"),
+    )
+    monkeypatch.setattr(
+        workflow_runtime,
+        "_persist_model_post_estimation_result",
+        lambda *_args, **_kwargs: pytest.fail("foreign branch reached OLS persistence"),
+    )
+
+    port = EvidencePersistencePort(tmp_path)
+    receipt = port.admit(draft, draft.steps[1])
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[1]))
+    try:
+        with pytest.raises(
+            WorkflowExecutionError, match=POST_ESTIMATION_UNSUPPORTED_FAMILY
+        ):
+            _execute_model_white_test(
+                tmp_path,
+                draft,
+                {"artifact_id": "raw-1", "node_ref": "stage:raw", "sha256": "sha256:source-1"},
+                pd.DataFrame({"outcome": [1.0, 2.0, 3.0, 4.0], "rate_a": [0.0, 1.0, 2.0, 3.0]}),
+                draft.steps[1],
+                previous,
+            )
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
+
+    assert not (tmp_path / "runs" / "run-1" / "artifacts").exists()
+
+
 def test_model_post_estimation_rejects_source_artifact_mismatch(tmp_path) -> None:
     draft = compile_fixture_workflow(workflow_id="wf-model-source-mismatch")
     source_root = tmp_path / "runs" / "run-1"
