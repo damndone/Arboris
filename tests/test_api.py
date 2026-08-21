@@ -71,6 +71,15 @@ def completed_run(tmp_path: Path):
     return client, project_root, run_id
 
 
+def _assert_unbound_report_evidence(detail: dict) -> None:
+    projection = detail["report_evidence"]
+    assert projection["status"] == "unavailable"
+    assert projection["availability"] == "unavailable"
+    assert projection["validationStatus"] == "unavailable"
+    assert projection["reasonCode"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    assert projection["facts"] == []
+
+
 def test_api_creates_project_and_runs_upload(tmp_path: Path):
     client = TestClient(app)
     response = client.post(
@@ -276,12 +285,24 @@ def test_get_run_detail_returns_artifact_counts(completed_run):
     assert "artifact_counts" in detail
     assert isinstance(detail["artifact_counts"], dict)
     assert sum(detail["artifact_counts"].values()) > 0
-    assert detail["errors"] == {"issues": []}
-    assert detail["model_results"][0]["model_id"] == "ols_1"
-    assert "x" in detail["model_results"][0]["coefficients"]
+    report_failure = [
+        issue for issue in detail["errors"]["issues"]
+        if issue["code"] == "REPORT_RENDER_FAILED"
+    ]
+    assert len(report_failure) == 1
+    assert report_failure[0]["evidence"] == {
+        "error": "REPORT_EVIDENCE_UNAVAILABLE:EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    }
+    assert detail["model_results"] == []
+    assert detail["model_results_authority"] == "non-authoritative"
+    assert detail["model_results_status"] == "unavailable"
+    assert detail["diagnostic_summary_preview"]["model_identity"]["model_type"] == "ols_robust"
+    _assert_unbound_report_evidence(detail)
 
 
-def test_get_run_detail_normalizes_stale_categorical_candidate(tmp_path: Path):
+def test_get_run_detail_does_not_derive_categorical_diagnostics_from_raw_model_file(
+    tmp_path: Path,
+):
     from workbench.artifacts import write_json
     from workbench.projects import create_project, create_run
 
@@ -330,25 +351,15 @@ def test_get_run_detail_normalizes_stale_categorical_candidate(tmp_path: Path):
     )
 
     assert detail_response.status_code == 200
-    issues = detail_response.json()["errors"]["issues"]
-    assert not any(issue["code"] == "CATEGORICAL_CANDIDATE" for issue in issues)
-    auto_dummy = [i for i in issues if i["code"] == "CATEGORICAL_AUTO_DUMMY_CODED"]
-    assert len(auto_dummy) == 1
-    assert auto_dummy[0]["severity"] == "INFO"
-    assert auto_dummy[0]["code"] == "CATEGORICAL_AUTO_DUMMY_CODED"
-    assert auto_dummy[0]["message"] == (
-        "Column 'x7_region_code' was detected as categorical and automatically dummy-coded."
-    )
-    assert auto_dummy[0]["evidence"] == {"column": "x7_region_code", "preprocessing": "dummy_coded"}
-    assert auto_dummy[0]["affected_stage"] == "data_cleaning"
-    assert auto_dummy[0]["variables"] == ["x7_region_code"]
-    assert auto_dummy[0]["template_key"] == "categorical_auto_dummy"
-    assert auto_dummy[0]["issue_id"] == ""
-    assert auto_dummy[0]["metric"] == ""
-    assert auto_dummy[0]["value"] is None
-    assert auto_dummy[0]["threshold"] is None
-    assert auto_dummy[0]["recommended_action_key"] == ""
-    assert auto_dummy[0]["is_user_action_required"] is False
+    detail = detail_response.json()
+    issues = detail["errors"]["issues"]
+    assert any(issue["code"] == "CATEGORICAL_CANDIDATE" for issue in issues)
+    assert not any(issue["code"] == "CATEGORICAL_AUTO_DUMMY_CODED" for issue in issues)
+    assert detail["model_results"] == []
+    assert detail["model_results_authority"] == "non-authoritative"
+    assert detail["model_results_status"] == "unavailable"
+    assert (run.root / "model_results" / "ols_1.json").is_file()
+    _assert_unbound_report_evidence(detail)
 
 
 def test_get_run_detail_returns_diagnostic_summary_preview(completed_run):
@@ -362,16 +373,26 @@ def test_get_run_detail_returns_diagnostic_summary_preview(completed_run):
     preview = detail_response.json()["diagnostic_summary_preview"]
     assert preview["available"] is True
     assert preview["preview_contract_version"] == "1.0"
-    assert preview["preview_status"] == "complete"
+    assert preview["preview_status"] == "partial"
     assert preview["run_lifecycle_status"] == "completed"
     assert "run_status" in preview
+    assert preview["run_status"]["report_render_status"] == "failed"
+    assert preview["run_status"]["report_available"] is False
     assert "trust_label" in preview
     assert "trust_counts" in preview
     assert "model_identity" in preview
     assert "primary_reasons" in preview
     assert "artifact_manifest" in preview
+    assert preview["artifact_manifest"]["report_html"] == {
+        "expected": True,
+        "available": False,
+        "readable": False,
+        "artifact_id": "report_html",
+        "filename": "report.html",
+    }
     assert "diagnostic_highlights" in preview
     assert "recommended_actions" in preview
+    _assert_unbound_report_evidence(detail_response.json())
 
 
 def test_running_run_returns_pending_preview(tmp_path: Path):
@@ -521,28 +542,29 @@ def test_list_artifacts_groups_by_type(completed_run):
     payload = artifacts_response.json()
     assert "groups" in payload
     by_type = {group["artifact_type"]: group for group in payload["groups"]}
-    assert "report" in by_type
+    assert "report" not in by_type
     assert "model_result" in by_type
-    report_items = by_type["report"]["items"]
-    assert any(item["artifact_id"] == "report_html" for item in report_items)
     for group in payload["groups"]:
         for item in group["items"]:
             assert "artifact_id" in item
             assert "path" in item
             assert "step" in item
+    _assert_unbound_report_evidence(
+        client.get(f"/runs/{run_id}", params={"project_root": project_root}).json()
+    )
 
 
-def test_download_artifact_returns_file_with_attachment_disposition(completed_run):
+def test_download_metadata_artifact_returns_file_with_attachment_disposition(completed_run):
     client, project_root, run_id = completed_run
 
     download_response = client.get(
-        f"/runs/{run_id}/artifacts/report_html",
+        f"/runs/{run_id}/artifacts/diagnostic_summary",
         params={"project_root": project_root},
     )
 
     assert download_response.status_code == 200
     assert "attachment" in download_response.headers["content-disposition"]
-    assert b"<html" in download_response.content.lower()
+    assert b'"run_id"' in download_response.content
 
 
 def test_download_artifact_returns_artifact_not_found(completed_run):
@@ -572,14 +594,11 @@ def test_resolve_artifact_path_rejects_escape(tmp_path: Path):
     assert exc_info.value.status_code == 400
 
 
-def test_download_artifact_returns_not_found_when_file_missing_on_disk(completed_run):
+def test_download_unbound_report_returns_not_found_without_owner(completed_run):
     client, project_root, run_id = completed_run
 
-    # Registry says the report exists; delete the actual file behind it.
-    report_file = Path(project_root) / "runs" / run_id / "reports" / "report.html"
-    assert report_file.is_file()
-    report_file.unlink()
-
+    # A local run has no owner-admitted Report artifact.  The download route
+    # must not fall back to a raw or unindexed reports/report.html file.
     download_response = client.get(
         f"/runs/{run_id}/artifacts/report_html",
         params={"project_root": project_root},
@@ -589,19 +608,24 @@ def test_download_artifact_returns_not_found_when_file_missing_on_disk(completed
     assert download_response.json()["error"]["code"] == "ARTIFACT_NOT_FOUND"
 
 
-def test_get_report_returns_html(completed_run):
+def test_get_report_requires_owner_admitted_evidence(completed_run):
     client, project_root, run_id = completed_run
 
     report_response = client.get(
         f"/runs/{run_id}/report", params={"project_root": project_root}
     )
 
-    assert report_response.status_code == 200
-    assert report_response.headers["content-type"].startswith("text/html")
-    assert b"<html" in report_response.content.lower()
+    assert report_response.status_code == 409
+    error = report_response.json()["error"]
+    assert error["code"] == "REPORT_EVIDENCE_UNAVAILABLE"
+    assert error["details"]["projection"]["status"] == "unavailable"
+    assert error["details"]["projection"]["reasonCode"] == (
+        "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    )
+    assert error["details"]["projection"]["facts"] == []
 
 
-def test_get_report_returns_report_not_found_when_missing(tmp_path: Path):
+def test_get_report_fails_closed_before_missing_file_check(tmp_path: Path):
     from workbench.projects import create_project, create_run
 
     create_project(tmp_path, "demo")
@@ -613,8 +637,11 @@ def test_get_report_returns_report_not_found_when_missing(tmp_path: Path):
         f"/runs/{run.run_id}/report", params={"project_root": str(project_root)}
     )
 
-    assert report_response.status_code == 404
-    assert report_response.json()["error"]["code"] == "REPORT_NOT_FOUND"
+    assert report_response.status_code == 409
+    error = report_response.json()["error"]
+    assert error["code"] == "REPORT_EVIDENCE_UNAVAILABLE"
+    assert error["details"]["projection"]["status"] == "unavailable"
+    assert error["details"]["projection"]["facts"] == []
 
 
 def test_artifacts_index_missing_schema_version_is_ok(tmp_path: Path):
@@ -750,7 +777,8 @@ def test_artifacts_list_and_download_use_schema_validated_index(completed_run):
         f"/runs/{run_id}/artifacts/report_html",
         params={"project_root": project_root},
     )
-    assert dl_resp.status_code == 200
+    assert dl_resp.status_code == 404
+    assert dl_resp.json()["error"]["code"] == "ARTIFACT_NOT_FOUND"
 
 
 # --- V1.2.2 async/SSE tests ---

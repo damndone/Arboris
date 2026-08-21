@@ -148,10 +148,28 @@ def test_x7_region_code_reports_auto_dummy_coded_diagnostic(auto_infer_csv_path,
         for i in errors["issues"]
     )
 
-    html = (run_root / "reports" / "report.html").read_text()
-    assert "Column &#39;x7_region_code&#39; was detected as categorical and automatically dummy-coded." in html
-    assert "Column &#39;x7_region_code&#39; may be categorical" not in html
-    assert "Consider one-hot encoding" not in html
+    summary = read_json(run_root / "diagnostic_summary.json")
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
+    encoded = summary["preprocessing"]["categorical_encoded"]
+    assert [item["variable"] for item in encoded] == ["x7_region_code"]
+    assert summary["narrative_contract"]["constraints"]["must_note_categorical_encoded"] is True
+    assert "categorical auto-encoding" in summary["narrative_contract"]["required_mentions"]
+    report_artifact = {
+        "expected": True,
+        "available": False,
+        "readable": False,
+        "artifact_id": "report_html",
+        "filename": "report.html",
+    }
+    from workbench.diagnostic_preview import build_diagnostic_summary_preview
+
+    preview = build_diagnostic_summary_preview(
+        run_root,
+        read_json(run_root / "run_manifest.json"),
+        [],
+    )
+    assert preview["artifact_manifest"]["report_html"] == report_artifact
 
 
 # ---------------------------------------------------------------------------
@@ -205,10 +223,10 @@ def test_independent_run_ids(auto_infer_csv_path, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Test 8: Report lists used/encoded/dropped variables in facts
+# Test 8: Typed diagnostic summary lists used/encoded/dropped variables
 # ---------------------------------------------------------------------------
 
-def test_report_lists_variable_info(auto_infer_csv_path, tmp_path):
+def test_diagnostic_summary_lists_variable_info(auto_infer_csv_path, tmp_path):
     source = Path(auto_infer_csv_path)
     project = create_project(tmp_path, "test_report")
 
@@ -217,11 +235,9 @@ def test_report_lists_variable_info(auto_infer_csv_path, tmp_path):
     assert result["status"] == "completed"
 
     run_root = project.root / "runs" / result["run_id"]
-    html = (run_root / "reports" / "report.html").read_text()
-
-    # The facts section always includes the "X = ..." line
-    assert "X =" in html, "Facts should list X variables"
-
-    # Check a sample of X vars appear somewhere in the report
+    summary = read_json(run_root / "diagnostic_summary.json")
+    assert summary["model_identity"]["x_variables"] == X_VARS
     for xv in ("x1", "x4_time_on_task", "x10"):
-        assert xv in html, f"X variable '{xv}' not mentioned in report"
+        assert xv in summary["model_identity"]["x_variables"]
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False

@@ -80,11 +80,11 @@ def test_categorical_encoding_in_formula(csv_path, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Test 2: Categorical interpretation — claims avoid "one-unit increase"
+# Test 2: Categorical interpretation — typed claims avoid numeric units
 # ---------------------------------------------------------------------------
 
-def test_categorical_interpretation_in_claims(csv_path, tmp_path):
-    """Claims should acknowledge categorical encoding, not say 'one-unit increase'."""
+def test_categorical_interpretation_contract(csv_path, tmp_path):
+    """Typed claims should acknowledge categorical encoding, not numeric units."""
     source = Path(csv_path)
     project = create_project(tmp_path, "cat_claims")
 
@@ -95,16 +95,20 @@ def test_categorical_interpretation_in_claims(csv_path, tmp_path):
     assert result["status"] == "completed"
 
     run_root = project.root / "runs" / result["run_id"]
-    html = (run_root / "reports" / "report.html").read_text()
-
-    # C()-encoded variables generate system notes about categorical detection
-    assert "detected as categorical" in html, (
-        "Expected system note acknowledging categorical encoding"
-    )
-    # x7_region_code (categorical) should NOT get "one-unit increase" interpretation
-    assert "one-unit increase in x7_region_code" not in html, (
-        "x7_region_code should not receive 'one-unit increase' interpretation"
-    )
+    summary = read_json(run_root / "diagnostic_summary.json")
+    categorical_rows = [
+        row for row in summary["coefficients_summary"]["rows"]
+        if row["display_name"] == "x7_region_code"
+    ]
+    assert categorical_rows
+    assert all(row["interpretation_guide"] == "categorical_level" for row in categorical_rows)
+    assert all(row["template_key"] == "coef_categorical" for row in categorical_rows)
+    contract = summary["narrative_contract"]
+    assert contract["constraints"]["must_note_categorical_encoded"] is True
+    assert contract["constraints"]["allowed_effect_language"] == "association_only"
+    assert "categorical auto-encoding" in contract["required_mentions"]
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
 
 
 def test_numeric_region_code_encoded_but_team_size_remains_numeric(tmp_path):
@@ -141,9 +145,17 @@ def test_numeric_region_code_encoded_but_team_size_remains_numeric(tmp_path):
     assert "x7_region_code" not in terms
     assert any("C(Q('x7_region_code'))" in term for term in terms)
 
-    html = (run_root / "reports" / "report.html").read_text()
-    assert "one-unit increase in x5_team_size" in html
-    assert "one-unit increase in x7_region_code" not in html
+    summary = read_json(run_root / "diagnostic_summary.json")
+    rows = summary["coefficients_summary"]["rows"]
+    team_rows = [row for row in rows if row["display_name"] == "x5_team_size"]
+    region_rows = [row for row in rows if row["display_name"] == "x7_region_code"]
+    assert team_rows
+    assert all(row["interpretation_guide"] == "standard" for row in team_rows)
+    assert region_rows
+    assert all(row["interpretation_guide"] == "categorical_level" for row in region_rows)
+    assert summary["narrative_contract"]["constraints"]["allowed_effect_language"] == "association_only"
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +187,8 @@ def test_batch_y_model_type(y, expected_type, model_file, csv_path, tmp_path):
 # Test 4: p-value display — tiny p-values show as "< 0.001" not "0.0000"
 # ---------------------------------------------------------------------------
 
-def test_p_value_shows_less_than_0_001(csv_path, tmp_path):
-    """Very small p-values should be rendered with significance label in the report."""
+def test_p_value_preserves_typed_significance_label(csv_path, tmp_path):
+    """Very small p-values retain their typed significance label without HTML."""
     source = Path(csv_path)
     project = create_project(tmp_path, "pval")
 
@@ -187,15 +199,6 @@ def test_p_value_shows_less_than_0_001(csv_path, tmp_path):
     assert result["status"] == "completed"
 
     run_root = project.root / "runs" / result["run_id"]
-    html = (run_root / "reports" / "report.html").read_text()
-
-    # Small p-values should show "significant at the 1% level" in coefficient interpretation
-    assert "significant at the 1% level" in html or "significant at the 5% level" in html, (
-        "Expected significance label in coefficient interpretation"
-    )
-
-    # The raw coefficient p_value from statsmodels can be numerically
-    # zero for very strong signals; the important thing is the display.
     model_result = read_json(run_root / "model_results" / "poisson_1.json")
     x1_coef = model_result["coefficients"].get("x1", {})
     assert x1_coef
@@ -204,3 +207,15 @@ def test_p_value_shows_less_than_0_001(csv_path, tmp_path):
     assert round(float(pval), 4) < 0.001, (
         "x1 should be highly significant"
     )
+    summary = read_json(run_root / "diagnostic_summary.json")
+    x1_rows = [
+        row for row in summary["coefficients_summary"]["rows"]
+        if row["display_name"] == "x1"
+    ]
+    assert len(x1_rows) == 1
+    assert x1_rows[0]["significance_label"] in {
+        "significant at the 1% level",
+        "significant at the 5% level",
+    }
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
