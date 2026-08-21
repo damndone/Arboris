@@ -40,6 +40,30 @@ def _run(tmp_path: Path, frame: pd.DataFrame, *, model_type: str, y: str, x: lis
     return project.root / "runs" / result["run_id"]
 
 
+def _family_packet_without_binding(result: dict) -> dict:
+    """Validate the persisted envelope boundary before exact packet parsing."""
+
+    packet = dict(result)
+    binding = packet.pop("result_binding", None)
+    assert isinstance(binding, dict)
+    assert set(binding) == {
+        "strategy",
+        "project_root",
+        "run_id",
+        "model_id",
+        "source_artifact_ids",
+        "coefficient_source_ids",
+        "payload_sha256",
+    }
+    assert binding["strategy"] == "coefficient_table_v1"
+    assert binding["model_id"] == packet["model_id"]
+    assert isinstance(binding["run_id"], str) and binding["run_id"]
+    assert binding["source_artifact_ids"]
+    assert binding["coefficient_source_ids"]
+    assert isinstance(binding["payload_sha256"], str)
+    return packet
+
+
 def _agent_model_family_evidence(run_root: Path, model_type: str) -> dict:
     run_id = run_root.name
     provider = NodeOperationContextProvider(run_root.parent.parent)
@@ -80,7 +104,7 @@ def test_ordinal_logit_run_persists_probabilities_effects_and_parallel_lines(tmp
     # must state its evidence rather than assert correctness bare.
     assert diagnostics["validation"]["level"] == "external_oracle_within_tolerance"
     assert "polr" in diagnostics["validation"]["external_oracle"]
-    OrdinalResultContract.from_dict(result)
+    OrdinalResultContract.from_dict(_family_packet_without_binding(result))
     OrdinalDiagnosticsContract.from_dict(diagnostics)
     projected = _bounded_model_family_evidence(run_root, read_model_results(run_root))
     assert projected["contract"] == "workbench.ordinal_logit.result.v1"
@@ -139,7 +163,7 @@ def test_multinomial_logit_run_persists_probabilities_rrr_and_marginal_effects(t
     assert {"relative_risk_ratio", "ci_lower", "ci_upper"} <= set(
         result["relative_risk_ratios"]["a:x"]
     )
-    MultinomialResultContract.from_dict(result)
+    MultinomialResultContract.from_dict(_family_packet_without_binding(result))
     projected = _bounded_model_family_evidence(run_root, read_model_results(run_root))
     assert projected["contract"] == "workbench.multinomial_logit.result.v1"
     assert projected["relative_risk_ratios"] == result["relative_risk_ratios"]
@@ -323,7 +347,7 @@ def test_quantile_regression_run_persists_multiple_quantiles_bootstrap_and_compa
     assert result["reference_quantile"] == 0.5
     assert result["cross_quantile_comparisons"]
     assert read_json(run_root / "model_results" / "diagnostics_quantile_regression_1.json")["status"] == "family_owned"
-    QuantileRegressionResultContract.from_dict(result)
+    QuantileRegressionResultContract.from_dict(_family_packet_without_binding(result))
     projected = _bounded_model_family_evidence(run_root, read_model_results(run_root))
     assert projected["contract"] == "workbench.quantile_regression.result.v1"
     assert projected["cross_quantile_comparisons"]
@@ -381,7 +405,7 @@ def _http_family_run(
     x: str,
     model_type: str,
     model_options: dict[str, object] | None = None,
-) -> dict:
+) -> tuple[dict, dict, dict, dict]:
     client = TestClient(app)
     project_root = client.post(
         "/projects", json={"parent": str(tmp_path), "name": name}
@@ -403,9 +427,52 @@ def _http_family_run(
     for _ in range(240):
         detail = client.get(f"/runs/{run_id}", params={"project_root": project_root}).json()
         if detail.get("status") in {"completed", "failed", "blocked", "partial", "interrupted"}:
-            return detail
+            break
         time.sleep(0.05)
-    raise AssertionError(f"HTTP model-family run did not terminate: {run_id}")
+    else:
+        raise AssertionError(f"HTTP model-family run did not terminate: {run_id}")
+
+    artifact_response = client.get(
+        f"/runs/{run_id}/artifacts",
+        params={"project_root": project_root},
+    )
+    assert artifact_response.status_code == 200, artifact_response.text
+    artifact_items = [
+        item
+        for group in artifact_response.json()["groups"]
+        for item in group["items"]
+    ]
+    result_artifact = next(
+        item
+        for item in artifact_items
+        if item["artifact_type"] == "model_result"
+        and item["artifact_id"] == f"{model_type}_1"
+    )
+    result_response = client.get(
+        f"/runs/{run_id}/artifacts/{result_artifact['artifact_id']}",
+        params={"project_root": project_root},
+    )
+    assert result_response.status_code == 200, result_response.text
+    result_packet = result_response.json()
+
+    evidence_artifact_id = {
+        "ordinal_logit": "diagnostics_ordinal_logit_1",
+        "multinomial_logit": "diagnostics_multinomial_logit_1",
+        "survival_cox": "survival_evidence",
+    }.get(model_type)
+    if evidence_artifact_id is None:
+        evidence_packet = result_packet
+    else:
+        evidence_artifact = next(
+            item for item in artifact_items if item["artifact_id"] == evidence_artifact_id
+        )
+        evidence_response = client.get(
+            f"/runs/{run_id}/artifacts/{evidence_artifact['artifact_id']}",
+            params={"project_root": project_root},
+        )
+        assert evidence_response.status_code == 200, evidence_response.text
+        evidence_packet = evidence_response.json()
+    return detail, result_artifact, result_packet, evidence_packet
 
 
 @pytest.mark.parametrize(
@@ -459,7 +526,7 @@ def test_model_family_packets_are_reachable_from_real_http_run(
     options: dict[str, object],
     evidence_keys: set[str],
 ) -> None:
-    detail = _http_family_run(
+    detail, result_artifact, result_packet, evidence_packet = _http_family_run(
         tmp_path,
         name=name,
         frame=frame,
@@ -469,10 +536,32 @@ def test_model_family_packets_are_reachable_from_real_http_run(
         model_options=options,
     )
     assert detail["status"] == "completed", detail
-    assert any(row.get("model_type") == model_type for row in detail["model_results"])
-    evidence = detail["model_family_evidence"]
-    assert isinstance(evidence, dict)
-    assert evidence_keys <= set(evidence)
+    assert detail["model_results"] == []
+    assert detail["model_results_authority"] == "non-authoritative"
+    assert detail["model_results_status"] == "unavailable"
+    assert result_artifact["artifact_id"] == f"{model_type}_1"
+    assert result_packet["model_type"] == model_type
+    assert result_packet["model_id"] == f"{model_type}_1"
+    result_body = _family_packet_without_binding(result_packet)
+    if model_type == "ordinal_logit":
+        OrdinalResultContract.from_dict(result_body)
+    elif model_type == "multinomial_logit":
+        MultinomialResultContract.from_dict(result_body)
+    elif model_type == "quantile_regression":
+        QuantileRegressionResultContract.from_dict(result_body)
+    else:
+        assert set(result_body) == {
+            "schema_version",
+            "model_id",
+            "model_type",
+            "engine",
+            "nobs",
+            "coefficients",
+            "hazard_ratios",
+            "survival_evidence_artifact",
+        }
+        SurvivalEvidenceContract.from_dict(evidence_packet)
+    assert evidence_keys <= set(result_body) | set(evidence_packet)
 
 
 def test_ordinal_logit_thresholds_are_named_by_the_declared_outcome_levels(tmp_path: Path) -> None:
