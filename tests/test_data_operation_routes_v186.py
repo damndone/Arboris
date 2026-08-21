@@ -166,12 +166,27 @@ def test_transform_route_transfers_complete_long_to_wide_payload(tmp_path: Path)
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["spec"]["parameters"] == {
+    assert payload["spec"] == {
+        "source_run_id": run_id,
+        "secondary_node_id": None,
+        "operation_id": "data.reshape",
+        "source_node_id": "stage:source",
+        "source_artifact_id": artifact_id,
+        "secondary_artifact_id": None,
+        "operation_version": "v1",
+        "secondary_run_id": None,
+    }
+    assert "parameters" not in payload["spec"]
+    assert payload["preview"]["parameters"] == {
         "direction": "long_to_wide",
         "index": ["id"],
         "columns": "metric",
         "values": "value",
     }
+    assert payload["preview"]["status"] == "ready"
+    assert payload["preview"]["evidence_method"] == "data.reshape"
+    assert payload["preview"]["row_count_before"] == 4
+    assert payload["preview"]["row_count_after"] == 2
     assert payload["preview"]["output_columns"] == ["id", "cost", "score"]
 
 

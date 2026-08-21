@@ -3658,10 +3658,14 @@ def get_column_cast_operation_by_child_node(
 
     root = _root(project_root)
     store = OperationRecordStore(root / "workbench", create=False)
+    # code.execute has a dedicated high-risk route surface rather than a
+    # descriptor in the low-risk data-operation manifest, but its server-owned
+    # typed effect is still a valid lineage source for this readback route.
+    live_operation_ids = _live_data_operation_ids() | frozenset({"code.execute"})
     matches = [
         record
         for record in store.list_records()
-        if record.operation_id in _live_data_operation_ids()
+        if record.operation_id in live_operation_ids
         and (
             record.execution.get("bindings", {}).get("data_child_node_id") == child_node_id
             or record.execution.get("bindings", {}).get("child_node_id") == child_node_id

@@ -78,6 +78,10 @@ def test_code_execute_preview_confirm_and_provenance_readback(tmp_path: Path) ->
         operation = body["operation"]
         assert operation["operation_id"] == "code.execute"
         child_node_id = operation["outputs"]["child_node_id"]
+        bindings = operation["execution"]["bindings"]
+        assert bindings["data_child_node_id"] == child_node_id
+        assert bindings["data_artifact_id"] == operation["outputs"]["artifact_id"]
+        assert bindings["data_recipe_artifact_id"] == operation["outputs"]["recipe_artifact_id"]
         assert operation["verification"]["checks"]["sandboxed"] is True
         assert operation["verification"]["checks"]["deterministic"] is True
 
@@ -107,7 +111,8 @@ def test_code_execute_preview_reports_failing_code_as_blocked(tmp_path: Path) ->
     assert response.status_code == 200
     preview = response.json()["preview"]
     assert preview["status"] == "blocked"
-    assert "KeyError" in preview["error"]
+    assert preview["reason_code"] == "CODE_EXECUTION_BLOCKED"
+    assert "error" not in preview
 
 
 def test_code_execute_confirm_refuses_a_blocked_preview(tmp_path: Path) -> None:
