@@ -22,6 +22,7 @@ from workbench.contracts.agent.notebook_option import ExpectedArtifact
 from workbench.lineage.run_family import bind_run_to_family
 
 from tests.test_notebook_support import make_project, make_run, model_rerun_proposal
+from tests.test_notebook_freshness_gate import _materializable_rerun_option
 
 _REQUIRED = (
     ExpectedArtifact(
@@ -44,51 +45,44 @@ def _draft(proposal_id: str, covariance: str, option_id: str | None = None) -> O
 
 def test_one_decision_chain_emits_every_registered_trace_event_type(tmp_path: Path) -> None:
     project = make_project(tmp_path)
-    service = NotebookService(project)
-    notebook = service.create_notebook(
-        title="n", created_by="u", user_focus={"selected_text_hash": "sha256:aaa"}
-    )
-    trace = TraceWriter(
-        project,
-        scope={
-            "project_id": project.name,
-            "notebook_id": notebook.notebook_id,
-            "run_family_id": notebook.run_family_id,
-        },
-        versions={
-            "app_commit": "c",
-            "model_id": "m",
-            "prompt_version": "p",
-            "vocabulary_version": "v",
-            "context_profile": "notebook-plan/v1",
-        },
-    )
-    context = service.compile_context(notebook.notebook_id)
-    record_compiled_context(trace, context)
+    trace_holder = {}
 
-    (option,) = service.propose_batch(
-        notebook.notebook_id, context=context, drafts=[_draft("p1", "robust")], trace=trace
+    def trace_factory(notebook):
+        trace = TraceWriter(
+            project,
+            scope={
+                "project_id": project.name,
+                "notebook_id": notebook.notebook_id,
+                "run_family_id": notebook.run_family_id,
+            },
+            versions={
+                "app_commit": "c",
+                "model_id": "m",
+                "prompt_version": "p",
+                "vocabulary_version": "v",
+                "context_profile": "notebook-plan/v1",
+            },
+        )
+        trace_holder["trace"] = trace
+        return trace
+
+    service, notebook_id, notebook, option = _materializable_rerun_option(
+        project,
+        trace_factory=trace_factory,
     )
-    service.record_decision(
-        notebook.notebook_id,
+    trace = trace_holder["trace"]
+    context = service.compile_context(notebook_id)
+    record_compiled_context(trace, context)
+    service.materialize_option(
+        notebook_id,
         option.option_id,
-        decision="selected",
-        actor="user_1",
-        trace=trace,
-    )
-    service.confirm(
-        notebook.notebook_id,
-        option.option_id,
-        option_revision=1,
-        proposal_id="p1",
-        proposal_revision=1,
-        context=service.compile_context(notebook.notebook_id),
+        context=context,
         trace=trace,
     )
     failed = make_run(project, "run_failed")
     bind_run_to_family(failed, run_family_id=notebook.run_family_id, bound_by="test")
     first = service.complete_execution(
-        notebook.notebook_id,
+        notebook_id,
         option.option_id,
         execution_status="succeeded",
         run_id="run_failed",
@@ -98,19 +92,16 @@ def test_one_decision_chain_emits_every_registered_trace_event_type(tmp_path: Pa
     assert first.active_head_advanced is False
 
     # Retry the same option; this time the run produces what it promised.
-    service.confirm(
-        notebook.notebook_id,
+    service.materialize_option(
+        notebook_id,
         option.option_id,
-        option_revision=1,
-        proposal_id="p1",
-        proposal_revision=1,
-        context=service.compile_context(notebook.notebook_id),
+        context=service.compile_context(notebook_id),
         trace=trace,
     )
     good = make_run(project, "run_good")
     bind_run_to_family(good, run_family_id=notebook.run_family_id, bound_by="test")
     second = service.complete_execution(
-        notebook.notebook_id,
+        notebook_id,
         option.option_id,
         execution_status="succeeded",
         run_id="run_good",
@@ -145,7 +136,7 @@ def test_one_decision_chain_emits_every_registered_trace_event_type(tmp_path: Pa
 
     head_changes = [e for e in events if e["event_type"] == "active_head.changed/v1"]
     assert [e["payload"]["to_run_id"] for e in head_changes] == ["run_good"]
-    assert head_changes[0]["payload"]["from_run_id"] is None
+    assert head_changes[0]["payload"]["from_run_id"] == "run_source"
 
     errors = [e for e in events if e["event_type"] == "operation.error/v1"]
     assert [e["payload"]["code"] for e in errors] == ["ARTIFACT_CONTRACT_UNSATISFIED"]

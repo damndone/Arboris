@@ -20,6 +20,74 @@ _PROTOCOL_TOKENS = (
 )
 
 
+_P7_CLI_ADMITTED_HOST_BOOTSTRAP = r"""
+import os
+import runpy
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+repository_root = Path(sys.argv[1]).resolve()
+runner = Path(sys.argv[2]).resolve()
+runner_arguments = sys.argv[3:]
+sys.path.insert(0, str(repository_root))
+sys.path.insert(0, str(repository_root / "backend"))
+
+from workbench.agent.workflow_runtime import (  # noqa: E402
+    _admit_workflow_host_endpoint_from_supervisor,
+)
+import workbench.agent.workflow_runtime as workflow_runtime  # noqa: E402
+
+endpoint_fds = []
+
+
+def resolve(project_root):
+    project_root = Path(project_root).resolve()
+    workflow_directory = project_root / "workbench" / "workflows"
+    workflow_directory.mkdir(parents=True, exist_ok=True)
+    endpoint_fd = os.open(
+        workflow_directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    endpoint_fds.append(endpoint_fd)
+    return _admit_workflow_host_endpoint_from_supervisor(project_root, endpoint_fd)
+
+
+try:
+    with patch.object(
+        workflow_runtime,
+        "_deployment_host_endpoint_from_supervisor",
+        side_effect=resolve,
+    ):
+        sys.argv = [str(runner), *runner_arguments]
+        runpy.run_path(str(runner), run_name="__main__")
+finally:
+    for endpoint_fd in reversed(endpoint_fds):
+        os.close(endpoint_fd)
+"""
+
+
+def _run_p7_cli_with_admitted_host(
+    root: Path, python: Path, runner: Path, *arguments: str
+):
+    """Run one CLI command with a per-project, test-only admitted host seam."""
+
+    return subprocess.run(
+        [
+            str(python),
+            "-c",
+            _P7_CLI_ADMITTED_HOST_BOOTSTRAP,
+            str(root),
+            str(runner),
+            *arguments,
+        ],
+        cwd=root,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+
 def test_current_p7_acceptance_denominator_is_deliberately_pinned() -> None:
     """A red count means registration scope changed and this record needs review."""
 
@@ -3287,13 +3355,17 @@ def test_cli_executes_every_live_p7_operation_through_generic_workflow(tmp_path)
         encoding="utf-8",
     )
 
-    def execute(*arguments: str) -> dict[str, object]:
-        completed = subprocess.run(
-            [str(python), str(runner), *arguments],
-            cwd=root,
-            check=False,
-            text=True,
-            capture_output=True,
+    def execute(*arguments: str, admitted_host: bool = False) -> dict[str, object]:
+        completed = (
+            _run_p7_cli_with_admitted_host(root, python, runner, *arguments)
+            if admitted_host
+            else subprocess.run(
+                [str(python), str(runner), *arguments],
+                cwd=root,
+                check=False,
+                text=True,
+                capture_output=True,
+            )
         )
         if completed.returncode != 0:
             raise AssertionError(completed.stderr)
@@ -3326,6 +3398,7 @@ def test_cli_executes_every_live_p7_operation_through_generic_workflow(tmp_path)
         str(work_root),
         "--expected-failure",
         "glm.hurdle_negative_binomial=GLM_NONCONVERGENCE",
+        admitted_host=True,
     )
 
     operation_ids = set(p7_pack_registry.operation_ids())

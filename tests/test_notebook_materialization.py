@@ -16,6 +16,7 @@ from workbench.agent.notebook.errors import (
     NotebookOptionError,
     OptionMaterializationFailed,
     OptionLifecycleTransitionInvalid,
+    OptionRevisionStale,
     OptionValidationFailed,
 )
 from workbench.agent.notebook.materialization import NotebookOptionMaterializer
@@ -530,7 +531,7 @@ def test_materialized_option_can_reconcile_a_successful_draft_run(
     ).lifecycle_history] == ["selected", "materialized", "executing", "executed"]
 
 
-def test_legacy_confirmation_remains_legacy_without_a_materialized_lie(
+def test_legacy_confirmation_fails_closed_without_a_materialized_lie(
     tmp_path: Path,
 ) -> None:
     project = make_project(tmp_path)
@@ -538,23 +539,21 @@ def test_legacy_confirmation_remains_legacy_without_a_materialized_lie(
     notebook = service.create_notebook(title="Legacy confirm", created_by="ui")
     legacy = _legacy_option(service, notebook.notebook_id)
 
-    execution = service.confirm(
-        notebook.notebook_id,
-        legacy.option_id,
-        option_revision=legacy.option_revision,
-        proposal_id=legacy.typed_proposal_id,
-        proposal_revision=legacy.typed_proposal_revision,
-        context=service.compile_context(notebook.notebook_id),
-    )
+    with pytest.raises(OptionRevisionStale) as excinfo:
+        service.confirm(
+            notebook.notebook_id,
+            legacy.option_id,
+            option_revision=legacy.option_revision,
+            proposal_id=legacy.typed_proposal_id,
+            proposal_revision=legacy.typed_proposal_revision,
+            context=service.compile_context(notebook.notebook_id),
+        )
 
     view = service.option_view(notebook.notebook_id, legacy.option_id)
-    assert execution.contract_version == "1.0"
-    assert view.lifecycle_status == "executing"
-    assert {entry["to_status"] for entry in view.lifecycle_history} == {
-        "proposed",
-        "selected",
-        "executing",
-    }
+    assert excinfo.value.code == "NOTEBOOK_LEGACY_COMPILATION_REQUIRED"
+    assert excinfo.value.details["reason"] == "legacy_compilation_required"
+    assert view.lifecycle_status == "proposed"
+    assert [entry["to_status"] for entry in view.lifecycle_history] == ["proposed"]
     assert service.store.read_materialization(
         notebook.notebook_id, legacy.option_id, legacy.option_revision
     ) is None

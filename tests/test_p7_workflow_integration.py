@@ -3,20 +3,67 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from workbench.lineage.run_inputs import write_run_inputs
 from workbench.lineage.upload_store import store_upload_bytes
 from tests.test_p7_adoption_calls import _cases, _hurdle_negative_binomial_success_case
-from tests.test_data_column_cast import _source_project
-from workbench.agent.workflow import WorkflowExecutor, compile_workflow
+from tests.test_data_column_cast import _source_project as _legacy_source_project
+from workbench.agent.workflow import WorkflowExecutionError, WorkflowExecutor, compile_workflow
 from workbench.agent.workflow_runtime import (
+    _admit_workflow_host_endpoint_from_supervisor,
     build_workflow_step_executor,
     collect_post_estimation_results,
 )
-from workbench.artifacts import sha256_file
+from workbench.artifacts import initialize_artifact_index, register_artifact, sha256_file
+import workbench.agent.workflow_runtime as workflow_runtime
+
+
+def _execute_workflow_with_admitted_host(project: Path, draft):
+    """Model the deployment-owned host admission boundary for one test run."""
+
+    workflow_directory = project / "workbench" / "workflows"
+    workflow_directory.mkdir(parents=True, exist_ok=True)
+    endpoint_fd = os.open(
+        workflow_directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        endpoint = _admit_workflow_host_endpoint_from_supervisor(project, endpoint_fd)
+        with patch.object(
+            workflow_runtime,
+            "_deployment_host_endpoint_from_supervisor",
+            return_value=endpoint,
+        ):
+            return WorkflowExecutor(project).execute(
+                draft,
+                build_workflow_step_executor(project, draft),
+            )
+    finally:
+        os.close(endpoint_fd)
+
+
+def _source_project(tmp_path, frame):
+    """Create the source fixture through the current artifact record contract."""
+
+    project, run_id, artifact_id = _legacy_source_project(tmp_path, frame)
+    run_root = project / "runs" / run_id
+    initialize_artifact_index(run_root)
+    register_artifact(
+        run_root,
+        artifact_id,
+        run_root / "data.csv",
+        "raw_data",
+        "fixture",
+        [],
+    )
+    return project, run_id, artifact_id
 
 
 def _compile_p7(
@@ -62,10 +109,7 @@ def test_p7_step_uses_generic_runtime_and_persists_provenance(tmp_path) -> None:
     project, run_id, artifact_id = _source_project(tmp_path, frame)
     draft = _compile_p7((run_id, artifact_id), frame)
 
-    state = WorkflowExecutor(project).execute(
-        draft,
-        build_workflow_step_executor(project, draft),
-    )
+    state = _execute_workflow_with_admitted_host(project, draft)
 
     assert state.status == "completed", state.steps["categorical_association"].error
     result = state.steps["categorical_association"]
@@ -89,6 +133,28 @@ def test_p7_step_uses_generic_runtime_and_persists_provenance(tmp_path) -> None:
     assert projected[0]["pack_family"] == "categorical"
     assert projected[0]["workflow_step_id"] == "categorical_association"
     assert projected[0]["result"] == payload["result"]
+
+
+def test_p7_workflow_requires_deployment_owned_host_authority(tmp_path) -> None:
+    """Successful P7 execution cannot silently mint a local host endpoint."""
+
+    frame = pd.DataFrame(
+        {
+            "row": ["a"] * 12 + ["b"] * 12,
+            "column": ["x"] * 10 + ["y"] * 2 + ["x"] * 3 + ["y"] * 9,
+        }
+    )
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = _compile_p7((run_id, artifact_id), frame, workflow_id="wf-p7-no-host")
+
+    with pytest.raises(
+        WorkflowExecutionError,
+        match="WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED",
+    ):
+        WorkflowExecutor(project).execute(
+            draft,
+            build_workflow_step_executor(project, draft),
+        )
 
 
 def test_p7_failed_result_fails_workflow_instead_of_false_success(
@@ -135,10 +201,7 @@ def test_p7_failed_result_fails_workflow_instead_of_false_success(
     project, run_id, artifact_id = _source_project(tmp_path, frame)
     draft = _compile_p7((run_id, artifact_id), frame, workflow_id="wf-p7-failed-result")
 
-    state = WorkflowExecutor(project).execute(
-        draft,
-        build_workflow_step_executor(project, draft),
-    )
+    state = _execute_workflow_with_admitted_host(project, draft)
 
     assert state.status == "failed"
     step_state = state.steps["categorical_association"]
@@ -223,10 +286,7 @@ def test_runtime_preflight_refuses_an_impossible_p7_request_before_execution(
         available_columns=list(frame.columns),
     )
 
-    state = WorkflowExecutor(project).execute(
-        draft,
-        build_workflow_step_executor(project, draft),
-    )
+    state = _execute_workflow_with_admitted_host(project, draft)
 
     assert state.status == "failed"
     assert "SYNTHETIC_CONTROL_PERIOD_COUNT_MISMATCH" in (
@@ -249,17 +309,11 @@ def test_repeating_a_p7_step_on_one_source_run_creates_distinct_artifacts(tmp_pa
     first_draft = _compile_p7(
         (run_id, artifact_id), frame, workflow_id="wf-p7-repeat-1"
     )
-    first = WorkflowExecutor(project).execute(
-        first_draft,
-        build_workflow_step_executor(project, first_draft),
-    )
+    first = _execute_workflow_with_admitted_host(project, first_draft)
     second_draft = _compile_p7(
         (run_id, artifact_id), frame, workflow_id="wf-p7-repeat-2"
     )
-    second = WorkflowExecutor(project).execute(
-        second_draft,
-        build_workflow_step_executor(project, second_draft),
-    )
+    second = _execute_workflow_with_admitted_host(project, second_draft)
 
     assert first.status == "completed", first.steps["categorical_association"].error
     assert second.status == "completed", second.steps["categorical_association"].error
@@ -318,10 +372,7 @@ def test_every_registered_p7_operation_completes_through_compiled_workflow(tmp_p
             available_columns=list(source_frame.columns),
         )
         try:
-            state = WorkflowExecutor(project).execute(
-                draft,
-                build_workflow_step_executor(project, draft),
-            )
+            state = _execute_workflow_with_admitted_host(project, draft)
             step_state = state.steps[step_id]
             expected_reason = expected_fixture_failures.get(operation_id)
             if expected_reason is not None:
@@ -391,10 +442,7 @@ def test_hurdle_negative_binomial_success_fixture_completes_generic_workflow(
         available_columns=list(frame.columns),
     )
 
-    state = WorkflowExecutor(project).execute(
-        draft,
-        build_workflow_step_executor(project, draft),
-    )
+    state = _execute_workflow_with_admitted_host(project, draft)
 
     assert state.status == "completed", state.steps[step_id].error
     assert state.steps[step_id].artifact_ids
@@ -474,10 +522,7 @@ def test_p7_step_composes_with_model_genesis_in_one_workflow(tmp_path) -> None:
         available_columns=list(frame.columns),
     )
 
-    state = WorkflowExecutor(project).execute(
-        draft,
-        build_workflow_step_executor(project, draft),
-    )
+    state = _execute_workflow_with_admitted_host(project, draft)
 
     assert state.status == "completed", state.steps["estimate"].error
     assert state.steps["association"].artifact_ids

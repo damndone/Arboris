@@ -325,15 +325,14 @@ def test_dataset_projection_from_run_pins_a_server_owned_workflow_source(
     )
 
 
-def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflow(
+def test_legacy_dataset_notebook_confirmation_fails_closed_before_composed_workflow(
     tmp_path: Path,
 ) -> None:
-    """One UI confirmation executes declared model terms and post-estimation.
+    """The historical option route cannot execute a composed workflow.
 
-    The body submits only the existing Run id to create the Notebook and then
-    the option/proposal revision pins to confirm it.  The workflow source,
-    compilation, execution, branch runs, and result references are all
-    reconstructed server-side.
+    The source pin and proposal are still validated and selected through the
+    Notebook route, but execution requires the current server-owned compiler,
+    confirmation, and host boundary.
     """
 
     from tests.test_data_column_cast import _source_project
@@ -472,35 +471,21 @@ def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflo
         },
     )
 
-    assert confirmed.status_code == 200, confirmed.text
-    workflow = confirmed.json()["workflow_execution"]
-    assert workflow["status"] == "completed"
-    assert len(workflow["branch_runs"]) == 2
-    assert {item["branch_id"] for item in workflow["branch_runs"]} == {
-        "linear",
-        "curved",
-    }
-    assert workflow["post_estimation_artifact_ids"]
+    assert confirmed.status_code == 409, confirmed.text
+    assert confirmed.json()["error"]["code"] == (
+        "NOTEBOOK_LEGACY_COMPILATION_REQUIRED"
+    )
     listed = client.get(f"/notebooks/{notebook_id}/options", params=params)
     assert listed.status_code == 200, listed.text
-    result = listed.json()["execution_results"][option["option_id"]]
-    assert result["execution_status"] == "succeeded"
-    assert result["committed"] is True
-    assert result["run_id"] is None
-    assert result["workflow_execution"]["branch_runs"] == workflow["branch_runs"]
-    assert result["artifact_validation"]["issues"] == []
-    assert result["artifact_validation_scope"]["mode"] == (
-        "server_owned_workflow_projection"
-    )
-    assert result["artifact_validation_scope"]["ambient_artifact_count"] > 0
-    assert "ols_1" in result["artifact_validation_scope"]["ambient_artifact_ids"]
+    assert option["option_id"] not in listed.json().get("execution_results", {})
+    assert listed.json()["options"][0]["lifecycle_status"] == "selected"
     assert service.get_notebook(notebook_id).active_head_run_id is None
 
 
-def test_confirmed_p7_only_notebook_workflow_persists_one_contract_result(
+def test_legacy_p7_notebook_workflow_confirmation_fails_closed_before_persistence(
     tmp_path: Path,
 ) -> None:
-    """A confirmed P7 analysis needs no dummy model and leaves no artifact warning."""
+    """The historical P7 option route cannot persist a workflow result."""
 
     from tests.test_data_column_cast import _source_project
     from workbench.agent.notebook.planning_agent import NotebookPlanningAgent
@@ -613,18 +598,20 @@ def test_confirmed_p7_only_notebook_workflow_persists_one_contract_result(
         },
     )
 
-    assert confirmed.status_code == 200, confirmed.text
-    assert confirmed.json()["workflow_execution"]["status"] == "completed"
-    listed = client.get(f"/notebooks/{notebook_id}/options", params=params).json()
-    result = listed["execution_results"][option_id]
-    assert result["artifact_validation"]["issues"] == []
+    assert confirmed.status_code == 409, confirmed.text
+    assert confirmed.json()["error"]["code"] == (
+        "NOTEBOOK_LEGACY_COMPILATION_REQUIRED"
+    )
+    listed_response = client.get(f"/notebooks/{notebook_id}/options", params=params)
+    assert listed_response.status_code == 200, listed_response.text
+    listed = listed_response.json()
+    assert option_id not in listed.get("execution_results", {})
+    assert listed["options"][0]["lifecycle_status"] == "selected"
     index = json.loads(
         (project / "runs" / source_run_id / "artifacts_index.json").read_text()
     )
-    assert any(
-        item.get("artifact_id") == result_artifact_id
-        and item.get("artifact_type") == WORKFLOW_RESULT_ARTIFACT_TYPE
-        for item in index["artifacts"]
+    assert not any(
+        item.get("artifact_id") == result_artifact_id for item in index["artifacts"]
     )
 
 
@@ -1330,7 +1317,7 @@ def test_notebook_route_creates_reads_and_compiles_a_runless_notebook(
     assert compiled.json()["trace_id"].startswith("trace_")
 
 
-def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
+def test_notebook_route_rejects_legacy_option_before_artifact_execution(
     tmp_path: Path,
 ) -> None:
     project = make_project(tmp_path)
@@ -1401,98 +1388,18 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
             "proposal_revision": 1,
         },
     )
-    assert confirmed.status_code == 200, confirmed.text
-    assert confirmed.json()["execution"]["option_id"] == "opt_route_1"
-    assert confirmed.json()["execution"]["run_id"] is None
+    assert confirmed.status_code == 409, confirmed.text
+    assert confirmed.json()["error"]["code"] == (
+        "NOTEBOOK_LEGACY_COMPILATION_REQUIRED"
+    )
 
     after_confirm = client.get(
         f"/notebooks/{notebook_id}/options",
         params=params,
     )
     assert after_confirm.status_code == 200, after_confirm.text
-    assert after_confirm.json()["options"][0]["lifecycle_status"] == "executing"
-
-    client_owned = client.post(
-        f"/notebooks/{notebook_id}/options/opt_route_1/execute",
-        params=params,
-        json={
-            "execution_status": "succeeded",
-            "produced_artifacts": [
-                {
-                    "artifact_id": "ts.parameters",
-                    "artifact_type": "time_series_json",
-                    "count": 1,
-                }
-            ],
-        },
-    )
-    assert client_owned.status_code == 409, client_owned.text
-    assert client_owned.json()["error"]["code"] == (
-        "NOTEBOOK_CLIENT_EXECUTION_FACTS_FORBIDDEN"
-    )
-
-    server_run = make_run(project, "run_001")
-    bind_run_to_family(
-        server_run,
-        run_family_id=notebook["run_family_id"],
-        bound_by="server-test",
-    )
-    artifact_path = server_run / "ts.parameters.json"
-    artifact_path.write_text("{\"status\": \"completed\"}", encoding="utf-8")
-    register_artifact(
-        server_run,
-        "ts.parameters",
-        artifact_path,
-        "time_series_json",
-        "estimation",
-        [],
-    )
-    ambient_path = server_run / "ts.diagnostics.json"
-    ambient_path.write_text("{\"status\": \"completed\"}", encoding="utf-8")
-    register_artifact(
-        server_run,
-        "ts.diagnostics",
-        ambient_path,
-        "time_series_json",
-        "diagnostics",
-        [],
-    )
-
-    completed = client.post(
-        f"/notebooks/{notebook_id}/options/opt_route_1/execute",
-        params=params,
-        json={"run_id": "run_001"},
-    )
-    assert completed.status_code == 200, completed.text
-    assert completed.json()["execution_status"] == "succeeded"
-    assert completed.json()["artifact_validation"]["validation_status"] == "passed"
-    assert completed.json()["lifecycle_status"] == "executed"
-
-    reloaded = client.get(
-        f"/notebooks/{notebook_id}/options",
-        params=params,
-    )
-    assert reloaded.status_code == 200, reloaded.text
-    persisted_result = reloaded.json()["execution_results"]["opt_route_1"]
-    assert persisted_result == {
-        "option_id": "opt_route_1",
-        "option_revision": 1,
-        "run_id": "run_001",
-        "execution_status": "succeeded",
-        "committed": True,
-        "artifact_validation": {
-            "contract_profile": "artifact-identity-type-count/v1",
-            "validation_status": "passed",
-            "checked_dimensions": ["artifact_id", "artifact_type", "count", "step"],
-            "not_evaluated_dimensions": ["payload_schema"],
-            "issues": [],
-        },
-        "artifact_validation_scope": {
-            "mode": "server_owned_contract_projection",
-            "ambient_artifact_ids": ["ts.diagnostics", "ts.parameters"],
-            "ambient_artifact_count": 2,
-        },
-    }
+    assert after_confirm.json()["options"][0]["lifecycle_status"] == "selected"
+    assert "opt_route_1" not in after_confirm.json().get("execution_results", {})
 
 
 def test_notebook_route_uses_server_planner_when_drafts_are_omitted(

@@ -180,6 +180,21 @@ class NotebookOptionMaterializer:
                 )
             draft = PipelineDraftStore(self.service.project_root).get(existing.draft_id)
             self._validate_binding_provenance(current, existing, draft)
+            # A failed execution intentionally returns a materialized option
+            # to ``selected`` so it can be retried.  The Draft is still the
+            # same server-owned, evidence-bound handoff; replaying
+            # materialization must therefore restore the lifecycle boundary
+            # before the next execution callback instead of treating the
+            # existing record as a no-op that leaves the option unexecutable.
+            if view.lifecycle_status == "selected":
+                self.service._transition(
+                    notebook_id,
+                    view,
+                    to_status="materialized",
+                    actor="agent",
+                    reason="draft_materialized_retry",
+                    trace=trace,
+                )
             return MaterializationResult(existing, draft)
         if view.lifecycle_status == "executed":
             raise _fail("an executed option cannot be materialized again", option_id=option_id)

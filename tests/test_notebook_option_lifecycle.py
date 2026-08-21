@@ -20,6 +20,7 @@ from workbench.agent.notebook import (
 from workbench.agent.notebook.errors import (
     NotebookOptionError,
     OptionBatchInvalid,
+    OptionRevisionStale,
     OptionValidationFailed,
 )
 from workbench.contracts.agent.notebook_option import (
@@ -93,16 +94,14 @@ def test_notebook_created_without_any_run_persists_family_and_null_head(tmp_path
     )
 
 
-def test_a_runless_notebook_can_compile_generate_and_confirm_with_a_null_head(
+def test_a_runless_notebook_stays_unexecuted_without_source_materialization(
     tmp_path: Path,
 ) -> None:
     """§9.1 criterion 1, end to end: no run has to exist for the loop to work.
 
-    This is the acceptance the run-family lane pins with an xfail(strict=True)
-    for "notebook without a run"; here it is proven positively on the owned
-    surface. A notebook with zero runs must still compile a bounded context,
-    generate an option against it and confirm that option — the head only moves
-    when a real run is committed, which never happens on this path.
+    A notebook with zero runs still compiles a bounded context and generates an
+    option, but the option cannot be confirmed without a source-bound server
+    materialization. The head and lifecycle stay unchanged on the refusal.
     """
     project = make_project(tmp_path)
     service = NotebookService(project)
@@ -131,26 +130,28 @@ def test_a_runless_notebook_can_compile_generate_and_confirm_with_a_null_head(
         drafts=[_draft(1, covariance="robust", proposal_id="p1")],
     )
 
-    execution = service.confirm(
-        notebook.notebook_id,
-        option.option_id,
-        option_revision=1,
-        proposal_id="p1",
-        proposal_revision=1,
-        context=service.compile_context(notebook.notebook_id),
-    )
+    with pytest.raises(OptionRevisionStale) as excinfo:
+        service.confirm(
+            notebook.notebook_id,
+            option.option_id,
+            option_revision=1,
+            proposal_id="p1",
+            proposal_revision=1,
+            context=service.compile_context(notebook.notebook_id),
+        )
 
-    assert execution.run_id is None
-    assert execution.freshness_dependency_fingerprint == (
-        option.freshness_dependency_fingerprint
-    )
+    assert excinfo.value.code == "NOTEBOOK_LEGACY_COMPILATION_REQUIRED"
+    assert excinfo.value.details["reason"] == "legacy_compilation_required"
     reloaded = NotebookService(project).get_notebook(notebook.notebook_id)
     assert reloaded.active_head_run_id is None
     assert reloaded.last_attempt_run_id is None
     assert (
         service.option_view(notebook.notebook_id, option.option_id).lifecycle_status
-        == "executing"
+        == "proposed"
     )
+    assert service.store.read_materialization(
+        notebook.notebook_id, option.option_id, option.option_revision
+    ) is None
 
 
 def test_notebook_created_from_a_run_binds_that_runs_persisted_family(tmp_path: Path) -> None:

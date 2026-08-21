@@ -24,7 +24,7 @@ from workbench.services.notebook_source_materialization import (
 )
 
 
-def test_upload_only_notebook_materializes_its_source_only_after_confirmation(
+def test_upload_only_notebook_rejects_legacy_confirmation_before_source_materialization(
     tmp_path: Path,
 ) -> None:
     """A normal upload can plan and execute P7 without a user-created model Run."""
@@ -139,27 +139,14 @@ def test_upload_only_notebook_materializes_its_source_only_after_confirmation(
         },
     )
 
-    assert confirmed.status_code == 200, confirmed.text
-    result = client.get(
-        f"/notebooks/{notebook_id}/options", params=params
-    ).json()["execution_results"][option_id]
-    source_index = json.loads((source_run_root / "artifacts_index.json").read_text())
-    projected_analysis_ids = result["workflow_execution"][
-        "post_estimation_artifact_ids"
-    ]
-    assert (
-        source_run_root.is_dir()
-        and result["committed"] is True
-        and result["artifact_validation"]["issues"] == []
-        and len(projected_analysis_ids) == 1
-        and any(
-            item["artifact_id"] == projected_analysis_ids[0]
-            and item["artifact_type"] == "p7_analysis"
-            for item in source_index["artifacts"]
-        )
-        and {item["artifact_type"] for item in source_index["artifacts"]}
-        >= {"raw_data", "p7_analysis", WORKFLOW_RESULT_ARTIFACT_TYPE}
+    assert confirmed.status_code == 409, confirmed.text
+    assert confirmed.json()["error"]["code"] == (
+        "NOTEBOOK_LEGACY_COMPILATION_REQUIRED"
     )
+    assert not source_run_root.exists()
+    listed = client.get(f"/notebooks/{notebook_id}/options", params=params)
+    assert listed.status_code == 200, listed.text
+    assert option_id not in listed.json().get("execution_results", {})
 
 
 def test_upload_source_materialization_never_repairs_an_inconsistent_reserved_run(
