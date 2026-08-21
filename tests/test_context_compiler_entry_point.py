@@ -24,13 +24,22 @@ AGENT_DIR = Path(__file__).resolve().parents[1] / "backend" / "workbench" / "age
 # it would put unbounded, unrecorded content in front of the model.
 COMPILER_OWNED_SOURCES = ("artifacts_index.json", "graph.json", "data_profile.json")
 
-# Modules allowed to read those sources directly. `context_tools.py` earns its
-# place because it is the bounded-inspection surface itself: it truncates what
-# it extracts and every tool it registers declares a `max_output_budget` the
-# registry enforces. That budget, not this string scan, is what actually keeps
-# a 22 KB index away from an 8192-byte tool result -- so the exemption is
-# paired with `test_every_inspect_tool_declares_an_output_budget`.
-COMPILER_SOURCE_READERS = {"context_compiler.py", "evidence.py", "context_tools.py"}
+# Modules allowed to read those sources directly, by source. `context_tools.py`
+# earns its place because it is the bounded-inspection surface itself: it
+# truncates what it extracts and every tool it registers declares a
+# `max_output_budget` the registry enforces. That budget, not this string scan,
+# is what actually keeps a 22 KB index away from an 8192-byte tool result -- so
+# the exemption is paired with `test_every_inspect_tool_declares_an_output_budget`.
+#
+# `workflow_runtime.py` is an intentional server-owned authority reader for the
+# canonical artifact index. Keep that exception source-specific: graph and
+# data-profile reads must remain compiler-only.
+COMPILER_SOURCE_READERS = {
+    "context_compiler.py": frozenset(COMPILER_OWNED_SOURCES),
+    "evidence.py": frozenset(COMPILER_OWNED_SOURCES),
+    "context_tools.py": frozenset(COMPILER_OWNED_SOURCES),
+    "workflow_runtime.py": frozenset({"artifacts_index.json"}),
+}
 
 
 @pytest.fixture()
@@ -92,11 +101,10 @@ def test_no_agent_module_reads_compiler_owned_sources(project: Path) -> None:
     """
     offenders: list[str] = []
     for path in sorted(AGENT_DIR.rglob("*.py")):
-        if path.name in COMPILER_SOURCE_READERS:
-            continue
         text = path.read_text(encoding="utf-8")
+        allowed_sources = COMPILER_SOURCE_READERS.get(path.name, frozenset())
         for source in COMPILER_OWNED_SOURCES:
-            if source in text:
+            if source in text and source not in allowed_sources:
                 offenders.append(f"{path.relative_to(AGENT_DIR)} reads {source}")
 
     assert offenders == []

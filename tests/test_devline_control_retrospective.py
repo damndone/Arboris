@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from workbench.development_control.events import append_event
@@ -68,11 +69,20 @@ def _line(tmp_path: Path) -> tuple[Path, str]:
     return root, "wo-a"
 
 
+def _timestamp_ms(event: dict[str, object]) -> int:
+    timestamp = datetime.fromisoformat(str(event["timestamp"]).replace("Z", "+00:00"))
+    return int(timestamp.timestamp() * 1000)
+
+
 def test_report_is_byte_stable_and_covers_required_sections_and_metric_semantics(tmp_path: Path) -> None:
     root, line_id = _line(tmp_path)
     incident = str(uuid.uuid4())
-    append_event(root, line_id, _event(timestamp="2026-07-19T10:00:00.000Z", incident_id=incident))
-    append_event(
+    started = append_event(
+        root,
+        line_id,
+        _event(timestamp="2026-07-19T10:00:00.000Z", incident_id=incident),
+    )
+    resolved = append_event(
         root,
         line_id,
         _event(
@@ -198,7 +208,8 @@ def test_report_is_byte_stable_and_covers_required_sections_and_metric_semantics
     assert "Failure frequency: 3/11 (27.3%; 27.3 per 100 events)" in text
     assert "Repeat rate: 2/3 (66.7%)" in text
     assert "Recurrence rate: 1/1 (100.0%)" in text
-    assert "MTTR: median=180000 ms (sample=1; unresolved=1)" in text
+    expected_mttr = _timestamp_ms(resolved) - _timestamp_ms(started)
+    assert f"MTTR: median={expected_mttr} ms (sample=1; unresolved=1)" in text
     assert "Review churn: changes_required=1; average_review_round=2.0 (sample=1); withdrawn=1" in text
     assert "Spec churn: 0 (sample=1)" in text
     assert "Plan churn: 0 (sample=1)" in text
