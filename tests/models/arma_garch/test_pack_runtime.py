@@ -297,10 +297,29 @@ def test_public_workflow_completes_with_pack_graph_and_raw_lineage(
     run_root = project.root / "runs" / outcome["run_id"]
     result = json.loads((run_root / "model_results" / "arma_garch_1.json").read_text())
     assert result["model_type"] == "time_series.arma_garch"
-    report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
-    assert 'id="time-series-overview"' in report_html
-    assert "ARMA(1,0)" in report_html
-    assert "RMSE" in report_html
+    assert not (run_root / "reports" / "report.html").exists()
+    summary = json.loads((run_root / "diagnostic_summary.json").read_text())
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
+    assert summary["run_status"]["model_results_available"] is True
+    errors = json.loads((run_root / "errors.json").read_text())
+    report_issue = next(
+        issue for issue in errors["issues"] if issue["code"] == "REPORT_RENDER_FAILED"
+    )
+    assert "EVIDENCE_OWNER_CAPABILITY_REQUIRED" in report_issue["message"]
+    from workbench.report_view_model import build_report_view_model
+
+    report_view = build_report_view_model(
+        summary,
+        run_root,
+        include_legacy_presentation=True,
+    )
+    assert report_view["status"] == "unavailable"
+    assert report_view["validationStatus"] == "unavailable"
+    assert report_view["reasonCode"] == "EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    assert report_view["typed_critical_errors"] == [
+        {"code": "EVIDENCE_OWNER_CAPABILITY_REQUIRED", "severity": "BLOCKER"}
+    ]
     # Presentation exports are explicit Report-page actions in v1.8.6; a
     # normal Run retains the HTML/evidence artifacts without creating XLSX.
     assert not (run_root / "exports" / "tables.xlsx").exists()

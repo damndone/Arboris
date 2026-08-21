@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from ..context import ModelingContext, RunEnv
-from ...orchestrator._errors import WorkflowValidationError
 
 
 class StatisticalTestsStage:
@@ -84,6 +83,11 @@ def _declared_test_targets(
     pair is rejected rather than guessed.  Absent declarations simply leave the
     corresponding tests out of the packet.
     """
+
+    # Import lazily: importing the parent orchestrator package here during
+    # stage-module initialization would make orchestrator.__init__ re-import
+    # this stage before StatisticalTestsStage is defined.
+    from ...orchestrator._errors import WorkflowValidationError
 
     if not isinstance(request, dict):
         return None, None
