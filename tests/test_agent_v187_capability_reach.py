@@ -34,9 +34,8 @@ def _rerun_scaffold() -> tuple[dict, dict]:
     return target, preconditions
 
 
-def _await_run(client, project_root, run_id, timeout=90.0):
-    """Runs are submitted asynchronously; reading artifacts before the terminal
-    status is a race that fails as a missing file rather than as a wrong number."""
+def _await_terminal_run(client, project_root, run_id, timeout=90.0):
+    """Runs are submitted asynchronously; wait before reading terminal artifacts."""
     import time
 
     deadline = time.monotonic() + timeout
@@ -46,10 +45,16 @@ def _await_run(client, project_root, run_id, timeout=90.0):
         ).json()
         status = payload.get("status")
         if status in {"completed", "succeeded", "failed", "error"}:
-            assert status in {"completed", "succeeded"}, payload
             return payload
         time.sleep(0.1)
     raise AssertionError(f"run {run_id} never reached a terminal status")
+
+
+def _await_run(client, project_root, run_id, timeout=90.0):
+    """Wait for a successful run before reading its generated artifacts."""
+    payload = _await_terminal_run(client, project_root, run_id, timeout)
+    assert payload["status"] in {"completed", "succeeded"}, payload
+    return payload
 
 
 def _validate_rerun(changes: dict) -> None:
@@ -222,7 +227,6 @@ def test_a_rerun_override_actually_produces_a_design_run(tmp_path):
                 "sampling_weight": "weight",
                 "survey_strata_col": "stratum",
                 "survey_psu_col": "psu",
-                "survey_fpc_col": "fpc",
             },
             "rerun_reason": "agent_confirmed",
         },
@@ -243,6 +247,62 @@ def test_a_rerun_override_actually_produces_a_design_run(tmp_path):
     ]:
         entry = child["coefficients"][payload_term]
         assert entry["std_error"] == pytest.approx(oracle["se"][oracle_term], rel=1e-8)
+
+
+def test_a_rerun_override_rejects_unsupported_fpc_fail_closed(tmp_path):
+    """An Agent-declared FPC must fail rather than emit an ordinary artifact."""
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from workbench.api import app
+    from workbench.artifacts import read_json
+    from workbench.projects import create_project
+
+    fixtures = Path(__file__).parent / "fixtures" / "survey"
+    project = create_project(tmp_path, "agent_reach_fpc")
+    source = project.root / "design.csv"
+    source.write_text((fixtures / "design.csv").read_text())
+
+    client = TestClient(app)
+    with source.open("rb") as handle:
+        created = client.post(
+            "/runs",
+            files={"file": ("design.csv", handle, "text/csv")},
+            data={
+                "project_root": str(project.root),
+                "mode": "auto", "model_type": "ols", "y": "y", "x": "x1,x2",
+            },
+        )
+    assert created.status_code == 200, created.text
+    parent_id = created.json()["run_id"]
+    _await_run(client, project.root, parent_id)
+
+    rerun = client.post(
+        f"/runs/{parent_id}/rerun",
+        params={"project_root": str(project.root)},
+        json={
+            "from_node": "model:ols_1",
+            "op_overrides": {
+                "sampling_weight": "weight",
+                "survey_strata_col": "stratum",
+                "survey_psu_col": "psu",
+                "survey_fpc_col": "fpc",
+            },
+            "rerun_reason": "agent_confirmed",
+        },
+    )
+    assert rerun.status_code == 200, rerun.text
+    child_id = rerun.json()["run_id"]
+    terminal = _await_terminal_run(client, project.root, child_id)
+    assert terminal["status"] == "failed", terminal
+
+    run_root = project.root / "runs" / child_id
+    errors = read_json(run_root / "errors.json")
+    assert any(
+        issue["code"] == "SURVEY_FPC_UNSUPPORTED" for issue in errors["issues"]
+    )
+    assert not (run_root / "model_results" / "ols_1.json").exists()
 
 
 def test_agent_can_switch_the_model_family_and_carry_the_new_family_options():
