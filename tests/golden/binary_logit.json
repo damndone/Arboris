@@ -26,7 +26,6 @@
     ],
     "pred_prob_by_class": [],
     "raw_data.csv": [],
-    "report_html": [],
     "statistical_tests_anova": [
       "cleaned_dataset"
     ],
@@ -52,7 +51,9 @@
       "cleaned_dataset"
     ]
   },
-  "error_codes": [],
+  "error_codes": [
+    "REPORT_RENDER_FAILED"
+  ],
   "models": {
     "logit_1": {
       "coef_keys": [

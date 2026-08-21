@@ -28,7 +28,6 @@
     "histograms": [],
     "kde_plots": [],
     "raw_data.csv": [],
-    "report_html": [],
     "statistical_tests_anova": [
       "cleaned_dataset"
     ],
@@ -53,7 +52,8 @@
     "time_trend": []
   },
   "error_codes": [
-    "PANEL_POOLED_MODEL"
+    "PANEL_POOLED_MODEL",
+    "REPORT_RENDER_FAILED"
   ],
   "models": {
     "did_1": {

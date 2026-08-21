@@ -87,6 +87,56 @@
     }
   ],
   "projection_refs": [{"kind": "projection", "logical_id": "workflow.post_estimation.projection", "semantic_version": "1.0", "contract_digest": "cf69309126cbd0aa575f8e18fc561a1f30ff7406685bbaa55c92e0c0cc3efab1"}],
+  "projection_declarations": [
+    {
+      "path_id": "workflow.post_estimation.joint_f_test",
+      "consumer_id": "agent",
+      "projection_ref": {"kind": "projection", "logical_id": "workflow.post_estimation.projection", "semantic_version": "1.0", "contract_digest": "cf69309126cbd0aa575f8e18fc561a1f30ff7406685bbaa55c92e0c0cc3efab1"},
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workflow.post_estimation.evidence", "semantic_version": "1.0", "contract_digest": "cc05024da39f1b0304993e12d5e02e9a8d0e76dfae490ee0cee7a40acf97f871"}],
+      "envelope_contract_refs": [],
+      "fact_kinds": ["post_estimation", "diagnostic"],
+      "policy_ref": {"kind": "policy", "logical_id": "workflow.post_estimation.policy", "semantic_version": "1.0", "contract_digest": "ed18c6f3f5d6ae05296b572b31b53c87da86734de387bcf8ae3f2138de5eb43d"},
+      "renderer_ref": {"kind": "renderer", "logical_id": "workflow.post_estimation.renderer", "semantic_version": "1.0", "contract_digest": "ecd2d4f77b29ef18d91a12cbbb25520c6c7a6855ea5ebadc4e1b0ddc9f8141ee"},
+      "max_token_budget": 4096,
+      "max_row_budget": 64,
+      "allowed_sensitivity": ["public", "internal"],
+      "ordering": ["fact_id"],
+      "coverage_status": "required",
+      "exemption_reason": null
+    },
+    {
+      "path_id": "workflow.post_estimation.white_test",
+      "consumer_id": "agent",
+      "projection_ref": {"kind": "projection", "logical_id": "workflow.post_estimation.projection", "semantic_version": "1.0", "contract_digest": "cf69309126cbd0aa575f8e18fc561a1f30ff7406685bbaa55c92e0c0cc3efab1"},
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workflow.post_estimation.evidence", "semantic_version": "1.0", "contract_digest": "cc05024da39f1b0304993e12d5e02e9a8d0e76dfae490ee0cee7a40acf97f871"}],
+      "envelope_contract_refs": [],
+      "fact_kinds": ["post_estimation", "diagnostic"],
+      "policy_ref": {"kind": "policy", "logical_id": "workflow.post_estimation.policy", "semantic_version": "1.0", "contract_digest": "ed18c6f3f5d6ae05296b572b31b53c87da86734de387bcf8ae3f2138de5eb43d"},
+      "renderer_ref": {"kind": "renderer", "logical_id": "workflow.post_estimation.renderer", "semantic_version": "1.0", "contract_digest": "ecd2d4f77b29ef18d91a12cbbb25520c6c7a6855ea5ebadc4e1b0ddc9f8141ee"},
+      "max_token_budget": 4096,
+      "max_row_budget": 64,
+      "allowed_sensitivity": ["public", "internal"],
+      "ordering": ["fact_id"],
+      "coverage_status": "required",
+      "exemption_reason": null
+    },
+    {
+      "path_id": "workflow.post_estimation.quadratic_stationary_point",
+      "consumer_id": "agent",
+      "projection_ref": {"kind": "projection", "logical_id": "workflow.post_estimation.projection", "semantic_version": "1.0", "contract_digest": "cf69309126cbd0aa575f8e18fc561a1f30ff7406685bbaa55c92e0c0cc3efab1"},
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workflow.post_estimation.evidence", "semantic_version": "1.0", "contract_digest": "cc05024da39f1b0304993e12d5e02e9a8d0e76dfae490ee0cee7a40acf97f871"}],
+      "envelope_contract_refs": [],
+      "fact_kinds": ["post_estimation", "diagnostic"],
+      "policy_ref": {"kind": "policy", "logical_id": "workflow.post_estimation.policy", "semantic_version": "1.0", "contract_digest": "ed18c6f3f5d6ae05296b572b31b53c87da86734de387bcf8ae3f2138de5eb43d"},
+      "renderer_ref": {"kind": "renderer", "logical_id": "workflow.post_estimation.renderer", "semantic_version": "1.0", "contract_digest": "ecd2d4f77b29ef18d91a12cbbb25520c6c7a6855ea5ebadc4e1b0ddc9f8141ee"},
+      "max_token_budget": 4096,
+      "max_row_budget": 64,
+      "allowed_sensitivity": ["public", "internal"],
+      "ordering": ["fact_id"],
+      "coverage_status": "required",
+      "exemption_reason": null
+    }
+  ],
   "renderer_refs": [{"kind": "renderer", "logical_id": "workflow.post_estimation.renderer", "semantic_version": "1.0", "contract_digest": "ecd2d4f77b29ef18d91a12cbbb25520c6c7a6855ea5ebadc4e1b0ddc9f8141ee"}],
   "policy_refs": [{"kind": "policy", "logical_id": "workflow.post_estimation.policy", "semantic_version": "1.0", "contract_digest": "ed18c6f3f5d6ae05296b572b31b53c87da86734de387bcf8ae3f2138de5eb43d"}]
 }

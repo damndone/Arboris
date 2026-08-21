@@ -26,7 +26,6 @@
     "histograms": [],
     "kde_plots": [],
     "raw_data.csv": [],
-    "report_html": [],
     "scatter_plots": [],
     "statistical_tests_anova": [
       "cleaned_dataset"
@@ -53,7 +52,8 @@
   },
   "error_codes": [
     "DID_DYNAMIC_THIN_SUPPORT",
-    "PANEL_POOLED_MODEL"
+    "PANEL_POOLED_MODEL",
+    "REPORT_RENDER_FAILED"
   ],
   "models": {
     "cs_did_1": {

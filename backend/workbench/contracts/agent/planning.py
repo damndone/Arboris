@@ -370,7 +370,9 @@ _DRAFT_DURABLE_ENUMS = {
     "value_kind": frozenset({"boolean", "integer", "number", "reference", "scalar"}),
     "write_mode": frozenset({"append", "create", "none", "read_only", "replace"}),
 }
-_DRAFT_DURABLE_IDENTIFIER_KEYS = frozenset({"connection_name", "key", "name", "node_id", "port_name"})
+_DRAFT_DURABLE_IDENTIFIER_KEYS = frozenset(
+    {"connection_name", "key", "model_id", "name", "node_id", "port_name"}
+)
 _DRAFT_DURABLE_NUMBER_KEYS = frozenset(
     {"alpha", "cpu_ms", "limit", "max_rows", "max_tokens", "memory_mb", "probability", "seed", "threshold", "timeout_ms"}
 )

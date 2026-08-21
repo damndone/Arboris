@@ -31,6 +31,7 @@ panel = ["linearmodels>=6"]
 ml = ["scikit-learn>=1.5"]
 imbalanced = ["imbalanced-learn>=0.12"]
 imputation = ["statsmodels>=0.14"]
+native = ["pyreadstat>=1.3"]
 
 [project.scripts]
 workbench = "workbench.cli:app"

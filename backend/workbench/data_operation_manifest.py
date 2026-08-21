@@ -8,7 +8,7 @@ from hashlib import sha256
 import json
 import re
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from workbench.agent.operations import OperationRecord, OperationRegistry
 from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
@@ -21,6 +21,7 @@ from workbench.contracts.agent.planning import (
 from workbench.contracts.common.contract_ref import ContractRefV1
 from workbench.contracts.common.provider import (
     AdapterDeclarationV1,
+    ConsumerProjectionDeclarationV1,
     ExposurePathRefV1,
     ProviderContributionV1,
     is_opaque_executor_ref,
@@ -65,6 +66,19 @@ _DERIVED_IDENTITY_FIELDS = (
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _SERVER_OWNED_CAPABILITY = object()
 _SERVER_OWNED_ISSUER = object()
+
+
+def _validate_opaque_identity(value: object, name: str) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or value != value.strip()
+        or "/" in value
+        or "\\" in value
+        or ".." in value
+    ):
+        raise ValueError(f"{name} must be an opaque identity")
+    return value
 
 
 def _registered_data_consumer_executor(
@@ -982,6 +996,510 @@ class DataConsumerOutputPortsV1:
 
 
 @dataclass(frozen=True)
+class DataConsumerRuntimeOutputV1:
+    """Safe runtime projection of server-issued data output ports.
+
+    The Agent/Notebook runtime must not carry rows or filesystem paths.  The
+    package-owned data route may still use ``DataConsumerOutputPortsV1``
+    internally, but this projection carries only durable identities and an
+    evidence digest across the generic provider boundary.
+    """
+
+    record_id: str
+    operation_id: str
+    operation_version: str
+    execution_key: str
+    child_node_id: str
+    artifact_ids: tuple[str, ...]
+    evidence_digest: str
+    catalog_digest: str
+    _capability: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        for name in (
+            "record_id",
+            "operation_id",
+            "operation_version",
+            "execution_key",
+            "child_node_id",
+            "catalog_digest",
+        ):
+            value = getattr(self, name)
+            if (
+                type(value) is not str
+                or not value
+                or value != value.strip()
+                or "/" in value
+                or "\\" in value
+                or ".." in value
+            ):
+                raise ValueError(f"{name} must be a non-empty string")
+        if self.operation_id not in _DATA_OPERATION_IDS:
+            raise ValueError("runtime output operation_id is not a declared data operation")
+        if type(self.artifact_ids) is not tuple or not self.artifact_ids:
+            raise ValueError("runtime output artifact identities are required")
+        if any(
+            type(value) is not str
+            or not value
+            or value != value.strip()
+            or "/" in value
+            or "\\" in value
+            or ".." in value
+            for value in self.artifact_ids
+        ):
+            raise ValueError("runtime output artifact identities must not be paths")
+        if len(set(self.artifact_ids)) != len(self.artifact_ids):
+            raise ValueError("runtime output artifact identities are duplicated")
+        if _SHA256_RE.fullmatch(self.evidence_digest) is None:
+            raise ValueError("runtime output evidence_digest must be a SHA-256 digest")
+        if _SHA256_RE.fullmatch(self.catalog_digest) is None:
+            raise ValueError("runtime output catalog_digest must be a SHA-256 digest")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("runtime output can only be created by the server-owned factory")
+
+    @classmethod
+    def from_server(
+        cls,
+        *,
+        record_id: str,
+        operation_id: str,
+        operation_version: str,
+        execution_key: str,
+        child_node_id: str,
+        artifact_ids: tuple[str, ...],
+        evidence_digest: str,
+        catalog_digest: str,
+        _issuer: object | None = None,
+    ) -> "DataConsumerRuntimeOutputV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("runtime output requires the server-owned issuer")
+        return cls(
+            record_id=record_id,
+            operation_id=operation_id,
+            operation_version=operation_version,
+            execution_key=execution_key,
+            child_node_id=child_node_id,
+            artifact_ids=artifact_ids,
+            evidence_digest=evidence_digest,
+            catalog_digest=catalog_digest,
+            _capability=_SERVER_OWNED_CAPABILITY,
+        )
+
+    @classmethod
+    def from_output_ports(
+        cls,
+        output_ports: object,
+        *,
+        catalog_digest: str,
+        _issuer: object | None = None,
+    ) -> "DataConsumerRuntimeOutputV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("runtime output requires the server-owned issuer")
+        if type(output_ports) is not DataConsumerOutputPortsV1:
+            raise TypeError("server-owned DataConsumerOutputPortsV1 is required")
+        payload = output_ports.to_dict(catalog_digest=catalog_digest)
+        record = payload["ports"]["operation_record"]
+        derived = payload["ports"]["derived"]
+        evidence = payload["ports"]["evidence"]
+        artifact_ids = tuple(
+            sorted(
+                str(value)
+                for key, value in derived.items()
+                if key in {
+                    "artifact_id",
+                    "metadata_artifact_id",
+                    "recipe_artifact_id",
+                    "group_manifest_id",
+                }
+                and value is not None
+            )
+        )
+        return cls(
+            record_id=str(record["record_id"]),
+            operation_id=str(record["operation_id"]),
+            operation_version=str(record["operation_version"]),
+            execution_key=str(derived["execution_key"]),
+            child_node_id=str(derived["child_node_id"]),
+            artifact_ids=artifact_ids,
+            evidence_digest=sha256_canonical(evidence),
+            catalog_digest=str(payload["catalog_digest"]),
+            _capability=_SERVER_OWNED_CAPABILITY,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "record_id": self.record_id,
+            "operation_id": self.operation_id,
+            "operation_version": self.operation_version,
+            "execution_key": self.execution_key,
+            "child_node_id": self.child_node_id,
+            "artifact_ids": list(self.artifact_ids),
+            "evidence_digest": self.evidence_digest,
+            "catalog_digest": self.catalog_digest,
+        }
+
+
+@dataclass(frozen=True)
+class DataConsumerHostOperationRequestV1:
+    """Opaque identity-only input accepted by the server host-operation port."""
+
+    project_ref: str
+    session_ref: str
+    snapshot_ref: str
+    snapshot_digest: str
+    operation_id: str
+    operation_version: str
+    source_run_id: str
+    source_node_id: str
+    source_artifact_id: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "project_ref",
+            "session_ref",
+            "snapshot_ref",
+            "operation_id",
+            "operation_version",
+            "source_run_id",
+            "source_node_id",
+            "source_artifact_id",
+        ):
+            _validate_opaque_identity(getattr(self, name), name)
+        if _SHA256_RE.fullmatch(self.snapshot_digest) is None:
+            raise ValueError("snapshot_digest must be a SHA-256 digest")
+        if self.operation_id not in _DATA_OPERATION_IDS:
+            raise ValueError("operation_id is not a declared data operation")
+        if self.operation_version != "v1":
+            raise ValueError("operation_version is not supported")
+
+
+@dataclass(frozen=True)
+class DataConsumerRecordAuthorityV1:
+    """Closed server-issued authority for the records a host port may consume."""
+
+    _records: Mapping[str, OperationRecord]
+    _capability: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self._records, Mapping):
+            raise TypeError("record authority requires a server record mapping")
+        copied = dict(self._records)
+        for record_id, record in copied.items():
+            if type(record_id) is not str or not record_id:
+                raise ValueError("record authority contains an invalid record_id")
+            if type(record) is not OperationRecord or record.record_id != record_id:
+                raise ValueError("record authority contains a non-server OperationRecord")
+        object.__setattr__(self, "_records", MappingProxyType(copied))
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("record authority can only be created by the server-owned factory")
+
+    @classmethod
+    def from_server(
+        cls,
+        records: Mapping[str, OperationRecord],
+        *,
+        _issuer: object | None = None,
+    ) -> "DataConsumerRecordAuthorityV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("record authority requires the server-owned issuer")
+        return cls(records, _capability=_SERVER_OWNED_CAPABILITY)
+
+    def get(self, record_id: str) -> OperationRecord | None:
+        return self._records.get(record_id)
+
+
+_DATA_HOST_RAW_KEYS = frozenset(
+    {"frame", "frames", "rows", "path", "paths", "features", "target", "raw", "data"}
+)
+
+
+def _reject_data_host_raw_payload(value: object, *, path: str = "request") -> None:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if type(key) is not str:
+                raise ValueError(f"{path} contains a non-string field name")
+            if key.lower() in _DATA_HOST_RAW_KEYS:
+                raise ValueError(f"{path}.{key} is a raw data field")
+            _reject_data_host_raw_payload(child, path=f"{path}.{key}")
+        return
+    if isinstance(value, (list, tuple)):
+        for index, child in enumerate(value):
+            _reject_data_host_raw_payload(child, path=f"{path}[{index}]")
+
+
+@dataclass(frozen=True)
+class DataConsumerHostOperationPortV1:
+    """Server-owned resolver from opaque identities to typed data output ports."""
+
+    _resolve: Callable[[DataConsumerHostOperationRequestV1], object]
+    _record_authority: DataConsumerRecordAuthorityV1
+    catalog_digest: str
+    project_ref: str
+    session_ref: str
+    snapshot_ref: str
+    snapshot_digest: str
+    operation_id: str
+    operation_version: str
+    source_run_id: str
+    source_node_id: str
+    source_artifact_id: str
+    _capability: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not callable(self._resolve):
+            raise TypeError("host-operation port requires a server resolver")
+        if type(self._record_authority) is not DataConsumerRecordAuthorityV1:
+            raise TypeError("host-operation port requires a server record authority")
+        if _SHA256_RE.fullmatch(self.catalog_digest) is None:
+            raise ValueError("host-operation port catalog_digest must be a SHA-256 digest")
+        for name in (
+            "project_ref",
+            "session_ref",
+            "snapshot_ref",
+            "operation_id",
+            "operation_version",
+            "source_run_id",
+            "source_node_id",
+            "source_artifact_id",
+        ):
+            _validate_opaque_identity(getattr(self, name), name)
+        if self.operation_id not in _DATA_OPERATION_IDS:
+            raise ValueError("host-operation port operation_id is not declared")
+        if self.operation_version != "v1":
+            raise ValueError("host-operation port operation_version is not supported")
+        if _SHA256_RE.fullmatch(self.snapshot_digest) is None:
+            raise ValueError("host-operation port snapshot_digest must be a SHA-256 digest")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("host-operation port can only be created by the server-owned factory")
+
+    @classmethod
+    def from_server(
+        cls,
+        resolve: Callable[[DataConsumerHostOperationRequestV1], object],
+        *,
+        record_authority: DataConsumerRecordAuthorityV1,
+        catalog_digest: str,
+        project_ref: str,
+        session_ref: str,
+        snapshot_ref: str,
+        snapshot_digest: str,
+        operation_id: str,
+        operation_version: str,
+        source_run_id: str,
+        source_node_id: str,
+        source_artifact_id: str,
+        _issuer: object | None = None,
+    ) -> "DataConsumerHostOperationPortV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("host-operation port requires the server-owned issuer")
+        return cls(
+            _resolve=resolve,
+            _record_authority=record_authority,
+            catalog_digest=catalog_digest,
+            project_ref=project_ref,
+            session_ref=session_ref,
+            snapshot_ref=snapshot_ref,
+            snapshot_digest=snapshot_digest,
+            operation_id=operation_id,
+            operation_version=operation_version,
+            source_run_id=source_run_id,
+            source_node_id=source_node_id,
+            source_artifact_id=source_artifact_id,
+            _capability=_SERVER_OWNED_CAPABILITY,
+        )
+
+    def resolve(self, request: DataConsumerHostOperationRequestV1) -> DataConsumerRuntimeOutputV1:
+        if type(request) is not DataConsumerHostOperationRequestV1:
+            raise TypeError("host-operation port accepts only a typed identity request")
+        if request.project_ref != self.project_ref or request.session_ref != self.session_ref:
+            raise ValueError("host-operation request has a foreign scope")
+        if (
+            request.snapshot_ref != self.snapshot_ref
+            or request.snapshot_digest != self.snapshot_digest
+        ):
+            raise ValueError("host-operation request has a stale snapshot")
+        if (
+            request.operation_id != self.operation_id
+            or request.operation_version != self.operation_version
+            or request.source_run_id != self.source_run_id
+            or request.source_node_id != self.source_node_id
+            or request.source_artifact_id != self.source_artifact_id
+        ):
+            raise ValueError("host-operation request has a foreign operation or source identity")
+        result = self._resolve(request)
+        if type(result) is not DataConsumerOutputPortsV1:
+            raise TypeError("host resolver must return typed server-owned output ports")
+        record = result.operation_record
+        authoritative_record = self._record_authority.get(record.record_id)
+        if type(authoritative_record) is not OperationRecord or authoritative_record is not record:
+            raise ValueError(
+                "host resolver returned an OperationRecord that is not the exact server-issued record"
+            )
+        if record.status != "completed" or record.effect_status != "committed":
+            raise ValueError("host resolver returned an incomplete OperationRecord")
+        if (
+            record.operation_id != request.operation_id
+            or record.operation_version != request.operation_version
+            or record.agent_session_id != self.session_ref
+        ):
+            raise ValueError("OperationRecord does not match the host-operation identity")
+        required_claims = {
+            "project_ref": self.project_ref,
+            "session_ref": self.session_ref,
+            "data_snapshot_ref": self.snapshot_ref,
+            "data_snapshot_digest": self.snapshot_digest,
+            "source_run_id": self.source_run_id,
+            "source_node_id": self.source_node_id,
+            "source_artifact_id": self.source_artifact_id,
+        }
+        claims = (record.target, record.preconditions)
+        if any(not isinstance(claim, Mapping) for claim in claims):
+            raise ValueError("OperationRecord identity claims are not mappings")
+        for key, expected in required_claims.items():
+            values = [claim[key] for claim in claims if key in claim]
+            if not values:
+                raise ValueError(f"OperationRecord is missing required identity claim {key}")
+            if any(type(value) is not str or value != expected for value in values):
+                raise ValueError(f"OperationRecord has a foreign {key}")
+        adapter = build_data_consumer_runtime_adapter()
+        if adapter.catalog_digest != self.catalog_digest:
+            raise ValueError("host-operation port catalog digest is not the live server catalog")
+        adapter.adapt_operation_record(record, result)
+        return DataConsumerRuntimeOutputV1.from_output_ports(
+            result,
+            catalog_digest=self.catalog_digest,
+            _issuer=_SERVER_OWNED_ISSUER,
+        )
+
+    def as_execution_port(self) -> "DataConsumerExecutionPortV1":
+        def execute(context: object, request: Mapping[str, object]) -> object:
+            from workbench.agent.trusted_executor_registry import ProviderRuntimeContextV1
+
+            if type(context) is not ProviderRuntimeContextV1:
+                raise TypeError("host-operation port requires a server runtime context")
+            if context.project_ref != self.project_ref or context.session_ref != self.session_ref:
+                raise ValueError("host runtime context has a foreign scope")
+            if not isinstance(request, Mapping):
+                raise TypeError("host-operation port requires a shared runtime request mapping")
+            _reject_data_host_raw_payload(request)
+            allowed = {
+                "capability_id",
+                "target_ref",
+                "data_snapshot_ref",
+                "source_text_digest",
+                "operation_id",
+                "source_run_id",
+                "source_node_id",
+                "source_artifact_id",
+                "operation",
+                "options",
+            }
+            unknown = sorted(set(request) - allowed)
+            if unknown:
+                raise ValueError(
+                    "host-operation shared runtime request contains unsupported field(s): "
+                    + ", ".join(unknown)
+                )
+            if request.get("data_snapshot_ref") != self.snapshot_ref:
+                raise ValueError("host-operation shared runtime request has a stale snapshot")
+            if request.get("target_ref") != self.source_run_id:
+                raise ValueError("host-operation shared runtime request has a foreign source run")
+            options = request.get("options")
+            if options is not None and not isinstance(options, Mapping):
+                raise ValueError("host-operation shared runtime options must be a mapping")
+            operation_id = request.get("operation_id")
+            if operation_id is None and isinstance(options, Mapping):
+                operation_id = options.get("operation_id")
+            if operation_id != self.operation_id:
+                raise ValueError("host-operation shared runtime request has a foreign operation")
+            for name in ("source_run_id", "source_node_id", "source_artifact_id"):
+                value = request.get(name)
+                if value is not None and value != getattr(self, name):
+                    raise ValueError(f"host-operation shared runtime request has a foreign {name}")
+            typed_request = DataConsumerHostOperationRequestV1(
+                project_ref=self.project_ref,
+                session_ref=self.session_ref,
+                snapshot_ref=self.snapshot_ref,
+                snapshot_digest=self.snapshot_digest,
+                operation_id=self.operation_id,
+                operation_version=self.operation_version,
+                source_run_id=self.source_run_id,
+                source_node_id=self.source_node_id,
+                source_artifact_id=self.source_artifact_id,
+            )
+            return self.resolve(typed_request)
+
+        return DataConsumerExecutionPortV1.from_server(
+            execute,
+            catalog_digest=self.catalog_digest,
+            _issuer=_SERVER_OWNED_ISSUER,
+        )
+
+
+@dataclass(frozen=True)
+class DataConsumerExecutionPortV1:
+    """Server-issued host port for executing one data operation.
+
+    The host implementation is intentionally hidden behind this typed port.
+    A generic provider contribution can only receive a validated
+    ``DataConsumerRuntimeOutputV1``; it cannot receive a project path, a raw
+    dataframe, or a caller-created evidence packet.
+    """
+
+    _execute: Callable[[object, Mapping[str, object]], object]
+    catalog_digest: str
+    _capability: object | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not callable(self._execute):
+            raise TypeError("execution port requires a callable host implementation")
+        if _SHA256_RE.fullmatch(self.catalog_digest) is None:
+            raise ValueError("execution port catalog_digest must be a SHA-256 digest")
+        if self._capability is not _SERVER_OWNED_CAPABILITY:
+            raise TypeError("execution port can only be created by the server-owned factory")
+
+    @classmethod
+    def from_server(
+        cls,
+        execute: Callable[[object, Mapping[str, object]], object],
+        *,
+        catalog_digest: str,
+        _issuer: object | None = None,
+    ) -> "DataConsumerExecutionPortV1":
+        if _issuer is not _SERVER_OWNED_ISSUER:
+            raise TypeError("execution port requires the server-owned issuer")
+        return cls(
+            _execute=execute,
+            catalog_digest=catalog_digest,
+            _capability=_SERVER_OWNED_CAPABILITY,
+        )
+
+    def execute(
+        self,
+        context: object,
+        request: Mapping[str, object],
+    ) -> DataConsumerRuntimeOutputV1:
+        from workbench.agent.trusted_executor_registry import ProviderRuntimeContextV1
+
+        if type(context) is not ProviderRuntimeContextV1:
+            raise TypeError("execution port requires a server runtime context")
+        if not isinstance(request, Mapping):
+            raise TypeError("execution port requires a typed request mapping")
+        result = self._execute(context, dict(request))
+        if type(result) is DataConsumerRuntimeOutputV1:
+            output = result
+        else:
+            output = DataConsumerRuntimeOutputV1.from_output_ports(
+                result,
+                catalog_digest=self.catalog_digest,
+                _issuer=_SERVER_OWNED_ISSUER,
+            )
+        if output.catalog_digest != self.catalog_digest:
+            raise ValueError("execution port output catalog digest does not match the port")
+        return output
+
+
+@dataclass(frozen=True)
 class DataConsumerRuntimeAdapterV1:
     """Package-owned adapter joined only from the server's typed catalog."""
 
@@ -1088,6 +1606,253 @@ def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
         output_ports=("derived", "operation_record", "evidence"),
         operation_ids=tuple(item.operation_id for item in manifest.operations),
         _capability=_SERVER_OWNED_CAPABILITY,
+    )
+
+
+def _validate_data_consumer_runtime_request(request: Mapping[str, object]) -> dict[str, object]:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+    if not isinstance(request, Mapping):
+        raise TrustedExecutorRegistryError(
+            "DATA_CONSUMER_RUNTIME_REQUEST_INVALID",
+            "data-consumer runtime request must be an object",
+        )
+    allowed = {
+        "capability_id", "target_ref", "data_snapshot_ref", "source_text_digest",
+        "operation_id", "source_run_id", "source_node_id", "source_artifact_id",
+        "operation", "options",
+    }
+    unknown = sorted(set(request) - allowed)
+    if unknown:
+        raise TrustedExecutorRegistryError(
+            "DATA_CONSUMER_RUNTIME_REQUEST_INVALID",
+            f"unsupported data-consumer runtime field(s): {', '.join(unknown)}",
+        )
+    normalized = dict(request)
+    operation_id = normalized.get("operation_id")
+    if operation_id is None and isinstance(normalized.get("options"), Mapping):
+        operation_id = normalized["options"].get("operation_id")  # type: ignore[union-attr]
+    if type(operation_id) is not str or operation_id not in _DATA_OPERATION_IDS:
+        raise TrustedExecutorRegistryError(
+            "DATA_CONSUMER_RUNTIME_OPERATION_INVALID",
+            "data-consumer runtime requires a declared operation_id",
+        )
+    normalized["operation_id"] = operation_id
+    for field_name in (
+        "capability_id", "target_ref", "data_snapshot_ref", "source_text_digest",
+        "source_run_id", "source_node_id", "source_artifact_id", "operation",
+    ):
+        value = normalized.get(field_name)
+        if value is not None and (type(value) is not str or not value or value != value.strip()):
+            raise TrustedExecutorRegistryError(
+                "DATA_CONSUMER_RUNTIME_REQUEST_INVALID",
+                f"{field_name} must be a non-empty string when present",
+            )
+    return normalized
+
+
+def _execute_data_consumer_runtime_unavailable(
+    context: object,
+    request: Mapping[str, object],
+) -> Mapping[str, object]:
+    from workbench.agent.trusted_executor_registry import ProviderRuntimeContextV1
+
+    if type(context) is not ProviderRuntimeContextV1:
+        raise TypeError("data-consumer runtime requires a server runtime context")
+    return {
+        "status": "unavailable",
+        "reason_code": "DATA_CONSUMER_HOST_DATA_STORE_UNAVAILABLE",
+        "provider_id": "workbench.data_consumer",
+        "adapter_id": "workbench.data_consumer.adapter",
+        "executor_ref": "executor:workbench.data_consumer.adapter",
+        "operation_id": str(request["operation_id"]),
+        "execution_instance_hash": context.execution_instance_hash,
+        "typed_authority": "DataConsumerOutputPortsV1",
+    }
+
+
+def _execute_data_consumer_runtime_with_port(
+    context: object,
+    request: Mapping[str, object],
+    execution_port: DataConsumerExecutionPortV1,
+) -> Mapping[str, object]:
+    output = execution_port.execute(context, request)
+    operation_id = str(request["operation_id"])
+    if output.operation_id != operation_id:
+        raise ValueError("data-consumer execution output operation does not match the request")
+    return {
+        "status": "completed",
+        "reason_code": "DATA_CONSUMER_EXECUTED",
+        "provider_id": "workbench.data_consumer",
+        "adapter_id": "workbench.data_consumer.adapter",
+        "executor_ref": "executor:workbench.data_consumer.adapter",
+        "operation_id": operation_id,
+        "execution_instance_hash": context.execution_instance_hash,
+        "typed_authority": "DataConsumerOutputPortsV1",
+        "output": output.to_dict(),
+    }
+
+
+def _validate_data_consumer_runtime_result(result: Mapping[str, object]) -> None:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+    if not isinstance(result, Mapping) or result.get("status") not in {"unavailable", "completed"}:
+        raise TrustedExecutorRegistryError(
+            "DATA_CONSUMER_RUNTIME_RESULT_INVALID",
+            "data-consumer runtime cannot claim completed without typed output ports",
+        )
+    expected = {
+        "provider_id": "workbench.data_consumer",
+        "adapter_id": "workbench.data_consumer.adapter",
+        "executor_ref": "executor:workbench.data_consumer.adapter",
+        "typed_authority": "DataConsumerOutputPortsV1",
+    }
+    if any(result.get(key) != value for key, value in expected.items()):
+        raise TrustedExecutorRegistryError("DATA_CONSUMER_RUNTIME_RESULT_INVALID")
+    operation_id = result.get("operation_id")
+    if type(operation_id) is not str or operation_id not in _DATA_OPERATION_IDS:
+        raise TrustedExecutorRegistryError("DATA_CONSUMER_RUNTIME_RESULT_INVALID")
+    if any(key in result for key in ("rows", "path", "evidence")):
+        raise TrustedExecutorRegistryError(
+            "DATA_CONSUMER_RUNTIME_RESULT_INVALID",
+            "unavailable data-consumer results cannot contain raw rows, paths or evidence",
+        )
+    if result.get("status") == "unavailable":
+        if result.get("reason_code") != "DATA_CONSUMER_HOST_DATA_STORE_UNAVAILABLE":
+            raise TrustedExecutorRegistryError("DATA_CONSUMER_RUNTIME_RESULT_INVALID")
+        return
+    if result.get("reason_code") != "DATA_CONSUMER_EXECUTED":
+        raise TrustedExecutorRegistryError("DATA_CONSUMER_RUNTIME_RESULT_INVALID")
+    output = result.get("output")
+    if not isinstance(output, Mapping):
+        raise TrustedExecutorRegistryError(
+            "DATA_CONSUMER_RUNTIME_RESULT_INVALID",
+            "completed data-consumer results require a typed output projection",
+        )
+    expected_output = {
+        "record_id",
+        "operation_id",
+        "operation_version",
+        "execution_key",
+        "child_node_id",
+        "artifact_ids",
+        "evidence_digest",
+        "catalog_digest",
+    }
+    if set(output) != expected_output:
+        raise TrustedExecutorRegistryError(
+            "DATA_CONSUMER_RUNTIME_RESULT_INVALID",
+            "completed data-consumer output contains fields outside the typed projection",
+        )
+    if output.get("operation_id") != operation_id:
+        raise TrustedExecutorRegistryError("DATA_CONSUMER_RUNTIME_RESULT_INVALID")
+    for field_name in (
+        "record_id",
+        "operation_id",
+        "operation_version",
+        "execution_key",
+        "child_node_id",
+    ):
+        value = output.get(field_name)
+        if (
+            type(value) is not str
+            or not value
+            or value != value.strip()
+            or "/" in value
+            or "\\" in value
+            or ".." in value
+        ):
+            raise TrustedExecutorRegistryError("DATA_CONSUMER_RUNTIME_RESULT_INVALID")
+    if type(output.get("artifact_ids")) is not list or not output["artifact_ids"]:
+        raise TrustedExecutorRegistryError("DATA_CONSUMER_RUNTIME_RESULT_INVALID")
+    if any(
+        type(value) is not str
+        or not value
+        or "/" in value
+        or "\\" in value
+        or ".." in value
+        for value in output["artifact_ids"]
+    ):
+        raise TrustedExecutorRegistryError(
+            "DATA_CONSUMER_RUNTIME_RESULT_INVALID",
+            "completed data-consumer output contains a path-like artifact identity",
+        )
+    if _SHA256_RE.fullmatch(str(output.get("evidence_digest"))) is None:
+        raise TrustedExecutorRegistryError("DATA_CONSUMER_RUNTIME_RESULT_INVALID")
+    if _SHA256_RE.fullmatch(str(output.get("catalog_digest"))) is None:
+        raise TrustedExecutorRegistryError("DATA_CONSUMER_RUNTIME_RESULT_INVALID")
+
+
+def build_data_consumer_runtime_contribution(
+    catalog: object,
+    *,
+    execution_port: DataConsumerExecutionPortV1 | None = None,
+) -> object:
+    """Build the data contribution from an optional server-owned host port.
+
+    Without a port the contribution remains explicitly unavailable.  A port
+    can only enable execution when it is server-issued and bound to the exact
+    catalog digest being composed.
+    """
+
+    from workbench.agent.trusted_executor_registry import ProviderRuntimeContributionV1
+    from workbench.providers.catalog import ProviderCatalogV1, is_server_owned_catalog
+
+    if type(catalog) is not ProviderCatalogV1 or not is_server_owned_catalog(catalog):
+        raise ValueError("data-consumer runtime requires the exact server-loaded provider catalog")
+    if execution_port is not None and type(execution_port) is not DataConsumerExecutionPortV1:
+        raise TypeError("data-consumer runtime requires a server-issued execution port")
+    if execution_port is not None and execution_port.catalog_digest != catalog.catalog_digest:
+        raise ValueError("data-consumer execution port catalog digest does not match the catalog")
+    providers = [provider for provider in catalog.providers if provider.provider_id == "workbench.data_consumer"]
+    if len(providers) != 1:
+        raise ValueError("workbench.data_consumer provider must be unique")
+    provider = providers[0]
+    declarations = [
+        declaration
+        for declaration in provider.adapter_declarations
+        if declaration.adapter_id == "workbench.data_consumer.adapter"
+    ]
+    if len(declarations) != 1:
+        raise ValueError("workbench.data_consumer adapter declaration must be unique")
+    declaration = declarations[0]
+    adapter = build_data_consumer_runtime_adapter()
+    if execution_port is None:
+        executor = _execute_data_consumer_runtime_unavailable
+        execution_allowed = False
+        metadata = {
+            "status": "unavailable",
+            "reason_code": "DATA_CONSUMER_HOST_DATA_STORE_UNAVAILABLE",
+            "catalog_digest": catalog.catalog_digest,
+            "output_ports": list(adapter.output_ports),
+            "typed_authority": "DataConsumerOutputPortsV1",
+        }
+    else:
+        def executor(context: object, request: Mapping[str, object]) -> Mapping[str, object]:
+            return _execute_data_consumer_runtime_with_port(context, request, execution_port)
+
+        execution_allowed = True
+        metadata = {
+            "status": "available",
+            "reason_code": "DATA_CONSUMER_EXECUTED",
+            "catalog_digest": catalog.catalog_digest,
+            "output_ports": list(adapter.output_ports),
+            "typed_authority": "DataConsumerOutputPortsV1",
+        }
+    return ProviderRuntimeContributionV1(
+        provider_id=provider.provider_id,
+        adapter_id=declaration.adapter_id,
+        executor_ref=declaration.executor_ref,
+        owner="workbench.server.data_consumer",
+        signature="workbench.data_consumer.runtime.v1",
+        effect="read_only",
+        request_contract_ref=declaration.request_schema_ref,
+        result_contract_refs=declaration.output_refs,
+        executor=executor,
+        request_validator=_validate_data_consumer_runtime_request,
+        result_validator=_validate_data_consumer_runtime_result,
+        execution_allowed=execution_allowed,
+        metadata=metadata,
     )
 
 
@@ -1247,7 +2012,13 @@ def build_builtin_provider_payload() -> dict[str, object]:
                 execution_adapter_ref=refs["adapter"],
                 result_contract_refs=(refs["output"],),
                 evidence_contract_refs=(refs["evidence"],),
-                projection_refs=MappingProxyType({"agent": refs["projection"]}),
+                projection_refs=MappingProxyType(
+                    {
+                        "agent": refs["projection"],
+                        "notebook": refs["projection"],
+                        "report": refs["projection"],
+                    }
+                ),
             ),
         ),
         adapter_declarations=(
@@ -1263,6 +2034,56 @@ def build_builtin_provider_payload() -> dict[str, object]:
         projection_refs=(refs["projection"],),
         renderer_refs=(refs["renderer"],),
         policy_refs=(refs["policy"],),
+        projection_declarations=(
+            ConsumerProjectionDeclarationV1(
+                path_id="workbench.data_consumer.operations",
+                consumer_id="agent",
+                projection_ref=refs["projection"],
+                evidence_contract_refs=(refs["evidence"],),
+                envelope_contract_refs=(),
+                fact_kinds=("data_operation", "metadata"),
+                policy_ref=refs["policy"],
+                renderer_ref=refs["renderer"],
+                max_token_budget=4096,
+                max_row_budget=64,
+                allowed_sensitivity=("public", "internal"),
+                ordering=("fact_id",),
+                coverage_status="required",
+                exemption_reason=None,
+            ),
+            ConsumerProjectionDeclarationV1(
+                path_id="workbench.data_consumer.operations",
+                consumer_id="notebook",
+                projection_ref=refs["projection"],
+                evidence_contract_refs=(refs["evidence"],),
+                envelope_contract_refs=(),
+                fact_kinds=("data_operation", "metadata"),
+                policy_ref=refs["policy"],
+                renderer_ref=refs["renderer"],
+                max_token_budget=4096,
+                max_row_budget=64,
+                allowed_sensitivity=("public", "internal"),
+                ordering=("fact_id",),
+                coverage_status="required",
+                exemption_reason=None,
+            ),
+            ConsumerProjectionDeclarationV1(
+                path_id="workbench.data_consumer.operations",
+                consumer_id="report",
+                projection_ref=refs["projection"],
+                evidence_contract_refs=(refs["evidence"],),
+                envelope_contract_refs=(),
+                fact_kinds=("data_operation", "metadata"),
+                policy_ref=refs["policy"],
+                renderer_ref=refs["renderer"],
+                max_token_budget=4096,
+                max_row_budget=64,
+                allowed_sensitivity=("public", "internal"),
+                ordering=("fact_id",),
+                coverage_status="required",
+                exemption_reason=None,
+            ),
+        ),
     )
     return contribution.to_dict()
 
@@ -1328,11 +2149,14 @@ __all__ = [
     "DataConsumerEvidencePortV1",
     "DataConsumerServerEvidenceV1",
     "DataConsumerOutputPortsV1",
+    "DataConsumerHostOperationRequestV1",
+    "DataConsumerHostOperationPortV1",
     "DataConsumerRuntimeAdapterV1",
     "DraftAgentNotebookFixture",
     "ReplayContractV1",
     "build_builtin_provider_payload",
     "build_data_operation_manifest",
+    "build_data_consumer_runtime_contribution",
     "build_data_consumer_runtime_adapter",
     "draft_agent_notebook_composition_fixtures",
 ]

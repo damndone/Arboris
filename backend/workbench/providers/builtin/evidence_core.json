@@ -51,6 +51,22 @@
   "projection_refs": [
     {"kind": "projection", "logical_id": "evidence.core.projection", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000009"}
   ],
+  "projection_declarations": [{
+    "path_id": "evidence.core.direct",
+    "consumer_id": "agent",
+    "projection_ref": {"kind": "projection", "logical_id": "evidence.core.projection", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000009"},
+    "evidence_contract_refs": [{"kind": "evidence", "logical_id": "evidence.core.envelope.contract", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000008"}],
+    "envelope_contract_refs": [],
+    "fact_kinds": ["numeric_fact", "validation"],
+    "policy_ref": {"kind": "policy", "logical_id": "evidence.core.policy", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000011"},
+    "renderer_ref": {"kind": "renderer", "logical_id": "evidence.core.renderer", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000010"},
+    "max_token_budget": 4096,
+    "max_row_budget": 64,
+    "allowed_sensitivity": ["public", "internal"],
+    "ordering": ["fact_id"],
+    "coverage_status": "required",
+    "exemption_reason": null
+  }],
   "renderer_refs": [
     {"kind": "renderer", "logical_id": "evidence.core.renderer", "semantic_version": "1.0", "contract_digest": "1000000000000000000000000000000000000000000000000000000000000010"}
   ],

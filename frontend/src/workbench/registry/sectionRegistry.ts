@@ -31,9 +31,11 @@ import { useProjectRootOptional } from "../ProjectRootContext";
 import {
   confirmDataOperation,
   fetchDataColumnCastContext,
+  fetchDataOperationProfile,
   fetchDataOperationManifest,
   previewDataOperation,
 } from "../../lineage/dataOperations";
+import { DataProfileFetchError } from "../../lineage/dataOperations";
 import { useResolvedNodeOperationContext } from "../../lineage/detail/NodeOperationContextProvider";
 import { TrustBanner } from "../../lineage/detail/sections/TrustBanner";
 import { LineageChainSection } from "../../lineage/detail/sections/LineageChainSection";
@@ -161,12 +163,16 @@ export const DataOperationsRegistrySection: FC<{ node: GraphViewNode }> = () => 
   const sourceNodeId = resolved?.ok ? resolved.context.operation_target.op_node_id : null;
   const [manifest, setManifest] = useState<unknown | null>(null);
   const [sourceArtifactId, setSourceArtifactId] = useState<string | null>(null);
+  const [profile, setProfile] = useState<unknown | null>(null);
+  const [profileStatus, setProfileStatus] = useState<"loading" | "available" | "unavailable" | "degraded">("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     setManifest(null);
     setSourceArtifactId(null);
+    setProfile(null);
+    setProfileStatus("loading");
     setLoadError(null);
     if (!projectRoot || !sourceRunId || !sourceNodeId) return () => undefined;
 
@@ -183,6 +189,21 @@ export const DataOperationsRegistrySection: FC<{ node: GraphViewNode }> = () => 
         }
         setManifest(nextManifest);
         setSourceArtifactId(artifactId);
+        void fetchDataOperationProfile(projectRoot, sourceRunId, sourceNodeId, artifactId)
+          .then((nextProfile) => {
+            if (!active) return;
+            setProfile(nextProfile);
+            setProfileStatus("available");
+          })
+          .catch((reason: unknown) => {
+            if (!active) return;
+            setProfile(null);
+            setProfileStatus(
+              reason instanceof DataProfileFetchError && reason.code === "UNAVAILABLE"
+                ? "unavailable"
+                : "degraded",
+            );
+          });
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -219,6 +240,8 @@ export const DataOperationsRegistrySection: FC<{ node: GraphViewNode }> = () => 
     },
     preview: previewDataOperation,
     confirm: confirmDataOperation,
+    profile,
+    profileStatus,
   });
 };
 

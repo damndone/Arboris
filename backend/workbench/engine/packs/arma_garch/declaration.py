@@ -12,7 +12,10 @@ from workbench.engine.capabilities import (
     register_capability_declaration,
 )
 from workbench.engine.pack import AnalysisPack, register_pack
-from workbench.engine.registry import ModelHandler
+from workbench.engine.registry import (
+    ARTIFACT_RESULT_BINDING_KEY,
+    ModelHandler,
+)
 from workbench.model_options import ModelOptionsContract
 
 from .runner import fit_from_context
@@ -35,6 +38,7 @@ def declare_pack() -> None:
                         producer_version="time_series.arma_garch@1.0",
                         input_contract_version=ARMA_GARCH_CONTRACT_VERSION,
                     ),
+                    result_binding_key=ARTIFACT_RESULT_BINDING_KEY,
                 )
             ],
         )

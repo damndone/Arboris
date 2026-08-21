@@ -27,7 +27,6 @@
     ],
     "qq_residuals": [],
     "raw_data.csv": [],
-    "report_html": [],
     "residuals_fitted": [],
     "residuals_vs_x": [],
     "scatter_plots": [],
@@ -58,7 +57,8 @@
     "time_trend": []
   },
   "error_codes": [
-    "PANEL_POOLED_MODEL"
+    "PANEL_POOLED_MODEL",
+    "REPORT_RENDER_FAILED"
   ],
   "models": {
     "ols_1": {

@@ -24,6 +24,43 @@ export interface DataColumnCastContext {
   downstream_invalidation: string[];
 }
 
+export interface DataProfileSourceV1 {
+  run_id: string;
+  node_id: string;
+  artifact_id: string;
+}
+
+export interface DataProfileMissingnessV1 {
+  count: number;
+  rate: number;
+}
+
+export interface DataProfileVariableV1 {
+  name: string;
+  label: string | null;
+  measurement_level: string | null;
+  missingness: DataProfileMissingnessV1;
+  user_missing_values: unknown[];
+  value_labels: Record<string, string>;
+  sample_values: unknown[];
+}
+
+export interface DataProfileV1 {
+  schema_version: "data-profile.v1";
+  source: DataProfileSourceV1;
+  variables: DataProfileVariableV1[];
+}
+
+export class DataProfileFetchError extends Error {
+  constructor(
+    readonly code: "UNAVAILABLE" | "DEGRADED",
+    message = "The bounded data profile is unavailable.",
+  ) {
+    super(message);
+    this.name = "DataProfileFetchError";
+  }
+}
+
 export interface DataColumnCastPreview {
   operation_id: "data.column.cast";
   operation_version: "v1";
@@ -386,6 +423,37 @@ function serverOperationUrl(projectRoot: string, route: string): string {
 export async function fetchDataOperationManifest(): Promise<unknown> {
   const response = await fetch(apiUrl("/data-operations/manifest"));
   return readResponse<unknown>(response);
+}
+
+export async function fetchDataOperationProfile(
+  projectRoot: string,
+  sourceRunId: string,
+  sourceNodeId: string,
+  sourceArtifactId: string,
+): Promise<DataProfileV1> {
+  const params = new URLSearchParams({
+    project_root: projectRoot,
+    source_run_id: sourceRunId,
+    source_node_id: sourceNodeId,
+    source_artifact_id: sourceArtifactId,
+  });
+  const response = await fetch(apiUrl(`/data-operations/profile?${params.toString()}`));
+  if (response.status === 422) {
+    throw new DataProfileFetchError("UNAVAILABLE");
+  }
+  if (!response.ok) {
+    throw new DataProfileFetchError("DEGRADED");
+  }
+  try {
+    const payload = await readResponse<{ profile: DataProfileV1 }>(response);
+    if (!payload || typeof payload.profile !== "object" || payload.profile === null) {
+      throw new DataProfileFetchError("DEGRADED");
+    }
+    return payload.profile;
+  } catch (reason: unknown) {
+    if (reason instanceof DataProfileFetchError) throw reason;
+    throw new DataProfileFetchError("DEGRADED");
+  }
 }
 
 /** Return the raw HTTP transport so DataOperationsSection can verify its type. */

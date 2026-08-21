@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,16 @@ def _api():
     if importlib.util.find_spec("workbench.data_interchange") is None:
         pytest.fail("workbench.data_interchange is not implemented")
     return importlib.import_module("workbench.data_interchange")
+
+
+def test_package_declares_native_extra_for_native_interchange() -> None:
+    metadata = tomllib.loads(
+        (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    )
+
+    assert metadata["project"]["optional-dependencies"]["native"] == [
+        "pyreadstat>=1.3"
+    ]
 
 
 def test_csv_xlsx_and_parquet_round_trip_contract_is_real(tmp_path) -> None:
@@ -496,7 +507,7 @@ def test_native_partial_writer_cleans_only_owned_targets(tmp_path, monkeypatch) 
 def test_pyreadstat_admission_probes_sav_zsav_and_dta_modes(monkeypatch) -> None:
     api = _api()
     calls: list[tuple[str, bool | None, Path]] = []
-    probe_frame = pd.DataFrame({"__workbench_probe__": pd.Series([1], dtype="int64")})
+    probe_frame = pd.DataFrame({"workbench_probe": pd.Series([1], dtype="int64")})
 
     def write_sav(_frame, path, *, compress=False):
         calls.append(("write_sav", compress, Path(path)))
@@ -590,6 +601,81 @@ def test_pyreadstat_admission_runs_a_bounded_probe_through_the_real_adapter(
     assert all(not path.exists() for _name, path in calls)
 
 
+def test_native_statistical_formats_have_real_round_trip_evidence(tmp_path) -> None:
+    api = _api()
+    pytest.importorskip("pyreadstat")
+    frame = pd.DataFrame(
+        {"workbench_value": pd.Series([1.25, 2.5], dtype="float64")}
+    )
+
+    for target_format in ("sav", "zsav", "dta"):
+        capability = api.interchange_capability(target_format)
+        result = api.round_trip_frame(
+            frame,
+            metadata={},
+            target_format=target_format,
+            directory=tmp_path / target_format,
+        )
+
+        if capability.status != "available":
+            assert result.status == "unavailable"
+            assert result.path is None
+            assert result.capability.reason_code == "optional_dependency"
+            continue
+
+        assert result.status == "verified"
+        assert result.capability.status == "available"
+        assert result.frame_equal is True
+        assert result.dtype_equal is True
+        assert result.schema_equal is True
+        assert result.path is not None
+        artifact = Path(result.path)
+        assert artifact.is_file()
+        assert artifact.stat().st_size > 0
+
+
+def test_native_round_trip_reports_unrepresentable_metadata_loss(tmp_path) -> None:
+    api = _api()
+    pytest.importorskip("pyreadstat")
+    frame = pd.DataFrame(
+        {"workbench_value": pd.Series([1.25, 2.5], dtype="float64")}
+    )
+
+    for target_format in ("sav", "zsav", "dta"):
+        capability = api.interchange_capability(target_format)
+        result = api.round_trip_frame(
+            frame,
+            metadata={
+                "columns": {
+                    "workbench_value": {
+                        "measurement_level": "scale",
+                        "user_missing_values": [999.0],
+                    }
+                }
+            },
+            target_format=target_format,
+            directory=tmp_path / target_format,
+        )
+
+        if capability.status != "available":
+            assert result.status == "unavailable"
+            assert result.path is None
+            continue
+
+        assert result.status == "metadata_loss"
+        assert result.frame_equal is True
+        assert result.schema_equal is True
+        assert result.metadata_loss.has_loss is True
+        assert {
+            item.field
+            for item in result.metadata_loss.items
+            if item.status != "preserved"
+        } >= {
+            "workbench_value.measurement_level",
+            "workbench_value.user_missing_values",
+        }
+
+
 def test_malformed_column_metadata_is_typed_and_not_reported_verified(tmp_path) -> None:
     api = _api()
 
@@ -638,8 +724,11 @@ def test_round_trip_status_exposes_declared_metadata_loss(tmp_path) -> None:
     assert result.status == "metadata_loss"
 
 
-def test_native_statistical_formats_are_typed_unavailable_without_optional_dependency() -> None:
+def test_native_statistical_formats_are_typed_unavailable_when_adapter_is_missing(
+    monkeypatch,
+) -> None:
     api = _api()
+    monkeypatch.setattr(api, "_pyreadstat_module", lambda: None)
 
     for target_format in ("sav", "zsav", "dta"):
         capability = api.interchange_capability(target_format)
@@ -648,9 +737,10 @@ def test_native_statistical_formats_are_typed_unavailable_without_optional_depen
 
 
 def test_native_statistical_writer_is_typed_unavailable_without_optional_dependency(
-    tmp_path,
+    tmp_path, monkeypatch
 ) -> None:
     api = _api()
+    monkeypatch.setattr(api, "_pyreadstat_module", lambda: None)
     frame = pd.DataFrame({"code": [1]})
 
     for target_format in ("sav", "zsav", "dta"):

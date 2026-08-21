@@ -238,6 +238,15 @@ export type RunDetail = RunSummary & {
   prediction_evidence?: PredictionResearchEvidence | null;
   /** Server-owned typed Report projection; parsed again at the consumer boundary. */
   report_evidence?: unknown;
+  /** Server-owned family projections; raw artifact payloads are never citable. */
+  classification_evidence?: unknown;
+  classification_evidence_authority?: "server-owned" | "non-authoritative";
+  data_consumer_evidence?: unknown;
+  data_consumer_evidence_authority?: "server-owned" | "non-authoritative";
+  data_consumer_evidence_receipt?: unknown;
+  survey_evidence?: unknown;
+  survey_evidence_authority?: "server-owned" | "non-authoritative";
+  survey_evidence_receipt?: unknown;
   /** Durable deterministic report packets projected from diagnostic_summary. */
   table_1?: Array<Record<string, unknown>>;
   statistical_evidence?: Record<string, unknown> | null;

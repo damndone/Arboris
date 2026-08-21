@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -10,8 +8,10 @@ import numpy as np
 from ..context import ModelingContext, RunEnv
 from ..pack import AnalysisPack, RerunAction, register_pack
 from ..registry import (
+    COEFFICIENT_RESULT_BINDING_KEY,
     ModelHandler,
     ModelOptionsValidationError,
+    require_result_binding_key,
     resolve,
 )
 from ...contracts.model.ols import (
@@ -499,59 +499,27 @@ def _design_term(payload_term: str) -> str:
 
 
 def _attach_result_binding(
-    run_root, run_id: str, model_id: str, primary: dict[str, Any], inputs: list[str]
+    run_root,
+    run_id: str,
+    model_id: str,
+    primary: dict[str, Any],
+    inputs: list[str],
+    *,
+    strategy_key: str | None = None,
+    expected_model_types: tuple[str, ...] | None = None,
 ) -> None:
-    """Bind a persisted model result to its run, project, model, and terms."""
-    if not isinstance(primary, dict):
-        raise ValueError("MODEL_RESULT_INVALID: result payload must be an object")
-    if (
-        not isinstance(inputs, list)
-        or not inputs
-        or not all(isinstance(item, str) and item and len(item) <= 300 for item in inputs)
-    ):
-        raise ValueError("MODEL_RESULT_INVALID: source artifact binding is invalid")
-    for field in ("nobs", "row_count", "n_observations"):
-        value = primary.get(field)
-        if value is not None and (
-            isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= 1_000_000
-        ):
-            raise ValueError(f"MODEL_RESULT_INVALID: {field} must be a bounded integer")
-    for field in ("sampling_weight", "frequency_weight", "analysis_weight", "exposure_col"):
-        value = primary.get(field)
-        if value is not None and (
-            not isinstance(value, str) or not value or len(value) > 128
-        ):
-            raise ValueError(f"MODEL_RESULT_INVALID: {field} must be a bounded column name")
-    coefficients = primary.get("coefficients")
-    if not isinstance(coefficients, dict) or not coefficients:
-        raise ValueError("MODEL_RESULT_INVALID: result payload has no coefficients")
-    source_ids: dict[str, str] = {}
-    for term, coefficient in coefficients.items():
-        if not isinstance(term, str) or not isinstance(coefficient, dict):
-            raise ValueError("MODEL_RESULT_INVALID: coefficient terms must be objects")
-        source_id = f"model_results.{model_id}.coefficients.{term}"
-        coefficient["source_id"] = source_id
-        source_ids[term] = source_id
-        if not isinstance(coefficient.get("warnings"), list):
-            coefficient["warnings"] = []
-    primary["result_binding"] = {
-        "project_root": str(run_root.parent.parent.resolve()),
-        "run_id": run_id,
-        "model_id": model_id,
-        "source_artifact_ids": list(inputs),
-        "coefficient_source_ids": source_ids,
-    }
-    unsigned = dict(primary)
-    unsigned["result_binding"] = dict(primary["result_binding"])
-    primary["result_binding"]["payload_sha256"] = hashlib.sha256(
-        json.dumps(
-            unsigned,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
+    """Delegate result binding to the family-aware adapter registry."""
+    from ..result_binding import attach_result_binding
+
+    attach_result_binding(
+        run_root,
+        run_id,
+        model_id,
+        primary,
+        inputs,
+        strategy_key=strategy_key,
+        expected_model_type=expected_model_types,
+    )
 
 
 def _apply_survey_design_variance(
@@ -679,6 +647,11 @@ def _apply_survey_design_variance(
             if isinstance(entry, dict):
                 entry["warnings"].append("SURVEY_REPLICATE_FAILURES")
     primary["warnings"] = survey_warnings
+    primary["survey_evidence_status"] = "degraded" if summary and summary.failed else "validated"
+    if summary and summary.failed:
+        primary["survey_unavailable_reason"] = "SURVEY_REPLICATE_FAILURES"
+    else:
+        primary.pop("survey_unavailable_reason", None)
     primary["survey_design"] = {
         "strata_column": design.strata,
         "psu_column": design.psu,
@@ -864,13 +837,52 @@ CORE_PACK = AnalysisPack(
             _fit_panel_ols,
             validate_model_options=validate_ols_model_options,
             model_options_contract=OLS_MODEL_OPTIONS_CONTRACT,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
         ),
-        ModelHandler("probit", "probit_1", ("binary",), _fit_probit),
-        ModelHandler("negative_binomial", "negative_binomial_1", ("count",), _fit_negative_binomial),
-        ModelHandler("glm", "glm_1", ("count", "continuous", "binary"), _fit_glm),
-        ModelHandler("logit", "logit_1", ("binary",), _fit_logit),
-        ModelHandler("poisson_rate", "poisson_1", ("count",), _fit_poisson),
-        ModelHandler("poisson", "poisson_1", ("count",), _fit_poisson),
+        ModelHandler(
+            "probit",
+            "probit_1",
+            ("binary",),
+            _fit_probit,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        ModelHandler(
+            "negative_binomial",
+            "negative_binomial_1",
+            ("count",),
+            _fit_negative_binomial,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        ModelHandler(
+            "glm",
+            "glm_1",
+            ("count", "continuous", "binary"),
+            _fit_glm,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        ModelHandler(
+            "logit",
+            "logit_1",
+            ("binary",),
+            _fit_logit,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        ModelHandler(
+            "poisson_rate",
+            "poisson_1",
+            ("count",),
+            _fit_poisson,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+            accepted_result_model_types=("poisson", "poisson_rate"),
+        ),
+        ModelHandler(
+            "poisson",
+            "poisson_1",
+            ("count",),
+            _fit_poisson,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+            accepted_result_model_types=("poisson", "poisson_rate"),
+        ),
         ModelHandler(
             "ols",
             "ols_1",
@@ -878,12 +890,44 @@ CORE_PACK = AnalysisPack(
             _fit_ols,
             validate_model_options=validate_ols_model_options,
             model_options_contract=OLS_MODEL_OPTIONS_CONTRACT,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+            accepted_result_model_types=("ols", "ols_robust", "ols_clustered"),
         ),
-        ModelHandler("iv_2sls", "iv_2sls_1", ("continuous",), _fit_iv_2sls),
-        ModelHandler("did", "did_1", ("continuous",), _fit_did),
-        ModelHandler("cs_did", "cs_did_1", ("continuous",), _fit_cs_did),
-        ModelHandler("sa_did", "sa_did_1", ("continuous",), _fit_sa_did),
-        ModelHandler("dcdh", "dcdh_1", ("continuous",), _fit_dcdh),
+        ModelHandler(
+            "iv_2sls",
+            "iv_2sls_1",
+            ("continuous",),
+            _fit_iv_2sls,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        ModelHandler(
+            "did",
+            "did_1",
+            ("continuous",),
+            _fit_did,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        ModelHandler(
+            "cs_did",
+            "cs_did_1",
+            ("continuous",),
+            _fit_cs_did,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        ModelHandler(
+            "sa_did",
+            "sa_did_1",
+            ("continuous",),
+            _fit_sa_did,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        ModelHandler(
+            "dcdh",
+            "dcdh_1",
+            ("continuous",),
+            _fit_dcdh,
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
     ],
     defaults_by_y_type={
         "continuous": "ols",
@@ -1035,6 +1079,7 @@ class EstimationStage:
 
         try:
             handler = resolve(resolve_ctx)
+            result_binding_key = require_result_binding_key(handler)
             frequency_weight = str(ctx.artifacts.get("_frequency_weight") or "").strip()
             analysis_weight = str(ctx.artifacts.get("_analysis_weight") or "").strip()
             sampling_weight = str(ctx.artifacts.get("_sampling_weight") or "").strip()
@@ -1159,7 +1204,18 @@ class EstimationStage:
             # LMM's registered PacketEnvelope is its sole model-result source;
             # never create a competing legacy ``model_results/*.json`` copy.
             if handler.model_type != "linear_mixed_effects":
-                _attach_result_binding(run_root, run_id, model_id, primary, model_input_ids)
+                _attach_result_binding(
+                    run_root,
+                    run_id,
+                    model_id,
+                    primary,
+                    model_input_ids,
+                    strategy_key=result_binding_key,
+                    expected_model_types=(
+                        handler.accepted_result_model_types
+                        or (handler.model_type,)
+                    ),
+                )
                 _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
             if handler.model_type != "linear_mixed_effects":
                 _persist_model_options_execution_binding(
@@ -1208,6 +1264,7 @@ class EstimationStage:
                 and bool(structured_code)
                 and isinstance(structured_evidence, Mapping)
             )
+            is_result_binding_error = structured_code == "MODEL_RESULT_INVALID"
             if isinstance(exc, SurveyEngineError):
                 failure_evidence = {
                     **exc.context,
@@ -1267,7 +1324,12 @@ class EstimationStage:
 
             issue_dicts.append(GuardrailIssue(
                 Severity.BLOCKER
-                if (model_type != "auto" or is_model_options_error or isinstance(exc, SurveyEngineError))
+                if (
+                    model_type != "auto"
+                    or is_model_options_error
+                    or isinstance(exc, SurveyEngineError)
+                    or is_result_binding_error
+                )
                 else Severity.WARNING,
                 issue_code,
                 str(exc),
@@ -1276,7 +1338,12 @@ class EstimationStage:
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("estimation", "blocked", f"Model fit failed: {exc}")
 
-            if model_type != "auto" or is_model_options_error or isinstance(exc, SurveyEngineError):
+            if (
+                model_type != "auto"
+                or is_model_options_error
+                or isinstance(exc, SurveyEngineError)
+                or is_result_binding_error
+            ):
                 # 1.5.3.2 CONTRACT: explicit failure => structured `failed`.
                 # NO silent OLS fallback.
                 _write_manifest(
@@ -1350,7 +1417,15 @@ class EstimationStage:
                 return ctx
 
             _robust_se_dp = _ols_robust_se_decision(ctx)
-            _attach_result_binding(run_root, run_id, "ols_1", ols_result, model_input_ids)
+            _attach_result_binding(
+                run_root,
+                run_id,
+                "ols_1",
+                ols_result,
+                model_input_ids,
+                strategy_key="coefficient_table_v1",
+                expected_model_types=("ols", "ols_robust", "ols_clustered"),
+            )
             _write_model_result(run_root, "ols_1", ols_result, inputs=model_input_ids)
             _persist_ols_contract_metadata(run_root, ols_result)
             model_results.append(("ols_1", ols_result))

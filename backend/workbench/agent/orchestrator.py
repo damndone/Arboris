@@ -568,6 +568,7 @@ class WorkbenchOrchestrator:
         context_provider: WorkbenchContextProvider | None = None,
         failpoint: OperationFailpoint | None = None,
         risk_authorization_store: RiskAuthorizationStore | None = None,
+        cutover_compiler: Any | None = None,
     ) -> None:
         self.repository = repository
         self.events = events
@@ -589,6 +590,7 @@ class WorkbenchOrchestrator:
         self.risk_authorization_store = risk_authorization_store or RiskAuthorizationStore(
             repository.root
         )
+        self.cutover_compiler = cutover_compiler
         self.chain_store = ChainStore(repository.root)
         self.fork_store = ForkStore(repository.root)
         self._chains: dict[str, tuple[str, AgentCore]] = {}
@@ -2898,44 +2900,159 @@ class WorkbenchOrchestrator:
                 metadata=metadata,
             )
 
-        registry.register(
-            ToolDefinition(
-                tool_id="propose_analysis_loop",
-                version="v1",
-                input_schema={
-                    "type": "object",
-                    "required": [
-                        "source_run_id",
-                        "source_node_ref",
-                        "active_head_run_id",
-                        "cluster_variable",
-                    ],
-                    "properties": {
-                        "source_run_id": {"type": "string", "minLength": 1},
-                        "source_node_ref": {"type": "string", "minLength": 1},
-                        "active_head_run_id": {"type": "string", "minLength": 1},
-                        "cluster_variable": {"type": "string", "minLength": 1},
-                        "result_id": {"type": "string", "minLength": 1},
-                    },
-                    "additionalProperties": False,
-                },
-                side_effect="proposal",
-                scope_requirements=("chain", "active_head"),
-                max_output_budget=24_000,
-                handler=propose_analysis_loop,
-            )
-        )
+        if self.cutover_compiler is not None:
+            def compile_natural_language(
+                arguments: dict[str, Any], context
+            ) -> dict[str, Any]:
+                """Compile the exact user turn through the shared C0 compiler."""
 
-        registry.register(
-            ToolDefinition(
-                tool_id="propose_operation",
-                version="v1",
-                input_schema=self.operation_registry.proposal_tool_schema(),
-                side_effect="proposal",
-                scope_requirements=("chain",),
-                handler=propose_operation,
+                if context.session_id != session_id:
+                    raise PermissionError("tool session is outside the registered chain scope")
+                metadata = context.metadata
+                actor_ref = metadata.get("actor_ref")
+                session_ref = metadata.get("session_ref")
+                project_ref = metadata.get("project_ref")
+                source_text = metadata.get("agent_user_question")
+                if any(
+                    type(value) is not str or not value.strip()
+                    for value in (actor_ref, session_ref, project_ref, source_text)
+                ):
+                    raise PermissionError("server-owned Agent compiler scope is unavailable")
+                normalized_fields = arguments.get("normalized_fields")
+                if normalized_fields is not None and not isinstance(normalized_fields, Mapping):
+                    raise ValueError("normalized_fields must be an object")
+                preview = self.cutover_compiler.compile_natural_language(
+                    source_text,
+                    actor_ref=actor_ref,
+                    session_ref=session_ref,
+                    project_ref=project_ref,
+                    normalized_fields=normalized_fields,
+                    entrypoint="agent",
+                )
+                output: dict[str, Any] = {
+                    "status": (
+                        "clarification_required"
+                        if preview.compilation_record_id is None
+                        else "proposal_ready"
+                    ),
+                    "preview": preview.to_dict(),
+                    "source_text_digest": hashlib.sha256(
+                        source_text.encode("utf-8")
+                    ).hexdigest(),
+                }
+                if preview.compilation_record_id is None:
+                    output["requires_confirmation"] = False
+                    return output
+
+                record = self.cutover_compiler.record(preview.compilation_record_id)
+                proposal_store = self.cutover_compiler.server_proposal_store(
+                    self.repository.root
+                )
+                target_ref = str(record.source_commitments.get("target_ref"))
+                confirmation_id = f"confirmation:agent:{uuid4().hex}"
+                proposal = proposal_store.create(
+                    session_id=record.session_ref,
+                    chain_id=str(metadata.get("chain_id") or chain_id),
+                    operation_id="model.rerun",
+                    target={"run_id": target_ref},
+                    preconditions={
+                        "server_compilation": {
+                            "compilation_record_id": record.record_id,
+                            "confirmation_id": confirmation_id,
+                            "actor_ref": record.principal_ref,
+                            "session_ref": record.session_ref,
+                            "project_ref": record.project_ref,
+                            "semantic_plan_hash": record.semantic_plan_hash,
+                            "target": {"run_id": target_ref},
+                            "chain_id": str(metadata.get("chain_id") or chain_id),
+                            "operation_id": "model.rerun",
+                        }
+                    },
+                    changes={},
+                    evidence_refs=(),
+                    expected_effect=(str(record.compiled_workflow.effect.value),),
+                    risks=(str(record.compiled_workflow.risk_level.value),),
+                )
+                self.cutover_compiler.bind_persisted_proposal(
+                    record.record_id,
+                    proposal_store,
+                    proposal.proposal_id,
+                )
+                output["requires_confirmation"] = True
+                output["proposal"] = {
+                    "proposal_id": proposal.proposal_id,
+                    "revision": proposal.revision,
+                    "fingerprint": proposal.fingerprint,
+                    "compilation_record_id": record.record_id,
+                    "semantic_plan_hash": record.semantic_plan_hash,
+                }
+                return output
+
+            registry.register(
+                ToolDefinition(
+                    tool_id="compile_natural_language",
+                    version="v1",
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "normalized_fields": {
+                                "type": "object",
+                                "additionalProperties": True,
+                            }
+                        },
+                        "additionalProperties": False,
+                    },
+                    side_effect="proposal",
+                    scope_requirements=("chain", "server_identity", "compiler"),
+                    max_output_budget=24_000,
+                    description=(
+                        "Compile the exact user request through the server-owned "
+                        "Agent/Notebook compiler. This creates a preview or a "
+                        "confirmation-gated proposal; it never executes. Do not "
+                        "invent data snapshot digests or hidden evidence."
+                    ),
+                    handler=compile_natural_language,
+                )
             )
-        )
+        else:
+            registry.register(
+                ToolDefinition(
+                    tool_id="propose_analysis_loop",
+                    version="v1",
+                    input_schema={
+                        "type": "object",
+                        "required": [
+                            "source_run_id",
+                            "source_node_ref",
+                            "active_head_run_id",
+                            "cluster_variable",
+                        ],
+                        "properties": {
+                            "source_run_id": {"type": "string", "minLength": 1},
+                            "source_node_ref": {"type": "string", "minLength": 1},
+                            "active_head_run_id": {"type": "string", "minLength": 1},
+                            "cluster_variable": {"type": "string", "minLength": 1},
+                            "result_id": {"type": "string", "minLength": 1},
+                        },
+                        "additionalProperties": False,
+                    },
+                    side_effect="proposal",
+                    scope_requirements=("chain", "active_head"),
+                    max_output_budget=24_000,
+                    handler=propose_analysis_loop,
+                )
+            )
+
+            registry.register(
+                ToolDefinition(
+                    tool_id="propose_operation",
+                    version="v1",
+                    input_schema=self.operation_registry.proposal_tool_schema(),
+                    side_effect="proposal",
+                    scope_requirements=("chain",),
+                    handler=propose_operation,
+                )
+            )
         return registry
 
     def dispatch_to_chain(

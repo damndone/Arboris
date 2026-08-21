@@ -162,6 +162,7 @@ const typedReportEvidence = {
   projectionId: "report:commit-1",
   consumerId: "report",
   consumerVersion: "1.0",
+  rendererKey: "workbench.consumer_projection.report",
   actorRef: "actor:1",
   projectRef: "project:1",
   sessionRef: "session:1",
@@ -340,6 +341,88 @@ function sharedClassificationArtifactsWrapper(artifact: Record<string, unknown>)
 
 const persistedClassificationArtifactsWrapper = sharedClassificationArtifactsWrapper(persistedClassificationArtifact);
 
+const centralClassificationEvidence = {
+  payload_schema: CLASSIFICATION_ARTIFACTS_WRAPPER_SCHEMA,
+  schema_version: 1,
+  status: "validated",
+  consumer: "report",
+  artifact_id: "artifact:central-classification",
+  artifact_sha256: "a".repeat(64),
+  receipt_digest: "b".repeat(64),
+  server_identity: serverIdentity,
+  projection: {
+    ...evidencePacket,
+    consumer: "report",
+    provider_id: "workbench.classification_ml",
+    exposure_path: "workbench.classification_ml.direct",
+    projection_ref: {
+      kind: "projection",
+      logical_id: "workbench.classification_ml.report",
+      semantic_version: "1.0",
+      contract_digest: "5".repeat(64),
+    },
+    policy_ref: {
+      kind: "policy",
+      logical_id: "workbench.classification_ml.policy",
+      semantic_version: "1.0",
+      contract_digest: "7".repeat(64),
+    },
+    renderer_ref: {
+      kind: "renderer",
+      logical_id: "workbench.classification_ml.report",
+      semantic_version: "1.0",
+      contract_digest: "6".repeat(64),
+    },
+    catalog_digest: "f59d0cc8c5746f7e8905fa6ff79e31465b11614284bcb9849d1545bfb271c952",
+    provider_digest: "f2cd959aae60720574e4687940d562b20ac2ad7afc14d58af423f7a9e9a2b43c",
+    coverage_status: "required",
+  },
+  source: {
+    artifact_id: "artifact:central-classification",
+    artifact_sha256: "a".repeat(64),
+    receipt_digest: "b".repeat(64),
+    server_identity: serverIdentity,
+  },
+  receipt: {
+    payload_schema: "workbench.prediction.classification-consumer-receipt",
+    schema_version: 1,
+    receipt_digest: "b".repeat(64),
+  },
+};
+
+function centralClassificationUnavailable(reason: string) {
+  return {
+    payload_schema: "workbench.prediction.classification-evidence.unavailable",
+    schema_version: 1,
+    status: "unavailable",
+    consumer: "report",
+    provider_id: "workbench.classification_ml",
+    exposure_path: "workbench.classification_ml.direct",
+    policy_ref: {
+      kind: "policy",
+      logical_id: "workbench.classification_ml.policy",
+      semantic_version: "1.0",
+      contract_digest: "7".repeat(64),
+    },
+    catalog_digest: "f59d0cc8c5746f7e8905fa6ff79e31465b11614284bcb9849d1545bfb271c952",
+    provider_digest: "f2cd959aae60720574e4687940d562b20ac2ad7afc14d58af423f7a9e9a2b43c",
+    projection_ref: {
+      kind: "projection",
+      logical_id: "workbench.classification_ml.report",
+      semantic_version: "1.0",
+      contract_digest: "5".repeat(64),
+    },
+    renderer_ref: {
+      kind: "renderer",
+      logical_id: "workbench.classification_ml.report",
+      semantic_version: "1.0",
+      contract_digest: "6".repeat(64),
+    },
+    coverage_status: "required",
+    reason,
+  } as const;
+}
+
 function indexedClassificationItem(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     artifact_id: "sha256:" + "a".repeat(64),
@@ -362,20 +445,22 @@ function indexedClassificationItem(overrides: Record<string, unknown> = {}): Rec
 
 function WorkspaceProbe() {
   const workspace = useReportWorkspace();
-  const packet = workspace.familyEvidenceArtifacts.classification_evidence;
-  const isTypedPacket = Boolean(
-    packet
-    && typeof packet === "object"
-    && (packet as Record<string, unknown>).payload_schema === CLASSIFICATION_ARTIFACTS_WRAPPER_SCHEMA
-    && (packet as Record<string, unknown>).schema_version === 1,
+  const evidence = workspace.classificationEvidence;
+  const evidenceRecord = evidence && typeof evidence === "object" && !Array.isArray(evidence)
+    ? evidence as Record<string, unknown>
+    : null;
+  const isCentralProjection = Boolean(
+    evidenceRecord
+    && ((evidenceRecord.payload_schema === CLASSIFICATION_ARTIFACTS_WRAPPER_SCHEMA && evidenceRecord.schema_version === 1)
+      || (evidenceRecord.payload_schema === "workbench.prediction.classification-evidence.unavailable" && evidenceRecord.schema_version === 1)),
   );
   return (
     <>
       <output data-testid="classification-state">
-        {isTypedPacket ? "present" : "UNAVAILABLE"}
+        {isCentralProjection && evidenceRecord?.status !== "unavailable" ? "present" : "UNAVAILABLE"}
       </output>
       <output data-testid="classification-context">
-        {packet === undefined ? "" : JSON.stringify(packet)}
+        {evidence === undefined ? "" : JSON.stringify(evidence)}
       </output>
       <output data-testid="report-selected-facts">
         {JSON.stringify(workspace.includedFacts)}
@@ -440,7 +525,11 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     )).toBeNull();
   });
 
-  it("loads only a server-indexed typed classification artifact", async () => {
+  it("uses the server-owned central classification projection without downloading a raw artifact", async () => {
+    mockRunDetail.current = {
+      ...mockRunDetail.current,
+      classification_evidence: centralClassificationEvidence,
+    };
     mockArtifacts.current = {
       groups: [{
         artifact_type: "classification_artifacts",
@@ -461,13 +550,9 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     renderWorkspace();
 
     await waitFor(() => expect(screen.getByTestId("classification-state")).toHaveTextContent("present"));
-    expect(mockArtifactJson.current).toHaveBeenCalledWith(
-      "/private/tmp/report-project",
-      "run-classification",
-      "sha256:" + "a".repeat(64),
-    );
-    expect(mockArtifactJson.current).toHaveBeenCalledTimes(1);
+    expect(mockArtifactJson.current).not.toHaveBeenCalled();
     expect(screen.getByTestId("classification-context")).toHaveTextContent(CLASSIFICATION_EVIDENCE_SCHEMA);
+    expect(screen.getByTestId("classification-context")).toHaveTextContent("workbench.classification_ml.report");
   });
 
   it("accepts a canonical formal_output inventory without blocking ReportWorkspace", async () => {
@@ -491,32 +576,22 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     expect(mockArtifactJson.current).not.toHaveBeenCalled();
   });
 
-  it("marks an indexed classification artifact unavailable when persisted fold receipts are missing", async () => {
-    mockArtifacts.current = {
-      groups: [{
-        artifact_type: "classification_artifacts",
-        items: [indexedClassificationItem({
-          artifact_id: "sha256:" + "a".repeat(64),
-          artifact_type: "classification_artifacts",
-          payload_contract: { payload_schema: "workbench.prediction.classification-artifacts", schema_version: 1 },
-          payload_schema: "workbench.prediction.classification-artifacts",
-        })],
-      }],
+  it("keeps an explicit central unavailable reason instead of reading a raw artifact", async () => {
+    mockRunDetail.current = {
+      ...mockRunDetail.current,
+      classification_evidence: centralClassificationUnavailable("CLASSIFICATION_PERSISTED_RECEIPT_INVALID"),
     };
-    mockArtifactJson.current.mockResolvedValue({
-      payload_schema: "workbench.prediction.classification-artifacts",
-      schema_version: 1,
-      artifact_id: "sha256:" + "a".repeat(64),
-      models: { logistic_regression: { preprocessing: { folds: [] } } },
-      fit: { schema_version: 1, models: { logistic_regression: { fold_receipts: [] } } },
-      evaluation: {},
-      evidence: evidencePacket,
-    });
+    mockArtifacts.current = {
+      groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
+    };
+    mockArtifactJson.current.mockResolvedValue({ secret: "raw-classification-secret" });
 
     renderWorkspace();
 
     await waitFor(() => expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE"));
-    expect(screen.getByTestId("classification-context")).toHaveTextContent("classification-evidence.unavailable");
+    expect(screen.getByTestId("classification-context")).toHaveTextContent("CLASSIFICATION_PERSISTED_RECEIPT_INVALID");
+    expect(mockArtifactJson.current).not.toHaveBeenCalled();
+    expect(screen.getByTestId("classification-context")).not.toHaveTextContent("raw-classification-secret");
   });
 
   it("keeps the classification projection unavailable when no indexed artifact exists", async () => {
@@ -525,6 +600,23 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     await waitFor(() => expect(mockArtifactJson.current).not.toHaveBeenCalled());
     expect(screen.getByTestId("classification-state")).toHaveTextContent("UNAVAILABLE");
     expect(screen.getByTestId("classification-context")).not.toHaveTextContent("secret");
+  });
+
+  it("emits a fully server-bound unavailable projection for every local fallback", async () => {
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByTestId("classification-context")).toHaveTextContent("workbench.classification_ml"));
+    const evidence = JSON.parse(screen.getByTestId("classification-context").textContent ?? "null") as Record<string, unknown>;
+    expect(evidence).toMatchObject({
+      provider_id: "workbench.classification_ml",
+      exposure_path: "workbench.classification_ml.direct",
+      catalog_digest: "f59d0cc8c5746f7e8905fa6ff79e31465b11614284bcb9849d1545bfb271c952",
+      provider_digest: "f2cd959aae60720574e4687940d562b20ac2ad7afc14d58af423f7a9e9a2b43c",
+      coverage_status: "required",
+      projection_ref: { logical_id: "workbench.classification_ml.report", contract_digest: "5".repeat(64) },
+      renderer_ref: { logical_id: "workbench.classification_ml.report", contract_digest: "6".repeat(64) },
+      policy_ref: { logical_id: "workbench.classification_ml.policy", contract_digest: "7".repeat(64) },
+    });
   });
 
   it.each([
@@ -647,19 +739,10 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     expect(screen.getByTestId("classification-context")).not.toHaveTextContent("download-secret");
   });
 
-  it("keeps raw classification JSON display-only and out of selected facts and LLM context", async () => {
-    mockArtifacts.current = {
-      groups: [{ artifact_type: "classification_artifacts", items: [indexedClassificationItem()] }],
-    };
-    mockArtifactJson.current.mockResolvedValue({
-      ...persistedClassificationArtifactsWrapper,
-      artifact: {
-        ...persistedClassificationArtifactsWrapper.artifact,
-        raw_classification_secret: "RAW_CLASSIFICATION_SECRET",
-      },
-    });
+  it("keeps central classification evidence out of selected facts and LLM context", async () => {
     mockRunDetail.current = {
       ...mockRunDetail.current,
+      classification_evidence: centralClassificationEvidence,
       report_evidence: typedReportEvidence,
       report_evidence_receipt: typedReportEvidenceReceipt,
     };
@@ -667,13 +750,12 @@ describe("ReportWorkspaceContext v1.8.9 classification consumer", () => {
     renderWorkspace();
 
     await waitFor(() => expect(screen.getByTestId("classification-state")).toHaveTextContent("present"));
+    expect(mockArtifactJson.current).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId("report-selected-facts")).toHaveTextContent("typed-estimate"));
-    expect(screen.getByTestId("report-selected-facts")).not.toHaveTextContent("RAW_CLASSIFICATION_SECRET");
     expect(screen.getByTestId("report-llm-context")).toHaveTextContent(/typed-estimate/i);
-    expect(screen.getByTestId("report-llm-context")).not.toHaveTextContent("RAW_CLASSIFICATION_SECRET");
     fireEvent.click(screen.getByTestId("report-generate-probe"));
     await waitFor(() => expect(mockGenerateRequest.current).not.toBeNull());
     expect(JSON.stringify(mockGenerateRequest.current)).toContain("typed-estimate");
-    expect(JSON.stringify(mockGenerateRequest.current)).not.toContain("RAW_CLASSIFICATION_SECRET");
+    expect(JSON.stringify(mockGenerateRequest.current)).not.toContain("classification_artifacts.json");
   });
 });

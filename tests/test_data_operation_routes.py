@@ -33,6 +33,12 @@ def _request(
     }
 
 
+def _artifact_path(project: Path, run_id: str, artifact_id: str) -> Path:
+    index = json.loads((project / "runs" / run_id / "artifacts_index.json").read_text())
+    row = next(item for item in index["artifacts"] if item["artifact_id"] == artifact_id)
+    return project / "runs" / run_id / row["path"]
+
+
 def _seed_confirmed_metadata(
     project: Path,
     run_id: str,
@@ -44,7 +50,9 @@ def _seed_confirmed_metadata(
     confirmed: bool = True,
 ) -> str:
     run_root = project / "runs" / run_id
-    path = run_root / "metadata" / "registry.json"
+    # The source registry is a detached, server-owned metadata artifact.  The
+    # retired metadata/registry.json shape is intentionally not authoritative.
+    path = run_root / "metadata" / "source.json"
     metadata_revision = metadata_revision_digest(metadata, schema_revision=schema_revision)
     schema_path = run_root / "metadata" / "schema.json"
     write_json(schema_path, {"schema_revision": schema_revision})
@@ -63,7 +71,7 @@ def _seed_confirmed_metadata(
         if item["artifact_id"] == source_artifact_id
     )
     source_sha256 = source_row["sha256"]
-    metadata_artifact_id = "source_metadata_registry"
+    metadata_artifact_id = "source_metadata_artifact"
     payload = {
         "payload_schema": "workbench.data-metadata",
         "schema_version": 1,
@@ -178,10 +186,13 @@ def test_feature_recipe_routes_preview_confirm_and_expose_typed_child(tmp_path: 
             json={**request, "preview_fingerprint": preview["fingerprint"]},
         )
     assert confirm_response.status_code == 200
-    effect = confirm_response.json()["effect"]
+    body = confirm_response.json()
+    effect = body["effect"]
     assert effect["child_node_id"].startswith("feature-recipe:")
-    assert confirm_response.json()["confirmation"]["status"] == "confirmed"
-    assert confirm_response.json()["proposal"]["operation_id"] == "data.feature_recipe"
+    assert body["confirmation"]["status"] == "confirmed"
+    assert body["proposal"]["operation_id"] == "data.feature_recipe"
+    assert body["operation_record"]["status"] == "completed"
+    assert body["operation_record"]["outputs"]["ports"]["evidence"]["record_id"] == body["operation_record"]["record_id"]
 
 
 def test_data_transform_routes_preview_confirm_subset(tmp_path: Path) -> None:
@@ -211,9 +222,12 @@ def test_data_transform_routes_preview_confirm_subset(tmp_path: Path) -> None:
             json={**request, "preview_fingerprint": preview["fingerprint"]},
         )
     assert confirm_response.status_code == 200
-    assert confirm_response.json()["effect"]["child_node_id"].startswith("data-subset:")
-    assert confirm_response.json()["confirmation"]["status"] == "confirmed"
-    assert confirm_response.json()["proposal"]["operation_id"] == "data.subset"
+    body = confirm_response.json()
+    assert body["effect"]["child_node_id"].startswith("data-subset:")
+    assert body["confirmation"]["status"] == "confirmed"
+    assert body["proposal"]["operation_id"] == "data.subset"
+    assert body["operation_record"]["status"] == "completed"
+    assert body["operation_record"]["outputs"]["ports"]["evidence"]["record_id"] == body["operation_record"]["record_id"]
 
 
 def test_data_operation_routes_require_a_project_runs_root(tmp_path: Path) -> None:
@@ -253,6 +267,7 @@ def test_column_cast_context_resolves_existing_columns_from_dataset_node(tmp_pat
     context = response.json()
     assert context["source_artifact_id"] == artifact_id
     assert context["source_node_id"] == "stage:source"
+    assert "source_artifact_path" not in context
     assert context["columns"] == [
         {"name": "age", "dtype": "int64"},
         {"name": "name", "dtype": "str"},
@@ -492,7 +507,7 @@ def test_profile_rejects_synchronously_resigned_metadata_and_schema_tamper(
     )
 
     run_root = project / "runs" / run_id
-    metadata_path = run_root / "metadata" / "registry.json"
+    metadata_path = run_root / "metadata" / "source.json"
     schema_path = run_root / "metadata" / "schema.json"
     index_path = run_root / "artifacts_index.json"
     payload = json.loads(metadata_path.read_text())
@@ -515,7 +530,7 @@ def test_profile_rejects_synchronously_resigned_metadata_and_schema_tamper(
     metadata_row = next(
         row
         for row in index["artifacts"]
-        if row["artifact_id"] == "source_metadata_registry"
+        if row["artifact_id"] == "source_metadata_artifact"
     )
     metadata_row["sha256"] = sha256_file(metadata_path)
     write_json(index_path, index)
@@ -649,11 +664,16 @@ def test_data_operation_profile_is_bounded_and_keeps_dataset_identity(tmp_path: 
 
     assert response.status_code == 200
     profile = response.json()["profile"]
-    assert profile["dataset_ref"]["run_id"] == run_id
-    assert profile["dataset_ref"]["node_id"] == "stage:source"
-    assert profile["dataset_ref"]["artifact_id"] == artifact_id
-    assert {column["name"] for column in profile["columns"]} == {"customer_id", "score"}
-    assert all(column["inferred"]["confirmed"] is False for column in profile["columns"])
+    assert profile["source"] == {
+        "run_id": run_id,
+        "node_id": "stage:source",
+        "artifact_id": artifact_id,
+    }
+    assert {variable["name"] for variable in profile["variables"]} == {
+        "customer_id",
+        "score",
+    }
+    assert all(variable["measurement_level"] == "unknown" for variable in profile["variables"])
 
 
 def test_profile_rejects_metadata_registered_for_a_foreign_graph_node(tmp_path: Path) -> None:
@@ -719,10 +739,24 @@ def test_profile_reload_rejects_forged_metadata_bytes_and_provenance_on_every_at
         {"columns": {"score": {"variable_label": "server label"}}},
     )
 
-    metadata_path = project / "runs" / run_id / "metadata" / "registry.json"
+    metadata_path = project / "runs" / run_id / "metadata" / "source.json"
     canonical_payload = json.loads(metadata_path.read_text())
-    assert "metadata_artifact" not in canonical_payload
-    assert "metadata_index" not in canonical_payload
+    metadata_row = next(
+        row
+        for row in json.loads(
+            (project / "runs" / run_id / "artifacts_index.json").read_text()
+        )["artifacts"]
+        if row["artifact_id"] == "source_metadata_artifact"
+    )
+    assert metadata_row["artifact_type"] == "metadata"
+    assert metadata_row["path"] == "metadata/source.json"
+    authority = json.loads(
+        (project / "workbench" / "data-consumer" / "metadata-authority.json").read_text()
+    )
+    assert [
+        entry["metadata_artifact_id"]
+        for entry in authority["entries"]
+    ] == ["source_metadata_artifact"]
 
     with TestClient(app) as client:
         initial = client.get(
@@ -771,7 +805,7 @@ def test_profile_reload_rejects_server_index_sha_tamper(tmp_path: Path) -> None:
     index_path = project / "runs" / run_id / "artifacts_index.json"
     index = json.loads(index_path.read_text())
     metadata_row = next(
-        row for row in index["artifacts"] if row["artifact_id"] == "source_metadata_registry"
+        row for row in index["artifacts"] if row["artifact_id"] == "source_metadata_artifact"
     )
     metadata_row["sha256"] = "0" * 64
     write_json(index_path, index)
@@ -1144,8 +1178,17 @@ def test_profile_reload_uses_server_metadata_revisions_after_confirmed_mutation(
         )
         assert before.status_code == 200
         before_profile = before.json()["profile"]
-        assert before_profile["schema_revision"] == "schema:before-mutation"
-        assert before_profile["metadata_revision"].startswith("metadata:")
+        assert before_profile["source"] == {
+            "run_id": run_id,
+            "node_id": "stage:source",
+            "artifact_id": artifact_id,
+        }
+        before_group = next(
+            variable
+            for variable in before_profile["variables"]
+            if variable["name"] == "group"
+        )
+        assert before_group["user_missing_values"] == []
 
         preview = client.post(
             "/data-operations/metadata/preview",
@@ -1171,10 +1214,9 @@ def test_profile_reload_uses_server_metadata_revisions_after_confirmed_mutation(
 
     assert child.status_code == 200
     after_profile = child.json()["profile"]
-    assert after_profile["dataset_ref"]["node_id"] == effect["child_node_id"]
-    assert after_profile["metadata_revision"] != before_profile["metadata_revision"]
-    assert after_profile["metadata_revision"] != "v1"
-    assert after_profile["columns"][0]["declared"]["user_missing_values"] == [99]
+    assert after_profile["source"]["node_id"] == effect["child_node_id"]
+    group = next(variable for variable in after_profile["variables"] if variable["name"] == "group")
+    assert group["user_missing_values"] == [99]
 
 
 def test_filter_transform_uses_confirmed_user_missing_registry_and_rejects_unknown(tmp_path: Path) -> None:
@@ -1249,7 +1291,7 @@ def test_split_confirm_materializes_group_children_manifest_and_lineage(tmp_path
     effect = confirmed.json()["effect"]
     assert len(effect["group_artifacts"]) == 2
     assert len({item["artifact_id"] for item in effect["group_artifacts"]}) == 2
-    manifest_path = project / "runs" / run_id / effect["group_manifest_path"]
+    manifest_path = _artifact_path(project, run_id, effect["group_manifest_id"])
     manifest = json.loads(manifest_path.read_text())
     assert manifest["execution_key"] == effect["execution_key"]
     assert manifest["group_count"] == 2
@@ -1336,7 +1378,7 @@ def test_declared_weight_is_consumed_by_supported_aggregate_and_recorded(tmp_pat
 
     assert confirmed.status_code == 200
     effect = confirmed.json()["effect"]
-    output = pd.read_csv(project / "runs" / run_id / effect["artifact_path"])
+    output = pd.read_csv(_artifact_path(project, run_id, effect["artifact_id"]))
     assert output.set_index("group").loc["a", "mean_value"] == 17.5
     assert (
         confirmed.json()["operation"]["outputs"]["ports"]["evidence"]["method"]
@@ -1404,9 +1446,7 @@ def test_transform_child_reloads_all_confirmed_metadata_and_provenance_sidecar(t
 
     assert profile.status_code == 200
     assert effect["metadata_artifact_id"]
-    sidecar = json.loads(
-        (project / "runs" / run_id / effect["metadata_artifact_path"]).read_text()
-    )
+    sidecar = json.loads(_artifact_path(project, run_id, effect["metadata_artifact_id"]).read_text())
     assert sidecar["metadata"]["columns"]["code"]["value_labels"] == {
         "1": "One",
         "2": "Two",
@@ -1416,7 +1456,12 @@ def test_transform_child_reloads_all_confirmed_metadata_and_provenance_sidecar(t
     assert sidecar["metadata"]["split"]["columns"] == ["group"]
     assert sidecar["metadata"]["group"]["columns"] == ["group"]
     assert sidecar["provenance"]["source_artifact_id"] == artifact_id
-    assert profile.json()["profile"]["columns"][0]["declared"]["value_labels"] == {
+    code = next(
+        variable
+        for variable in profile.json()["profile"]["variables"]
+        if variable["name"] == "code"
+    )
+    assert code["value_labels"] == {
         "1": "One",
         "2": "Two",
     }
@@ -1476,14 +1521,8 @@ def test_split_group_children_bind_metadata_sidecars_and_reload_profile(tmp_path
         effect = confirmed.json()["effect"]
         for group_artifact in effect["group_artifacts"]:
             assert group_artifact["metadata_artifact_id"]
-            assert group_artifact["metadata_artifact_path"]
             sidecar = json.loads(
-                (
-                    project
-                    / "runs"
-                    / run_id
-                    / group_artifact["metadata_artifact_path"]
-                ).read_text()
+                _artifact_path(project, run_id, group_artifact["metadata_artifact_id"]).read_text()
             )
             assert sidecar["source"]["artifact_id"] == group_artifact["artifact_id"]
             assert sidecar["metadata"]["columns"]["code"]["value_labels"] == {
@@ -1507,12 +1546,12 @@ def test_split_group_children_bind_metadata_sidecars_and_reload_profile(tmp_path
             )
             assert profile.status_code == 200
             code = next(
-                column
-                for column in profile.json()["profile"]["columns"]
-                if column["name"] == "code"
+                variable
+                for variable in profile.json()["profile"]["variables"]
+                if variable["name"] == "code"
             )
-            assert code["declared"]["variable_label"] == "Code"
-            assert code["declared"]["user_missing_values"] == [99]
+            assert code["label"] == "Code"
+            assert code["user_missing_values"] == [99]
 
 
 def test_rename_confirm_preflights_recipe_conflict_before_writing_child_artifacts(
@@ -1644,16 +1683,14 @@ def test_rename_child_reloads_expressible_metadata_and_provenance(tmp_path: Path
 
     assert profile.status_code == 200
     renamed = next(
-        column
-        for column in profile.json()["profile"]["columns"]
-        if column["name"] == "code_new"
+        variable
+        for variable in profile.json()["profile"]["variables"]
+        if variable["name"] == "code_new"
     )
-    assert renamed["declared"]["variable_label"] == "Code"
-    assert renamed["declared"]["value_labels"] == {"1": "One", "2": "Two"}
-    assert renamed["declared"]["user_missing_values"] == [99]
-    sidecar = json.loads(
-        (project / "runs" / run_id / effect["metadata_artifact_path"]).read_text()
-    )
+    assert renamed["label"] == "Code"
+    assert renamed["value_labels"] == {"1": "One", "2": "Two"}
+    assert renamed["user_missing_values"] == [99]
+    sidecar = json.loads(_artifact_path(project, run_id, effect["metadata_artifact_id"]).read_text())
     assert sidecar["metadata"]["weight"] == {"column": "weight", "kind": "frequency"}
     assert sidecar["provenance"]["source_artifact_id"] == artifact_id
     assert sidecar["provenance"]["operation_id"] == "data.rename"

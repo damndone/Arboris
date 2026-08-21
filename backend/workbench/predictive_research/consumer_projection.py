@@ -14,6 +14,7 @@ from workbench.contracts.evidence.envelope import (
     ConsumerProjectionV1,
     EvidenceEnvelopeV1,
 )
+from workbench.contracts.common.contract_ref import ContractRefError, ContractRefV1
 from .schema import PayloadContractError, default_v1_prediction_registry
 from .contracts import ContractError
 from .persistence import (
@@ -170,6 +171,30 @@ def read_classification_artifacts_wrapper_from_run_root(run_root: Path) -> dict[
         "content_digests": dict(receipt["content_digests"]),
         "server_identity": dict(expected_server_identity),
     }
+
+
+def read_classification_source_snapshot_from_run_root(run_root: Path) -> object:
+    """Return an opaque source handle after one complete wrapper validation."""
+
+    from workbench.evidence.provider_projection_adapters import (
+        _authorize_classification_source_receipt,
+        _issue_classification_source_snapshot,
+    )
+
+    wrapper = read_classification_artifacts_wrapper_from_run_root(run_root)
+    metadata = {
+        "artifact_id": wrapper["artifact_id"],
+        "artifact_sha256": wrapper["artifact_sha256"],
+        "receipt_digest": wrapper["receipt_digest"],
+        "server_identity": wrapper["server_identity"],
+    }
+    authorization = _authorize_classification_source_receipt(metadata)
+    return _issue_classification_source_snapshot(
+        wrapper["artifact"],
+        wrapper["receipt"]["source_contract"],
+        authorization=authorization,
+        metadata=metadata,
+    )
 
 
 def read_classification_evidence_from_run_root(
@@ -478,7 +503,8 @@ def _validate_classification_receipt(
         raise _persisted_classification_error("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification server receipt must be an object")
     required = {
         "payload_schema", "schema_version", "receipt_id", "artifact_path", "artifact_id",
-        "artifact_sha256", "payload_contract", "server_identity", "content_digests", "issuer", "receipt_digest",
+        "artifact_sha256", "payload_contract", "source_contract", "server_identity",
+        "content_digests", "issuer", "receipt_digest",
     }
     if set(receipt) != required or receipt.get("payload_schema") != _CLASSIFICATION_RECEIPT_SCHEMA or receipt.get("schema_version") != 1:
         raise _persisted_classification_error("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification server receipt schema is invalid")
@@ -494,6 +520,47 @@ def _validate_classification_receipt(
         or receipt.get("issuer") != "workbench.server.classification-persistence"
     ):
         raise _persisted_classification_error("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification server receipt identity is stale")
+    source_contract = receipt.get("source_contract")
+    expected_payload_contract = record.get("payload_contract")
+    evidence = payload.get("evidence")
+    if (
+        not isinstance(source_contract, Mapping)
+        or set(source_contract) != {
+            "payload_contract",
+            "evidence_schema_ref",
+            "evidence_contract_refs",
+            "envelope_contract_refs",
+        }
+        or source_contract.get("payload_contract") != expected_payload_contract
+        or (
+            isinstance(evidence, Mapping)
+            and source_contract.get("evidence_schema_ref") != evidence.get("payload_schema")
+        )
+        or not isinstance(source_contract.get("evidence_contract_refs"), list)
+        or not source_contract["evidence_contract_refs"]
+        or not isinstance(source_contract.get("envelope_contract_refs"), list)
+    ):
+        raise _persisted_classification_error(
+            "CLASSIFICATION_PERSISTED_RECEIPT_INVALID",
+            "classification source contract is missing or stale",
+        )
+    for name, expected_kind in (
+        ("evidence_contract_refs", "evidence"),
+        ("envelope_contract_refs", "envelope"),
+    ):
+        for raw_ref in source_contract[name]:
+            try:
+                ref = ContractRefV1.from_dict(raw_ref)
+            except (ContractRefError, TypeError, ValueError) as exc:
+                raise _persisted_classification_error(
+                    "CLASSIFICATION_PERSISTED_RECEIPT_INVALID",
+                    f"classification source {name} contains an invalid ref",
+                ) from exc
+            if ref.kind != expected_kind:
+                raise _persisted_classification_error(
+                    "CLASSIFICATION_PERSISTED_RECEIPT_INVALID",
+                    f"classification source {name} contains a wrong ref kind",
+                )
     base = {key: receipt[key] for key in required if key != "receipt_digest"}
     if receipt.get("receipt_digest") != sha256_canonical(base):
         raise _persisted_classification_error("CLASSIFICATION_PERSISTED_RECEIPT_INVALID", "classification server receipt digest is invalid")

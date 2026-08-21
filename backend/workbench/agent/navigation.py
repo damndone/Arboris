@@ -10,7 +10,7 @@ from typing import Any, Iterable
 from .chains import ChainStore, ForkStore
 from .events import AgentEvent, AgentEventStream
 from .operations import OperationRecord, OperationRecordStore
-from .proposals import ProposalStore
+from .proposals import ProposalStore, ProposalStoreCapabilityError
 from .session import EntryRef, JsonlSessionRepository
 
 
@@ -156,7 +156,17 @@ class AgentNavigationProjector:
         self.events = AgentEventStream(self.workbench_root, create=False)
         self.chains = ChainStore(self.workbench_root, create=False)
         self.forks = ForkStore(self.workbench_root, create=False)
-        self.proposals = ProposalStore(self.workbench_root, create=False)
+        # Navigation is a read-only projection. A project may legitimately
+        # have runs but no Agent/Workbench storage yet; that state is an
+        # unavailable proposal relationship, not a capability error that
+        # should escape the projector (and never a reason to create storage).
+        try:
+            self.proposals: ProposalStore | None = ProposalStore(
+                self.workbench_root,
+                create=False,
+            )
+        except ProposalStoreCapabilityError:
+            self.proposals = None
         self.operations = OperationRecordStore(self.workbench_root, create=False)
 
     def session(self, session_id: str) -> AgentNavigationProjection:
@@ -514,6 +524,8 @@ class AgentNavigationProjector:
 
     def _link_status(self, link: AgentNavigationRef) -> str | None:
         if link.kind == "proposal":
+            if self.proposals is None:
+                return None
             try:
                 return self.proposals.latest_status(link.id)
             except (KeyError, ValueError):
@@ -1156,6 +1168,8 @@ class AgentNavigationProjector:
             yield record
 
     def _try_proposal(self, proposal_id: str):
+        if self.proposals is None:
+            return None
         try:
             return self.proposals.latest_revision(proposal_id)
         except (KeyError, ValueError):

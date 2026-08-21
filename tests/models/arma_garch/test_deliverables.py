@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 # One rolling origin, keyed exactly as ``ts.rolling_forecasts.payload.rows[]``.
 ROLLING_ROW = {
     "forecast_origin": {"row_id": "source-row:0000002589", "time": "2025-11-14T00:00:00+00:00"},
@@ -292,12 +293,8 @@ def test_deliverables_never_embed_nondeterministic_columns(tmp_path: Path) -> No
             assert "convergence_details" not in row, f"{name} leaked a convergence blob"
 
 
-def test_arma_garch_report_and_exports_render_the_native_evidence(tmp_path: Path) -> None:
-    from openpyxl import load_workbook
-
+def _arma_report_fixture(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     from workbench.engine.packs.arma_garch.deliverables import build_arma_garch_deliverables
-    from workbench.exports import export_pdf, export_xlsx
-    from workbench.reporting import render_html_report
 
     # Reuse the small, registered-artifact fixture above via the public builder
     # setup rather than creating a special report-only representation.
@@ -318,23 +315,54 @@ def test_arma_garch_report_and_exports_render_the_native_evidence(tmp_path: Path
     _write_artifact(run_root, "ts.volatility_candidates", VOLATILITY_SEARCHES)
     _write_artifact(run_root, "ts.rolling_forecasts", {"rows": [ROLLING_ROW]})
 
-    deliverables = build_arma_garch_deliverables(run_root)
-    html_path = render_html_report(deliverables["report"], run_root)
-    pdf_path = export_pdf(deliverables["report"], run_root)
-    xlsx_path = export_xlsx(deliverables["tables"], run_root)
+    return run_root, build_arma_garch_deliverables(run_root)
+
+
+def test_arma_garch_report_and_exports_require_typed_evidence_admission(tmp_path: Path) -> None:
+    from workbench.exports import export_pdf, export_xlsx
+    from workbench.reporting import render_html_report
+
+    run_root, deliverables = _arma_report_fixture(tmp_path)
+    # The family mapping is deliberately not a report/export capability.  A
+    # host-issued owner and projection are required before any presentation
+    # bytes are written; the real rendering path is covered by the host-bound
+    # evidence tests and cannot be exercised inside this sandbox.
+    with pytest.raises(TypeError, match="ReportDocumentWriterV1"):
+        render_html_report(deliverables["report"], run_root)
+    with pytest.raises(TypeError, match="ReportDocumentWriterV1"):
+        export_pdf(deliverables["report"], run_root)
+    with pytest.raises(TypeError, match="ReportEvidenceWriterV1"):
+        export_xlsx(deliverables["tables"], run_root)
+    assert not (run_root / "reports").exists()
+    assert not (run_root / "exports").exists()
+
+
+def test_arma_garch_report_and_pdf_render_through_typed_document_writer(
+    tmp_path: Path,
+) -> None:
+    from workbench.exports import export_pdf
+    from workbench.reporting import render_html_report
+    from tests.test_v189_evidence_report_boundary import (
+        _owner_issued_document_writer,
+    )
+
+    run_root, deliverables = _arma_report_fixture(tmp_path)
+    try:
+        document_writer = _owner_issued_document_writer(
+            tmp_path,
+            deliverables["report"],
+            run_root,
+        )
+    except (OSError, PermissionError) as exc:
+        pytest.skip(f"host authority unavailable in this environment: {type(exc).__name__}")
+
+    html_path = render_html_report(document_writer, run_root)
+    pdf_path = export_pdf(document_writer, run_root)
 
     html = html_path.read_text(encoding="utf-8")
     assert 'id="time-series-overview"' in html
     assert "ARMA(1,1)" in html
     assert "7.4409" in html
-    # The residual diagnostics a reader needs must reach the rendered surfaces,
-    # not just the typed artifacts.
     assert "Ljung–Box" in html
     assert "Jarque–Bera" in html
     assert pdf_path.stat().st_size > 4_000
-    workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
-    assert "Parameters" in workbook.sheetnames
-    assert workbook["Parameters"].max_row > 1
-    rolling = workbook["Rolling forecasts"]
-    header = [cell.value for cell in next(rolling.iter_rows(min_row=1, max_row=1))]
-    assert {"origin_time", "target_time", "observed_value", "conditional_mean"} <= set(header)

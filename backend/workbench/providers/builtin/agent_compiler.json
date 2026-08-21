@@ -43,6 +43,22 @@
     }
   ],
   "projection_refs": [{"kind": "projection", "logical_id": "agent.compiler.agent", "semantic_version": "1.0", "contract_digest": "3333333333333333333333333333333333333333333333333333333333333333"}],
+  "projection_declarations": [{
+    "path_id": "agent.compiler.draft-only",
+    "consumer_id": "agent",
+    "projection_ref": {"kind": "projection", "logical_id": "agent.compiler.agent", "semantic_version": "1.0", "contract_digest": "3333333333333333333333333333333333333333333333333333333333333333"},
+    "evidence_contract_refs": [{"kind": "evidence", "logical_id": "agent.compiler.evidence", "semantic_version": "1.0", "contract_digest": "2222222222222222222222222222222222222222222222222222222222222222"}],
+    "envelope_contract_refs": [],
+    "fact_kinds": ["compiler_receipt"],
+    "policy_ref": {"kind": "policy", "logical_id": "agent.compiler.policy", "semantic_version": "1.0", "contract_digest": "5555555555555555555555555555555555555555555555555555555555555555"},
+    "renderer_ref": {"kind": "renderer", "logical_id": "agent.compiler.renderer", "semantic_version": "1.0", "contract_digest": "4444444444444444444444444444444444444444444444444444444444444444"},
+    "max_token_budget": 4096,
+    "max_row_budget": 64,
+    "allowed_sensitivity": ["public", "internal"],
+    "ordering": ["fact_id"],
+    "coverage_status": "required",
+    "exemption_reason": null
+  }],
   "renderer_refs": [{"kind": "renderer", "logical_id": "agent.compiler.renderer", "semantic_version": "1.0", "contract_digest": "4444444444444444444444444444444444444444444444444444444444444444"}],
   "policy_refs": [{"kind": "policy", "logical_id": "agent.compiler.policy", "semantic_version": "1.0", "contract_digest": "5555555555555555555555555555555555555555555555555555555555555555"}]
 }

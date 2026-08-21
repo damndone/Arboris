@@ -700,8 +700,9 @@ def build_report_view_model(
             )
         try:
             _validate_owner_bound_projection(evidence_projection, owner)
+            canonical_source, _canonical_artifact = owner._canonical_report_source_and_artifact()  # type: ignore[attr-defined]
             canonical_projection = default_projection_registry().project(
-                owner._canonical_record,  # type: ignore[attr-defined]
+                canonical_source,
                 consumer_id="report",
                 destination="local",
             )
@@ -846,7 +847,7 @@ def build_persisted_evidence_report_view(
     try:
         owner._require_report_authority()
         bound_identity = owner._require_report_request_identity(request_identity)
-        canonical_artifact = owner._canonical_report_artifact()
+        canonical_source, canonical_artifact = owner._canonical_report_source_and_artifact()
         if type(artifact_admission) is not ArtifactAdmissionV1 or artifact_admission is not canonical_artifact:
             raise EvidenceProjectionError(
                 "EVIDENCE_PROVENANCE_REQUIRED",
@@ -858,7 +859,7 @@ def build_persisted_evidence_report_view(
                 "Report projection must be an admitted typed projection",
             )
         expected_projection = default_projection_registry().project(
-            owner._canonical_record,  # type: ignore[attr-defined]
+            canonical_source,
             consumer_id="report",
             destination="local",
         )
@@ -915,6 +916,14 @@ def build_persisted_evidence_report_view(
     sections = []
     if status != "available":
         sections.append({"key": "persisted-evidence", "label": "Persisted evidence", "status": status})
+    snapshot_fields = (
+        {
+            "dataSnapshotRef": projection.data_snapshot_ref,
+            "dataSnapshotDigest": projection.data_snapshot_digest,
+        }
+        if projection.data_snapshot_ref is not None and projection.data_snapshot_digest is not None
+        else {}
+    )
     view: dict[str, object] = {
         "schemaVersion": 1,
         "projectionId": f"{projection.consumer_id}:{projection.commit_id}",
@@ -924,6 +933,7 @@ def build_persisted_evidence_report_view(
         "envelopeRef": projection.envelope_ref,
         "commitId": projection.commit_id,
         "envelopeDigest": projection.envelope_digest,
+        **snapshot_fields,
         "status": status,
         "executionStatus": projection.execution_status,
         "availability": projection.availability,
@@ -932,6 +942,7 @@ def build_persisted_evidence_report_view(
             projection.validation_summary.get("requirement_status", "unavailable")
         ),
         "validationSummary": dict(projection.validation_summary),
+        "rendererKey": projection.renderer_key,
         "facts": facts,
         "sections": sections,
         "provenance": {
@@ -950,6 +961,7 @@ def build_persisted_evidence_report_view(
             "commitId": projection.commit_id,
             "envelopeRef": projection.envelope_ref,
             "envelopeDigest": projection.envelope_digest,
+            **snapshot_fields,
             "lineageRefs": list(projection.lineage_refs),
             "projectionRef": projection.projection_ref.to_dict(),
             "resultIdentity": dict(projection.result_identity),
@@ -996,6 +1008,7 @@ def _unavailable_report_evidence(
         "projectionId": f"report:unavailable:{safe_artifact_id}",
         "consumerId": "report",
         "consumerVersion": "1.0",
+        "rendererKey": "workbench.consumer_projection.report",
         "artifactRef": safe_artifact_id,
         "envelopeRef": "UNAVAILABLE",
         "commitId": "UNAVAILABLE",

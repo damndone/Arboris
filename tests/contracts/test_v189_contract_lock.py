@@ -3586,14 +3586,24 @@ def _new_family_provider_payload(
         path["execution_adapter_ref"] = None
     elif variant % 3 == 1:
         path["result_contract_refs"] = []
-        path["evidence_contract_refs"] = []
     else:
         projection_ref = _contract_ref_payload(
             kind="projection", logical_id=f"{provider_id}.projection.{variant}"
         )
         payload["contracts"].append(projection_ref)  # type: ignore[union-attr]
+        payload["projection_refs"].append(projection_ref)  # type: ignore[union-attr]
         path["projection_refs"] = {"agent": projection_ref}
     payload["exposure_paths"] = [path]  # type: ignore[assignment]
+    if path["evidence_contract_refs"]:
+        declaration = payload["projection_declarations"][0]  # type: ignore[index]
+        declaration["path_id"] = path["path_id"]  # type: ignore[index]
+        declaration["projection_ref"] = path["projection_refs"]["agent"]  # type: ignore[index]
+        declaration["evidence_contract_refs"] = path["evidence_contract_refs"]  # type: ignore[index]
+    else:
+        # A projection without an admissible evidence contract is not a
+        # consumer-covered path; remove it instead of manufacturing evidence.
+        path["projection_refs"] = {}
+        payload["projection_declarations"] = []
     return payload
 
 

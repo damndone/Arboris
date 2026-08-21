@@ -8,7 +8,10 @@ from shutil import copytree
 from fastapi.testclient import TestClient
 
 from workbench.agent.model import ModelRequest, ModelStreamEvent
-from workbench.agent.proposals import ProposalStore
+from workbench.agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    issue_route_proposal_store,
+)
 from workbench.app import app
 from workbench.llm.config import LLMConfig
 from workbench.lineage.node_write_validation import build_rerun_operation_context
@@ -655,7 +658,7 @@ def test_get_activity_projection_returns_durable_operation_and_diff(tmp_path: Pa
     }
 
 
-def test_graph_fork_proposal_route_confirms_into_child_agent_without_child_run(
+def test_graph_fork_proposal_route_fails_closed_without_cutover_receipt(
     tmp_path: Path,
 ) -> None:
     project_root = tmp_path / "project"
@@ -691,20 +694,10 @@ def test_graph_fork_proposal_route_confirms_into_child_agent_without_child_run(
             },
         )
 
-        assert confirmed.status_code == 200, confirmed.text
-        operation = confirmed.json()["operation"]
-        assert operation["operation_id"] == "graph.fork"
-        assert operation["status"] == "completed"
-        assert operation["verification"]["passed"] is True
-        assert operation["execution"]["execution_key"].startswith("exec_")
-        assert operation["execution"]["bindings"]["fork_id"] == operation["outputs"]["fork_id"]
-        assert operation["execution"]["bindings"]["child_chain_id"] == operation["outputs"]["child_chain_id"]
-        assert "target_run_id" not in operation["outputs"]
-        assert operation["outputs"]["fork_id"]
-        assert operation["outputs"]["child_chain_id"]
-        assert operation["outputs"]["child_session_id"]
+        assert confirmed.status_code == 409, confirmed.text
+        assert confirmed.json()["error"]["code"] == "AGENT_LEGACY_COMPILATION_REQUIRED"
         assert sorted(path.name for path in (project_root / "runs").iterdir()) == ["run-a"]
-        assert (project_root / "workbench" / "forks").is_dir()
+        assert not list((project_root / "workbench" / "operation-records").glob("*.jsonl"))
 
 
 def test_graph_fork_proposal_rejects_a_request_head_outside_chain_scope(
@@ -965,21 +958,34 @@ def _create_route_proposal(
         op_node_id="model:ols_1",
         active_head_run_id="run-a",
     )
-    return ProposalStore(project_root / "workbench").create(
+    target = {
+        "run_id": "run-a",
+        "node_ref": "model:ols_1",
+        "node_hash": context.node_hash,
+        "forest_node_key": context.forest_node_key,
+    }
+    proposal_store = issue_route_proposal_store(project_root / "workbench")
+    return proposal_store.create(
         session_id=session_id,
         chain_id=chain_id,
         operation_id="model.rerun",
-        target={
-            "run_id": "run-a",
-            "node_ref": "model:ols_1",
-            "node_hash": context.node_hash,
-            "forest_node_key": context.forest_node_key,
-        },
+        target=target,
         preconditions={
             "context_version": context.context_version,
             "context_fingerprint": context.context_fingerprint,
             "active_head_run_id": "run-a",
             "owner_resolution": context.owner_resolution,
+            "server_compilation": {
+                "compilation_record_id": "route-fixture-compilation",
+                "confirmation_id": "route-fixture-confirmation",
+                "actor_ref": f"actor:agent:{session_id}",
+                "session_ref": session_id,
+                "project_ref": f"project:{project_root.resolve()}",
+                "semantic_plan_hash": "a" * 64,
+                "target": target,
+                "chain_id": chain_id,
+                "operation_id": "model.rerun",
+            },
         },
         changes={"covariance": {"old": "nonrobust", "new": "HC1"}},
         evidence_refs=["diagnostic:MODEL_DIAGNOSTIC_WARNING"],
@@ -1030,22 +1036,14 @@ def test_proposal_is_listed_and_confirmation_is_pending_without_rerun_mutation(
                 "active_head_run_id": "run-a",
             },
         )
-        assert confirmed.status_code == 200, confirmed.text
-        payload = confirmed.json()
-        assert payload["proposal"]["status"] == "confirmed"
-        # Design §8.2: user confirmation IS the execution gate — the endpoint
-        # runs the request-independent executor immediately. This fixture run
-        # is not genuinely rerunnable, so the operation must land as a durable
-        # `failed` record (never a fake success) and no ghost child run may
-        # appear. The healthy end-to-end path is covered by
-        # test_confirmed_proposal_executes_rerun_and_reconciles_to_completion.
-        assert payload["operation"]["status"] == "failed"
-        assert payload["operation"]["error"]
-        assert payload["operation"]["proposal_id"] == proposal.proposal_id
+        # The compatibility route cannot promote a caller-shaped fixture into
+        # execution. A real cutover compiler/receipt is required first.
+        assert confirmed.status_code == 503, confirmed.text
+        assert confirmed.json()["error"]["code"] == "AGENT_NOTEBOOK_IDENTITY_NOT_BOUND"
         assert list((project_root / "runs").iterdir()) == [project_root / "runs" / "run-a"]
 
 
-def test_proposal_confirmation_is_scoped_and_stale_context_fails_closed(
+def test_proposal_confirmation_requires_host_identity_before_legacy_lookup(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1107,8 +1105,8 @@ def test_proposal_confirmation_is_scoped_and_stale_context_fails_closed(
                 "active_head_run_id": "run-no-longer-current",
             },
         )
-        assert stale.status_code == 409
-        assert stale.json()["error"]["code"] == "AGENT_PROPOSAL_STALE"
+        assert stale.status_code == 503
+        assert stale.json()["error"]["code"] == "AGENT_NOTEBOOK_IDENTITY_NOT_BOUND"
         assert not list((project_root / "workbench" / "operation-records").glob("*.jsonl"))
 
 
@@ -1155,8 +1153,8 @@ def test_proposal_confirmation_uses_chain_store_active_head(
             },
         )
 
-    assert confirmed.status_code == 409
-    assert confirmed.json()["error"]["code"] == "AGENT_PROPOSAL_STALE"
+    assert confirmed.status_code == 503
+    assert confirmed.json()["error"]["code"] == "AGENT_NOTEBOOK_IDENTITY_NOT_BOUND"
 
 
 def test_proposal_decline_is_a_scoped_append_only_decision(
@@ -1207,8 +1205,8 @@ def test_proposal_decline_is_a_scoped_append_only_decision(
                 "active_head_run_id": "run-a",
             },
         )
-        assert confirmed.status_code == 409
-        assert confirmed.json()["error"]["code"] == "AGENT_PROPOSAL_CONFLICT"
+        assert confirmed.status_code == 503
+        assert confirmed.json()["error"]["code"] == "AGENT_NOTEBOOK_IDENTITY_NOT_BOUND"
 
 
 def test_proposal_revision_route_preserves_scope_and_rejects_stale_revision(
@@ -1581,17 +1579,8 @@ def test_natural_language_turn_can_propose_registry_enabled_graph_fork(
             },
         )
 
-    assert confirmed.status_code == 200, confirmed.text
-    operation = confirmed.json()["operation"]
-    assert operation["operation_id"] == "graph.fork"
-    assert operation["status"] == "completed"
-    assert "target_run_id" not in operation["outputs"]
-    assert operation["execution"]["bindings"]["fork_id"] == operation["outputs"]["fork_id"]
-    assert operation["verification"]["checks"] == {
-        "fork_record": True,
-        "child_chain": True,
-        "child_session": True,
-    }
+    assert confirmed.status_code == 409, confirmed.text
+    assert confirmed.json()["error"]["code"] == "AGENT_LEGACY_COMPILATION_REQUIRED"
     assert not list((project_root / "runs").glob("run-*child*"))
 
 
@@ -1766,52 +1755,13 @@ def test_confirmed_proposal_executes_rerun_and_reconciles_to_completion(
                 "active_head_run_id": parent_run_id,
             },
         )
-        assert confirmed.status_code == 200
-        operation = confirmed.json()["operation"]
-        # Confirmation EXECUTES: the child run is submitted through the
-        # request-independent rerun service before the response returns.
-        assert operation["status"] == "running"
-        assert operation["execution"]["execution_key"].startswith("exec_")
-        child_run_id = operation["outputs"]["target_run_id"]
-        assert operation["execution"]["bindings"]["child_run_id"] == child_run_id
-        assert child_run_id and child_run_id != parent_run_id
-        child_inputs = json.loads(
-            (project.root / "runs" / child_run_id / "run_inputs.json").read_text()
-        )
-        assert child_inputs["rerun_of"] == parent_run_id
-        assert child_inputs["workbench_context"]["proposal_id"] == proposal["proposal_id"]
-        assert child_inputs["form"]["covariance"] == "unadjusted"
-
-        for _ in range(150):
-            status = client.get(
-                f"/runs/{child_run_id}", params={"project_root": str(project.root)}
-            ).json().get("status")
-            if status in {"completed", "failed"}:
-                break
-            time.sleep(0.1)
-        assert status == "completed"
-
-        record_id = operation["record_id"]
-        reconciled = client.post(
-            f"/agent/sessions/{session_id}/operations/{record_id}/reconcile",
-            params={"project_root": str(project.root)},
-        )
-        assert reconciled.status_code == 200
-        final = reconciled.json()["operation"]
-        assert final["status"] == "completed"
-        assert final["verification"]
-        again = client.post(
-            f"/agent/sessions/{session_id}/operations/{record_id}/reconcile",
-            params={"project_root": str(project.root)},
-        )
-        assert again.status_code == 200
-        assert again.json()["operation"]["status"] == "completed"
-
-        unknown = client.post(
-            f"/agent/sessions/{session_id}/operations/oprec_missing/reconcile",
-            params={"project_root": str(project.root)},
-        )
-        assert unknown.status_code == 404
+        # The old natural-language proposal route is deliberately not an
+        # execution authority. The positive execution path is the typed
+        # Agent/Notebook cutover contract, which requires a persisted server
+        # compilation and confirmation receipt.
+        assert confirmed.status_code == 409, confirmed.text
+        assert confirmed.json()["error"]["code"] == "AGENT_LEGACY_COMPILATION_REQUIRED"
+        assert not list((project.root / "runs").glob("run-*child*"))
 
 
 def test_proposal_canonicalizes_model_supplied_target_references(

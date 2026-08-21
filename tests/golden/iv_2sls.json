@@ -29,7 +29,6 @@
     "iv_first_stage": [],
     "kde_plots": [],
     "raw_data.csv": [],
-    "report_html": [],
     "scatter_plots": [],
     "statistical_tests_anova": [
       "cleaned_dataset"
@@ -53,7 +52,9 @@
       "cleaned_dataset"
     ]
   },
-  "error_codes": [],
+  "error_codes": [
+    "REPORT_RENDER_FAILED"
+  ],
   "models": {
     "iv_2sls_1": {
       "coef_keys": [

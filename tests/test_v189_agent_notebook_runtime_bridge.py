@@ -150,6 +150,43 @@ def _compile_request(scope: Mapping[str, str]) -> AgentNotebookCutoverCompileReq
     )
 
 
+def _bound_agent_client(
+    *scoped_runtimes: tuple[Mapping[str, str], object],
+) -> tuple[FastAPI, TestClient]:
+    """Build the explicit HTTP host harness required by the route boundary."""
+
+    host_app = FastAPI()
+    register_error_handlers(host_app)
+    host_app.include_router(agent_router)
+    bindings = {
+        scope["session_ref"]: scope
+        for scope, _runtime in scoped_runtimes
+    }
+    for scope, runtime in scoped_runtimes:
+        configure_agent_notebook_runtime(
+            project_ref=scope["project_ref"],
+            session_ref=scope["session_ref"],
+            compiler=runtime.compiler,
+            app_instance=host_app,
+        )
+
+    def resolve_identity(_request, _project_ref, claimed_session_ref, _notebook_id):
+        scope = bindings.get(claimed_session_ref)
+        if scope is None:
+            raise WorkbenchAPIError(
+                status_code=503,
+                code="AGENT_NOTEBOOK_IDENTITY_NOT_BOUND",
+                message="test host identity is not bound",
+            )
+        return scope["actor_ref"], scope["session_ref"], scope["project_ref"]
+
+    configure_notebook_cutover_identity_resolver(
+        resolve_identity,
+        app_instance=host_app,
+    )
+    return host_app, TestClient(host_app)
+
+
 @pytest.fixture(autouse=True)
 def _clear_test_scopes():
     for scope in (_SCOPE_A, _SCOPE_B, _UNBOUND_SCOPE):
@@ -245,19 +282,16 @@ def test_runtime_composition_requires_a_host_compiler() -> None:
 
 def test_app_bootstrap_installs_compiler_for_one_exact_scope() -> None:
     runtime = _runtime()
-
-    configure_agent_notebook_runtime(
-        project_ref=_SCOPE_A["project_ref"],
-        session_ref=_SCOPE_A["session_ref"],
-        compiler=runtime.compiler,
-    )
+    host_app, client = _bound_agent_client((_SCOPE_A, runtime))
 
     assert lookup_agent_notebook_cutover_authority(
         _SCOPE_A["project_ref"],
         _SCOPE_A["session_ref"],
+        request=SimpleNamespace(app=host_app),
     ) is runtime.compiler
-    preview = compile_agent_notebook_cutover(_compile_request(_SCOPE_A))
-    assert preview["preview"]["entrypoint"] == "agent"
+    response = client.post("/agent/cutover/compile", json=_compile_request(_SCOPE_A).model_dump())
+    assert response.status_code == 200, response.text
+    assert response.json()["preview"]["entrypoint"] == "agent"
 
 
 def test_scope_lookup_does_not_leak_authority_or_confirmation_across_scopes() -> None:
@@ -286,18 +320,20 @@ def test_scope_lookup_does_not_leak_authority_or_confirmation_across_scopes() ->
         )
     assert unbound.value.code == "AGENT_NOTEBOOK_CUTOVER_NOT_BOUND"
 
-    record_id = compile_agent_notebook_cutover(_compile_request(_SCOPE_A))["preview"][
-        "compilation_record_id"
-    ]
+    runtime_host, client = _bound_agent_client(
+        (_SCOPE_A, runtime_a),
+        (_SCOPE_B, runtime_b),
+    )
+    response = client.post("/agent/cutover/compile", json=_compile_request(_SCOPE_A).model_dump())
+    assert response.status_code == 200, response.text
+    record_id = response.json()["preview"]["compilation_record_id"]
     assert isinstance(record_id, str)
-    with pytest.raises(WorkbenchAPIError) as cross_scope:
-        from workbench.http.agent_routes import confirm_agent_notebook_cutover
-
-        confirm_agent_notebook_cutover(
-            record_id,
-            AgentNotebookCutoverScopeRequest(**_SCOPE_B),
-        )
-    assert cross_scope.value.code == "SERVER_RECORD_UNKNOWN"
+    cross_scope = client.post(
+        f"/agent/cutover/{record_id}/confirm",
+        json=AgentNotebookCutoverScopeRequest(**_SCOPE_B).model_dump(),
+    )
+    assert cross_scope.status_code == 409, cross_scope.text
+    assert cross_scope.json()["error"]["code"] == "SERVER_RECORD_UNKNOWN"
 
 
 def test_http_authority_store_isolated_per_application_instance() -> None:
@@ -388,7 +424,7 @@ def test_unbound_route_remains_explicit_503() -> None:
         compile_agent_notebook_cutover(_compile_request(_UNBOUND_SCOPE))
 
     assert error.value.status_code == 503
-    assert error.value.code == "AGENT_NOTEBOOK_CUTOVER_NOT_BOUND"
+    assert error.value.code == "AGENT_NOTEBOOK_IDENTITY_NOT_BOUND"
 
 
 def test_app_bootstrap_can_unbind_one_scope_without_affecting_another() -> None:

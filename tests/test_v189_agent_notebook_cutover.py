@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 import pytest
 
 from workbench.agent.cutover_runtime import EvidenceCommitReceiptV1
@@ -28,6 +30,11 @@ from workbench.agent.workflow_contracts import (
 )
 from workbench.agent.proposals import ProposalStore
 from workbench.api_errors import WorkbenchAPIError
+from workbench.api_errors import register_error_handlers
+from workbench.app import (
+    configure_agent_notebook_runtime,
+    configure_notebook_cutover_identity_resolver,
+)
 from workbench.http.agent_routes import (
     AgentNotebookCutoverCompileRequest,
     AgentNotebookCutoverExecuteRequest,
@@ -35,6 +42,7 @@ from workbench.http.agent_routes import (
     compile_agent_notebook_cutover,
     confirm_agent_notebook_cutover,
     execute_agent_notebook_cutover,
+    router as agent_router,
     register_agent_notebook_cutover_authority,
 )
 from workbench.providers.catalog import load_builtin_catalog
@@ -501,7 +509,7 @@ def test_http_cutover_requires_explicit_server_authority_and_keeps_confirmation_
     )
     with pytest.raises(WorkbenchAPIError) as unbound_error:
         compile_agent_notebook_cutover(unbound)
-    assert unbound_error.value.code == "AGENT_NOTEBOOK_CUTOVER_NOT_BOUND"
+    assert unbound_error.value.code == "AGENT_NOTEBOOK_IDENTITY_NOT_BOUND"
 
     _catalog, compiler = _cutover()
     scope = {
@@ -509,10 +517,22 @@ def test_http_cutover_requires_explicit_server_authority_and_keeps_confirmation_
         "project_ref": "project:http-bound",
         "session_ref": "session:http-bound",
     }
-    register_agent_notebook_cutover_authority(
+    host_app = FastAPI()
+    register_error_handlers(host_app)
+    host_app.include_router(agent_router)
+    configure_agent_notebook_runtime(
         project_ref=scope["project_ref"],
         session_ref=scope["session_ref"],
         compiler=compiler,
+        app_instance=host_app,
+    )
+    configure_notebook_cutover_identity_resolver(
+        lambda _request, _project, _session, _notebook: (
+            scope["actor_ref"],
+            scope["session_ref"],
+            scope["project_ref"],
+        ),
+        app_instance=host_app,
     )
     request = AgentNotebookCutoverCompileRequest(
         text="请检查 dataset:fixture:1",
@@ -526,19 +546,23 @@ def test_http_cutover_requires_explicit_server_authority_and_keeps_confirmation_
             "sensitivity": "public",
         },
     )
-    preview_response = compile_agent_notebook_cutover(request)
-    record_id = preview_response["preview"]["compilation_record_id"]
+    with TestClient(host_app) as client:
+        preview_http = client.post("/agent/cutover/compile", json=request.model_dump())
+        assert preview_http.status_code == 200, preview_http.text
+        record_id = preview_http.json()["preview"]["compilation_record_id"]
+        missing_proposal = client.post(
+            f"/agent/cutover/{record_id}/confirm",
+            json=AgentNotebookCutoverScopeRequest(**scope).model_dump(),
+        )
+        forged = client.post(
+            f"/agent/cutover/{record_id}/execute",
+            json=AgentNotebookCutoverExecuteRequest(
+                **scope,
+                confirmation_id="confirmation:forged",
+            ).model_dump(),
+        )
     assert isinstance(record_id, str)
-    with pytest.raises(WorkbenchAPIError) as missing_proposal:
-        confirm_agent_notebook_cutover(
-            record_id,
-            AgentNotebookCutoverScopeRequest(**scope),
-        )
-    assert missing_proposal.value.code == "PROPOSAL_BINDING_REQUIRED"
-
-    with pytest.raises(WorkbenchAPIError) as forged_error:
-        execute_agent_notebook_cutover(
-            record_id,
-            AgentNotebookCutoverExecuteRequest(**scope, confirmation_id="confirmation:forged"),
-        )
-    assert forged_error.value.code == "SERVER_CONFIRMATION_UNKNOWN"
+    assert missing_proposal.status_code == 409, missing_proposal.text
+    assert missing_proposal.json()["error"]["code"] == "PROPOSAL_BINDING_REQUIRED"
+    assert forged.status_code == 409, forged.text
+    assert forged.json()["error"]["code"] == "SERVER_CONFIRMATION_UNKNOWN"

@@ -358,6 +358,102 @@ class ScopeAuthorityResolverV1:
         raise TypeError("scope authority resolvers cannot be serialized")
 
 
+class DeploymentIdentityResolverV1:
+    """Adapt authenticated host identity to the external scope authority.
+
+    The callback only supplies the deployment's authenticated identity
+    snapshot.  It does not issue a scope binding.  Every invocation is
+    re-bound and revalidated through ``ScopeAuthorityResolverV1`` so a stale
+    request assertion cannot become Agent/Notebook authority.
+    """
+
+    def __init__(
+        self,
+        scope_resolver: ScopeAuthorityResolverV1,
+        authenticated_identity_resolver: Any,
+    ) -> None:
+        if type(scope_resolver) is not ScopeAuthorityResolverV1:
+            raise ValueError("scope authority resolver is required")
+        if not callable(authenticated_identity_resolver):
+            raise ValueError("authenticated identity resolver is required")
+        self._scope_resolver = scope_resolver
+        self._authenticated_identity_resolver = authenticated_identity_resolver
+
+    @classmethod
+    def from_host_handle(
+        cls,
+        host_handle: HostAuthorityHandleV1,
+        authenticated_identity_resolver: Any,
+    ) -> "DeploymentIdentityResolverV1":
+        if type(host_handle) is not HostAuthorityHandleV1:
+            raise ValueError("host authority handle is required")
+        try:
+            scope_resolver = ScopeAuthorityResolverV1.from_host_handle(host_handle)
+        except (AttributeError, HostAuthorityChannelError, TypeError, ValueError) as exc:
+            raise ValueError("host authority handle is required") from exc
+        return cls(scope_resolver, authenticated_identity_resolver)
+
+    def __call__(
+        self,
+        request: Any,
+        project_ref: str,
+        claimed_session_ref: str | None,
+        notebook_id: str | None,
+    ) -> tuple[str, str, str]:
+        try:
+            asserted = self._authenticated_identity_resolver(
+                request,
+                project_ref,
+                claimed_session_ref,
+                notebook_id,
+            )
+        except Exception as exc:
+            raise ValueError("authenticated identity is unavailable") from exc
+        if type(asserted) is not tuple or len(asserted) not in {2, 3}:
+            raise ValueError("authenticated identity binding is invalid")
+        principal_ref, session_ref = asserted[:2]
+        _safe_ref(principal_ref, "principal:")
+        _safe_ref(session_ref, "session:")
+        canonical_project_ref = project_ref
+        if len(asserted) == 3:
+            asserted_project_ref = asserted[2]
+            if asserted_project_ref != project_ref:
+                raise ValueError("authenticated project scope does not match request scope")
+            canonical_project_ref = asserted_project_ref
+        _safe_scope(canonical_project_ref)
+        try:
+            binding = self._scope_resolver.resolve(
+                scope_ref=canonical_project_ref,
+                principal_ref=principal_ref,
+                session_ref=session_ref,
+                project_ref=canonical_project_ref,
+            )
+        except (AttributeError, HostAuthorityChannelError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError("scope and principal are not server-bound") from exc
+        if type(binding) is not ServerScopeBindingV1:
+            raise ValueError("scope authority returned an invalid binding")
+        if (
+            binding.scope_ref != canonical_project_ref
+            or binding.principal_ref != principal_ref
+            or binding.session_ref != session_ref
+            or binding.project_ref != canonical_project_ref
+        ):
+            raise ValueError("scope authority returned a mismatched binding")
+        return binding.principal_ref, binding.session_ref, binding.project_ref
+
+    def __copy__(self) -> "DeploymentIdentityResolverV1":
+        raise TypeError("deployment identity resolvers cannot be copied")
+
+    def __deepcopy__(self, _memo: dict[str, object]) -> "DeploymentIdentityResolverV1":
+        raise TypeError("deployment identity resolvers cannot be copied")
+
+    def __reduce__(self) -> tuple[object, ...]:
+        raise TypeError("deployment identity resolvers cannot be serialized")
+
+    def __reduce_ex__(self, _protocol: int) -> tuple[object, ...]:
+        raise TypeError("deployment identity resolvers cannot be serialized")
+
+
 CompiledAgentPlanV1 = CompiledWorkflowV1
 CompiledAgentPlan = CompiledWorkflowV1
 CompilationRecord = CompilationRecordV1
@@ -463,4 +559,5 @@ __all__ = [
     "ServerDraftPlanReferenceV1",
     "ScopeAuthorityResolverV1",
     "ServerScopeBindingV1",
+    "DeploymentIdentityResolverV1",
 ]

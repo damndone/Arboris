@@ -119,6 +119,44 @@ def validate_classification_server_identity(value: Any, run_root: Path) -> dict[
     return expected
 
 
+def _classification_source_contract(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Persist the typed source contract in the server receipt.
+
+    Consumer-side catalog lookup is not sufficient provenance: the receipt
+    must carry the exact evidence/envelope refs that were admitted when this
+    packet crossed the server persistence seam.  The estimator does not
+    choose these refs; the server-owned provider catalog does.
+    """
+
+    from ..evidence.provider_projection_adapters import (
+        CLASSIFICATION_EXPOSURE_PATH,
+        CLASSIFICATION_PROVIDER_ID,
+    )
+    from ..providers.catalog import load_builtin_catalog
+
+    catalog = load_builtin_catalog()
+    provider = next(
+        provider
+        for provider in catalog.providers
+        if provider.provider_id == CLASSIFICATION_PROVIDER_ID
+    )
+    path = next(
+        path
+        for path in provider.exposure_paths
+        if path.path_id == CLASSIFICATION_EXPOSURE_PATH
+    )
+    evidence = payload.get("evidence")
+    return {
+        "payload_contract": {
+            "payload_schema": payload.get("payload_schema"),
+            "schema_version": payload.get("schema_version"),
+        },
+        "evidence_schema_ref": evidence.get("payload_schema") if isinstance(evidence, Mapping) else None,
+        "evidence_contract_refs": [ref.to_dict() for ref in path.evidence_contract_refs],
+        "envelope_contract_refs": [],
+    }
+
+
 def _classification_content_receipt(payload: Mapping[str, Any], *, artifact_sha256: str, server_identity: Mapping[str, Any]) -> dict[str, Any]:
     """Create the server-owned receipt for every classification consumer field.
 
@@ -176,6 +214,7 @@ def _classification_content_receipt(payload: Mapping[str, Any], *, artifact_sha2
             "payload_schema": payload.get("payload_schema"),
             "schema_version": payload.get("schema_version"),
         },
+        "source_contract": _classification_source_contract(payload),
         "server_identity": dict(server_identity),
         "content_digests": content_digests,
         "issuer": "workbench.server.classification-persistence",

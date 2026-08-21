@@ -108,9 +108,16 @@ def test_manifest_and_rows_have_stable_json_safe_round_trips() -> None:
         )
 
 
-def test_builtin_provider_payload_is_c0_shaped_and_matches_repository_fixture() -> None:
+def test_builtin_provider_payload_is_c0_shaped_and_matches_repository_fixture(
+    monkeypatch,
+) -> None:
+    from workbench import data_interchange
     from workbench.data_operation_manifest import build_builtin_provider_payload
 
+    # The repository fixture is a stable contract artifact.  Native optional
+    # capability admission is environment-sensitive and is tested separately
+    # through the live manifest projection below.
+    monkeypatch.setattr(data_interchange, "_pyreadstat_module", lambda: None)
     payload = build_builtin_provider_payload()
     fixture_path = (
         Path(__file__).parents[1]
@@ -130,6 +137,7 @@ def test_builtin_provider_payload_is_c0_shaped_and_matches_repository_fixture() 
         "projection_refs",
         "renderer_refs",
         "policy_refs",
+        "projection_declarations",
     }
     assert "operations" not in payload
     assert json.loads(fixture_path.read_text(encoding="utf-8")) == payload
@@ -320,7 +328,8 @@ def test_manifest_advertises_only_real_data_consumer_extensions() -> None:
 
     from workbench.data_interchange import interchange_capability
 
-    unavailable = manifest.to_dict().get("unavailable", [])
+    payload = manifest.to_dict()
+    unavailable = payload.get("unavailable", [])
     native_items = {
         item["operation_id"]: item
         for item in unavailable
@@ -330,15 +339,14 @@ def test_manifest_advertises_only_real_data_consumer_extensions() -> None:
             "data.interchange.dta",
         }
     }
-    assert set(native_items) == {
-        "data.interchange.sav",
-        "data.interchange.zsav",
-        "data.interchange.dta",
-    }
-    for operation_id, item in native_items.items():
-        capability = interchange_capability(operation_id.rsplit(".", 1)[-1])
-        assert item["status"] == "unavailable"
-        assert item["reason_code"] == capability.reason_code
+    for target_format in ("sav", "zsav", "dta"):
+        operation_id = f"data.interchange.{target_format}"
+        capability = interchange_capability(target_format)
+        if capability.status == "available":
+            assert operation_id not in native_items
+        else:
+            assert native_items[operation_id]["status"] == "unavailable"
+            assert native_items[operation_id]["reason_code"] == capability.reason_code
 
 
 def test_manifest_fails_closed_when_pyreadstat_import_is_broken(monkeypatch) -> None:
@@ -510,6 +518,136 @@ def test_package_runtime_adapter_joins_live_catalog_and_exposes_record_evidence_
     assert {"data.agent", "data.notebook", "data.report"} <= set(adapter.consumer_slots)
     assert {"derived", "operation_record", "evidence"} <= set(adapter.output_ports)
     assert callable(adapter.adapt_operation_record)
+
+
+def test_package_runtime_contribution_joins_live_declaration_and_fails_closed_without_host_input() -> None:
+    from workbench.agent.trusted_executor_registry import (
+        ProviderRuntimeContextV1,
+        ProviderRuntimeContributionV1,
+    )
+    from workbench.data_operation_manifest import (
+        build_data_consumer_runtime_adapter,
+        build_data_consumer_runtime_contribution,
+    )
+
+    catalog = load_builtin_catalog()
+    provider = next(item for item in catalog.providers if item.provider_id == "workbench.data_consumer")
+    declaration = next(
+        item
+        for item in provider.adapter_declarations
+        if item.adapter_id == "workbench.data_consumer.adapter"
+    )
+    adapter = build_data_consumer_runtime_adapter()
+
+    contribution = build_data_consumer_runtime_contribution(catalog)
+
+    assert type(contribution) is ProviderRuntimeContributionV1
+    assert contribution.provider_id == provider.provider_id
+    assert contribution.adapter_id == declaration.adapter_id
+    assert contribution.executor_ref == declaration.executor_ref
+    assert contribution.request_contract_ref == declaration.request_schema_ref
+    assert contribution.result_contract_refs == declaration.output_refs
+    assert contribution.metadata["output_ports"] == list(adapter.output_ports)
+    assert contribution.metadata["typed_authority"] == "DataConsumerOutputPortsV1"
+
+    context = ProviderRuntimeContextV1(
+        compilation_record_id="compile:data-consumer-test",
+        execution_instance_hash="exec:data-consumer-test",
+        actor_ref="principal:data-consumer-test",
+        session_ref="session:data-consumer-test",
+        project_ref="project:data-consumer-test",
+        effect="read_only",
+    )
+    result = contribution.executor(
+        context,
+        {
+            "operation_id": "data.sort",
+            "source_run_id": "run:data-consumer-test",
+            "source_node_id": "node:data-consumer-test",
+            "source_artifact_id": "artifact:data-consumer-test",
+            "operation": "sort",
+        },
+    )
+
+    assert result["status"] == "unavailable"
+    assert result["reason_code"] == "DATA_CONSUMER_HOST_DATA_STORE_UNAVAILABLE"
+    assert result["operation_id"] == "data.sort"
+    assert "rows" not in result
+    assert "path" not in result
+    assert "evidence" not in result
+    with pytest.raises((TypeError, ValueError), match="completed|typed|output|OperationRecord|INVALID"):
+        contribution.result_validator(
+            {
+                "status": "completed",
+                "operation_id": "data.sort",
+                "rows": [{"caller": "fake-success"}],
+            }
+        )
+
+
+def test_server_issued_data_execution_port_enables_only_bounded_runtime_output() -> None:
+    import workbench.data_operation_manifest as manifest_module
+    from workbench.agent.trusted_executor_registry import ProviderRuntimeContextV1
+    from workbench.data_operation_manifest import (
+        DataConsumerExecutionPortV1,
+        DataConsumerRuntimeOutputV1,
+        build_data_consumer_runtime_contribution,
+    )
+
+    catalog = load_builtin_catalog()
+    output = DataConsumerRuntimeOutputV1.from_server(
+        record_id="record:data-sort",
+        operation_id="data.sort",
+        operation_version="v1",
+        execution_key="execution:data-sort",
+        child_node_id="node:data-sort-child",
+        artifact_ids=("artifact:data-sort", "recipe:data-sort"),
+        evidence_digest="a" * 64,
+        catalog_digest=catalog.catalog_digest,
+        _issuer=manifest_module._SERVER_OWNED_ISSUER,
+    )
+    port = DataConsumerExecutionPortV1.from_server(
+        lambda _context, _request: output,
+        catalog_digest=catalog.catalog_digest,
+        _issuer=manifest_module._SERVER_OWNED_ISSUER,
+    )
+    contribution = build_data_consumer_runtime_contribution(
+        catalog,
+        execution_port=port,
+    )
+
+    assert contribution.execution_allowed is True
+    assert contribution.metadata["status"] == "available"
+    context = ProviderRuntimeContextV1(
+        compilation_record_id="compile:data-port-test",
+        execution_instance_hash="exec:data-port-test",
+        actor_ref="principal:data-port-test",
+        session_ref="session:data-port-test",
+        project_ref="project:data-port-test",
+        effect="read_only",
+    )
+    result = contribution.executor(
+        context,
+        {"operation_id": "data.sort"},
+    )
+
+    assert result["status"] == "completed"
+    assert result["operation_id"] == "data.sort"
+    assert result["execution_instance_hash"] == context.execution_instance_hash
+    assert result["output"]["record_id"] == "record:data-sort"
+    assert result["output"]["artifact_ids"] == ["artifact:data-sort", "recipe:data-sort"]
+    assert "rows" not in result
+    assert "path" not in result
+
+
+def test_caller_cannot_enable_data_execution_with_an_unissued_port() -> None:
+    from workbench.data_operation_manifest import build_data_consumer_runtime_contribution
+
+    with pytest.raises((TypeError, ValueError), match="server|issuer|execution port"):
+        build_data_consumer_runtime_contribution(
+            load_builtin_catalog(),
+            execution_port=lambda _context, _request: {},
+        )
 
 
 def test_package_runtime_adapter_rejects_caller_authored_operation_record_mapping() -> None:

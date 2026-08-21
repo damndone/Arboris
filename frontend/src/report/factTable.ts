@@ -315,7 +315,12 @@ export function reportProjectionDigest(candidate: Record<string, unknown>): stri
   const withoutDigest = Object.fromEntries(
     Object.entries(candidate).filter(([key]) => key !== "projectionDigest"),
   );
-  return sha256Hex(canonicalJsonV1(withoutDigest));
+  return sha256CanonicalV1(withoutDigest);
+}
+
+/** Canonical JSON v1 digest shared by bounded consumer projection readers. */
+export function sha256CanonicalV1(value: unknown): string {
+  return sha256Hex(canonicalJsonV1(value));
 }
 
 function readReportEvidenceServerReceipt(
@@ -470,6 +475,7 @@ export function unavailableReportEvidence(
     projectionId: `report:unavailable:${artifactRef}`,
     consumerId: "report",
     consumerVersion: "1.0",
+    rendererKey: "workbench.consumer_projection.report",
     actorRef: "UNAVAILABLE",
     projectRef: "UNAVAILABLE",
     sessionRef: "UNAVAILABLE",

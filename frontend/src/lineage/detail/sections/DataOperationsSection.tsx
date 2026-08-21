@@ -7,6 +7,7 @@ import {
   type DataOperationManifest,
   parseDataOperationManifest,
 } from "../../dataOperationManifest";
+import type { DataProfileV1, DataProfileVariableV1 } from "../../dataOperations";
 
 export interface DataOperationSourceIdentity {
   source_run_id: string;
@@ -29,6 +30,8 @@ export interface DataOperationsSectionProps {
   source_run_id?: string;
   source_node_id?: string;
   source_artifact_id?: string;
+  profile?: unknown;
+  profileStatus?: DataProfileStatus;
 }
 
 interface ResolvedSourceIdentity {
@@ -38,6 +41,7 @@ interface ResolvedSourceIdentity {
 }
 
 type OperationStatus = "idle" | "previewing" | "confirming" | "complete" | "error";
+type DataProfileStatus = "loading" | "available" | "unavailable" | "degraded";
 
 interface PreviewPayload {
   status: string;
@@ -58,6 +62,161 @@ const EMPTY_VALUE = "";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function safeProfileValue(value: unknown): value is string | number | boolean | null {
+  return value === null || ["string", "number", "boolean"].includes(typeof value);
+}
+
+function boundedDataProfile(value: unknown): DataProfileV1 | null {
+  if (!isObject(value) || value.schema_version !== "data-profile.v1") return null;
+  const source = isObject(value.source) ? value.source : null;
+  const variables = Array.isArray(value.variables) ? value.variables : null;
+  if (
+    !source ||
+    typeof source.run_id !== "string" ||
+    typeof source.node_id !== "string" ||
+    typeof source.artifact_id !== "string" ||
+    !variables
+  ) {
+    return null;
+  }
+  const normalized: DataProfileVariableV1[] = [];
+  for (const candidate of variables) {
+    if (!isObject(candidate) || typeof candidate.name !== "string" || !candidate.name.trim()) {
+      return null;
+    }
+    const missingness = isObject(candidate.missingness) ? candidate.missingness : null;
+    const count = finiteNumber(missingness?.count);
+    const rate = finiteNumber(missingness?.rate);
+    const valueLabels = isObject(candidate.value_labels) ? candidate.value_labels : {};
+    const userMissingValues = Array.isArray(candidate.user_missing_values)
+      ? candidate.user_missing_values.filter(safeProfileValue)
+      : [];
+    const sampleValues = Array.isArray(candidate.sample_values)
+      ? candidate.sample_values.filter(safeProfileValue)
+      : [];
+    const labels = Object.fromEntries(
+      Object.entries(valueLabels).filter(([, label]) => typeof label === "string"),
+    ) as Record<string, string>;
+    if (count === null || rate === null) return null;
+    normalized.push({
+      name: candidate.name,
+      label: typeof candidate.label === "string" ? candidate.label : null,
+      measurement_level:
+        typeof candidate.measurement_level === "string" ? candidate.measurement_level : null,
+      missingness: { count, rate },
+      user_missing_values: userMissingValues,
+      value_labels: labels,
+      sample_values: sampleValues,
+    });
+  }
+  return {
+    schema_version: "data-profile.v1",
+    source: {
+      run_id: source.run_id,
+      node_id: source.node_id,
+      artifact_id: source.artifact_id,
+    },
+    variables: normalized,
+  };
+}
+
+function profileMatchesSource(
+  profile: DataProfileV1,
+  identity: ResolvedSourceIdentity,
+): boolean {
+  return (
+    profile.source.run_id === identity.source_run_id &&
+    profile.source.node_id === identity.source_node_id &&
+    profile.source.artifact_id === identity.source_artifact_id
+  );
+}
+
+function profileValueText(value: unknown): string {
+  if (value === null) return "null";
+  return String(value);
+}
+
+function profileMetadata(profile: DataProfileV1): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(
+    profile.variables.map((variable) => [
+      variable.name,
+      {
+        label: variable.label ?? "",
+        user_missing_values: [...variable.user_missing_values],
+        value_labels: { ...variable.value_labels },
+      },
+    ]),
+  );
+}
+
+function profileMissingness(variable: DataProfileVariableV1): string {
+  const percent = Number((variable.missingness.rate * 100).toFixed(2));
+  return `${variable.missingness.count} (${percent}%)`;
+}
+
+function ProfilePanel({
+  rawProfile,
+  status,
+  canEdit,
+  onEdit,
+}: {
+  rawProfile: unknown;
+  status: DataProfileStatus;
+  canEdit: boolean;
+  onEdit: () => void;
+}) {
+  if (status === "loading") {
+    return <p data-testid="data-profile-status">LOADING: bounded data profile.</p>;
+  }
+  const profile = boundedDataProfile(rawProfile);
+  if (status === "unavailable") {
+    return <p data-testid="data-profile-status">UNAVAILABLE: bounded data profile.</p>;
+  }
+  if (!profile) {
+    return <p data-testid="data-profile-status">DEGRADED: bounded data profile is not trusted.</p>;
+  }
+  if (status === "degraded") {
+    return <p data-testid="data-profile-status">DEGRADED: bounded data profile is not trusted.</p>;
+  }
+  return (
+    <section aria-label="Data profile" data-testid="data-profile">
+      <h4>Data profile</h4>
+      {profile.variables.map((variable) => (
+        <div key={variable.name} data-testid={`data-profile-variable-${variable.name}`}>
+          <strong>{variable.name}</strong>
+          <dl>
+            <dt>Label</dt>
+            <dd>{variable.label || "UNAVAILABLE"}</dd>
+            <dt>Measurement level</dt>
+            <dd>{variable.measurement_level || "UNAVAILABLE"}</dd>
+            <dt>Missingness</dt>
+            <dd>{profileMissingness(variable)}</dd>
+            <dt>User missing values</dt>
+            <dd>{variable.user_missing_values.map(profileValueText).join(", ") || "UNAVAILABLE"}</dd>
+            <dt>Value labels</dt>
+            <dd>
+              {Object.entries(variable.value_labels)
+                .map(([value, label]) => `${value} → ${label}`)
+                .join(", ") || "UNAVAILABLE"}
+            </dd>
+            <dt>Bounded sample values</dt>
+            <dd>{variable.sample_values.map(profileValueText).join(", ") || "UNAVAILABLE"}</dd>
+          </dl>
+          {canEdit && (
+            <button type="button" onClick={onEdit}>
+              Edit metadata
+            </button>
+          )}
+        </div>
+      ))}
+    </section>
+  );
 }
 
 function resolveSourceIdentity(props: DataOperationsSectionProps): ResolvedSourceIdentity {
@@ -200,7 +359,11 @@ function confirmedPayloadError(
   ) {
     return "CONFIRM_INVALID: completed effect is missing typed identity.";
   }
-  const operation = payload.operation;
+  // The typed OperationRecord is authoritative. Keep the legacy `operation`
+  // field as a migration fallback for older server responses only.
+  const operation = isObject(payload.operation_record)
+    ? payload.operation_record
+    : payload.operation;
   if (
     !operation ||
     typeof operation.record_id !== "string" ||
@@ -488,18 +651,105 @@ function OperationField({
   );
 }
 
+function parseMetadataList(value: string): unknown[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const numeric = Number(item);
+      return item !== "" && Number.isFinite(numeric) ? numeric : item;
+    });
+}
+
+function MetadataEditor({
+  profile,
+  metadata,
+  onChange,
+}: {
+  profile: DataProfileV1;
+  metadata: Record<string, Record<string, unknown>>;
+  onChange: (metadata: Record<string, Record<string, unknown>>) => void;
+}) {
+  function update(variable: DataProfileVariableV1, field: string, value: unknown) {
+    onChange({
+      ...metadata,
+      [variable.name]: {
+        ...(metadata[variable.name] ?? {}),
+        [field]: value,
+      },
+    });
+  }
+
+  return (
+    <section aria-label="Metadata editor" data-testid="data-metadata-editor">
+      <h4>Metadata editor</h4>
+      {profile.variables.map((variable) => {
+        const current = metadata[variable.name] ?? {};
+        const label = typeof current.label === "string" ? current.label : variable.label ?? "";
+        const missing = Array.isArray(current.user_missing_values)
+          ? current.user_missing_values.map(profileValueText).join(", ")
+          : variable.user_missing_values.map(profileValueText).join(", ");
+        const labels = isObject(current.value_labels)
+          ? current.value_labels
+          : variable.value_labels;
+        return (
+          <fieldset key={variable.name}>
+            <legend>{variable.name}</legend>
+            <label>
+              {variable.name} label
+              <input
+                aria-label={`${variable.name} label`}
+                value={label}
+                onChange={(event) => update(variable, "label", event.target.value)}
+              />
+            </label>
+            <label>
+              {variable.name} user missing values
+              <input
+                aria-label={`${variable.name} user missing values`}
+                value={missing}
+                onChange={(event) => update(variable, "user_missing_values", parseMetadataList(event.target.value))}
+              />
+            </label>
+            {Object.entries(labels).map(([value, currentLabel]) => (
+              <label key={value}>
+                {variable.name} value label {value}
+                <input
+                  aria-label={`${variable.name} value label ${value}`}
+                  value={typeof currentLabel === "string" ? currentLabel : ""}
+                  onChange={(event) =>
+                    update(variable, "value_labels", {
+                      ...labels,
+                      [value]: event.target.value,
+                    })
+                  }
+                />
+              </label>
+            ))}
+          </fieldset>
+        );
+      })}
+    </section>
+  );
+}
+
 function ParsedDataOperationsSection({
   manifest,
   projectRoot,
   preview,
   confirm,
   sourceIdentity,
+  profile,
+  profileStatus,
 }: {
   manifest: DataOperationManifest;
   projectRoot: string;
   preview: DataOperationAction;
   confirm: DataOperationAction;
   sourceIdentity: ResolvedSourceIdentity;
+  profile: unknown;
+  profileStatus: DataProfileStatus;
 }) {
   const [selectedOperationId, setSelectedOperationId] = useState("");
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -521,6 +771,16 @@ function ParsedDataOperationsSection({
     ...(manifest.unavailable ?? []),
     ...manifest.operations.filter((operation) => operation.availability?.status === "unavailable"),
   ];
+  const parsedProfile = boundedDataProfile(profile);
+  const normalizedProfile =
+    profileStatus === "available" && parsedProfile && profileMatchesSource(parsedProfile, sourceIdentity)
+      ? parsedProfile
+      : null;
+  const effectiveProfileStatus =
+    profileStatus === "available" && normalizedProfile === null ? "degraded" : profileStatus;
+  const metadataOperation = availableOperations.find(
+    (operation) => operation.operation_id === "data.metadata.update",
+  );
 
   function invalidatePreview() {
     requestRevision.current += 1;
@@ -538,6 +798,17 @@ function ParsedDataOperationsSection({
     setConfirmPayload(null);
     setError(null);
     setStatus("idle");
+  }
+
+  function editProfileMetadata() {
+    if (!metadataOperation || !normalizedProfile) return;
+    setSelectedOperationId(metadataOperation.operation_id);
+    setValues({ metadata: profileMetadata(normalizedProfile) });
+    setPreviewPayload(null);
+    setConfirmPayload(null);
+    setError(null);
+    setStatus("idle");
+    requestRevision.current += 1;
   }
 
   function changeValue(name: string, value: unknown) {
@@ -647,6 +918,12 @@ function ParsedDataOperationsSection({
 
   return (
     <section aria-label="Data operations" data-testid="data-operations-section">
+      <ProfilePanel
+        rawProfile={normalizedProfile}
+        status={effectiveProfileStatus}
+        canEdit={metadataOperation !== undefined}
+        onEdit={editProfileMetadata}
+      />
       {unavailableOperations.map((operation) => (
         <div key={operation.operation_id} data-testid="data-operation-unavailable">
           {operation.operation_id}: {"availability" in operation && isObject(operation.availability)
@@ -677,7 +954,10 @@ function ParsedDataOperationsSection({
       {selectedOperation && (
         <div data-testid="data-operation-fields">
           {Object.entries(selectedOperation.request_schema.properties)
-            .filter(([name]) => !DATA_OPERATION_SOURCE_IDENTITY_FIELDS.includes(name as (typeof DATA_OPERATION_SOURCE_IDENTITY_FIELDS)[number]))
+            .filter(([name]) =>
+              !DATA_OPERATION_SOURCE_IDENTITY_FIELDS.includes(name as (typeof DATA_OPERATION_SOURCE_IDENTITY_FIELDS)[number]) &&
+              !(selectedOperation.operation_id === "data.metadata.update" && name === "metadata"),
+            )
             .map(([name, schema]) => (
               <OperationField
                 key={name}
@@ -688,6 +968,18 @@ function ParsedDataOperationsSection({
               />
             ))}
         </div>
+      )}
+
+      {selectedOperation?.operation_id === "data.metadata.update" && normalizedProfile && (
+        <MetadataEditor
+          profile={normalizedProfile}
+          metadata={
+            isObject(values.metadata)
+              ? (values.metadata as Record<string, Record<string, unknown>>)
+              : profileMetadata(normalizedProfile)
+          }
+          onChange={(metadata) => changeValue("metadata", metadata)}
+        />
       )}
 
       {selectedOperation && (
@@ -745,6 +1037,8 @@ export function DataOperationsSection(props: DataOperationsSectionProps) {
         preview={props.preview}
         confirm={props.confirm}
         sourceIdentity={sourceIdentity}
+        profile={props.profile}
+        profileStatus={props.profileStatus ?? (props.profile ? "available" : "unavailable")}
       />
     );
   } catch (reason: unknown) {

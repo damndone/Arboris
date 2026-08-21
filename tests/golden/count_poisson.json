@@ -28,7 +28,6 @@
     ],
     "qq_residuals": [],
     "raw_data.csv": [],
-    "report_html": [],
     "residuals_fitted": [],
     "residuals_vs_x": [],
     "statistical_tests_anova": [
@@ -56,7 +55,9 @@
       "cleaned_dataset"
     ]
   },
-  "error_codes": [],
+  "error_codes": [
+    "REPORT_RENDER_FAILED"
+  ],
   "models": {
     "poisson_1": {
       "coef_keys": [

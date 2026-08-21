@@ -6,7 +6,7 @@ import {
   DataOperationManifestError,
   parseDataOperationManifest,
 } from "../../dataOperationManifest";
-import { DataOperationsSection } from "./DataOperationsSection";
+import { DataOperationsSection, type DataOperationsSectionProps } from "./DataOperationsSection";
 
 const { previewMock, confirmMock } = vi.hoisted(() => ({
   previewMock: vi.fn(),
@@ -431,6 +431,143 @@ describe("DataOperationsSection", () => {
     expect(screen.getByLabelText("options")).toBeInTheDocument();
   });
 
+  it("renders the server-owned bounded data profile without raw payload fields", () => {
+    const profile = {
+      schema_version: "data-profile.v1",
+      source: { run_id: "run-1", node_id: "node-1", artifact_id: "artifact-1" },
+      variables: [
+        {
+          name: "score",
+          label: "Score label",
+          measurement_level: "scale",
+          missingness: { count: 1, rate: 0.25 },
+          user_missing_values: [-99],
+          value_labels: { "1": "Yes", "2": "No" },
+          sample_values: [1, 2, 3],
+        },
+      ],
+      source_artifact_path: "/private/raw.csv",
+      raw_rows: [{ score: 1 }],
+    };
+
+    render(
+      <DataOperationsSection
+        {...({ ...sectionProps(), profile } as DataOperationsSectionProps)}
+      />,
+    );
+
+    expect(screen.getByTestId("data-profile-variable-score")).toHaveTextContent("score");
+    expect(screen.getByText("Score label")).toBeInTheDocument();
+    expect(screen.getByText("scale")).toBeInTheDocument();
+    expect(screen.getByText("1 (25%)")).toBeInTheDocument();
+    expect(screen.getByText("-99")).toBeInTheDocument();
+    expect(screen.getByTestId("data-profile-variable-score")).toHaveTextContent("1 → Yes");
+    expect(screen.getByTestId("data-profile-variable-score")).toHaveTextContent("1, 2, 3");
+    expect(screen.queryByText("/private/raw.csv")).toBeNull();
+    expect(screen.queryByText(/raw_rows/)).toBeNull();
+  });
+
+  it("edits profile metadata through the server-owned metadata update descriptor", async () => {
+    previewMock.mockResolvedValue({
+      preview: { status: "ready", fingerprint: "metadata-preview" },
+    });
+    const profile = {
+      schema_version: "data-profile.v1",
+      source: { run_id: "run-1", node_id: "node-1", artifact_id: "artifact-1" },
+      variables: [
+        {
+          name: "score",
+          label: "Score label",
+          measurement_level: "scale",
+          missingness: { count: 1, rate: 0.25 },
+          user_missing_values: [-99],
+          value_labels: { "1": "Yes" },
+          sample_values: [1, 2, 3],
+        },
+      ],
+    };
+    const metadataManifest = manifest({
+      operation_id: "data.metadata.update",
+      request_schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["source_run_id", "source_node_id", "source_artifact_id", "metadata"],
+        properties: {
+          source_run_id: { type: "string", minLength: 1 },
+          source_node_id: { type: "string", minLength: 1 },
+          source_artifact_id: { type: "string", minLength: 1 },
+          metadata: { type: "object", additionalProperties: true },
+        },
+      },
+    });
+
+    render(
+      <DataOperationsSection
+        {...({ ...sectionProps(metadataManifest), profile } as DataOperationsSectionProps)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit metadata" }));
+    fireEvent.change(screen.getByLabelText("score label"), {
+      target: { value: "Updated score" },
+    });
+    fireEvent.change(screen.getByLabelText("score user missing values"), {
+      target: { value: "-999" },
+    });
+    fireEvent.change(screen.getByLabelText("score value label 1"), {
+      target: { value: "Approved" },
+    });
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+
+    await waitFor(() => expect(previewMock).toHaveBeenCalledTimes(1));
+    expect(previewMock.mock.calls[0][2]).toMatchObject({
+      ...SOURCE_IDENTITY,
+      metadata: {
+        score: {
+          label: "Updated score",
+          user_missing_values: [-999],
+          value_labels: { "1": "Approved" },
+        },
+      },
+    });
+  });
+
+  it("shows UNAVAILABLE when the server has no trusted profile", () => {
+    render(
+      <DataOperationsSection
+        {...({ ...sectionProps(), profile: null, profileStatus: "unavailable" } as DataOperationsSectionProps)}
+      />,
+    );
+
+    expect(screen.getByTestId("data-profile-status")).toHaveTextContent("UNAVAILABLE");
+  });
+
+  it("degrades instead of rendering a profile for a different source identity", () => {
+    const profile = {
+      schema_version: "data-profile.v1",
+      source: { run_id: "other-run", node_id: "node-1", artifact_id: "artifact-1" },
+      variables: [
+        {
+          name: "score",
+          label: "Score label",
+          measurement_level: "scale",
+          missingness: { count: 0, rate: 0 },
+          user_missing_values: [],
+          value_labels: {},
+          sample_values: [1],
+        },
+      ],
+    };
+
+    render(
+      <DataOperationsSection
+        {...({ ...sectionProps(), profile } as DataOperationsSectionProps)}
+      />,
+    );
+
+    expect(screen.getByTestId("data-profile-status")).toHaveTextContent("DEGRADED");
+    expect(screen.queryByTestId("data-profile-variable-score")).toBeNull();
+  });
+
   it("only confirms after a ready preview fingerprint and uses descriptor refs", async () => {
     previewMock.mockResolvedValue({
       preview: { status: "ready", fingerprint: "preview-fp-default", row_count_after: 2 },
@@ -478,6 +615,60 @@ describe("DataOperationsSection", () => {
         preview_fingerprint: "preview-fp-default",
       },
     );
+    expect(await screen.findByTestId("data-operation-complete")).toHaveTextContent(
+      "completed",
+    );
+  });
+
+  it("prefers the server-owned operation_record over legacy cast bindings", async () => {
+    const valid = (await completedResponse().json()) as {
+      operation: {
+        execution: { bindings: Record<string, string> };
+        [key: string]: unknown;
+      };
+      [key: string]: unknown;
+    };
+    valid.operation = {
+      ...valid.operation,
+      execution: {
+        ...valid.operation.execution,
+        bindings: {
+          data_artifact_id: "artifact-2",
+          data_child_node_id: "child-1",
+          data_recipe_artifact_id: "recipe-2",
+        },
+      },
+    };
+    valid.operation_record = {
+      ...valid.operation,
+      execution: {
+        ...valid.operation.execution,
+        bindings: {
+          artifact_id: "artifact-2",
+          child_node_id: "child-1",
+          metadata_artifact_id: "metadata-2",
+          recipe_artifact_id: "recipe-2",
+          group_manifest_id: "group-2",
+        },
+      },
+    };
+    confirmMock.mockResolvedValue(valid);
+    previewMock.mockResolvedValue({
+      preview: { status: "ready", fingerprint: "preview-fp-default" },
+    });
+
+    render(<DataOperationsSection {...sectionProps()} />);
+    fireEvent.change(screen.getByLabelText("Data operation"), {
+      target: { value: "data.example" },
+    });
+    fireEvent.change(screen.getByLabelText("label"), {
+      target: { value: "approved" },
+    });
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+    await screen.findByTestId("data-operation-preview-ready");
+    fireEvent.click(screen.getByTestId("data-operation-confirm"));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
     expect(await screen.findByTestId("data-operation-complete")).toHaveTextContent(
       "completed",
     );

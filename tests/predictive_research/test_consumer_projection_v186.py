@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from workbench.artifacts import sha256_file, write_json
+from workbench.app import app
 from workbench.http import runs_routes
 from workbench.predictive_research.consumer_projection import (
     project_prediction_evidence,
@@ -150,11 +152,20 @@ def test_run_detail_route_exposes_legacy_projection_to_table_consumer(
             }],
         },
     )
-    monkeypatch.setattr(runs_routes, "_model_results", lambda _run_root: [])
     monkeypatch.setattr(runs_routes, "build_diagnostic_summary_preview", lambda *args: {})
     monkeypatch.setattr(runs_routes, "collect_post_estimation_results", lambda *args: [])
 
-    detail = runs_routes.get_run_endpoint("run-legacy", str(project_root))
+    # The route now receives its request-bound identity and projects the run
+    # through the central consumer reader.  Use the real HTTP seam instead of
+    # calling a pre-cutover function signature directly.
+    with TestClient(app) as client:
+        response = client.get(
+            "/runs/run-legacy",
+            params={"project_root": str(project_root)},
+        )
+
+    assert response.status_code == 200, response.text
+    detail = response.json()
 
     assert detail["prediction_evidence"]["status"] == "legacy"
     assert detail["prediction_evidence"]["comparability"] == "legacy_only"

@@ -114,6 +114,7 @@ def _active_turn_key(project_root: Path, session_id: str) -> tuple[str, str]:
 CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - You are the Workbench Chain Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
 - Read-only inspection tools are the evidence source for this turn.
+- If the tool list contains compile_natural_language, it is the server-owned path for this request: call it with the exact user request and only fields grounded in the supplied context. It returns a typed preview or a confirmation-gated proposal; it never executes. Do not call a legacy proposal tool when compile_natural_language is present.
 - When the user asks for an OLS conventional-to-clustered Analysis Loop proposal, call propose_analysis_loop with the exact source_run_id, source_node_ref, active_head_run_id, cluster_variable, and (when supplied) result_id. This typed tool resolves the source facts and creates the PlanDiff binding.
 - When the user asks for a multi-step statistical workflow over the selected Raw data node (for example: grouped descriptive statistics, missing-value checks, a correlation matrix, percentile-derived group comparisons, scatter plots, and one or more regressions), use operation.multi_step@v1 as a SINGLE workflow proposal covering the whole request.
 - Compose that workflow yourself in changes.steps. Each step is {step_id, operation_id, spec, depends_on}. Field names are exact and unknown fields are rejected. The per-step vocabulary below is the registry's own, and inspect_operation_contract on operation.multi_step returns the same thing.
@@ -319,6 +320,25 @@ def _project_root(raw: str) -> Path:
             details={"project_root": str(root)},
         )
     return root
+
+
+def _server_project_ref(root: Path) -> str:
+    """Derive an opaque server scope without putting a filesystem path in it."""
+
+    canonical = str(root.resolve())
+    return "project:local:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+
+def _server_session_ref(session_id: str) -> str:
+    """Derive the compiler's typed session scope from a server session id."""
+
+    if type(session_id) is not str or not session_id.strip():
+        raise WorkbenchAPIError(
+            status_code=404,
+            code="AGENT_SESSION_NOT_FOUND",
+            message="Agent session was not found in this project.",
+        )
+    return "session:agent:" + hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
 
 
 def _stores(root: Path) -> tuple[JsonlSessionRepository, AgentEventStream]:
@@ -2018,6 +2038,11 @@ async def confirm_agent_proposal(
     request: Request = None,
 ) -> dict[str, Any]:
     root = _project_root(project_root)
+    # Reject a direct function call before opening the route-owned session or
+    # proposal repository.  An absent Request has no deployment-bound identity
+    # and cannot be repaired from the caller's path/session arguments.
+    if request is None:
+        _legacy_agent_route_scope(root, session_id, request=request)
     repository, events, metadata = _get_session(root, session_id)
     store = _server_proposal_store(repository.root)
     proposal = _proposal_for_session(
@@ -2122,6 +2147,7 @@ async def run_agent_turn(
     session_id: str,
     project_root: str,
     body: AgentTurnRequest,
+    request: Request,
 ) -> dict[str, Any]:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
@@ -2150,9 +2176,38 @@ async def run_agent_turn(
         session_id=session_id,
     )
     tool_context: dict[str, Any] | None = None
+    cutover_compiler: Any | None = None
+    # The shared planning contract calls the authenticated Agent principal a
+    # `principal:` opaque reference.  The legacy proposal route keeps its
+    # historical `actor:` label separately; do not feed that weaker identity
+    # vocabulary into the C0 compiler.
+    cutover_actor_ref = f"principal:agent:{session_id}"
+    cutover_session_ref = _server_session_ref(session_id)
+    cutover_project_ref = _server_project_ref(root)
     if metadata.get("role") == "main":
         _ensure_current_global_protocol(repository, session_id)
     if metadata.get("role") == "chain":
+        try:
+            cutover_compiler = _cutover_authority(
+                cutover_project_ref,
+                cutover_session_ref,
+                request=request,
+            )
+        except WorkbenchAPIError as exc:
+            if exc.code != "AGENT_NOTEBOOK_CUTOVER_NOT_BOUND":
+                raise
+            cutover_compiler = None
+        if cutover_compiler is not None:
+            (
+                cutover_actor_ref,
+                cutover_session_ref,
+                cutover_project_ref,
+            ) = _assert_server_identity(
+                request,
+                project_ref=cutover_project_ref,
+                claimed_actor_ref=cutover_actor_ref,
+                claimed_session_ref=cutover_session_ref,
+            )
         # Handoff §7 slice: the ROUTE registers the chain-scoped read-only
         # tools through the existing orchestrator boundary — the model never
         # discovers Workbench capabilities on its own, and a plain inspection
@@ -2168,6 +2223,7 @@ async def run_agent_turn(
             proposal_store_issuer=_ROUTE_PROPOSAL_STORE_ISSUER,
             operation_registry=operation_registry,
             context_provider=NodeOperationContextProvider(root),
+            cutover_compiler=cutover_compiler,
         )
         orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
         tool_context = {
@@ -2175,6 +2231,16 @@ async def run_agent_turn(
                 scope_requirements=("chain", "active_head")
             )
         }
+        if cutover_compiler is not None:
+            tool_context.update(
+                {
+                    "actor_ref": cutover_actor_ref,
+                    "session_ref": cutover_session_ref,
+                    "project_ref": cutover_project_ref,
+                    "agent_user_question": body.question.strip(),
+                    "chain_id": str(metadata.get("chain_id") or ""),
+                }
+            )
     else:
         provider = NodeOperationContextProvider(root)
         registry = ToolRegistry()
@@ -2468,10 +2534,16 @@ def _assert_server_identity(
     notebook_id: str | None = None,
 ) -> tuple[str, str, str]:
     if request is None:
-        # Direct route-function calls are a compatibility/testing seam. Real
-        # HTTP requests always receive a Request and therefore require the
-        # host identity binding above.
-        return claimed_actor_ref, claimed_session_ref, project_ref
+        # A direct route-function call has no deployment-bound request
+        # identity. Caller-supplied actor/session/project values are therefore
+        # untrusted data, not a test or compatibility authority. Reject before
+        # resolving a compiler, proposal, provider, repository, or evidence
+        # capability.
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_IDENTITY_NOT_BOUND",
+            message="The host has not bound a server-owned Agent/Notebook identity.",
+        )
     actor_ref, session_ref, canonical_project_ref = resolve_agent_notebook_server_identity(
         request,
         project_ref=project_ref,

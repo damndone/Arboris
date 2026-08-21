@@ -6,6 +6,7 @@ import {
   buildReportEvidenceFacts,
   buildTimeSeriesFacts,
   reportProjectionDigest,
+  sha256CanonicalV1,
   unavailableReportEvidence,
   type ReportEvidenceProjection,
   type ReportEvidenceServerReceipt,
@@ -44,11 +45,123 @@ const rawRegressionResult = {
   },
 };
 
+const dataConsumerFact = {
+  fact_id: "data-operation:record-data",
+  kind: "data_operation",
+  operation_id: "data.subset",
+  operation_version: "1.0",
+  record_id: "record-data",
+  execution_key: "execution-data",
+  child_node_id: "child-data",
+  artifact_ids: ["artifact-data"],
+  evidence_digest: "d".repeat(64),
+  catalog_digest: "b".repeat(64),
+  run_id: "run-1",
+  source_run_id: "run-1",
+  source_node_id: "node-data",
+  source_artifact_id: "artifact-data",
+  data_snapshot_ref: "snapshot-data",
+  data_snapshot_digest: "e".repeat(64),
+};
+const dataConsumerProjectionDigest = sha256CanonicalV1({
+  schema_version: 1,
+  payload_schema: "workbench.data.consumer-evidence.v1",
+  scope_digest: "c".repeat(64),
+  facts: [dataConsumerFact],
+  catalog_digest: "b".repeat(64),
+});
+
+const surveyReportEvidence = {
+  payload_schema: "workbench.survey.report-evidence.v1",
+  schema_version: 1,
+  provider_id: "workbench.survey",
+  consumer: "report",
+  status: "validated",
+  authority: "server-owned",
+  model_family: "ols",
+  survey_design: { variance_method: "linearization" },
+  source: {
+    artifact_id: "ols-1",
+    artifact_sha256: "d".repeat(64),
+    receipt_digest: "e".repeat(64),
+    server_identity: { run_id: "run-1", model_id: "ols-1" },
+  },
+  catalog: {
+    digest: "1".repeat(64),
+    provider_id: "workbench.survey",
+    path_id: "workbench.survey.central_source",
+    projection_ref: { kind: "projection", logical_id: "survey.report", semantic_version: "1.0", contract_digest: "2".repeat(64) },
+    evidence_contract_refs: [{ kind: "evidence", logical_id: "survey.evidence", semantic_version: "1.0", contract_digest: "3".repeat(64) }],
+    policy_ref: { kind: "policy", logical_id: "survey.policy", semantic_version: "1.0", contract_digest: "4".repeat(64) },
+    renderer_ref: { kind: "renderer", logical_id: "survey.renderer", semantic_version: "1.0", contract_digest: "5".repeat(64) },
+  },
+  receipt: {
+    schemaVersion: 1,
+    kind: "evidence.survey.server-receipt.v1",
+    projectionDigest: "",
+    identity: {
+      consumerId: "report",
+      runId: "run-1",
+      artifactId: "ols-1",
+      artifactSha256: "d".repeat(64),
+      sourceReceiptDigest: "e".repeat(64),
+      catalogDigest: "1".repeat(64),
+    },
+  },
+};
+const { consumer: _surveyConsumer, receipt: _surveyReceipt, ...surveyReceiptPayload } = surveyReportEvidence;
+surveyReportEvidence.receipt.projectionDigest = sha256CanonicalV1(surveyReceiptPayload);
+
+const centralClassificationEvidence = {
+  payload_schema: "workbench.prediction.classification-artifacts-wrapper",
+  schema_version: 1,
+  status: "validated",
+  consumer: "report",
+  artifact_id: "artifact:central-classification",
+  artifact_sha256: "a".repeat(64),
+  receipt_digest: "b".repeat(64),
+  server_identity: { project_id: "project:1", run_id: "run-1" },
+  projection: {
+    payload_schema: "workbench.prediction.classification-evidence",
+    schema_version: 1,
+    status: "validated",
+    consumer: "report",
+    provider_id: "workbench.classification_ml",
+    exposure_path: "workbench.classification_ml.direct",
+    policy_ref: { kind: "policy", logical_id: "workbench.classification_ml.policy", semantic_version: "1.0", contract_digest: "7".repeat(64) },
+    catalog_digest: "f59d0cc8c5746f7e8905fa6ff79e31465b11614284bcb9849d1545bfb271c952",
+    provider_digest: "f2cd959aae60720574e4687940d562b20ac2ad7afc14d58af423f7a9e9a2b43c",
+    coverage_status: "required",
+    projection_ref: { kind: "projection", logical_id: "workbench.classification_ml.report", semantic_version: "1.0", contract_digest: "5".repeat(64) },
+    renderer_ref: { kind: "renderer", logical_id: "workbench.classification_ml.report", semantic_version: "1.0", contract_digest: "6".repeat(64) },
+    task: { task_type: "binary", positive_class: "yes", class_support: { no: 2, yes: 2 } },
+    split: { profile: "sealed_holdout", split_hash: "split-1" },
+    metrics: { accuracy: { point_estimate: 0.5, status: "validated" } },
+    calibration: { status: "descriptive" },
+    baselines: [],
+    controls: [],
+    comparison: { selected_model: "logistic_regression" },
+    explanations: { status: "available" },
+    stability: { status: "descriptive" },
+    shift: { status: "descriptive" },
+    decision_policy: { selection_status: "SCENARIOS_ONLY" },
+    blocked_reasons: [],
+    evidence_refs: { task: "task-1", split: "split-1", model: "model-1", holdout: "holdout-1", release_plan: "release-1" },
+    holdout: { status: "sealed" },
+    c0_evidence_envelope: { availability: "available" },
+    c0_consumer_projection: { payload: { projection_status: "available" } },
+    foundation_status: { execution_status: "completed", availability: "available", completeness_status: "complete", producer_status: "validated" },
+  },
+  source: { artifact_id: "artifact:central-classification" },
+  receipt: { payload_schema: "workbench.prediction.classification-consumer-receipt", schema_version: 1 },
+};
+
 const committedProjection: ReportEvidenceProjection = {
   schemaVersion: 1,
   projectionId: "report:evidence-commit-1",
   consumerId: "report",
   consumerVersion: "1.0",
+  rendererKey: "workbench.consumer_projection.report",
   actorRef: "actor:1",
   projectRef: "project:1",
   sessionRef: "session:1",
@@ -348,10 +461,35 @@ describe("Report evidence boundary v1.8.9", () => {
         limits: ["display-only compatibility evidence"],
       },
       modelResults: [rawRegressionResult],
+      classificationEvidence: centralClassificationEvidence,
       familyEvidenceArtifacts: {
         raw: { leaked_scalar: 9.9 },
         classification_evidence: { raw_classification_secret: "RAW_CLASSIFICATION_SECRET" },
       },
+      dataConsumerEvidence: {
+        schema_version: 1,
+        payload_schema: "workbench.data.consumer-evidence.v1",
+        consumer_id: "report",
+        status: "available",
+        authority: "server-owned",
+        run_id: "run-1",
+        scope_digest: "c".repeat(64),
+        projection_digest: dataConsumerProjectionDigest,
+        catalog_digest: "b".repeat(64),
+        source: "persisted-data-operation-output",
+        availability: "available",
+        execution_status: "completed",
+        completeness_status: "complete",
+        reason_code: null,
+        facts: [dataConsumerFact],
+        receipt: {
+          schemaVersion: 1,
+          kind: "evidence.data-consumer.server-receipt.v1",
+          projectionDigest: dataConsumerProjectionDigest,
+          identity: { consumerId: "report", runId: "run-1", scopeDigest: "c".repeat(64), catalogDigest: "b".repeat(64) },
+        },
+      },
+      surveyEvidence: surveyReportEvidence,
       reportEvidenceProjection: committedProjection,
       reportExportAllowed: true,
       history: [],
@@ -375,11 +513,31 @@ describe("Report evidence boundary v1.8.9", () => {
 
     expect(screen.getByTestId(`typed-evidence-${committedProjection.projectionId}`)).toHaveTextContent("AVAILABLE");
     expect(screen.getByTestId("typed-evidence-provenance")).toHaveTextContent("operation-1");
-    expect(screen.getByTestId("report-classification-evidence-non-citable")).toHaveTextContent("NON-CITABLE");
-    expect(screen.getByTestId("report-classification-evidence-non-citable")).not.toHaveTextContent("RAW_CLASSIFICATION_SECRET");
+    expect(screen.getByTestId("report-classification-evidence-central")).toHaveTextContent("central classification projection");
+    expect(screen.getByTestId("report-data-consumer-evidence")).toHaveTextContent("AVAILABLE");
+    expect(screen.getByTestId("report-data-consumer-lineage")).toHaveTextContent("node-data");
+    expect(screen.getByTestId("report-survey-evidence")).toHaveTextContent("VALIDATED");
+    expect(screen.getByTestId("report-survey-evidence")).toHaveTextContent("linearization");
+    expect(screen.queryByText("RAW_CLASSIFICATION_SECRET")).not.toBeInTheDocument();
     expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
     expect(screen.queryByText("123.456")).not.toBeInTheDocument();
     expect(screen.getByTestId("report-prediction-evidence-non-citable")).toHaveTextContent(/non-citable/i);
+  });
+
+  it("does not use a legacy classification artifact when the central projection is absent", () => {
+    const previousWorkspace = mockWorkspace.current as Record<string, unknown>;
+    mockWorkspace.current = {
+      ...previousWorkspace,
+      classificationEvidence: undefined,
+      familyEvidenceArtifacts: {
+        classification_evidence: { raw_classification_secret: "RAW_CLASSIFICATION_SECRET" },
+      },
+    };
+
+    render(<ReportViewContent />);
+
+    expect(screen.queryByText("RAW_CLASSIFICATION_SECRET")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("report-classification-evidence")).not.toBeInTheDocument();
   });
 
   it("fail-closes every legacy raw fact helper instead of feeding the Report writer", () => {

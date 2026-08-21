@@ -141,7 +141,23 @@ class CompletedResultAnswerAdapter:
         yield ModelStreamEvent.done(request.request_id)
 
 
-def _write_project_run(project_root: Path, *, run_id: str = "run-a") -> None:
+def _write_project_run(
+    project_root: Path,
+    *,
+    run_id: str = "run-a",
+    model_result: dict | None = None,
+    diagnostic_summary_overrides: dict | None = None,
+) -> None:
+    """Persist the minimum server-shaped run consumed by Agent readers."""
+
+    from workbench.artifacts import (
+        initialize_artifact_index,
+        register_artifact,
+        write_json,
+    )
+    from workbench.engine.result_binding import attach_result_binding
+    from workbench.survey.projection import survey_payload_sha256
+
     runs_root = project_root / "runs"
     run_root = runs_root / run_id
     run_root.mkdir(parents=True)
@@ -185,58 +201,98 @@ def _write_project_run(project_root: Path, *, run_id: str = "run-a") -> None:
         ),
         encoding="utf-8",
     )
-    (run_root / "model_results").mkdir()
-    (run_root / "model_results" / "ols_1.json").write_text(
+    initialize_artifact_index(run_root)
+    source_path = run_root / "inputs" / "raw_input.json"
+    write_json(source_path, {"artifact_id": "raw_input", "source": "fixture"})
+    register_artifact(run_root, "raw_input", source_path, "dataset", "ingestion", [])
+
+    result = json.loads(
         json.dumps(
-            {
+            model_result
+            if model_result is not None
+            else {
                 "model_id": "ols_1",
                 "model_type": "ols",
                 "nobs": 100,
                 "coefficients": {"x1": {"estimate": 1.2}},
             }
-        ),
-        encoding="utf-8",
+        )
     )
-    (run_root / "diagnostic_summary.json").write_text(
-        json.dumps(
-            {
-                "model_identity": {
-                    "model_label": "OLS regression",
-                    "model_family": "ols",
-                    "y_variable": "y",
-                    "x_variables": ["x1"],
-                    "n_observations": 100,
-                },
-                "diagnostics": {
-                    "blockers": [],
-                    "warnings": [
-                        {
-                            "issue_id": "issue-1",
-                            "severity": "WARNING",
-                            "code": "MODEL_DIAGNOSTIC_WARNING",
-                            "message": "Review residual variance before interpretation.",
-                            "variables": ["x1"],
-                            "is_user_action_required": True,
-                        }
-                    ],
-                    "cautions": [],
-                    "info": [],
-                },
-                "run_status": {
-                    "report_render_status": "complete",
-                    "report_available": True,
-                },
-                "narrative_contract": {
-                    "constraints": {"causal_language_allowed": False}
-                },
-                "coefficients_summary": {"rows": []},
-                "model_quality": {
-                    "metrics": {"r_squared": 0.72, "aic": 120.5, "bic": 125.1},
-                    "primary_metric_keys": ["r_squared", "aic"],
-                },
-            }
-        ),
-        encoding="utf-8",
+    attach_result_binding(
+        run_root,
+        run_id,
+        "ols_1",
+        result,
+        ["raw_input"],
+        strategy_key="coefficient_table_v1",
+        expected_model_type=("ols", "ols_robust", "ols_clustered"),
+    )
+    result_path = run_root / "model_results" / "ols_1.json"
+    write_json(result_path, result)
+    register_artifact(
+        run_root,
+        "ols_1",
+        result_path,
+        "model_result",
+        "model.genesis",
+        ["raw_input"],
+    )
+    diagnostic_summary = {
+        "model_identity": {
+            "model_label": "OLS regression",
+            "model_family": "ols",
+            "y_variable": "y",
+            "x_variables": ["x1"],
+            "n_observations": 100,
+        },
+        "diagnostics": {
+            "blockers": [],
+            "warnings": [
+                {
+                    "issue_id": "issue-1",
+                    "severity": "WARNING",
+                    "code": "MODEL_DIAGNOSTIC_WARNING",
+                    "message": "Review residual variance before interpretation.",
+                    "variables": ["x1"],
+                    "is_user_action_required": True,
+                }
+            ],
+            "cautions": [],
+            "info": [],
+        },
+        "run_status": {
+            "report_render_status": "complete",
+            "report_available": True,
+        },
+        "narrative_contract": {
+            "constraints": {"causal_language_allowed": False}
+        },
+        "coefficients_summary": {"rows": []},
+        "model_quality": {
+            "metrics": {"r_squared": 0.72, "aic": 120.5, "bic": 125.1},
+            "primary_metric_keys": ["r_squared", "aic"],
+        },
+    }
+    if diagnostic_summary_overrides:
+        diagnostic_summary.update(json.loads(json.dumps(diagnostic_summary_overrides)))
+    payload_sha256 = survey_payload_sha256(diagnostic_summary)
+    assert payload_sha256 is not None
+    diagnostic_summary["summary_binding"] = {
+        "artifact_id": "diagnostic_summary",
+        "run_id": run_id,
+        "status": "complete",
+        "provenance": "server",
+        "payload_sha256": payload_sha256,
+    }
+    summary_path = run_root / "diagnostic_summary.json"
+    write_json(summary_path, diagnostic_summary)
+    register_artifact(
+        run_root,
+        "diagnostic_summary",
+        summary_path,
+        "metadata",
+        "diagnostics",
+        [],
     )
 
 
@@ -1372,23 +1428,20 @@ def test_global_numeric_summary_and_linear_interaction_effect_are_bounded(
     tmp_path: Path,
 ) -> None:
     project_root = tmp_path / "project"
-    _write_project_run(project_root)
-    run_root = project_root / "runs" / "run-a"
-    (run_root / "model_results" / "ols_1.json").write_text(
-        json.dumps(
-            {
-                "model_id": "ols_1",
-                "model_type": "ols",
-                "coefficients": {
-                    "share": {"estimate": 1.2},
-                    "share_x_group": {"estimate": 0.5},
-                    "ln_size": {"estimate": -4052.1594},
-                    "middle": {"estimate": 0.022887},
-                },
-            }
-        ),
-        encoding="utf-8",
+    _write_project_run(
+        project_root,
+        model_result={
+            "model_id": "ols_1",
+            "model_type": "ols",
+            "coefficients": {
+                "share": {"estimate": 1.2},
+                "share_x_group": {"estimate": 0.5},
+                "ln_size": {"estimate": -4052.1594},
+                "middle": {"estimate": 0.022887},
+            },
+        },
     )
+    run_root = project_root / "runs" / "run-a"
     profile_path = run_root / "staged" / "data_profile.json"
     profile_path.parent.mkdir()
     profile_path.write_text(
@@ -2063,27 +2116,28 @@ def test_result_summary_bounds_coefficient_rows_and_preserves_artifact_ref(
     tmp_path: Path,
 ) -> None:
     project_root = tmp_path / "project"
-    _write_project_run(project_root)
-    summary_path = project_root / "runs" / "run-a" / "diagnostic_summary.json"
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    summary["coefficients_summary"] = {
-        "interpretation_mode": "associational",
-        "full_table_ref": "model_results/ols_1.json",
-        "rows": [
-            {
-                "variable": f"x{index}",
-                "estimate": index,
-                "std_error": 0.1,
-                "p_value": 0.05,
-                "ci_lower": index - 0.2,
-                "ci_upper": index + 0.2,
-                "significance_label": "not reported",
-                "raw_payload": {"should_not": "leak"},
+    _write_project_run(
+        project_root,
+        diagnostic_summary_overrides={
+            "coefficients_summary": {
+                "interpretation_mode": "associational",
+                "full_table_ref": "model_results/ols_1.json",
+                "rows": [
+                    {
+                        "variable": f"x{index}",
+                        "estimate": index,
+                        "std_error": 0.1,
+                        "p_value": 0.05,
+                        "ci_lower": index - 0.2,
+                        "ci_upper": index + 0.2,
+                        "significance_label": "not reported",
+                        "raw_payload": {"should_not": "leak"},
+                    }
+                    for index in range(10)
+                ],
             }
-            for index in range(10)
-        ],
-    }
-    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+        },
+    )
     provider = _load_provider_type()(project_root)
     orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
     result = asyncio.run(
@@ -2119,65 +2173,61 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
     tmp_path: Path,
 ) -> None:
     project_root = tmp_path / "project"
-    _write_project_run(project_root)
-    result_path = project_root / "runs" / "run-a" / "model_results" / "ols_1.json"
-    result_path.write_text(
-        json.dumps(
-            {
-                "model_id": "ols_1",
-                "model_type": "ols_robust",
-                "nobs": 100,
-                "r_squared": 0.42,
-                "r_squared_adj": 0.41,
-                "df_model": 2,
-                "df_resid": 97,
-                "y_column": "outcome",
-                "x_columns": ["share", "control"],
-                "entity_col": "firm_id",
-                "time_col": "year",
-                "covariance": "robust",
-                "covariance_estimator": "HC1",
-                "covariance_evidence": {
-                    "confidence_level": 0.95,
-                    "confidence_interval_method": "normal_z",
+    _write_project_run(
+        project_root,
+        model_result={
+            "model_id": "ols_1",
+            "model_type": "ols_robust",
+            "nobs": 100,
+            "r_squared": 0.42,
+            "r_squared_adj": 0.41,
+            "df_model": 2,
+            "df_resid": 97,
+            "y_column": "outcome",
+            "x_columns": ["share", "control"],
+            "entity_col": "firm_id",
+            "time_col": "year",
+            "covariance": "robust",
+            "covariance_estimator": "HC1",
+            "covariance_evidence": {
+                "confidence_level": 0.95,
+                "confidence_interval_method": "normal_z",
+            },
+            "survey_design": {
+                "strata_column": "stratum",
+                "psu_column": "psu",
+                "weight_column": "weight",
+                "subpopulation": "region == 'north'",
+                "n_obs": 100,
+                "n_strata": 4,
+                "n_psu": 8,
+                "degf": 4,
+                "residual_degf": 3,
+                "variance_method": "linearization",
+                "replicate_type": None,
+                "lonely_psu_policy": "adjust",
+                "design_effect": 2.5,
+                "effective_sample_size": 40.0,
+                "replicates_attempted": None,
+                "replicates_succeeded": None,
+                "replicates_failed": None,
+                "replicate_failure_reasons": None,
+            },
+            "coefficients": {
+                "share": {
+                    "estimate": 1.2,
+                    "std_error": 0.3,
+                    "p_value": 0.001,
+                    "ci_lower": 0.61,
+                    "ci_upper": 1.79,
+                    "variance_source": "survey_design",
+                    "source_id": "model_results.ols_1.coefficients.share",
+                    "warnings": ["SURVEY_REPLICATE_FAILURES"],
                 },
-                "survey_design": {
-                    "strata_column": "stratum",
-                    "psu_column": "psu",
-                    "weight_column": "weight",
-                    "subpopulation": "region == 'north'",
-                    "n_obs": 100,
-                    "n_strata": 4,
-                    "n_psu": 8,
-                    "degf": 4,
-                    "residual_degf": 3,
-                    "variance_method": "linearization",
-                    "replicate_type": None,
-                    "lonely_psu_policy": "adjust",
-                    "design_effect": 2.5,
-                    "effective_sample_size": 40.0,
-                    "replicates_attempted": None,
-                    "replicates_succeeded": None,
-                    "replicates_failed": None,
-                    "replicate_failure_reasons": None,
-                },
-                "coefficients": {
-                    "share": {
-                        "estimate": 1.2,
-                        "std_error": 0.3,
-                        "p_value": 0.001,
-                        "ci_lower": 0.61,
-                        "ci_upper": 1.79,
-                        "variance_source": "survey_design",
-                        "source_id": "model_results.ols_1.coefficients.share",
-                        "warnings": ["SURVEY_REPLICATE_FAILURES"],
-                    },
-                    "control": {"estimate": 0.4},
-                },
-                "raw_rows": [{"outcome": 99}],
-            }
-        ),
-        encoding="utf-8",
+                "control": {"estimate": 0.4},
+            },
+            "raw_rows": [{"outcome": 99}],
+        },
     )
     provider = _load_provider_type()(project_root)
     registry = ToolRegistry()
@@ -2209,17 +2259,11 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                 "df_resid": 97,
                 "outcome": "outcome",
                 "predictors": ["share", "control"],
-                "predictors_omitted": 0,
                 "entity_col": "firm_id",
                 "time_col": "year",
                 "covariance": "robust",
                 "covariance_estimator": "HC1",
                 "confidence_interval": {"level": 0.95, "method": "normal_z"},
-                "covariance_details": {
-                    "cluster_variable": None,
-                    "cluster_count": None,
-                    "cluster_entity": None,
-                },
                 "survey_design": {
                     "n_obs": 100,
                     "n_strata": 4,
@@ -2234,10 +2278,6 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                     "weight_column": "weight",
                     "subpopulation": "region == 'north'",
                     "lonely_psu_policy": "adjust",
-                    "replicates_attempted": None,
-                    "replicates_succeeded": None,
-                    "replicates_failed": None,
-                    "replicate_failure_reasons": None,
                 },
                 "coefficients": [
                     {
@@ -2249,10 +2289,13 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                         "ci_upper": 1.79,
                         "variance_source": "survey_design",
                         "source_id": "model_results.ols_1.coefficients.share",
+                        "provenance": {
+                            "run_id": "run-a",
+                            "source_id": "model_results.ols_1.coefficients.share",
+                        },
                         "warnings": ["SURVEY_REPLICATE_FAILURES"],
                     }
                 ],
-                "missing_terms": [],
                 "evidence_ref": {
                     "run_id": "run-a",
                     "model_id": "ols_1",
@@ -2397,26 +2440,53 @@ def test_chain_context_exposes_the_same_bounded_exact_coefficient_reader(
 def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
     tmp_path: Path,
 ) -> None:
-    from workbench.agent.context_tools import InspectResultSummaryRequest
+    from workbench.agent.context_tools import (
+        InspectResultSummaryRequest,
+        _verified_model_results,
+    )
+    from workbench.artifacts import sha256_file
 
     project_root = tmp_path / "project"
-    _write_project_run(project_root)
-    result_path = project_root / "runs" / "run-a" / "model_results" / "ols_1.json"
-    result_path.write_text(
-        json.dumps(
-            {
-                "model_id": "ols_1",
-                "model_type": "ols",
-                "nobs": 100,
-                "r_squared": 0.42,
-                "r_squared_adj": 0.41,
-                "coefficients": {
-                    "share": {"estimate": 1.2, "ci_lower": 0.61, "ci_upper": 1.79},
-                },
-            }
-        ),
-        encoding="utf-8",
+    _write_project_run(
+        project_root,
+        model_result={
+            "model_id": "ols_1",
+            "model_type": "ols",
+            "nobs": 100,
+            "r_squared": 0.42,
+            "r_squared_adj": 0.41,
+            "coefficients": {
+                "share": {"estimate": 1.2, "ci_lower": 0.61, "ci_upper": 1.79},
+            },
+        },
     )
+    result_path = project_root / "runs" / "run-a" / "model_results" / "ols_1.json"
+    run_root = project_root / "runs" / "run-a"
+    index_path = run_root / "artifacts_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    records = {item["artifact_id"]: item for item in index["artifacts"]}
+    result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+    binding = result_payload["result_binding"]
+    assert records["raw_input"]["path"] == "inputs/raw_input.json"
+    assert records["raw_input"]["sha256"] == sha256_file(
+        run_root / "inputs/raw_input.json"
+    )
+    assert records["ols_1"]["path"] == "model_results/ols_1.json"
+    assert records["ols_1"]["sha256"] == sha256_file(result_path)
+    assert records["ols_1"]["inputs"] == ["raw_input"]
+    assert result_payload["model_id"] == "ols_1"
+    assert binding["project_root"] == str(project_root.resolve())
+    assert binding["run_id"] == "run-a"
+    assert binding["model_id"] == "ols_1"
+    assert binding["source_artifact_ids"] == ["raw_input"]
+    assert binding["coefficient_source_ids"] == {
+        "share": "model_results.ols_1.coefficients.share"
+    }
+    assert isinstance(binding["payload_sha256"], str)
+    assert len(binding["payload_sha256"]) == 64
+    verified, verification_error = _verified_model_results(run_root)
+    assert verification_error is None
+    assert verified == [result_payload]
     provider = _load_provider_type()(project_root)
 
     output = provider.inspect_result_summary(
@@ -2430,9 +2500,43 @@ def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
             "model_id": "ols_1",
             "r_squared": 0.42,
             "r_squared_adj": 0.41,
-            "coefficients": [{"term": "share", "estimate": 1.2, "std_error": None, "p_value": None, "ci_lower": 0.61, "ci_upper": 1.79}],
+            "coefficients": [
+                {
+                    "term": "share",
+                    "estimate": 1.2,
+                    "ci_lower": 0.61,
+                    "ci_upper": 1.79,
+                    "source_id": "model_results.ols_1.coefficients.share",
+                    "warnings": [],
+                }
+            ],
         }
     ]
+
+    mutated = json.loads(result_path.read_text(encoding="utf-8"))
+    mutated["coefficients"]["share"]["estimate"] = 999.0
+    result_path.write_text(json.dumps(mutated), encoding="utf-8")
+    # Keep the file digest synchronized so the self-digesting payload binding
+    # is the boundary that rejects the changed model fact.
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    next(
+        item for item in index["artifacts"] if item["artifact_id"] == "ols_1"
+    )["sha256"] = sha256_file(result_path)
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    unavailable = provider.inspect_result_summary(
+        InspectResultSummaryRequest(
+            request_id="summary-after-result-mutation",
+            owner_run_id="run-a",
+            op_node_id="model:ols_1",
+            active_head_run_id="run-a",
+        )
+    )
+    assert unavailable["result_summary"] == {
+        "available": False,
+        "status": "unavailable",
+        "summary_status": "unavailable",
+        "unavailable_reason": "AGENT_RESULT_ARTIFACT_INVALID",
+    }
 
 
 def test_model_figure_evidence_exposes_binned_numeric_facts_not_raw_vectors(
@@ -2445,35 +2549,32 @@ def test_model_figure_evidence_exposes_binned_numeric_facts_not_raw_vectors(
         InspectProjectModelFigureEvidenceRequest,
         _bounded_model_figure_numeric_source,
     )
+    from workbench.artifacts import register_artifact
 
     project_root = tmp_path / "project"
-    _write_project_run(project_root)
-    run_root = project_root / "runs" / "run-a"
-    (run_root / "model_results" / "ols_1.json").write_text(
-        json.dumps(
-            {
-                "model_id": "ols_1",
-                "model_type": "ols",
-                "nobs": 20,
-                "coefficients": {},
-                "residuals": [float(index - 10) / 10 for index in range(20)],
-                "fitted_values": [float(index) for index in range(20)],
-            }
-        ),
-        encoding="utf-8",
+    _write_project_run(
+        project_root,
+        model_result={
+            "model_id": "ols_1",
+            "model_type": "ols",
+            "nobs": 20,
+            "coefficients": {"Intercept": {"estimate": 0.0}},
+            "residuals": [float(index - 10) / 10 for index in range(20)],
+            "fitted_values": [float(index) for index in range(20)],
+        },
     )
-    index = {
-        "artifacts": [
-            {
-                "artifact_id": "residuals_fitted",
-                "artifact_type": "figure",
-                "path": "figures/residuals_fitted.png",
-                "sha256": "figure-sha",
-                "inputs": [],
-            }
-        ]
-    }
-    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+    run_root = project_root / "runs" / "run-a"
+    figure_path = run_root / "figures" / "residuals_fitted.png"
+    figure_path.parent.mkdir(parents=True)
+    figure_path.write_bytes(b"fixture figure")
+    register_artifact(
+        run_root,
+        "residuals_fitted",
+        figure_path,
+        "figure",
+        "visualization",
+        ["ols_1"],
+    )
     assert _bounded_model_figure_numeric_source(
         run_root,
         node_id="model:ols_1",
@@ -2508,48 +2609,46 @@ def test_model_predictor_residual_figure_exposes_binned_numeric_facts_not_rows(
         InspectProjectModelFigureEvidenceRequest,
         _bounded_model_figure_numeric_source,
     )
+    from workbench.artifacts import register_artifact
 
     project_root = tmp_path / "project"
-    _write_project_run(project_root)
+    _write_project_run(
+        project_root,
+        model_result={
+            "model_id": "ols_1",
+            "model_type": "ols",
+            "nobs": 12,
+            "x_columns": ["exposure"],
+            "coefficients": {"Intercept": {"estimate": 0.0}},
+            "analysis_sample": {"row_order": [str(index) for index in range(12)]},
+            "residuals": [float(index - 5) / 4 for index in range(12)],
+            "fitted_values": [float(index) for index in range(12)],
+        },
+    )
     run_root = project_root / "runs" / "run-a"
     processed = run_root / "processed"
     processed.mkdir()
     frame = pd.DataFrame({"exposure": list(range(12)), "outcome": list(range(12))})
     frame.to_parquet(processed / "cleaned_dataset.parquet", index=False)
-    (run_root / "model_results" / "ols_1.json").write_text(
-        json.dumps(
-            {
-                "model_id": "ols_1",
-                "model_type": "ols",
-                "nobs": 12,
-                "x_columns": ["exposure"],
-                "coefficients": {},
-                "analysis_sample": {"row_order": [str(index) for index in range(12)]},
-                "residuals": [float(index - 5) / 4 for index in range(12)],
-                "fitted_values": [float(index) for index in range(12)],
-            }
-        ),
-        encoding="utf-8",
+    register_artifact(
+        run_root,
+        "cleaned_dataset",
+        processed / "cleaned_dataset.parquet",
+        "processed_data",
+        "preprocessing",
+        ["raw_input"],
     )
-    index = {
-        "artifacts": [
-            {
-                "artifact_id": "cleaned_dataset",
-                "artifact_type": "processed_data",
-                "path": "processed/cleaned_dataset.parquet",
-                "sha256": "dataset-sha",
-                "inputs": [],
-            },
-            {
-                "artifact_id": "residuals_vs_exposure",
-                "artifact_type": "figure",
-                "path": "figures/residuals_vs_exposure.png",
-                "sha256": "figure-sha",
-                "inputs": [],
-            },
-        ]
-    }
-    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+    figure_path = run_root / "figures" / "residuals_vs_exposure.png"
+    figure_path.parent.mkdir(parents=True)
+    figure_path.write_bytes(b"fixture figure")
+    register_artifact(
+        run_root,
+        "residuals_vs_exposure",
+        figure_path,
+        "figure",
+        "visualization",
+        ["ols_1", "cleaned_dataset"],
+    )
 
     direct = _bounded_model_figure_numeric_source(
         run_root,
@@ -2601,7 +2700,7 @@ def test_raw_node_preview_exposes_only_registered_statistical_result_facts(
     """Direct UI results become readable evidence only through declared inputs."""
 
     from workbench.agent.context_tools import InspectArtifactPreviewRequest
-    from workbench.artifacts import sha256_file
+    from workbench.artifacts import register_artifact, sha256_file
 
     project_root = tmp_path / "project"
     _write_project_run(project_root)
@@ -2648,28 +2747,21 @@ def test_raw_node_preview_exposes_only_registered_statistical_result_facts(
     node_index = json.loads((run_root / "node_index.json").read_text(encoding="utf-8"))
     node_index["stage:raw"] = {"node_hash": sha256_file(raw_path)}
     (run_root / "node_index.json").write_text(json.dumps(node_index), encoding="utf-8")
-    (run_root / "artifacts_index.json").write_text(
-        json.dumps(
-            {
-                "artifacts": [
-                    {
-                        "artifact_id": "source_data",
-                        "artifact_type": "raw_data",
-                        "path": "raw_snapshot/source.csv",
-                        "sha256": sha256_file(raw_path),
-                        "inputs": [],
-                    },
-                    {
-                        "artifact_id": "summary",
-                        "artifact_type": "statistical_exploration",
-                        "path": "artifacts/statistical_exploration/summary.json",
-                        "sha256": sha256_file(summary_path),
-                        "inputs": ["source_data"],
-                    },
-                ]
-            }
-        ),
-        encoding="utf-8",
+    register_artifact(
+        run_root,
+        "source_data",
+        raw_path,
+        "raw_data",
+        "ingestion",
+        [],
+    )
+    register_artifact(
+        run_root,
+        "summary",
+        summary_path,
+        "statistical_exploration",
+        "statistical_exploration",
+        ["source_data"],
     )
 
     output = _load_provider_type()(project_root).inspect_artifact_preview(
@@ -3129,8 +3221,12 @@ def test_diagnostics_preserves_malformed_summary_as_read_only_preview_state(
     )
 
     assert result.ok is True
-    assert result.output["diagnostics"]["preview_status"] == "malformed"
-    assert result.output["diagnostics"]["trust_label"] == "contract_unavailable"
+    assert result.output["diagnostics"] == {
+        "available": False,
+        "status": "unavailable",
+        "summary_status": "unavailable",
+        "unavailable_reason": "AGENT_RESULT_ARTIFACT_INVALID",
+    }
 
 
 def test_result_summary_preserves_malformed_summary_state_without_raw_results(
@@ -3161,10 +3257,16 @@ def test_result_summary_preserves_malformed_summary_state_without_raw_results(
 
     assert result.ok is True
     summary = result.output["result_summary"]
-    assert summary["available"] is False
-    assert summary["summary_status"] == "malformed"
-    assert summary["trust_label"] == "contract_unavailable"
-    assert result.output["omitted_sections"] == ["raw_model_results"]
+    assert summary == {
+        "available": False,
+        "status": "unavailable",
+        "summary_status": "unavailable",
+        "unavailable_reason": "AGENT_RESULT_ARTIFACT_INVALID",
+    }
+    assert result.output["omitted_sections"] == [
+        "raw_model_results",
+        "coefficient_rows",
+    ]
 
 
 def test_artifact_preview_reports_running_lifecycle_without_writes(

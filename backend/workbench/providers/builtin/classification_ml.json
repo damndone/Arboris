@@ -57,6 +57,56 @@
     {"kind": "projection", "logical_id": "workbench.classification_ml.notebook", "semantic_version": "1.0", "contract_digest": "4444444444444444444444444444444444444444444444444444444444444444"},
     {"kind": "projection", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "5555555555555555555555555555555555555555555555555555555555555555"}
   ],
+  "projection_declarations": [
+    {
+      "path_id": "workbench.classification_ml.direct",
+      "consumer_id": "agent",
+      "projection_ref": {"kind": "projection", "logical_id": "workbench.classification_ml.agent", "semantic_version": "1.0", "contract_digest": "3333333333333333333333333333333333333333333333333333333333333333"},
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.classification_ml.evidence", "semantic_version": "1.0", "contract_digest": "2222222222222222222222222222222222222222222222222222222222222222"}],
+      "envelope_contract_refs": [],
+      "fact_kinds": ["classification", "metrics", "diagnostics"],
+      "policy_ref": {"kind": "policy", "logical_id": "workbench.classification_ml.policy", "semantic_version": "1.0", "contract_digest": "7777777777777777777777777777777777777777777777777777777777777777"},
+      "renderer_ref": {"kind": "renderer", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"},
+      "max_token_budget": 4096,
+      "max_row_budget": 64,
+      "allowed_sensitivity": ["public", "internal"],
+      "ordering": ["fact_id"],
+      "coverage_status": "required",
+      "exemption_reason": null
+    },
+    {
+      "path_id": "workbench.classification_ml.direct",
+      "consumer_id": "notebook",
+      "projection_ref": {"kind": "projection", "logical_id": "workbench.classification_ml.notebook", "semantic_version": "1.0", "contract_digest": "4444444444444444444444444444444444444444444444444444444444444444"},
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.classification_ml.evidence", "semantic_version": "1.0", "contract_digest": "2222222222222222222222222222222222222222222222222222222222222222"}],
+      "envelope_contract_refs": [],
+      "fact_kinds": ["classification", "metrics", "diagnostics"],
+      "policy_ref": {"kind": "policy", "logical_id": "workbench.classification_ml.policy", "semantic_version": "1.0", "contract_digest": "7777777777777777777777777777777777777777777777777777777777777777"},
+      "renderer_ref": {"kind": "renderer", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"},
+      "max_token_budget": 4096,
+      "max_row_budget": 64,
+      "allowed_sensitivity": ["public", "internal"],
+      "ordering": ["fact_id"],
+      "coverage_status": "required",
+      "exemption_reason": null
+    },
+    {
+      "path_id": "workbench.classification_ml.direct",
+      "consumer_id": "report",
+      "projection_ref": {"kind": "projection", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "5555555555555555555555555555555555555555555555555555555555555555"},
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.classification_ml.evidence", "semantic_version": "1.0", "contract_digest": "2222222222222222222222222222222222222222222222222222222222222222"}],
+      "envelope_contract_refs": [],
+      "fact_kinds": ["classification", "metrics", "diagnostics"],
+      "policy_ref": {"kind": "policy", "logical_id": "workbench.classification_ml.policy", "semantic_version": "1.0", "contract_digest": "7777777777777777777777777777777777777777777777777777777777777777"},
+      "renderer_ref": {"kind": "renderer", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"},
+      "max_token_budget": 4096,
+      "max_row_budget": 64,
+      "allowed_sensitivity": ["public", "internal"],
+      "ordering": ["fact_id"],
+      "coverage_status": "required",
+      "exemption_reason": null
+    }
+  ],
   "renderer_refs": [
     {"kind": "renderer", "logical_id": "workbench.classification_ml.report", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"}
   ],

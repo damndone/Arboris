@@ -98,6 +98,7 @@ function typedReportEvidence(
     scopeRef: "scope:report-test",
     runId: "run_c",
     modelRunId: "run_c",
+    rendererKey: "workbench.consumer_projection.report",
     artifactRef: "artifact:report-test",
     envelopeRef: "envelope:report-test",
     envelopeDigest: "a".repeat(64),

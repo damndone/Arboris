@@ -1,0 +1,56 @@
+{
+  "provider_id": "workbench.survey",
+  "semantic_version": "1.0",
+  "contracts": [
+    {"kind": "capability", "logical_id": "workbench.survey.capability", "semantic_version": "1.0", "contract_digest": "1010101010101010101010101010101010101010101010101010101010101010"},
+    {"kind": "operation", "logical_id": "workbench.survey.operation", "semantic_version": "1.0", "contract_digest": "2020202020202020202020202020202020202020202020202020202020202020"},
+    {"kind": "step", "logical_id": "workbench.survey.step", "semantic_version": "1.0", "contract_digest": "3030303030303030303030303030303030303030303030303030303030303030"},
+    {"kind": "schema", "logical_id": "workbench.survey.schema", "semantic_version": "1.0", "contract_digest": "4040404040404040404040404040404040404040404040404040404040404040"},
+    {"kind": "validator", "logical_id": "workbench.survey.validator", "semantic_version": "1.0", "contract_digest": "5050505050505050505050505050505050505050505050505050505050505050"},
+    {"kind": "adapter", "logical_id": "workbench.survey.central_source", "semantic_version": "1.0", "contract_digest": "6060606060606060606060606060606060606060606060606060606060606060"},
+    {"kind": "output", "logical_id": "workbench.survey.output", "semantic_version": "1.0", "contract_digest": "7070707070707070707070707070707070707070707070707070707070707070"},
+    {"kind": "evidence", "logical_id": "workbench.survey.evidence", "semantic_version": "1.0", "contract_digest": "8080808080808080808080808080808080808080808080808080808080808080"},
+    {"kind": "projection", "logical_id": "workbench.survey.agent", "semantic_version": "1.0", "contract_digest": "9090909090909090909090909090909090909090909090909090909090909090"},
+    {"kind": "projection", "logical_id": "workbench.survey.notebook", "semantic_version": "1.0", "contract_digest": "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"},
+    {"kind": "projection", "logical_id": "workbench.survey.report", "semantic_version": "1.0", "contract_digest": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0"},
+    {"kind": "renderer", "logical_id": "workbench.survey.consumer", "semantic_version": "1.0", "contract_digest": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"},
+    {"kind": "policy", "logical_id": "workbench.survey.policy", "semantic_version": "1.0", "contract_digest": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0"}
+  ],
+  "exposure_paths": [
+    {
+      "path_id": "workbench.survey.central_source",
+      "semantic_version": "1.0",
+      "exposure": "composition",
+      "capability_ref": {"kind": "capability", "logical_id": "workbench.survey.capability", "semantic_version": "1.0", "contract_digest": "1010101010101010101010101010101010101010101010101010101010101010"},
+      "operation_ref": {"kind": "operation", "logical_id": "workbench.survey.operation", "semantic_version": "1.0", "contract_digest": "2020202020202020202020202020202020202020202020202020202020202020"},
+      "step_contract_ref": {"kind": "step", "logical_id": "workbench.survey.step", "semantic_version": "1.0", "contract_digest": "3030303030303030303030303030303030303030303030303030303030303030"},
+      "family_contract_ref": null,
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "workbench.survey.central_source", "semantic_version": "1.0", "contract_digest": "6060606060606060606060606060606060606060606060606060606060606060"},
+      "result_contract_refs": [{"kind": "output", "logical_id": "workbench.survey.output", "semantic_version": "1.0", "contract_digest": "7070707070707070707070707070707070707070707070707070707070707070"}],
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.survey.evidence", "semantic_version": "1.0", "contract_digest": "8080808080808080808080808080808080808080808080808080808080808080"}],
+      "projection_refs": {
+        "agent": {"kind": "projection", "logical_id": "workbench.survey.agent", "semantic_version": "1.0", "contract_digest": "9090909090909090909090909090909090909090909090909090909090909090"},
+        "notebook": {"kind": "projection", "logical_id": "workbench.survey.notebook", "semantic_version": "1.0", "contract_digest": "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"},
+        "report": {"kind": "projection", "logical_id": "workbench.survey.report", "semantic_version": "1.0", "contract_digest": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0"}
+      }
+    }
+  ],
+  "adapter_declarations": [
+    {
+      "adapter_id": "workbench.survey.central_source",
+      "semantic_version": "1.0",
+      "request_schema_ref": {"kind": "schema", "logical_id": "workbench.survey.schema", "semantic_version": "1.0", "contract_digest": "4040404040404040404040404040404040404040404040404040404040404040"},
+      "executor_ref": "executor:workbench.survey.central_source",
+      "result_validator_ref": {"kind": "validator", "logical_id": "workbench.survey.validator", "semantic_version": "1.0", "contract_digest": "5050505050505050505050505050505050505050505050505050505050505050"},
+      "output_refs": [{"kind": "output", "logical_id": "workbench.survey.output", "semantic_version": "1.0", "contract_digest": "7070707070707070707070707070707070707070707070707070707070707070"}, {"kind": "evidence", "logical_id": "workbench.survey.evidence", "semantic_version": "1.0", "contract_digest": "8080808080808080808080808080808080808080808080808080808080808080"}]
+    }
+  ],
+  "projection_refs": [{"kind": "projection", "logical_id": "workbench.survey.agent", "semantic_version": "1.0", "contract_digest": "9090909090909090909090909090909090909090909090909090909090909090"}, {"kind": "projection", "logical_id": "workbench.survey.notebook", "semantic_version": "1.0", "contract_digest": "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"}, {"kind": "projection", "logical_id": "workbench.survey.report", "semantic_version": "1.0", "contract_digest": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0"}],
+  "projection_declarations": [
+    {"path_id": "workbench.survey.central_source", "consumer_id": "agent", "projection_ref": {"kind": "projection", "logical_id": "workbench.survey.agent", "semantic_version": "1.0", "contract_digest": "9090909090909090909090909090909090909090909090909090909090909090"}, "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.survey.evidence", "semantic_version": "1.0", "contract_digest": "8080808080808080808080808080808080808080808080808080808080808080"}], "envelope_contract_refs": [], "fact_kinds": ["survey", "design"], "policy_ref": {"kind": "policy", "logical_id": "workbench.survey.policy", "semantic_version": "1.0", "contract_digest": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0"}, "renderer_ref": {"kind": "renderer", "logical_id": "workbench.survey.consumer", "semantic_version": "1.0", "contract_digest": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"}, "max_token_budget": 4096, "max_row_budget": 64, "allowed_sensitivity": ["public", "internal"], "ordering": ["fact_id"], "coverage_status": "required", "exemption_reason": null},
+    {"path_id": "workbench.survey.central_source", "consumer_id": "notebook", "projection_ref": {"kind": "projection", "logical_id": "workbench.survey.notebook", "semantic_version": "1.0", "contract_digest": "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"}, "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.survey.evidence", "semantic_version": "1.0", "contract_digest": "8080808080808080808080808080808080808080808080808080808080808080"}], "envelope_contract_refs": [], "fact_kinds": ["survey", "design"], "policy_ref": {"kind": "policy", "logical_id": "workbench.survey.policy", "semantic_version": "1.0", "contract_digest": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0"}, "renderer_ref": {"kind": "renderer", "logical_id": "workbench.survey.consumer", "semantic_version": "1.0", "contract_digest": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"}, "max_token_budget": 4096, "max_row_budget": 64, "allowed_sensitivity": ["public", "internal"], "ordering": ["fact_id"], "coverage_status": "required", "exemption_reason": null},
+    {"path_id": "workbench.survey.central_source", "consumer_id": "report", "projection_ref": {"kind": "projection", "logical_id": "workbench.survey.report", "semantic_version": "1.0", "contract_digest": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0"}, "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.survey.evidence", "semantic_version": "1.0", "contract_digest": "8080808080808080808080808080808080808080808080808080808080808080"}], "envelope_contract_refs": [], "fact_kinds": ["survey", "design"], "policy_ref": {"kind": "policy", "logical_id": "workbench.survey.policy", "semantic_version": "1.0", "contract_digest": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0"}, "renderer_ref": {"kind": "renderer", "logical_id": "workbench.survey.consumer", "semantic_version": "1.0", "contract_digest": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"}, "max_token_budget": 4096, "max_row_budget": 64, "allowed_sensitivity": ["public", "internal"], "ordering": ["fact_id"], "coverage_status": "required", "exemption_reason": null}
+  ],
+  "renderer_refs": [{"kind": "renderer", "logical_id": "workbench.survey.consumer", "semantic_version": "1.0", "contract_digest": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"}],
+  "policy_refs": [{"kind": "policy", "logical_id": "workbench.survey.policy", "semantic_version": "1.0", "contract_digest": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0"}]
+}

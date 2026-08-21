@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import json
 import math
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping
 
 import pandas as pd
@@ -124,6 +125,11 @@ class EvidenceRecord:
             raise ValueError("evidence status is invalid")
         if self.failure_code is not None and self.status != "failed":
             raise ValueError("failure_code is only valid for failed evidence")
+        object.__setattr__(self, "source_refs", tuple(self.source_refs))
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+        object.__setattr__(self, "observations", _freeze_json(self.observations))
+        object.__setattr__(self, "metrics", _freeze_json(self.metrics))
+        object.__setattr__(self, "omissions", tuple(_freeze_json(item) for item in self.omissions))
 
     def _content(self) -> dict[str, Any]:
         return {
@@ -132,10 +138,10 @@ class EvidenceRecord:
             "source_refs": list(self.source_refs),
             "protocol_version": self.protocol_version,
             "status": self.status,
-            "observations": self.observations,
-            "metrics": self.metrics,
+            "observations": _thaw_json(self.observations),
+            "metrics": _thaw_json(self.metrics),
             "warnings": list(self.warnings),
-            "omissions": list(self.omissions),
+            "omissions": [_thaw_json(item) for item in self.omissions],
             "failure_code": self.failure_code,
         }
 
@@ -190,6 +196,22 @@ def _require_pathless(value: str, label: str) -> None:
 
 def _hash(value: Any) -> str:
     return "sha256:" + sha256_canonical(value)
+
+
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
+def _thaw_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_thaw_json(item) for item in value]
+    return value
 
 
 def _canonical_size(value: Any) -> int:
@@ -546,36 +568,94 @@ __all__ = [
     "RunSource",
     "UnsupportedEvidenceSource",
     "compile_evidence_pack",
+    "project_persisted_evidence_for_notebook",
+    "read_persisted_evidence_for_notebook",
+    "read_data_consumer_evidence_for_notebook",
 ]
 
 
 def project_persisted_evidence_for_notebook(
     record: object,
     *,
+    destination: str = "local",
     requested_fact_ids: tuple[str, ...] | None = None,
     registry: object | None = None,
+    gateway: object | None = None,
+    receipt: object | None = None,
+    issuer: object | None = None,
 ) -> dict[str, object]:
     """Bounded Notebook contribution over the same persisted envelope port."""
 
     from ...evidence.consumer_adapters import (
-        ConsumerProjectionRegistryV1,
+        EvidenceProjectionError,
         default_projection_registry,
     )
 
-    active_registry = default_projection_registry() if registry is None else registry
-    if type(active_registry) is not ConsumerProjectionRegistryV1:
-        raise TypeError("registry must be ConsumerProjectionRegistryV1")
+    if registry is not None:
+        raise EvidenceProjectionError(
+            "PROJECTION_REGISTRY_INJECTION_REJECTED",
+            "Notebook evidence projection uses the server-owned canonical registry",
+        )
+    active_registry = default_projection_registry()
     return active_registry.project(
         record,  # type: ignore[arg-type]
         consumer_id="notebook",
-        destination="local",
+        destination=destination,
         requested_fact_ids=requested_fact_ids,
+        gateway=gateway,  # type: ignore[arg-type]
+        receipt=receipt,  # type: ignore[arg-type]
+        issuer=issuer,  # type: ignore[arg-type]
     ).to_dict()
 
 
-def read_classification_evidence_for_notebook(run_root: Path) -> dict[str, object]:
-    """Read Notebook classification evidence from the shared indexed receipt."""
+def read_persisted_evidence_for_notebook(
+    run_root: Path,
+    *,
+    requested_fact_ids: tuple[str, ...] | None = None,
+) -> dict[str, object]:
+    """Read Notebook evidence through the same central C0 consumer port."""
 
-    from ...predictive_research.consumer_projection import read_classification_evidence_from_run_root
+    from ...services.results_service import read_persisted_consumer_evidence_for_run
 
-    return read_classification_evidence_from_run_root(run_root, consumer="notebook")
+    return read_persisted_consumer_evidence_for_run(
+        consumer_id="notebook",
+        project_root=Path(run_root).expanduser().resolve(strict=False).parent.parent,
+        run_id=Path(run_root).name,
+        requested_fact_ids=requested_fact_ids,
+    )
+
+
+def read_classification_evidence_for_notebook(run_root: object) -> dict[str, object]:
+    """Read Notebook evidence from an opaque server-issued run capability."""
+
+    from ...services.classification_consumer_service import (
+        read_classification_consumer_projection,
+    )
+
+    return read_classification_consumer_projection(run_root, "notebook")
+
+
+def read_data_consumer_evidence_for_notebook(
+    run_capability: object,
+    *,
+    requested_fact_ids: tuple[str, ...] | None = None,
+) -> dict[str, object]:
+    """Read the same server-owned data-operation projection as Agent."""
+
+    from ...services.data_consumer_projection_service import (
+        read_data_consumer_projection,
+    )
+
+    return read_data_consumer_projection(
+        run_capability,
+        "notebook",
+        requested_fact_ids=requested_fact_ids,
+    )
+
+
+def read_survey_evidence_for_notebook(run_capability: object) -> dict[str, object]:
+    """Read Survey evidence only through the central source capability."""
+
+    from ...services.survey_consumer_service import read_survey_consumer_projection
+
+    return read_survey_consumer_projection(run_capability, "notebook")

@@ -8,6 +8,10 @@ import pandas as pd
 import pytest
 
 from workbench.artifacts import sha256_file, write_json
+from workbench.agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    issue_route_proposal_store,
+)
 from workbench.graph_model import BranchRef, Edge, Graph, Node, NodeKind, Stage, Trust
 from workbench.graph_store import GraphStore
 
@@ -57,6 +61,31 @@ def _source_project(tmp_path: Path, frame: pd.DataFrame) -> tuple[Path, str, str
         )
     )
     return project, run_id, artifact_id
+
+
+def _confirm_server_owned_proposal(
+    orchestrator,
+    proposal,
+    *,
+    preview_fingerprint: str,
+    active_head_run_id: str,
+):
+    """Confirm and enqueue a proposal through the server-issued test seam."""
+
+    proposal_store = orchestrator.proposal_store
+    assert proposal_store is not None
+    confirmation = proposal_store.confirm(
+        proposal.proposal_id,
+        revision=proposal.revision,
+        fingerprint=proposal.fingerprint,
+        actor_type="human_ui",
+        current_context_fingerprint=preview_fingerprint,
+        current_active_head_run_id=active_head_run_id,
+    )
+    return orchestrator.operation_store.create_pending(
+        confirmation,
+        command_id=confirmation.command_id,
+    )
 
 
 def test_column_cast_preview_is_strict_and_deterministic(tmp_path: Path) -> None:
@@ -267,6 +296,8 @@ def test_column_cast_confirmed_operation_uses_shared_lifecycle(tmp_path: Path) -
         repository,
         events,
         main_session_id="agent_main",
+        proposal_store=issue_route_proposal_store(repository.root),
+        proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
     )
     orchestrator.register_chain("chain_data", "agent_data", agent)
     proposal = orchestrator.create_proposal(
@@ -290,13 +321,11 @@ def test_column_cast_confirmed_operation_uses_shared_lifecycle(tmp_path: Path) -
         expected_effect=["create one child data artifact"],
         risks=["downstream model rerun required"],
     )
-    record = orchestrator.confirm_proposal(
-        proposal.proposal_id,
-        revision=proposal.revision,
-        fingerprint=proposal.fingerprint,
-        actor_type="human_ui",
-        current_context_fingerprint=preview.fingerprint,
-        current_active_head_run_id=run_id,
+    record = _confirm_server_owned_proposal(
+        orchestrator,
+        proposal,
+        preview_fingerprint=preview.fingerprint,
+        active_head_run_id=run_id,
     )
 
     completed = asyncio.run(
@@ -375,6 +404,8 @@ def test_column_cast_lifecycle_reconciles_without_duplicate_child_effect(
         events,
         main_session_id="agent_main",
         failpoint=CrashOnce(),
+        proposal_store=issue_route_proposal_store(repository.root),
+        proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
     )
     orchestrator.register_chain("chain_data", "agent_data", agent)
     proposal = orchestrator.create_proposal(
@@ -398,13 +429,11 @@ def test_column_cast_lifecycle_reconciles_without_duplicate_child_effect(
         expected_effect=["create one child data artifact"],
         risks=["downstream model rerun required"],
     )
-    record = orchestrator.confirm_proposal(
-        proposal.proposal_id,
-        revision=proposal.revision,
-        fingerprint=proposal.fingerprint,
-        actor_type="human_ui",
-        current_context_fingerprint=preview.fingerprint,
-        current_active_head_run_id=run_id,
+    record = _confirm_server_owned_proposal(
+        orchestrator,
+        proposal,
+        preview_fingerprint=preview.fingerprint,
+        active_head_run_id=run_id,
     )
 
     source_sha_before = sha256_file(project / "runs" / run_id / "data.csv")

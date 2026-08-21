@@ -108,7 +108,12 @@ def _ref_tuple(value: object, name: str, *, allow_empty: bool = False) -> tuple[
         raise ProviderContractError(PROVIDER_REF_INVALID, name)
     if not allow_empty and not value:
         raise ProviderContractError(PROVIDER_REF_INVALID, name)
-    refs = tuple(_contract_ref(item, f"{name}[{index}]") for index, item in enumerate(value))
+    refs = tuple(
+        item
+        if type(item) is ContractRefV1
+        else _contract_ref(item, f"{name}[{index}]")
+        for index, item in enumerate(value)
+    )
     if len({(ref.kind, ref.logical_id, ref.semantic_version) for ref in refs}) != len(refs):
         raise ProviderContractError(PROVIDER_DUPLICATE, name)
     return refs
@@ -118,6 +123,22 @@ def _optional_ref(value: object, name: str) -> ContractRefV1 | None:
     if value is None:
         return None
     return _contract_ref(value, name)
+
+
+def _string_tuple(value: object, name: str, *, allow_empty: bool = False) -> tuple[str, ...]:
+    if type(value) not in {list, tuple}:
+        raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, name)
+    if not allow_empty and not value:
+        raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, name)
+    values = tuple(_text(item, f"{name}[{index}]") for index, item in enumerate(value))
+    if len(set(values)) != len(values):
+        raise ProviderContractError(PROVIDER_DUPLICATE, name)
+    return values
+
+
+def _ref_kind(ref: ContractRefV1, name: str, allowed: frozenset[str]) -> None:
+    if type(ref) is not ContractRefV1 or ref.kind not in allowed:
+        raise ProviderContractError(PROVIDER_REF_INVALID, name)
 
 
 class _StrictValueTuple:
@@ -380,6 +401,192 @@ class ExposurePathRefV1(
         )
 
 
+_CONSUMER_SENSITIVITIES = frozenset({"public", "internal", "restricted"})
+_ENVELOPE_REF_KINDS = frozenset({"envelope", "evidence"})
+
+
+class ConsumerProjectionDeclarationV1(
+    _StrictValueTuple,
+    namedtuple(
+        "_ConsumerProjectionDeclarationV1Base",
+        (
+            "path_id",
+            "consumer_id",
+            "projection_ref",
+            "evidence_contract_refs",
+            "envelope_contract_refs",
+            "fact_kinds",
+            "policy_ref",
+            "renderer_ref",
+            "max_token_budget",
+            "max_row_budget",
+            "allowed_sensitivity",
+            "ordering",
+            "coverage_status",
+            "exemption_reason",
+        ),
+        module=__name__,
+    ),
+):
+    """Provider-owned, immutable policy for one consumer projection row."""
+
+    __slots__ = ()
+
+    path_id: str
+    consumer_id: str
+    projection_ref: ContractRefV1
+    evidence_contract_refs: tuple[ContractRefV1, ...]
+    envelope_contract_refs: tuple[ContractRefV1, ...]
+    fact_kinds: tuple[str, ...]
+    policy_ref: ContractRefV1
+    renderer_ref: ContractRefV1
+    max_token_budget: int
+    max_row_budget: int
+    allowed_sensitivity: tuple[str, ...]
+    ordering: tuple[str, ...]
+    coverage_status: str
+    exemption_reason: str | None
+
+    def __new__(
+        cls,
+        path_id: str,
+        consumer_id: str,
+        projection_ref: ContractRefV1,
+        evidence_contract_refs: tuple[ContractRefV1, ...],
+        envelope_contract_refs: tuple[ContractRefV1, ...],
+        fact_kinds: tuple[str, ...],
+        policy_ref: ContractRefV1,
+        renderer_ref: ContractRefV1,
+        max_token_budget: int,
+        max_row_budget: int,
+        allowed_sensitivity: tuple[str, ...],
+        ordering: tuple[str, ...],
+        coverage_status: str,
+        exemption_reason: str | None,
+    ) -> "ConsumerProjectionDeclarationV1":
+        _text(path_id, "path_id")
+        _text(consumer_id, "consumer_id")
+        _ref_kind(projection_ref, "projection_ref", frozenset({"projection"}))
+        _ref_kind(policy_ref, "policy_ref", frozenset({"policy"}))
+        _ref_kind(renderer_ref, "renderer_ref", frozenset({"renderer"}))
+
+        evidence_refs = _ref_tuple(evidence_contract_refs, "evidence_contract_refs")
+        for ref in evidence_refs:
+            _ref_kind(ref, "evidence_contract_refs", frozenset({"evidence"}))
+        envelope_refs = _ref_tuple(
+            envelope_contract_refs,
+            "envelope_contract_refs",
+            allow_empty=True,
+        )
+        for ref in envelope_refs:
+            _ref_kind(ref, "envelope_contract_refs", _ENVELOPE_REF_KINDS)
+
+        fact_kind_values = _string_tuple(fact_kinds, "fact_kinds")
+        if type(max_token_budget) is not int or max_token_budget <= 0:
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "max_token_budget")
+        if type(max_row_budget) is not int or max_row_budget <= 0:
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "max_row_budget")
+        sensitivity_values = _string_tuple(allowed_sensitivity, "allowed_sensitivity")
+        if any(value not in _CONSUMER_SENSITIVITIES for value in sensitivity_values):
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "allowed_sensitivity")
+        ordering_values = _string_tuple(ordering, "ordering")
+
+        if coverage_status not in {"required", "exempt"}:
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "coverage_status")
+        if coverage_status == "required":
+            if exemption_reason is not None:
+                raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "exemption_reason")
+        else:
+            if type(exemption_reason) is not str or not exemption_reason.strip():
+                raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "exemption_reason")
+            _text(exemption_reason, "exemption_reason")
+
+        return tuple.__new__(
+            cls,
+            (
+                path_id,
+                consumer_id,
+                projection_ref,
+                evidence_refs,
+                envelope_refs,
+                fact_kind_values,
+                policy_ref,
+                renderer_ref,
+                max_token_budget,
+                max_row_budget,
+                sensitivity_values,
+                ordering_values,
+                coverage_status,
+                exemption_reason,
+            ),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path_id": self.path_id,
+            "consumer_id": self.consumer_id,
+            "projection_ref": self.projection_ref.to_dict(),
+            "evidence_contract_refs": [ref.to_dict() for ref in self.evidence_contract_refs],
+            "envelope_contract_refs": [ref.to_dict() for ref in self.envelope_contract_refs],
+            "fact_kinds": list(self.fact_kinds),
+            "policy_ref": self.policy_ref.to_dict(),
+            "renderer_ref": self.renderer_ref.to_dict(),
+            "max_token_budget": self.max_token_budget,
+            "max_row_budget": self.max_row_budget,
+            "allowed_sensitivity": list(self.allowed_sensitivity),
+            "ordering": list(self.ordering),
+            "coverage_status": self.coverage_status,
+            "exemption_reason": self.exemption_reason,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> "ConsumerProjectionDeclarationV1":
+        fields = {
+            "path_id",
+            "consumer_id",
+            "projection_ref",
+            "evidence_contract_refs",
+            "envelope_contract_refs",
+            "fact_kinds",
+            "policy_ref",
+            "renderer_ref",
+            "max_token_budget",
+            "max_row_budget",
+            "allowed_sensitivity",
+            "ordering",
+            "coverage_status",
+            "exemption_reason",
+        }
+        if not isinstance(value, Mapping) or set(value) != fields:
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "projection declaration fields")
+        return cls(
+            path_id=_text(value["path_id"], "path_id"),
+            consumer_id=_text(value["consumer_id"], "consumer_id"),
+            projection_ref=_contract_ref(value["projection_ref"], "projection_ref"),
+            evidence_contract_refs=_ref_tuple(
+                value["evidence_contract_refs"],
+                "evidence_contract_refs",
+            ),
+            envelope_contract_refs=_ref_tuple(
+                value["envelope_contract_refs"],
+                "envelope_contract_refs",
+                allow_empty=True,
+            ),
+            fact_kinds=_string_tuple(value["fact_kinds"], "fact_kinds"),
+            policy_ref=_contract_ref(value["policy_ref"], "policy_ref"),
+            renderer_ref=_contract_ref(value["renderer_ref"], "renderer_ref"),
+            max_token_budget=value["max_token_budget"],  # type: ignore[arg-type]
+            max_row_budget=value["max_row_budget"],  # type: ignore[arg-type]
+            allowed_sensitivity=_string_tuple(
+                value["allowed_sensitivity"],
+                "allowed_sensitivity",
+            ),
+            ordering=_string_tuple(value["ordering"], "ordering"),
+            coverage_status=value["coverage_status"],  # type: ignore[arg-type]
+            exemption_reason=value["exemption_reason"],  # type: ignore[arg-type]
+        )
+
+
 def _unique_ref_identities(refs: Sequence[ContractRefV1], name: str) -> None:
     identities = [(ref.kind, ref.logical_id, ref.semantic_version) for ref in refs]
     if len(set(identities)) != len(identities):
@@ -399,6 +606,7 @@ class ProviderContributionV1(
             "projection_refs",
             "renderer_refs",
             "policy_refs",
+            "projection_declarations",
         ),
         module=__name__,
     ),
@@ -415,6 +623,7 @@ class ProviderContributionV1(
     projection_refs: tuple[ContractRefV1, ...]
     renderer_refs: tuple[ContractRefV1, ...]
     policy_refs: tuple[ContractRefV1, ...]
+    projection_declarations: tuple[ConsumerProjectionDeclarationV1, ...]
 
     @property
     def contracts(self) -> tuple[ContractRefV1, ...]:
@@ -430,6 +639,7 @@ class ProviderContributionV1(
         projection_refs: tuple[ContractRefV1, ...],
         renderer_refs: tuple[ContractRefV1, ...],
         policy_refs: tuple[ContractRefV1, ...],
+        projection_declarations: tuple[ConsumerProjectionDeclarationV1, ...] = (),
     ) -> "ProviderContributionV1":
         _text(provider_id, "provider_id")
         _version(semantic_version)
@@ -440,6 +650,7 @@ class ProviderContributionV1(
             "projection_refs": projection_refs,
             "renderer_refs": renderer_refs,
             "policy_refs": policy_refs,
+            "projection_declarations": projection_declarations,
         }
         for name in (
             "contract_refs",
@@ -448,6 +659,7 @@ class ProviderContributionV1(
             "projection_refs",
             "renderer_refs",
             "policy_refs",
+            "projection_declarations",
         ):
             if type(values[name]) is not tuple:
                 raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, name)
@@ -457,16 +669,66 @@ class ProviderContributionV1(
             raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "exposure_paths")
         if any(type(adapter) is not AdapterDeclarationV1 for adapter in adapter_declarations):
             raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "adapter_declarations")
+        if any(
+            type(declaration) is not ConsumerProjectionDeclarationV1
+            for declaration in projection_declarations
+        ):
+            raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "projection_declarations")
         if len({path.path_id for path in exposure_paths}) != len(exposure_paths):
             raise ProviderContractError(PROVIDER_DUPLICATE, "path_id")
         if len({adapter.adapter_id for adapter in adapter_declarations}) != len(adapter_declarations):
             raise ProviderContractError(PROVIDER_DUPLICATE, "adapter_id")
+        declaration_keys = {
+            (declaration.path_id, declaration.consumer_id)
+            for declaration in projection_declarations
+        }
+        if len(declaration_keys) != len(projection_declarations):
+            raise ProviderContractError(PROVIDER_DUPLICATE, "projection_declarations")
         _unique_ref_identities(contract_refs, "contracts")
         for name in ("projection_refs", "renderer_refs", "policy_refs"):
             refs = values[name]
             if any(type(ref) is not ContractRefV1 for ref in refs):
                 raise ProviderContractError(PROVIDER_REF_INVALID, name)
             _unique_ref_identities(refs, name)
+        paths_by_id = {path.path_id: path for path in exposure_paths}
+        projection_ref_set = set(projection_refs)
+        renderer_ref_set = set(renderer_refs)
+        policy_ref_set = set(policy_refs)
+        contract_ref_set = set(contract_refs)
+        expected_declaration_keys: set[tuple[str, str]] = set()
+        for path in exposure_paths:
+            expected_declaration_keys.update(
+                (path.path_id, consumer_id) for consumer_id in path.projection_refs
+            )
+        for declaration in projection_declarations:
+            path = paths_by_id.get(declaration.path_id)
+            if path is None:
+                raise ProviderContractError(
+                    PROVIDER_UNRESOLVED,
+                    f"projection declaration path {declaration.path_id}",
+                )
+            if path.projection_refs.get(declaration.consumer_id) != declaration.projection_ref:
+                raise ProviderContractError(
+                    PROVIDER_REF_INVALID,
+                    f"projection_ref for {declaration.path_id}:{declaration.consumer_id}",
+                )
+            if declaration.projection_ref not in projection_ref_set:
+                raise ProviderContractError(PROVIDER_UNRESOLVED, "projection_ref")
+            if declaration.policy_ref not in policy_ref_set:
+                raise ProviderContractError(PROVIDER_UNRESOLVED, "policy_ref")
+            if declaration.renderer_ref not in renderer_ref_set:
+                raise ProviderContractError(PROVIDER_UNRESOLVED, "renderer_ref")
+            if any(ref not in path.evidence_contract_refs for ref in declaration.evidence_contract_refs):
+                raise ProviderContractError(PROVIDER_REF_INVALID, "evidence_contract_refs")
+            if any(ref not in contract_ref_set for ref in declaration.envelope_contract_refs):
+                raise ProviderContractError(PROVIDER_UNRESOLVED, "envelope_contract_refs")
+        if expected_declaration_keys != declaration_keys:
+            missing = sorted(expected_declaration_keys - declaration_keys)
+            extra = sorted(declaration_keys - expected_declaration_keys)
+            raise ProviderContractError(
+                PROVIDER_CONTRIBUTION_INVALID,
+                f"projection_declarations coverage missing={missing} extra={extra}",
+            )
         return tuple.__new__(
             cls,
             (
@@ -478,6 +740,7 @@ class ProviderContributionV1(
                 projection_refs,
                 renderer_refs,
                 policy_refs,
+                projection_declarations,
             ),
         )
 
@@ -505,6 +768,16 @@ class ProviderContributionV1(
         refs.extend(self.projection_refs)
         refs.extend(self.renderer_refs)
         refs.extend(self.policy_refs)
+        for declaration in self.projection_declarations:
+            refs.extend(
+                (
+                    declaration.projection_ref,
+                    *declaration.evidence_contract_refs,
+                    *declaration.envelope_contract_refs,
+                    declaration.policy_ref,
+                    declaration.renderer_ref,
+                )
+            )
         return tuple(refs)
 
     def to_dict(self) -> dict[str, object]:
@@ -517,6 +790,9 @@ class ProviderContributionV1(
             "projection_refs": [ref.to_dict() for ref in self.projection_refs],
             "renderer_refs": [ref.to_dict() for ref in self.renderer_refs],
             "policy_refs": [ref.to_dict() for ref in self.policy_refs],
+            "projection_declarations": [
+                declaration.to_dict() for declaration in self.projection_declarations
+            ],
         }
 
     @classmethod
@@ -531,11 +807,17 @@ class ProviderContributionV1(
             "renderer_refs",
             "policy_refs",
         }
+        required = required | {"projection_declarations"}
         if not isinstance(value, Mapping) or set(value) != required:
             raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "contribution fields")
         paths = value["exposure_paths"]
         adapters = value["adapter_declarations"]
-        if type(paths) not in {list, tuple} or type(adapters) not in {list, tuple}:
+        declaration_values = value["projection_declarations"]
+        if (
+            type(paths) not in {list, tuple}
+            or type(adapters) not in {list, tuple}
+            or type(declaration_values) not in {list, tuple}
+        ):
             raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "declarations")
         return cls(
             provider_id=_text(value["provider_id"], "provider_id"),
@@ -546,6 +828,10 @@ class ProviderContributionV1(
             projection_refs=_ref_tuple(value["projection_refs"], "projection_refs"),
             renderer_refs=_ref_tuple(value["renderer_refs"], "renderer_refs"),
             policy_refs=_ref_tuple(value["policy_refs"], "policy_refs"),
+            projection_declarations=tuple(
+                ConsumerProjectionDeclarationV1.from_dict(item)
+                for item in declaration_values  # type: ignore[arg-type]
+            ),
         )
 
 
@@ -603,6 +889,7 @@ class TrustedExecutorRegistryV1:
 
 __all__ = [
     "AdapterDeclarationV1",
+    "ConsumerProjectionDeclarationV1",
     "ExposurePathRefV1",
     "ProviderContributionV1",
     "ProviderContractError",

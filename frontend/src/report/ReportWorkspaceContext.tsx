@@ -65,11 +65,31 @@ import {
   isPersistedClassificationArtifact,
   type ClassificationActiveScope,
   type ClassificationArtifactsWrapper,
+  type ClassificationReportUnavailable,
 } from "./ClassificationEvidence";
+import {
+  CLASSIFICATION_REPORT_UNAVAILABLE_IDENTITY,
+} from "./reportRendererRegistry";
+import {
+  unavailableDataConsumerReportEvidence,
+} from "./ReportDataConsumerEvidence";
+import {
+  unavailableSurveyReportEvidence,
+} from "./SurveyReportEvidence";
 
-const CLASSIFICATION_EVIDENCE_SCHEMA = "workbench.prediction.classification-evidence";
 const CLASSIFICATION_ARTIFACTS_SCHEMA = "workbench.prediction.classification-artifacts";
-const CLASSIFICATION_ARTIFACT_TYPES = new Set(["classification_artifacts"]);
+
+function unavailableClassificationEvidence(reason: string): ClassificationReportUnavailable {
+  return {
+    payload_schema: "workbench.prediction.classification-evidence.unavailable" as const,
+    schema_version: 1 as const,
+    status: "unavailable" as const,
+    consumer: "report" as const,
+    ...CLASSIFICATION_REPORT_UNAVAILABLE_IDENTITY,
+    reason,
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -99,49 +119,6 @@ function sameJsonValue(left: unknown, right: unknown): boolean {
   return keys.size === Object.keys(leftRecord).length
     && keys.size === Object.keys(rightRecord).length
     && [...keys].every((key) => sameJsonValue(leftRecord[key], rightRecord[key]));
-}
-
-function indexedClassificationArtifactId(value: unknown): string | null {
-  const item = asRecord(value);
-  if (!item) return null;
-  const artifactId = item.artifact_id;
-  const artifactType = item.artifact_type;
-  const path = item.path;
-  const sha256 = item.sha256;
-  if (
-    typeof artifactId !== "string"
-    || artifactId.trim() !== artifactId
-    || artifactId.length === 0
-    || typeof artifactType !== "string"
-    || !CLASSIFICATION_ARTIFACT_TYPES.has(artifactType)
-    || typeof path !== "string"
-    || path.length === 0
-    || typeof sha256 !== "string"
-    || sha256.length === 0
-  ) return null;
-
-  const contract = asRecord(item.payload_contract);
-  const contractSchema = contract?.payload_schema;
-  const contractVersion = contract?.schema_version;
-  const indexedSchema = item.payload_schema;
-  const indexedVersion = item.schema_version;
-  const schemas = [contractSchema, indexedSchema].filter((schema) => schema !== undefined);
-  const versions = [contractVersion, indexedVersion].filter((version) => version !== undefined);
-  const supportedSchemas = new Set([CLASSIFICATION_EVIDENCE_SCHEMA, CLASSIFICATION_ARTIFACTS_SCHEMA]);
-  if (
-    (item.payload_contract !== undefined
-      && (!contract || typeof contractSchema !== "string" || contractVersion !== 1))
-    || (indexedSchema !== undefined
-      && (typeof indexedSchema !== "string" || indexedVersion !== 1))
-    || (indexedVersion !== undefined && indexedSchema === undefined)
-    || schemas.some((schema) => typeof schema !== "string" || !supportedSchemas.has(schema))
-    || versions.some((version) => version !== 1)
-    || (contractSchema !== undefined && indexedSchema !== undefined && contractSchema !== indexedSchema)
-    || (contractVersion !== undefined && indexedVersion !== undefined && contractVersion !== indexedVersion)
-  ) return null;
-
-  if (schemas.length === 0 || contractSchema !== CLASSIFICATION_ARTIFACTS_SCHEMA) return null;
-  return artifactId;
 }
 
 /** Return only the typed evidence packet, including its server-owned family identity. */
@@ -325,6 +302,12 @@ export interface ReportWorkspaceContextValue {
   postEstimation: PostEstimationResult[];
   modelResults: ModelResult[];
   familyEvidenceArtifacts: Record<string, unknown>;
+  /** Server-owned central classification projection; missing data is explicit unavailable. */
+  classificationEvidence: unknown | undefined;
+  /** Server-owned central data-consumer projection; missing data is explicit unavailable. */
+  dataConsumerEvidence: unknown | undefined;
+  /** Server-owned central Survey projection; missing data is explicit unavailable. */
+  surveyEvidence: unknown | undefined;
   reportEvidenceProjection: ReportEvidenceProjection | null;
   reportContextLines: string[];
   reportContextDetails: string[];
@@ -418,6 +401,9 @@ export function ReportWorkspaceProvider({
   const [predictionEvidence, setPredictionEvidence] = useState<PredictionResearchEvidence | null>(null);
   const [modelResults, setModelResults] = useState<ModelResult[]>([]);
   const [familyEvidenceArtifacts, setFamilyEvidenceArtifacts] = useState<Record<string, unknown>>({});
+  const [classificationEvidence, setClassificationEvidence] = useState<unknown | undefined>(undefined);
+  const [dataConsumerEvidence, setDataConsumerEvidence] = useState<unknown | undefined>(undefined);
+  const [surveyEvidence, setSurveyEvidence] = useState<unknown | undefined>(undefined);
   const [reportEvidenceProjection, setReportEvidenceProjection] = useState<ReportEvidenceProjection | null>(null);
 
   useEffect(() => {
@@ -427,12 +413,18 @@ export function ReportWorkspaceProvider({
       setPostEstimation([]);
       setPredictionEvidence(null);
       setModelResults([]);
+      setClassificationEvidence(unavailableClassificationEvidence("CLASSIFICATION_EVIDENCE_SCOPE_UNAVAILABLE"));
+      setDataConsumerEvidence(unavailableDataConsumerReportEvidence("DATA_CONSUMER_EVIDENCE_SCOPE_UNAVAILABLE"));
+      setSurveyEvidence(unavailableSurveyReportEvidence("SURVEY_EVIDENCE_SCOPE_UNAVAILABLE"));
       setReportEvidenceProjection(null);
       setPostEstimationLoadError(null);
       return;
     }
     let cancelled = false;
     setPostEstimationLoadError(null);
+    setClassificationEvidence(unavailableClassificationEvidence("CLASSIFICATION_EVIDENCE_LOADING"));
+    setDataConsumerEvidence(unavailableDataConsumerReportEvidence("DATA_CONSUMER_EVIDENCE_LOADING"));
+    setSurveyEvidence(unavailableSurveyReportEvidence("SURVEY_EVIDENCE_LOADING"));
     void fetchRunDetail(projectRoot, runId)
       .then((detail) => {
         if (!cancelled) {
@@ -440,6 +432,21 @@ export function ReportWorkspaceProvider({
           setPredictionEvidence(detail.prediction_evidence ?? null);
           setModelResults(detail.model_results ?? []);
           const detailRecord = detail as unknown as Record<string, unknown>;
+          setClassificationEvidence(
+            Object.prototype.hasOwnProperty.call(detailRecord, "classification_evidence")
+              ? detailRecord.classification_evidence ?? unavailableClassificationEvidence("CLASSIFICATION_EVIDENCE_UNAVAILABLE")
+              : unavailableClassificationEvidence("CLASSIFICATION_EVIDENCE_NOT_PROVIDED"),
+          );
+          setDataConsumerEvidence(
+            Object.prototype.hasOwnProperty.call(detailRecord, "data_consumer_evidence")
+              ? detailRecord.data_consumer_evidence
+              : unavailableDataConsumerReportEvidence("DATA_CONSUMER_EVIDENCE_NOT_PROVIDED"),
+          );
+          setSurveyEvidence(
+            Object.prototype.hasOwnProperty.call(detailRecord, "survey_evidence")
+              ? detailRecord.survey_evidence
+              : unavailableSurveyReportEvidence("SURVEY_EVIDENCE_NOT_PROVIDED"),
+          );
           const reportEvidence = readReportEvidenceProjection(
             detail.report_evidence,
             { runId },
@@ -456,6 +463,9 @@ export function ReportWorkspaceProvider({
           setPostEstimation([]);
           setPredictionEvidence(null);
           setModelResults([]);
+          setClassificationEvidence(unavailableClassificationEvidence("CLASSIFICATION_EVIDENCE_LOAD_FAILED"));
+          setDataConsumerEvidence(unavailableDataConsumerReportEvidence("DATA_CONSUMER_EVIDENCE_LOAD_FAILED"));
+          setSurveyEvidence(unavailableSurveyReportEvidence("SURVEY_EVIDENCE_LOAD_FAILED"));
           setReportEvidenceProjection(
             unavailableReportEvidence("REPORT_EVIDENCE_LOAD_FAILED", `run:${runId}`),
           );
@@ -503,9 +513,6 @@ export function ReportWorkspaceProvider({
       .then(async (response) => {
         const allItems = response.groups.flatMap((group) => group.items);
         const items = allItems.filter((item) => familyArtifactIds.has(item.artifact_id));
-        const classificationItems = allItems
-          .map((item) => ({ item, artifactId: indexedClassificationArtifactId(item) }))
-          .filter((entry): entry is { item: typeof allItems[number]; artifactId: string } => entry.artifactId !== null);
         const loaded = await Promise.all(items.map(async (item) => {
           try {
             return [item.artifact_id, await fetchArtifactJson(projectRoot, runId, item.artifact_id)] as const;
@@ -513,36 +520,10 @@ export function ReportWorkspaceProvider({
             return null;
           }
         }));
-        const loadedClassification = await Promise.all(classificationItems.map(async ({ item }) => {
-          try {
-            return readClassificationEvidencePacket(
-              await fetchArtifactJson(projectRoot, runId, item.artifact_id),
-              item,
-              { projectRoot, runId },
-            );
-          } catch {
-            return null;
-          }
-        }));
-        const validClassificationPackets = loadedClassification.filter(
-          (packet): packet is ClassificationArtifactsWrapper => packet !== null,
-        );
-        const classificationEntry = classificationItems.length > 0
-          ? [[
-            "classification_evidence",
-            classificationItems.length === 1 && validClassificationPackets.length === 1
-              ? validClassificationPackets[0]
-              : {
-                payload_schema: "workbench.prediction.classification-evidence.unavailable",
-                schema_version: 0,
-              },
-          ] as const]
-          : [];
         if (!cancelled) {
           setFamilyEvidenceArtifacts(
             Object.fromEntries([
               ...loaded.filter((entry): entry is readonly [string, unknown] => entry !== null),
-              ...classificationEntry,
             ]),
           );
         }
@@ -1071,6 +1052,9 @@ export function ReportWorkspaceProvider({
     postEstimation,
     modelResults,
     familyEvidenceArtifacts,
+    classificationEvidence,
+    dataConsumerEvidence,
+    surveyEvidence,
     reportEvidenceProjection,
     reportContextLines,
     reportContextDetails,

@@ -1,8 +1,90 @@
 import type { ReactNode } from "react";
+import {
+  CLASSIFICATION_REPORT_BINDING,
+  CLASSIFICATION_REPORT_REFS,
+} from "./reportRendererRegistry";
 
 type EvidenceRecord = Record<string, unknown>;
 
 export type ClassificationEvidenceStatus = "validated" | "degraded" | "unavailable";
+
+export interface ClassificationEvidenceProjectionRef {
+  readonly kind: "projection" | "renderer";
+  readonly logical_id: string;
+  readonly semantic_version: string;
+  readonly contract_digest: string;
+}
+
+export interface ClassificationEvidencePolicyRef {
+  readonly kind: "policy";
+  readonly logical_id: string;
+  readonly semantic_version: string;
+  readonly contract_digest: string;
+}
+
+export interface ClassificationEvidenceProjection {
+  readonly payload_schema: "workbench.prediction.classification-evidence";
+  readonly schema_version: 1;
+  readonly status: ClassificationEvidenceStatus;
+  readonly consumer: "report";
+  readonly provider_id: "workbench.classification_ml";
+  readonly exposure_path: "workbench.classification_ml.direct";
+  readonly projection_ref: ClassificationEvidenceProjectionRef;
+  readonly renderer_ref: ClassificationEvidenceProjectionRef;
+  readonly policy_ref: ClassificationEvidencePolicyRef;
+  readonly catalog_digest: string;
+  readonly provider_digest: string;
+  readonly coverage_status: "required";
+  readonly task: Readonly<Record<string, unknown>>;
+  readonly split: Readonly<Record<string, unknown>>;
+  readonly metrics: Readonly<Record<string, unknown>>;
+  readonly calibration: Readonly<Record<string, unknown>>;
+  readonly baselines: readonly unknown[];
+  readonly controls: readonly unknown[];
+  readonly comparison: Readonly<Record<string, unknown>>;
+  readonly explanations: Readonly<Record<string, unknown>>;
+  readonly stability: Readonly<Record<string, unknown>>;
+  readonly shift: Readonly<Record<string, unknown>>;
+  readonly decision_policy: Readonly<Record<string, unknown>>;
+  readonly blocked_reasons: readonly string[];
+  readonly evidence_refs: Readonly<Record<string, unknown>>;
+  readonly holdout: Readonly<Record<string, unknown>>;
+  readonly c0_evidence_envelope: Readonly<Record<string, unknown>>;
+  readonly c0_consumer_projection: Readonly<Record<string, unknown>>;
+  readonly foundation_status: Readonly<Record<string, unknown>>;
+}
+
+export interface ClassificationReportEvidenceWrapper {
+  readonly payload_schema: "workbench.prediction.classification-artifacts-wrapper";
+  readonly schema_version: 1;
+  readonly status: ClassificationEvidenceStatus;
+  readonly consumer: "report";
+  readonly artifact_id: string;
+  readonly artifact_sha256: string;
+  readonly receipt_digest: string;
+  readonly server_identity: Readonly<Record<string, unknown>>;
+  readonly projection: ClassificationEvidenceProjection;
+  readonly source: Readonly<Record<string, unknown>>;
+  readonly receipt: Readonly<Record<string, unknown>>;
+  readonly reason?: string | readonly string[];
+}
+
+export interface ClassificationReportUnavailable {
+  readonly payload_schema: "workbench.prediction.classification-evidence.unavailable";
+  readonly schema_version: 1;
+  readonly status: "unavailable";
+  readonly consumer: "report";
+  readonly provider_id: "workbench.classification_ml";
+  readonly exposure_path: "workbench.classification_ml.direct";
+  readonly policy_ref: ClassificationEvidencePolicyRef;
+  readonly projection_ref: ClassificationEvidenceProjectionRef;
+  readonly renderer_ref: ClassificationEvidenceProjectionRef;
+  readonly catalog_digest: string;
+  readonly provider_digest: string;
+  readonly coverage_status: "required";
+  readonly reason?: string | readonly string[];
+  readonly code?: string;
+}
 
 export interface ClassificationEvidenceTaskIdentity {
   readonly task_type: string;
@@ -107,6 +189,106 @@ function asRecord(value: unknown): EvidenceRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as EvidenceRecord
     : null;
+}
+
+function isProjectionRef(value: unknown, kind: ClassificationEvidenceProjectionRef["kind"]): value is ClassificationEvidenceProjectionRef {
+  const ref = asRecord(value);
+  return ref !== null
+    && ref.kind === kind
+    && typeof ref.logical_id === "string"
+    && typeof ref.semantic_version === "string"
+    && typeof ref.contract_digest === "string";
+}
+
+const SHA256_DIGEST = /^[0-9a-f]{64}$/;
+
+function isExactPolicyRef(value: unknown): value is ClassificationEvidencePolicyRef {
+  const ref = asRecord(value);
+  return ref !== null
+    && ref.kind === CLASSIFICATION_REPORT_BINDING.policy_ref.kind
+    && ref.logical_id === CLASSIFICATION_REPORT_BINDING.policy_ref.logical_id
+    && ref.semantic_version === CLASSIFICATION_REPORT_BINDING.policy_ref.semantic_version
+    && ref.contract_digest === CLASSIFICATION_REPORT_BINDING.policy_ref.contract_digest;
+}
+
+const CENTRAL_PROJECTION_FIELDS = [
+  "task", "split", "metrics", "calibration", "baselines", "controls", "comparison",
+  "explanations", "stability", "shift", "decision_policy", "blocked_reasons", "evidence_refs",
+  "holdout", "c0_evidence_envelope", "c0_consumer_projection", "foundation_status",
+] as const;
+
+function isClassificationEvidenceProjection(value: unknown): value is ClassificationEvidenceProjection {
+  const projection = asRecord(value);
+  if (
+    projection === null
+    || projection.payload_schema !== CLASSIFICATION_EVIDENCE_SCHEMA
+    || projection.schema_version !== 1
+    || !CLASSIFICATION_C0_CONSUMERS.has(String(projection.consumer))
+    || projection.consumer !== "report"
+    || (projection.status !== "validated" && projection.status !== "degraded" && projection.status !== "unavailable")
+    || !isProjectionRef(projection.projection_ref, "projection")
+    || !isProjectionRef(projection.renderer_ref, "renderer")
+    || projection.provider_id !== CLASSIFICATION_REPORT_BINDING.provider_id
+    || projection.exposure_path !== CLASSIFICATION_REPORT_BINDING.exposure_path
+    || !isExactPolicyRef(projection.policy_ref)
+    || typeof projection.catalog_digest !== "string"
+    || !SHA256_DIGEST.test(projection.catalog_digest)
+    || projection.catalog_digest !== CLASSIFICATION_REPORT_BINDING.catalog_digest
+    || typeof projection.provider_digest !== "string"
+    || !SHA256_DIGEST.test(projection.provider_digest)
+    || projection.provider_digest !== CLASSIFICATION_REPORT_BINDING.provider_digest
+    || projection.coverage_status !== "required"
+    || CENTRAL_PROJECTION_FIELDS.some((field) => !(field in projection))
+    || !Array.isArray(projection.baselines)
+    || !Array.isArray(projection.controls)
+    || !Array.isArray(projection.blocked_reasons)
+    || projection.blocked_reasons.some((reason) => typeof reason !== "string")
+  ) return false;
+  return CENTRAL_PROJECTION_FIELDS.every((field) => asRecord(projection[field]) !== null || ["baselines", "controls", "blocked_reasons"].includes(field));
+}
+
+export function readClassificationReportEvidence(
+  value: unknown,
+): ClassificationReportEvidenceWrapper | ClassificationReportUnavailable | null {
+  const record = asRecord(value);
+  if (record === null) return null;
+  if (
+    record.payload_schema === "workbench.prediction.classification-evidence.unavailable"
+    && record.schema_version === 1
+    && record.status === "unavailable"
+    && record.consumer === "report"
+    && record.provider_id === CLASSIFICATION_REPORT_BINDING.provider_id
+    && record.exposure_path === CLASSIFICATION_REPORT_BINDING.exposure_path
+    && isExactPolicyRef(record.policy_ref)
+    && isProjectionRef(record.projection_ref, "projection")
+    && isProjectionRef(record.renderer_ref, "renderer")
+    && record.projection_ref.logical_id === CLASSIFICATION_REPORT_REFS.projection.logical_id
+    && record.projection_ref.semantic_version === CLASSIFICATION_REPORT_REFS.projection.semantic_version
+    && record.projection_ref.contract_digest === CLASSIFICATION_REPORT_REFS.projection.contract_digest
+    && record.renderer_ref.logical_id === CLASSIFICATION_REPORT_REFS.renderer.logical_id
+    && record.renderer_ref.semantic_version === CLASSIFICATION_REPORT_REFS.renderer.semantic_version
+    && record.renderer_ref.contract_digest === CLASSIFICATION_REPORT_REFS.renderer.contract_digest
+    && record.catalog_digest === CLASSIFICATION_REPORT_BINDING.catalog_digest
+    && record.provider_digest === CLASSIFICATION_REPORT_BINDING.provider_digest
+    && record.coverage_status === CLASSIFICATION_REPORT_BINDING.coverage_status
+    && (record.reason === undefined || typeof record.reason === "string" || (Array.isArray(record.reason) && record.reason.every((item) => typeof item === "string")))
+  ) return record as unknown as ClassificationReportUnavailable;
+  if (
+    record.payload_schema !== CLASSIFICATION_ARTIFACTS_WRAPPER_SCHEMA
+    || record.schema_version !== 1
+    || (record.status !== "validated" && record.status !== "degraded" && record.status !== "unavailable")
+    || record.consumer !== "report"
+    || typeof record.artifact_id !== "string"
+    || typeof record.artifact_sha256 !== "string"
+    || typeof record.receipt_digest !== "string"
+    || asRecord(record.server_identity) === null
+    || asRecord(record.source) === null
+    || asRecord(record.receipt) === null
+    || !isClassificationEvidenceProjection(record.projection)
+    || record.projection.status !== record.status
+    || (record.reason !== undefined && typeof record.reason !== "string" && !(Array.isArray(record.reason) && record.reason.every((item) => typeof item === "string")))
+  ) return null;
+  return record as unknown as ClassificationReportEvidenceWrapper;
 }
 
 const CLASSIFICATION_EVIDENCE_SCHEMA = "workbench.prediction.classification-evidence";
@@ -780,6 +962,80 @@ function classificationTitle(task: unknown): string {
   const taskRecord = asRecord(task);
   const taskType = typeof taskRecord?.task_type === "string" ? taskRecord.task_type : "classification";
   return `${taskType.charAt(0).toUpperCase()}${taskType.slice(1)} classification`;
+}
+
+function classificationReason(
+  projection: ClassificationEvidenceProjection | ClassificationReportUnavailable,
+  wrapper?: Pick<ClassificationReportEvidenceWrapper, "reason">,
+): string[] {
+  const reasons = "blocked_reasons" in projection ? projection.blocked_reasons : [];
+  const directReason = "reason" in projection ? projection.reason : undefined;
+  const wrapperReason = wrapper?.reason ?? directReason ?? ("code" in projection ? projection.code : undefined);
+  const supplied = wrapperReason === undefined
+    ? []
+    : Array.isArray(wrapperReason) ? wrapperReason : [wrapperReason];
+  return [...new Set([...reasons, ...supplied].filter((reason): reason is string => typeof reason === "string" && reason.length > 0))];
+}
+
+export function ClassificationEvidenceProjection({
+  evidence,
+  reason,
+}: {
+  evidence: ClassificationEvidenceProjection | ClassificationReportUnavailable;
+  reason?: string | readonly string[];
+}) {
+  const isUnavailable = evidence.status === "unavailable";
+  const reasons = classificationReason(evidence, reason === undefined ? undefined : { reason });
+  const task = "task" in evidence ? asRecord(evidence.task) : null;
+  const split = "split" in evidence ? asRecord(evidence.split) : null;
+  return (
+    <div data-testid="classification-evidence" style={{ fontSize: 13 }}>
+      <div data-testid={`classification-evidence-status-${evidence.status}`}>
+        <strong>{evidence.status.toUpperCase()}</strong>
+      </div>
+      {isUnavailable ? (
+        <p style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "4px 0 0" }}>
+          Central classification projection is unavailable; no raw artifact was used as a result authority.
+        </p>
+      ) : (
+        <>
+          <h2 style={{ fontSize: 14, margin: "4px 0 0" }}>{classificationTitle(task)}</h2>
+          <Section title="Task and split">
+            <KeyValueList value={{
+              positive_class: task?.positive_class,
+              class_support: task?.class_support,
+              split_profile: split?.profile,
+              split_hash: split?.split_hash,
+            }} />
+          </Section>
+          <Section title="Metrics">
+            <MetricTable metrics={evidence.metrics} />
+          </Section>
+          <Section title="Calibration">
+            <KeyValueList value={evidence.calibration} />
+          </Section>
+          <Section title="Comparison">
+            <KeyValueList value={evidence.comparison} />
+          </Section>
+          <Section title="Explanations and stability">
+            <KeyValueList value={evidence.explanations} />
+            <KeyValueList value={evidence.stability} />
+          </Section>
+          <Section title="Shift and holdout boundary">
+            <KeyValueList value={evidence.shift} />
+            <KeyValueList value={evidence.holdout} />
+          </Section>
+        </>
+      )}
+      {reasons.length > 0 && (
+        <Section title="Reason">
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+            {reasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </Section>
+      )}
+    </div>
+  );
 }
 
 export function ClassificationEvidence({ evidence }: { evidence: ClassificationArtifactsWrapper }) {

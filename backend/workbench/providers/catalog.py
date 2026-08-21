@@ -44,6 +44,7 @@ _CATALOG_FIELDS = frozenset(
         "exposure_paths",
         "adapter_declarations",
         "projection_refs",
+        "projection_declarations",
         "renderer_refs",
         "policy_refs",
     }
@@ -51,6 +52,13 @@ _CATALOG_FIELDS = frozenset(
 
 
 ProviderCatalogError = ProviderContractError
+
+
+# A catalog is a server-owned capability only after it has been loaded through
+# the closed builtin manifest loader.  The identity map is intentional:
+# digest equality alone would let a caller present a value-equivalent
+# ``_replace`` clone as the issued runtime catalog.
+_AUTHORIZED_CATALOGS: dict[int, "ProviderCatalogV1"] = {}
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -144,6 +152,36 @@ class _StrictValueTuple:
         return tuple.__eq__(self, other)  # type: ignore[arg-type]
 
 
+def _catalog_digest_payload(
+    providers: tuple[ProviderContributionV1, ...],
+    source_filenames: tuple[str, ...],
+    contract_resolver: ContractRefResolverV1,
+) -> list[dict[str, object]]:
+    """Return the complete authenticity payload, including resolver state."""
+
+    if type(contract_resolver) is not ContractRefResolverV1:
+        raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "contract_resolver")
+    try:
+        resolver_refs = contract_resolver._bound_refs()  # type: ignore[attr-defined]
+    except (AttributeError, ContractRefError) as exc:
+        raise ProviderContractError(PROVIDER_CONTRIBUTION_INVALID, "contract_resolver") from exc
+    return [
+        *[
+            {
+                "filename": filename,
+                "contribution": provider.to_dict(),
+            }
+            for filename, provider in zip(source_filenames, providers, strict=True)
+        ],
+        {
+            "contract_resolver": [
+                ref.to_dict()
+                for _, ref in sorted(resolver_refs.items(), key=lambda item: item[0])
+            ]
+        },
+    ]
+
+
 class ProviderCatalogV1(
     _StrictValueTuple,
     namedtuple(
@@ -196,14 +234,11 @@ class ProviderCatalogV1(
         return tuple(provider.provider_id for provider in self.providers)
 
     def digest_payload(self) -> list[dict[str, object]]:
-        return [
-            {
-                "filename": filename,
-                "contribution": provider.to_dict(),
-            }
-            for filename, provider in zip(self.source_filenames, self.providers, strict=True)
-        ]
-
+        return _catalog_digest_payload(
+            self.providers,
+            self.source_filenames,
+            self.contract_resolver,
+        )
     @property
     def manifest_inputs(self) -> tuple[dict[str, object], ...]:
         return tuple(
@@ -303,16 +338,27 @@ def _load_catalog_from_root(root: Path | str) -> ProviderCatalogV1:
             except ContractRefError as exc:
                 raise _provider_error(exc) from exc
 
-    digest_payload = [
-        {"filename": filename, "contribution": provider.to_dict()}
-        for filename, provider in zip(filenames, providers, strict=True)
-    ]
-    return ProviderCatalogV1(
+    digest_payload = _catalog_digest_payload(tuple(providers), tuple(filenames), resolver)
+    catalog = ProviderCatalogV1(
         providers=tuple(providers),
         source_filenames=tuple(filenames),
         contract_resolver=resolver,
         catalog_digest=sha256_canonical(digest_payload),
     )
+    return catalog
+
+
+def is_server_owned_catalog(value: object) -> bool:
+    """Return whether *value* is an unmodified catalog issued by the loader."""
+
+    if type(value) is not ProviderCatalogV1:
+        return False
+    try:
+        digest = sha256_canonical(value.digest_payload())
+    except (TypeError, ValueError, OverflowError):
+        return False
+    issued = _AUTHORIZED_CATALOGS.get(id(value))
+    return issued is value and digest == value.catalog_digest
 
 
 def _make_builtin_catalog_loader():
@@ -325,12 +371,17 @@ def _make_builtin_catalog_loader():
 
 
 _LOAD_REPOSITORY_BUILTIN_CATALOG = _make_builtin_catalog_loader()
+_BUILTIN_CATALOG: ProviderCatalogV1 | None = None
 
 
 def load_builtin_catalog() -> ProviderCatalogV1:
     """Load only the repository-local builtin provider manifests."""
 
-    return _LOAD_REPOSITORY_BUILTIN_CATALOG()
+    global _BUILTIN_CATALOG
+    if _BUILTIN_CATALOG is None:
+        _BUILTIN_CATALOG = _LOAD_REPOSITORY_BUILTIN_CATALOG()
+        _AUTHORIZED_CATALOGS[id(_BUILTIN_CATALOG)] = _BUILTIN_CATALOG
+    return _BUILTIN_CATALOG
 
 
 def load_provider_catalog() -> ProviderCatalogV1:
@@ -349,6 +400,7 @@ __all__ = [
     "ProviderCatalogError",
     "ProviderCatalogV1",
     "build_provider_catalog",
+    "is_server_owned_catalog",
     "load_builtin_catalog",
     "load_catalog",
     "load_provider_catalog",

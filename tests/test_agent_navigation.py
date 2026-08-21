@@ -13,6 +13,10 @@ from workbench.agent.core import AgentCore
 from workbench.agent.events import AgentEventStream
 from workbench.agent.navigation import AgentNavigationProjector
 from workbench.agent.orchestrator import WorkbenchOrchestrator
+from workbench.agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    issue_route_proposal_store,
+)
 from workbench.agent.session import JsonlSessionRepository
 
 
@@ -77,6 +81,8 @@ def build_confirmed_rerun_fixture(project_root: Path) -> NavigationFixture:
         repository,
         events,
         main_session_id="main-session",
+        proposal_store=issue_route_proposal_store(workbench_root),
+        proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
     )
     orchestrator.register_chain("chain-a", "chain-session", agent)
     proposal = orchestrator.create_proposal(
@@ -101,13 +107,25 @@ def build_confirmed_rerun_fixture(project_root: Path) -> NavigationFixture:
         command_id="command-1",
         proposal_id="proposal-navigation-1",
     )
-    record = orchestrator.confirm_proposal(
+    proposal_store = orchestrator.proposal_store
+    assert proposal_store is not None
+    confirmation = proposal_store.confirm(
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
         actor_type="user",
         current_context_fingerprint="context-1",
         current_active_head_run_id="run-source",
+    )
+    record = orchestrator.operation_store.create_pending(
+        confirmation,
+        command_id=proposal.command_id,
+    )
+    events.emit(
+        "chain-session",
+        "proposal_confirmed",
+        confirmation.to_dict(),
+        command_id=proposal.command_id,
     )
 
     async def executor(_request):

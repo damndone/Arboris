@@ -9,7 +9,7 @@ from workbench.contracts.model.linear_mixed_effects import (
 )
 from workbench.engine.pack import AnalysisPack, register_pack
 from workbench.engine.capabilities import CapabilityDeclaration, register_capability_declaration
-from workbench.engine.registry import ModelHandler
+from workbench.engine.registry import ModelHandler, TYPED_PACKET_RESULT_BINDING_KEY
 from workbench.model_options import ModelOptionsContract
 
 from .runner import fit_from_context
@@ -32,6 +32,7 @@ def declare_pack() -> None:
                         producer_version="linear_mixed_effects@1.0",
                         input_contract_version=LMM_CONTRACT_VERSION,
                     ),
+                    result_binding_key=TYPED_PACKET_RESULT_BINDING_KEY,
                 )
             ],
         )

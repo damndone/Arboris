@@ -12,13 +12,12 @@ from workbench.api import app
 from workbench.app import configure_notebook_cutover_identity_resolver
 from workbench.http.agent_routes import (
     AgentNotebookCutoverCompileRequest,
-    compile_agent_notebook_cutover,
     register_agent_notebook_cutover_authority,
 )
 from workbench.http.notebook_routes import NotebookCutoverCompileRequest
 
 
-_IDENTITY_BINDINGS: dict[str, tuple[str, str]] = {}
+_IDENTITY_BINDINGS: dict[str | None, tuple[str, str, str | None]] = {}
 
 
 @pytest.fixture(autouse=True)
@@ -57,8 +56,16 @@ def _fields() -> dict[str, object]:
     }
 
 
-def _bind_identity(notebook_id: str, session_ref: str) -> None:
-    _IDENTITY_BINDINGS[notebook_id] = ("principal:notebook-test", session_ref)
+def _bind_identity(
+    notebook_id: str,
+    session_ref: str,
+    project_ref: str | None = None,
+) -> None:
+    _IDENTITY_BINDINGS[notebook_id] = (
+        "principal:notebook-test",
+        session_ref,
+        project_ref,
+    )
 
 
 def _register(project_ref: str, session_ref: str, notebook_id: str):
@@ -83,6 +90,7 @@ def test_notebook_compile_delegates_shared_compiler_and_preserves_semantic_hash(
     project_ref = f"project:{project_ref}"
     session_ref = "session:notebook-cutover-equivalent"
     compiler = _register(project_ref, session_ref, str(notebook["notebook_id"]))
+    _IDENTITY_BINDINGS[None] = ("principal:notebook-test", session_ref, project_ref)
 
     notebook_response = client.post(
         f"/notebooks/{notebook['notebook_id']}/cutover/compile",
@@ -97,15 +105,18 @@ def test_notebook_compile_delegates_shared_compiler_and_preserves_semantic_hash(
     assert notebook_response.status_code == 200, notebook_response.text
     notebook_preview = notebook_response.json()["preview"]
 
-    agent_preview = compile_agent_notebook_cutover(
-        AgentNotebookCutoverCompileRequest(
+    agent_response = client.post(
+        "/agent/cutover/compile",
+        json=AgentNotebookCutoverCompileRequest(
             text="请检查 dataset:fixture:1",
             actor_ref="principal:notebook-test",
             session_ref=session_ref,
             project_ref=project_ref,
             normalized_fields=_fields(),
-        )
-    )["preview"]
+        ).model_dump(),
+    )
+    assert agent_response.status_code == 200, agent_response.text
+    agent_preview = agent_response.json()["preview"]
 
     assert notebook_preview["entrypoint"] == "notebook"
     assert notebook_preview["semantic_plan_hash"] == agent_preview["semantic_plan_hash"]

@@ -19,6 +19,17 @@ python3 -m pip install -e ".[dev]"
 uvicorn workbench.api:app --reload
 ```
 
+To enable native SPSS/Stata interchange, install the optional native extra:
+
+```bash
+python3 -m pip install -e ".[native]"
+```
+
+The native extra enables typed import/export support for SPSS `.sav` and
+compressed `.zsav` files and Stata `.dta` files. Without a usable `pyreadstat`
+installation, these capabilities remain explicitly unavailable instead of
+silently falling back to another parser.
+
 ```bash
 cd frontend && npm install && npm run dev
 ```

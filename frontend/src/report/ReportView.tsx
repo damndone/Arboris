@@ -21,15 +21,25 @@ import {
 } from "./FamilyEvidence";
 import {
   ClassificationEvidence,
+  ClassificationEvidenceProjection,
+  ClassificationReportUnavailable,
   type ClassificationActiveScope,
   type ClassificationArtifactsWrapper,
+  type ClassificationReportEvidenceWrapper,
+  readClassificationReportEvidence,
 } from "./ClassificationEvidence";
+import {
+  CLASSIFICATION_REPORT_UNAVAILABLE_IDENTITY,
+  resolveReportRenderer,
+} from "./reportRendererRegistry";
 import {
   ReportWorkspaceProvider,
   readClassificationEvidencePacket,
   useReportWorkspaceOptional,
   useReportWorkspace,
 } from "./ReportWorkspaceContext";
+import { DataConsumerReportEvidence } from "./ReportDataConsumerEvidence";
+import { SurveyReportEvidence } from "./SurveyReportEvidence";
 import type { CitableFact } from "./factTable";
 import type { ReportRecord } from "./reportHistory";
 import "./report.css";
@@ -43,15 +53,80 @@ export function readTypedClassificationEvidence(
   return readClassificationEvidencePacket(value, indexedArtifact, activeScope) as ClassificationArtifactsWrapper | null;
 }
 
+/** Parse only the server-owned central classification Report packet. */
+export function readTypedClassificationProjection(
+  value: unknown,
+): ClassificationReportEvidenceWrapper | ClassificationReportUnavailable | null {
+  const parsed = readClassificationReportEvidence(value);
+  if (parsed === null) return null;
+  if (parsed.payload_schema === "workbench.prediction.classification-evidence.unavailable") return parsed;
+  return resolveReportRenderer(parsed.projection.projection_ref, parsed.projection.renderer_ref) === "classification-evidence"
+    ? parsed
+    : null;
+}
+
+function isCentralClassificationPayload(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.payload_schema === "workbench.prediction.classification-evidence.unavailable"
+    || (record.payload_schema === "workbench.prediction.classification-artifacts-wrapper" && "projection" in record);
+}
+
 export function ReportClassificationEvidenceMount({
   evidence,
   indexedArtifact,
   activeScope,
+  allowLegacyCompatibility = true,
 }: {
   evidence: unknown;
   indexedArtifact?: unknown;
   activeScope?: ClassificationActiveScope;
+  /** Legacy artifact parsing is kept for isolated compatibility callers only. */
+  allowLegacyCompatibility?: boolean;
 }) {
+  const centralEvidence = readTypedClassificationProjection(evidence);
+  if (centralEvidence) {
+    const centralProjection: ClassificationEvidenceProjection | ClassificationReportUnavailable = "projection" in centralEvidence
+      ? centralEvidence.projection
+      : centralEvidence;
+    return (
+      <section
+        aria-label="Classification evidence"
+        data-testid="report-classification-evidence"
+        style={{ marginBottom: 16 }}
+      >
+        <p
+          data-testid="report-classification-evidence-central"
+          style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "0 0 6px" }}
+        >
+          Server-owned central classification projection; raw artifact downloads are compatibility diagnostics only.
+        </p>
+        <ClassificationEvidenceProjection
+          evidence={centralProjection}
+          reason={"projection" in centralEvidence ? centralEvidence.reason : undefined}
+        />
+      </section>
+    );
+  }
+  if (!allowLegacyCompatibility || isCentralClassificationPayload(evidence)) {
+    const unavailable: ClassificationReportUnavailable = {
+      payload_schema: "workbench.prediction.classification-evidence.unavailable",
+      schema_version: 1,
+      status: "unavailable",
+      consumer: "report",
+      ...CLASSIFICATION_REPORT_UNAVAILABLE_IDENTITY,
+      reason: "REPORT_CLASSIFICATION_PROJECTION_UNAVAILABLE",
+    };
+    return (
+      <section
+        aria-label="Classification evidence"
+        data-testid="report-classification-evidence"
+        style={{ marginBottom: 16 }}
+      >
+        <ClassificationEvidenceProjection evidence={unavailable} />
+      </section>
+    );
+  }
   const packet = readTypedClassificationEvidence(evidence, indexedArtifact, activeScope);
   return (
     <section
@@ -115,19 +190,12 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
   const regressionTable = buildRegressionTablePacketFromEvidence(
     workspace.reportEvidenceProjection,
   );
-  const classificationEvidenceArtifact = workspace.familyEvidenceArtifacts.classification_evidence;
-  const classificationEvidenceIndex = (
-    classificationEvidenceArtifact !== null
-    && typeof classificationEvidenceArtifact === "object"
-    && !Array.isArray(classificationEvidenceArtifact)
-  )
-    ? (classificationEvidenceArtifact as { index?: unknown }).index
-    : undefined;
+  const centralClassificationEvidence = workspace.classificationEvidence;
   const resultFamilies = [
     ...(workspace.reportEvidenceProjection
       ? [`${workspace.reportEvidenceProjection.consumerId}:${workspace.reportEvidenceProjection.status}`]
       : []),
-    ...(classificationEvidenceArtifact !== undefined ? ["classification"] : []),
+    ...(centralClassificationEvidence !== undefined ? ["classification"] : []),
   ];
   const hasCurrentReport = workspace.current !== null;
   const promptValue = hasCurrentReport ? workspace.revisionInstruction : workspace.instruction;
@@ -318,13 +386,22 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
       <FamilyEvidence
         evidence={workspace.reportEvidenceProjection}
       />
-      {classificationEvidenceArtifact !== undefined && (
+      {centralClassificationEvidence !== undefined && (
         <ReportClassificationEvidenceMount
-          evidence={classificationEvidenceArtifact}
-          indexedArtifact={classificationEvidenceIndex}
-          activeScope={workspace.projectRoot && activeRunId
-            ? { projectRoot: workspace.projectRoot, runId: activeRunId }
-            : undefined}
+          evidence={centralClassificationEvidence}
+          allowLegacyCompatibility={false}
+        />
+      )}
+      {workspace.dataConsumerEvidence !== undefined && (
+        <DataConsumerReportEvidence
+          evidence={workspace.dataConsumerEvidence}
+          expectedRunId={activeRunId ?? undefined}
+        />
+      )}
+      {workspace.surveyEvidence !== undefined && (
+        <SurveyReportEvidence
+          evidence={workspace.surveyEvidence}
+          expectedRunId={activeRunId ?? undefined}
         />
       )}
 

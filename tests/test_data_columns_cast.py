@@ -9,10 +9,14 @@ import pandas as pd
 import pytest
 
 from workbench.artifacts import sha256_file, write_json
+from workbench.agent.proposals import (
+    DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    issue_route_proposal_store,
+)
 from workbench.graph_model import Edge, Graph, Node, NodeKind, Stage
 from workbench.graph_store import GraphStore
 
-from tests.test_data_column_cast import _source_project
+from tests.test_data_column_cast import _confirm_server_owned_proposal, _source_project
 
 
 def _model_project(tmp_path: Path, frame: pd.DataFrame):
@@ -216,7 +220,13 @@ def test_columns_cast_confirmed_operation_uses_shared_lifecycle(tmp_path: Path) 
                 yield request
 
     agent = AgentCore(repository, events, NoopAdapter(), session_id="agent_data")
-    orchestrator = WorkbenchOrchestrator(repository, events, main_session_id="agent_main")
+    orchestrator = WorkbenchOrchestrator(
+        repository,
+        events,
+        main_session_id="agent_main",
+        proposal_store=issue_route_proposal_store(repository.root),
+        proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
+    )
     orchestrator.register_chain("chain_data", "agent_data", agent)
     proposal = orchestrator.create_proposal(
         chain_id="chain_data",
@@ -238,13 +248,11 @@ def test_columns_cast_confirmed_operation_uses_shared_lifecycle(tmp_path: Path) 
         expected_effect=["create one child data artifact"],
         risks=["downstream model rerun required"],
     )
-    record = orchestrator.confirm_proposal(
-        proposal.proposal_id,
-        revision=proposal.revision,
-        fingerprint=proposal.fingerprint,
-        actor_type="human_ui",
-        current_context_fingerprint=preview.fingerprint,
-        current_active_head_run_id=run_id,
+    record = _confirm_server_owned_proposal(
+        orchestrator,
+        proposal,
+        preview_fingerprint=preview.fingerprint,
+        active_head_run_id=run_id,
     )
     completed = asyncio.run(
         orchestrator.execute_confirmed_operation(
@@ -307,7 +315,12 @@ def test_columns_cast_lifecycle_reconciles_without_duplicate_effect(
 
     agent = AgentCore(repository, events, NoopAdapter(), session_id="agent_data")
     orchestrator = WorkbenchOrchestrator(
-        repository, events, main_session_id="agent_main", failpoint=CrashOnce()
+        repository,
+        events,
+        main_session_id="agent_main",
+        failpoint=CrashOnce(),
+        proposal_store=issue_route_proposal_store(repository.root),
+        proposal_store_issuer=DEFAULT_ROUTE_PROPOSAL_STORE_ISSUER,
     )
     orchestrator.register_chain("chain_data", "agent_data", agent)
     proposal = orchestrator.create_proposal(
@@ -330,13 +343,11 @@ def test_columns_cast_lifecycle_reconciles_without_duplicate_effect(
         expected_effect=["create one child data artifact"],
         risks=["downstream model rerun required"],
     )
-    record = orchestrator.confirm_proposal(
-        proposal.proposal_id,
-        revision=proposal.revision,
-        fingerprint=proposal.fingerprint,
-        actor_type="human_ui",
-        current_context_fingerprint=preview.fingerprint,
-        current_active_head_run_id=run_id,
+    record = _confirm_server_owned_proposal(
+        orchestrator,
+        proposal,
+        preview_fingerprint=preview.fingerprint,
+        active_head_run_id=run_id,
     )
     with pytest.raises(InjectedOperationCrash):
         asyncio.run(

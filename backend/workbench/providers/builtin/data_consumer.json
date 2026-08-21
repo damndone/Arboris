@@ -121,6 +121,18 @@
           "logical_id": "workbench.data_consumer.projection",
           "semantic_version": "1.0",
       "contract_digest": "96dd6d42d1fced07f6979a59d972a22dfadd9cd5c177512f80eab69ef54ee40a"
+        },
+        "notebook": {
+          "kind": "projection",
+          "logical_id": "workbench.data_consumer.projection",
+          "semantic_version": "1.0",
+          "contract_digest": "96dd6d42d1fced07f6979a59d972a22dfadd9cd5c177512f80eab69ef54ee40a"
+        },
+        "report": {
+          "kind": "projection",
+          "logical_id": "workbench.data_consumer.projection",
+          "semantic_version": "1.0",
+          "contract_digest": "96dd6d42d1fced07f6979a59d972a22dfadd9cd5c177512f80eab69ef54ee40a"
         }
       }
     }
@@ -164,6 +176,56 @@
       "logical_id": "workbench.data_consumer.projection",
       "semantic_version": "1.0",
       "contract_digest": "96dd6d42d1fced07f6979a59d972a22dfadd9cd5c177512f80eab69ef54ee40a"
+    }
+  ],
+  "projection_declarations": [
+    {
+      "path_id": "workbench.data_consumer.operations",
+      "consumer_id": "agent",
+      "projection_ref": {"kind": "projection", "logical_id": "workbench.data_consumer.projection", "semantic_version": "1.0", "contract_digest": "96dd6d42d1fced07f6979a59d972a22dfadd9cd5c177512f80eab69ef54ee40a"},
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.data_consumer.evidence", "semantic_version": "1.0", "contract_digest": "ad5fb2d4167f9a192bf1cd651f364897ae77eaaa2af5939aca3401c469bec87d"}],
+      "envelope_contract_refs": [],
+      "fact_kinds": ["data_operation", "metadata"],
+      "policy_ref": {"kind": "policy", "logical_id": "workbench.data_consumer.policy", "semantic_version": "1.0", "contract_digest": "4a2c4a3318a4892e60be7c853d49dee15f3d7bca1a33e04195bf4287c5b13823"},
+      "renderer_ref": {"kind": "renderer", "logical_id": "workbench.data_consumer.renderer", "semantic_version": "1.0", "contract_digest": "cbe84238d55117f2a85b23008dc27d021f6395e6d09ce1851a35785089fe5e22"},
+      "max_token_budget": 4096,
+      "max_row_budget": 64,
+      "allowed_sensitivity": ["public", "internal"],
+      "ordering": ["fact_id"],
+      "coverage_status": "required",
+      "exemption_reason": null
+    },
+    {
+      "path_id": "workbench.data_consumer.operations",
+      "consumer_id": "notebook",
+      "projection_ref": {"kind": "projection", "logical_id": "workbench.data_consumer.projection", "semantic_version": "1.0", "contract_digest": "96dd6d42d1fced07f6979a59d972a22dfadd9cd5c177512f80eab69ef54ee40a"},
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.data_consumer.evidence", "semantic_version": "1.0", "contract_digest": "ad5fb2d4167f9a192bf1cd651f364897ae77eaaa2af5939aca3401c469bec87d"}],
+      "envelope_contract_refs": [],
+      "fact_kinds": ["data_operation", "metadata"],
+      "policy_ref": {"kind": "policy", "logical_id": "workbench.data_consumer.policy", "semantic_version": "1.0", "contract_digest": "4a2c4a3318a4892e60be7c853d49dee15f3d7bca1a33e04195bf4287c5b13823"},
+      "renderer_ref": {"kind": "renderer", "logical_id": "workbench.data_consumer.renderer", "semantic_version": "1.0", "contract_digest": "cbe84238d55117f2a85b23008dc27d021f6395e6d09ce1851a35785089fe5e22"},
+      "max_token_budget": 4096,
+      "max_row_budget": 64,
+      "allowed_sensitivity": ["public", "internal"],
+      "ordering": ["fact_id"],
+      "coverage_status": "required",
+      "exemption_reason": null
+    },
+    {
+      "path_id": "workbench.data_consumer.operations",
+      "consumer_id": "report",
+      "projection_ref": {"kind": "projection", "logical_id": "workbench.data_consumer.projection", "semantic_version": "1.0", "contract_digest": "96dd6d42d1fced07f6979a59d972a22dfadd9cd5c177512f80eab69ef54ee40a"},
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.data_consumer.evidence", "semantic_version": "1.0", "contract_digest": "ad5fb2d4167f9a192bf1cd651f364897ae77eaaa2af5939aca3401c469bec87d"}],
+      "envelope_contract_refs": [],
+      "fact_kinds": ["data_operation", "metadata"],
+      "policy_ref": {"kind": "policy", "logical_id": "workbench.data_consumer.policy", "semantic_version": "1.0", "contract_digest": "4a2c4a3318a4892e60be7c853d49dee15f3d7bca1a33e04195bf4287c5b13823"},
+      "renderer_ref": {"kind": "renderer", "logical_id": "workbench.data_consumer.renderer", "semantic_version": "1.0", "contract_digest": "cbe84238d55117f2a85b23008dc27d021f6395e6d09ce1851a35785089fe5e22"},
+      "max_token_budget": 4096,
+      "max_row_budget": 64,
+      "allowed_sensitivity": ["public", "internal"],
+      "ordering": ["fact_id"],
+      "coverage_status": "required",
+      "exemption_reason": null
     }
   ],
   "renderer_refs": [

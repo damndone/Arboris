@@ -26,9 +26,15 @@ from ..analysis_loop.plan import PlanDiff
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
 from ..predictive_research.consumer_projection import (
-    read_classification_evidence_from_run_root,
     read_prediction_evidence_from_run_root,
 )
+from ..services.classification_consumer_service import (
+    read_classification_consumer_projection,
+)
+from ..services.data_consumer_projection_service import (
+    read_data_consumer_projection,
+)
+from ..services.survey_consumer_service import read_survey_consumer_projection
 from ..services.server_run_artifacts import (
     ServerOwnedArtifactManifestError,
     read_server_owned_run_artifacts,
@@ -1621,12 +1627,14 @@ class NodeOperationContextProvider:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
+        persisted_evidence = read_persisted_evidence_for_agent(run_root)
         model_results, verification_error = _verified_model_results(run_root)
         if verification_error is not None:
             return {
                 **canonical,
                 "node": _bounded_node(node),
                 "diagnostics": _agent_result_unavailable(verification_error),
+                "persisted_evidence": persisted_evidence,
                 "omitted_sections": ["raw_model_results", "coefficient_risk"],
             }
         summary, summary_status = _read_diagnostic_summary(run_root)
@@ -1637,6 +1645,7 @@ class NodeOperationContextProvider:
                 "diagnostics": _agent_result_unavailable(
                     "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
                 ),
+                "persisted_evidence": persisted_evidence,
                 "omitted_sections": ["raw_model_results", "coefficient_risk"],
             }
         summary_projection = project_survey_result_summary(
@@ -1653,6 +1662,7 @@ class NodeOperationContextProvider:
                 "diagnostics": _agent_result_unavailable(
                     "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
                 ),
+                "persisted_evidence": persisted_evidence,
                 "omitted_sections": ["raw_model_results", "coefficient_risk"],
             }
         preview = build_diagnostic_summary_preview(
@@ -1671,6 +1681,7 @@ class NodeOperationContextProvider:
             **canonical,
             "node": _bounded_node(node),
             "diagnostics": diagnostics,
+            "persisted_evidence": persisted_evidence,
             "omitted_sections": omitted_sections,
         }
 
@@ -1747,10 +1758,12 @@ class NodeOperationContextProvider:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
+        persisted_evidence = read_persisted_evidence_for_agent(run_root)
         return {
             **canonical,
             "node": _bounded_node(node),
             "statistical_evidence": _bounded_statistics_evidence(run_root),
+            "persisted_evidence": persisted_evidence,
         }
 
     def inspect_result_summary(
@@ -1766,12 +1779,14 @@ class NodeOperationContextProvider:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
+        persisted_evidence = read_persisted_evidence_for_agent(run_root)
         model_results, verification_error = _verified_model_results(run_root)
         if verification_error is not None:
             return {
                 **canonical,
                 "node": _bounded_node(node),
                 "result_summary": _agent_result_unavailable(verification_error),
+                "persisted_evidence": persisted_evidence,
                 "omitted_sections": ["raw_model_results", "coefficient_rows"],
             }
         preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
@@ -1790,6 +1805,7 @@ class NodeOperationContextProvider:
             **canonical,
             "node": _bounded_node(node),
             "result_summary": result_summary,
+            "persisted_evidence": persisted_evidence,
             "omitted_sections": omitted_sections,
         }
 
@@ -5724,10 +5740,30 @@ def read_prediction_research_evidence(
     return read_prediction_evidence_from_run_root(run_root, consumer=consumer)
 
 
-def read_classification_evidence_for_agent(run_root: Path) -> dict[str, Any]:
-    """Read Agent classification evidence only from the indexed persisted receipt."""
+def read_classification_evidence_for_agent(run_root: object) -> dict[str, Any]:
+    """Read Agent evidence from an opaque server-issued run capability."""
 
-    return read_classification_evidence_from_run_root(run_root, consumer="agent")
+    return read_classification_consumer_projection(run_root, "agent")
+
+
+def read_data_consumer_evidence_for_agent(
+    run_capability: object,
+    *,
+    requested_fact_ids: tuple[str, ...] | None = None,
+) -> dict[str, object]:
+    """Read the server-owned data-operation projection for Agent context."""
+
+    return read_data_consumer_projection(
+        run_capability,
+        "agent",
+        requested_fact_ids=requested_fact_ids,
+    )
+
+
+def read_survey_evidence_for_agent(run_capability: object) -> dict[str, Any]:
+    """Read Survey evidence only through the central source capability."""
+
+    return read_survey_consumer_projection(run_capability, "agent")
 
 
 @dataclass(frozen=True)
@@ -5929,13 +5965,16 @@ def project_persisted_evidence_for_agent(
     """Bounded Agent contribution over the shared persisted-evidence port."""
 
     from ..evidence.consumer_adapters import (
-        ConsumerProjectionRegistryV1,
+        EvidenceProjectionError,
         default_projection_registry,
     )
 
-    active_registry = default_projection_registry() if registry is None else registry
-    if type(active_registry) is not ConsumerProjectionRegistryV1:
-        raise TypeError("registry must be ConsumerProjectionRegistryV1")
+    if registry is not None:
+        raise EvidenceProjectionError(
+            "PROJECTION_REGISTRY_INJECTION_REJECTED",
+            "Agent evidence projection uses the server-owned canonical registry",
+        )
+    active_registry = default_projection_registry()
     return active_registry.project(
         record,  # type: ignore[arg-type]
         consumer_id="agent",
@@ -5945,3 +5984,20 @@ def project_persisted_evidence_for_agent(
         receipt=receipt,  # type: ignore[arg-type]
         issuer=issuer,  # type: ignore[arg-type]
     ).to_dict()
+
+
+def read_persisted_evidence_for_agent(
+    run_root: Path,
+    *,
+    requested_fact_ids: tuple[str, ...] | None = None,
+) -> dict[str, object]:
+    """Read Agent evidence through the server-owned central consumer port."""
+
+    from ..services.results_service import read_persisted_consumer_evidence_for_run
+
+    return read_persisted_consumer_evidence_for_run(
+        consumer_id="agent",
+        project_root=Path(run_root).expanduser().resolve(strict=False).parent.parent,
+        run_id=Path(run_root).name,
+        requested_fact_ids=requested_fact_ids,
+    )

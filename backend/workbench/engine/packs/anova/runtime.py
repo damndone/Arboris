@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...registry import ModelHandler
+from ...registry import COEFFICIENT_RESULT_BINDING_KEY, ModelHandler
 from .estimation import fit_anova, validate_anova_model_options
 
 #: Accepted keys, documented here rather than enforced by the version
@@ -38,5 +38,6 @@ def model_handlers() -> dict[str, ModelHandler]:
                 producer_version="anova@1.0",
                 input_contract_version="1.0",
             ),
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
         )
     }

@@ -12,11 +12,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
 
 from .agent.cutover_runtime import AgentNotebookRuntimeV1
+from .agent.authority import HostAuthorityHandleV1
+from .agent.planning_contracts import DeploymentIdentityResolverV1
 from .agent.orchestrator import AgentNotebookCompilerV1
 from .agent.trace import TraceSchemaDescriptor, register_trace_catalog
 from .api_errors import register_error_handlers
@@ -274,6 +277,236 @@ def configure_agent_notebook_runtime_bundle(
         project_ref=project_ref,
         session_ref=session_ref,
         compiler=None if runtime is None else runtime.compiler,
+        app_instance=app_instance,
+    )
+
+
+def bootstrap_builtin_agent_notebook_runtime(
+    *,
+    project_ref: str,
+    session_ref: str,
+    provider_catalog: Any,
+    evidence_committer: Any,
+    host_compiler: Any,
+    data_project_root: Path | str | None = None,
+    data_consumer_execution_port: Any | None = None,
+    classification_execution_port: Any | None = None,
+    ttl_seconds: int = 900,
+    clock: Callable[[], Any] | None = None,
+    app_instance: FastAPI | None = None,
+) -> AgentNotebookRuntimeV1:
+    """Compose and install one shared Agent/Notebook runtime for a scope.
+
+    This is application bootstrap only.  HTTP callers cannot invoke it, and
+    no default catalog, evidence owner, host compiler, or executor is created
+    when a deployment omits one of those authorities.
+    """
+
+    target = _bootstrap_app(app_instance)
+    from .agent.runtime_bootstrap import compose_builtin_agent_notebook_runtime
+
+    runtime = compose_builtin_agent_notebook_runtime(
+        provider_catalog=provider_catalog,
+        evidence_committer=evidence_committer,
+        host_compiler=host_compiler,
+        project_ref=project_ref,
+        session_ref=session_ref,
+        data_project_root=data_project_root,
+        data_consumer_execution_port=data_consumer_execution_port,
+        classification_execution_port=classification_execution_port,
+        ttl_seconds=ttl_seconds,
+        clock=clock,
+    )
+    configure_agent_notebook_runtime_bundle(
+        project_ref=project_ref,
+        session_ref=session_ref,
+        runtime=runtime,
+        app_instance=target,
+    )
+    return runtime
+
+
+def bootstrap_builtin_agent_notebook_host(
+    *,
+    project_ref: str,
+    session_ref: str,
+    provider_catalog: Any,
+    evidence_committer: Any,
+    host_compiler: Any,
+    report_evidence_persistence: ServerOwnedReportEvidencePersistenceV1
+    | UnavailableReportEvidenceCapabilityV1,
+    notebook_identity_resolver: DeploymentIdentityResolverV1,
+    report_identity_resolver: Callable[..., object] | None = None,
+    data_project_root: Path | str | None = None,
+    data_consumer_execution_port: Any | None = None,
+    classification_execution_port: Any | None = None,
+    ttl_seconds: int = 900,
+    clock: Callable[[], Any] | None = None,
+    app_instance: FastAPI | None = None,
+) -> AgentNotebookRuntimeV1:
+    """Atomically install the server-owned Agent/Notebook host bundle.
+
+    This is the production host boundary.  All authorities are supplied by
+    the embedding service; neither HTTP callers nor this function infer a
+    provider, identity, persistence root, or project scope.  Composition is
+    deliberately completed before application state is touched.  The explicit
+    unavailable Report capability is accepted as a typed fail-closed choice;
+    production deployments that expose Report must inject a real C0 owner.
+    """
+
+    if type(project_ref) is not str or not project_ref.strip() or "\x00" in project_ref:
+        raise ValueError("project_ref must be a non-empty scope reference")
+    if type(session_ref) is not str or not session_ref.strip() or "\x00" in session_ref:
+        raise ValueError("session_ref must be a non-empty scope reference")
+    if type(report_evidence_persistence) not in {
+        ServerOwnedReportEvidencePersistenceV1,
+        UnavailableReportEvidenceCapabilityV1,
+    }:
+        raise TypeError(
+            "report_evidence_persistence must be a server-owned Report capability"
+        )
+    if type(notebook_identity_resolver) is not DeploymentIdentityResolverV1:
+        raise ValueError(
+            "notebook_identity_resolver must be a deployment identity resolver"
+        )
+    if report_identity_resolver is not None and not callable(report_identity_resolver):
+        raise ValueError("report_identity_resolver must be callable or None")
+
+    # Build the whole runtime before touching the app.  A bad catalog join,
+    # missing evidence committer, or missing host compiler therefore cannot
+    # leave behind an apparently configured identity or Report owner.
+    from .agent.runtime_bootstrap import compose_builtin_agent_notebook_runtime
+
+    runtime = compose_builtin_agent_notebook_runtime(
+        provider_catalog=provider_catalog,
+        evidence_committer=evidence_committer,
+        host_compiler=host_compiler,
+        project_ref=project_ref,
+        session_ref=session_ref,
+        data_project_root=data_project_root,
+        data_consumer_execution_port=data_consumer_execution_port,
+        classification_execution_port=classification_execution_port,
+        ttl_seconds=ttl_seconds,
+        clock=clock,
+    )
+
+    target = _bootstrap_app(app_instance)
+    store = target.state.agent_notebook_cutover_store
+    store_fields = (
+        "authorities",
+        "confirmations",
+        "confirmation_digests",
+        "confirmation_authorities",
+        "confirmation_receipts",
+        "confirmation_serializations",
+        "legacy_proposal_bindings",
+    )
+    previous_state = {
+        "report_evidence_persistence": getattr(
+            target.state, "report_evidence_persistence", None
+        ),
+        "report_evidence_identity_resolver": getattr(
+            target.state, "report_evidence_identity_resolver", None
+        ),
+        "notebook_cutover_identity_resolver": getattr(
+            target.state, "notebook_cutover_identity_resolver", None
+        ),
+        "store": store,
+        "store_fields": {
+            name: dict(getattr(store, name))
+            for name in store_fields
+        },
+    }
+    try:
+        target.state.report_evidence_persistence = report_evidence_persistence
+        target.state.report_evidence_identity_resolver = report_identity_resolver
+        target.state.notebook_cutover_identity_resolver = notebook_identity_resolver
+        configure_agent_notebook_runtime_bundle(
+            project_ref=project_ref,
+            session_ref=session_ref,
+            runtime=runtime,
+            app_instance=target,
+        )
+    except Exception:
+        target.state.report_evidence_persistence = previous_state[
+            "report_evidence_persistence"
+        ]
+        target.state.report_evidence_identity_resolver = previous_state[
+            "report_evidence_identity_resolver"
+        ]
+        target.state.notebook_cutover_identity_resolver = previous_state[
+            "notebook_cutover_identity_resolver"
+        ]
+        for name, snapshot in previous_state["store_fields"].items():
+            current = getattr(store, name)
+            current.clear()
+            current.update(snapshot)
+        raise
+    return runtime
+
+
+def build_deployment_agent_notebook_identity_resolver(
+    *,
+    host_authority_handle: HostAuthorityHandleV1 | None,
+    authenticated_identity_resolver: Callable[..., object] | None,
+) -> DeploymentIdentityResolverV1:
+    """Build the application resolver over an admitted external authority.
+
+    The deployment callback observes authenticated request identity only. The
+    returned resolver asks the external authority to issue and revalidate the
+    exact scope on every request; no local binding or request assertion is
+    promoted to authority.
+    """
+
+    if type(host_authority_handle) is not HostAuthorityHandleV1:
+        raise ValueError("host authority handle must be a deployment-admitted handle")
+    if not callable(authenticated_identity_resolver):
+        raise ValueError("authenticated_identity_resolver must be callable")
+    return DeploymentIdentityResolverV1.from_host_handle(
+        host_authority_handle,
+        authenticated_identity_resolver,
+    )
+
+
+def bootstrap_builtin_agent_notebook_host_from_deployment(
+    *,
+    host_authority_handle: HostAuthorityHandleV1 | None,
+    authenticated_identity_resolver: Callable[..., object] | None,
+    project_ref: str,
+    session_ref: str,
+    provider_catalog: Any,
+    evidence_committer: Any,
+    host_compiler: Any,
+    report_evidence_persistence: ServerOwnedReportEvidencePersistenceV1
+    | UnavailableReportEvidenceCapabilityV1,
+    report_identity_resolver: Callable[..., object] | None = None,
+    data_project_root: Path | str | None = None,
+    data_consumer_execution_port: Any | None = None,
+    classification_execution_port: Any | None = None,
+    ttl_seconds: int = 900,
+    clock: Callable[[], Any] | None = None,
+    app_instance: FastAPI | None = None,
+) -> AgentNotebookRuntimeV1:
+    """Bootstrap the shared host bundle with an external identity authority."""
+
+    identity_resolver = build_deployment_agent_notebook_identity_resolver(
+        host_authority_handle=host_authority_handle,
+        authenticated_identity_resolver=authenticated_identity_resolver,
+    )
+    return bootstrap_builtin_agent_notebook_host(
+        project_ref=project_ref,
+        session_ref=session_ref,
+        provider_catalog=provider_catalog,
+        evidence_committer=evidence_committer,
+        host_compiler=host_compiler,
+        report_evidence_persistence=report_evidence_persistence,
+        notebook_identity_resolver=identity_resolver,
+        report_identity_resolver=report_identity_resolver,
+        data_project_root=data_project_root,
+        data_consumer_execution_port=data_consumer_execution_port,
+        classification_execution_port=classification_execution_port,
+        ttl_seconds=ttl_seconds,
+        clock=clock,
         app_instance=app_instance,
     )
 

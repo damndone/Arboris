@@ -6,9 +6,13 @@ calibration and policy decisions remain in the classification protocol.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field, replace
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any, Callable
+import math
+import re
+import time
 import warnings
 import weakref
 
@@ -252,10 +256,239 @@ _ADAPTERS = {
 }
 
 
+_CLASSIFICATION_SERVER_OWNED_ISSUER = object()
+_CLASSIFICATION_SERVER_OWNED_CAPABILITY = object()
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _classification_text(value: object, name: str) -> str:
+    if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+        raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
+def _classification_sha256_digest(value: object, name: str) -> str:
+    if type(value) is not str or _SHA256_HEX_RE.fullmatch(value) is None:
+        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+@dataclass(frozen=True)
+class ClassificationInputV1:
+    """Opaque, server-issued identity for one classification snapshot."""
+
+    input_ref: str
+    catalog_digest: str
+    actor_ref: str
+    project_ref: str
+    session_ref: str
+    snapshot_ref: str
+    model_id: str
+    expires_at: float
+    _capability: object | None = dataclass_field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        for name in (
+            "input_ref",
+            "actor_ref",
+            "project_ref",
+            "session_ref",
+            "snapshot_ref",
+            "model_id",
+        ):
+            _classification_text(getattr(self, name), name)
+        _classification_sha256_digest(self.catalog_digest, "classification input catalog_digest")
+        if type(self.expires_at) is not float or not math.isfinite(self.expires_at):
+            raise ValueError("classification input expires_at must be finite")
+        if self._capability is not _CLASSIFICATION_SERVER_OWNED_CAPABILITY:
+            raise TypeError("classification input can only be created by the server-owned issuer")
+        if self.model_id not in _ADAPTERS:
+            raise ValueError("classification input model_id is unsupported")
+
+    @classmethod
+    def from_server(
+        cls,
+        *,
+        input_ref: str,
+        catalog_digest: str,
+        actor_ref: str,
+        project_ref: str,
+        session_ref: str,
+        snapshot_ref: str,
+        model_id: str,
+        expires_at: float,
+        _issuer: object | None = None,
+    ) -> "ClassificationInputV1":
+        if _issuer is not _CLASSIFICATION_SERVER_OWNED_ISSUER:
+            raise TypeError("classification input requires the server-owned issuer")
+        return cls(
+            input_ref=input_ref,
+            catalog_digest=catalog_digest,
+            actor_ref=actor_ref,
+            project_ref=project_ref,
+            session_ref=session_ref,
+            snapshot_ref=snapshot_ref,
+            model_id=model_id,
+            expires_at=expires_at,
+            _capability=_CLASSIFICATION_SERVER_OWNED_CAPABILITY,
+        )
+
+
+@dataclass(frozen=True)
+class ClassificationOutputV1:
+    """Bounded server output; raw feature material never crosses this type."""
+
+    model_id: str
+    sample_count: int
+    feature_count: int
+    class_count: int
+    metrics: Mapping[str, float]
+    result_digest: str
+    catalog_digest: str
+    project_ref: str
+    session_ref: str
+    snapshot_ref: str
+    _capability: object | None = dataclass_field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        _classification_text(self.model_id, "model_id")
+        for name in ("sample_count", "feature_count", "class_count"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+        if type(self.metrics) is not dict or set(self.metrics) != {"accuracy"}:
+            raise ValueError("classification output metrics are not bounded")
+        if type(self.metrics["accuracy"]) is not float or not math.isfinite(self.metrics["accuracy"]):
+            raise ValueError("classification output accuracy must be finite")
+        for name in ("catalog_digest", "project_ref", "session_ref", "snapshot_ref", "result_digest"):
+            _classification_text(getattr(self, name), name)
+        _classification_sha256_digest(self.catalog_digest, "classification output catalog_digest")
+        _classification_sha256_digest(self.result_digest, "classification output result_digest")
+        if not 0.0 <= self.metrics["accuracy"] <= 1.0:
+            raise ValueError("classification output accuracy must be between zero and one")
+        if self._capability is not _CLASSIFICATION_SERVER_OWNED_CAPABILITY:
+            raise TypeError("classification output can only be created by the server-owned issuer")
+        object.__setattr__(self, "metrics", MappingProxyType(dict(self.metrics)))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "model_id": self.model_id,
+            "sample_count": self.sample_count,
+            "feature_count": self.feature_count,
+            "class_count": self.class_count,
+            "metrics": dict(self.metrics),
+            "result_digest": self.result_digest,
+            "catalog_digest": self.catalog_digest,
+            "project_ref": self.project_ref,
+            "session_ref": self.session_ref,
+            "snapshot_ref": self.snapshot_ref,
+        }
+
+    @classmethod
+    def from_server(cls, **kwargs: object) -> "ClassificationOutputV1":
+        if kwargs.pop("_issuer", None) is not _CLASSIFICATION_SERVER_OWNED_ISSUER:
+            raise TypeError("classification output requires the server-owned issuer")
+        return cls(**kwargs, _capability=_CLASSIFICATION_SERVER_OWNED_CAPABILITY)
+
+
+@dataclass(frozen=True)
+class ClassificationExecutionPortV1:
+    """Server-issued host boundary that resolves and fits one typed input."""
+
+    input: ClassificationInputV1
+    catalog_digest: str
+    _resolver: Callable[[ClassificationInputV1], tuple[pd.DataFrame, Any]]
+    _capability: object | None = dataclass_field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if type(self.input) is not ClassificationInputV1:
+            raise TypeError("classification execution port requires typed server input")
+        if self.catalog_digest != self.input.catalog_digest:
+            raise ValueError("classification execution port catalog digest does not match input")
+        if not callable(self._resolver):
+            raise TypeError("classification execution port requires a host resolver")
+        if self._capability is not _CLASSIFICATION_SERVER_OWNED_CAPABILITY:
+            raise TypeError("classification execution port can only be created by the server-owned issuer")
+
+    @classmethod
+    def from_server(
+        cls,
+        input: ClassificationInputV1,
+        *,
+        catalog_digest: str,
+        resolver: Callable[[ClassificationInputV1], tuple[pd.DataFrame, Any]],
+        _issuer: object | None = None,
+    ) -> "ClassificationExecutionPortV1":
+        if _issuer is not _CLASSIFICATION_SERVER_OWNED_ISSUER:
+            raise TypeError("classification execution port requires the server-owned issuer")
+        return cls(
+            input=input,
+            catalog_digest=catalog_digest,
+            _resolver=resolver,
+            _capability=_CLASSIFICATION_SERVER_OWNED_CAPABILITY,
+        )
+
+    def execute(self, context: Any, request: Mapping[str, Any]) -> dict[str, object]:
+        from workbench.agent.trusted_executor_registry import ProviderRuntimeContextV1
+
+        if type(context) is not ProviderRuntimeContextV1:
+            raise ValueError("classification execution port requires a server runtime context")
+        if set(request) != {"input_ref", "model_id"}:
+            raise ValueError("classification execution request is not typed")
+        if request["input_ref"] != self.input.input_ref or request["model_id"] != self.input.model_id:
+            raise ValueError("classification execution input identity mismatch")
+        if (
+            context.actor_ref != self.input.actor_ref
+            or context.project_ref != self.input.project_ref
+            or context.session_ref != self.input.session_ref
+        ):
+            raise ValueError("classification execution actor/scope mismatch")
+        if context.effect not in {"read", "read_only"}:
+            raise ValueError("classification execution requires a read-only effect")
+        if context.evidence_required is not True:
+            raise ValueError("classification execution requires evidence")
+        if self.input.expires_at <= time.time():
+            raise ValueError("classification execution input is expired")
+        features, target = self._resolver(self.input)
+        adapter = get_classification_adapter(self.input.model_id)
+        adapter.fit(features, target)
+        predicted = adapter.estimator.predict(_numeric_matrix(features))
+        accuracy = float(np.mean(predicted == np.asarray(target)))
+        summary = {
+            "model_id": self.input.model_id,
+            "sample_count": len(features),
+            "feature_count": len(features.columns),
+            "class_count": len(adapter.metadata["class_order"]),
+            "metrics": {"accuracy": accuracy},
+            "catalog_digest": self.catalog_digest,
+            "project_ref": self.input.project_ref,
+            "session_ref": self.input.session_ref,
+            "snapshot_ref": self.input.snapshot_ref,
+        }
+        output = ClassificationOutputV1.from_server(
+            **summary,
+            result_digest=sha256_canonical(summary),
+            _issuer=_CLASSIFICATION_SERVER_OWNED_ISSUER,
+        )
+        return output.to_dict()
+
+
 def _classification_provider_declaration(catalog: Any) -> tuple[Any, Any]:
     from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+    from workbench.providers.catalog import ProviderCatalogV1, is_server_owned_catalog
 
-    providers = tuple(getattr(catalog, "providers", ()))
+    if type(catalog) is not ProviderCatalogV1:
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_CATALOG_REQUIRED",
+            "classification runtime requires the server-loaded ProviderCatalogV1",
+        )
+    if not is_server_owned_catalog(catalog):
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_CATALOG_INVALID",
+            "classification provider catalog is not the exact server-issued catalog",
+        )
+
+    providers = catalog.providers
     matches = [provider for provider in providers if provider.provider_id == CLASSIFICATION_PROVIDER_ID]
     if len(matches) != 1:
         raise TrustedExecutorRegistryError(
@@ -276,11 +509,123 @@ def _validate_classification_runtime_request(request: Mapping[str, Any]) -> Mapp
     from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
 
     if not isinstance(request, Mapping):
-        raise TrustedExecutorRegistryError("RUNTIME_REQUEST_INVALID", "classification runtime request must be a mapping")
+        raise TrustedExecutorRegistryError(
+            "RUNTIME_REQUEST_INVALID",
+            "classification runtime request must be a mapping",
+        )
+    allowed = {
+        "capability_id",
+        "target_ref",
+        "data_snapshot_ref",
+        "source_text_digest",
+        "options",
+        "input_ref",
+        "model_id",
+    }
+    unknown = sorted(set(request) - allowed)
+    if unknown:
+        raise TrustedExecutorRegistryError(
+            "RUNTIME_REQUEST_INVALID",
+            f"classification runtime request has unsupported field(s): {', '.join(unknown)}",
+        )
+    options = request.get("options")
+    if options is not None and not isinstance(options, Mapping):
+        raise TrustedExecutorRegistryError("RUNTIME_REQUEST_INVALID", "classification options must be a mapping")
+    model_id = request.get("model_id")
+    if model_id is None and isinstance(options, Mapping):
+        model_id = options.get("model_id")
+    if type(model_id) is not str or model_id not in _ADAPTERS:
+        raise TrustedExecutorRegistryError("RUNTIME_REQUEST_INVALID", "classification runtime request has an unsupported model_id")
+    input_ref = request.get("input_ref")
+    if input_ref is None and isinstance(options, Mapping):
+        input_ref = options.get("input_ref")
+    if input_ref is None:
+        input_ref = request.get("data_snapshot_ref")
+    if type(input_ref) is not str or not input_ref:
+        raise TrustedExecutorRegistryError("RUNTIME_REQUEST_INVALID", "classification input_ref is required")
+    return {"input_ref": input_ref, "model_id": model_id}
+
+
+def _validate_legacy_classification_runtime_request(request: Mapping[str, Any]) -> Mapping[str, Any]:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+    if not isinstance(request, Mapping) or set(request) != {"model_id"}:
+        raise TrustedExecutorRegistryError("RUNTIME_REQUEST_INVALID", "legacy classification runtime request is invalid")
     model_id = request.get("model_id")
     if type(model_id) is not str or model_id not in _ADAPTERS:
         raise TrustedExecutorRegistryError("RUNTIME_REQUEST_INVALID", "classification runtime request has an unsupported model_id")
     return {"model_id": model_id}
+
+
+def _blocked_classification_executor(_context: Any, _request: Mapping[str, Any]) -> Mapping[str, Any]:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+    raise TrustedExecutorRegistryError("RUNTIME_EXECUTION_BLOCKED", "classification execution port is unavailable")
+
+
+def _execute_classification_host(
+    context: Any,
+    request: Mapping[str, Any],
+    execution_port: ClassificationExecutionPortV1,
+) -> Mapping[str, Any]:
+    return execution_port.execute(context, request)
+
+
+def _validate_classification_host_result(result: Mapping[str, Any]) -> None:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+    expected = {
+        "model_id",
+        "sample_count",
+        "feature_count",
+        "class_count",
+        "metrics",
+        "result_digest",
+        "catalog_digest",
+        "project_ref",
+        "session_ref",
+        "snapshot_ref",
+    }
+    if not isinstance(result, Mapping) or set(result) != expected:
+        raise TrustedExecutorRegistryError("RUNTIME_RESULT_INVALID", "classification result is not bounded")
+    if any(key in result for key in ("frame", "rows", "path", "features", "target")):
+        raise TrustedExecutorRegistryError("RUNTIME_RESULT_INVALID", "classification result contains raw data")
+    try:
+        ClassificationOutputV1.from_server(**dict(result), _issuer=_CLASSIFICATION_SERVER_OWNED_ISSUER)
+    except (TypeError, ValueError) as exc:
+        raise TrustedExecutorRegistryError("RUNTIME_RESULT_INVALID", str(exc)) from exc
+    summary = dict(result)
+    supplied_digest = summary.pop("result_digest")
+    expected_digest = sha256_canonical(summary)
+    if supplied_digest != expected_digest:
+        raise TrustedExecutorRegistryError(
+            "RUNTIME_RESULT_INVALID",
+            "classification result_digest does not match the bounded result summary",
+        )
+
+
+@dataclass(frozen=True)
+class _ClassificationHostResultValidatorV1:
+    """Bind a bounded result to the exact input issued for one host port."""
+
+    input: ClassificationInputV1
+
+    def __call__(self, result: Mapping[str, Any]) -> None:
+        from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+        _validate_classification_host_result(result)
+        expected = {
+            "model_id": self.input.model_id,
+            "catalog_digest": self.input.catalog_digest,
+            "project_ref": self.input.project_ref,
+            "session_ref": self.input.session_ref,
+            "snapshot_ref": self.input.snapshot_ref,
+        }
+        if any(result.get(key) != value for key, value in expected.items()):
+            raise TrustedExecutorRegistryError(
+                "RUNTIME_RESULT_INVALID",
+                "classification result identity does not match the issued input",
+            )
 
 
 def _execute_classification_runtime_binding(context: Any, request: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -312,22 +657,49 @@ def _validate_classification_runtime_result(result: Mapping[str, Any]) -> None:
         raise TrustedExecutorRegistryError("RUNTIME_RESULT_INVALID", "classification runtime result model_id is invalid")
 
 
-def classification_runtime_registry(catalog: Any | None = None) -> TrustedExecutorRegistry:
-    """Build the server-owned classification runtime join.
+def build_classification_runtime_contribution(
+    catalog: Any,
+    execution_port: ClassificationExecutionPortV1 | None = None,
+) -> ProviderRuntimeContributionV1:
+    """Build the server-owned classification contribution for *catalog*.
 
-    The JSON manifest contributes only opaque contract identities.  This
-    factory supplies the trusted callable and binds it to the fixed builtin
-    catalog before a production entrypoint may accept the registry.
+    The returned contribution is intentionally unbound.  A bootstrapper may
+    compose it with contributions from the complete provider catalog and let
+    ``TrustedExecutorRegistry.bind_catalog`` perform the one-to-one join.
     """
 
     from workbench.agent.trusted_executor_registry import (
         ProviderRuntimeContributionV1,
-        TrustedExecutorRegistry,
+        TrustedExecutorRegistryError,
     )
 
-    source_catalog = load_builtin_catalog() if catalog is None else catalog
-    provider, declaration = _classification_provider_declaration(source_catalog)
-    contribution = ProviderRuntimeContributionV1(
+    provider, declaration = _classification_provider_declaration(catalog)
+    if execution_port is not None:
+        if type(execution_port) is not ClassificationExecutionPortV1:
+            raise TrustedExecutorRegistryError("CLASSIFICATION_EXECUTION_PORT_REQUIRED")
+        if execution_port.catalog_digest != catalog.catalog_digest:
+            raise TrustedExecutorRegistryError("CLASSIFICATION_EXECUTION_PORT_CATALOG_MISMATCH")
+        executor = lambda context, request: _execute_classification_host(context, request, execution_port)
+        execution_allowed = True
+        result_validator = _ClassificationHostResultValidatorV1(execution_port.input)
+        metadata = {
+            "status": "available",
+            "production_entrypoint": CLASSIFICATION_PRODUCTION_ENTRYPOINT,
+            "provider_id": CLASSIFICATION_PROVIDER_ID,
+            "adapter_id": CLASSIFICATION_RUNTIME_ADAPTER_ID,
+        }
+    else:
+        executor = _blocked_classification_executor
+        execution_allowed = False
+        result_validator = _validate_classification_host_result
+        metadata = {
+            "status": "unavailable",
+            "reason_code": "CLASSIFICATION_EXECUTION_PORT_UNAVAILABLE",
+            "production_entrypoint": CLASSIFICATION_PRODUCTION_ENTRYPOINT,
+            "provider_id": CLASSIFICATION_PROVIDER_ID,
+            "adapter_id": CLASSIFICATION_RUNTIME_ADAPTER_ID,
+        }
+    return ProviderRuntimeContributionV1(
         provider_id=provider.provider_id,
         adapter_id=declaration.adapter_id,
         executor_ref=declaration.executor_ref,
@@ -336,15 +708,39 @@ def classification_runtime_registry(catalog: Any | None = None) -> TrustedExecut
         effect="read_only",
         request_contract_ref=declaration.request_schema_ref,
         result_contract_refs=declaration.output_refs,
-        executor=_execute_classification_runtime_binding,
+        executor=executor,
         request_validator=_validate_classification_runtime_request,
+        result_validator=result_validator,
+        execution_allowed=execution_allowed,
+        metadata=metadata,
+    )
+
+
+def classification_runtime_registry(catalog: Any | None = None) -> TrustedExecutorRegistry:
+    """Build the server-owned classification runtime join.
+
+    The JSON manifest contributes only opaque contract identities.  This
+    factory supplies the trusted callable and binds it to the fixed builtin
+    catalog before a production entrypoint may accept the registry.
+    """
+
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistry, TrustedExecutorRegistryError
+
+    source_catalog = load_builtin_catalog() if catalog is None else catalog
+    contribution = build_classification_runtime_contribution(source_catalog)
+    contribution = replace(
+        contribution,
+        executor=_execute_classification_runtime_binding,
+        request_validator=_validate_legacy_classification_runtime_request,
         result_validator=_validate_classification_runtime_result,
+        execution_allowed=True,
         metadata={
             "production_entrypoint": CLASSIFICATION_PRODUCTION_ENTRYPOINT,
             "provider_id": CLASSIFICATION_PROVIDER_ID,
             "adapter_id": CLASSIFICATION_RUNTIME_ADAPTER_ID,
         },
     )
+    provider, _declaration = _classification_provider_declaration(source_catalog)
     if len(tuple(source_catalog.providers)) == 1:
         bind_catalog = source_catalog
     else:
@@ -413,7 +809,10 @@ def dispatch_classification_runtime_binding(
         or contribution.signature != "workbench.classification_ml.runtime.v1"
         or contribution.effect != "read_only"
         or contribution.executor is not _execute_classification_runtime_binding
-        or contribution.request_validator is not _validate_classification_runtime_request
+            or contribution.request_validator not in {
+                _validate_classification_runtime_request,
+                _validate_legacy_classification_runtime_request,
+            }
         or contribution.result_validator is not _validate_classification_runtime_result
         or dict(contribution.metadata) != {
             "production_entrypoint": CLASSIFICATION_PRODUCTION_ENTRYPOINT,
@@ -481,9 +880,13 @@ __all__ = [
     "CLASSIFICATION_PROVIDER_ID",
     "CLASSIFICATION_RUNTIME_ADAPTER_ID",
     "ClassificationAdapterV1",
+    "ClassificationExecutionPortV1",
+    "ClassificationInputV1",
+    "ClassificationOutputV1",
     "LogisticRegressionAdapterV1",
     "RandomForestAdapterV1",
     "adapter_registry",
+    "build_classification_runtime_contribution",
     "classification_runtime_registry",
     "dispatch_classification_runtime_binding",
     "get_classification_adapter",

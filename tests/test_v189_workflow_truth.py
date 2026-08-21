@@ -46,7 +46,12 @@ from workbench.agent.workflow_runtime import (
     build_workflow_step_executor,
     issue_server_evidence_port,
 )
-from workbench.reporting import render_html_report
+from workbench.reporting import (
+    WorkflowReportPayloadV1,
+    WorkflowReportStepV1,
+    issue_workflow_report_writer,
+    render_html_report,
+)
 
 
 
@@ -73,6 +78,65 @@ def _test_evidence_port(project_root):
 
 
 EvidencePersistencePort = _test_evidence_port
+
+
+def _issue_truth_workflow_report_writer(tmp_path, draft):
+    """Issue the current receipt-bound writer used by formal-output probes."""
+
+    report_step = next(
+        step for step in draft.steps if step.operation_id == "report.compose"
+    )
+    run_root = tmp_path / "runs" / str(draft.target["run_id"])
+    run_root.mkdir(parents=True, exist_ok=True)
+    initialize_artifact_index(run_root)
+    port = EvidencePersistencePort(tmp_path)
+    receipt = port.admit(draft, report_step)
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, report_step))
+    try:
+        collection_id = f"workflow_report_collection_{draft.workflow_id}"
+        payload = WorkflowReportPayloadV1(
+            workflow_id=draft.workflow_id,
+            workflow_plan_fingerprint=draft.plan_fingerprint,
+            steps=(
+                WorkflowReportStepV1(
+                    step_id=report_step.step_id,
+                    status="completed",
+                    artifact_ids=(collection_id,),
+                ),
+            ),
+        )
+        writer = issue_workflow_report_writer(
+            payload,
+            port,
+            receipt,
+            canonical_run_root=run_root,
+            producer_step="report.compose",
+            input_collection=(collection_id,),
+            artifact_bindings={
+                "html": (
+                    "reports",
+                    f"{draft.workflow_id}.html",
+                    f"workflow_report_{draft.workflow_id}_html",
+                    "report",
+                ),
+                "pdf": (
+                    "reports",
+                    f"{draft.workflow_id}.pdf",
+                    f"workflow_report_{draft.workflow_id}_pdf",
+                    "report",
+                ),
+                "xlsx": (
+                    "exports",
+                    f"{draft.workflow_id}.xlsx",
+                    f"workflow_report_{draft.workflow_id}_xlsx",
+                    "table_export",
+                ),
+            },
+        )
+    except Exception:
+        _WRITE_CONTEXT.reset(context_token)
+        raise
+    return port, receipt, report_step, context_token, writer
 from workbench.agent.post_estimation_registry import (
     POST_ESTIMATION_UNKNOWN_FAMILY,
     POST_ESTIMATION_UNKNOWN_OPERATION,
@@ -1382,20 +1446,14 @@ def test_model_branch_recomputes_the_source_file_digest(tmp_path) -> None:
     source_root.mkdir(parents=True)
     source_path = source_root / "data.csv"
     source_path.write_text("actual source bytes\n", encoding="utf-8")
-    (source_root / "artifacts_index.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "artifacts": [
-                    {
-                        "artifact_id": "raw-1",
-                        "path": "data.csv",
-                        "sha256": "sha256:declared-but-wrong",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+    initialize_artifact_index(source_root)
+    register_artifact(
+        source_root,
+        "raw-1",
+        source_path,
+        "raw_data",
+        "fixture",
+        [],
     )
     model_root = tmp_path / "runs" / "model-run"
     model_artifact = model_root / "artifacts" / "model" / "ols_1.json"
@@ -1405,20 +1463,14 @@ def test_model_branch_recomputes_the_source_file_digest(tmp_path) -> None:
         json.dumps({"run_id": "model-run", "status": "completed"}),
         encoding="utf-8",
     )
-    (model_root / "artifacts_index.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "artifacts": [
-                    {
-                        "artifact_id": "ols_1",
-                        "path": "artifacts/model/ols_1.json",
-                        "sha256": sha256_file(model_artifact),
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+    initialize_artifact_index(model_root)
+    register_artifact(
+        model_root,
+        "ols_1",
+        model_artifact,
+        "model_result",
+        "model.genesis",
+        [],
     )
     branch = {
         "branch_id": "main",
@@ -1597,20 +1649,16 @@ def test_model_post_estimation_rejects_source_artifact_mismatch(tmp_path) -> Non
     draft = compile_fixture_workflow(workflow_id="wf-model-source-mismatch")
     source_root = tmp_path / "runs" / "run-1"
     source_root.mkdir(parents=True)
-    (source_root / "artifacts_index.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "artifacts": [
-                    {
-                        "artifact_id": "raw-1",
-                        "path": "data.csv",
-                        "sha256": "sha256:source-1",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+    source_path = source_root / "data.csv"
+    source_path.write_text("actual source bytes\n", encoding="utf-8")
+    initialize_artifact_index(source_root)
+    register_artifact(
+        source_root,
+        "raw-1",
+        source_path,
+        "raw_data",
+        "fixture",
+        [],
     )
     model_root = tmp_path / "runs" / "model-run"
     model_artifact = model_root / "artifacts" / "model" / "ols_1.json"
@@ -1620,20 +1668,14 @@ def test_model_post_estimation_rejects_source_artifact_mismatch(tmp_path) -> Non
         json.dumps({"run_id": "model-run", "status": "completed"}),
         encoding="utf-8",
     )
-    (model_root / "artifacts_index.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "artifacts": [
-                    {
-                        "artifact_id": "ols_1",
-                        "path": "artifacts/model/ols_1.json",
-                        "sha256": "sha256:model-artifact",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+    initialize_artifact_index(model_root)
+    register_artifact(
+        model_root,
+        "ols_1",
+        model_artifact,
+        "model_result",
+        "model.genesis",
+        [],
     )
     branch = {
         "branch_id": "main",
@@ -1968,10 +2010,9 @@ def test_formal_writer_rolls_back_when_parent_is_replaced_during_commit(
 
     draft = compile_fixture_workflow(workflow_id="wf-formal-commit-race")
     run_root = tmp_path / "runs" / "run-1"
-    run_root.mkdir(parents=True)
-    initialize_artifact_index(run_root)
-    port = EvidencePersistencePort(tmp_path)
-    receipt = port.admit(draft, draft.steps[0])
+    port, receipt, report_step, context_token, writer = _issue_truth_workflow_report_writer(
+        tmp_path, draft
+    )
     outside = tmp_path / "outside"
     outside.mkdir()
     reports = run_root / "reports"
@@ -1986,20 +2027,18 @@ def test_formal_writer_rolls_back_when_parent_is_replaced_during_commit(
         return original_replace(*args, **kwargs)
 
     monkeypatch.setattr(workflow_runtime.os, "replace", replace_after_parent_move)
-    context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[0]))
     try:
         with pytest.raises(WorkflowExecutionError, match="PATH|registry|admission"):
             render_html_report(
-                {"title": "race"},
+                writer,
                 run_root,
-                filename="race.html",
-                evidence_port=port,
-                admission_receipt=receipt,
+                filename=f"{draft.workflow_id}.html",
+                artifact_id=f"workflow_report_{draft.workflow_id}_html",
             )
     finally:
         _WRITE_CONTEXT.reset(context_token)
 
-    assert not (outside / "reports" / "race.html").exists()
+    assert not (outside / "reports" / f"{draft.workflow_id}.html").exists()
 
 
 def test_formal_registration_rolls_back_when_run_root_is_replaced_after_commit(
@@ -2010,11 +2049,10 @@ def test_formal_registration_rolls_back_when_run_root_is_replaced_after_commit(
     from workbench import reporting
 
     draft = compile_fixture_workflow(workflow_id="wf-formal-registration-race")
-    port = EvidencePersistencePort(tmp_path)
-    receipt = port.admit(draft, draft.steps[0])
     run_root = tmp_path / "runs" / "run-1"
-    run_root.mkdir(parents=True)
-    initialize_artifact_index(run_root)
+    port, receipt, report_step, context_token, writer = _issue_truth_workflow_report_writer(
+        tmp_path, draft
+    )
     outside = tmp_path / "outside"
     outside.mkdir()
     moved_root = outside / "run-1"
@@ -2030,7 +2068,6 @@ def test_formal_registration_rolls_back_when_run_root_is_replaced_after_commit(
             initialize_artifact_index(run_root)
         return original_admit(self, *args, **kwargs)
 
-    context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[0]))
     try:
         with patch.object(
             EvidencePersistencePortClass,
@@ -2039,24 +2076,26 @@ def test_formal_registration_rolls_back_when_run_root_is_replaced_after_commit(
         ):
             with pytest.raises(Exception):
                 reporting.render_html_report(
-                    {"title": "Race", "facts": [], "warnings": []},
+                    writer,
                     run_root,
-                    filename="race.html",
-                    artifact_id="race_html",
-                    evidence_port=port,
-                    admission_receipt=receipt,
+                    filename=f"{draft.workflow_id}.html",
+                    artifact_id=f"workflow_report_{draft.workflow_id}_html",
                 )
     finally:
         _WRITE_CONTEXT.reset(context_token)
 
     assert moved
-    assert not (moved_root / "reports" / "race.html").exists()
+    assert not (moved_root / "reports" / f"{draft.workflow_id}.html").exists()
     for index_path in (
         moved_root / "artifacts_index.json",
         run_root / "artifacts_index.json",
     ):
         index = json.loads(index_path.read_text(encoding="utf-8"))
-        assert all(item.get("artifact_id") != "race_html" for item in index["artifacts"])
+        assert all(
+            item.get("artifact_id")
+            != f"workflow_report_{draft.workflow_id}_html"
+            for item in index["artifacts"]
+        )
 
 
 def test_formal_index_publish_rolls_back_when_run_root_is_replaced_after_admission(
@@ -2067,11 +2106,10 @@ def test_formal_index_publish_rolls_back_when_run_root_is_replaced_after_admissi
     from workbench import reporting
 
     draft = compile_fixture_workflow(workflow_id="wf-formal-index-race")
-    port = EvidencePersistencePort(tmp_path)
-    receipt = port.admit(draft, draft.steps[0])
     run_root = tmp_path / "runs" / "run-1"
-    run_root.mkdir(parents=True)
-    initialize_artifact_index(run_root)
+    port, receipt, report_step, context_token, writer = _issue_truth_workflow_report_writer(
+        tmp_path, draft
+    )
     outside = tmp_path / "outside"
     outside.mkdir()
     moved_root = outside / "run-1"
@@ -2087,7 +2125,6 @@ def test_formal_index_publish_rolls_back_when_run_root_is_replaced_after_admissi
             initialize_artifact_index(run_root)
         return original_publish(self, output_target, row)
 
-    context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[0]))
     try:
         with patch.object(
             EvidencePersistencePortClass,
@@ -2096,24 +2133,26 @@ def test_formal_index_publish_rolls_back_when_run_root_is_replaced_after_admissi
         ):
             with pytest.raises(Exception):
                 reporting.render_html_report(
-                    {"title": "Race", "facts": [], "warnings": []},
+                    writer,
                     run_root,
-                    filename="race.html",
-                    artifact_id="race_html",
-                    evidence_port=port,
-                    admission_receipt=receipt,
+                    filename=f"{draft.workflow_id}.html",
+                    artifact_id=f"workflow_report_{draft.workflow_id}_html",
                 )
     finally:
         _WRITE_CONTEXT.reset(context_token)
 
     assert moved
-    assert not (moved_root / "reports" / "race.html").exists()
+    assert not (moved_root / "reports" / f"{draft.workflow_id}.html").exists()
     for index_path in (
         moved_root / "artifacts_index.json",
         run_root / "artifacts_index.json",
     ):
         index = json.loads(index_path.read_text(encoding="utf-8"))
-        assert all(item.get("artifact_id") != "race_html" for item in index["artifacts"])
+        assert all(
+            item.get("artifact_id")
+            != f"workflow_report_{draft.workflow_id}_html"
+            for item in index["artifacts"]
+        )
 
 
 def test_formal_admission_rejects_file_rebind_after_commit(tmp_path) -> None:
@@ -2122,11 +2161,10 @@ def test_formal_admission_rejects_file_rebind_after_commit(tmp_path) -> None:
     import workbench.agent.workflow_runtime as workflow_runtime
 
     draft = compile_fixture_workflow(workflow_id="wf-formal-file-rebind")
-    port = EvidencePersistencePort(tmp_path)
-    receipt = port.admit(draft, draft.steps[0])
     run_root = tmp_path / "runs" / "run-1"
-    run_root.mkdir(parents=True)
-    initialize_artifact_index(run_root)
+    port, receipt, report_step, context_token, writer = _issue_truth_workflow_report_writer(
+        tmp_path, draft
+    )
     original_admit = EvidencePersistencePortClass._admit_server_artifact
 
     def replace_file_before_admission(self, *args, **kwargs):
@@ -2136,7 +2174,6 @@ def test_formal_admission_rejects_file_rebind_after_commit(tmp_path) -> None:
         os.replace(rebound, path)
         return original_admit(self, *args, **kwargs)
 
-    context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[0]))
     try:
         with patch.object(
             workflow_runtime.EvidencePersistencePort,
@@ -2145,54 +2182,42 @@ def test_formal_admission_rejects_file_rebind_after_commit(tmp_path) -> None:
         ):
             with pytest.raises(WorkflowExecutionError, match="PATH|registry|admission"):
                 render_html_report(
-                    {"title": "Rebind", "facts": [], "warnings": []},
+                    writer,
                     run_root,
-                    filename="rebind.html",
-                    artifact_id="rebind_html",
-                    evidence_port=port,
-                    admission_receipt=receipt,
+                    filename=f"{draft.workflow_id}.html",
+                    artifact_id=f"workflow_report_{draft.workflow_id}_html",
                 )
     finally:
         _WRITE_CONTEXT.reset(context_token)
 
     index = json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))
-    assert all(item.get("artifact_id") != "rebind_html" for item in index["artifacts"])
+    assert all(
+        item.get("artifact_id")
+        != f"workflow_report_{draft.workflow_id}_html"
+        for item in index["artifacts"]
+    )
 
 
-def test_formal_failure_restores_existing_destination_content(tmp_path) -> None:
-    """A failed replacement preserves a pre-existing formal output."""
-
-    import workbench.agent.workflow_runtime as workflow_runtime
+def test_formal_failure_preserves_existing_destination_content(tmp_path) -> None:
+    """A different pre-existing formal output is never overwritten."""
 
     draft = compile_fixture_workflow(workflow_id="wf-formal-existing-rollback")
-    port = EvidencePersistencePort(tmp_path)
-    receipt = port.admit(draft, draft.steps[0])
     run_root = tmp_path / "runs" / "run-1"
-    run_root.mkdir(parents=True)
-    initialize_artifact_index(run_root)
-    existing = run_root / "reports" / "existing.html"
+    port, receipt, report_step, context_token, writer = _issue_truth_workflow_report_writer(
+        tmp_path, draft
+    )
+    existing = run_root / "reports" / f"{draft.workflow_id}.html"
     existing.parent.mkdir()
     existing.write_bytes(b"old-content")
 
-    def reject_admission(*_args, **_kwargs):
-        raise WorkflowExecutionError("forced formal admission failure")
-
-    context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[0]))
     try:
-        with patch.object(
-            workflow_runtime.EvidencePersistencePort,
-            "_admit_server_artifact",
-            reject_admission,
-        ):
-            with pytest.raises(WorkflowExecutionError, match="forced formal admission failure"):
-                render_html_report(
-                    {"title": "Replacement", "facts": [], "warnings": []},
-                    run_root,
-                    filename="existing.html",
-                    artifact_id="existing_html",
-                    evidence_port=port,
-                    admission_receipt=receipt,
-                )
+        with pytest.raises(WorkflowExecutionError, match="occupied"):
+            render_html_report(
+                writer,
+                run_root,
+                filename=f"{draft.workflow_id}.html",
+                artifact_id=f"workflow_report_{draft.workflow_id}_html",
+            )
     finally:
         _WRITE_CONTEXT.reset(context_token)
 

@@ -27,7 +27,6 @@
     ],
     "qq_residuals": [],
     "raw_data.csv": [],
-    "report_html": [],
     "residuals_fitted": [],
     "residuals_vs_x": [],
     "scatter_plots": [],
@@ -53,7 +52,9 @@
       "cleaned_dataset"
     ]
   },
-  "error_codes": [],
+  "error_codes": [
+    "REPORT_RENDER_FAILED"
+  ],
   "models": {
     "ols_1": {
       "coef_keys": [

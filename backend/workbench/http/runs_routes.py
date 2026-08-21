@@ -67,6 +67,25 @@ from ..services.results_service import (
     ReportEvidenceRequestIdentityV1,
     ServerOwnedReportEvidencePersistenceV1,
     current_report_evidence_persistence,
+    read_classification_evidence_for_report,
+    project_persisted_results_evidence,
+    results_evidence_server_receipt,
+)
+from ..services.classification_consumer_service import (
+    _mint_classification_run_capability,
+    unavailable_classification_report_evidence,
+)
+from ..services.data_consumer_projection_service import (
+    DataConsumerProjectionError,
+    data_consumer_projection_receipt,
+    issue_data_consumer_run_capability,
+    read_data_consumer_projection,
+    unavailable_data_consumer_projection,
+)
+from ..services.survey_consumer_service import (
+    issue_survey_run_capability,
+    read_survey_report_evidence,
+    unavailable_survey_report_evidence,
 )
 from ..predictive_research.consumer_projection import (
     read_classification_artifacts_wrapper_from_run_root,
@@ -927,34 +946,69 @@ def get_run_endpoint(run_id: str, project_root: str, request: Request) -> dict:
         # missing or malformed registry must remain an empty typed surface;
         # it must never turn a safe run-detail response into a 500.
         post_estimation_results = []
+    request_identity = _report_identity_for_request(request, run_id)
     report_evidence = _report_evidence_for_run(
         run_root,
         post_estimation_results,
-        _report_identity_for_request(request, run_id),
+        request_identity,
         project_root=project_root,
     )
+    results_evidence = project_persisted_results_evidence(
+        run_root=run_root,
+        request_identity=request_identity,
+        project_root=project_root,
+    )
+    results_evidence_receipt = results_evidence_server_receipt(results_evidence)
+    report_evidence_receipt = _report_evidence_server_receipt(report_evidence)
     try:
         artifact_counts = _artifact_counts(run_root)
     except (OSError, TypeError, ValueError, WorkbenchAPIError):
         artifact_counts = {}
-    classification_evidence = None
     try:
-        classification_records = _read_artifact_records(run_root)
-    except (OSError, TypeError, ValueError, WorkbenchAPIError):
-        classification_records = []
-    if any(
-        isinstance(record, dict) and record.get("artifact_type") == "classification_artifacts"
-        for record in classification_records
-    ):
+        classification_capability = _mint_classification_run_capability(run_root)
+        classification_evidence = read_classification_evidence_for_report(
+            classification_capability,
+        )
+    except (PayloadContractError, PredictiveContractError, OSError, ValueError) as exc:
+        classification_evidence = unavailable_classification_report_evidence(
+            getattr(exc, "code", "CLASSIFICATION_EVIDENCE_UNAVAILABLE")
+        )
+    data_consumer_evidence = unavailable_data_consumer_projection(
+        "report",
+        "DATA_CONSUMER_REPORT_IDENTITY_UNAVAILABLE",
+    )
+    if type(request_identity) is ReportEvidenceRequestIdentityV1:
         try:
-            classification_evidence = read_classification_artifacts_wrapper_from_run_root(run_root)
-        except (PayloadContractError, PredictiveContractError, OSError, ValueError) as exc:
-            classification_evidence = {
-                "payload_schema": "workbench.prediction.classification-artifacts-wrapper.unavailable",
-                "schema_version": 0,
-                "status": "UNAVAILABLE",
-                "reason": getattr(exc, "code", "CLASSIFICATION_EVIDENCE_UNAVAILABLE"),
-            }
+            data_capability = issue_data_consumer_run_capability(
+                run_root,
+                project_ref=request_identity.project_ref,
+                session_ref=request_identity.session_ref,
+            )
+            data_consumer_evidence = read_data_consumer_projection(
+                data_capability,
+                "report",
+            )
+        except (DataConsumerProjectionError, OSError, TypeError, ValueError) as exc:
+            data_consumer_evidence = unavailable_data_consumer_projection(
+                "report",
+                getattr(exc, "code", "DATA_CONSUMER_PROJECTION_UNAVAILABLE"),
+            )
+    data_consumer_evidence_receipt = data_consumer_projection_receipt(
+        data_consumer_evidence
+    )
+    try:
+        survey_capability = issue_survey_run_capability(
+            run_root.parent.parent,
+            run_id,
+        )
+        survey_evidence = read_survey_report_evidence(survey_capability)
+    except (PredictiveContractError, OSError, TypeError, ValueError) as exc:
+        survey_evidence = unavailable_survey_report_evidence(
+            getattr(exc, "code", "SURVEY_EVIDENCE_UNAVAILABLE")
+        )
+    survey_evidence_receipt = survey_evidence.get("receipt")
+    if not isinstance(survey_evidence_receipt, dict):
+        survey_evidence_receipt = None
     return {
         **summary,
         "lineage": manifest.get("lineage", []),
@@ -963,20 +1017,36 @@ def get_run_endpoint(run_id: str, project_root: str, request: Request) -> dict:
         "model_results": model_results,
         "model_results_authority": "non-authoritative",
         "model_results_status": "unavailable",
+        "results_evidence": results_evidence,
+        "results_evidence_authority": "server-owned",
+        "results_evidence_receipt": results_evidence_receipt,
         "diagnostic_summary_preview": preview,
         "table_1": [],
+        "table_1_authority": "non-authoritative",
         "statistical_evidence": None,
+        "statistical_evidence_authority": "non-authoritative",
         "labels": {"variable_labels": {}, "value_labels": {}},
+        "labels_authority": "non-authoritative",
         "model_family_evidence": model_family_evidence,
         "model_family_evidence_authority": "non-authoritative",
         "prediction_evidence": prediction_evidence,
+        "prediction_evidence_authority": "non-authoritative",
         "classification_evidence": classification_evidence,
+        "classification_evidence_authority": "server-owned",
+        "data_consumer_evidence": data_consumer_evidence,
+        "data_consumer_evidence_authority": "server-owned",
+        "data_consumer_evidence_receipt": data_consumer_evidence_receipt,
+        "survey_evidence": survey_evidence,
+        "survey_evidence_authority": "server-owned",
+        "survey_evidence_receipt": survey_evidence_receipt,
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the
         # run surface show that answer instead of leaving it in an artifact.
         "post_estimation_results": post_estimation_results,
+        "post_estimation_results_authority": "non-authoritative",
         "report_evidence": report_evidence,
-        "report_evidence_receipt": _report_evidence_server_receipt(report_evidence),
+        "report_evidence_authority": "server-owned",
+        "report_evidence_receipt": report_evidence_receipt,
     }
 
 

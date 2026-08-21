@@ -23,7 +23,11 @@ from ....contracts.model.quantile_regression import QuantileRegressionRequest
 from ....contracts.model.survival import SurvivalCoxRequest
 from ....contracts.common.envelope import ContractError as TypedContractError
 from ....model_options import ModelOptionsContract
-from ...registry import ModelHandler, ModelOptionsValidationError
+from ...registry import (
+    COEFFICIENT_RESULT_BINDING_KEY,
+    ModelHandler,
+    ModelOptionsValidationError,
+)
 
 
 MODEL_OPTIONS_VERSION = "v1.8.6"
@@ -646,8 +650,40 @@ def fit_quantile(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
 
 def model_handlers() -> dict[str, ModelHandler]:
     return {
-        "ordinal_logit": ModelHandler("ordinal_logit", "ordinal_logit_1", ("ordinal",), fit_ordinal, validate_ordinal_options, _options_contract("ordinal_logit")),
-        "multinomial_logit": ModelHandler("multinomial_logit", "multinomial_logit_1", ("nominal",), fit_multinomial, validate_multinomial_options, _options_contract("multinomial_logit")),
-        "survival_cox": ModelHandler("survival_cox", "survival_cox_1", ("survival",), fit_survival, validate_survival_options, _options_contract("survival")),
-        "quantile_regression": ModelHandler("quantile_regression", "quantile_regression_1", ("continuous",), fit_quantile, validate_quantile_options, _options_contract("quantile_regression")),
+        "ordinal_logit": ModelHandler(
+            "ordinal_logit",
+            "ordinal_logit_1",
+            ("ordinal",),
+            fit_ordinal,
+            validate_ordinal_options,
+            _options_contract("ordinal_logit"),
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        "multinomial_logit": ModelHandler(
+            "multinomial_logit",
+            "multinomial_logit_1",
+            ("nominal",),
+            fit_multinomial,
+            validate_multinomial_options,
+            _options_contract("multinomial_logit"),
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        "survival_cox": ModelHandler(
+            "survival_cox",
+            "survival_cox_1",
+            ("survival",),
+            fit_survival,
+            validate_survival_options,
+            _options_contract("survival"),
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
+        "quantile_regression": ModelHandler(
+            "quantile_regression",
+            "quantile_regression_1",
+            ("continuous",),
+            fit_quantile,
+            validate_quantile_options,
+            _options_contract("quantile_regression"),
+            result_binding_key=COEFFICIENT_RESULT_BINDING_KEY,
+        ),
     }

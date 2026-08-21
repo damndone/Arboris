@@ -20,7 +20,6 @@
     "histograms": [],
     "kde_plots": [],
     "raw_data.csv": [],
-    "report_html": [],
     "sa_did": [
       "cleaned_dataset"
     ],
@@ -54,6 +53,7 @@
   "error_codes": [
     "DID_DYNAMIC_THIN_SUPPORT",
     "PANEL_POOLED_MODEL",
+    "REPORT_RENDER_FAILED",
     "VARIABLE_DROPPED"
   ],
   "models": {

@@ -23,7 +23,7 @@ from workbench.agent.trusted_executor_registry import (
     TrustedExecutorRegistryError,
 )
 from workbench.agent.workflow_capability_registry import CutoverCapabilityCatalogV1
-from workbench.providers.catalog import ProviderCatalogV1
+from workbench.providers.catalog import ProviderCatalogV1, is_server_owned_catalog
 
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -144,6 +144,11 @@ def compose_agent_notebook_runtime(
         raise TrustedExecutorRegistryError(
             "RUNTIME_PROVIDER_CATALOG_REQUIRED",
             "provider catalog must be the server-loaded ProviderCatalogV1",
+        )
+    if not is_server_owned_catalog(provider_catalog):
+        raise TrustedExecutorRegistryError(
+            "RUNTIME_PROVIDER_CATALOG_REQUIRED",
+            "provider catalog must be the exact catalog issued by the server loader",
         )
     if evidence_committer is not None and not callable(evidence_committer):
         raise TrustedExecutorRegistryError(

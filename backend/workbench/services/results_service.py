@@ -28,6 +28,15 @@ from ..evidence.authority import (
 )
 from ..term_parser import is_q_quoted_dummy, parse_term
 from .lmm_result_adapter import read_lmm_public_results
+from .classification_consumer_service import read_classification_report_evidence
+
+
+def read_classification_evidence_for_report(
+    capability: object,
+) -> dict[str, object]:
+    """Expose Report classification evidence through the central service."""
+
+    return read_classification_report_evidence(capability)
 
 
 _OLS_RESULT_CONTRACT_RE = re.compile(r"^ols_result_contract_v(\d+)$")
@@ -174,7 +183,8 @@ def _auto_dummy_coded_issue(column: str) -> dict:
 from ..contracts.evidence.persistence import EvidenceCommitBindingV1
 from ..evidence.consumer_adapters import (
     EvidenceProjectionError,
-    PersistedEvidenceEnvelopeV1,
+    ServerOwnedEvidenceProjectionSourceV1,
+    ServerOwnedEvidenceSensitivityPolicyV1,
 )
 from ..evidence.contracts import ArtifactAdmissionV1
 from ..evidence.persistence import (
@@ -221,6 +231,7 @@ class ReportEvidenceRequestIdentityV1:
 
 _REPORT_OWNER_ADMISSIONS: weakref.WeakKeyDictionary[object, object] = weakref.WeakKeyDictionary()
 _REPORT_OWNER_ADMISSIONS_LOCK = RLock()
+_REPORT_REQUEST_IDENTITY_ADMISSIONS: dict[tuple[int, int], ReportEvidenceRequestIdentityV1] = {}
 
 
 def _report_owner_payload_digest(
@@ -408,13 +419,24 @@ class ServerOwnedReportEvidencePersistenceV1:
                     "EVIDENCE_ADMISSION_NOT_FOUND",
                     "owner capability is not bound to the requested canonical commit and admission",
                 )
-            canonical_record = PersistedEvidenceEnvelopeV1(
+            sensitivity_policy = ServerOwnedEvidenceSensitivityPolicyV1._from_host(
+                scope_ref=scope_ref,
+                artifact_id=artifact.artifact_id,
                 commit_id=binding.commit_id,
-                artifact_ref=artifact.artifact_id,
-                envelope_ref=f"evidence-envelope:{artifact.envelope_digest}",
+                envelope_digest=binding.envelope_digest,
                 sensitivity="public",
-                binding=binding,
-                envelope=artifact.envelope.envelope,
+                authority_handle=authority_handle,
+            )
+            canonical_record = ServerOwnedEvidenceProjectionSourceV1(
+                evidence_store,
+                registry,
+                receipt,
+                scope_ref=scope_ref,
+                artifact_id=artifact.artifact_id,
+                commit_id=binding.commit_id,
+                sensitivity_policy=sensitivity_policy,
+                envelope_digest=binding.envelope_digest,
+                authority_handle=authority_handle,
             )
         except EvidenceProjectionError:
             raise
@@ -454,6 +476,9 @@ class ServerOwnedReportEvidencePersistenceV1:
             run_id=self._run_id,
             model_run_id=self._model_run_id,
             confirmation_ref=self._confirmation_ref,
+        )
+        _REPORT_REQUEST_IDENTITY_ADMISSIONS[(id(self), id(self._report_request_identity))] = (
+            self._report_request_identity
         )
         self._canonical_artifact = artifact
         self._report_authority_marker = object()
@@ -615,15 +640,33 @@ class ServerOwnedReportEvidencePersistenceV1:
         self,
         candidate: ReportEvidenceRequestIdentityV1 | None,
     ) -> ReportEvidenceRequestIdentityV1:
-        """Return only the request identity created during host admission."""
+        """Return the request identity rebuilt from the live owner binding."""
 
         self._require_report_authority()
-        if candidate is not None and candidate is not self._report_request_identity:
+        expected = ReportEvidenceRequestIdentityV1(
+            actor_ref=self._actor_ref,
+            project_ref=self._project_ref,
+            session_ref=self._session_ref,
+            scope_ref=self._scope_ref,
+            run_id=self._run_id,
+            model_run_id=self._model_run_id,
+            confirmation_ref=self._confirmation_ref,
+        )
+        cached = getattr(self, "_report_request_identity", None)
+        if (
+            type(cached) is not ReportEvidenceRequestIdentityV1
+            or cached != expected
+            or _REPORT_REQUEST_IDENTITY_ADMISSIONS.get((id(self), id(cached))) is not cached
+        ):
+            cached = expected
+            object.__setattr__(self, "_report_request_identity", cached)
+            _REPORT_REQUEST_IDENTITY_ADMISSIONS[(id(self), id(cached))] = cached
+        if candidate is not None and candidate is not cached:
             raise EvidenceProjectionError(
                 "EVIDENCE_OWNER_REQUEST_REQUIRED",
-                "Report request identity must be the exact owner-bound server identity",
+                "Report request identity must be the exact owner-issued server identity",
             )
-        return self._report_request_identity
+        return cached
 
     @classmethod
     def _from_host(cls, *args: object, **kwargs: object) -> "ServerOwnedReportEvidencePersistenceV1":
@@ -709,27 +752,88 @@ class ServerOwnedReportEvidencePersistenceV1:
         from ..evidence.consumer_adapters import default_projection_registry
         from ..report_view_model import build_persisted_evidence_report_view
 
+        source, artifact = self._canonical_report_source_and_artifact()
         projection = default_projection_registry().project(
-            self._canonical_record,
+            source,
             consumer_id="report",
             destination="local",
         )
         return build_persisted_evidence_report_view(
             projection,
             owner=self,
-            artifact_admission=self._canonical_artifact,
+            artifact_admission=artifact,
         )
 
     def _canonical_report_artifact(self) -> ArtifactAdmissionV1:
         """Return the exact C0 artifact admission used by Report projection."""
 
+        _source, artifact = self._canonical_report_source_and_artifact()
+        return artifact
+
+    def _canonical_report_source_and_artifact(
+        self,
+    ) -> tuple[ServerOwnedEvidenceProjectionSourceV1, ArtifactAdmissionV1]:
+        """Reload the canonical source from live C0 store, registry and receipt."""
+
         self._require_report_authority()
-        if type(self._canonical_artifact) is not ArtifactAdmissionV1:
-            raise EvidenceProjectionError(
-                "EVIDENCE_PROVENANCE_REQUIRED",
-                "Report provenance is not bound to an admitted artifact",
+        try:
+            admitted = self._registry.get(self._artifact_id, scope_ref=self._scope_ref)
+            validate_registry_persistence_receipt(
+                admitted,
+                self._receipt,
+                registry=self._registry,
             )
-        return self._canonical_artifact
+            binding = self._evidence_store.load(
+                self._commit_id,
+                registry=self._registry,
+                receipt=self._receipt,
+            )
+            artifact = self._evidence_store.load_packet(
+                self._commit_id,
+                registry=self._registry,
+                receipt=self._receipt,
+            )
+            if type(artifact) is not ArtifactAdmissionV1:
+                raise ValueError("stored evidence packet did not return an admitted artifact")
+            if (
+                artifact.to_dict() != admitted.to_dict()
+                or artifact.artifact_id != self._artifact_id
+                or artifact.scope_ref != self._scope_ref
+                or binding.commit_id != self._commit_id
+                or binding.artifact_admission_ref != artifact.artifact_id
+                or binding.envelope_digest != artifact.envelope_digest
+            ):
+                raise EvidenceProjectionError(
+                    "EVIDENCE_ADMISSION_NOT_FOUND",
+                    "Report owner canonical source is not bound to the live packet store",
+                )
+            sensitivity_policy = ServerOwnedEvidenceSensitivityPolicyV1._from_host(
+                scope_ref=self._scope_ref,
+                artifact_id=artifact.artifact_id,
+                commit_id=binding.commit_id,
+                envelope_digest=binding.envelope_digest,
+                sensitivity="public",
+                authority_handle=self._authority_handle,
+            )
+            source = ServerOwnedEvidenceProjectionSourceV1(
+                self._evidence_store,
+                self._registry,
+                self._receipt,
+                scope_ref=self._scope_ref,
+                artifact_id=artifact.artifact_id,
+                commit_id=binding.commit_id,
+                sensitivity_policy=sensitivity_policy,
+                envelope_digest=binding.envelope_digest,
+                authority_handle=self._authority_handle,
+            )
+            return source, admitted
+        except EvidenceProjectionError:
+            raise
+        except (EvidencePersistenceError, EvidenceRegistryError, TypeError, ValueError, KeyError) as exc:
+            raise EvidenceProjectionError(
+                "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+                "Report owner canonical source is not backed by the live C0 store and registry",
+            ) from exc
 
     def issue_report_projection(self, wire: Mapping[str, object]):
         """Issue an opaque Report projection only for this exact C0 owner."""
@@ -830,7 +934,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         confirmation_ref: str,
         artifact_file_sha256: str,
         envelope_digest: str | None = None,
-    ) -> PersistedEvidenceEnvelopeV1:
+    ) -> ServerOwnedEvidenceProjectionSourceV1:
         """Load only the registry-owned artifact bound to this commit context."""
 
         self._require_report_authority()
@@ -926,21 +1030,31 @@ class ServerOwnedReportEvidencePersistenceV1:
                     "EVIDENCE_ARTIFACT_ADMISSION_MISMATCH",
                     "requested admission ref differs from the committed binding",
                 )
-            envelope = artifact.envelope.envelope
-            record = PersistedEvidenceEnvelopeV1(
+            sensitivity_policy = ServerOwnedEvidenceSensitivityPolicyV1._from_host(
+                scope_ref=self._scope_ref,
+                artifact_id=artifact.artifact_id,
                 commit_id=binding.commit_id,
-                artifact_ref=artifact.artifact_id,
-                envelope_ref=f"evidence-envelope:{artifact.envelope_digest}",
+                envelope_digest=binding.envelope_digest,
                 sensitivity="public",
-                binding=binding,
-                envelope=envelope,
+                authority_handle=self._authority_handle,
             )
-            if envelope_digest is not None and record.envelope_digest != envelope_digest:
+            source = ServerOwnedEvidenceProjectionSourceV1(
+                self._evidence_store,
+                self._registry,
+                self._receipt,
+                scope_ref=self._scope_ref,
+                artifact_id=artifact.artifact_id,
+                commit_id=binding.commit_id,
+                sensitivity_policy=sensitivity_policy,
+                envelope_digest=binding.envelope_digest,
+                authority_handle=self._authority_handle,
+            )
+            if envelope_digest is not None and binding.envelope_digest != envelope_digest:
                 raise EvidenceProjectionError(
                     "PROJECTION_DIGEST_MISMATCH",
                     "persisted envelope digest differs from the requested commit",
                 )
-            return record
+            return source
         except EvidenceProjectionError:
             raise
         except (EvidencePersistenceError, EvidenceRegistryError, TypeError, ValueError, KeyError) as exc:
@@ -1053,6 +1167,258 @@ def current_report_evidence_persistence(
     return capability
 
 
+def _unavailable_consumer_evidence(
+    consumer_id: str,
+    reason_code: str,
+    *,
+    status: str = "unavailable",
+) -> dict[str, object]:
+    """Return one uniform, typed failure shape for every consumer surface."""
+
+    return {
+        "schema_version": 1,
+        "consumer_id": consumer_id,
+        "consumer_version": "1.0",
+        "status": status,
+        "availability": "unavailable",
+        "execution_status": "unavailable",
+        "completeness_status": "unavailable",
+        "authority": "server-owned",
+        "source": "persisted-typed-evidence",
+        "facts": [],
+        "projection_digest": None,
+        "reason_code": reason_code,
+        "receipt": None,
+    }
+
+
+def _project_server_owned_consumer_evidence(
+    *,
+    consumer_id: str,
+    run_root: Path,
+    request_identity: ReportEvidenceRequestIdentityV1 | None,
+    project_root: Path | str | None,
+    requested_fact_ids: Sequence[str] | None = None,
+) -> dict[str, object]:
+    """Read and project one C0 packet without accepting a caller-owned source."""
+
+    if type(request_identity) is not ReportEvidenceRequestIdentityV1:
+        return _unavailable_consumer_evidence(
+            consumer_id,
+            "EVIDENCE_OWNER_REQUEST_REQUIRED",
+        )
+    if request_identity.run_id != run_root.name:
+        return _unavailable_consumer_evidence(
+            consumer_id,
+            "EVIDENCE_OWNER_CONTEXT_MISMATCH",
+        )
+
+    owner = current_report_evidence_persistence(
+        actor_ref=request_identity.actor_ref,
+        run_id=run_root.name,
+        project_ref=request_identity.project_ref,
+        session_ref=request_identity.session_ref,
+        scope_ref=request_identity.scope_ref,
+        model_run_id=request_identity.model_run_id,
+        artifact_id=None,
+        commit_id=None,
+        confirmation_ref=request_identity.confirmation_ref,
+        artifact_file_sha256=None,
+        project_root=project_root,
+    )
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        return _unavailable_consumer_evidence(
+            consumer_id,
+            "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+        )
+
+    try:
+        owner._require_report_authority()
+        owner._require_report_request_identity(request_identity)
+        if not owner.accepts_canonical_run_root(run_root):
+            raise EvidenceProjectionError(
+                "EVIDENCE_SCOPE_ROOT_MISMATCH",
+                "consumer evidence owner is not bound to this canonical run root",
+            )
+        source, _artifact = owner._canonical_report_source_and_artifact()
+        from ..evidence.consumer_adapters import default_projection_registry
+
+        projection = default_projection_registry().project(
+            source,
+            consumer_id=consumer_id,
+            destination="local",
+            requested_fact_ids=requested_fact_ids,
+        )
+        evidence = projection.to_dict()
+        evidence["schema_version"] = 1
+        # The digest covers the canonical typed projection plus its schema
+        # version.  Transport metadata and the receipt are deliberately not
+        # part of the digest, so consumers cannot alter evidence by wrapping it.
+        evidence["projection_digest"] = sha256_canonical(evidence)
+        evidence["authority"] = "server-owned"
+        evidence["source"] = "persisted-typed-evidence"
+        evidence["identity"] = {
+            "actor_ref": owner.actor_ref,
+            "project_ref": owner.project_ref,
+            "session_ref": owner.session_ref,
+            "scope_ref": owner.scope_ref,
+            "run_id": owner.run_id,
+            "model_run_id": owner.model_run_id,
+            "confirmation_ref": owner.confirmation_ref,
+        }
+        evidence["receipt"] = _consumer_evidence_receipt(evidence)
+        return evidence
+    except EvidenceProjectionError as exc:
+        return _unavailable_consumer_evidence(consumer_id, exc.code)
+    except (
+        AttributeError,
+        EvidencePersistenceError,
+        EvidenceRegistryError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ):
+        return _unavailable_consumer_evidence(
+            consumer_id,
+            "EVIDENCE_PROJECTION_UNAVAILABLE",
+        )
+
+
+def _consumer_evidence_receipt(
+    evidence: Mapping[str, object],
+) -> dict[str, object] | None:
+    """Issue a typed local receipt only for a complete consumer projection."""
+
+    digest = evidence.get("projection_digest")
+    consumer_id = evidence.get("consumer_id")
+    if (
+        evidence.get("status") not in {"available", "degraded"}
+        or not isinstance(consumer_id, str)
+        or not consumer_id.strip()
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(char not in "0123456789abcdef" for char in digest)
+    ):
+        return None
+    identity = evidence.get("identity")
+    if not isinstance(identity, Mapping):
+        return None
+    required_identity = (
+        "actor_ref",
+        "project_ref",
+        "session_ref",
+        "scope_ref",
+        "run_id",
+        "model_run_id",
+        "confirmation_ref",
+    )
+    if any(
+        not isinstance(identity.get(key), str) or not identity.get(key, "").strip()
+        for key in required_identity
+    ):
+        return None
+    return {
+        "schema_version": 1,
+        "kind": f"evidence.{consumer_id}.server-receipt.v1",
+        "projection_digest": digest,
+        "identity": dict(identity),
+        "provenance": {
+            "artifact_ref": evidence.get("artifact_ref"),
+            "commit_id": evidence.get("commit_id"),
+            "envelope_digest": evidence.get("envelope_digest"),
+        },
+    }
+
+
+def read_persisted_consumer_evidence_for_run(
+    *,
+    consumer_id: str,
+    project_root: Path | str,
+    run_id: str,
+    requested_fact_ids: Sequence[str] | None = None,
+) -> dict[str, object]:
+    """Read one consumer projection from the server-configured owner.
+
+    Agent and Notebook do not receive actor/session/model identities from the
+    model.  They resolve the identity from the server-installed C0 owner, then
+    use this same projection path.  A missing owner or a different run is an
+    explicit unavailable result, never a fallback to ``model_results`` files.
+    """
+
+    if type(consumer_id) is not str or not consumer_id.strip():
+        return _unavailable_consumer_evidence("unknown", "EVIDENCE_CONSUMER_REQUIRED")
+    if type(run_id) is not str or not run_id.strip():
+        return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_RUN_ID_REQUIRED")
+    configured = _REPORT_EVIDENCE_PERSISTENCE
+    if type(configured) is not ServerOwnedReportEvidencePersistenceV1:
+        return _unavailable_consumer_evidence(
+            consumer_id,
+            "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+        )
+    try:
+        identity = configured._require_report_request_identity(None)
+    except (AttributeError, EvidenceProjectionError, TypeError, ValueError):
+        return _unavailable_consumer_evidence(
+            consumer_id,
+            "EVIDENCE_OWNER_REQUEST_REQUIRED",
+        )
+    return _project_server_owned_consumer_evidence(
+        consumer_id=consumer_id,
+        run_root=Path(project_root).expanduser().resolve(strict=False) / "runs" / run_id,
+        request_identity=identity,
+        project_root=project_root,
+        requested_fact_ids=requested_fact_ids,
+    )
+
+
+def project_persisted_results_evidence(
+    *,
+    run_root: Path,
+    request_identity: ReportEvidenceRequestIdentityV1 | None,
+    project_root: Path | str | None,
+) -> dict[str, object]:
+    """Project the server-owned C0 packet for the central Run results surface."""
+    return _project_server_owned_consumer_evidence(
+        consumer_id="results",
+        run_root=run_root,
+        request_identity=request_identity,
+        project_root=project_root,
+    )
+
+
+def results_evidence_server_receipt(
+    evidence: Mapping[str, object],
+) -> dict[str, object] | None:
+    """Build the transport receipt only for a non-empty typed projection."""
+
+    digest = evidence.get("projection_digest")
+    if (
+        evidence.get("status") not in {"available", "degraded"}
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(char not in "0123456789abcdef" for char in digest)
+    ):
+        return None
+    identity = {
+        "artifactRef": evidence.get("artifact_ref"),
+        "commitId": evidence.get("commit_id"),
+        "envelopeDigest": evidence.get("envelope_digest"),
+    }
+    if any(not isinstance(value, str) or not value.strip() for value in identity.values()):
+        return None
+    return {
+        "schemaVersion": 1,
+        "kind": "evidence.results.server-receipt.v1",
+        "projectionDigest": digest,
+        "identity": identity,
+        "provenance": {
+            "artifactRef": identity["artifactRef"],
+            "commitId": identity["commitId"],
+            "envelopeDigest": identity["envelopeDigest"],
+        },
+    }
+
+
 __all__ = [
     "PersistedEvidenceResultsFacadeV1",
     "ReportEvidenceRequestIdentityV1",
@@ -1060,4 +1426,7 @@ __all__ = [
     "UnavailableReportEvidenceCapabilityV1",
     "configure_report_evidence_persistence",
     "current_report_evidence_persistence",
+    "read_persisted_consumer_evidence_for_run",
+    "project_persisted_results_evidence",
+    "results_evidence_server_receipt",
 ]

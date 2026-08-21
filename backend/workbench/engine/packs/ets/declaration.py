@@ -12,7 +12,7 @@ from workbench.engine.capabilities import (
     register_capability_declaration,
 )
 from workbench.engine.pack import AnalysisPack, register_pack
-from workbench.engine.registry import ModelHandler
+from workbench.engine.registry import ModelHandler, TYPED_PACKET_RESULT_BINDING_KEY
 from workbench.model_options import ModelOptionsContract
 
 from .input import ETSModelOptions
@@ -36,6 +36,7 @@ def declare_pack() -> None:
                         producer_version=f"{ETS_MODEL_TYPE}@{ETS_CONTRACT_VERSION}",
                         input_contract_version=ETS_CONTRACT_VERSION,
                     ),
+                    result_binding_key=TYPED_PACKET_RESULT_BINDING_KEY,
                 )
             ],
         )

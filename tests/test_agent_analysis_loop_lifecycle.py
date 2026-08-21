@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import replace
 from pathlib import Path
 
@@ -8,9 +7,11 @@ import pytest
 
 from workbench.analysis_loop.contracts import SourceRunContract
 from workbench.agent.core import AgentCore
-from workbench.agent.chains import RerunExecutionResult
 from workbench.agent.events import AgentEventStream
-from workbench.agent.orchestrator import WorkbenchOrchestrator
+from workbench.agent.orchestrator import (
+    LegacyAgentConfirmationBoundaryError,
+    WorkbenchOrchestrator,
+)
 from workbench.agent.session import JsonlSessionRepository
 from workbench.analysis_loop.lifecycle import (
     build_analysis_loop_proposal,
@@ -23,6 +24,7 @@ from workbench.analysis_loop.plan import (
     validate_confirmation_binding,
 )
 from workbench.analysis_loop.storage import PlanDiffStore
+from workbench.http import agent_routes
 
 
 ACTION_ID = "ols.use_clustered_covariance_v1"
@@ -96,10 +98,13 @@ def _orchestrator(tmp_path: Path) -> WorkbenchOrchestrator:
     repository.create_session("main-session", chain_id="project", role="main")
     repository.create_session("chain-session", chain_id="chain-a", role="chain")
     events = AgentEventStream(tmp_path / "workbench")
+    proposal_store = agent_routes._server_proposal_store(repository.root)
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
         main_session_id="main-session",
+        proposal_store=proposal_store,
+        proposal_store_issuer=agent_routes._ROUTE_PROPOSAL_STORE_ISSUER,
     )
     orchestrator.register_chain(
         "chain-a",
@@ -242,7 +247,7 @@ def test_confirm_analysis_loop_proposal_rejects_changed_source_before_operation(
     assert orchestrator.operation_store.list_records() == []
 
 
-def test_analysis_loop_execution_recomputes_and_persists_executed_proposal_hash(
+def test_legacy_analysis_loop_confirmation_is_rejected_before_execution(
     tmp_path: Path,
 ) -> None:
     orchestrator = _orchestrator(tmp_path)
@@ -252,46 +257,26 @@ def test_analysis_loop_execution_recomputes_and_persists_executed_proposal_hash(
         chain_id="chain-a",
         **kwargs,
     )
-    record = confirm_analysis_loop_proposal(
-        orchestrator=orchestrator,
-        plan_store=kwargs["plan_store"],
-        proposal_id=proposal.proposal_id,
-        current_source=_source(),
-        current_source_context_fingerprint=proposal.preconditions[
-            "source_context_fingerprint"
-        ],
-        current_active_head_run_id="run-source",
-        revision=proposal.revision,
-        fingerprint=proposal.fingerprint,
-        confirmed_payload_hash=proposal.preconditions["confirmed_payload_hash"],
-    )
-    captured = []
-
-    async def executor(request):
-        captured.append(request)
-        return RerunExecutionResult(
-            target_run_id="run-child",
-            outputs={"status": "completed"},
-        )
-
-    completed = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
-            record.record_id,
-            current_context_fingerprint=proposal.preconditions[
-                "context_fingerprint"
+    with pytest.raises(LegacyAgentConfirmationBoundaryError):
+        confirm_analysis_loop_proposal(
+            orchestrator=orchestrator,
+            plan_store=kwargs["plan_store"],
+            proposal_id=proposal.proposal_id,
+            current_source=_source(),
+            current_source_context_fingerprint=proposal.preconditions[
+                "source_context_fingerprint"
             ],
             current_active_head_run_id="run-source",
-            executor=executor,
+            revision=proposal.revision,
+            fingerprint=proposal.fingerprint,
+            confirmed_payload_hash=proposal.preconditions["confirmed_payload_hash"],
         )
-    )
 
-    assert len(captured) == 1
-    assert captured[0].executed_proposal_payload_hash == proposal.preconditions[
-        "confirmed_payload_hash"
-    ]
-    assert completed.execution["executed_proposal_payload_hash"] == captured[
-        0
-    ].executed_proposal_payload_hash
+    # The old lifecycle facade has no authority to confirm or execute.  The
+    # central Agent/Notebook compiler owns that path now, so the proposal stays
+    # pending and no operation record is created here.
+    assert orchestrator.proposal_store.latest_status(proposal.proposal_id) == "pending"
+    assert orchestrator.operation_store.list_records() == []
 
 
 def test_build_analysis_loop_proposal_returns_existing_proposal_kwargs_and_binding(

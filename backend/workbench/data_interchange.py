@@ -169,7 +169,7 @@ def _pyreadstat_probe_succeeded(module: Any) -> bool:
     """Exercise the native adapter with one bounded, private data frame."""
 
     probe_frame = pd.DataFrame(
-        {"__workbench_probe__": pd.Series([1], dtype="int64")}
+        {"workbench_probe": pd.Series([1], dtype="int64")}
     )
     with tempfile.TemporaryDirectory(prefix="workbench-pyreadstat-probe-") as directory:
         root = Path(directory)
