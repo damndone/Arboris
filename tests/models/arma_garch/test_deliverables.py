@@ -295,11 +295,12 @@ def test_deliverables_never_embed_nondeterministic_columns(tmp_path: Path) -> No
 
 def _arma_report_fixture(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     from workbench.engine.packs.arma_garch.deliverables import build_arma_garch_deliverables
+    from workbench.projects import create_project, create_run
 
     # Reuse the small, registered-artifact fixture above via the public builder
     # setup rather than creating a special report-only representation.
-    run_root = tmp_path / "run"
-    run_root.mkdir()
+    project = create_project(tmp_path, "arma-garch-report")
+    run_root = create_run(project.root, mode="auto").root
     _write_artifact(run_root, "ts.analysis_contract", {
         "dataset_ref": "upload:VIXCLS.csv", "time_column": "observation_date", "value_column": "VIXCLS",
         "transform": "log_return_pct", "arma": {"p": 1, "q": 1, "constant_mode": "exclude"},
@@ -333,8 +334,8 @@ def test_arma_garch_report_and_exports_require_typed_evidence_admission(tmp_path
         export_pdf(deliverables["report"], run_root)
     with pytest.raises(TypeError, match="ReportEvidenceWriterV1"):
         export_xlsx(deliverables["tables"], run_root)
-    assert not (run_root / "reports").exists()
-    assert not (run_root / "exports").exists()
+    assert not any((run_root / "reports").iterdir())
+    assert not any((run_root / "exports").iterdir())
 
 
 def test_arma_garch_report_and_pdf_render_through_typed_document_writer(

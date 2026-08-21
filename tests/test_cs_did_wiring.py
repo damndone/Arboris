@@ -110,13 +110,33 @@ def test_cs_did_artifact_present_and_valid(tmp_path):
     assert "metadata" in artifact
 
     summary = read_json(run_root / "diagnostic_summary.json")
-    assert summary["run_status"]["report_render_status"] == "complete"
-    assert summary["run_status"]["report_available"] is True
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
+    assert summary["run_status"]["model_results_available"] is True
     assert summary["run_status"]["has_warnings"] is True
     assert any(
         issue["code"] == "DID_DYNAMIC_THIN_SUPPORT"
         for issue in summary["diagnostics"]["warnings"]
     )
+    report_issue = next(
+        issue for issue in summary["diagnostics"]["warnings"]
+        if issue["code"] == "REPORT_RENDER_FAILED"
+    )
+    assert report_issue["evidence"] == {
+        "error": "REPORT_EVIDENCE_UNAVAILABLE:EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    }
+    assert not (run_root / "reports" / "report.html").exists()
+
+    from workbench.report_view_model import build_report_view_model
+
+    report_view = build_report_view_model(
+        summary,
+        run_root,
+        include_legacy_presentation=True,
+    )
+    assert report_view["status"] == "unavailable"
+    assert report_view["reasonCode"] == "EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    assert report_view["facts"] == []
     summary_record = next(
         item for item in read_json(run_root / "artifacts_index.json")["artifacts"]
         if item["artifact_id"] == "diagnostic_summary"

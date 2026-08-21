@@ -24,6 +24,39 @@ from workbench.projects import create_project
 from workbench.router import classify_dataset
 
 
+def _assert_unbound_report_is_typed_unavailable(run_root: Path) -> dict:
+    assert not (run_root / "reports" / "report.html").exists()
+
+    summary = read_json(run_root / "diagnostic_summary.json")
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
+    assert summary["run_status"]["model_results_available"] is True
+
+    report_issue = next(
+        issue for issue in summary["diagnostics"]["warnings"]
+        if issue["code"] == "REPORT_RENDER_FAILED"
+    )
+    assert report_issue["evidence"] == {
+        "error": "REPORT_EVIDENCE_UNAVAILABLE:EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    }
+
+    from workbench.report_view_model import build_report_view_model
+
+    report_view = build_report_view_model(
+        summary,
+        run_root,
+        include_legacy_presentation=True,
+    )
+    assert report_view["status"] == "unavailable"
+    assert report_view["validationStatus"] == "unavailable"
+    assert report_view["reasonCode"] == "EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    assert report_view["facts"] == []
+    assert report_view["typed_critical_errors"] == [
+        {"code": "EVIDENCE_OWNER_CAPABILITY_REQUIRED", "severity": "BLOCKER"}
+    ]
+    return summary
+
+
 # ---------------------------------------------------------------------------
 # Test 1: Transpose produces sensible column names from data values
 # ---------------------------------------------------------------------------
@@ -171,10 +204,10 @@ def test_unique_entities_classified_as_cross_section():
 
 
 # ---------------------------------------------------------------------------
-# Test 7: Report.html exists after workflow completes
+# Test 7: Unbound workflow exposes typed Report-unavailable diagnostics
 # ---------------------------------------------------------------------------
 
-def test_report_html_exists_after_workflow(tmp_path: Path):
+def test_unbound_workflow_exposes_typed_report_unavailable_diagnostic(tmp_path: Path):
     source = tmp_path / "data.csv"
     pd.DataFrame({
         "y": [float(i) for i in range(35)],
@@ -186,7 +219,7 @@ def test_report_html_exists_after_workflow(tmp_path: Path):
 
     assert result["status"] == "completed"
     run_root = project.root / "runs" / result["run_id"]
-    assert (run_root / "reports" / "report.html").is_file()
+    _assert_unbound_report_is_typed_unavailable(run_root)
 
 
 # ---------------------------------------------------------------------------
@@ -210,11 +243,12 @@ def test_exposure_not_in_facts_x_list(tmp_path: Path):
 
     assert result["status"] == "completed"
     run_root = project.root / "runs" / result["run_id"]
-    html = (run_root / "reports" / "report.html").read_text()
-    # The facts section should have "X = x1" without "exposure_months"
-    assert "X = x1" in html
-    assert "exposure_months" not in html.split("X =")[1].split("\n")[0] if "X =" in html else False \
-           or True  # skip if the markup differs
+    _assert_unbound_report_is_typed_unavailable(run_root)
+    model_result = read_json(run_root / "model_results" / "poisson_1.json")
+    assert model_result["model_type"] == "poisson_rate"
+    assert model_result["exposure_col"] == "exposure_months"
+    assert "x1" in model_result["coefficients"]
+    assert "exposure_months" not in model_result["coefficients"]
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +289,9 @@ def test_variable_importance_has_disclaimer(tmp_path: Path):
 
     assert result["status"] == "completed"
     run_root = project.root / "runs" / result["run_id"]
-    html = (run_root / "reports" / "report.html").read_text()
-    # New 5-section layout includes causal caution instead of variable importance
-    assert "Causal Caution" in html
+    summary = _assert_unbound_report_is_typed_unavailable(run_root)
+    contract = summary["narrative_contract"]
+    assert contract["constraints"]["causal_language_allowed"] is False
+    assert contract["constraints"]["allowed_effect_language"] == "association_only"
+    assert contract["constraints"]["must_not_claim_policy_effect"] is True
+    assert "causal effect of treatment" in contract["forbidden_claims"]
