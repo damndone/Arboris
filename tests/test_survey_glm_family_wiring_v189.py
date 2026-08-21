@@ -453,7 +453,7 @@ def test_survey_p_value_display_is_regenerated_from_replaced_p_value(tmp_path):
 
 
 def test_clean_process_capability_bootstrap_returns_typed_survey_status():
-    """A known central import cycle must not become a false survey advertise."""
+    """A clean process publishes the executable survey family contract."""
     repo_root = Path(__file__).resolve().parents[1]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(repo_root / "backend")
@@ -475,6 +475,8 @@ def test_clean_process_capability_bootstrap_returns_typed_survey_status():
     )
     assert probe.returncode == 0, probe.stderr
     status = json.loads(probe.stdout)
-    assert status["status"] == "blocked"
-    assert status["code"] == "CAPABILITY_BOOTSTRAP_IMPORT_CYCLE"
-    assert status["sampling_weight_families"] == []
+    assert status == {
+        "code": None,
+        "sampling_weight_families": ["logit", "ols", "poisson", "probit"],
+        "status": "available",
+    }
