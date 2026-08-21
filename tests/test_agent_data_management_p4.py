@@ -590,9 +590,18 @@ def test_transform_and_model_genesis_execute_on_real_persisted_child(tmp_path: P
         available_columns=["x", "y"],
     )
     state = _execute_workflow_with_admitted_host(project, draft)
-    assert state.status == "completed"
+    step_errors = {
+        step_id: state.steps[step_id].error
+        for step_id in ("renamed", "model")
+    }
+    assert state.status == "completed", f"workflow step errors: {step_errors!r}"
     binding = state.steps["renamed"].produced_dataset
     assert binding is not None
+    model_branches = state.steps["model"].output_bindings["model_branches"]["branches"]
+    assert len(model_branches) == 1
+    assert model_branches[0]["source_run_id"] == binding["run_id"]
+    assert model_branches[0]["source_artifact_id"] == binding["artifact_id"]
+    assert model_branches[0]["source_sha256"] == binding["content_sha256"]
     child_frame = pd.read_csv(
         project / "runs" / run_id / "derived" / "data_operations" / "rename" / binding["node_ref"].split(":", 1)[1] / "data.csv"
     )

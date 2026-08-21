@@ -2539,7 +2539,6 @@ class EvidencePersistencePort:
                     branch.get("workflow_id") != draft.workflow_id
                     or branch.get("workflow_step_id") != step.step_id
                     or branch.get("source_run_id") != target_run_id
-                    or branch.get("source_artifact_id") != draft.target.get("artifact_id")
                     or branch.get("model_artifact_id") not in set(branch.get("artifact_ids", []) or [])
                 ):
                     raise WorkflowExecutionError(
@@ -2551,12 +2550,23 @@ class EvidencePersistencePort:
                     or provenance.get("branch_id") != branch.get("branch_id")
                     or provenance.get("model_run_id") != branch.get("run_id")
                     or provenance.get("model_artifact_id") != branch.get("model_artifact_id")
+                    or provenance.get("source_run_id") != branch.get("source_run_id")
+                    or provenance.get("source_artifact_id") != branch.get("source_artifact_id")
                     or provenance.get("source_run_id") != target_run_id
-                    or provenance.get("source_artifact_id") != draft.target.get("artifact_id")
                     or artifact_id not in set(provenance.get("expected_artifacts", []) or [])
                 ):
                     raise WorkflowExecutionError(
                         "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: foreign artifact lacks a server-admitted model branch"
+                    )
+                producer = server_record.get("producer")
+                if (
+                    not isinstance(producer, Mapping)
+                    or producer.get("workflow_id") != draft.workflow_id
+                    or producer.get("step_id") != step.step_id
+                    or producer.get("operation_id") != step.operation_id
+                ):
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: foreign artifact provenance is not from the admitted model producer"
                     )
             self._validate_server_artifact_snapshot(server_record, receipt=receipt)
 
@@ -3136,7 +3146,6 @@ class EvidencePersistencePort:
                     )
                 if (
                     branch_record.get("source_run_id") != target_run_id
-                    or branch_record.get("source_artifact_id") != target.get("artifact_id")
                     or branch_record.get("workflow_id") != workflow_id
                     or branch_record.get("workflow_step_id") != workflow_step_id
                 ):
@@ -3149,12 +3158,23 @@ class EvidencePersistencePort:
                     not isinstance(provenance, Mapping)
                     or provenance.get("model_run_id") != run_id
                     or provenance.get("model_artifact_id") != branch_record.get("model_artifact_id")
+                    or provenance.get("source_run_id") != branch_record.get("source_run_id")
+                    or provenance.get("source_artifact_id") != branch_record.get("source_artifact_id")
                     or provenance.get("source_run_id") != target_run_id
-                    or provenance.get("source_artifact_id") != target.get("artifact_id")
                     or artifact_id not in set(provenance.get("expected_artifacts", []) or [])
                 ):
                     raise WorkflowExecutionError(
                         "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: foreign model artifact lacks server-owned branch provenance"
+                    )
+                producer = server_record.get("producer")
+                if (
+                    not isinstance(producer, Mapping)
+                    or producer.get("workflow_id") != workflow_id
+                    or producer.get("step_id") != workflow_step_id
+                    or producer.get("operation_id") != operation_id
+                ):
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_ARTIFACT_REGISTRY_REQUIRED: foreign model artifact provenance is not from the admitted model producer"
                     )
             _artifact_path, actual_sha256 = self._validate_server_artifact_snapshot(
                 server_record,
@@ -6635,7 +6655,7 @@ def _validate_persisted_model_branch(
         item
         for item in source_index.get("artifacts", [])
         if isinstance(item, Mapping)
-        and item.get("artifact_id") == draft.target.get("artifact_id")
+        and item.get("artifact_id") == source_artifact_id
     ]
     if len(source_matches) != 1:
         raise WorkflowExecutionError(
@@ -6673,8 +6693,7 @@ def _validate_persisted_model_branch(
         ) from exc
     registered_source_sha256 = source_record.get("sha256")
     if (
-        source_artifact_id != draft.target.get("artifact_id")
-        or not _digest_matches(registered_source_sha256, actual_source_sha256)
+        not _digest_matches(registered_source_sha256, actual_source_sha256)
         or not _digest_matches(source_sha256, actual_source_sha256)
     ):
         raise WorkflowExecutionError(
@@ -7091,13 +7110,7 @@ def _validate_canonical_model_branch_completion(
         target_run_id = _require_workflow_opaque_ref(
             target.get("run_id"), "model branch admission target run_id"
         )
-        target_artifact_id = _require_workflow_artifact_ref(
-            target.get("artifact_id"), "model branch admission target artifact_id"
-        )
-        if (
-            source_refs.get("run_id") != target_run_id
-            or source_refs.get("artifact_id") != target_artifact_id
-        ):
+        if source_refs.get("run_id") != target_run_id:
             raise WorkflowExecutionError(
                 "WORKFLOW_TARGET_MISMATCH: canonical model branch source is not bound to the admission target"
             )
@@ -7180,10 +7193,23 @@ def _validate_canonical_model_branch_completion(
                 or provenance.get("branch_id") != branch_id
                 or provenance.get("model_run_id") != run_id
                 or provenance.get("model_artifact_id") != expected_primary
+                or provenance.get("source_run_id") != branch.get("source_run_id")
+                or provenance.get("source_artifact_id") != branch.get("source_artifact_id")
+                or provenance.get("source_run_id") != target_run_id
                 or artifact_id not in set(provenance.get("expected_artifacts") or [])
             ):
                 raise WorkflowExecutionError(
                     "WORKFLOW_RESUME_AUTHORITY_REQUIRED: model evidence lacks server-bound family provenance"
+                )
+            producer = row.get("producer")
+            if (
+                not isinstance(producer, Mapping)
+                or producer.get("workflow_id") != workflow_id
+                or producer.get("step_id") != workflow_step_id
+                or producer.get("operation_id") != operation_id
+            ):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: model evidence provenance is not from the admitted model producer"
                 )
 
 
