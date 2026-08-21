@@ -6,6 +6,7 @@ fitted coefficients must match (proving the cache is faithful, not just present)
 import json
 from pathlib import Path
 
+from workbench.artifacts import read_json
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
 
@@ -38,6 +39,34 @@ def _imputed_bytes(run_root):
     return (run_root / "processed" / "imputed_dataset.parquet").read_bytes()
 
 
+def _assert_unbound_report_is_typed_unavailable(run_root):
+    assert not (run_root / "reports" / "report.html").exists()
+
+    summary = read_json(run_root / "diagnostic_summary.json")
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
+    report_issue = next(
+        issue
+        for issue in summary["diagnostics"]["warnings"]
+        if issue["code"] == "REPORT_RENDER_FAILED"
+    )
+    assert report_issue["evidence"] == {
+        "error": "REPORT_EVIDENCE_UNAVAILABLE:EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    }
+
+    from workbench.report_view_model import build_report_view_model
+
+    report_view = build_report_view_model(
+        summary,
+        run_root,
+        include_legacy_presentation=True,
+    )
+    assert report_view["status"] == "unavailable"
+    assert report_view["validationStatus"] == "unavailable"
+    assert report_view["reasonCode"] == "EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    assert report_view["facts"] == []
+
+
 def test_mice_hit_reused_and_run_dir_complete(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKBENCH_INCREMENTAL_CACHE", "1")
     project = create_project(tmp_path, "demo")
@@ -52,7 +81,12 @@ def test_mice_hit_reused_and_run_dir_complete(tmp_path, monkeypatch):
     # G2: cache-hit child run dir still has the run-relative artifacts.
     assert (r2 / "processed" / "imputed_dataset.parquet").exists()
     assert list((r2 / "model_results").glob("*.json"))
-    assert (r2 / "reports" / "report.html").exists()
+    artifact_ids = {
+        artifact["artifact_id"]
+        for artifact in read_json(r2 / "artifacts_index.json")["artifacts"]
+    }
+    assert {"imputation_summary", "ols_1", "diagnostics_ols_1"} <= artifact_ids
+    _assert_unbound_report_is_typed_unavailable(r2)
 
     # Byte-identical: restored imputed frame == computed; fitted coefs match.
     assert _imputed_bytes(r1) == _imputed_bytes(r2)

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from io import BytesIO
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-import openpyxl
 import matplotlib.pyplot as plt
 import pandas as pd
 import pytest
@@ -40,7 +38,38 @@ def _run(tmp_path: Path, *, labels: dict[str, object] | None = None) -> Path:
     return project.root / "runs" / result["run_id"]
 
 
-def test_declared_labels_reach_run_report_and_explicit_xlsx_export(tmp_path: Path) -> None:
+def _assert_unbound_report_is_typed_unavailable(run_root: Path) -> dict:
+    assert not (run_root / "reports" / "report.html").exists()
+
+    summary = read_json(run_root / "diagnostic_summary.json")
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
+    report_issue = next(
+        issue
+        for issue in summary["diagnostics"]["warnings"]
+        if issue["code"] == "REPORT_RENDER_FAILED"
+    )
+    assert report_issue["evidence"] == {
+        "error": "REPORT_EVIDENCE_UNAVAILABLE:EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    }
+
+    from workbench.report_view_model import build_report_view_model
+
+    report_view = build_report_view_model(
+        summary,
+        run_root,
+        include_legacy_presentation=True,
+    )
+    assert report_view["status"] == "unavailable"
+    assert report_view["validationStatus"] == "unavailable"
+    assert report_view["reasonCode"] == "EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    assert report_view["facts"] == []
+    return summary
+
+
+def test_declared_labels_reach_durable_artifacts_and_unbound_export_fails_closed(
+    tmp_path: Path,
+) -> None:
     run_root = _run(
         tmp_path,
         labels={
@@ -52,10 +81,19 @@ def test_declared_labels_reach_run_report_and_explicit_xlsx_export(tmp_path: Pat
     inputs = read_json(run_root / "run_inputs.json")
     assert inputs["form"]["labels"]["variable_labels"]["outcome"] == "Outcome label"
 
-    html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
-    assert "Outcome label" in html
-    assert "Treatment label" in html
-    assert "Control" in html
+    summary = _assert_unbound_report_is_typed_unavailable(run_root)
+    rows = {row["column"]: row for row in summary["table_1"]}
+    assert summary["labels"] == {
+        "variable_labels": {
+            "outcome": "Outcome label",
+            "treatment": "Treatment label",
+        },
+        "value_labels": {"treatment": {"0": "Control", "1": "Treated"}},
+    }
+    assert rows["outcome"]["label"] == "Outcome label"
+    assert rows["outcome"]["label_source"] == "declared"
+    assert rows["treatment"]["label"] == "Treatment label"
+    assert rows["treatment"]["value_labels"] == {"0": "Control", "1": "Treated"}
 
     assert not (run_root / "exports" / "tables.xlsx").exists()
 
@@ -64,15 +102,13 @@ def test_declared_labels_reach_run_report_and_explicit_xlsx_export(tmp_path: Pat
         params={"project_root": str(run_root.parent.parent)},
         json={"sections": ["table_1", "regression_table"]},
     )
-    assert response.status_code == 200, response.text
-    workbook = openpyxl.load_workbook(BytesIO(response.content), read_only=True)
-    table_1 = workbook["table_1"]
-    rows = list(table_1.iter_rows(values_only=True))
-    assert any("Outcome label" in row for row in rows)
-    assert any("Treatment label" in row for row in rows)
-    regression_table = workbook["regression_table"]
-    regression_rows = list(regression_table.iter_rows(values_only=True))
-    assert any("Treatment label" in row for row in regression_rows)
+    assert response.status_code == 409, response.text
+    error = response.json()["error"]
+    assert error["code"] == "RESULT_TABLE_EXPORT_UNAVAILABLE"
+    projection = error["details"]["projection"]
+    assert projection["status"] == "unavailable"
+    assert projection["reasonCode"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    assert projection["facts"] == []
 
     figure_labels = read_json(run_root / "figures" / "figure_labels.json")
     assert figure_labels["scatter_plots"]["x_label"] == "Treatment label"
@@ -81,9 +117,13 @@ def test_declared_labels_reach_run_report_and_explicit_xlsx_export(tmp_path: Pat
 
 def test_undeclared_labels_use_explicit_column_name_fallback(tmp_path: Path) -> None:
     run_root = _run(tmp_path)
-    html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
-    assert "column_name_fallback" in html
-    assert "Outcome label" not in html
+    summary = _assert_unbound_report_is_typed_unavailable(run_root)
+    rows = {row["column"]: row for row in summary["table_1"]}
+    assert summary["labels"] == {"variable_labels": {}, "value_labels": {}}
+    assert rows["outcome"]["label"] == "outcome"
+    assert rows["outcome"]["label_source"] == "column_name_fallback"
+    assert rows["treatment"]["label"] == "treatment"
+    assert rows["treatment"]["label_source"] == "column_name_fallback"
 
 
 def test_labels_reject_unknown_top_level_fields(tmp_path: Path) -> None:

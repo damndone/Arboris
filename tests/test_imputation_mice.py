@@ -148,9 +148,35 @@ def test_workflow_uses_mice_only_when_configured(tmp_path: Path):
         if artifact["artifact_id"] == "diagnostics_ols_1"
     )
     assert diagnostics_record["inputs"] == ["imputed_dataset"]
-    report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
-    assert "MICE imputation: one persisted imputed dataset" in report_html
-    assert "pooled estimates were not produced" in report_html
+    diagnostic_summary = read_json(run_root / "diagnostic_summary.json")
+    imputation = diagnostic_summary["preprocessing"]["imputation"]
+    assert imputation["output_artifact"] == "imputed_dataset"
+    assert imputation["persisted_datasets"] == 1
+    assert imputation["pooled_estimates"] is False
+    assert any("pooled multiple-imputation estimates" in warning for warning in imputation["warnings"])
+    assert diagnostic_summary["run_status"]["report_render_status"] == "failed"
+    assert diagnostic_summary["run_status"]["report_available"] is False
+    report_issue = next(
+        issue
+        for issue in diagnostic_summary["diagnostics"]["warnings"]
+        if issue["code"] == "REPORT_RENDER_FAILED"
+    )
+    assert report_issue["evidence"] == {
+        "error": "REPORT_EVIDENCE_UNAVAILABLE:EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    }
+    assert not (run_root / "reports" / "report.html").exists()
+
+    from workbench.report_view_model import build_report_view_model
+
+    report_view = build_report_view_model(
+        diagnostic_summary,
+        run_root,
+        include_legacy_presentation=True,
+    )
+    assert report_view["status"] == "unavailable"
+    assert report_view["validationStatus"] == "unavailable"
+    assert report_view["reasonCode"] == "EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    assert report_view["facts"] == []
 
 
 def test_workflow_does_not_impute_by_default(tmp_path: Path):
