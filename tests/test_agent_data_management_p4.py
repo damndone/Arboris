@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -15,6 +17,8 @@ from workbench.agent.tools import ToolContext, ToolVisibleError
 from workbench.agent.workflow import WorkflowExecutor, compile_workflow
 from workbench.agent import workflow_contracts
 from workbench.agent.workflow_runtime import build_workflow_step_executor
+import workbench.agent.workflow_runtime as workflow_runtime
+from workbench.agent.workflow_runtime import _admit_workflow_host_endpoint_from_supervisor
 from workbench.agent.workflow_contracts import (
     StepSpecContract,
     WORKFLOW_STEP_SPEC_CONTRACTS,
@@ -24,15 +28,18 @@ from workbench.agent.workflow_contracts import (
     workflow_step_operations,
     workflow_step_vocabulary,
 )
+from workbench.artifacts import initialize_artifact_index, register_artifact, write_json
 from workbench.data_operations import (
     DataColumnCastValidationError,
     DataTransformSpecV1,
+    _register_metadata_authority,
     apply_data_transform,
     preview_data_transform,
 )
 from workbench.graph_store import GraphStore
 from workbench.lineage.run_inputs import write_run_inputs
 from workbench.lineage.upload_store import store_upload_bytes
+from workbench.metadata import metadata_revision_digest
 from workbench.lineage.pipeline_drafts import PipelineDraftStore
 
 
@@ -64,6 +71,113 @@ def _apply(project: Path, spec: DataTransformSpecV1) -> pd.DataFrame:
     assert preview.status == "ready"
     effect = apply_data_transform(project, spec, preview)
     return pd.read_csv(project / "runs" / spec.source_run_id / effect.artifact_path)
+
+
+def _execute_workflow_with_admitted_host(project: Path, draft):
+    """Model the deployment-owned host resolver required by real execution."""
+
+    workflow_directory = project / "workbench" / "workflows"
+    workflow_directory.mkdir(parents=True, exist_ok=True)
+    endpoint_fd = os.open(workflow_directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        endpoint = _admit_workflow_host_endpoint_from_supervisor(project, endpoint_fd)
+        with patch.object(
+            workflow_runtime,
+            "_deployment_host_endpoint_from_supervisor",
+            return_value=endpoint,
+        ):
+            return WorkflowExecutor(project).execute(
+                draft, build_workflow_step_executor(project, draft)
+            )
+    finally:
+        os.close(endpoint_fd)
+
+
+def _seed_confirmed_metadata(
+    project: Path,
+    run_id: str,
+    source_artifact_id: str,
+    metadata: dict[str, object],
+) -> None:
+    """Create the same detached, server-owned metadata envelope as the API."""
+
+    run_root = project / "runs" / run_id
+    schema_revision = "schema:p0-workflow-legacy-fixture"
+    schema_path = run_root / "metadata" / "schema.json"
+    write_json(schema_path, {"schema_revision": schema_revision})
+    schema_artifact_id = f"{source_artifact_id}_schema"
+    register_artifact(
+        run_root,
+        schema_artifact_id,
+        schema_path,
+        "schema",
+        "fixture.schema",
+        [source_artifact_id],
+    )
+    index = json.loads((run_root / "artifacts_index.json").read_text(encoding="utf-8"))
+    source_sha256 = next(
+        item["sha256"]
+        for item in index["artifacts"]
+        if item["artifact_id"] == source_artifact_id
+    )
+    schema_sha256 = next(
+        item["sha256"]
+        for item in index["artifacts"]
+        if item["artifact_id"] == schema_artifact_id
+    )
+    metadata_path = run_root / "metadata" / "source.json"
+    metadata_artifact_id = "source_metadata_artifact"
+    payload = {
+        "payload_schema": "workbench.data-metadata",
+        "schema_version": 1,
+        "confirmed": True,
+        "schema_revision": schema_revision,
+        "metadata_revision": metadata_revision_digest(
+            metadata, schema_revision=schema_revision
+        ),
+        "source": {
+            "run_id": run_id,
+            "node_id": "stage:source",
+            "artifact_id": source_artifact_id,
+            "sha256": source_sha256,
+        },
+        "schema_artifact": {
+            "artifact_id": schema_artifact_id,
+            "sha256": schema_sha256,
+        },
+        "metadata": metadata,
+        "provenance": {"fixture": "server-owned"},
+    }
+    write_json(metadata_path, payload)
+    register_artifact(
+        run_root,
+        metadata_artifact_id,
+        metadata_path,
+        "metadata",
+        "fixture.metadata",
+        [source_artifact_id],
+    )
+    _register_metadata_authority(
+        run_root,
+        metadata_artifact_id=metadata_artifact_id,
+        metadata_path=metadata_path,
+        payload=payload,
+    )
+
+
+def _register_source_artifact(project: Path, run_id: str, artifact_id: str) -> None:
+    """Seed the server-owned source artifact registry used by execution."""
+
+    run_root = project / "runs" / run_id
+    initialize_artifact_index(run_root)
+    register_artifact(
+        run_root,
+        artifact_id,
+        run_root / "data.csv",
+        "raw_data",
+        "fixture",
+        [],
+    )
 
 
 def _secondary_project(project: Path, run_id: str, frame: pd.DataFrame, artifact_id: str) -> None:
@@ -227,6 +341,12 @@ def test_subset_closed_comparison_operators_filter_before_column_projection(
     project, run_id, artifact_id = _source_project(
         tmp_path,
         pd.DataFrame({"year": [2019, 2020, None, 2022], "value": [10, 20, 30, 40]}),
+    )
+    _seed_confirmed_metadata(
+        project,
+        run_id,
+        artifact_id,
+        {"columns": {"year": {"user_missing_values": []}}},
     )
     filter_spec = {"column": "year", "op": operator}
     if operator not in {"is_missing", "not_missing"}:
@@ -403,7 +523,10 @@ def test_transform_and_model_genesis_compile_in_one_multi_step_plan() -> None:
     draft = compile_workflow(
         workflow_id="p4-transform-model",
         target={"run_id": "run_source", "node_ref": "stage:source", "artifact_id": "source_data"},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": "run_source",
+        },
         steps=steps,
         available_columns=["x", "y"],
     )
@@ -422,6 +545,7 @@ def test_transform_and_model_genesis_execute_on_real_persisted_child(tmp_path: P
         }
     )
     project, run_id, artifact_id = _source_project(tmp_path, frame)
+    _register_source_artifact(project, run_id, artifact_id)
     upload_sha = store_upload_bytes(
         project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
     )
@@ -458,13 +582,14 @@ def test_transform_and_model_genesis_execute_on_real_persisted_child(tmp_path: P
     draft = compile_workflow(
         workflow_id="p4-transform-model-execution",
         target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": run_id,
+        },
         steps=steps,
         available_columns=["x", "y"],
     )
-    state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
-    )
+    state = _execute_workflow_with_admitted_host(project, draft)
     assert state.status == "completed"
     binding = state.steps["renamed"].produced_dataset
     assert binding is not None

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -15,6 +17,9 @@ from workbench.agent.workflow_contracts import (
 )
 from workbench.agent.workflow import WorkflowExecutor, compile_workflow
 from workbench.agent.workflow_runtime import build_workflow_step_executor
+import workbench.agent.workflow_runtime as workflow_runtime
+from workbench.agent.workflow_runtime import _admit_workflow_host_endpoint_from_supervisor
+from workbench.artifacts import initialize_artifact_index, register_artifact
 
 
 def _frame() -> pd.DataFrame:
@@ -26,6 +31,41 @@ def _frame() -> pd.DataFrame:
             "rnd_share": [float(index % 19) for index in range(40)],
             "export_share": [float(index % 11) for index in range(40)],
         }
+    )
+
+
+def _execute_workflow_with_admitted_host(project, draft):
+    """Model the deployment-owned host resolver required by real execution."""
+
+    workflow_directory = project / "workbench" / "workflows"
+    workflow_directory.mkdir(parents=True, exist_ok=True)
+    endpoint_fd = os.open(workflow_directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        endpoint = _admit_workflow_host_endpoint_from_supervisor(project, endpoint_fd)
+        with patch.object(
+            workflow_runtime,
+            "_deployment_host_endpoint_from_supervisor",
+            return_value=endpoint,
+        ):
+            return WorkflowExecutor(project).execute(
+                draft, build_workflow_step_executor(project, draft)
+            )
+    finally:
+        os.close(endpoint_fd)
+
+
+def _register_source_artifact(project, run_id, artifact_id):
+    """Seed the server-owned source artifact registry used by execution."""
+
+    run_root = project / "runs" / run_id
+    initialize_artifact_index(run_root)
+    register_artifact(
+        run_root,
+        artifact_id,
+        run_root / "data.csv",
+        "raw_data",
+        "fixture",
+        [],
     )
 
 
@@ -94,7 +134,10 @@ def test_an_arbitrary_agent_composed_plan_compiles(tmp_path):
     draft = compile_workflow(
         workflow_id="wf-generic",
         target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": run_id,
+        },
         steps=_plan(),
         available_columns=list(_frame().columns),
     )
@@ -108,16 +151,20 @@ def test_an_arbitrary_agent_composed_plan_compiles(tmp_path):
 
 def test_the_arbitrary_plan_executes_its_exploration_steps(tmp_path):
     project, run_id, artifact_id = _source_project(tmp_path, _frame())
+    _register_source_artifact(project, run_id, artifact_id)
     steps = [item for item in _plan() if item["operation_id"] != "model.genesis"]
     draft = compile_workflow(
         workflow_id="wf-generic-run",
         target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": run_id,
+        },
         steps=steps,
         available_columns=list(_frame().columns),
     )
 
-    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+    state = _execute_workflow_with_admitted_host(project, draft)
 
     assert state.status == "completed"
     assert {step.status for step in state.steps.values()} == {"completed"}
@@ -128,7 +175,10 @@ def test_a_derived_column_is_available_to_later_steps(tmp_path):
     compile_workflow(
         workflow_id="wf-produced",
         target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": "r",
+        },
         steps=[
             _plan()[1],
             _plan()[2],
@@ -151,6 +201,7 @@ def test_numeric_derived_columns_are_typed_and_available_to_later_steps(tmp_path
     """A workflow may name safe transforms, never an executable expression."""
 
     project, run_id, artifact_id = _source_project(tmp_path, _frame())
+    _register_source_artifact(project, run_id, artifact_id)
     steps = [
         {
             "step_id": "transform",
@@ -180,12 +231,15 @@ def test_numeric_derived_columns_are_typed_and_available_to_later_steps(tmp_path
     draft = compile_workflow(
         workflow_id="wf-numeric-derived",
         target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": run_id,
+        },
         steps=steps,
         available_columns=list(_frame().columns),
     )
 
-    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+    state = _execute_workflow_with_admitted_host(project, draft)
 
     assert state.status == "completed"
     assert state.steps["transform"].artifact_ids
@@ -238,7 +292,10 @@ def test_numeric_derivation_contract_refuses_code_and_unsafe_shapes(recipe, mess
         compile_workflow(
             workflow_id="wf-numeric-contract-rejection",
             target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-            preconditions={"context_fingerprint": "fp"},
+            preconditions={
+                "context_fingerprint": "fp",
+                "active_head_run_id": "r",
+            },
             steps=[
                 {
                     "step_id": "transform",
@@ -254,10 +311,14 @@ def test_numeric_derivation_fails_closed_for_invalid_observed_values(tmp_path):
     frame = _frame()
     frame.loc[0, "headcount"] = 0
     project, run_id, artifact_id = _source_project(tmp_path, frame)
+    _register_source_artifact(project, run_id, artifact_id)
     draft = compile_workflow(
         workflow_id="wf-numeric-domain-rejection",
         target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": run_id,
+        },
         steps=[
             {
                 "step_id": "transform",
@@ -276,7 +337,7 @@ def test_numeric_derivation_fails_closed_for_invalid_observed_values(tmp_path):
         available_columns=list(frame.columns),
     )
 
-    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+    state = _execute_workflow_with_admitted_host(project, draft)
 
     assert state.status == "failed"
     assert state.steps["transform"].status == "failed"
@@ -302,7 +363,10 @@ def test_a_malformed_plan_fails_closed(tmp_path, mutate, message):
         compile_workflow(
             workflow_id="wf-bad",
             target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-            preconditions={"context_fingerprint": "fp"},
+            preconditions={
+                "context_fingerprint": "fp",
+                "active_head_run_id": "r",
+            },
             steps=plan,
             available_columns=list(_frame().columns),
         )
@@ -313,7 +377,10 @@ def test_a_dependency_cycle_is_refused_rather_than_looping():
         compile_workflow(
             workflow_id="wf-cycle",
             target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-            preconditions={"context_fingerprint": "fp"},
+            preconditions={
+                "context_fingerprint": "fp",
+                "active_head_run_id": "r",
+            },
             steps=[
                 {"step_id": "a", "operation_id": "statistical.explore",
                  "depends_on": ["b"], "spec": {"operation": "misstable", "selected_columns": ["revenue"]}},
@@ -330,10 +397,14 @@ def test_percentile_evidence_is_found_through_an_intermediate_step(tmp_path):
     a direct edge to the detail step would reject that correct plan.
     """
     project, run_id, artifact_id = _source_project(tmp_path, _frame())
+    _register_source_artifact(project, run_id, artifact_id)
     draft = compile_workflow(
         workflow_id="wf-transitive",
         target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": run_id,
+        },
         steps=[
             {
                 "step_id": "step_detail",
@@ -370,7 +441,7 @@ def test_percentile_evidence_is_found_through_an_intermediate_step(tmp_path):
         available_columns=list(_frame().columns),
     )
 
-    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+    state = _execute_workflow_with_admitted_host(project, draft)
 
     assert state.status == "completed"
     assert state.steps["step_group"].status == "completed"
@@ -478,7 +549,10 @@ def test_post_estimation_specs_fail_closed(
         compile_workflow(
             workflow_id="wf-post-estimation-invalid",
             target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-            preconditions={"context_fingerprint": "fp"},
+            preconditions={
+                "context_fingerprint": "fp",
+                "active_head_run_id": "r",
+            },
             steps=[
                 {
                     "step_id": "post_estimation",
@@ -553,7 +627,10 @@ def test_a_branch_with_dummies_and_a_polynomial_validates_and_expands(tmp_path):
     draft = compile_workflow(
         workflow_id="wf-terms",
         target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": "r",
+        },
         steps=plan,
         available_columns=list(frame.columns),
     )
@@ -577,7 +654,10 @@ def test_a_dummy_column_typo_is_caught_by_the_schema_check():
         compile_workflow(
             workflow_id="wf-typo",
             target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-            preconditions={"context_fingerprint": "fp"},
+            preconditions={
+                "context_fingerprint": "fp",
+                "active_head_run_id": "r",
+            },
             steps=[
                 {
                     "step_id": "models",
@@ -605,7 +685,10 @@ def test_the_validator_refuses_a_branch_the_executor_could_not_build():
         compile_workflow(
             workflow_id="wf-conflict",
             target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-            preconditions={"context_fingerprint": "fp"},
+            preconditions={
+                "context_fingerprint": "fp",
+                "active_head_run_id": "r",
+            },
             steps=[
                 {
                     "step_id": "models",

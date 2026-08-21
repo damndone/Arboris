@@ -124,7 +124,10 @@ def test_a_declared_design_survives_compilation_into_the_genesis_step():
     draft = compile_workflow(
         workflow_id="wf-survey",
         target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": "r",
+        },
         steps=plan,
         available_columns=list(frame.columns),
     )
@@ -182,7 +185,6 @@ def test_a_plan_declaring_a_design_runs_and_produces_design_standard_errors(tmp_
                 "sampling_weight": "weight",
                 "survey_strata_col": "stratum",
                 "survey_psu_col": "psu",
-                "survey_fpc_col": "fpc",
                 "branches": [
                     {"branch_id": "b1", "outcome": "y", "predictors": ["x1", "x2"]}
                 ],
@@ -192,7 +194,10 @@ def test_a_plan_declaring_a_design_runs_and_produces_design_standard_errors(tmp_
     draft = compile_workflow(
         workflow_id="wf-svy-e2e",
         target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={
+            "context_fingerprint": "fp",
+            "active_head_run_id": "r",
+        },
         steps=plan,
         available_columns=list(frame.columns),
     )
@@ -202,8 +207,10 @@ def test_a_plan_declaring_a_design_runs_and_produces_design_standard_errors(tmp_
     carried = genesis_run_params(draft.steps[0].spec)
     assert carried["survey_strata_col"] == "stratum"
     assert carried["survey_psu_col"] == "psu"
-    assert carried["survey_fpc_col"] == "fpc"
     assert carried["sampling_weight"] == "weight"
+    # FPC is deliberately fail-closed until the variance engine supports it;
+    # this test exercises the currently supported linearization design.
+    assert "survey_fpc_col" not in carried
 
     # The same declarations, run through the ordinary workflow the executor
     # ultimately calls, must reproduce R's design-based standard errors.
