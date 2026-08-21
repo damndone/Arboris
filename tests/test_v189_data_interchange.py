@@ -422,12 +422,12 @@ def test_native_runtime_failures_after_admission_are_typed_unavailable(
     assert write_result.status == "unavailable"
     assert write_result.path is None
     assert write_result.capability.status == "unavailable"
-    assert write_result.capability.reason_code == "optional_dependency"
+    assert write_result.capability.reason_code == "adapter_failure"
 
     with pytest.raises(api.InterchangeUnavailableError) as error:
         api._read_frame("sav", tmp_path / "missing.sav")
     assert error.value.capability.status == "unavailable"
-    assert error.value.capability.reason_code == "optional_dependency"
+    assert error.value.capability.reason_code == "adapter_failure"
 
     round_trip_result = api.round_trip_frame(
         frame,
@@ -438,7 +438,7 @@ def test_native_runtime_failures_after_admission_are_typed_unavailable(
     assert round_trip_result.status == "unavailable"
     assert round_trip_result.path is None
     assert round_trip_result.capability.status == "unavailable"
-    assert round_trip_result.capability.reason_code == "optional_dependency"
+    assert round_trip_result.capability.reason_code == "adapter_failure"
 
 
 def test_native_partial_writer_cleans_only_owned_targets(tmp_path, monkeypatch) -> None:
@@ -634,6 +634,118 @@ def test_native_statistical_formats_have_real_round_trip_evidence(tmp_path) -> N
         assert artifact.stat().st_size > 0
 
 
+def test_native_labels_round_trip_and_public_read_projection(tmp_path) -> None:
+    api = _api()
+    pytest.importorskip("pyreadstat")
+    frame = pd.DataFrame(
+        {
+            "code": pd.Series([1.0, 2.0], dtype="float64"),
+            "score": pd.Series([1.25, 2.5], dtype="float64"),
+        }
+    )
+    metadata = {
+        "columns": {
+            "code": {
+                "variable_label": "Code label",
+                "value_labels": {"1": "One", "2": "Two"},
+                "measurement_level": "nominal",
+            },
+            "score": {
+                "variable_label": "Score label",
+                "measurement_level": "scale",
+            },
+        }
+    }
+
+    for target_format in ("sav", "zsav", "dta"):
+        capability = api.interchange_capability(target_format)
+        result = api.round_trip_frame(
+            frame,
+            metadata=metadata,
+            target_format=target_format,
+            directory=tmp_path / target_format,
+        )
+
+        if capability.status != "available":
+            assert result.status == "unavailable"
+            continue
+
+        expected_metadata = {
+            "columns": {
+                "code": {
+                    "variable_label": "Code label",
+                    "value_labels": {"1": "One", "2": "Two"},
+                },
+                "score": {"variable_label": "Score label"},
+            }
+        }
+        assert result.frame_equal is True
+        assert result.dtype_equal is True
+        assert result.schema_equal is True
+        assert result.restored_metadata["columns"] == expected_metadata["columns"] | (
+            {
+                "code": {
+                    "variable_label": "Code label",
+                    "value_labels": {"1": "One", "2": "Two"},
+                    **({"measurement_level": "nominal"} if target_format in {"sav", "zsav"} else {}),
+                },
+                "score": {
+                    "variable_label": "Score label",
+                    **({"measurement_level": "scale"} if target_format in {"sav", "zsav"} else {}),
+                },
+            }
+        )
+        if target_format in {"sav", "zsav"}:
+            assert result.status == "verified"
+            assert result.metadata_loss.has_loss is False
+        else:
+            assert result.status == "metadata_loss"
+            assert {
+                item.field
+                for item in result.metadata_loss.items
+                if item.status != "preserved"
+            } == {
+                "code.measurement_level",
+                "score.measurement_level",
+            }
+
+        read_result = api.read_interchange_frame(
+            target_format=target_format,
+            path=result.path,
+        )
+        assert read_result.status == "read"
+        assert read_result.path == result.path
+        assert read_result.metadata == result.restored_metadata
+        pd.testing.assert_frame_equal(read_result.frame, frame)
+
+
+def test_native_corrupt_and_non_dataframe_reads_fail_closed(tmp_path, monkeypatch) -> None:
+    api = _api()
+    pytest.importorskip("pyreadstat")
+    corrupt = tmp_path / "corrupt.sav"
+    corrupt.write_bytes(b"not-a-statistical-file")
+
+    corrupt_result = api.read_interchange_frame(
+        target_format="sav", path=corrupt
+    )
+    assert corrupt_result.status == "unavailable"
+    assert corrupt_result.path is None
+    assert corrupt_result.frame is None
+    assert corrupt_result.capability.reason_code == "adapter_failure"
+
+    def non_dataframe(*_args, **_kwargs):
+        return {"not": "a dataframe"}, SimpleNamespace()
+
+    monkeypatch.setattr(api, "_read_frame_with_metadata", non_dataframe)
+    non_dataframe_result = api.read_interchange_frame(
+        target_format="sav", path=corrupt
+    )
+    assert non_dataframe_result.status == "unavailable"
+    assert non_dataframe_result.path is None
+    assert non_dataframe_result.frame is None
+    assert non_dataframe_result.capability.reason_code == "adapter_failure"
+
+
 def test_native_round_trip_reports_unrepresentable_metadata_loss(tmp_path) -> None:
     api = _api()
     pytest.importorskip("pyreadstat")
@@ -660,6 +772,19 @@ def test_native_round_trip_reports_unrepresentable_metadata_loss(tmp_path) -> No
         if capability.status != "available":
             assert result.status == "unavailable"
             assert result.path is None
+            continue
+
+        if target_format in {"sav", "zsav"}:
+            assert result.status == "verified"
+            assert result.metadata_loss.has_loss is False
+            assert {
+                item.field
+                for item in result.metadata_loss.items
+                if item.status == "preserved"
+            } >= {
+                "workbench_value.measurement_level",
+                "workbench_value.user_missing_values",
+            }
             continue
 
         assert result.status == "metadata_loss"
@@ -690,11 +815,36 @@ def test_malformed_column_metadata_is_typed_and_not_reported_verified(tmp_path) 
     assert error.value.reason_code == "metadata_loss"
 
 
+def test_invalid_native_missing_metadata_fails_closed_before_write(tmp_path) -> None:
+    api = _api()
+    pytest.importorskip("pyreadstat")
+    target = tmp_path / "invalid.sav"
+
+    with pytest.raises(api.InterchangeMetadataError) as error:
+        api.write_interchange_frame(
+            pd.DataFrame({"code": [1.0]}),
+            target_format="sav",
+            path=target,
+            metadata={
+                "columns": {
+                    "code": {"user_missing_values": ["not-numeric"]}
+                }
+            },
+        )
+
+    assert error.value.reason_code == "metadata_user_missing_invalid"
+    assert not target.exists()
+
+
 def test_round_trip_status_is_schema_mismatch_when_dtype_differs(tmp_path, monkeypatch) -> None:
     api = _api()
     source = pd.DataFrame({"code": pd.Series([1], dtype="int64")})
     restored = pd.DataFrame({"code": pd.Series([1], dtype="float64")})
-    monkeypatch.setattr(api, "_read_frame", lambda *_args: restored)
+    monkeypatch.setattr(
+        api,
+        "_read_frame_with_metadata",
+        lambda *_args: (restored, {}),
+    )
 
     result = api.round_trip_frame(
         source,
