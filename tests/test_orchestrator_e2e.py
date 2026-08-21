@@ -8,6 +8,35 @@ from workbench.artifacts import read_json
 from workbench.agent.context_tools import _bounded_result_summary, _bounded_statistics_evidence
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
+from workbench.report_view_model import build_report_view_model
+
+
+def _assert_unbound_report_is_typed_unavailable(run_root: Path) -> dict:
+    assert not (run_root / "reports" / "report.html").exists()
+
+    summary = read_json(run_root / "diagnostic_summary.json")
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
+    assert summary["run_status"]["model_results_available"] is True
+    report_issue = next(
+        issue
+        for issue in summary["diagnostics"]["warnings"]
+        if issue["code"] == "REPORT_RENDER_FAILED"
+    )
+    assert report_issue["evidence"] == {
+        "error": "REPORT_EVIDENCE_UNAVAILABLE:EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    }
+
+    report_view = build_report_view_model(
+        summary,
+        run_root,
+        include_legacy_presentation=True,
+    )
+    assert report_view["status"] == "unavailable"
+    assert report_view["validationStatus"] == "unavailable"
+    assert report_view["reasonCode"] == "EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    assert report_view["facts"] == []
+    return summary
 
 
 def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
@@ -24,7 +53,7 @@ def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
     assert result["status"] == "completed"
     run_root = project.root / "runs" / result["run_id"]
     assert (run_root / "run_manifest.json").exists()
-    assert (run_root / "reports" / "report.html").exists()
+    _assert_unbound_report_is_typed_unavailable(run_root)
     assert not (run_root / "reports" / "report.pdf").exists()
     assert not (run_root / "exports" / "tables.xlsx").exists()
     assert (run_root / "artifacts_index.json").exists()
@@ -40,8 +69,9 @@ def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
         "data_profile",
         "analysis_router",
         "ols_1",
-        "report_html",
+        "diagnostic_summary",
     }.issubset(artifact_ids)
+    assert "report_html" not in artifact_ids
     assert "report_pdf" not in artifact_ids
     assert "tables_xlsx" not in artifact_ids
     assert all(
@@ -89,11 +119,16 @@ def test_normal_run_persists_typed_advanced_statistics_evidence(tmp_path: Path):
     )
     assert first_agent_result.get("statistic") == first_packet_result.get("statistic")
     assert first_agent_result.get("p_value") == first_packet_result.get("p_value")
-    report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
-    assert "Statistical Evidence" in report_html
-    assert "Table 1" in report_html
-    assert "Regression Table" in report_html
-    assert "model_results.ols_1.coefficients.x" in report_html
+    summary = _assert_unbound_report_is_typed_unavailable(run_root)
+    assert summary["statistical_evidence"]["payload_schema"] == (
+        "workbench.statistics.evidence-packet"
+    )
+    assert {row["column"] for row in summary["table_1"]} >= {"y", "x", "region"}
+    assert summary["coefficients_summary"]["full_table_ref"] == "model_results/ols_1.json"
+    assert any(
+        row["source_id"] == "model_results.ols_1.coefficients.x"
+        for row in summary["coefficients_summary"]["rows"]
+    )
     assert not (run_root / "reports" / "report.pdf").exists()
     assert not (run_root / "exports" / "tables.xlsx").exists()
 

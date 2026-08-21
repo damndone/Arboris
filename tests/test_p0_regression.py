@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from workbench.artifacts import read_json
 from workbench.domain import Severity
 from workbench.econometrics.diagnostics import compute_diagnostics
 from workbench.econometrics.runner import run_ols
@@ -18,6 +19,35 @@ from workbench.orchestrator import (
     _check_dropped_variables,
 )
 from workbench.router import YKind, detect_y_kind
+from workbench.report_view_model import build_report_view_model
+
+
+def _assert_unbound_report_is_typed_unavailable(run_root):
+    assert not (run_root / "reports" / "report.html").exists()
+
+    summary = read_json(run_root / "diagnostic_summary.json")
+    assert summary["run_status"]["report_render_status"] == "failed"
+    assert summary["run_status"]["report_available"] is False
+    assert summary["run_status"]["model_results_available"] is True
+    report_issue = next(
+        issue
+        for issue in summary["diagnostics"]["warnings"]
+        if issue["code"] == "REPORT_RENDER_FAILED"
+    )
+    assert report_issue["evidence"] == {
+        "error": "REPORT_EVIDENCE_UNAVAILABLE:EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    }
+
+    report_view = build_report_view_model(
+        summary,
+        run_root,
+        include_legacy_presentation=True,
+    )
+    assert report_view["status"] == "unavailable"
+    assert report_view["validationStatus"] == "unavailable"
+    assert report_view["reasonCode"] == "EVIDENCE_OWNER_CAPABILITY_REQUIRED"
+    assert report_view["facts"] == []
+    return summary
 
 
 # --- TEST 1 (Frontend): User X input not overwritten by suggestedX ---
@@ -215,13 +245,15 @@ def test_poisson_offset_is_not_reported_as_dropped_variable(tmp_path):
         and issue.get("evidence", {}).get("variable") == "x2_exposure"
         for issue in errors["issues"]
     )
-    html = (run_root / "reports" / "report.html").read_text()
-    assert "Exposure/offset: log(x2_exposure), coefficient fixed at 1" in html
-    assert "x2_exposure (dropped" not in html
+    summary = _assert_unbound_report_is_typed_unavailable(run_root)
+    assert summary["model_identity"]["model_family"] == "poisson_rate"
+    assert summary["preprocessing"]["exposure_variable"] == "x2_exposure"
+    assert summary["preprocessing"]["variables_dropped"] == []
+    assert "x2_exposure" not in poisson["coefficients"]
 
 
-def test_nonpositive_exposure_fallback_report_does_not_claim_offset(tmp_path):
-    """If exposure is unusable, the report should describe the fitted plain Poisson."""
+def test_nonpositive_exposure_fails_closed_without_claiming_offset(tmp_path):
+    """An unusable exposure is rejected instead of fitting plain Poisson."""
     from workbench.artifacts import read_json
     from workbench.orchestrator import run_workflow
     from workbench.projects import create_project
@@ -249,13 +281,19 @@ def test_nonpositive_exposure_fallback_report_does_not_claim_offset(tmp_path):
         x=["x1_budget", "x2_exposure"],
     )
 
-    assert result["status"] == "completed"
+    assert result["status"] == "failed"
     run_root = project.root / "runs" / result["run_id"]
-    poisson = read_json(run_root / "model_results" / "poisson_1.json")
-    assert poisson["model_type"] == "poisson"
-    html = (run_root / "reports" / "report.html").read_text()
-    assert "Model: Poisson rate model" not in html
-    assert "offset(log(x2_exposure))" not in html
+    errors = read_json(run_root / "errors.json")
+    issue = next(
+        issue
+        for issue in errors["issues"]
+        if issue["code"] == "SURVEY_POISSON_EXPOSURE_INVALID"
+    )
+    assert issue["evidence"]["exposure_column"] == "x2_exposure"
+    assert issue["evidence"]["reason"] == "nonpositive"
+    assert "strictly positive" in issue["message"]
+    assert not (run_root / "model_results" / "poisson_1.json").exists()
+    assert not (run_root / "reports" / "report.html").exists()
 
 
 def test_auto_infer_routes_binary_y_to_logit():

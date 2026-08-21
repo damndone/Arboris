@@ -198,8 +198,8 @@ def test_workflow_sampling_weight_without_a_declared_design_still_fails_closed(t
     issue = errors["issues"][-1]
     # The stage wraps the fit failure, so the specific refusal travels in the
     # message rather than the code.
-    assert issue["code"] in {"OLS_SAMPLING_WEIGHT_UNSUPPORTED", "MODEL_FIT_FAILED"}
-    assert "OLS_SAMPLING_WEIGHT_UNSUPPORTED" in issue["message"]
+    assert issue["code"] == "SURVEY_DESIGN_INCOMPLETE"
+    assert "SURVEY_DESIGN_INCOMPLETE" in issue["message"]
     assert "survey_strata_col" in issue["message"] or "sampling design" in issue["message"]
     assert "covariance=clustered" not in issue["message"], (
         "the refusal must not send the user to a channel that answers a "
