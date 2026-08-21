@@ -82,7 +82,7 @@ def test_an_agent_can_compose_a_plan_that_starts_an_lmm():
     draft = compile_workflow(
         workflow_id="wf-lmm",
         target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
-        preconditions={"context_fingerprint": "fp"},
+        preconditions={"context_fingerprint": "fp", "active_head_run_id": "r"},
         steps=plan,
         available_columns=["subject", "week", "arm", "score"],
     )

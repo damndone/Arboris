@@ -19,11 +19,22 @@ from workbench.agent.notebook import (
     build_artifact_contract,
     validate_produced_artifacts,
 )
+from workbench.agent.context_compiler import (
+    freshness_dependency_fingerprint,
+    generation_context_hash,
+)
 from workbench.agent.trace import TraceWriter
-from workbench.contracts.agent.notebook_option import ExpectedArtifact
+from workbench.contracts.agent.notebook_option import ExpectedArtifact, RecommendationDecision
+from workbench.graph_model import Graph, Node, NodeKind, Stage
+from workbench.graph_store import GraphStore
 from workbench.lineage.run_family import bind_run_to_family
+from workbench.lineage.node_write_validation import (
+    NodeWriteOperationRequestV1,
+    compute_context_fingerprint,
+)
 from workbench.services.server_run_artifacts import (
     ServerOwnedArtifactManifestError,
+    register_server_owned_run_artifact,
     read_server_owned_run_artifacts,
 )
 
@@ -48,6 +59,31 @@ def test_an_empty_artifact_contract_is_refused_before_persistence() -> None:
 
 def _artifact(artifact_id: str, artifact_type: str = "time_series_json", step: str = "arma_garch"):
     return {"artifact_id": artifact_id, "artifact_type": artifact_type, "step": step}
+
+
+def _register_server_artifacts(
+    project: Path, run_id: str, records: list[dict]
+) -> list[dict]:
+    """Create the server-owned files and integrity-bound index records."""
+
+    run_root = project / "runs" / run_id
+    registered = []
+    for record in records:
+        artifact_id = str(record["artifact_id"])
+        artifact_path = run_root / f"{artifact_id}.json"
+        artifact_path.write_text("{}", encoding="utf-8")
+        registered.append(
+            register_server_owned_run_artifact(
+                project,
+                run_id,
+                artifact_id=artifact_id,
+                artifact_path=artifact_path,
+                artifact_type=str(record["artifact_type"]),
+                step=str(record["step"]),
+                inputs=[],
+            )
+        )
+    return registered
 
 
 def test_server_owned_reader_rejects_a_non_object_artifact_index(tmp_path: Path) -> None:
@@ -233,40 +269,20 @@ def test_completion_projects_the_contract_without_hiding_ambient_artifacts(
 ) -> None:
     """The option contract is narrow, while the durable run index stays complete."""
 
-    project = make_project(tmp_path)
-    service = NotebookService(project)
-    notebook = service.create_notebook(title="ambient", created_by="u")
-    context = service.compile_context(notebook.notebook_id)
-    (option,) = service.propose_batch(
-        notebook.notebook_id,
-        context=context,
-        drafts=[
-            OptionDraft(
-                rank=1,
-                rationale="contract-owned result",
-                proposal=TypedProposal.from_dict(model_rerun_proposal("p1")),
-                expected_artifacts=(REQUIRED_PARAMETERS,),
-                option_id="opt_ambient",
-            )
-        ],
+    project, service, notebook_id, option_id = _materialized_option(
+        tmp_path, option_id="opt_ambient"
     )
-    service.confirm(
-        notebook.notebook_id,
-        option.option_id,
-        option_revision=1,
-        proposal_id="p1",
-        proposal_revision=1,
-        context=service.compile_context(notebook.notebook_id),
-    )
+    notebook = service.get_notebook(notebook_id)
     run_root = make_run(project, "run_ambient")
-    ambient = [
-        _artifact("ts.parameters"),
-        _artifact("ts.chart.acf"),
-        _artifact("ts.chart.qq"),
-        _artifact("ts.diagnostics"),
-    ]
-    (run_root / "artifacts_index.json").write_text(
-        json.dumps({"schema_version": 1, "artifacts": ambient}), encoding="utf-8"
+    ambient = _register_server_artifacts(
+        project,
+        "run_ambient",
+        [
+            _artifact("ts.parameters"),
+            _artifact("ts.chart.acf"),
+            _artifact("ts.chart.qq"),
+            _artifact("ts.diagnostics"),
+        ],
     )
     bind_run_to_family(run_root, run_family_id=notebook.run_family_id, bound_by="test")
 
@@ -286,8 +302,8 @@ def test_completion_projects_the_contract_without_hiding_ambient_artifacts(
         },
     )
     outcome = service.complete_execution(
-        notebook.notebook_id,
-        option.option_id,
+        notebook_id,
+        option_id,
         execution_status="succeeded",
         run_id="run_ambient",
         trace=trace,
@@ -326,20 +342,12 @@ def test_completion_projects_the_contract_without_hiding_ambient_artifacts(
 def test_explicit_produced_artifacts_keep_undeclared_detection(tmp_path: Path) -> None:
     """A caller-owned produced list remains strict and is not projected."""
 
-    service, notebook_id, _ = _executed_notebook(tmp_path, [])
-    notebook = service.get_notebook(notebook_id)
-    option = service.list_options(notebook_id)[0]
-    service.confirm(
-        notebook_id,
-        option.option_id,
-        option_revision=1,
-        proposal_id="p1",
-        proposal_revision=1,
-        context=service.compile_context(notebook_id),
+    _, service, notebook_id, option_id = _materialized_option(
+        tmp_path, option_id="opt_explicit"
     )
     outcome = service.complete_execution(
         notebook_id,
-        option.option_id,
+        option_id,
         execution_status="succeeded",
         produced_artifacts=[_artifact("ts.parameters"), _artifact("ts.chart.acf")],
     )
@@ -354,49 +362,24 @@ def test_explicit_produced_artifacts_keep_undeclared_detection(tmp_path: Path) -
 def test_contract_projection_keeps_wrong_type_blocking(tmp_path: Path) -> None:
     """Narrowing the projection must not turn a wrong expected type into success."""
 
-    project = make_project(tmp_path)
-    service = NotebookService(project)
-    notebook = service.create_notebook(title="wrong type", created_by="u")
-    context = service.compile_context(notebook.notebook_id)
-    (option,) = service.propose_batch(
-        notebook.notebook_id,
-        context=context,
-        drafts=[
-            OptionDraft(
-                rank=1,
-                rationale="wrong type",
-                proposal=TypedProposal.from_dict(model_rerun_proposal("p1")),
-                expected_artifacts=(REQUIRED_PARAMETERS,),
-                option_id="opt_wrong_type",
-            )
-        ],
+    project, service, notebook_id, option_id = _materialized_option(
+        tmp_path, option_id="opt_wrong_type"
     )
-    service.confirm(
-        notebook.notebook_id,
-        option.option_id,
-        option_revision=1,
-        proposal_id="p1",
-        proposal_revision=1,
-        context=service.compile_context(notebook.notebook_id),
-    )
+    notebook = service.get_notebook(notebook_id)
     run_root = make_run(project, "run_wrong_type")
-    (run_root / "artifacts_index.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "artifacts": [
-                    _artifact("ts.parameters", artifact_type="figure"),
-                    _artifact("ts.chart.acf"),
-                ],
-            }
-        ),
-        encoding="utf-8",
+    _register_server_artifacts(
+        project,
+        "run_wrong_type",
+        [
+            _artifact("ts.parameters", artifact_type="figure"),
+            _artifact("ts.chart.acf"),
+        ],
     )
     bind_run_to_family(run_root, run_family_id=notebook.run_family_id, bound_by="test")
 
     outcome = service.complete_execution(
-        notebook.notebook_id,
-        option.option_id,
+        notebook_id,
+        option_id,
         execution_status="succeeded",
         run_id="run_wrong_type",
     )
@@ -414,36 +397,157 @@ def test_contract_projection_keeps_wrong_type_blocking(tmp_path: Path) -> None:
 # ----------------------------------------------------------------------
 
 
-def _executed_notebook(tmp_path: Path, produced: list[dict]) -> tuple[NotebookService, str, str]:
+def _materialized_option(
+    tmp_path: Path,
+    *,
+    option_id: str = "opt_contract",
+) -> tuple[Path, NotebookService, str, str]:
+    """Build the smallest server-owned, source-bound option for execution tests."""
+
     project = make_project(tmp_path)
     service = NotebookService(project)
-    notebook = service.create_notebook(title="n", created_by="u")
+    source_run = make_run(project, "run_source")
+    source_run_hash = "a" * 64
+    source_upload_sha = "upload-source"
+    (source_run / "run_inputs.json").write_text(
+        json.dumps(
+            {
+                "run_input_schema_version": 1,
+                "upload": {"sha256": source_upload_sha},
+                "form": {
+                    "model_type": "ols",
+                    "y": "outcome",
+                    "x": "predictor",
+                    "model_options": {},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (source_run / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run_source",
+                "mode": "manual",
+                "status": "completed",
+                "model_routing": {
+                    "requested_model_type": "ols",
+                    "effective_model_type": "ols",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    GraphStore(project / "runs").write(
+        Graph(
+            schema_version=3,
+            run_id="run_source",
+            nodes={
+                "model:ols_1": Node(
+                    id="model:ols_1",
+                    kind=NodeKind.MODEL,
+                    display_label="OLS",
+                    created_at="2026-08-21T00:00:00+00:00",
+                    parent_stage_id=None,
+                    branch_id="main",
+                    stage=Stage.MODEL,
+                )
+            },
+            edges={},
+            branches={},
+        )
+    )
+    (source_run / "node_index.json").write_text(
+        json.dumps({"model:ols_1": {"node_hash": source_run_hash, "cas_ref": {}}}),
+        encoding="utf-8",
+    )
+
+    notebook = service.ensure_default_projection(from_run_id="run_source", created_by="test")
+    request = NodeWriteOperationRequestV1(
+        request_id="artifact-contract-test",
+        operation="rerun",
+        context_version="node-operation-context/v1",
+        context_fingerprint="pending",
+        owner_run_id="run_source",
+        op_node_id="model:ols_1",
+        node_hash=source_run_hash,
+        forest_node_key=f"{source_run_hash}::model:ols_1",
+        owner_resolution="single_candidate",
+        active_head_run_id="run_source",
+    )
+    source_context_fingerprint = compute_context_fingerprint(project / "runs", request)
     context = service.compile_context(notebook.notebook_id)
-    (option,) = service.propose_batch(
+    proposal = TypedProposal(
+        proposal_id=f"proposal_{option_id}",
+        proposal_revision=1,
+        operation_id="model.rerun",
+        operation_version="v1",
+        target={
+            "run_id": "run_source",
+            "node_ref": "model:ols_1",
+            "node_hash": source_run_hash,
+            "forest_node_key": f"{source_run_hash}::model:ols_1",
+        },
+        preconditions={
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": source_context_fingerprint,
+            "active_head_run_id": "run_source",
+            "owner_resolution": "single_candidate",
+        },
+        changes={"model_options": {}},
+    )
+    decision = RecommendationDecision(
+        recommendation_decision_id=f"decision_{option_id}",
+        batch_id=f"batch_{option_id}",
+        generation_context_hash=generation_context_hash(context),
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+        evidence_pack_hashes=(),
+        comparison_protocol_refs=(),
+        candidate_option_ids=(option_id,),
+        outcome="recommended",
+        recommended_option_id=option_id,
+        reason_refs=(),
+    )
+    (revision,) = service.propose_batch(
         notebook.notebook_id,
         context=context,
         drafts=[
             OptionDraft(
                 rank=1,
-                rationale="r",
-                proposal=TypedProposal.from_dict(model_rerun_proposal("p1")),
+                rationale="server-owned typed artifact contract",
+                proposal=proposal,
                 expected_artifacts=(REQUIRED_PARAMETERS,),
+                option_id=option_id,
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome,
             )
         ],
+        batch_id=decision.batch_id,
+        recommendation_decision=decision,
     )
-    service.confirm(
+    assert revision.materializable is True
+    service.record_decision(
         notebook.notebook_id,
-        option.option_id,
-        option_revision=1,
-        proposal_id="p1",
-        proposal_revision=1,
+        revision.option_id,
+        decision="selected",
+        actor="test",
+    )
+    service.materialize_option(
+        notebook.notebook_id,
+        revision.option_id,
         context=service.compile_context(notebook.notebook_id),
     )
+    return project, service, notebook.notebook_id, revision.option_id
+
+
+def _executed_notebook(tmp_path: Path, produced: list[dict]) -> tuple[NotebookService, str, str]:
+    project, service, notebook_id, option_id = _materialized_option(tmp_path)
+    notebook = service.get_notebook(notebook_id)
     child = make_run(project, "run_child")
     bind_run_to_family(child, run_family_id=notebook.run_family_id, bound_by="test")
     outcome = service.complete_execution(
-        notebook.notebook_id,
-        option.option_id,
+        notebook_id,
+        option_id,
         execution_status="succeeded",
         run_id="run_child",
         produced_artifacts=produced,
@@ -463,7 +567,7 @@ def test_a_successful_run_missing_its_required_table_does_not_advance_the_head(
     assert outcome.active_head_advanced is False
     assert outcome.lifecycle_status == "selected"
     notebook = service.get_notebook(notebook_id)
-    assert notebook.active_head_run_id is None
+    assert notebook.active_head_run_id == "run_source"
     assert notebook.last_attempt_run_id == "run_child"
 
 
@@ -482,11 +586,16 @@ def test_a_run_that_satisfies_the_contract_advances_the_head_and_pins_the_execut
     assert notebook.last_attempt_run_id is None
     # §9.1 criterion 12: an executed option can always be traced to its branch.
     (option_view,) = service.list_options(notebook_id)
-    execution = option_view.last_execution["execution"]
+    execution = option_view.execution_results[-1]
     assert execution["option_id"] == option_view.option_id
     assert execution["option_revision"] == 1
-    assert execution["proposal_id"] == "p1"
-    assert execution["proposal_revision"] == 1
-    assert execution["freshness_dependency_fingerprint"] == (
+    assert execution["run_id"] == "run_child"
+    assert execution["execution_status"] == "succeeded"
+    assert execution["committed"] is True
+    assert option_view.current_revision.typed_proposal_id == "proposal_opt_contract"
+    assert option_view.current_revision.typed_proposal_revision == 1
+    assert option_view.current_revision.generation_context_hash.startswith("sha256:")
+    assert option_view.current_revision.freshness_dependency_fingerprint.startswith("fresh1:")
+    assert option_view.current_revision.generation_context_hash != (
         option_view.current_revision.freshness_dependency_fingerprint
     )
