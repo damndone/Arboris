@@ -1,6 +1,6 @@
 # Arboris
 
-A local econometrics workbench. You point it at a dataset, choose a model, and
+A local statistics workbench. You point it at a dataset, choose a model, and
 it produces a run: every decision recorded, every artifact addressed, and a
 lineage graph you can edit and re-execute node by node.
 
@@ -8,7 +8,7 @@ Everything runs on your machine. Nothing is uploaded, and the only network call
 is to an LLM provider you configure yourself — for prose and for typed change
 proposals, never for the statistics.
 
-**Current release: v1.8.0** — see [docs/releases/](docs/releases/).
+**Current release: v1.8.8** — see [docs/releases/](docs/releases/).
 
 ---
 
