@@ -1,0 +1,58 @@
+# Retrospective — v1-8-9
+
+## Goal
+
+# v1.8.9 — 日常可用（重建版）  基线：\`f3836408\`（v1.8.8 发布提交 \`f564de63\` + v1.8.9 spec/plan 文档）。 零件库：tag \`archive/v1.8.9-codex-wip\`（\`214dee95\`），只按需移植，不整体合并。  ## 一句话目标  研究员不写代码、不看菜单，用中文完成"导入数据 → 整理变量 → 建模 → 读懂结果"， 且每个数字都可信、可追溯。  ## 为什么重建  Codex 的 integration 分支在主线上出现退化：Agent/Notebook 面板不再调用 LLM； v1.8.6 四个模型族的结果对 Agent/Report 不可读；证据读取比 v1.8.8 慢约 200 倍； full gate 未通过。数据层、分类 ML、抽样 GLM 等模块本身基本独立，可移植。  ## 范围（按顺序交付，每步单独提交并验收）  | # | 交付 | 来源 | 验收场景（浏览器内真实操作） | |---|---|---|---| | 1 | 修正后估计的模型族错配：非 OLS 模型不得做 OLS 联合 F / White / 二次驻点 | 新写 | Logit 模型后请求联合 F 检验 → 明确"不适用于 logit"，不产出数字 | | 2 | 恢复模型分支在 resume 时的绑定 | 参考零件库 P0-B | 模型后中断、重启 backend、继续 → 后续步骤绑定到同一模型 | | 3 | Agent 基线核查：v1.8.8 LLM Agent 用 DeepSeek 跑 10 条中文请求，记录成功率与失败类型 | 新写（评测脚本） | 基线数字写入本文件末尾，作为后续改动的对照 | | 4 | 变量元数据：变量标签、值标签、测量级别、缺失值定义 | 移植 \`metadata.py\` 等 | 在界面改 \`gender\` 的值标签，结果表与 Agent 回答使用新标签 | | 5 | \`.sav/.zsav/.dta\` 导入导出（含标签），不能保留的元数据明确提示 | 移植 \`data_interchange.py\` | 导入 .sav → 改标签 → 导出 .dta → 再导入，标签一致 | | 6 | 数据编辑器：数据视图 + 变量视图，数据操作（filter/sort/recode/split）以血缘节点记录 | 移植 \`data_operations.py\`、\`filter_ast.py\` + 新 UI | 在变量视图把 \`age\` 分三组 recode，生成新节点，可回溯 | | 7 | Agent 驱动以上全部能力：LLM 负责理解与组合；写操作经服务端校验 + 用户确认 | 在 v1.8.8 Agent 上扩展工具 | 用中文让 Agent 完成场景 4–6 与一次 Logit 建模，成功率不低于第 3 步基线 | | 8 | 外发管控 v1：内容来源处打标签、LLM 客户端唯一出口检查、原始行默认不外发、被拦截内容以占位说明替换 | 新写（参考 spec §7.7） | Agent 请求"把前 20 行发给我看"→ 本地显示，发往 DeepSeek 的请求中无原始行（审计日志可见） |  不在本版：分类 ML、抽样 GLM 扩展（v1.8.11 移植）、出版级表格与脚本导出（v1.8.10）、 P2 模型族、Codex 的分页/授权凭据/字节预算体系。  ## 硬约束  - 正确性：统计数字只由确定性代码产生；不适用的方法明确拒绝，不静默降级。 - 性能预算：读取单个结果 < 1 秒；后端测试总时长不超过 v1.8.8 的 1.5 倍。 - 不退化：v1.8.8 已有的 UI、Agent、模型族、结果展示全部保留，除非本文件列出替代。 - 每个交付完成即提交；不留跨天未提交改动。  ## 验证  - 每步：先写能复现问题的失败测试，再修；相关测试 + 前端 typecheck。 - 第 3、7 步：真实 DeepSeek 调用，结果与确定性测试分开记录。 - 发版前：宿主机 full gate（\`scripts/gate.sh --full\`），浏览器逐条走验收场景。  ## 已知门槛  - 仅本机 macOS 验证；Linux / 其他主机 / 云端为 NOT VERIFIED。 - 真实 LLM 质量只对 DeepSeek 负责。 - merge / tag / push 需用户单独授权。
+
+## Final status
+
+STARTED
+
+## Metrics
+
+- Failure frequency: N/A (sample=0)
+- Repeat rate: N/A (sample=0)
+- Recurrence rate: N/A (sample=0)
+- MTTR: N/A (sample=0; unresolved=0)
+- Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
+- Spec churn: N/A (sample=0)
+- Plan churn: N/A (sample=0)
+- Gate waste rate: N/A (sample=0)
+- Same-state retry rate: N/A (sample=0)
+- Token waste: N/A (sample=0)
+
+## All failures
+
+- None recorded.
+
+## All errors
+
+- None recorded.
+
+## All gaps
+
+- None recorded.
+
+## All waste
+
+- None recorded.
+
+## Root causes and solutions
+
+- None recorded.
+
+## Added tests
+
+- No test evidence recorded.
+
+## New rules
+
+- No rule candidate recorded.
+
+## Future guidance
+
+- No guidance recorded.
+
+## Event index
+
+- #1: `7bcb1489-b6df-4db0-81ed-2793f0502c66` | 2026-09-25T19:11:31.903Z | STATE_CHANGE/line_started | incident=`d8430bd4-d887-43cb-8a00-357030610149` | lesson_key=`frozen-context-before-start` | event_sha256=`cd178a32507adbe6680ee05de1e50266cc41a614ee76dd133b703bab39a12df2`
