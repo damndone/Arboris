@@ -1086,6 +1086,91 @@ def _curved_post_estimation_state(tmp_path, covariance: str):
     )
 
 
+_OLS_ONLY_POST_ESTIMATION = (
+    ("model.joint_f_test", {"term_selectors": [{"kind": "polynomial", "column": "exposure"}]}),
+    ("model.white_test", {}),
+    ("model.quadratic_stationary_point", {"column": "exposure"}),
+)
+
+
+@pytest.mark.parametrize("model_family", ("logit", "probit", "poisson"))
+@pytest.mark.parametrize(("operation_id", "extra_spec"), _OLS_ONLY_POST_ESTIMATION)
+def test_ols_post_estimation_refuses_a_non_ols_upstream_model(
+    tmp_path, model_family: str, operation_id: str, extra_spec: dict
+) -> None:
+    """An OLS-only test must not answer for a GLM the user actually fitted.
+
+    These steps refit the branch by OLS. On a logit/probit/poisson branch that
+    silently reports a linear-probability (or linear-count) F statistic under
+    the GLM's provenance. The step has to refuse and persist nothing.
+    """
+
+    import numpy as np
+
+    rng = np.random.default_rng(7)
+    nobs = 200
+    exposure = rng.normal(size=nobs)
+    linear = -0.2 + 0.5 * exposure - 0.15 * exposure**2
+    if model_family == "poisson":
+        outcome = rng.poisson(np.exp(0.4 + 0.1 * linear))
+    else:
+        outcome = rng.binomial(1, 1 / (1 + np.exp(-linear)))
+    frame = pd.DataFrame({"outcome": outcome, "exposure": exposure})
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="glm.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "glm.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="glm-post-estimation-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id=f"wf-{model_family}-{operation_id}",
+        steps=[
+            {
+                "step_id": "estimate",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": model_family,
+                    "branches": [
+                        {
+                            "branch_id": "curved",
+                            "outcome": "outcome",
+                            "predictors": ["exposure"],
+                            "polynomials": [{"column": "exposure", "degree": 2}],
+                        }
+                    ],
+                },
+            },
+            {
+                "step_id": "post",
+                "operation_id": operation_id,
+                "depends_on": ["estimate"],
+                "spec": {"branch_id": "curved", **extra_spec},
+            },
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.steps["estimate"].status == "completed", state.steps["estimate"].error
+    post = state.steps["post"]
+    assert post.status == "failed"
+    assert not post.artifact_ids
+    assert model_family in (post.error or "")
+    assert "ols" in (post.error or "").lower()
+
+
 def test_post_estimation_inference_uses_the_model_declared_covariance(tmp_path) -> None:
     """A joint test must answer for the model the user actually fitted.
 

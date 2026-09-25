@@ -2355,6 +2355,14 @@ def _refit_completed_ols_branch(
     branch_spec = branch.get("branch_spec")
     if not isinstance(branch_spec, Mapping):
         raise WorkflowExecutionError("completed model branch lacks a branch specification")
+    # Every caller refits by OLS. On a GLM/panel/IV branch that would report
+    # OLS inference under that model's provenance, so refuse instead.
+    model_family = branch_spec.get("model_family")
+    if model_family != "ols":
+        raise WorkflowExecutionError(
+            f"this post-estimation step is defined for OLS models only; branch "
+            f"{branch.get('branch_id')} was estimated as {model_family or 'an undeclared family'}"
+        )
     try:
         branch_frame, predictor_columns, _references = expand_branch_terms(
             source_frame,
