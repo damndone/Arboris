@@ -437,3 +437,32 @@ def test_the_agent_hears_why_before_the_user_is_asked_to_confirm(tmp_path: Path)
     with pytest.raises(ValueError, match=r"RERUN_HAS_NO_MODEL_EFFECT.*firm.*model\.genesis"):
         preflight({"firm": "nominal"})
     preflight({"y": "scale", "firm": "nominal"})
+
+
+def test_an_agent_rerun_can_relabel_and_declare_missing_codes(tmp_path: Path) -> None:
+    """Metadata edits ride model.rerun: labels reach the child run's inputs."""
+
+    project = create_project(tmp_path, "relabel")
+    parent_run_id = _create_terminal_unadjusted_ols_run(project.root)
+    node_id = _model_node(project.root, parent_run_id)
+    labels = {
+        "variable_labels": {"x": "Exposure"},
+        "value_labels": {"firm": {"firm-0": "First firm"}},
+        "user_missing_values": {"x": [-99]},
+    }
+    result = RerunService(project.root).submit(
+        RerunSubmissionRequest(
+            source_run_id=parent_run_id,
+            from_node=node_id,
+            op_overrides={"labels": labels},
+            rerun_reason="agent_confirmed",
+            rerun_from={"owner_run_id": parent_run_id, "op_node_id": node_id},
+            workbench_context=_workbench_context(project.root, parent_run_id, node_id),
+        )
+    )
+    assert _wait_terminal(project.root, result.run_id) == "completed"
+    child_form = json.loads(
+        (project.root / "runs" / result.run_id / "run_inputs.json").read_text()
+    )["form"]
+    assert child_form["labels"]["variable_labels"] == {"x": "Exposure"}
+    assert child_form["labels"]["user_missing_values"] == {"x": [-99]}

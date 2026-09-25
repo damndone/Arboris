@@ -756,8 +756,13 @@ def _model_rerun_change_branch() -> dict[str, Any]:
                 "already in the model is treated (for example an ordinal outcome "
                 "routes to ordinal logit). It never adds a column to the model: to "
                 "add a regressor, propose model.genesis with it in predictors or "
-                "categorical. Declare every column in one proposal rather than one "
-                "at a time. Only columns present in the data may be named."
+                "categorical. `variable_labels` and `value_labels` change how "
+                "columns and their values are displayed in tables and answers. "
+                "`user_missing_values` declares codes (e.g. -99, or a {low, high} "
+                "range) that mean no valid answer; they become missing before any "
+                "model runs, which changes the estimation sample. Declare every "
+                "column in one proposal rather than one at a time. Only columns "
+                "present in the data may be named."
             ),
             "properties": {
                 "measurement_level": {
@@ -765,6 +770,38 @@ def _model_rerun_change_branch() -> dict[str, Any]:
                     "additionalProperties": {
                         "type": "string",
                         "enum": ["nominal", "ordinal", "scale", "count", "unspecified"],
+                    },
+                },
+                "variable_labels": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string", "minLength": 1},
+                },
+                "value_labels": {
+                    "type": "object",
+                    "description": "Column -> {stored value as string -> label}.",
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string", "minLength": 1},
+                    },
+                },
+                "user_missing_values": {
+                    "type": "object",
+                    "description": "Column -> list of codes; a code is a number, a string, or {low, high}.",
+                    "additionalProperties": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "anyOf": [
+                                {"type": "number"},
+                                {"type": "string", "minLength": 1},
+                                {
+                                    "type": "object",
+                                    "required": ["low", "high"],
+                                    "properties": {"low": {"type": "number"}, "high": {"type": "number"}},
+                                    "additionalProperties": False,
+                                },
+                            ]
+                        },
                     },
                 },
             },

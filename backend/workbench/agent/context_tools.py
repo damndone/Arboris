@@ -1830,6 +1830,9 @@ class NodeOperationContextProvider:
                     "columns_omitted": columns_omitted,
                     "columns_without_missing": public_no_missing,
                 }
+                declared_metadata = _bounded_declared_metadata(_run_declared_labels(run_root))
+                if declared_metadata is not None:
+                    entry["declared_metadata"] = declared_metadata
                 if (run_id, node.id) in detail_keys:
                     entry["column_details"] = [
                         self._dataset_column_detail(frame, column)
@@ -1933,11 +1936,13 @@ class NodeOperationContextProvider:
         models: list[dict[str, Any]] = []
         for run_id in request.run_ids:
             run_root = self._project_run_root(run_id)
+            labeler = _run_term_labeler(run_root)
             for result in read_model_results(run_root):
                 public_model = _public_requested_model_coefficients(
                     run_id=run_id,
                     result=result,
                     requested_terms=request.terms,
+                    labeler=labeler,
                 )
                 if public_model is not None:
                     models.append(public_model)
@@ -1970,18 +1975,32 @@ class NodeOperationContextProvider:
             raise ToolVisibleError(
                 "PROJECT_DATASET_SCHEMA_UNAVAILABLE: the persisted dataset schema has no columns."
             )
+        declared = _run_declared_labels(run_root)
         columns: list[dict[str, Any]] = []
         for name, metadata in sorted(source_columns.items(), key=lambda item: str(item[0])):
             if not isinstance(name, str) or not name or not isinstance(metadata, dict):
                 continue
-            columns.append(
-                {
-                    "name": name,
-                    "dtype": metadata.get("dtype") if isinstance(metadata.get("dtype"), str) else None,
-                    "missing_rate": _public_stat_number(metadata.get("missing_rate")),
-                    "unique_count": _public_positive_int(metadata.get("unique_count")),
+            column: dict[str, Any] = {
+                "name": name,
+                "dtype": metadata.get("dtype") if isinstance(metadata.get("dtype"), str) else None,
+                "missing_rate": _public_stat_number(metadata.get("missing_rate")),
+                "unique_count": _public_positive_int(metadata.get("unique_count")),
+            }
+            for field, key in (
+                ("variable_labels", "variable_label"),
+                ("measurement_level", "measurement_level"),
+                ("user_missing_values", "user_missing_values"),
+            ):
+                mapping = declared.get(field)
+                if isinstance(mapping, dict) and name in mapping:
+                    column[key] = mapping[name]
+            value_labels = declared.get("value_labels")
+            if isinstance(value_labels, dict) and isinstance(value_labels.get(name), dict):
+                mapping = value_labels[name]
+                column["value_labels"] = {
+                    key: mapping[key] for key in sorted(mapping)[:_MAX_VALUE_LABELS_PER_COLUMN]
                 }
-            )
+            columns.append(column)
         public_columns = columns[:64]
         return {
             "run_id": request.run_id,
@@ -2948,6 +2967,16 @@ class NodeOperationContextProvider:
                 "row_count": context["row_count"],
                 "columns": context["columns"],
                 "downstream_invalidation": context["downstream_invalidation"],
+                **(
+                    {"declared_metadata": declared_metadata}
+                    if (
+                        declared_metadata := _bounded_declared_metadata(
+                            _run_declared_labels(self.project_root / "runs" / request.owner_run_id)
+                        )
+                    )
+                    is not None
+                    else {}
+                ),
             },
             "omitted_sections": ["source_artifact_id", "raw_rows"],
         }
@@ -3118,6 +3147,7 @@ def _public_requested_model_coefficients(
     run_id: str,
     result: dict[str, Any],
     requested_terms: tuple[str, ...],
+    labeler: Any = None,
 ) -> dict[str, Any] | None:
     """Project one stored result into term-specific, non-row evidence."""
 
@@ -3133,9 +3163,11 @@ def _public_requested_model_coefficients(
         if not isinstance(coefficient, dict):
             missing_terms.append(term)
             continue
+        label = labeler.label(term) if labeler is not None else term
         public_coefficients.append(
             {
                 "term": term,
+                **({"label": label} if label != term else {}),
                 "estimate": _public_stat_number(coefficient.get("estimate")),
                 "std_error": _public_stat_number(coefficient.get("std_error")),
                 "p_value": _public_stat_number(coefficient.get("p_value")),
@@ -3206,12 +3238,82 @@ def _public_requested_model_coefficients(
         },
         "coefficients": public_coefficients,
         "missing_terms": missing_terms,
+        # When a requested term is absent, name the terms that do exist, so a
+        # request for `region` can find C(Q('region'))[T.2] instead of guessing.
+        **(
+            {
+                "available_terms": [
+                    {"term": str(term), "label": labeler.label(str(term)) if labeler is not None else str(term)}
+                    for term in list(coefficients)[:_MAX_AVAILABLE_TERMS]
+                ]
+            }
+            if missing_terms
+            else {}
+        ),
         "evidence_ref": {
             "run_id": run_id,
             "model_id": model_id,
             "result_ref": f"model_results:{model_id}",
         },
     }
+
+
+_MAX_METADATA_COLUMNS = 64
+_MAX_VALUE_LABELS_PER_COLUMN = 32
+_MAX_AVAILABLE_TERMS = 48
+
+
+def _run_declared_labels(run_root: Path) -> dict[str, Any]:
+    """The labels a run was executed with, as recorded in its inputs."""
+
+    try:
+        form = (read_json(run_root / "run_inputs.json") or {}).get("form") or {}
+    except (FileNotFoundError, OSError, ValueError):
+        return {}
+    labels = form.get("labels") if isinstance(form, dict) else None
+    return labels if isinstance(labels, dict) else {}
+
+
+def _bounded_declared_metadata(labels: dict[str, Any]) -> dict[str, Any] | None:
+    """Declared metadata trimmed to a size an Agent turn can carry."""
+
+    out: dict[str, Any] = {}
+    omitted: list[str] = []
+    for field in ("variable_labels", "measurement_level", "user_missing_values"):
+        mapping = labels.get(field)
+        if isinstance(mapping, dict) and mapping:
+            keys = sorted(mapping)[:_MAX_METADATA_COLUMNS]
+            if len(mapping) > len(keys):
+                omitted.append(field)
+            out[field] = {key: mapping[key] for key in keys}
+    value_labels = labels.get("value_labels")
+    if isinstance(value_labels, dict) and value_labels:
+        bounded: dict[str, Any] = {}
+        for column in sorted(value_labels)[:_MAX_METADATA_COLUMNS]:
+            mapping = value_labels[column]
+            if not isinstance(mapping, dict):
+                continue
+            keys = sorted(mapping)[:_MAX_VALUE_LABELS_PER_COLUMN]
+            if len(mapping) > len(keys):
+                omitted.append(f"value_labels.{column}")
+            bounded[column] = {key: mapping[key] for key in keys}
+        if bounded:
+            out["value_labels"] = bounded
+    if not out:
+        return None
+    if omitted:
+        out["omitted"] = omitted
+    return out
+
+
+def _run_term_labeler(run_root: Path) -> Any:
+    from ..term_labels import TermLabeler
+
+    labels = _run_declared_labels(run_root)
+    return TermLabeler(
+        variable_labels=labels.get("variable_labels") if isinstance(labels.get("variable_labels"), dict) else {},
+        value_labels=labels.get("value_labels") if isinstance(labels.get("value_labels"), dict) else {},
+    )
 
 
 def _public_stat_number(value: Any) -> int | float | None:
