@@ -335,3 +335,105 @@ def test_rerun_service_reconciles_terminal_child_and_rejects_tampered_context(
     assert tampered.status == "failed"
     assert tampered.error == {"type": "VerificationFailed"}
     assert tampered.verification["passed"] is False
+
+
+def _model_node(project_root: Path, run_id: str) -> str:
+    graph = GraphStore(project_root / "runs").read(run_id)
+    return next(
+        node_id
+        for node_id, node in graph.nodes.items()
+        if getattr(node.stage, "value", node.stage) == "model"
+    )
+
+
+def _submit_levels(project_root: Path, run_id: str, levels: dict) -> object:
+    node_id = _model_node(project_root, run_id)
+    return RerunService(project_root).submit(
+        RerunSubmissionRequest(
+            source_run_id=run_id,
+            from_node=node_id,
+            op_overrides={"labels": {"measurement_level": levels}},
+            rerun_reason="agent_confirmed",
+            rerun_from={"owner_run_id": run_id, "op_node_id": node_id},
+            workbench_context=_workbench_context(project_root, run_id, node_id),
+        )
+    )
+
+
+def test_a_rerun_that_only_declares_columns_outside_the_model_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Declaring `firm` nominal does not put `firm` into `y ~ x`.
+
+    Accepting it produced a child run identical to its parent while the Agent's
+    proposal said the column had been added as dummies -- a completed operation
+    that silently did not do what the user confirmed.
+    """
+
+    project = create_project(tmp_path, "outside-model")
+    parent_run_id = _create_terminal_unadjusted_ols_run(project.root)
+    runs_before = set((project.root / "runs").iterdir())
+
+    with pytest.raises(RerunServiceError) as caught:
+        _submit_levels(project.root, parent_run_id, {"firm": "nominal"})
+
+    assert caught.value.code == "RERUN_HAS_NO_MODEL_EFFECT"
+    message = str(caught.value)
+    assert "firm" in message
+    assert "model.genesis" in message
+    assert set((project.root / "runs").iterdir()) == runs_before
+
+
+def test_the_agent_rerun_path_refuses_a_declaration_for_an_absent_column(
+    tmp_path: Path,
+) -> None:
+    """The v1.8.7 anti-fabrication guard must hold on the Agent path too."""
+
+    project = create_project(tmp_path, "absent-column")
+    parent_run_id = _create_terminal_unadjusted_ols_run(project.root)
+
+    with pytest.raises(RerunServiceError) as caught:
+        _submit_levels(project.root, parent_run_id, {"x": "scale", "not_a_column": "nominal"})
+
+    assert caught.value.code == "MEASUREMENT_LEVEL_UNKNOWN_COLUMN"
+    assert "not_a_column" in str(caught.value)
+
+
+def test_a_rerun_declaring_a_model_column_alongside_others_is_accepted(
+    tmp_path: Path,
+) -> None:
+    """Batch declaration stays legal once any declared column is in the model."""
+
+    project = create_project(tmp_path, "batch-levels")
+    parent_run_id = _create_terminal_unadjusted_ols_run(project.root)
+
+    result = _submit_levels(project.root, parent_run_id, {"y": "scale", "firm": "nominal"})
+
+    assert result.run_id != parent_run_id
+    assert _wait_terminal(project.root, result.run_id) == "completed"
+
+
+def test_the_agent_hears_why_before_the_user_is_asked_to_confirm(tmp_path: Path) -> None:
+    """The proposal tool applies the same check, so the Agent can re-plan."""
+
+    from types import SimpleNamespace
+
+    from workbench.agent.context_tools import NodeOperationContextProvider
+    from workbench.agent.orchestrator import WorkbenchOrchestrator
+
+    project = create_project(tmp_path, "proposal-preflight")
+    parent_run_id = _create_terminal_unadjusted_ols_run(project.root)
+    host = SimpleNamespace(context_provider=NodeOperationContextProvider(project.root))
+
+    def preflight(levels: dict) -> None:
+        WorkbenchOrchestrator._preflight_model_rerun_declarations(
+            host,
+            {
+                "target": {"run_id": parent_run_id},
+                "changes": {"labels": {"measurement_level": levels}},
+            },
+        )
+
+    with pytest.raises(ValueError, match=r"RERUN_HAS_NO_MODEL_EFFECT.*firm.*model\.genesis"):
+        preflight({"firm": "nominal"})
+    preflight({"y": "scale", "firm": "nominal"})

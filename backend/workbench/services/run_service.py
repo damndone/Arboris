@@ -453,6 +453,98 @@ def parse_column_selector(raw: str, field: str = "x") -> list[str]:
     return [part.strip() for part in text.split(",") if part.strip()]
 
 
+class RerunDeclarationError(ValueError):
+    """A rerun patch whose declarations cannot do what they claim."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _declared_levels(overrides: Mapping[str, object]) -> dict[str, object]:
+    labels = overrides.get("labels")
+    if not isinstance(labels, Mapping):
+        return {}
+    levels = labels.get("measurement_level")
+    return dict(levels) if isinstance(levels, Mapping) else {}
+
+
+def reject_invalid_rerun_declarations(
+    source_form: Mapping[str, Any],
+    overrides: Mapping[str, object],
+    upload_bytes: bytes,
+) -> None:
+    """Refuse measurement-level declarations that cannot take effect.
+
+    Shared by the manual rerun route and the Agent rerun service, so both paths
+    enforce the same rules:
+
+    - a declared column must exist in the data (v1.8.7 A2-6: an invented name
+      would apply to nothing while the user believes it was declared);
+    - a patch whose only change is declaring columns outside the model must not
+      run. A measurement level changes how a model column is treated; it never
+      adds a column to the model. Running it produced a child identical to its
+      parent under a proposal that said the column had been added.
+    """
+
+    import io
+
+    import pandas as pd
+
+    from ..cleaning import normalize_column_name
+
+    levels = _declared_levels(overrides)
+    if not levels:
+        return
+
+    try:
+        header = pd.read_csv(io.BytesIO(upload_bytes), nrows=0)
+    except Exception:
+        header = None
+    if header is not None:
+        known = {str(name) for name in header.columns}
+        known |= {normalize_column_name(str(name)) for name in header.columns}
+        missing = sorted(str(column) for column in levels if str(column) not in known)
+        if missing:
+            raise RerunDeclarationError(
+                "MEASUREMENT_LEVEL_UNKNOWN_COLUMN",
+                "measurement_level names column(s) not present in the dataset: "
+                + ", ".join(missing),
+            )
+
+    other_changes = set(overrides) - {"labels"}
+    labels = overrides.get("labels")
+    other_label_changes = (
+        {key for key, value in labels.items() if key != "measurement_level" and value}
+        if isinstance(labels, Mapping)
+        else set()
+    )
+    if other_changes or other_label_changes:
+        return
+    y = str(source_form.get("y") or "").strip()
+    x = parse_column_selector(str(source_form.get("x") or ""))
+    if not y or not x:
+        # Automatic variable selection: which columns the model uses is not
+        # known until it runs, so a declaration may still matter.
+        return
+    model_columns = {normalize_column_name(name) for name in (y, *x)}
+    outside = sorted(
+        str(column)
+        for column in levels
+        if normalize_column_name(str(column)) not in model_columns
+    )
+    if len(outside) == len(levels):
+        raise RerunDeclarationError(
+            "RERUN_HAS_NO_MODEL_EFFECT",
+            "This rerun would leave the model unchanged: "
+            + ", ".join(outside)
+            + f" is not a model variable (model: {y} ~ {' + '.join(x)}). A measurement "
+            "level only changes how a column already in the model is treated; it never "
+            "adds a column. To add a column as a regressor, propose model.genesis with "
+            "it in predictors or categorical.",
+        )
+
+
 def _submit_run(
     root: Path,
     *,

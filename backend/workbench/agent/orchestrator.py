@@ -718,6 +718,43 @@ class WorkbenchOrchestrator:
         except KeyError:
             return requested_active_head_run_id
 
+    def _preflight_model_rerun_declarations(self, arguments: dict[str, Any]) -> None:
+        """Refuse, before the user is asked, a rerun that cannot do what it says.
+
+        Execution applies the same shared check; running it here too means the
+        Agent hears the reason while it can still propose the right operation,
+        instead of the user confirming a proposal that is then refused.
+        """
+
+        from ..lineage.upload_store import verify_upload
+        from ..repository.run_repository import _resolve_run_root
+        from ..services.run_service import (
+            RerunDeclarationError,
+            reject_invalid_rerun_declarations,
+        )
+
+        project_root = getattr(self.context_provider, "project_root", None)
+        run_id = (arguments.get("target") or {}).get("run_id")
+        if project_root is None or not isinstance(run_id, str) or not run_id:
+            return
+        try:
+            run_root = _resolve_run_root(str(project_root), run_id)
+            inputs = read_run_inputs(run_root)
+            upload_bytes = verify_upload(
+                Path(project_root), str((inputs.get("upload") or {}).get("sha256") or "")
+            ).read_bytes()
+        except Exception:
+            # Unreadable inputs are execution's to report, with its own codes.
+            return
+        try:
+            reject_invalid_rerun_declarations(
+                inputs["form"],
+                _overrides_from_proposal_changes(dict(arguments.get("changes") or {})),
+                upload_bytes,
+            )
+        except RerunDeclarationError as exc:
+            raise ValueError(f"{exc.code}: {exc}") from exc
+
     def create_proposal(
         self,
         *,
@@ -2825,6 +2862,8 @@ class WorkbenchOrchestrator:
                     },
                     metadata=metadata,
                 )
+            if operation_id == "model.rerun":
+                self._preflight_model_rerun_declarations(arguments)
             proposal = self.create_proposal(
                 chain_id=chain_id,
                 operation_id=operation_id,

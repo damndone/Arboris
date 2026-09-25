@@ -26,7 +26,12 @@ from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import verify_upload
 from ..model_options import ModelOptionsError
 from ..repository.run_repository import _read_manifest, _resolve_run_root
-from .run_service import _submit_run, merge_form_overrides
+from .run_service import (
+    RerunDeclarationError,
+    _submit_run,
+    merge_form_overrides,
+    reject_invalid_rerun_declarations,
+)
 
 
 TERMINAL_RUN_STATUSES = frozenset(
@@ -214,6 +219,13 @@ class RerunService:
             upload_bytes = verify_upload(self.project_root, parent_sha).read_bytes()
         except (OSError, ValueError) as exc:
             raise RerunServiceError("unusable_parent_upload", str(exc)) from exc
+
+        try:
+            reject_invalid_rerun_declarations(
+                inputs["form"], request.op_overrides, upload_bytes
+            )
+        except RerunDeclarationError as exc:
+            raise RerunServiceError(exc.code, str(exc)) from exc
 
         try:
             merged_form = merge_form_overrides(inputs["form"], request.op_overrides)

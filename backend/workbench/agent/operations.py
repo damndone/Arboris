@@ -752,9 +752,12 @@ def _model_rerun_change_branch() -> dict[str, Any]:
             "type": "object",
             "description": (
                 "Column metadata. `measurement_level` maps column names to one of "
-                "nominal / ordinal / scale / count and decides how each is modelled; "
-                "declare every column in one proposal rather than one at a time. "
-                "Only columns present in the data may be named."
+                "nominal / ordinal / scale / count and changes how a column that is "
+                "already in the model is treated (for example an ordinal outcome "
+                "routes to ordinal logit). It never adds a column to the model: to "
+                "add a regressor, propose model.genesis with it in predictors or "
+                "categorical. Declare every column in one proposal rather than one "
+                "at a time. Only columns present in the data may be named."
             ),
             "properties": {
                 "measurement_level": {
