@@ -1,12 +1,62 @@
 [
-  {"id": "read_coef", "request": "这个模型里 education 的系数是多少？显著吗？", "expected": "answer: reads persisted OLS result, quotes education coefficient and p-value from evidence"},
-  {"id": "explain", "request": "帮我解读一下这次回归的结果，哪些变量显著，模型拟合得怎么样？", "expected": "answer: grounded summary of coefficients, significance and R-squared"},
-  {"id": "heterosk", "request": "检查一下这个模型的残差有没有异方差问题", "expected": "answer from diagnostics or proposal for a White/BP test; no invented statistics"},
-  {"id": "square_term", "request": "把 experience 的平方项加进去，重新跑一次回归", "expected": "proposal: rerun OLS with experience polynomial degree 2, awaiting confirmation"},
-  {"id": "logit_union", "request": "用 logit 模型分析 union 受哪些因素影响，解释变量用 education、experience 和 female", "expected": "proposal: logit on binary outcome union with the three predictors"},
-  {"id": "region_dummies", "request": "把 region 作为分类变量加进模型再估计一次", "expected": "proposal: rerun with region as categorical"},
-  {"id": "log_wage", "request": "把 wage 取对数，用 log(wage) 作为因变量重新回归", "expected": "proposal: derived log(wage) then OLS on it"},
-  {"id": "filter_age", "request": "只保留 age 在 25 到 55 岁之间的样本，重新估计原来的模型", "expected": "proposal: subset rows 25<=age<=55 then rerun same OLS"},
-  {"id": "describe", "request": "给我看一下各个变量的描述统计，包括缺失值情况", "expected": "answer or proposal for descriptive statistics incl. missing count for hours (12)"},
-  {"id": "female_compare", "request": "比较一下加入 female 之后 education 系数有什么变化", "expected": "proposal: second branch with female, comparison of education coefficient"}
+  {
+    "id": "read_coef",
+    "request": "这个模型里 education 的系数是多少？显著吗？",
+    "expected": "answer: reads persisted OLS result, quotes education coefficient and p-value from evidence"
+  },
+  {
+    "id": "explain",
+    "request": "帮我解读一下这次回归的结果，哪些变量显著，模型拟合得怎么样？",
+    "expected": "answer: grounded summary of coefficients, significance and R-squared"
+  },
+  {
+    "id": "heterosk",
+    "request": "检查一下这个模型的残差有没有异方差问题",
+    "expected": "answer from diagnostics or proposal for a White/BP test; no invented statistics"
+  },
+  {
+    "id": "square_term",
+    "request": "把 experience 的平方项加进去，重新跑一次回归",
+    "expected": "proposal: rerun OLS with experience polynomial degree 2, awaiting confirmation"
+  },
+  {
+    "id": "logit_union",
+    "request": "用 logit 模型分析 union 受哪些因素影响，解释变量用 education、experience 和 female",
+    "expected": "proposal: logit on binary outcome union with the three predictors"
+  },
+  {
+    "id": "region_dummies",
+    "request": "把 region 作为分类变量加进模型再估计一次",
+    "expected": "proposal: rerun with region as categorical"
+  },
+  {
+    "id": "log_wage",
+    "request": "把 wage 取对数，用 log(wage) 作为因变量重新回归",
+    "expected": "proposal: derived log(wage) then OLS on it"
+  },
+  {
+    "id": "filter_age",
+    "request": "只保留 age 在 25 到 55 岁之间的样本，重新估计原来的模型",
+    "expected": "proposal: subset rows 25<=age<=55 then rerun same OLS"
+  },
+  {
+    "id": "describe",
+    "request": "给我看一下各个变量的描述统计，包括缺失值情况",
+    "expected": "answer or proposal for descriptive statistics incl. missing count for hours (12)"
+  },
+  {
+    "id": "female_compare",
+    "request": "比较一下加入 female 之后 education 系数有什么变化",
+    "expected": "proposal: second branch with female, comparison of education coefficient"
+  },
+  {
+    "id": "relabel",
+    "request": "给 education 加上变量标签“受教育年限”，experience 加上“工作经验”，然后告诉我受教育年限的系数",
+    "expected": "proposal: model.rerun with labels.variable_labels; after execution the coefficient is reported under the new label"
+  },
+  {
+    "id": "missing_code",
+    "request": "hours 这一列里 999 表示未回答，请把 999 当作缺失值处理后重新估计",
+    "expected": "proposal: model.rerun with labels.user_missing_values {hours: [999]}"
+  }
 ]

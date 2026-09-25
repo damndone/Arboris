@@ -434,7 +434,10 @@ def test_the_agent_hears_why_before_the_user_is_asked_to_confirm(tmp_path: Path)
             },
         )
 
-    with pytest.raises(ValueError, match=r"RERUN_HAS_NO_MODEL_EFFECT.*firm.*model\.genesis"):
+    from workbench.agent.tools import ToolVisibleError
+
+    # ToolVisibleError, not a bare ValueError: only its message reaches the model.
+    with pytest.raises(ToolVisibleError, match=r"RERUN_HAS_NO_MODEL_EFFECT.*firm.*model\.genesis"):
         preflight({"firm": "nominal"})
     preflight({"y": "scale", "firm": "nominal"})
 
@@ -466,3 +469,68 @@ def test_an_agent_rerun_can_relabel_and_declare_missing_codes(tmp_path: Path) ->
     )["form"]
     assert child_form["labels"]["variable_labels"] == {"x": "Exposure"}
     assert child_form["labels"]["user_missing_values"] == {"x": [-99]}
+
+
+def test_a_rerun_aimed_at_a_data_node_is_redirected_before_confirmation(tmp_path: Path) -> None:
+    """The Agent targets the data node for label edits; tell it which node reruns."""
+
+    from types import SimpleNamespace
+
+    from workbench.agent.context_tools import NodeOperationContextProvider
+    from workbench.agent.orchestrator import WorkbenchOrchestrator
+
+    project = create_project(tmp_path, "data-node-target")
+    parent_run_id = _create_terminal_unadjusted_ols_run(project.root)
+    model_node = _model_node(project.root, parent_run_id)
+    host = SimpleNamespace(context_provider=NodeOperationContextProvider(project.root))
+
+    def preflight(node_ref: str) -> None:
+        WorkbenchOrchestrator._preflight_model_rerun_declarations(
+            host,
+            {
+                "target": {"run_id": parent_run_id, "node_ref": node_ref},
+                "changes": {"labels": {"variable_labels": {"x": "Exposure"}}},
+            },
+        )
+
+    from workbench.agent.tools import ToolVisibleError
+
+    with pytest.raises(ToolVisibleError, match=rf"MODEL_RERUN_TARGET_NOT_EDITABLE.*{model_node}"):
+        preflight("stage:cleaned")
+    preflight(model_node)
+
+
+
+@pytest.mark.parametrize("incremental_cache", ["0", "1"])
+def test_a_rerun_declaring_missing_codes_changes_the_estimation_sample(
+    tmp_path: Path, monkeypatch, incremental_cache: str
+) -> None:
+    """Declared codes are applied at the source stage, so a rerun from the
+    model node must not reuse a cached upstream that never saw them."""
+
+    monkeypatch.setenv("WORKBENCH_INCREMENTAL_CACHE", incremental_cache)
+    project = create_project(tmp_path, f"missing-rerun-{incremental_cache}")
+    parent_run_id = _create_terminal_unadjusted_ols_run(project.root)
+    node_id = _model_node(project.root, parent_run_id)
+    result = RerunService(project.root).submit(
+        RerunSubmissionRequest(
+            source_run_id=parent_run_id,
+            from_node=node_id,
+            op_overrides={"labels": {"user_missing_values": {"x": [{"low": 0, "high": 2.5}]}}},
+            rerun_reason="agent_confirmed",
+            rerun_from={"owner_run_id": parent_run_id, "op_node_id": node_id},
+            workbench_context=_workbench_context(project.root, parent_run_id, node_id),
+        )
+    )
+    assert _wait_terminal(project.root, result.run_id) == "completed"
+
+    def nobs(run_id: str) -> int:
+        return json.loads(
+            (project.root / "runs" / run_id / "model_results" / "ols_1.json").read_text()
+        )["nobs"]
+
+    applied = json.loads(
+        (project.root / "runs" / result.run_id / "measurement" / "user_missing.json").read_text()
+    )
+    assert applied["columns"]["x"]["converted"] == 9
+    assert nobs(result.run_id) == nobs(parent_run_id) - 9

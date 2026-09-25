@@ -524,6 +524,47 @@ def _overrides_from_proposal_changes(changes: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _require_editable_rerun_target(
+    run_root: Path, run_id: str, arguments: dict[str, Any]
+) -> None:
+    """Refuse a rerun aimed at a node execution will refuse as not editable.
+
+    Labels and missing codes belong to the data, so an Agent naturally
+    targets the data node; execution only reruns from an editable (model)
+    node. Saying so here, with the node to use, lets it re-plan.
+    """
+
+    from ..graph_store import GraphStore
+    from ..lineage.op_contract import resolve_operation_contract
+    from ..repository.run_repository import _read_manifest
+
+    node_ref = (arguments.get("target") or {}).get("node_ref")
+    if not isinstance(node_ref, str) or not node_ref:
+        return
+    try:
+        graph = GraphStore(runs_root=run_root.parent).read(run_id)
+        manifest = _read_manifest(run_root)
+    except Exception:
+        return
+
+    def editable(node: Any) -> bool:
+        stage = node.stage.value if node.stage is not None else None
+        return resolve_operation_contract(stage=stage, manifest=manifest) is not None
+
+    node = graph.nodes.get(node_ref)
+    if node is None or editable(node):
+        return
+    candidates = sorted(node_id for node_id, item in graph.nodes.items() if editable(item))
+    from .tools import ToolVisibleError
+
+    raise ToolVisibleError(
+        f"MODEL_RERUN_TARGET_NOT_EDITABLE: {node_ref} cannot be rerun. model.rerun "
+        "edits a model node; target "
+        + (", ".join(candidates) if candidates else "a model node")
+        + ". Labels and missing codes declared there apply to the whole run."
+    )
+
+
 class WorkbenchOrchestrator:
     """Bind Main/Chain roles to AgentCore without leaking Workbench state into it."""
 
@@ -739,6 +780,10 @@ class WorkbenchOrchestrator:
             return
         try:
             run_root = _resolve_run_root(str(project_root), run_id)
+        except Exception:
+            return
+        _require_editable_rerun_target(run_root, run_id, arguments)
+        try:
             inputs = read_run_inputs(run_root)
             upload_bytes = verify_upload(
                 Path(project_root), str((inputs.get("upload") or {}).get("sha256") or "")
@@ -753,7 +798,11 @@ class WorkbenchOrchestrator:
                 upload_bytes,
             )
         except RerunDeclarationError as exc:
-            raise ValueError(f"{exc.code}: {exc}") from exc
+            from .tools import ToolVisibleError
+
+            # A plain ValueError reaches the model as its type name only; this
+            # message is what lets the Agent re-plan.
+            raise ToolVisibleError(f"{exc.code}: {exc}") from exc
 
     def create_proposal(
         self,
