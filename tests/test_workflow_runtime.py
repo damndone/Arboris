@@ -18,6 +18,7 @@ import pytest
 from tests.test_data_column_cast import _source_project
 from tests.workflow_fixtures import composed_plan
 from workbench.agent.workflow import (
+    WorkflowExecutionError,
     WorkflowExecutor,
     WorkflowStepResult,
     compile_workflow,
@@ -1006,6 +1007,21 @@ def _post_estimation_results(project, run_id, state, step_ids):
 def _curved_post_estimation_state(tmp_path, covariance: str):
     """Run the same curved design under one declared covariance."""
 
+    project, run_id, draft = _curved_post_estimation_draft(tmp_path, covariance)
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+    assert state.status == "completed", {
+        step_id: step.error for step_id, step in state.steps.items() if step.error
+    }
+    return _post_estimation_results(
+        project, run_id, state, ["joint", "stationary"]
+    )
+
+
+def _curved_post_estimation_draft(tmp_path, covariance: str):
+    """A curved OLS design followed by two post-estimation steps."""
+
     rows = 48
     exposure = [float(index - 24) for index in range(rows)]
     frame = pd.DataFrame(
@@ -1075,14 +1091,58 @@ def _curved_post_estimation_state(tmp_path, covariance: str):
             },
         ],
     )
-    state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
-    )
-    assert state.status == "completed", {
-        step_id: step.error for step_id, step in state.steps.items() if step.error
+    return project, run_id, draft
+
+
+def test_post_estimation_resumes_against_the_model_fitted_before_interruption(
+    tmp_path,
+) -> None:
+    """Resume must rebind post-estimation to the already-fitted model branch.
+
+    Completed steps are rebuilt from the state file on resume, so the model
+    step's branches have to be persisted there. Otherwise a workflow that was
+    interrupted after estimation can never finish its post-estimation steps.
+    """
+
+    project, run_id, draft = _curved_post_estimation_draft(tmp_path / "resumed", "robust")
+    real = build_workflow_step_executor(project, draft)
+
+    def interrupted(step, previous):
+        if step.step_id == "joint":
+            raise WorkflowExecutionError("simulated interruption")
+        return real(step, previous)
+
+    first = WorkflowExecutor(project).execute(draft, interrupted)
+    assert first.steps["estimate"].status == "completed"
+    assert first.steps["joint"].status == "failed"
+    model_artifacts = first.steps["estimate"].artifact_ids
+
+    # A fresh executor stands in for a restarted backend process: only the
+    # state file carries the earlier pass forward. The model must not refit.
+    fresh = build_workflow_step_executor(project, draft)
+    calls: list[str] = []
+
+    def counting(step, previous):
+        calls.append(step.step_id)
+        return fresh(step, previous)
+
+    resumed = WorkflowExecutor(project).execute(draft, counting)
+
+    assert resumed.status == "completed", {
+        step_id: step.error for step_id, step in resumed.steps.items() if step.error
     }
-    return _post_estimation_results(
-        project, run_id, state, ["joint", "stationary"]
+    assert "estimate" not in calls
+    assert resumed.steps["estimate"].artifact_ids == model_artifacts
+    after_resume = _post_estimation_results(
+        project, run_id, resumed, ["joint", "stationary"]
+    )
+    uninterrupted = _curved_post_estimation_state(tmp_path / "direct", "robust")
+    assert after_resume["joint"]["covariance"] == "robust"
+    assert after_resume["joint"]["f_statistic"] == pytest.approx(
+        uninterrupted["joint"]["f_statistic"], rel=1e-9
+    )
+    assert after_resume["stationary"]["stationary_point"] == pytest.approx(
+        uninterrupted["stationary"]["stationary_point"], rel=1e-9
     )
 
 

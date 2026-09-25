@@ -1819,7 +1819,22 @@ def test_a_state_record_without_a_binding_still_loads(tmp_path: Path) -> None:
     )
 
     assert legacy.produced_dataset is None
+    assert legacy.model_branches is None
     assert legacy.status == "completed"
+
+
+def test_non_list_persisted_model_branches_are_refused_rather_than_read() -> None:
+    """A corrupt branch record must not be rebound to post-estimation."""
+
+    with pytest.raises(WorkflowExecutionError, match=r"model_branches.*list of objects"):
+        WorkflowStepState.from_dict(
+            {
+                "step_id": "estimate",
+                "fingerprint": "sha256:legacy",
+                "status": "completed",
+                "model_branches": {"branch_id": "curved"},
+            }
+        )
 
 
 def test_a_non_object_persisted_binding_is_refused_rather_than_read(tmp_path: Path) -> None:
