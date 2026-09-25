@@ -552,6 +552,10 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
         "table_1": diagnostic_summary.get("table_1", []),
         "statistical_evidence": diagnostic_summary.get("statistical_evidence"),
         "labels": diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
+        "term_labels": _term_labels(
+            model_results,
+            diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
+        ),
         "model_family_evidence": model_family_evidence,
         "prediction_evidence": prediction_evidence,
         # Serve-time projection of already-durable evidence: a declared
@@ -793,9 +797,11 @@ def export_result_table_endpoint(
     ]
     tables: dict[str, list[dict[str, Any]]] = {}
     if "regression_table" in sections:
+        value_labels = labels.get("value_labels", {}) if isinstance(labels, dict) else {}
         regression_table = build_regression_table(
             model_pairs,
             variable_labels=variable_labels if isinstance(variable_labels, dict) else {},
+            value_labels=value_labels if isinstance(value_labels, dict) else {},
         )
         tables["regression_table"] = _scalarize_result_rows(
             regression_table_export_rows(regression_table)
@@ -853,6 +859,36 @@ def export_result_table_endpoint(
 
 def _list_value(value: Any) -> list[dict[str, Any]]:
     return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
+
+
+def _term_labels(model_results: list[Any], labels: object) -> dict[str, str]:
+    """Display text for every coefficient term, from the run's declared labels.
+
+    Served beside the raw results so every surface shows the same text for a
+    term; the term itself stays the identifier.
+    """
+
+    from ..term_labels import TermLabeler
+
+    labels = labels if isinstance(labels, dict) else {}
+    labeler = TermLabeler(
+        variable_labels=labels.get("variable_labels") if isinstance(labels.get("variable_labels"), dict) else {},
+        value_labels=labels.get("value_labels") if isinstance(labels.get("value_labels"), dict) else {},
+    )
+    out: dict[str, str] = {}
+    for result in model_results:
+        coefficients = result.get("coefficients") if isinstance(result, dict) else None
+        terms = (
+            coefficients.keys()
+            if isinstance(coefficients, dict)
+            else [item.get("term") for item in coefficients or [] if isinstance(item, dict)]
+        )
+        for term in terms:
+            if isinstance(term, str) and term not in out:
+                label = labeler.label(term)
+                if label != term:
+                    out[term] = label
+    return out
 
 
 def _coefficient_export_rows(model_results: list[dict[str, Any]]) -> list[dict[str, Any]]:

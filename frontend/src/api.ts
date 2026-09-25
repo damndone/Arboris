@@ -239,6 +239,7 @@ export type RunDetail = RunSummary & {
   /** Durable deterministic report packets projected from diagnostic_summary. */
   table_1?: Array<Record<string, unknown>>;
   statistical_evidence?: Record<string, unknown> | null;
+  term_labels?: Record<string, string>;
   labels?: {
     variable_labels?: Record<string, string>;
     value_labels?: Record<string, Record<string, string>>;

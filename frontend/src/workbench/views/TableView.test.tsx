@@ -146,6 +146,32 @@ describe("TableView", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("shows server-rendered term labels and keeps the raw term as a tooltip", async () => {
+    mockDetail.current = {
+      model_results: [
+        {
+          model_id: "m1",
+          model_type: "ols",
+          nobs: 100,
+          coefficients: {
+            "C(Q('region'))[T.2]": { estimate: 0.3, std_error: 0.1, p_value: 0.01 },
+            educ: { estimate: 0.08, std_error: 0.01, p_value: 0.001 },
+          },
+        },
+      ],
+      term_labels: { "C(Q('region'))[T.2]": "地区: 南方", educ: "受教育年限" },
+      artifact_counts: {},
+    } as unknown as RunDetail;
+
+    renderTable();
+
+    await waitFor(() => expect(screen.getByTestId("table-view-coefficients")).toBeTruthy());
+    const region = screen.getByText("地区: 南方");
+    expect(region).toHaveAttribute("title", "C(Q('region'))[T.2]");
+    expect(screen.getByText("受教育年限")).toBeTruthy();
+    expect(screen.queryByText("C(Q('region'))[T.2]")).toBeNull();
+  });
+
   it("renders multiple model_results side-by-side with configurable stars, labels, CI, and source ids", async () => {
     mockDetail.current = {
       model_results: [
