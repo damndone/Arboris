@@ -5,6 +5,31 @@ from ...validation import has_blockers, validate_profile
 from ..context import ModelingContext, RunEnv
 
 
+def _user_missing_notices(applied: object) -> list:
+    """One INFO issue per column whose declared codes removed values."""
+
+    from ...domain import GuardrailIssue, Severity
+
+    if not isinstance(applied, dict):
+        return []
+    notices = []
+    for column, record in (applied.get("columns") or {}).items():
+        converted = int(record.get("converted") or 0)
+        if not converted:
+            continue
+        notices.append(
+            GuardrailIssue(
+                Severity.INFO,
+                "USER_MISSING_APPLIED",
+                f"{converted} value(s) of '{column}' matched declared missing codes "
+                "and were treated as missing.",
+                evidence={"column": column, "codes": record.get("codes"), "converted": converted},
+                variables=[column],
+            )
+        )
+    return notices
+
+
 class ValidationStage:
     """Validate the data profile and short-circuit on blocker issues.
 
@@ -38,6 +63,7 @@ class ValidationStage:
 
         env.step("validation", "start", "Validating profile...")
         issues = validate_profile(profile, config)
+        issues.extend(_user_missing_notices(ctx.artifacts.get("_user_missing_applied")))
         issue_dicts = [issue.to_dict() for issue in issues]
         write_json(run_root / "errors.json", {"issues": issue_dicts})
 

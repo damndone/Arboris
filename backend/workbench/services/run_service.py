@@ -66,8 +66,17 @@ def _normalize_labels(value: object) -> dict[str, object]:
 
     if value is None or value == "":
         return {}
+    from ..user_missing import FIELD as USER_MISSING_FIELD, normalize_user_missing
+
+    # Validated before canonicalization so a malformed code (NaN, a bare
+    # number) is reported against this field rather than as a generic error.
+    user_missing = (
+        normalize_user_missing(value[USER_MISSING_FIELD])
+        if isinstance(value, Mapping) and USER_MISSING_FIELD in value
+        else None
+    )
     payload = canonicalize_model_options(value)
-    allowed = {"variable_labels", "value_labels", "measurement_level"}
+    allowed = {"variable_labels", "value_labels", "measurement_level", USER_MISSING_FIELD}
     unknown = sorted(set(payload) - allowed)
     if unknown:
         raise ValueError(f"labels contains unknown field(s): {', '.join(unknown)}")
@@ -118,6 +127,8 @@ def _normalize_labels(value: object) -> dict[str, object]:
     # run, which is a behaviour change -- not allowed in a wiring block.
     if normalized_levels:
         normalized["measurement_level"] = normalized_levels
+    if user_missing:
+        normalized[USER_MISSING_FIELD] = user_missing
     return normalized
 
 
