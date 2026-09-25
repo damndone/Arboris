@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { toNotebookEvidenceContract } from "../notebook/evidenceContracts";
 import { FamilyEvidence } from "./FamilyEvidence";
@@ -158,5 +158,93 @@ describe("FamilyEvidence", () => {
       payload: { raw: "must-not-cross" },
     } as EvidenceViewModel)).toBeNull();
     expect(toNotebookEvidenceContract({ ...notebookEvidence, consumerId: "report" })).toBeNull();
+  });
+});
+
+function sectionEvidence() {
+  return {
+    ...evidence,
+    facts: [{ factId: "tiny:p", statisticId: "p_value", value: 1.25e-24 }],
+    structuredResults: { schema_version: 1, contract_digest: "9ac17e068d3d718e6cb09a938e2d373db3c43d49b11ca6b7ac6df76897732ab6", sections: [1, 2].map((i) => ({
+      section_id: `tests:${i}`, section_type: "statistical_tests", schema_version: 1,
+      status: "available", reason_codes: [], fact_refs: ["tiny:p"], dependency_refs: ["source:1"],
+      content: { kind: "object", fields: { results: { kind: "list", items: [{ kind: "object", fields: {
+        p_value: { kind: "fact", fact_id: "tiny:p", representation: "number" },
+        label: { kind: "text", value: "<img src=x onerror=alert(1)>" },
+      } }] } } },
+    })) },
+    resolvedSections: [1, 2].map((i) => ({ sectionId: `tests:${i}`, sectionType: "statistical_tests", status: "available", reasonCodes: [],
+      content: { results: [{ p_value: 1.25e-24, label: "<img src=x onerror=alert(1)>" }] } })),
+  };
+}
+
+describe("FamilyEvidence structured sections", () => {
+  it.each(["unavailable", "not_applicable"])("renders ARMA explicit %s without substituting a number", (status) => {
+    const missing = { status, reason: "ARMA_SOURCE_MISSING" };
+    const wire = {
+      ...sectionEvidence(),
+      structuredResults: { ...sectionEvidence().structuredResults, sections: [{
+        section_id: "arma:1", section_type: "model_family_evidence", schema_version: 1,
+        status: "available", reason_codes: [], fact_refs: ["tiny:p"], dependency_refs: ["source:1"],
+        content: { kind: "object", fields: {
+          model_family: { kind: "text", value: "time_series.arma_garch" },
+          results: { kind: "object", fields: { model: { kind: "object", fields: { report: { kind: "object", fields: {
+            metrics: { kind: "object", fields: { rmse: { kind: "missing", ...missing } } },
+            diagnostics: { kind: "object", fields: { adf: { kind: "object", fields: {
+              p_value: { kind: "fact", fact_id: "tiny:p", representation: "number" },
+            } } } },
+            warnings: { kind: "list", items: [{ kind: "text", value: "末行🧪" }] },
+          } } } } } },
+        } },
+      }] },
+      resolvedSections: [{ sectionId: "arma:1", sectionType: "model_family_evidence", status: "available", reasonCodes: [],
+        content: { model_family: "time_series.arma_garch", results: { model: { report: {
+          metrics: { rmse: missing }, diagnostics: { adf: { p_value: 1.25e-24 } }, warnings: ["末行🧪"],
+        } } } } }],
+    };
+    const { rerender } = render(<FamilyEvidence evidence={wire as EvidenceViewModel} />);
+    const details = screen.getByLabelText("model_family_evidence arma:1");
+    expect(details).toHaveTextContent("ARMA_SOURCE_MISSING");
+    expect(details).toHaveTextContent("1.25e-24");
+    expect(details).toHaveTextContent("末行🧪");
+    // Keep both trees in sync so this is an ARMA shape rejection.
+    Object.assign(wire.structuredResults.sections[0].content.fields.results.fields.model.fields.report.fields,
+      { undeclared: { kind: "text", value: "hidden-arma" } });
+    Object.assign(wire.resolvedSections[0].content.results.model.report, { undeclared: "hidden-arma" });
+    rerender(<FamilyEvidence evidence={wire as EvidenceViewModel} />);
+    expect(screen.getByTestId("typed-evidence-unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("hidden-arma")).not.toBeInTheDocument();
+  });
+
+  it("renders each partition as accessible details without rounding or HTML execution", () => {
+    const { container } = render(<FamilyEvidence evidence={sectionEvidence() as EvidenceViewModel} />);
+    for (const id of ["tests:1", "tests:2"]) {
+      const details = screen.getByLabelText(`statistical_tests ${id}`);
+      expect(details.tagName).toBe("DETAILS");
+      fireEvent.click(within(details).getByText(`statistical_tests · ${id} · AVAILABLE`));
+      expect(details).toHaveAttribute("open");
+      expect(within(details).getByText("1.25e-24")).toBeInTheDocument();
+      expect(within(details).getByText("<img src=x onerror=alert(1)>")).toBeInTheDocument();
+    }
+    expect(container.querySelector("img, script")).toBeNull();
+  });
+
+  it("rejects mutated resolved statistics without rendering either facts or sections", () => {
+    const wire = sectionEvidence(); wire.resolvedSections[0].content.results[0].p_value = 123456789;
+    render(<FamilyEvidence evidence={wire as EvidenceViewModel} />);
+    expect(screen.getByTestId("typed-evidence-unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("123456789")).not.toBeInTheDocument();
+    expect(screen.queryByText("1.25e-24")).not.toBeInTheDocument();
+  });
+
+  it("shows explicit unavailable reasons in the section details", () => {
+    const wire = { ...sectionEvidence(), structuredResults: { ...sectionEvidence().structuredResults, sections: [{
+      section_id: "survey:1", section_type: "survey_design", schema_version: 1, status: "unavailable",
+      reason_codes: ["SOURCE_MISSING"], fact_refs: [], dependency_refs: [], content: { kind: "null" },
+    }] }, resolvedSections: [{ sectionId: "survey:1", sectionType: "survey_design", status: "unavailable", reasonCodes: ["SOURCE_MISSING"], content: null }] };
+    render(<FamilyEvidence evidence={wire as EvidenceViewModel} />);
+    const details = screen.getByLabelText("survey_design survey:1");
+    fireEvent.click(within(details).getByText("survey_design · survey:1 · UNAVAILABLE"));
+    expect(details).toHaveTextContent("SOURCE_MISSING");
   });
 });

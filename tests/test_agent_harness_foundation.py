@@ -25,6 +25,141 @@ from workbench.agent.orchestrator import WorkbenchOrchestrator
 from workbench.agent.session import EntryRef, JsonlSessionRepository
 from workbench.agent.tools import ToolDefinition, ToolRegistry
 from workbench.llm.config import LLMConfig
+from tests.test_llm_providers import admitted_adapter, egress_host
+
+
+@pytest.mark.parametrize("limit,extra", [
+    (512, 0), (512, 1), (8192, 0), (8192, 1),
+    (262144, 0), (262144, 1), (None, 0),
+])
+@pytest.mark.parametrize("annotated", [False, True])
+def test_final_tool_utf8_budget_in_next_model_request(tmp_path, limit, extra, annotated):
+    effective = limit if limit is not None else 300000
+    guidance = (
+        "Step budget is nearly spent. Stop inspecting: submit your "
+        "proposal now with the evidence you already have, or answer "
+        "the user directly. Another inspection will end the turn with "
+        "nothing delivered."
+    )
+    output = {"persisted_evidence": {"qualification": ""}}
+    tool_id = "inspect_operation_contract" if limit == 262144 else "inspect"
+    expected = {"ok": True, "output": output, "error": None}
+    if annotated:
+        expected.update(steps_remaining=2, guidance=guidance)
+    overhead = len(json.dumps(expected, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    count, remainder = divmod(effective + extra - overhead, 3)
+    output["persisted_evidence"]["qualification"] = "界" * count + "x" * remainder
+    expected_content = json.dumps(expected, ensure_ascii=False, sort_keys=True)
+    assert len(expected_content.encode("utf-8")) == effective + extra
+
+    class Adapter:
+        def __init__(self):
+            self.requests = []
+
+        async def stream(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                yield ModelStreamEvent.tool_call_delta(request.request_id, {
+                    "tool_call_id": "byte-call", "tool_id": tool_id,
+                    "arguments": {"max_output_budget": 999999},
+                })
+                yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+            else:
+                yield ModelStreamEvent.text_delta(request.request_id, "done")
+                yield ModelStreamEvent.done(request.request_id)
+
+    async def scenario():
+        repository = JsonlSessionRepository(tmp_path)
+        repository.create_session("utf8-core", chain_id="chain", role="chain")
+        registry = ToolRegistry()
+        registry.register(ToolDefinition(
+            tool_id=tool_id, version="v1", input_schema={"type": "object"},
+            side_effect="none", handler=lambda _a, _c: output, max_output_budget=limit,
+        ))
+        adapter = Adapter()
+        agent = AgentCore(repository, AgentEventStream(tmp_path), adapter,
+                          session_id="utf8-core", tools=registry.descriptors(), tool_runtime=registry)
+        assert await agent.prompt("inspect", budget={"max_steps": 3} if annotated else None) == "done"
+        assert len(adapter.requests) == 2
+        content = [m["content"] for m in adapter.requests[1].messages if m["role"] == "tool"][-1]
+        assert len(content.encode("utf-8")) <= effective
+        if extra == 0:
+            assert content == expected_content
+        else:
+            assert json.loads(content) == {"ok": False, "output": None, "error": "tool_output_budget_exceeded"}
+            assert "界" not in content
+        ends = [e for e in agent.events.replay("utf8-core") if e.event_type == "tool_execution_end"]
+        assert ends[-1].payload["ok"] is (extra == 0)
+
+    asyncio.run(scenario())
+
+
+def test_final_tool_budget_repeated_inspection_guidance(tmp_path):
+    class Adapter:
+        def __init__(self):
+            self.requests = []
+
+        async def stream(self, request):
+            self.requests.append(request)
+            if len(self.requests) <= 2:
+                yield ModelStreamEvent.tool_call_delta(request.request_id, {
+                    "tool_call_id": f"repeat-{len(self.requests)}", "tool_id": "inspect", "arguments": {},
+                })
+                yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+            else:
+                yield ModelStreamEvent.text_delta(request.request_id, "done")
+                yield ModelStreamEvent.done(request.request_id)
+
+    async def scenario():
+        repository = JsonlSessionRepository(tmp_path)
+        repository.create_session("repeat-bytes", chain_id="chain", role="chain")
+        registry = ToolRegistry()
+        registry.register(ToolDefinition(
+            tool_id="inspect", version="v1", input_schema={"type": "object"},
+            side_effect="none", handler=lambda _a, _c: {"qualification": "界" * 110},
+            max_output_budget=512,
+        ))
+        adapter = Adapter()
+        agent = AgentCore(repository, AgentEventStream(tmp_path), adapter,
+                          session_id="repeat-bytes", tools=registry.descriptors(), tool_runtime=registry)
+        assert await agent.prompt("inspect", budget={"max_steps": 4, "max_consecutive_identical_tool_calls": 3}) == "done"
+        contents = [m["content"] for m in adapter.requests[-1].messages if m["role"] == "tool"]
+        assert len(contents) == 2
+        assert json.loads(contents[0])["ok"] is True
+        assert json.loads(contents[1]) == {"ok": False, "output": None, "error": "tool_output_budget_exceeded"}
+        assert all(len(c.encode("utf-8")) <= 512 for c in contents)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("runtime_present", [True, False])
+def test_final_tool_budget_inherited_history_uses_current_registration(tmp_path, runtime_present):
+    async def scenario():
+        repository = JsonlSessionRepository(tmp_path)
+        repository.create_session("parent-bytes", chain_id="chain", role="chain")
+        entry = repository.append("parent-bytes", "message", {
+            "role": "tool", "name": "inspect", "tool_call_id": "old-call",
+            "max_output_budget": 999999,
+            "content": json.dumps({"ok": True, "output": "界" * 100, "error": None}, ensure_ascii=False),
+        })
+        repository.create_session("child-bytes", chain_id="chain", role="chain",
+                                  inherited_parent_ref=EntryRef("parent-bytes", entry.entry_id))
+        registry = ToolRegistry()
+        registry.register(ToolDefinition(
+            tool_id="inspect", version="v1", input_schema={"type": "object"},
+            side_effect="none", handler=lambda _a, _c: {}, max_output_budget=128,
+        ))
+        adapter = RecordingStreamAdapter(["done"])
+        agent = AgentCore(repository, AgentEventStream(tmp_path), adapter,
+                          session_id="child-bytes", tools=registry.descriptors(),
+                          tool_runtime=registry if runtime_present else None)
+        assert await agent.prompt("continue") == "done"
+        content = [m["content"] for m in adapter.requests[0].messages if m["role"] == "tool"][0]
+        assert len(content.encode("utf-8")) <= 128
+        assert json.loads(content) == {"ok": False, "output": None, "error": "tool_output_budget_exceeded"}
+        assert repository.get_branch("parent-bytes")[0].payload == entry.payload
+
+    asyncio.run(scenario())
 
 
 def test_session_repository_keeps_append_only_cross_session_branch(tmp_path: Path) -> None:
@@ -323,8 +458,9 @@ def test_agent_core_persists_tool_runtime_unavailable_as_terminal_error(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("output_budget", [None, 128])
 def test_agent_core_persists_tool_runtime_exception_as_terminal_error(
-    tmp_path: Path,
+    tmp_path: Path, output_budget,
 ) -> None:
     async def scenario() -> None:
         repository = JsonlSessionRepository(tmp_path / "workbench")
@@ -336,11 +472,14 @@ def test_agent_core_persists_tool_runtime_exception_as_terminal_error(
             events,
             adapter,
             session_id="session-a",
-            tools=[{"tool_id": "inspect_node_context"}],
+            tools=[{"tool_id": "inspect_node_context", "max_output_budget": output_budget}],
             tool_runtime=ExplodingToolRuntime(),
         )
 
-        assert await agent.prompt("inspect this model") == ""
+        assert await agent.prompt(
+            "inspect this model", budget={"max_steps": 3} if output_budget else None,
+        ) == ""
+        assert len(adapter.requests) == 1
 
         branch = repository.get_branch("session-a")
         assert [entry.payload["role"] for entry in branch] == [
@@ -350,7 +489,11 @@ def test_agent_core_persists_tool_runtime_exception_as_terminal_error(
             "assistant",
         ]
         assert branch[-2].payload["content"]
-        assert json.loads(branch[-2].payload["content"])["error"] == "tool_runtime_error"
+        if output_budget:
+            assert len(branch[-2].payload["content"].encode("utf-8")) <= output_budget
+            assert json.loads(branch[-2].payload["content"])["error"] == "tool_output_budget_exceeded"
+        else:
+            assert json.loads(branch[-2].payload["content"])["error"] == "tool_runtime_error"
         assert branch[-1].payload["error"] == "tool_runtime_error"
         assert repository.get_metadata("session-a")["status"] == "failed"
         event_types = [event.event_type for event in events.replay("session-a")]
@@ -790,7 +933,7 @@ def test_workbench_orchestrator_passes_command_budget_to_chain_agent(
     asyncio.run(scenario())
 
 
-def test_openai_compatible_adapter_normalizes_public_stream_client(monkeypatch) -> None:
+def test_openai_compatible_adapter_normalizes_public_stream_client(monkeypatch, admitted_adapter) -> None:
     config = LLMConfig(base_url="https://api.example.test", api_key="secret", model="deepseek-chat")
     calls: list[tuple[list[dict[str, str]], LLMConfig]] = []
 
@@ -802,7 +945,7 @@ def test_openai_compatible_adapter_normalizes_public_stream_client(monkeypatch) 
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
     async def scenario() -> None:
-        adapter = OpenAICompatibleModelAdapter(config)
+        adapter = admitted_adapter(config)
         request = ModelRequest(
             request_id="request-1",
             messages=[{"role": "user", "content": "inspect"}],
@@ -810,24 +953,25 @@ def test_openai_compatible_adapter_normalizes_public_stream_client(monkeypatch) 
         streamed = [event async for event in adapter.stream(request)]
         assert [event.type for event in streamed] == ["text_delta", "done"]
         assert streamed[0].delta == "one streamed answer"
-        assert streamed[1].provider_request_id == "request-1"
+        assert streamed[1].provider_request_id is None
+        assert streamed[1].request_id == "request-1"
         assert calls == [(request.messages, config)]
 
     asyncio.run(scenario())
 
 
-def test_openai_compatible_adapter_forwards_public_stream_deltas(monkeypatch) -> None:
+def test_openai_compatible_adapter_forwards_public_stream_deltas(monkeypatch, admitted_adapter) -> None:
     config = LLMConfig(base_url="https://api.example.test", api_key="secret", model="deepseek-chat")
 
     async def fake_stream(*_args, **_kwargs):
         yield {"type": "text_delta", "delta": "first "}
         yield {"type": "text_delta", "delta": "second"}
-        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat"}
+        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat", "provider_request_id": "upstream-42"}
 
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
     async def scenario() -> None:
-        adapter = OpenAICompatibleModelAdapter(config)
+        adapter = admitted_adapter(config)
         request = ModelRequest(
             request_id="request-stream-1",
             messages=[{"role": "user", "content": "inspect"}],
@@ -835,7 +979,8 @@ def test_openai_compatible_adapter_forwards_public_stream_deltas(monkeypatch) ->
         streamed = [event async for event in adapter.stream(request)]
         assert [event.type for event in streamed] == ["text_delta", "text_delta", "done"]
         assert [event.delta for event in streamed[:2]] == ["first ", "second"]
-        assert streamed[-1].provider_request_id == "request-stream-1"
+        assert streamed[-1].provider_request_id == "upstream-42"
+        assert streamed[-1].request_id == "request-stream-1"
 
     asyncio.run(scenario())
 

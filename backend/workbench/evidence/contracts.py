@@ -203,7 +203,9 @@ def _validate_provenance_reference(value: object, name: str) -> None:
     raise _provenance_error(name, "reference must be opaque text or a closed structured reference")
 
 
-def _validate_provenance_tree(value: object, name: str, *, strict_strings: bool = False) -> None:
+def _validate_provenance_tree(value: object, name: str, *, strict_strings: bool = False,
+                              namespace_dependencies: frozenset[str] = frozenset(),
+                              dependency_record: bool = False) -> None:
     if type(value) is dict:
         for key, item in value.items():
             if type(key) is not str:
@@ -219,7 +221,10 @@ def _validate_provenance_tree(value: object, name: str, *, strict_strings: bool 
                 or lowered in {"ref", "artifact_ref", "reference"}
                 or lowered.endswith("_reference")
             ):
-                _validate_provenance_reference(item, child_name)
+                if dependency_record and key == "artifact_ref" and type(item) is str and item in namespace_dependencies:
+                    _reject_path_like_text(item, child_name)
+                else:
+                    _validate_provenance_reference(item, child_name)
             elif lowered.endswith("_refs") or lowered in {"refs", "references"}:
                 if type(item) is not list:
                     raise _provenance_error(child_name, "references must be an array")
@@ -235,7 +240,8 @@ def _validate_provenance_tree(value: object, name: str, *, strict_strings: bool 
                     raise _provenance_error(child_name, "digest is invalid") from exc
             elif strict_strings and type(item) is str:
                 _reject_path_like_text(item, child_name)
-            _validate_provenance_tree(item, child_name, strict_strings=strict_strings or lowered in {
+            _validate_provenance_tree(item, child_name, namespace_dependencies=namespace_dependencies,
+                                     strict_strings=strict_strings or lowered in {
                 "input_provenance",
                 "dependencies",
                 "source_selector",
@@ -243,14 +249,182 @@ def _validate_provenance_tree(value: object, name: str, *, strict_strings: bool 
         return
     if type(value) is list:
         for index, item in enumerate(value):
-            _validate_provenance_tree(item, f"{name}[{index}]", strict_strings=strict_strings)
+            _validate_provenance_tree(item, f"{name}[{index}]", strict_strings=strict_strings,
+                                     namespace_dependencies=namespace_dependencies,
+                                     dependency_record=name == "envelope.dependencies")
         return
     if strict_strings and type(value) is str:
         _reject_path_like_text(value, name)
 
 
+def _model_packet_dependency_namespace_v1(manifest: dict[str, object]) -> frozenset[str]:
+    """Closed dotted namespaces with canonical in-run artifact bindings.
+
+    This is value validation, not file admission. The dependency integrity gate
+    still verifies bytes/index records against the C0-sealed manifest.
+    """
+    admitted = set()
+    for record in manifest["records"]:
+        identity = record["artifact_id"]
+        if "." not in identity:
+            continue
+        prefix = "model_results."
+        if not identity.startswith(prefix):
+            from ..contracts.evidence.result_sections import RESULT_DEPENDENCY_NAMESPACES_V1
+
+            namespace, *parts = identity.split(".")
+            declaration = RESULT_DEPENDENCY_NAMESPACES_V1.get(namespace)
+            if declaration is None or not parts:
+                raise _error("EVIDENCE_REFERENCE_INVALID", "Undeclared dependency namespace")
+            for part in parts:
+                _opaque_ref(part, "result_dependency.logical_id")
+            relative = [*declaration["directory"], f"{identity}.json"]
+            row = record["index_record"]
+            if (row["artifact_type"] != declaration["artifact_type"]
+                    or row["step"] != declaration["producer_step"]
+                    or row["path"] != "/".join(relative)
+                    or record["path"] != ["runs", manifest["run_id"], *relative]):
+                raise _error("EVIDENCE_REFERENCE_INVALID", "Declared dependency namespace binding differs")
+            admitted.add(identity)
+            continue
+        model_id = _opaque_ref(identity[len(prefix):], "model_result_packet.model_id")
+        relative = ["artifacts", "model_results", f"{model_id}.result.json"]
+        row = record["index_record"]
+        if (row["artifact_type"] != "model_result_packet"
+                or row["path"] != "/".join(relative)
+                or record["path"] != ["runs", manifest["run_id"], *relative]):
+            raise _error("EVIDENCE_REFERENCE_INVALID", "Model packet dependency namespace binding differs")
+        admitted.add(identity)
+    return frozenset(admitted)
+
+
+# JSON string or nonnegative integer bracket segments, never Python/JSONPath
+# expressions. Resource checks and lexical validation precede JSON decoding.
+_RESULT_SELECTOR_SEGMENT_V1 = re.compile(
+    r'\[("(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"|0|[1-9][0-9]*)\]'
+)
+
+
+def _result_selector_tokens_v1(selector: str) -> list[str]:
+    from ..contracts.evidence.result_sections import MAX_DEPTH, MAX_TEXT_BYTES
+    max_bytes = MAX_DEPTH * (6 * MAX_TEXT_BYTES + 4) + 1
+    if len(selector) > max_bytes:
+        raise _provenance_error("source_selector.selector", "result selector exceeds byte budget")
+    try:
+        if len(selector.encode("utf-8")) > max_bytes:
+            raise ValueError("oversize")
+    except (UnicodeError, ValueError) as exc:
+        raise _provenance_error("source_selector.selector", "invalid result selector bytes") from exc
+    if not selector.startswith("$"):
+        raise _provenance_error("source_selector.selector", "result selector must start at JSON root")
+    tokens, position = [], 1
+    while position < len(selector):
+        if len(tokens) >= MAX_DEPTH:
+            raise _provenance_error("source_selector.selector", "result selector exceeds depth budget")
+        match = _RESULT_SELECTOR_SEGMENT_V1.match(selector, position)
+        if match is None:
+            raise _provenance_error("source_selector.selector", "invalid JSON bracket segment")
+        token = match.group(1)
+        if len(token) > (6 * MAX_TEXT_BYTES + 2 if token.startswith('"') else 16):
+            raise _provenance_error("source_selector.selector", "result selector segment exceeds budget")
+        tokens.append(token)
+        position = match.end()
+    return tokens
+
+
+def _validate_result_input_selector_v1(fact: dict[str, object], tokens: list[str],
+                                      manifest: dict[str, object] | None, structured: dict[str, object] | None) -> None:
+    from ..contracts.evidence.result_sections import MAX_SAFE_INTEGER, MAX_TEXT_BYTES
+    source = fact["source_selector"]
+    if set(source) != {"artifact_ref", "artifact_digest", "selector"} or manifest is None or structured is None:
+        raise _provenance_error("source_selector", "structured result selector is not sealed")
+    artifact = f"result-input:{manifest['run_id']}"
+    record = next((r for r in manifest["records"] if r["artifact_id"] == artifact), None)
+    if (source["artifact_ref"] != artifact or record is None
+            or source["artifact_digest"] != record["sha256"]
+            or record["path"] != ["runs", manifest["run_id"], "result_input.json"]
+            or record["index_record"]["path"] != "result_input.json"
+            or record["index_record"]["artifact_type"] != "result_input"
+            or record["index_record"]["step"] != "result_input"):
+        raise _provenance_error("source_selector", "result input binding differs from sealed manifest")
+    parts = []
+    for token in tokens:
+        part = json.loads(token)
+        if type(part) is int:
+            if part > MAX_SAFE_INTEGER:
+                raise _provenance_error("source_selector.selector", "unsafe result selector index")
+        else:
+            try:
+                if len(part.encode("utf-8")) > MAX_TEXT_BYTES:
+                    raise ValueError("oversize")
+            except (UnicodeError, ValueError) as exc:
+                raise _provenance_error("source_selector.selector", "invalid result selector key") from exc
+        parts.append(part)
+    if len(parts) < 3 or parts[0] != "sections" or type(parts[1]) is not str:
+        raise _provenance_error("source_selector.selector", "result selector must select a declared section")
+    section = next((s for s in structured["sections"] if s["section_id"] == parts[1]), None)
+    if (section is None or section["status"] != "available" or artifact not in section["dependency_refs"]
+            or fact["fact_id"] not in section["fact_refs"]):
+        raise _provenance_error("source_selector.selector", "result selector section closure differs")
+    node = section["content"]
+    for part in parts[2:]:
+        if type(part) is str and node["kind"] == "object" and part in node["fields"]:
+            node = node["fields"][part]
+        elif type(part) is int and node["kind"] == "list" and part < len(node["items"]):
+            node = node["items"][part]
+        else:
+            raise _provenance_error("source_selector.selector", "result selector does not resolve in its section")
+    if node["kind"] != "fact" or node["fact_id"] != fact["fact_id"]:
+        raise _provenance_error("source_selector.selector", "result selector resolves to another value")
+
+
 def _validate_envelope_provenance(envelope: "EvidenceEnvelopeFacadeV1") -> None:
+    # Preflight immutable strings before allocating the defensive wire copy.
+    result_selectors = {}
+    for index, fact in enumerate(envelope.envelope.numeric_facts):
+        source = fact.source_selector
+        if source.artifact_ref.startswith("result-input:") or source.selector.startswith("$["):
+            result_selectors[index] = _result_selector_tokens_v1(source.selector)
     payload = envelope.to_dict()
+    family = payload.get("family_evidence", {})
+    namespace_dependencies = frozenset()
+    if "result_dependencies" in family:
+        from .result_dependencies import validate_result_dependency_manifest
+        manifest = family["result_dependencies"]
+        try:
+            checked = validate_result_dependency_manifest(
+                manifest, project_ref=manifest.get("project_ref"),
+                run_id=payload["result_identity"].get("run_id"),
+            ).to_dict()
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise _error(getattr(exc, "code", "EVIDENCE_PROVENANCE_INVALID"),
+                         "invalid versioned result dependency manifest") from exc
+        namespace_dependencies = _model_packet_dependency_namespace_v1(checked)
+        for index, tokens in result_selectors.items():
+            fact = payload["numeric_facts"][index]
+            _validate_result_input_selector_v1(fact, tokens, checked, family.get("structured_results"))
+            # Remove ONLY this successfully validated scalar from the throwaway
+            # copy. Artifact ref/digest and every other provenance field remain
+            # subject to the normal checks; the sealed envelope is unchanged.
+            fact["source_selector"].pop("selector")
+        # Only the exact validated relative path fields are exempt from the
+        # old opaque-ref rule. Extra nested paths still undergo normal checks.
+        for record in checked["records"]:
+            record.pop("path")
+            record["index_record"].pop("path")
+        family["result_dependencies"] = checked
+    elif result_selectors:
+        raise _provenance_error("source_selector", "structured result selector requires sealed manifest")
+    if "structured_results" in family:
+        # Locked envelope admission has already validated the typed tree.
+        # Its display-field names are not provenance field names (a variable
+        # may legitimately be called path or source_ref). Check actual refs.
+        for section in family["structured_results"]["sections"]:
+            for name in ("fact_refs", "dependency_refs"):
+                for ref in section[name]:
+                    if name != "dependency_refs" or ref not in namespace_dependencies:
+                        _opaque_ref(ref, f"structured_results.{name}")
+        family.pop("structured_results")
     input_provenance = payload.get("input_provenance")
     if type(input_provenance) is not dict or set(input_provenance) != {"artifact_ref", "artifact_digest"}:
         raise _provenance_error("input_provenance", "fields are not the closed persistence schema")
@@ -259,7 +433,7 @@ def _validate_envelope_provenance(envelope: "EvidenceEnvelopeFacadeV1") -> None:
         _digest(input_provenance["artifact_digest"], "input_provenance.artifact_digest")
     except EvidenceCoreContractError as exc:
         raise _provenance_error("input_provenance", "artifact reference or digest is invalid") from exc
-    _validate_provenance_tree(payload, "envelope")
+    _validate_provenance_tree(payload, "envelope", namespace_dependencies=namespace_dependencies)
 
 
 @dataclass(frozen=True)

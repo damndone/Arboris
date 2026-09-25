@@ -3140,6 +3140,48 @@ def _assert_cutover_record_scope(
         )
 
 
+@router.get("/agent/cutover/identity")
+def get_agent_notebook_cutover_identity(
+    project_root: str,
+    request: Request,
+    project_ref: str | None = None,
+) -> dict[str, str]:
+    """Expose the server-resolved local UI scope, never a client authority."""
+
+    root = _project_root(project_root)
+    local_bundle = getattr(request.app.state, "local_host_bundle", None)
+    if local_bundle is not None:
+        bound_root = Path(local_bundle.workflow_endpoint.project_root).resolve(strict=False)
+        if bound_root != root:
+            raise WorkbenchAPIError(
+                status_code=403,
+                code="AGENT_NOTEBOOK_PROJECT_MISMATCH",
+                message="The requested project is not the bootstrapped local host project.",
+            )
+        bound_identity = getattr(local_bundle, "identity", None)
+        bound_project_ref = getattr(bound_identity, "project_ref", None)
+        if type(bound_project_ref) is str and bound_project_ref:
+            project_ref = bound_project_ref
+    if type(project_ref) is not str or not project_ref.strip():
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="AGENT_NOTEBOOK_PROJECT_NOT_BOUND",
+            message="The server has not published a project scope for this UI.",
+        )
+    actor_ref, session_ref, canonical_project_ref = resolve_agent_notebook_server_identity(
+        request,
+        project_ref=project_ref,
+        claimed_session_ref=None,
+        notebook_id=None,
+    )
+    return {
+        "schema_version": "agent-notebook-cutover-identity.v1",
+        "actor_ref": actor_ref,
+        "session_ref": session_ref,
+        "project_ref": canonical_project_ref or project_ref,
+    }
+
+
 @router.post("/agent/cutover/compile")
 def compile_agent_notebook_cutover(
     body: AgentNotebookCutoverCompileRequest,
@@ -3165,7 +3207,17 @@ def compile_agent_notebook_cutover(
         )
     except Exception as exc:
         raise _cutover_error(exc, action="compile") from exc
-    return {"preview": preview.to_dict()}
+    payload: dict[str, Any] = {"preview": preview.to_dict()}
+    if preview.compilation_record_id is not None:
+        try:
+            binding = compiler.bind_direct_compilation(preview.compilation_record_id)
+        except Exception as exc:
+            raise _cutover_error(exc, action="bind") from exc
+        payload["binding"] = {
+            **binding.to_dict(),
+            "compilation_record_id": preview.compilation_record_id,
+        }
+    return payload
 
 
 @router.post("/agent/cutover/{compilation_record_id}/confirm")

@@ -2,9 +2,14 @@
 would be blocked by the sandbox attribute."""
 
 import re
+import json
+import tempfile
+from html import unescape
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
+from tests.test_v189_evidence_report_boundary import _FIXTURE, _server_owned_evidence
+from workbench.report_view_model import build_report_view_model
 
 
 _TEMPLATE_DIR = Path(__file__).parent.parent / "backend" / "workbench" / "templates"
@@ -18,9 +23,22 @@ def _environment() -> Environment:
 
 
 def _minimal_view_model() -> dict:
+    envelope = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    envelope["numeric_facts"][0]["statistic_id"] = "Fact 1"
+    envelope["numeric_facts"][1]["statistic_id"] = "Fact 2"
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        with _server_owned_evidence(root / "owner-store", envelope_payload=envelope) as (_, _, owner):
+            projection = owner.issue_report_projection(owner._canonical_report_wire())
+            admitted = build_report_view_model(
+                {}, root / "run-1", evidence_projection=projection, owner=owner,
+                artifact_admission=owner._canonical_report_artifact(),
+            )
+    assert admitted["status"] == "available"
+    assert [fact["value"] for fact in admitted["typedFacts"]] == [2.0, 0.2]
     return {
+        **admitted,
         "title": "Test Report",
-        "facts": ["Fact 1", "Fact 2"],
         "critical_errors": [],
         "warnings": [],
         "cautions": [],
@@ -66,4 +84,14 @@ class TestReportContent:
         html = _environment().get_template("report.html.j2").render(view_model=vm)
         assert "Test Report" in html
         assert "Fact 1" in html
+        assert "Fact 2" in html
+        assert "'value': 2," in unescape(html)
+        assert "'value': 0.2," in unescape(html)
         assert "Causal Caution" in html
+
+    def test_raw_facts_are_not_a_template_fallback(self):
+        vm = _minimal_view_model()
+        vm["facts"] = ["UNTRUSTED_RAW_FACT"]
+        html = _environment().get_template("report.html.j2").render(view_model=vm)
+        assert "UNTRUSTED_RAW_FACT" not in html
+        assert "Fact 1" in html

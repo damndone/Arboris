@@ -29,6 +29,7 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 # Kept as a legacy import sentinel only.  It is deliberately not accepted by
 # any constructor or bootstrap method and carries no authority.
 _SERVER_SCOPE_AUTHORITY_PROOF = object()
+_LOCAL_IDENTITY_ISSUER = object()
 _SCOPE_BINDING_FIELDS = frozenset(
     {"scope_ref", "principal_ref", "session_ref", "project_ref"}
 )
@@ -454,6 +455,72 @@ class DeploymentIdentityResolverV1:
         raise TypeError("deployment identity resolvers cannot be serialized")
 
 
+class LocalDeploymentIdentityResolverV1:
+    """Exact project/session identity resolver issued by local bootstrap.
+
+    This is intentionally a separate typed boundary from the external host
+    resolver. It accepts no caller-supplied actor or project authority: the
+    bootstrap-installed tuple is the only identity it can return, and any
+    conflicting request assertion is rejected.
+    """
+
+    __slots__ = (
+        "_actor_ref",
+        "_project_ref",
+        "_session_ref",
+        "_issuer",
+        "__weakref__",
+    )
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("local identity resolvers must come from local bootstrap")
+
+    @classmethod
+    def _from_bootstrap(
+        cls,
+        *,
+        actor_ref: str,
+        project_ref: str,
+        session_ref: str,
+    ) -> "LocalDeploymentIdentityResolverV1":
+        _safe_ref(actor_ref, "principal:")
+        _safe_scope(project_ref)
+        _safe_ref(session_ref, "session:")
+        resolver = object.__new__(cls)
+        object.__setattr__(resolver, "_actor_ref", actor_ref)
+        object.__setattr__(resolver, "_project_ref", project_ref)
+        object.__setattr__(resolver, "_session_ref", session_ref)
+        object.__setattr__(resolver, "_issuer", _LOCAL_IDENTITY_ISSUER)
+        return resolver
+
+    def __call__(
+        self,
+        _request: Any,
+        project_ref: str,
+        claimed_session_ref: str | None,
+        _notebook_id: str | None,
+    ) -> tuple[str, str, str]:
+        if self._issuer is not _LOCAL_IDENTITY_ISSUER:
+            raise ValueError("local identity resolver is not bootstrap-issued")
+        if project_ref != self._project_ref:
+            raise ValueError("local project scope does not match the server binding")
+        if claimed_session_ref is not None and claimed_session_ref != self._session_ref:
+            raise ValueError("local session scope does not match the server binding")
+        return self._actor_ref, self._session_ref, self._project_ref
+
+    def __copy__(self) -> "LocalDeploymentIdentityResolverV1":
+        raise TypeError("local identity resolvers cannot be copied")
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> "LocalDeploymentIdentityResolverV1":
+        raise TypeError("local identity resolvers cannot be copied")
+
+    def __reduce__(self) -> tuple[object, ...]:
+        raise TypeError("local identity resolvers cannot be serialized")
+
+    def __reduce_ex__(self, _protocol: int) -> tuple[object, ...]:
+        raise TypeError("local identity resolvers cannot be serialized")
+
+
 CompiledAgentPlanV1 = CompiledWorkflowV1
 CompiledAgentPlan = CompiledWorkflowV1
 CompilationRecord = CompilationRecordV1
@@ -560,4 +627,5 @@ __all__ = [
     "ScopeAuthorityResolverV1",
     "ServerScopeBindingV1",
     "DeploymentIdentityResolverV1",
+    "LocalDeploymentIdentityResolverV1",
 ]

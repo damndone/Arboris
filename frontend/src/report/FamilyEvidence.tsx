@@ -1,8 +1,10 @@
+import { Fragment, type ReactNode } from "react";
 import {
   readReportEvidence,
   type EvidenceViewModel,
   type EvidenceFactViewModel,
   type EvidenceValidationProvenance,
+  type ResolvedSectionContent,
 } from "./reportEvidence";
 
 const tableStyle = { fontSize: 12, borderCollapse: "collapse" as const };
@@ -66,6 +68,22 @@ function projectionValidationProvenance(evidence: EvidenceViewModel): string {
     evidence.validationProvenance
       ?? evidence.provenance?.validatorRef
       ?? evidence.validationSummary,
+  );
+}
+
+/** Only called with the bounded, reference-checked parser output. */
+function resultContent(value: ResolvedSectionContent): ReactNode {
+  if (value === null) return <span>null</span>;
+  if (typeof value !== "object") return <span>{String(value)}</span>;
+  if (Array.isArray(value)) {
+    return value.length === 0 ? <span>[]</span> : (
+      <ol>{value.map((item, i) => <li key={i}>{resultContent(item)}</li>)}</ol>
+    );
+  }
+  return (
+    <dl>{Object.entries(value).map(([key, item]) => (
+      <Fragment key={key}><dt>{key}</dt><dd>{resultContent(item)}</dd></Fragment>
+    ))}</dl>
   );
 }
 
@@ -162,6 +180,13 @@ function TypedEvidenceProjection({ evidence }: { evidence: EvidenceViewModel }) 
         <p key={section.key} style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "6px 0 0" }}>
           {section.label}: {section.status.toUpperCase()}
         </p>
+      ))}
+      {evidence.resolvedSections?.map((section) => (
+        <details key={section.sectionId} aria-label={`${section.sectionType} ${section.sectionId}`} style={{ fontSize: 12, marginTop: 8 }}>
+          <summary>{section.sectionType} · {section.sectionId} · {section.status.toUpperCase()}</summary>
+          {section.reasonCodes.length > 0 && <p>Reason: {section.reasonCodes.join(" · ")}</p>}
+          {section.status === "available" && resultContent(section.content)}
+        </details>
       ))}
     </section>
   );

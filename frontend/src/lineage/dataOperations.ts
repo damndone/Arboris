@@ -39,11 +39,27 @@ export interface DataProfileVariableV1 {
   name: string;
   label: string | null;
   measurement_level: string | null;
+  missing_policy?: string | null;
+  role?: string | null;
+  sensitivity?: string | null;
   missingness: DataProfileMissingnessV1;
   user_missing_values: unknown[];
   value_labels: Record<string, string>;
   sample_values: unknown[];
 }
+
+/** Canonical per-column declaration accepted by data.metadata.update. */
+export interface DataMetadataColumnDeclarationV1 {
+  variable_label?: string;
+  value_labels?: Record<string, string>;
+  measurement_level?: string;
+  missing_policy?: string;
+  role?: string;
+  sensitivity?: string;
+  user_missing_values?: unknown[];
+}
+
+export type DataMetadataUpdateV1 = Record<string, DataMetadataColumnDeclarationV1>;
 
 export interface DataProfileV1 {
   schema_version: "data-profile.v1";

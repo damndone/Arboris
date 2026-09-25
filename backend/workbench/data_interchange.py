@@ -12,6 +12,7 @@ import importlib
 from importlib.util import find_spec
 import math
 from numbers import Real
+import os
 from pathlib import Path
 import tempfile
 from typing import Any, Literal, Mapping
@@ -207,6 +208,17 @@ def _pyreadstat_failure_capability(target_format: str) -> InterchangeCapabilityV
             "The admitted pyreadstat adapter failed a bounded native "
             "interchange operation."
         ),
+    )
+
+
+def _adapter_failure_capability(target_format: str) -> InterchangeCapabilityV1:
+    if target_format in _NATIVE_METADATA_FIELDS:
+        return _pyreadstat_failure_capability(target_format)
+    return InterchangeCapabilityV1(
+        target_format=target_format,
+        status="unavailable",
+        reason_code="adapter_failure",
+        message="The admitted interchange adapter failed a bounded operation.",
     )
 
 
@@ -592,8 +604,14 @@ def _native_loss_manifest(
     target_format: str,
     restored_metadata: Mapping[str, Any] | None = None,
 ) -> MetadataLossManifestV1:
-    declarations = _metadata_columns(metadata)
-    restored = _metadata_columns(restored_metadata or {}) if restored_metadata else {}
+    loss_declarations = _loss_metadata(metadata)
+    loss_restored = _loss_metadata(restored_metadata or {}) if restored_metadata else {}
+    declarations = {
+        column: fields for column, fields in loss_declarations.items() if column != "__dataset__"
+    }
+    restored = {
+        column: fields for column, fields in loss_restored.items() if column != "__dataset__"
+    }
     supported = _NATIVE_METADATA_FIELDS.get(target_format, frozenset())
     items: list[MetadataLossItemV1] = []
     for column, fields in declarations.items():
@@ -646,6 +664,17 @@ def _native_loss_manifest(
                     target_representation=target_repr,
                 )
             )
+    dataset_fields = loss_declarations.get("__dataset__", {})
+    for field_name, original in dataset_fields.items():
+        items.append(
+            MetadataLossItemV1(
+                field=f"__dataset__.{field_name}",
+                status="not_supported",
+                reason=f"target format {target_format!r} has no admitted dataset metadata mapping",
+                original_representation=_metadata_json(original),
+                target_representation="not_supported",
+            )
+        )
     return MetadataLossManifestV1(
         source_format="workbench-json",
         target_format=target_format,
@@ -738,6 +767,10 @@ def _read_frame_with_metadata(
             return pd.read_parquet(path, engine=engine), {}
         except (ImportError, ModuleNotFoundError) as exc:
             raise InterchangeUnavailableError(interchange_capability(target_format)) from exc
+        except Exception as exc:
+            raise InterchangeUnavailableError(
+                _adapter_failure_capability(target_format)
+            ) from exc
     if target_format in {"sav", "zsav", "dta"}:
         pyreadstat = _pyreadstat_module()
         if pyreadstat is None:
@@ -853,17 +886,39 @@ def write_interchange_frame(
         )
     target_path = Path(path).expanduser()
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_existed_before = _path_entry_exists(target_path)
+    staging_fd, staging_name = tempfile.mkstemp(
+        prefix=f".{target_path.name}.",
+        suffix=".workbench-staging",
+        dir=target_path.parent,
+    )
+    os.close(staging_fd)
+    staging_path = Path(staging_name)
+    staging_path.unlink(missing_ok=True)
     try:
-        _write_frame(frame, normalized, target_path, metadata)
+        _write_frame(frame, normalized, staging_path, metadata)
+        if not staging_path.is_file() or staging_path.stat().st_size <= 0:
+            raise InterchangeUnavailableError(
+                _adapter_failure_capability(normalized)
+            )
+        os.replace(staging_path, target_path)
     except InterchangeUnavailableError as error:
-        if not target_existed_before:
-            target_path.unlink(missing_ok=True)
+        staging_path.unlink(missing_ok=True)
         return InterchangeWriteResultV1(
             target_format=normalized,
             status="unavailable",
             path=None,
             capability=error.capability,
+        )
+    except InterchangeMetadataError:
+        staging_path.unlink(missing_ok=True)
+        raise
+    except Exception:
+        staging_path.unlink(missing_ok=True)
+        return InterchangeWriteResultV1(
+            target_format=normalized,
+            status="unavailable",
+            path=None,
+            capability=_adapter_failure_capability(normalized),
         )
     return InterchangeWriteResultV1(
         target_format=normalized,

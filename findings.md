@@ -26,3 +26,23 @@
 Typed frontend/raw classification `NON-CITABLE`, strict provenance and
 outer/nested tamper handling, and controlled HTTP behavior remain preserved.
 Browser/provider/central/live-host/full-gate/release remain `NOT VERIFIED`.
+
+# v1.8.9 Notebook/Graph Agent UI regression findings
+
+## Initial reproduction
+
+- The live Notebook surface renders only a heading, one explanatory sentence,
+  a disabled textarea, and one compile button; it currently reports `Not Found`.
+- The Graph bottom panel stays on Logs when the Agent tab is invoked through the
+  live page, so the current Agent shell is not reliably reachable from the UI.
+
+## Reference comparison
+
+- v1.8.8 used the full Notebook workspace and the shared Agent shell with
+  transcript turns, activity/progress, scope, capability prompts, model/context
+  controls, proposals, revisions, navigation, confirmation, and audit affordances.
+- v1.8.9 replaced those presentation shells with small inline-styled
+  `NotebookCutoverView` and `AgentCutoverPanel` components. The cutover itself is
+  not the visual regression; coupling the new compiler to replacement UI is.
+- Restoration must preserve `cutoverApi` as the only NL compile/confirm/execute
+  transport. Reintroducing v1.8.8 Notebook execution API calls is out of scope.

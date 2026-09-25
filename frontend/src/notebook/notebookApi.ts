@@ -1,5 +1,4 @@
 import { apiUrl, readResponse } from "../api";
-import type { PipelineDraftResponse } from "../api";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
@@ -25,43 +24,6 @@ export interface NotebookFocusInput {
   interaction_mode?: NotebookInteractionMode;
 }
 
-export interface NotebookContextResponse {
-  context_id: string;
-  context_profile: string;
-  generation_context_hash: string;
-  freshness_dependency_fingerprint: string;
-  artifact_type_counts: Record<string, number>;
-  omissions: Array<Record<string, unknown>>;
-  budget_report: Record<string, unknown>;
-  source_manifest: Array<Record<string, unknown>>;
-  trace_id?: string | null;
-  /** Total seconds a planning pass may run before the server ends it.
-   *
-   * Published so the planning surface can show the budget it is running
-   * against; an open-ended elapsed counter cannot tell a reader whether a
-   * live request is progressing or hung. */
-  planning_deadline_s?: number;
-  [key: string]: unknown;
-}
-
-export interface NotebookOptionsResponse {
-  context: NotebookContextResponse;
-  options: unknown[];
-  materializations?: Record<string, Record<string, unknown>>;
-  execution_results?: Record<string, Record<string, unknown>>;
-  trace_id: string;
-}
-
-export interface NotebookPlanningRequest {
-  attemptId: string;
-  signal?: AbortSignal;
-}
-
-export interface NotebookTraceResponse {
-  trace_id: string;
-  events: Array<Record<string, unknown>>;
-}
-
 export interface NotebookCreateInput {
   title: string;
   created_by: string;
@@ -75,11 +37,6 @@ export interface NotebookProjectionDataset {
   upload_sha256: string;
   filename: string;
   sheet_names: string[];
-}
-
-export interface NotebookMaterializationResponse extends PipelineDraftResponse {
-  materialization: Record<string, unknown>;
-  trace_id?: string;
 }
 
 function notebookPath(
@@ -167,191 +124,6 @@ export function updateNotebookFocus(
       method: "PUT",
       headers: jsonHeaders,
       body: JSON.stringify(input),
-    },
-  );
-}
-
-export function compileNotebookContext(
-  projectRoot: string,
-  notebookId: string,
-): Promise<NotebookContextResponse> {
-  return readNotebookResponse<NotebookContextResponse>(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/context/compile`,
-    { method: "POST" },
-  );
-}
-
-export function proposeNotebookOptions(
-  projectRoot: string,
-  notebookId: string,
-  count = 3,
-  planning?: NotebookPlanningRequest,
-): Promise<NotebookOptionsResponse> {
-  return readNotebookResponse<NotebookOptionsResponse>(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/options/propose`,
-    {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({
-        count,
-        ...(planning ? { attempt_id: planning.attemptId } : {}),
-      }),
-      signal: planning?.signal,
-    },
-  );
-}
-
-export function cancelNotebookPlanning(
-  projectRoot: string,
-  notebookId: string,
-  attemptId: string,
-): Promise<{ attempt_id: string; status: "cancelled" | "not_active" }> {
-  return readNotebookResponse(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/planning/${encodeURIComponent(attemptId)}`,
-    { method: "DELETE" },
-  );
-}
-
-export function listNotebookOptions(
-  projectRoot: string,
-  notebookId: string,
-): Promise<NotebookOptionsResponse> {
-  return readNotebookResponse<NotebookOptionsResponse>(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/options`,
-  );
-}
-
-export function getNotebookTrace(
-  projectRoot: string,
-  notebookId: string,
-  traceId: string,
-): Promise<NotebookTraceResponse> {
-  return readNotebookResponse<NotebookTraceResponse>(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/traces/${encodeURIComponent(traceId)}`,
-  );
-}
-
-export type NotebookDecision = {
-  decision:
-    | "selected"
-    | "deferred"
-    | "rejected"
-    | "edited"
-    | "requested_more_options"
-    | "requested_explanation";
-  actor: string;
-  edited_fields?: string[];
-  note_ref?: string;
-};
-
-export function recordNotebookDecision(
-  projectRoot: string,
-  notebookId: string,
-  optionId: string,
-  body: NotebookDecision,
-): Promise<Record<string, unknown>> {
-  return readNotebookResponse<Record<string, unknown>>(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/options/${encodeURIComponent(optionId)}/decision`,
-    {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
-    },
-  );
-}
-
-export function confirmNotebookOption(
-  projectRoot: string,
-  notebookId: string,
-  optionId: string,
-  body: {
-    option_revision: number;
-    proposal_id: string;
-    proposal_revision: number;
-  },
-): Promise<Record<string, unknown>> {
-  return readNotebookResponse<Record<string, unknown>>(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/options/${encodeURIComponent(optionId)}/confirm`,
-    {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
-    },
-  );
-}
-
-export function materializeNotebookOption(
-  projectRoot: string,
-  notebookId: string,
-  optionId: string,
-): Promise<NotebookMaterializationResponse> {
-  return readNotebookResponse<NotebookMaterializationResponse>(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/options/${encodeURIComponent(optionId)}/materialize`,
-    { method: "POST", headers: jsonHeaders },
-  );
-}
-
-export function confirmAndExecuteNotebookOption(
-  projectRoot: string,
-  notebookId: string,
-  optionId: string,
-  body: {
-    option_revision: number;
-    proposal_id: string;
-    proposal_revision: number;
-  },
-): Promise<{ dispatch: Record<string, unknown>; trace_id: string }> {
-  return readNotebookResponse<{ dispatch: Record<string, unknown>; trace_id: string }>(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/options/${encodeURIComponent(optionId)}/confirm-and-execute`,
-    {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
-    },
-  );
-}
-
-export function authorizeNotebookOptionExecution(
-  projectRoot: string,
-  notebookId: string,
-  optionId: string,
-  authorization: Record<string, unknown>,
-): Promise<{ authorization: Record<string, unknown>; trace_id: string }> {
-  return readNotebookResponse<{ authorization: Record<string, unknown>; trace_id: string }>(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/options/${encodeURIComponent(optionId)}/authorize-execution`,
-    {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({ authorization }),
-    },
-  );
-}
-
-export function completeNotebookOptionExecution(
-  projectRoot: string,
-  notebookId: string,
-  optionId: string,
-  body: {
-    run_id: string;
-  },
-): Promise<Record<string, unknown>> {
-  return readNotebookResponse<Record<string, unknown>>(
-    projectRoot,
-    `/notebooks/${encodeURIComponent(notebookId)}/options/${encodeURIComponent(optionId)}/execute`,
-    {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
     },
   );
 }

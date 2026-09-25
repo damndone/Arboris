@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from json.encoder import encode_basestring
 import math
 import unicodedata
 from collections.abc import Mapping
@@ -18,8 +19,12 @@ class CanonicalJSONError(ValueError):
 def _normalize(value: Any) -> Any:
     if isinstance(value, str):
         normalized = unicodedata.normalize("NFC", value)
-        if any(0xD800 <= ord(char) <= 0xDFFF for char in normalized):
-            raise CanonicalJSONError("canonical JSON does not allow surrogate code points")
+        try:
+            # Strict UTF-8 rejects every surrogate (including explicit pairs)
+            # in C, without a Python callback for every character.
+            normalized.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise CanonicalJSONError("canonical JSON does not allow surrogate code points") from exc
         return normalized
     if isinstance(value, float):
         if not math.isfinite(value):
@@ -65,12 +70,12 @@ def _encode_json(value: Any) -> str:
     if isinstance(value, float):
         return _canonical_float(value)
     if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        return encode_basestring(value)
     if isinstance(value, list):
         return "[" + ",".join(_encode_json(item) for item in value) + "]"
     if isinstance(value, dict):
         items = (
-            json.dumps(key, ensure_ascii=False, separators=(",", ":"))
+            encode_basestring(key)
             + ":"
             + _encode_json(item)
             for key, item in sorted(value.items())

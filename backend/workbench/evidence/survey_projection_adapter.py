@@ -251,6 +251,9 @@ def project_survey_source_snapshot(
             "ols": "ols",
             "ols_robust": "ols",
             "logit": "logit",
+            "probit": "probit",
+            "poisson": "poisson",
+            "poisson_rate": "poisson_rate",
         }.get(persisted_model_type)
     design = project_survey_design(
         artifact.get("survey_design"),

@@ -2256,6 +2256,118 @@ def test_migration_status_is_not_a_loadable_v2_execution_status_and_bad_wire_err
         HoldoutSealV1.from_dict({**malformed, "development_hashes": hashes})
 
 
+@pytest.mark.parametrize("untrusted", [
+    pytest.param(True, id="caller-approval-boolean"),
+    pytest.param({}, id="plain-dict"),
+    pytest.param((MappingProxyType({"evidence:projection": MappingProxyType({})}),
+                  SensitivityClassV1.PUBLIC), id="validator-shaped-tuple-is-not-authority"),
+    pytest.param({
+        "evidence:projection": {"consumer_id": "agent", "sections": []},
+        "approved": True,
+        "destination": "remote",
+    }, id="raw-key-and-claimed-approval"),
+])
+def test_structured_materializer_rejects_untrusted_admission(untrusted) -> None:
+    # Source admission is not an egress permit. No dictionary or boolean can
+    # replace either central source authority or the existing receipt issuer.
+    store = ContextMaterializationStoreV1(
+        materializer_ref=_ref(kind="materializer", logical_id="server.context.structured"),
+        redaction_policy_ref=_ref(kind="redaction-policy", logical_id="strict"),
+    )
+    consume = getattr(store, "materialize_structured_projection", None)
+    assert callable(consume), "dedicated opaque structured admission entry point is required"
+    with pytest.raises(context_egress_module.EgressContractError, match="authority|admission"):
+        consume(untrusted)
+
+
+def test_structured_materializer_rejects_forged_admission_before_serializing() -> None:
+    class ForgedAdmission:
+        # Deliberately adversarial, never a trusted fixture. Duck-typed payload
+        # access must not run before the central issuer verifies object identity.
+        approved = True
+
+        @property
+        def payload(self):
+            pytest.fail("forged admission payload was accessed before authority validation")
+
+        def to_dict(self):
+            pytest.fail("forged admission was serialized before authority validation")
+
+        def egress_payload(self):
+            pytest.fail("forged projection was resolved before authority validation")
+
+    store = ContextMaterializationStoreV1(
+        materializer_ref=_ref(kind="materializer", logical_id="server.context.structured"),
+        redaction_policy_ref=_ref(kind="redaction-policy", logical_id="strict"),
+    )
+    consume = getattr(store, "materialize_structured_projection", None)
+    assert callable(consume), "dedicated opaque structured admission entry point is required"
+    with pytest.raises(context_egress_module.EgressContractError, match="authority|admission"):
+        consume(ForgedAdmission())
+
+
+def test_structured_materializer_real_admission_requires_receipt_and_exact_remote_payload(tmp_path) -> None:
+    from tests.test_v189_structured_consumer_projection import committed
+    from workbench.evidence import consumer_adapters as central
+
+    registry = central.default_projection_registry()
+    prepare = getattr(registry, "prepare_structured_projection_admission", None)
+    assert callable(prepare), "central pre-receipt admission implementation is required"
+    with committed(tmp_path, label="Source-bound display label") as (source, *_):
+        selection = dict(consumer_id="agent", destination="remote",
+                         requested_section_ids=("a",), requested_fact_ids=())
+        admission = prepare(source, **selection)
+        context, observed = central.validate_server_owned_structured_projection_admission(admission)
+        assert observed is SensitivityClassV1.PUBLIC
+        expected = canonical_json_v1(context)
+        assert "Source-bound display label" in expected
+        assert "result_dependencies" in context["evidence:projection"]
+        store = ContextMaterializationStoreV1(
+            materializer_ref=_ref(kind="materializer", logical_id="server.context.structured"),
+            redaction_policy_ref=_ref(kind="redaction-policy", logical_id="strict"),
+        )
+        result = store.materialize_structured_projection(admission)
+        assert store.is_server_issued(result)
+        assert result.selected_refs == ("evidence:projection",)
+        assert not result.redacted_refs
+        assert result.observed_sensitivity is observed
+        assert canonical_json_v1(result.materialized_context) == expected
+        assert result.materialized_payload_digest == sha256_canonical(context)
+
+        # Source proof and materialization alone must never authorize remote delivery.
+        denied = registry.project(source, **selection)
+        assert not denied.facts and not denied.sections
+        policy_ref = _ref(kind="egress-policy", logical_id="structured.remote")
+        spec = registry.resolve("agent")
+        policy = ContextEgressPolicyV1(
+            policy_ref=policy_ref, destination="remote", provider_ref="provider:remote:1",
+            allowed_sensitivity=(SensitivityClassV1.PUBLIC,),
+            max_token_budget=spec.max_token_budget, max_row_budget=spec.max_row_budget,
+            max_time_budget_ms=5000,
+        )
+        gateway = ContextEgressGatewayV1.from_materialization_result(
+            result, request_id="egress-request:structured", destination="remote",
+            provider_ref="provider:remote:1", sensitivity_policy_ref=policy_ref,
+            sensitivity=observed, token_budget=spec.max_token_budget,
+            row_budget=spec.max_row_budget, time_budget_ms=1000,
+            purpose_ref="purpose:analysis:1", requested_at="2026-08-15T17:02:00+00:00",
+            expires_at="2026-08-15T18:00:00+00:00",
+        )
+        issuer = ContextEgressReceiptIssuerV1(policy, materializer_store=store,
+            clock=lambda: datetime.fromisoformat("2026-08-15T17:30:00+00:00"))
+        receipt = issuer.issue(gateway)
+        require_context_egress_receipt(gateway, receipt, issuer=issuer)
+        remote = registry.project(source, **selection, gateway=gateway, receipt=receipt, issuer=issuer)
+        assert remote.status.value in {"available", "degraded"}
+        assert remote.facts and remote.sections
+        assert canonical_json_v1({"evidence:projection": remote.egress_payload()}) == expected
+        assert remote.audit.egress_receipt_id == receipt.receipt_id
+        with pytest.raises(ContractError):
+            issuer.issue(replace(gateway, provider_ref="provider:other"))
+        with pytest.raises(ContractError):
+            issuer.require(gateway, receipt, at="2026-08-15T18:00:00+00:00")
+
+
 def test_egress_materializer_filters_selected_refs_and_recurses_sensitive_values() -> None:
     materializer = ContextMaterializationStoreV1(
         materializer_ref=_ref(kind="materializer", logical_id="server.context.selected"),

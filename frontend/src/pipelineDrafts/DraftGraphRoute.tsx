@@ -6,11 +6,9 @@ import {
   getPipelineDraft,
   patchPipelineDraftParams,
   validatePipelineDraft,
-  waitForRunTerminal,
   type DraftValidationResult,
   type PipelineDraftV1,
 } from "../api";
-import { completeNotebookOptionExecution } from "../notebook/notebookApi";
 import { DraftGraphCanvas } from "./DraftGraphCanvas";
 import { ModelNodeInspector } from "./ModelNodeInspector";
 import { rootToSlug } from "../workbench/projectSlug";
@@ -184,27 +182,6 @@ export function DraftGraphRoute() {
                   validated_draft_hash: validatedHash ?? "",
                   execution_mode: executionMode,
                 });
-                const provenance = draft.notebook_provenance;
-                if (provenance?.notebook_id && provenance.option_id) {
-                  // Draft execution is asynchronous. Reconcile the Notebook
-                  // only after the real run reaches a terminal state, so the
-                  // active head and Artifact Contract never advance on a
-                  // merely-dispatched or still-running run.
-                  void waitForRunTerminal(projectRoot, result.run_id).then((detail) => {
-                    if (!detail) return;
-                    return completeNotebookOptionExecution(
-                      projectRoot,
-                      provenance.notebook_id,
-                      provenance.option_id,
-                      {
-                        run_id: result.run_id,
-                      },
-                    );
-                  }).catch(() => {
-                    // The run remains authoritative; a later Notebook mount
-                    // can retry reconciliation from the persisted draft.
-                  });
-                }
                 const params = new URLSearchParams({ project_root: projectRoot, tab: "lineage" });
                 if (result.focus.target_model_node_id) {
                   params.set("focus", result.focus.target_model_node_id);

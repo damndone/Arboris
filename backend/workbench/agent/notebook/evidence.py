@@ -579,6 +579,10 @@ def project_persisted_evidence_for_notebook(
     *,
     destination: str = "local",
     requested_fact_ids: tuple[str, ...] | None = None,
+    requested_section_ids: tuple[str, ...] | None = None,
+    coefficient_selection: object | None = None,
+    provenance_selection: object | None = None,
+    requested_section_types: tuple[str, ...] | None = None,
     registry: object | None = None,
     gateway: object | None = None,
     receipt: object | None = None,
@@ -602,6 +606,10 @@ def project_persisted_evidence_for_notebook(
         consumer_id="notebook",
         destination=destination,
         requested_fact_ids=requested_fact_ids,
+        requested_section_ids=requested_section_ids,
+        coefficient_selection=coefficient_selection,
+        provenance_selection=provenance_selection,
+        requested_section_types=requested_section_types,
         gateway=gateway,  # type: ignore[arg-type]
         receipt=receipt,  # type: ignore[arg-type]
         issuer=issuer,  # type: ignore[arg-type]
@@ -612,6 +620,10 @@ def read_persisted_evidence_for_notebook(
     run_root: Path,
     *,
     requested_fact_ids: tuple[str, ...] | None = None,
+    requested_section_ids: tuple[str, ...] | None = None,
+    coefficient_selection: object | None = None,
+    provenance_selection: object | None = None,
+    requested_section_types: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
     """Read Notebook evidence through the same central C0 consumer port."""
 
@@ -622,6 +634,10 @@ def read_persisted_evidence_for_notebook(
         project_root=Path(run_root).expanduser().resolve(strict=False).parent.parent,
         run_id=Path(run_root).name,
         requested_fact_ids=requested_fact_ids,
+        requested_section_ids=requested_section_ids,
+        coefficient_selection=coefficient_selection,
+        provenance_selection=provenance_selection,
+        requested_section_types=requested_section_types,
     )
 
 

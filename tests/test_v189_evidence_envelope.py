@@ -1241,11 +1241,28 @@ class _TestAuthorityServer:
         except OSError:
             return
 
+    def is_live(self) -> bool:
+        if self.listener.fileno() < 0 or not self._thread.is_alive():
+            return False
+        try:
+            endpoint_stat = os.lstat(self.path)
+            return (
+                int(endpoint_stat.st_dev) == self.endpoint_device
+                and int(endpoint_stat.st_ino) == self.endpoint_inode
+            )
+        except OSError:
+            return False
+
     def close(self) -> None:
         self.stop_event.set()
         self.listener.close()
         try:
-            os.unlink(self.path)
+            endpoint_stat = os.lstat(self.path)
+            if (
+                int(endpoint_stat.st_dev) == self.endpoint_device
+                and int(endpoint_stat.st_ino) == self.endpoint_inode
+            ):
+                os.unlink(self.path)
         except FileNotFoundError:
             pass
         try:
@@ -1283,7 +1300,11 @@ class _ExternalHostAuthority:
     @classmethod
     def _get_server(cls) -> _TestAuthorityServer:
         with cls._server_lock:
-            if cls._server is None or cls._server_pid != os.getpid():
+            server = cls._server
+            same_process = cls._server_pid == os.getpid()
+            if server is None or not same_process or not server.is_live():
+                if server is not None and same_process and not server.is_live():
+                    server.close()
                 cls._server = _TestAuthorityServer()
                 cls._server_pid = os.getpid()
             return cls._server
@@ -1324,6 +1345,23 @@ def _authorized_registry(scope_ref: str = "scope:project:1"):
     registry = create_server_evidence_registry(scope_ref=scope_ref, authority_handle=host.channel)
     _TEST_AUTHORITY_BY_REGISTRY[id(registry)] = host.channel
     return registry, host
+
+
+def test_external_host_authority_rebuilds_after_cached_socket_is_closed() -> None:
+    first = _ExternalHostAuthority("scope:project:stale-cache-before")
+    stale_server = _ExternalHostAuthority._server
+    assert stale_server is not None
+    first.channel.close()
+    stale_server.close()
+
+    rebuilt = _ExternalHostAuthority("scope:project:stale-cache-after")
+
+    live_server = _ExternalHostAuthority._server
+    assert live_server is not None
+    assert live_server is not stale_server
+    assert live_server.listener.fileno() >= 0
+    assert os.path.exists(live_server.path)
+    assert live_server._thread.is_alive()
 
 
 def _process_host_boundary_probe(registry, artifact_id: str, view, outcome, admission, result_queue) -> None:

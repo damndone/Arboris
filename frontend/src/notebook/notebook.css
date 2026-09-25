@@ -663,3 +663,510 @@
 .nb-user-intent label { color: var(--label); font-size: 13px; font-weight: 650; }
 .nb-user-intent textarea { background: var(--background-secondary, transparent); border: 1px solid var(--separator, rgba(128, 128, 128, 0.3)); border-radius: 7px; box-sizing: border-box; color: var(--label); font: inherit; padding: 9px; resize: vertical; width: 100%; }
 .nb-user-intent button { justify-self: start; }
+
+/* --- v1.8.9 server-cutover Notebook workspace --------------------- */
+
+.nb-cutover-surface {
+  box-sizing: border-box;
+  min-height: 100%;
+  gap: 14px;
+  padding: 18px clamp(16px, 3vw, 32px) 32px;
+  background:
+    radial-gradient(circle at 90% 0%, color-mix(in oklch, var(--tint, #3b82f6) 8%, transparent), transparent 34%),
+    var(--bg-canvas, transparent);
+}
+
+.nb-cutover-header {
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+}
+
+.nb-cutover-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nb-cutover-heading h2,
+.nb-cutover-chooser h3 {
+  margin: 0;
+  color: var(--label);
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.nb-cutover-identity {
+  margin: 1px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--label-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.nb-cutover-compiler {
+  display: grid;
+  gap: 2px;
+  min-width: min(260px, 100%);
+  padding: 9px 11px;
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 9px;
+  background: color-mix(in oklch, var(--bg-card-2, transparent) 88%, transparent);
+  color: var(--label-secondary);
+  font-size: 11px;
+}
+
+.nb-cutover-compiler strong {
+  color: var(--label);
+  font-size: 12px;
+}
+
+.nb-cutover-compiler[data-status="ready"] {
+  border-color: color-mix(in oklch, var(--success, #30d158) 42%, var(--separator));
+}
+
+.nb-cutover-compiler[data-status="error"] {
+  border-color: color-mix(in oklch, var(--danger, #dc2626) 52%, var(--separator));
+}
+
+.nb-cutover-intent {
+  max-width: none;
+  background: color-mix(in oklch, var(--bg-card-2, transparent) 72%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in oklch, var(--tint, #3b82f6) 68%, transparent);
+}
+
+.nb-cutover-mode {
+  display: grid;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklch, var(--tint, #3b82f6) 36%, var(--separator));
+  border-radius: 9px;
+  background: color-mix(in oklch, var(--tint, #3b82f6) 7%, transparent);
+}
+
+.nb-cutover-mode .nb-context-header {
+  justify-content: space-between;
+}
+
+.nb-cutover-memory {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid color-mix(in oklch, var(--tint, #3b82f6) 32%, var(--separator));
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--bg-card-2, transparent) 82%, transparent);
+}
+
+.nb-cutover-memory > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.nb-cutover-memory strong {
+  color: var(--label);
+  font-size: 13px;
+}
+
+.nb-cutover-memory p {
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: 11px;
+}
+
+.nb-cutover-intent textarea:focus,
+.nb-clarification-field input:focus,
+.nb-clarification-field select:focus {
+  border-color: var(--tint, #3b82f6);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--tint, #3b82f6) 18%, transparent);
+  outline: none;
+}
+
+.nb-cutover-composer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.nb-cutover-composer-actions p {
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: 11px;
+}
+
+.nb-cutover-progress {
+  width: auto;
+  max-width: none;
+  margin-top: 0;
+}
+
+.nb-cutover-progress header strong {
+  color: var(--label);
+  font-size: 12px;
+  text-align: right;
+}
+
+.nb-cutover-progress li[data-status="pending"] {
+  color: var(--label-tertiary);
+}
+
+.nb-cutover-progress li[data-status="active"]::marker {
+  color: var(--tint, #3b82f6);
+}
+
+.nb-cutover-recovery {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.nb-cutover-recovery > div {
+  display: grid;
+  gap: 3px;
+}
+
+.nb-cutover-recovery p {
+  margin: 0;
+}
+
+.nb-cutover-chooser,
+.nb-cutover-activity,
+.nb-cutover-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--bg-card-2, transparent) 74%, transparent);
+}
+
+.nb-cutover-chooser > p {
+  margin: 0;
+  color: var(--label-secondary);
+}
+
+.nb-cutover-choice-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.nb-cutover-choice-list .nb-option-card {
+  justify-content: space-between;
+  background: var(--bg-card, transparent);
+}
+
+.nb-cutover-choice-list p {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--label-secondary);
+  font-size: 11px;
+}
+
+.nb-cutover-activity .nb-context-header,
+.nb-cutover-preview .nb-context-header,
+.nb-cutover-result .nb-context-header {
+  justify-content: space-between;
+}
+
+.nb-cutover-activity .nb-empty {
+  padding: 4px 0;
+}
+
+.nb-task-history {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, var(--separator, rgba(128, 128, 128, .3)) 82%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--bg-card, transparent) 72%, transparent);
+}
+
+.nb-task-history > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--label-secondary);
+}
+
+.nb-task-history ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nb-task-history li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.nb-task-history li > span {
+  overflow: hidden;
+  color: var(--label);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nb-task-history li > small {
+  color: var(--label-tertiary);
+  font-size: 11px;
+}
+
+.nb-history-empty {
+  color: var(--label-tertiary);
+}
+
+.nb-plan-grid {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.nb-plan-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.34fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in oklch, var(--separator, rgba(128, 128, 128, 0.3)) 82%, transparent);
+  border-radius: 7px;
+  background: color-mix(in oklch, var(--bg-card, transparent) 74%, transparent);
+}
+
+.nb-plan-row dt {
+  color: var(--label-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.nb-plan-row dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.nb-plan-grid-nested {
+  gap: 5px;
+}
+
+.nb-plan-grid-nested .nb-plan-row {
+  grid-template-columns: minmax(110px, 0.3fr) minmax(0, 1fr);
+  padding: 6px 8px;
+  background: transparent;
+}
+
+.nb-plan-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.nb-plan-value,
+.nb-plan-list {
+  color: var(--label);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.nb-plan-empty {
+  color: var(--label-tertiary);
+  font-style: italic;
+}
+
+.nb-cutover-clarifications {
+  border-color: color-mix(in oklch, var(--warning, #d97706) 62%, var(--separator));
+}
+
+.nb-cutover-clarifications > p,
+.nb-cutover-confirmation > p {
+  margin: 0;
+}
+
+.nb-clarification-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.nb-clarification-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--bg-card-2, transparent) 72%, transparent);
+}
+
+.nb-clarification-field-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nb-clarification-field-header label {
+  color: var(--label);
+  font-weight: 650;
+}
+
+.nb-clarification-field-header code {
+  color: var(--label-tertiary);
+  font-size: 10px;
+}
+
+.nb-clarification-field p {
+  min-height: 32px;
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: 11px;
+}
+
+.nb-clarification-field input,
+.nb-clarification-field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--background-secondary, transparent);
+  color: var(--label);
+  font: inherit;
+}
+
+.nb-cutover-confirmation {
+  border-color: var(--tint, #3b82f6);
+  background: color-mix(in oklch, var(--tint, #3b82f6) 7%, transparent);
+}
+
+.nb-cutover-metadata {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.nb-cutover-metadata > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.28fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.nb-cutover-metadata dt {
+  color: var(--label-secondary);
+  font-size: 11px;
+}
+
+.nb-cutover-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--label);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.nb-cutover-result {
+  display: grid;
+  gap: 10px;
+  border-color: color-mix(in oklch, var(--success, #30d158) 52%, var(--separator));
+}
+
+.nb-cutover-evidence {
+  display: grid;
+  gap: 5px;
+}
+
+.nb-cutover-evidence ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.nb-cutover-evidence li {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.nb-cutover-audit {
+  border-style: solid;
+  background: color-mix(in oklch, var(--bg-card-2, transparent) 78%, transparent);
+}
+
+.nb-cutover-audit-group {
+  display: grid;
+  gap: 5px;
+}
+
+.nb-cutover-audit-group > ol,
+.nb-cutover-audit-group > ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.nb-cutover-audit-group li {
+  overflow-wrap: anywhere;
+  color: var(--label-secondary);
+  font-size: 11px;
+}
+
+.nb-cutover-audit-group li strong,
+.nb-cutover-audit-group li span,
+.nb-cutover-audit-group li small {
+  display: block;
+}
+
+.nb-cutover-audit-group li strong {
+  color: var(--label);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.nb-cutover-audit-group li small {
+  color: var(--label-tertiary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+
+.nb-cutover-audit-group li::marker {
+  color: var(--tint, #3b82f6);
+}
+
+@media (max-width: 720px) {
+  .nb-cutover-header {
+    display: grid;
+  }
+
+  .nb-cutover-compiler {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .nb-plan-row,
+  .nb-plan-grid-nested .nb-plan-row,
+  .nb-cutover-metadata > div {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .nb-cutover-memory {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nb-cutover-memory .nb-button {
+    align-self: flex-start;
+  }
+}

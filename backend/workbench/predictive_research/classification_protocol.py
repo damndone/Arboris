@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections import Counter
 import hashlib
 import json
@@ -19,6 +18,7 @@ from .classification_metrics import (
     fit_probability_calibrator,
     threshold_curve,
 )
+from .classification_search import BoundedSearchV1, run_bounded_search
 from .contracts import ContractError
 from .preprocessing import ClassificationFoldPreprocessingV1, ClassificationPreprocessingStepV1
 from .split_kernel import (
@@ -121,32 +121,6 @@ class HoldoutSealGuardV1:
         }
 
 
-@dataclass(frozen=True)
-class BoundedSearchV1:
-    candidates: tuple[str, ...]
-    search_space: Mapping[str, Any]
-    primary_metric: str
-    max_trials: int
-    max_seconds: int
-    max_cpu_seconds: int
-    seed: int
-    status: str = "declared"
-
-    def validate(self, *, allowed_parameters: set[str] | frozenset[str]) -> None:
-        if not self.candidates or not isinstance(self.search_space, Mapping):
-            raise ContractError("CLASSIFICATION_SEARCH_INVALID", "search candidates and search_space are required")
-        if self.max_trials < 1 or self.max_seconds < 1 or self.max_cpu_seconds < 1:
-            raise ContractError("CLASSIFICATION_SEARCH_BUDGET_INVALID", "search budgets must be positive")
-        unknown = set(self.search_space) - set(allowed_parameters)
-        if unknown:
-            raise ContractError("CLASSIFICATION_SEARCH_PARAMETER_UNKNOWN", f"unknown search parameters: {sorted(unknown)}")
-
-    def validate_candidate(self, candidate: Mapping[str, Any], *, allowed_parameters: set[str] | frozenset[str]) -> None:
-        unknown = set(candidate) - set(allowed_parameters)
-        if unknown:
-            raise ContractError("CLASSIFICATION_SEARCH_PARAMETER_UNKNOWN", f"unknown candidate parameters: {sorted(unknown)}")
-
-
 def select_threshold_from_oof(
     *,
     actual: Sequence[Any],
@@ -230,6 +204,27 @@ def _policy_minimum_precision(policy: DecisionPolicyV1) -> float | None:
             "minimum_precision must be a finite numeric value in [0, 1]",
         )
     return float(value)
+
+
+def _production_select_oof_threshold(
+    *,
+    actual: Sequence[Any],
+    probabilities: Sequence[float],
+    decision_policy: DecisionPolicyV1,
+    positive_class: Any,
+    sample_weight: Sequence[float] | None,
+) -> dict[str, Any]:
+    """Select the one development-OOF threshold used by every production comparator."""
+
+    return select_threshold_from_oof(
+        actual=actual,
+        probabilities=probabilities,
+        method=decision_policy.threshold_method,
+        scope="development_oof",
+        positive_class=positive_class,
+        sample_weight=sample_weight,
+        minimum_precision=_policy_minimum_precision(decision_policy),
+    )
 
 
 _C0_DEVELOPMENT_HASH_KEYS = (
@@ -826,6 +821,45 @@ def _production_metric_score(bundle: Mapping[str, Any], metric_name: str) -> flo
     return float(metric["point_estimate"])
 
 
+def _production_oof_metric_bundle(
+    *,
+    actual: Sequence[Any],
+    probabilities: Sequence[float],
+    threshold_record: Mapping[str, Any],
+    positive_class: Any,
+    negative_class: Any,
+    sample_weight: Sequence[float] | None,
+) -> dict[str, Any]:
+    """Score one candidate on its declared development OOF decision rule.
+
+    Probability metrics remain probability-based inside ``classification_metric_bundle``;
+    only thresholded metrics consume the selected development threshold.
+    """
+
+    threshold = (
+        float(threshold_record["threshold"])
+        if threshold_record.get("status") == "frozen_development_choice"
+        else 0.5
+    )
+    predictions = [
+        positive_class if probability >= threshold else negative_class
+        for probability in probabilities
+    ]
+    return classification_metric_bundle(
+        actual=actual,
+        probabilities=probabilities,
+        predictions=predictions,
+        positive_class=positive_class,
+        threshold=threshold,
+        sample_scope="development_oof",
+        evaluation_design="cross_fitted_oof",
+        numerical_method="same_library_regression",
+        inference_basis="descriptive",
+        validation_level="validated",
+        sample_weight=sample_weight,
+    )
+
+
 def _production_training_refs(manifest: ClassificationSplitManifestV1, fold: int) -> tuple[str, ...]:
     explicit = manifest.training_rows_for_fold(fold)
     validation = {
@@ -912,6 +946,125 @@ def _production_calibration_partition(
     raise ContractError("CLASSIFICATION_CALIBRATION_SUPPORT", "disjoint calibration fit and evaluation slices lack both classes")
 
 
+def _production_oof_trial(
+    feature_frame: pd.DataFrame,
+    target: pd.Series,
+    manifest: ClassificationSplitManifestV1,
+    *,
+    task: ClassificationTaskSpecV1,
+    folds: Sequence[int],
+    model_id: str,
+    parameters: Mapping[str, Any],
+    seed: int,
+    steps: Sequence[ClassificationPreprocessingStepV1],
+    split_hash: str,
+    weight_by_ref: Mapping[str, float],
+    positive: Any,
+    decision_policy: DecisionPolicyV1,
+) -> dict[str, Any]:
+    """Evaluate one parameter set on the immutable development split only."""
+
+    oof_by_ref: dict[str, float] = {}
+    fold_receipts: list[dict[str, Any]] = []
+    for fold in folds:
+        validation_refs = tuple(
+            item.row_ref
+            for item in manifest.assignments
+            if item.partition == "development" and item.cv_fold == fold
+        )
+        training_refs = _production_training_refs(manifest, fold)
+        if len(set(target.loc[list(training_refs)].tolist())) < 2:
+            raise ContractError("CLASSIFICATION_SPLIT_CLASS_SUPPORT", f"fold {fold} lacks training class support")
+        if len(set(target.loc[list(validation_refs)].tolist())) < 2:
+            raise ContractError(
+                "CLASSIFICATION_SPLIT_VALIDATION_CLASS_SUPPORT",
+                f"fold {fold} lacks validation support for both classes",
+            )
+        fitted, receipt = _production_fit_transform(
+            feature_frame,
+            training_refs,
+            steps=steps,
+            split_hash=split_hash,
+            weight_name=task.weights,
+            weights_by_ref=weight_by_ref,
+        )
+        receipt = {
+            **receipt,
+            "class_support": {
+                "class_labels": list(dict.fromkeys(str(label) for label in task.class_mapping.values())),
+                "training": _classification_class_support(target.loc[list(training_refs)].tolist(), task=task),
+                "validation": _classification_class_support(target.loc[list(validation_refs)].tolist(), task=task),
+            },
+        }
+        _validate_class_support_receipt(
+            receipt,
+            task=task,
+            target=target,
+            training_refs=training_refs,
+            validation_refs=validation_refs,
+            fold=fold,
+        )
+        train_features = fitted.transform(feature_frame.loc[list(training_refs)], row_refs=training_refs)
+        validation_features = fitted.transform(feature_frame.loc[list(validation_refs)], row_refs=validation_refs)
+        adapter = get_classification_adapter(model_id, seed=seed, parameters=dict(parameters))
+        if task.weights is not None and not adapter.supports_weight:
+            raise ContractError(
+                "CLASSIFICATION_WEIGHT_UNSUPPORTED",
+                f"model {model_id!r} does not consume declared weights",
+            )
+        train_weight = None if not weight_by_ref else [weight_by_ref[ref] for ref in training_refs]
+        adapter.fit(train_features, target.loc[list(training_refs)], sample_weight=train_weight)
+        probabilities = adapter.predict_proba(validation_features)
+        try:
+            positive_index = list(adapter._classes).index(positive)
+        except ValueError as exc:
+            raise ContractError("CLASSIFICATION_POSITIVE_CLASS_INVALID", "positive class is not in adapter class order") from exc
+        for ref, probability in zip(validation_refs, probabilities[:, positive_index], strict=True):
+            oof_by_ref[ref] = float(probability)
+        fold_receipts.append(
+            {
+                "fold": fold,
+                "training_row_refs": list(training_refs),
+                "validation_row_refs": list(validation_refs),
+                "receipt": receipt,
+            }
+        )
+    oof_refs = tuple(
+        item.row_ref
+        for item in manifest.assignments
+        if item.partition == "development" and item.cv_fold is not None
+    )
+    if set(oof_refs) != set(oof_by_ref):
+        raise ContractError("CLASSIFICATION_OOF_INCOMPLETE", "every development validation row needs one OOF probability")
+    oof_actual = [target.loc[ref] for ref in oof_refs]
+    oof_probabilities = [oof_by_ref[ref] for ref in oof_refs]
+    oof_weight = None if not weight_by_ref else [weight_by_ref[ref] for ref in oof_refs]
+    negative = next(value for value in set(oof_actual) if value != positive)
+    selection_threshold = _production_select_oof_threshold(
+        actual=oof_actual,
+        probabilities=oof_probabilities,
+        decision_policy=decision_policy,
+        positive_class=positive,
+        sample_weight=oof_weight,
+    )
+    oof_bundle = _production_oof_metric_bundle(
+        actual=oof_actual,
+        probabilities=oof_probabilities,
+        threshold_record=selection_threshold,
+        positive_class=positive,
+        negative_class=negative,
+        sample_weight=oof_weight,
+    )
+    return {
+        "sample_scope": "development_oof",
+        "evaluation_design": "cross_fitted_oof",
+        "split_hash": split_hash,
+        "oof_metrics": oof_bundle,
+        "fold_receipts": fold_receipts,
+        "oof_row_refs": list(oof_refs),
+    }
+
+
 def _run_production_classification_protocol(
     frame: pd.DataFrame,
     *,
@@ -933,6 +1086,7 @@ def _run_production_classification_protocol(
     preprocessing_steps: Sequence[ClassificationPreprocessingStepV1] | None = None,
     calibration_method: str = "platt",
     model_parameters: Mapping[str, Mapping[str, Any]] | None = None,
+    bounded_search: BoundedSearchV1 | None = None,
     holdout_seal_store: HoldoutSealStoreV1 | None = None,
     holdout_principal_ref: str | None = None,
     holdout_access_id: str | None = None,
@@ -1046,6 +1200,66 @@ def _run_production_classification_protocol(
     folds = tuple(sorted({item.cv_fold for item in manifest.assignments if item.partition == "development" and item.cv_fold is not None}))
     if not development_refs or not holdout_refs or not folds:
         raise ContractError("CLASSIFICATION_SPLIT_SUPPORT", "production split needs development rows, holdout rows and folds")
+    search_receipt: dict[str, Any] | None = None
+    effective_model_parameters = {
+        model_id: dict(parameters)
+        for model_id, parameters in (model_parameters or {}).items()
+    }
+    if bounded_search is not None:
+        if not isinstance(bounded_search, BoundedSearchV1):
+            raise ContractError("CLASSIFICATION_SEARCH_INVALID", "bounded_search must be BoundedSearchV1")
+        if tuple(bounded_search.candidates) != model_ids_tuple:
+            raise ContractError(
+                "CLASSIFICATION_SEARCH_MODEL_SET_MISMATCH",
+                "bounded search candidates must match the protocol model_ids in order",
+            )
+        search_receipt = run_bounded_search(
+            bounded_search,
+            evaluate_trial=lambda model_id, parameters, trial_seed: _production_oof_trial(
+                feature_frame,
+                target,
+                manifest,
+                task=task,
+                folds=folds,
+                model_id=model_id,
+                parameters=parameters,
+                seed=trial_seed,
+                steps=steps,
+                split_hash=split_hash,
+                weight_by_ref=weight_by_ref,
+                positive=positive,
+                decision_policy=decision_policy,
+            ),
+        )
+        if search_receipt.get("status") != "selected":
+            return {
+                "status": "blocked",
+                "blocked_reasons": [search_receipt.get("reason_code", "CLASSIFICATION_SEARCH_BLOCKED")],
+                "models": {},
+                "comparison": {
+                    "same_split": True,
+                    "split_hash": split_hash,
+                    "ranking": [],
+                    "selection_status": "bounded_search_blocked",
+                    "selection_metric": task.primary_metric,
+                    "selection_scope": "development_oof",
+                    "selected_model": None,
+                    "selection_scores": {},
+                },
+                "split": manifest.to_dict(),
+                "holdout": {
+                    "status": "sealed",
+                    "access_boundary": "sealed_until_authorized_release",
+                    "release_count": 0,
+                },
+                "baselines": [],
+                "controls": [],
+                "calibration": {"status": "unavailable", "reason_code": "CLASSIFICATION_SEARCH_BLOCKED"},
+                "decision_policy": decision_policy.to_dict(),
+                "search": search_receipt,
+            }
+        for model_id, parameters in search_receipt.get("best_parameters_by_model", {}).items():
+            effective_model_parameters[model_id] = dict(parameters)
     models: dict[str, Any] = {}
     selection_scores: dict[str, float] = {}
     candidate_adapters: dict[str, Any] = {}
@@ -1098,7 +1312,7 @@ def _run_production_classification_protocol(
             adapter = get_classification_adapter(
                 model_id,
                 seed=seed + position,
-                parameters=dict((model_parameters or {}).get(model_id, {})),
+                parameters=dict(effective_model_parameters.get(model_id, {})),
             )
             if task.weights is not None and not adapter.supports_weight:
                 raise ContractError(
@@ -1132,29 +1346,27 @@ def _run_production_classification_protocol(
         oof_actual = [target.loc[ref] for ref in oof_refs]
         oof_probabilities = [oof_by_ref[ref] for ref in oof_refs]
         oof_weight = None if weights is None else [weight_by_ref[ref] for ref in oof_refs]
-        selection_threshold = select_threshold_from_oof(
+        selection_threshold = _production_select_oof_threshold(
             actual=oof_actual,
             probabilities=oof_probabilities,
-            method=decision_policy.threshold_method,
-            scope="development_oof",
+            decision_policy=decision_policy,
             positive_class=positive,
             sample_weight=oof_weight,
-            minimum_precision=minimum_precision,
         )
+        selection_threshold = {
+            **selection_threshold,
+            "row_refs": list(oof_refs),
+            "input_scope": "development_oof",
+            "probability_scale": "raw_model_probability",
+        }
         if selection_threshold.get("status") != "frozen_development_choice":
             blocked_reasons.append(str(selection_threshold.get("reason_code", "CLASSIFICATION_THRESHOLD_UNAVAILABLE")))
-        selection_predictions = [positive if probability >= 0.5 else negative for probability in oof_probabilities]
-        oof_bundle = classification_metric_bundle(
+        oof_bundle = _production_oof_metric_bundle(
             actual=oof_actual,
             probabilities=oof_probabilities,
-            predictions=selection_predictions,
+            threshold_record=selection_threshold,
             positive_class=positive,
-            threshold=0.5,
-            sample_scope="development_oof",
-            evaluation_design="cross_fitted_oof",
-            numerical_method="same_library_regression",
-            inference_basis="descriptive",
-            validation_level="validated",
+            negative_class=negative,
             sample_weight=oof_weight,
         )
         try:
@@ -1193,7 +1405,7 @@ def _run_production_classification_protocol(
             actual=calibration_eval_actual,
             probabilities=calibration_eval_probabilities.tolist(),
             method=decision_policy.threshold_method,
-            scope="development_oof",
+            scope="development_calibration_eval",
             positive_class=positive,
             sample_weight=calibration_eval_weight,
             minimum_precision=minimum_precision,
@@ -1212,6 +1424,9 @@ def _run_production_classification_protocol(
                 blocked_reasons.append("CLASSIFICATION_THRESHOLD_POLICY_CONSTRAINT_UNSATISFIED")
         threshold["row_refs"] = list(calibration_eval_refs)
         threshold["input_scope"] = "development_calibration_eval"
+        threshold["probability_scale"] = (
+            "calibrated_probability" if calibration_method != "none" else "raw_model_probability"
+        )
         calibration = compute_calibration_bins(
             _production_binary_labels(calibration_eval_actual, positive=positive),
             calibration_eval_probabilities.tolist(),
@@ -1244,7 +1459,7 @@ def _run_production_classification_protocol(
         final_adapter = get_classification_adapter(
             model_id,
             seed=seed + position,
-            parameters=dict((model_parameters or {}).get(model_id, {})),
+            parameters=dict(effective_model_parameters.get(model_id, {})),
         )
         final_weight = None if weights is None else [weight_by_ref[ref] for ref in development_refs]
         final_adapter.fit(final_features, target.loc[list(development_refs)], sample_weight=final_weight)
@@ -1432,7 +1647,7 @@ def _run_production_classification_protocol(
     if any(control["status"] == "blocked" for control in controls):
         blocked_reasons.append("CLASSIFICATION_CONTROL_BLOCKED_FOR_STRUCTURE")
     unique_blocked_reasons = list(dict.fromkeys(blocked_reasons))
-    return {
+    result = {
         "status": "degraded" if unique_blocked_reasons else "validated",
         "blocked_reasons": unique_blocked_reasons,
         "models": models,
@@ -1466,6 +1681,9 @@ def _run_production_classification_protocol(
         "calibration": models[selected_model]["calibration"],
         "decision_policy": policy_payload,
     }
+    if search_receipt is not None:
+        result["search"] = search_receipt
+    return result
 
 
 def run_classification_protocol(
@@ -1491,6 +1709,7 @@ def run_classification_protocol(
     preprocessing_steps: Sequence[ClassificationPreprocessingStepV1] | None = None,
     calibration_method: str = "platt",
     model_parameters: Mapping[str, Mapping[str, Any]] | None = None,
+    bounded_search: BoundedSearchV1 | None = None,
     holdout_seal_store: HoldoutSealStoreV1 | None = None,
     holdout_principal_ref: str | None = None,
     holdout_access_id: str | None = None,
@@ -1516,10 +1735,13 @@ def run_classification_protocol(
             preprocessing_steps=preprocessing_steps,
             calibration_method=calibration_method,
             model_parameters=model_parameters,
+            bounded_search=bounded_search,
             holdout_seal_store=holdout_seal_store,
             holdout_principal_ref=holdout_principal_ref,
             holdout_access_id=holdout_access_id,
         )
+    if bounded_search is not None:
+        raise ContractError("CLASSIFICATION_SEARCH_TASK_REQUIRED", "bounded search requires the typed classification task protocol")
     if target is None or row_refs is None or not isinstance(frame, pd.DataFrame) or len(frame) != len(target) or len(frame) != len(row_refs):
         raise ContractError("CLASSIFICATION_PROTOCOL_INPUT_INVALID", "frame, target and row_refs must align")
     model_ids_tuple = tuple(model_ids)
@@ -1729,4 +1951,10 @@ def run_classification_protocol(
     }
 
 
-__all__ = ["BoundedSearchV1", "HoldoutSealGuardV1", "run_classification_protocol", "select_threshold_from_oof"]
+__all__ = [
+    "BoundedSearchV1",
+    "HoldoutSealGuardV1",
+    "run_bounded_search",
+    "run_classification_protocol",
+    "select_threshold_from_oof",
+]

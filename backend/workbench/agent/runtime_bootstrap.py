@@ -31,6 +31,7 @@ def compose_builtin_agent_notebook_runtime(
     data_project_root: Path | str | None = None,
     data_consumer_execution_port: Any | None = None,
     classification_execution_port: Any | None = None,
+    workflow_post_estimation_execution_port: Any | None = None,
     ttl_seconds: int = 900,
     clock: Callable[[], Any] | None = None,
 ) -> AgentNotebookRuntimeV1:
@@ -71,6 +72,7 @@ def compose_builtin_agent_notebook_runtime(
         provider_catalog,
         data_consumer_execution_port=data_consumer_execution_port,
         classification_execution_port=classification_execution_port,
+        workflow_post_estimation_execution_port=workflow_post_estimation_execution_port,
     )
     return compose_agent_notebook_runtime(
         provider_catalog=provider_catalog,

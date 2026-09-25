@@ -35,12 +35,7 @@ import { useWorkbenchOptional } from "../../workbench/WorkbenchStateProvider";
 import { useResolvedNodeOperationContext } from "../detail/NodeOperationContextProvider";
 import { useDraftActions } from "../drafts/DraftActionsContext";
 import { useProjectRootOptional } from "../../workbench/ProjectRootContext";
-import { useAgentNavigationOptional } from "../../workbench/agent/agentNavigation";
-import {
-  createAgentForkProposal,
-  getAgentGraphNavigation,
-} from "../../workbench/agent/agentApi";
-import type { AgentNavigationRef } from "../../workbench/agent/agentTypes";
+import { useAgentCutoverOptional } from "../../workbench/agent/AgentCutoverPanel";
 import "../tokens/lineage.css";
 
 export interface NodeActionMenuProps {
@@ -76,17 +71,12 @@ export function NodeActionMenu({
   const resolvedContext = useResolvedNodeOperationContext();
   const draftActions = useDraftActions();
   const contextProjectRoot = useProjectRootOptional();
-  const openAgentNavigation = useAgentNavigationOptional();
+  const agentCutover = useAgentCutoverOptional();
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<PopupCoords | null>(null);
   // Visible failure state for actions that settle after the menu closes
   // (e.g. fork draft hitting a 409 context_stale). Cleared on re-open.
   const [forkError, setForkError] = useState<string | null>(null);
-  const [agentForkBusy, setAgentForkBusy] = useState(false);
-  const [agentForkError, setAgentForkError] = useState<string | null>(null);
-  const [agentNavigationLinks, setAgentNavigationLinks] = useState<AgentNavigationRef[]>([]);
-  const [agentNavigationBusy, setAgentNavigationBusy] = useState(false);
-  const [agentNavigationError, setAgentNavigationError] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popupRef = useRef<HTMLDivElement | null>(null);
 
@@ -161,48 +151,6 @@ export function NodeActionMenu({
     contextProjectRoot ??
     new URLSearchParams(window.location.search).get("project_root") ??
     "";
-  const navigationRunId =
-    context?.operation_target.owner_run_id ?? model.runId;
-  const navigationNodeRef =
-    context?.operation_target.op_node_id ?? node.nodeKey;
-  const navigationForestNodeKey = context?.selection.forest_node_key ?? node.nodeKey;
-
-  useEffect(() => {
-    if (!open || !openAgentNavigation || !effectiveProjectRoot) return undefined;
-    let cancelled = false;
-    setAgentNavigationBusy(true);
-    setAgentNavigationError(null);
-    getAgentGraphNavigation(effectiveProjectRoot, {
-      runId: navigationRunId,
-      nodeRef: navigationNodeRef,
-      forestNodeKey: navigationForestNodeKey,
-    })
-      .then((result) => {
-        if (cancelled) return;
-        const links = result?.projection?.links;
-        setAgentNavigationLinks(Array.isArray(links) ? links : []);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setAgentNavigationLinks([]);
-        setAgentNavigationError(
-          error instanceof Error ? error.message : "Agent lineage unavailable",
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setAgentNavigationBusy(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    effectiveProjectRoot,
-    navigationForestNodeKey,
-    navigationNodeRef,
-    navigationRunId,
-    open,
-    openAgentNavigation,
-  ]);
   const canOpenDraft = Boolean(
     resolvedContext?.ok &&
       effectiveProjectRoot &&
@@ -231,31 +179,17 @@ export function NodeActionMenu({
     }
   }
 
-  const canForkAgent = Boolean(
-    openAgentNavigation &&
-      effectiveProjectRoot &&
-      resolvedContext?.ok &&
-      !agentForkBusy,
-  );
+  const rawAgentNodeRef = context?.operation_target.op_node_id ?? null;
+  const agentNodeRef = rawAgentNodeRef && /^[A-Za-z0-9_.:-]+$/.test(rawAgentNodeRef)
+    ? (rawAgentNodeRef.startsWith("node:") ? rawAgentNodeRef : `node:${rawAgentNodeRef}`)
+    : null;
 
-  async function onForkAgentHere() {
-    if (!canForkAgent || !resolvedContext?.ok || !openAgentNavigation) return;
-    const context = resolvedContext.context;
-    const activeHeadRunId = context.ownership.active_head_run_id ?? navigationRunId;
-    setAgentForkBusy(true);
-    setAgentForkError(null);
-    try {
-      const result = await createAgentForkProposal(effectiveProjectRoot, {
-        source_run_id: context.operation_target.owner_run_id,
-        source_node_ref: context.operation_target.op_node_id,
-        active_head_run_id: activeHeadRunId,
-      });
-      openAgentNavigation(result.navigation);
-    } catch (error) {
-      setAgentForkError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAgentForkBusy(false);
-    }
+  function onAnalyzeWithAgent() {
+    if (!agentCutover || !agentNodeRef || agentCutover.state.busyPhase !== null) return;
+    const staged = agentCutover.changeRequestText(
+      `Inspect ${agentNodeRef} from the selected Graph context. Verify available server evidence and propose a typed analysis plan. Do not execute until I confirm.`,
+    );
+    if (staged) wb?.dispatch.setBottomPanel("agent");
   }
 
   const closeAfter = (fn: () => void) => () => {
@@ -312,32 +246,18 @@ export function NodeActionMenu({
             testId="drawer-menu-item-choose-operation-owner"
           />
         )}
-        {openAgentNavigation && (
-          <>
-            <MenuItem
-              label={agentNavigationBusy ? "Loading Agent lineage…" : "Agent lineage"}
-              disabled={agentNavigationBusy ? "Loading Agent lineage" : agentNavigationError ?? undefined}
-              onClick={() => {}}
-              testId="drawer-menu-item-agent-lineage"
-            />
-            {agentNavigationLinks.map((link) => (
-              <MenuItem
-                key={`agent-navigation:${link.kind}:${link.id}`}
-                label={`Open ${link.label}`}
-                disabled={!link.available ? link.reason ?? "Unavailable" : undefined}
-                onClick={closeAfter(() => {
-                  if (link.available) openAgentNavigation(link);
-                })}
-                testId={`drawer-menu-item-agent-navigation-${link.kind}-${link.id}`}
-              />
-            ))}
-          </>
-        )}
-        {canForkAgent && (
+        {agentCutover && resolvedContext?.ok && (
           <MenuItem
-            label="Fork Agent context"
-            onClick={closeAfter(onForkAgentHere)}
-            testId="drawer-menu-item-fork-agent-context"
+            label="Analyze with Agent"
+            disabled={
+              !agentNodeRef
+                ? "The selected node does not expose a canonical target reference."
+                : agentCutover.state.busyPhase !== null
+                  ? "Finish the active Agent operation before staging another request."
+                  : undefined
+            }
+            onClick={closeAfter(onAnalyzeWithAgent)}
+            testId="drawer-menu-item-analyze-with-agent"
           />
         )}
         {canOpenDraft && !node.isDraft && (
@@ -378,7 +298,6 @@ export function NodeActionMenu({
         className="ln-btn-secondary node-action-menu__trigger"
         onClick={() => {
           setForkError(null);
-          setAgentForkError(null);
           setOpen((o) => !o);
         }}
         aria-haspopup="menu"
@@ -400,20 +319,6 @@ export function NodeActionMenu({
           }}
         >
           Fork draft failed: {forkError}
-        </div>
-      )}
-      {agentForkError !== null && (
-        <div
-          role="alert"
-          style={{
-            marginTop: 6,
-            maxWidth: 320,
-            fontSize: 12,
-            color: "var(--red)",
-            whiteSpace: "normal",
-          }}
-        >
-          Agent fork failed: {agentForkError}
         </div>
       )}
       {popup !== null && createPortal(popup, document.body)}

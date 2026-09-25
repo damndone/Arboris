@@ -16,7 +16,7 @@ from .context import ContextBuilder
 from .events import AgentEventStream
 from .model import ModelAdapter, ModelRequest
 from .session import JsonlSessionRepository
-from .tools import ToolResult, ToolRuntime
+from .tools import ToolError, ToolRegistry, ToolResult, ToolRuntime, bounded_tool_content
 
 
 class AgentCoreBusyError(RuntimeError):
@@ -246,6 +246,16 @@ class AgentCore:
                 "cannot continue when the last message is not user or tool result"
             )
 
+    def _tool_output_budget(self, tool_id: str) -> int | None:
+        if isinstance(self.tool_runtime, ToolRegistry):
+            return self.tool_runtime.output_budget(tool_id)
+        # Non-registry runtimes use the server-supplied tool declarations, never
+        # arguments or budget claims embedded in conversation history.
+        for definition in self.tools:
+            if definition.get("tool_id") == tool_id:
+                return definition.get("max_output_budget")
+        return None
+
     def _annotate_step_budget(self, payload: Any) -> Any:
         """Tell the agent how much budget is left once most of it is spent.
 
@@ -410,9 +420,20 @@ class AgentCore:
         ):
             return self._persist_terminal_error("max_steps_exceeded")
         self._steps_used += 1
+        messages = []
+        for message in context.messages:
+            if message.get("role") == "tool":
+                try:
+                    content = bounded_tool_content(
+                        message["content"], self._tool_output_budget(message.get("name", "")),
+                    )
+                except ToolError:
+                    return self._persist_terminal_error("tool_output_budget_cannot_fit_failure")
+                message = {**message, "content": content}
+            messages.append(message)
         request = ModelRequest(
             request_id=uuid4().hex,
-            messages=context.messages,
+            messages=messages,
             tools=self.tools,
             abort_event=self._new_abort_event(),
         )
@@ -556,6 +577,9 @@ class AgentCore:
                     finally:
                         if self._active_tool_task is tool_task:
                             self._active_tool_task = None
+                    terminal_tool_error = result.error if not result.ok and result.error in {
+                        "agent_aborted", "agent_timeout", "tool_runtime_error",
+                    } else None
                     # A turn that re-asks a question it already answered learns
                     # nothing and spends a provider step doing it. The guard above
                     # only catches *consecutive* repeats, so an agent alternating
@@ -588,6 +612,16 @@ class AgentCore:
                     elif result.ok:
                         self._answered_tool_calls[repeat_fingerprint] = result.tool_id
                     payload = self._annotate_step_budget(payload)
+                    tool_content = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                    try:
+                        bounded_content = bounded_tool_content(tool_content, self._tool_output_budget(tool_id))
+                    except ToolError:
+                        return self._persist_terminal_error("tool_output_budget_cannot_fit_failure")
+                    if bounded_content != tool_content:
+                        result = ToolResult(
+                            tool_call_id=result.tool_call_id, tool_id=result.tool_id,
+                            ok=False, error="tool_output_budget_exceeded",
+                        )
                     result_entry = self.repository.append(
                         self.session_id,
                         "message",
@@ -596,11 +630,7 @@ class AgentCore:
                             "tool_call_id": result.tool_call_id,
                             "name": result.tool_id,
                             "command_id": command_id,
-                            "content": json.dumps(
-                                payload,
-                                ensure_ascii=False,
-                                sort_keys=True,
-                            ),
+                            "content": bounded_content,
                         },
                     )
                     self.events.emit(
@@ -615,12 +645,8 @@ class AgentCore:
                         },
                         command_id=command_id,
                     )
-                    if not result.ok and result.error in {
-                        "agent_aborted",
-                        "agent_timeout",
-                        "tool_runtime_error",
-                    }:
-                        return self._persist_terminal_error(result.error)
+                    if terminal_tool_error is not None:
+                        return self._persist_terminal_error(terminal_tool_error)
                     if self._abort_requested:
                         return self._persist_terminal_error(
                             "agent_timeout" if self._timeout_requested else "agent_aborted"

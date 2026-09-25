@@ -4,8 +4,10 @@ import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 
+from fastapi import FastAPI
 import pytest
 
+from workbench.app import configure_notebook_cutover_identity_resolver
 from workbench.api_errors import WorkbenchAPIError
 from workbench.agent.orchestrator import ServerConfirmationReceiptV1
 from workbench.contracts.agent.planning import (
@@ -14,6 +16,7 @@ from workbench.contracts.agent.planning import (
 )
 from workbench.contracts.common.envelope import ContractError
 from workbench.http import agent_routes, notebook_routes
+from tests.v189_cutover_test_host import make_test_identity_resolver
 
 
 def _server_receipt(
@@ -41,6 +44,23 @@ def _server_receipt(
         project_ref=project_ref,
         _authority_token=object(),
     )
+
+
+def _server_owned_request(
+    *, actor_ref: str, session_ref: str, project_ref: str
+) -> SimpleNamespace:
+    host_app = FastAPI()
+    configure_notebook_cutover_identity_resolver(
+        make_test_identity_resolver(
+            lambda _request, _project_ref, _claimed_session_ref, _notebook_id: (
+                actor_ref,
+                session_ref,
+                project_ref,
+            )
+        ),
+        app_instance=host_app,
+    )
+    return SimpleNamespace(app=host_app)
 
 
 def test_historical_agent_confirm_requires_server_compilation_before_orchestrator(
@@ -101,7 +121,7 @@ def test_historical_agent_confirm_requires_server_compilation_before_orchestrato
             )
         )
 
-    assert error.value.code == "AGENT_LEGACY_CANONICAL_PROPOSAL_REQUIRED"
+    assert error.value.code == "AGENT_NOTEBOOK_IDENTITY_NOT_BOUND"
 
 
 def test_historical_notebook_confirm_paths_fail_closed_before_legacy_execution(
@@ -158,7 +178,7 @@ def test_historical_notebook_confirm_paths_fail_closed_before_legacy_execution(
     ):
         with pytest.raises(WorkbenchAPIError) as error:
             endpoint(object(), str(tmp_path), "notebook-1", "option-1", body)
-        assert error.value.code == "NOTEBOOK_LEGACY_COMPILATION_REQUIRED"
+        assert error.value.code == "UNSUPPORTED_VERSION"
 
 
 def test_historical_notebook_v10_confirm_paths_never_reach_service_execution(
@@ -218,7 +238,7 @@ def test_historical_notebook_v10_confirm_paths_never_reach_service_execution(
     ):
         with pytest.raises(WorkbenchAPIError) as error:
             endpoint(object(), str(tmp_path), "notebook-v10", "option-v10", body)
-        assert error.value.code == "NOTEBOOK_LEGACY_COMPILATION_REQUIRED"
+        assert error.value.code == "UNSUPPORTED_VERSION"
 
 
 @pytest.mark.parametrize(
@@ -342,6 +362,11 @@ def test_agent_legacy_binding_cannot_select_scope_or_mismatch_proposal(
             confirmations={(canonical_project, session_id, record_id): confirmation}
         ),
     )
+    request = _server_owned_request(
+        actor_ref=canonical_actor,
+        session_ref=session_id,
+        project_ref=canonical_project,
+    )
 
     with pytest.raises(WorkbenchAPIError) as error:
         asyncio.run(
@@ -354,6 +379,7 @@ def test_agent_legacy_binding_cannot_select_scope_or_mismatch_proposal(
                     fingerprint="proposal-fingerprint",
                     active_head_run_id="run-1",
                 ),
+                request=request,
             )
         )
 

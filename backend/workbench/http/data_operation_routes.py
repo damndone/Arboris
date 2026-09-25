@@ -1399,6 +1399,9 @@ def _bounded_data_profile_projection(value: Any) -> dict[str, Any]:
             name = variable.get("name")
             label = declared.get("variable_label", "unknown")
             measurement_level = declared.get("measurement_level", "unknown")
+            missing_policy = declared.get("missing_policy", "unknown")
+            role = declared.get("role", "unknown")
+            sensitivity = declared.get("sensitivity", "unknown")
             count = observed.get("missing_count")
             rate = observed.get("missing_rate")
             user_missing_values = declared.get("user_missing_values", [])
@@ -1411,6 +1414,9 @@ def _bounded_data_profile_projection(value: Any) -> dict[str, Any]:
                 "measurement_level",
                 variable.get("measure", variable.get("measurement")),
             )
+            missing_policy = variable.get("missing_policy")
+            role = variable.get("role")
+            sensitivity = variable.get("sensitivity")
             missingness = variable.get("missingness")
             if not isinstance(missingness, dict):
                 missingness = {
@@ -1427,6 +1433,9 @@ def _bounded_data_profile_projection(value: Any) -> dict[str, Any]:
             or not name
             or not isinstance(label, (str, type(None)))
             or not isinstance(measurement_level, (str, type(None)))
+            or not isinstance(missing_policy, (str, type(None)))
+            or not isinstance(role, (str, type(None)))
+            or not isinstance(sensitivity, (str, type(None)))
             or type(count) not in (int, float)
             or type(rate) not in (int, float)
             or not isinstance(user_missing_values, list)
@@ -1438,17 +1447,23 @@ def _bounded_data_profile_projection(value: Any) -> dict[str, Any]:
         user_missing_values = _scalar_list(user_missing_values, "user-missing")
         value_labels = _value_labels(value_labels)
         sample_values = _scalar_list(sample_values, "sample")
-        projected_variables.append(
-            {
-                "name": name,
-                "label": label,
-                "measurement_level": measurement_level,
-                "missingness": {"count": count, "rate": rate},
-                "user_missing_values": user_missing_values,
-                "value_labels": value_labels,
-                "sample_values": sample_values,
-            }
-        )
+        projected_variable = {
+            "name": name,
+            "label": label,
+            "measurement_level": measurement_level,
+            "missingness": {"count": count, "rate": rate},
+            "user_missing_values": user_missing_values,
+            "value_labels": value_labels,
+            "sample_values": sample_values,
+        }
+        for field_name, field_value in (
+            ("missing_policy", missing_policy),
+            ("role", role),
+            ("sensitivity", sensitivity),
+        ):
+            if field_value is not None:
+                projected_variable[field_name] = field_value
+        projected_variables.append(projected_variable)
     return {
         "schema_version": "data-profile.v1",
         "source": source_fields,

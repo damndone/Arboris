@@ -31,6 +31,7 @@ from ...registry import (
 
 
 MODEL_OPTIONS_VERSION = "v1.8.6"
+_MIN_PAIRED_BOOTSTRAP_REPETITIONS = 2
 
 
 def _options_contract(name: str) -> ModelOptionsContract:
@@ -163,6 +164,38 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, float) and not np.isfinite(value):
         return None
     return value
+
+
+def _paired_bootstrap_p_value(
+    differences: list[float], *, observed_difference: float
+) -> float | None:
+    """Return an approximate null-centered two-sided sign-tail probability.
+
+    The paired bootstrap distribution is centered at the observed difference
+    before its tails are compared with the observed difference.  This keeps
+    the field explicit about its approximate bootstrap contract instead of
+    treating an ordinary bootstrap sign count as calibrated inference.
+    """
+    try:
+        values = np.asarray(differences, dtype=float)
+        observed = float(observed_difference)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (
+        values.size < _MIN_PAIRED_BOOTSTRAP_REPETITIONS
+        or not np.isfinite(values).all()
+        or not np.isfinite(observed)
+    ):
+        return None
+    with np.errstate(over="ignore", invalid="ignore"):
+        null_centered = values - observed
+    if not np.isfinite(null_centered).all():
+        return None
+    repetitions = int(values.size)
+    observed_abs = abs(observed)
+    lower_tail = (int(np.count_nonzero(null_centered <= -observed_abs)) + 1) / (repetitions + 1)
+    upper_tail = (int(np.count_nonzero(null_centered >= observed_abs)) + 1) / (repetitions + 1)
+    return float(min(1.0, lower_tail + upper_tail))
 
 
 def _validation_metadata(model_type: str) -> dict[str, str]:
@@ -599,33 +632,222 @@ def fit_quantile(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         "successful_repetitions": {},
         "intervals": {},
     }
+    comparison_pairs = list(zip(quantiles, quantiles[1:]))
+    paired_differences: dict[tuple[float, float], dict[str, list[float]]] = {
+        (lower, upper): {name: [] for name in names}
+        for lower, upper in comparison_pairs
+    }
+    paired_successful_repetitions = 0
+    nonfinite_bootstrap_fit = False
+    nonfinite_paired_difference = False
+    nonfinite_bootstrap_interval = False
     if bootstrap_reps:
         rng = np.random.default_rng(int(options.get("random_state", 0)))
         estimates = {str(q): {name: [] for name in names} for q in quantiles}
         for _ in range(bootstrap_reps):
             indices = rng.integers(0, len(target), len(target))
+            replicate_params: dict[float, list[float]] = {}
             for quantile in quantiles:
                 try:
                     fitted = QuantReg(target.to_numpy(dtype=float)[indices], exog.iloc[indices]).fit(q=quantile)
-                    for index, name in enumerate(names):
-                        estimates[str(quantile)][name].append(float(fitted.params.iloc[index]))
+                    params = [float(fitted.params.iloc[index]) for index in range(len(names))]
                 except Exception:
                     continue
+                if len(params) != len(names) or not all(np.isfinite(value) for value in params):
+                    nonfinite_bootstrap_fit = True
+                    continue
+                replicate_params[quantile] = params
+            if len(replicate_params) != len(quantiles) or not all(
+                np.isfinite(value)
+                for params in replicate_params.values()
+                for value in params
+            ):
+                nonfinite_bootstrap_fit = True
+                continue
+            replicate_differences: dict[tuple[float, float], dict[str, float]] = {}
+            replicate_valid = True
+            for lower, upper in comparison_pairs:
+                replicate_differences[(lower, upper)] = {}
+                for index, name in enumerate(names):
+                    with np.errstate(over="ignore", invalid="ignore"):
+                        difference = float(
+                            replicate_params[upper][index] - replicate_params[lower][index]
+                        )
+                    if not np.isfinite(difference):
+                        replicate_valid = False
+                        break
+                    replicate_differences[(lower, upper)][name] = difference
+                if not replicate_valid:
+                    break
+            if not replicate_valid:
+                nonfinite_paired_difference = True
+                continue
+            paired_successful_repetitions += 1
+            for quantile, params in replicate_params.items():
+                for name, value in zip(names, params):
+                    estimates[str(quantile)][name].append(value)
+            for lower, upper in comparison_pairs:
+                for index, name in enumerate(names):
+                    paired_differences[(lower, upper)][name].append(
+                        replicate_differences[(lower, upper)][name]
+                    )
         for q_key, term_values in estimates.items():
             successful = min((len(values) for values in term_values.values()), default=0)
             bootstrap["successful_repetitions"][q_key] = successful
-            bootstrap["intervals"][q_key] = {name: ([float(np.percentile(values, 2.5)), float(np.percentile(values, 97.5))] if values else [None, None]) for name, values in term_values.items()}
+            bootstrap["intervals"][q_key] = {}
+            for name, values in term_values.items():
+                if not values:
+                    bootstrap["intervals"][q_key][name] = [None, None]
+                    continue
+                try:
+                    with np.errstate(over="ignore", invalid="ignore"):
+                        interval = [
+                            float(np.percentile(values, 2.5)),
+                            float(np.percentile(values, 97.5)),
+                        ]
+                except (TypeError, ValueError, OverflowError):
+                    interval = [None, None]
+                if not all(value is not None and np.isfinite(value) for value in interval):
+                    nonfinite_bootstrap_interval = True
+                    interval = [None, None]
+                bootstrap["intervals"][q_key][name] = interval
     else:
         bootstrap["successful_repetitions"] = {str(q): 0 for q in quantiles}
-    comparisons: list[dict[str, Any]] = []
-    for lower, upper in zip(quantiles, quantiles[1:]):
+    observed_differences: dict[tuple[float, float], dict[str, float | None]] = {}
+    nonfinite_observed_difference = False
+    for lower, upper in comparison_pairs:
+        observed_differences[(lower, upper)] = {}
         lower_result = fitted_by_q[lower]
         upper_result = fitted_by_q[upper]
         for index, name in enumerate(names):
-            difference = float(upper_result.params.iloc[index] - lower_result.params.iloc[index])
-            se = float(np.sqrt(upper_result.bse.iloc[index] ** 2 + lower_result.bse.iloc[index] ** 2))
-            z_value = difference / se if se > 0 else np.nan
-            comparisons.append({"term": name, "lower_quantile": lower, "upper_quantile": upper, "difference": _json_safe(difference), "std_error": _json_safe(se), "p_value": _json_safe(2 * stats.norm.sf(abs(z_value))) if np.isfinite(z_value) else None})
+            try:
+                with np.errstate(over="ignore", invalid="ignore"):
+                    difference = float(
+                        upper_result.params.iloc[index] - lower_result.params.iloc[index]
+                    )
+            except (TypeError, ValueError, OverflowError):
+                difference = None
+            observed_differences[(lower, upper)][name] = difference
+            if difference is None or not np.isfinite(difference):
+                nonfinite_observed_difference = True
+    if bootstrap_reps == 0:
+        comparison_uncertainty = {
+            "method": "unavailable",
+            "status": "unavailable",
+            "reason": "BOOTSTRAP_NOT_REQUESTED",
+            "paired_successful_repetitions": paired_successful_repetitions,
+            "minimum_successful_repetitions": _MIN_PAIRED_BOOTSTRAP_REPETITIONS,
+            "p_value_method": None,
+            "p_value_status": "unavailable",
+            "p_value_contract": "null_centered_bootstrap_sign_tail",
+        }
+    elif nonfinite_observed_difference:
+        comparison_uncertainty = {
+            "method": "paired_bootstrap",
+            "status": "degraded",
+            "reason": "NONFINITE_OBSERVED_CROSS_QUANTILE_DIFFERENCE",
+            "paired_successful_repetitions": paired_successful_repetitions,
+            "minimum_successful_repetitions": _MIN_PAIRED_BOOTSTRAP_REPETITIONS,
+            "p_value_method": None,
+            "p_value_status": "unavailable",
+            "p_value_contract": "null_centered_bootstrap_sign_tail",
+        }
+    elif nonfinite_paired_difference:
+        comparison_uncertainty = {
+            "method": "paired_bootstrap",
+            "status": "degraded",
+            "reason": "NONFINITE_PAIRED_BOOTSTRAP_DIFFERENCE",
+            "paired_successful_repetitions": paired_successful_repetitions,
+            "minimum_successful_repetitions": _MIN_PAIRED_BOOTSTRAP_REPETITIONS,
+            "p_value_method": None,
+            "p_value_status": "unavailable",
+            "p_value_contract": "null_centered_bootstrap_sign_tail",
+        }
+    elif nonfinite_bootstrap_fit:
+        comparison_uncertainty = {
+            "method": "paired_bootstrap",
+            "status": "degraded",
+            "reason": "NONFINITE_PAIRED_BOOTSTRAP_FIT",
+            "paired_successful_repetitions": paired_successful_repetitions,
+            "minimum_successful_repetitions": _MIN_PAIRED_BOOTSTRAP_REPETITIONS,
+            "p_value_method": None,
+            "p_value_status": "unavailable",
+            "p_value_contract": "null_centered_bootstrap_sign_tail",
+        }
+    elif nonfinite_bootstrap_interval:
+        comparison_uncertainty = {
+            "method": "paired_bootstrap",
+            "status": "degraded",
+            "reason": "NONFINITE_PAIRED_BOOTSTRAP_INTERVAL",
+            "paired_successful_repetitions": paired_successful_repetitions,
+            "minimum_successful_repetitions": _MIN_PAIRED_BOOTSTRAP_REPETITIONS,
+            "p_value_method": None,
+            "p_value_status": "unavailable",
+            "p_value_contract": "null_centered_bootstrap_sign_tail",
+        }
+    elif paired_successful_repetitions < _MIN_PAIRED_BOOTSTRAP_REPETITIONS:
+        comparison_uncertainty = {
+            "method": "paired_bootstrap",
+            "status": "degraded",
+            "reason": "INSUFFICIENT_PAIRED_BOOTSTRAP_FITS",
+            "paired_successful_repetitions": paired_successful_repetitions,
+            "minimum_successful_repetitions": _MIN_PAIRED_BOOTSTRAP_REPETITIONS,
+            "p_value_method": None,
+            "p_value_status": "unavailable",
+            "p_value_contract": "null_centered_bootstrap_sign_tail",
+        }
+    else:
+        comparison_uncertainty = {
+            "method": "paired_bootstrap",
+            "status": "available",
+            "reason": None,
+            "paired_successful_repetitions": paired_successful_repetitions,
+            "minimum_successful_repetitions": _MIN_PAIRED_BOOTSTRAP_REPETITIONS,
+            "p_value_method": "paired_bootstrap_null_centered_two_sided_sign_tail",
+            "p_value_status": "approximate",
+            "p_value_contract": "null_centered_bootstrap_sign_tail",
+        }
+    bootstrap["comparison_uncertainty"] = comparison_uncertainty
+    comparisons: list[dict[str, Any]] = []
+    final_uncertainty_nonfinite = False
+    for lower, upper in comparison_pairs:
+        for index, name in enumerate(names):
+            difference = observed_differences[(lower, upper)][name]
+            paired_values = paired_differences[(lower, upper)][name]
+            if comparison_uncertainty["status"] == "available":
+                with np.errstate(over="ignore", invalid="ignore"):
+                    se = float(np.std(np.asarray(paired_values, dtype=float), ddof=1))
+                p_value = _paired_bootstrap_p_value(
+                    paired_values,
+                    observed_difference=difference,
+                ) if difference is not None else None
+                if not np.isfinite(se) or p_value is None or not np.isfinite(p_value):
+                    final_uncertainty_nonfinite = True
+            else:
+                se = None
+                p_value = None
+            comparisons.append(
+                {
+                    "term": name,
+                    "lower_quantile": lower,
+                    "upper_quantile": upper,
+                    "difference": _json_safe(difference),
+                    "std_error": _json_safe(se),
+                    "p_value": _json_safe(p_value),
+                }
+            )
+    if comparison_uncertainty["status"] == "available" and final_uncertainty_nonfinite:
+        comparison_uncertainty.update(
+            {
+                "status": "degraded",
+                "reason": "NONFINITE_PAIRED_BOOTSTRAP_UNCERTAINTY",
+                "p_value_method": None,
+                "p_value_status": "unavailable",
+            }
+        )
+        for row in comparisons:
+            row["std_error"] = None
+            row["p_value"] = None
     reference_quantile = min(quantiles, key=lambda q: abs(q - 0.5))
     median = fitted_by_q[reference_quantile]
     primary = {

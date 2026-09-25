@@ -8,6 +8,8 @@ anything raised from here.
 from __future__ import annotations
 
 import json
+import hashlib
+import asyncio
 from collections.abc import AsyncIterator, Mapping
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -23,6 +25,24 @@ _client_factory: Callable[[LLMConfig], httpx.Client] = lambda config: httpx.Clie
 _async_client_factory: Callable[[LLMConfig], httpx.AsyncClient] = (
     lambda config: httpx.AsyncClient(timeout=config.timeout_s)
 )
+
+
+def provider_egress_ref(config: LLMConfig) -> str:
+    """Bind permission to the effective destination, model and account.
+
+    This is a private grant identity, not public benchmark metadata. A provider
+    label alone cannot preserve permission after an endpoint/key switch.
+    """
+    binding = {
+        "schema": "provider-egress-destination.v1",
+        "url": f"{config.base_url.rstrip('/')}/chat/completions",
+        "model": config.model,
+        "provider_id": config.provider_id,
+        "credential_digest": hashlib.sha256(config.api_key.encode("utf-8")).hexdigest(),
+    }
+    raw = json.dumps(binding, sort_keys=True, separators=(",", ":"),
+                     ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return "provider:" + hashlib.sha256(raw).hexdigest()
 
 
 class LLMNotConfiguredError(Exception):
@@ -194,6 +214,9 @@ async def async_stream_chat_completion(
     *,
     tools: list[dict[str, Any]] | None = None,
     model_config: Mapping[str, Any] | None = None,
+    provider_admission: object | None = None,
+    project_ref: str | None = None,
+    purpose_ref: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield normalized public Chat Completions SSE events.
 
@@ -212,11 +235,23 @@ async def async_stream_chat_completion(
         model_config=model_config,
         stream=True,
     )
+    from ..services.provider_egress import ProviderEgressError, provider_payload_bytes, require_provider_send
+    # Freeze the exact body that will be sent, not a JSON object that httpx
+    # can independently encode or an alias that can change across awaits.
+    body = provider_payload_bytes(request_payload)
+    destination = provider_egress_ref(config)
+    lease = require_provider_send(provider_admission, body=body, project_ref=project_ref,
+        provider_ref=destination, purpose_ref=purpose_ref)
     tool_fragments: dict[int, dict[str, Any]] = {}
     model = config.model
     finish_reason: str | None = None
+    provider_request_id: str | None = None
     try:
-        async with _async_client_factory(config) as client:
+        async with asyncio.timeout(min(lease, config.timeout_s)) as deadline, _async_client_factory(config) as client:
+            # Client acquisition may await. Recheck revocation/expiry at dispatch.
+            lease = require_provider_send(provider_admission, body=body, project_ref=project_ref,
+                provider_ref=provider_egress_ref(config), purpose_ref=purpose_ref)
+            deadline.reschedule(min(deadline.when(), asyncio.get_running_loop().time() + lease))
             async with client.stream(
                 "POST",
                 f"{config.base_url.rstrip('/')}/chat/completions",
@@ -224,7 +259,7 @@ async def async_stream_chat_completion(
                     "Authorization": f"Bearer {config.api_key}",
                     "Content-Type": "application/json",
                 },
-                json=request_payload,
+                content=body,
                 timeout=config.timeout_s,
             ) as response:
                 if response.status_code < 200 or response.status_code >= 300:
@@ -255,6 +290,13 @@ async def async_stream_chat_completion(
                         raise LLMUpstreamError(
                             "LLM provider returned an unexpected streaming response shape"
                         ) from exc
+                    candidate_id = payload.get("id")
+                    if candidate_id is not None:
+                        if not isinstance(candidate_id, str) or not candidate_id.strip():
+                            raise LLMUpstreamError("LLM provider returned an invalid response identity")
+                        if provider_request_id is not None and candidate_id != provider_request_id:
+                            raise LLMUpstreamError("LLM provider response identity changed within a stream")
+                        provider_request_id = candidate_id
                     candidate_model = payload.get("model")
                     if isinstance(candidate_model, str) and candidate_model:
                         model = candidate_model
@@ -297,9 +339,13 @@ async def async_stream_chat_completion(
                             "type": "done",
                             "finish_reason": finish_reason,
                             "model": model,
+                            **({"provider_request_id": provider_request_id}
+                               if provider_request_id is not None else {}),
                         }
                         return
-    except LLMUpstreamError:
+    except TimeoutError as exc:
+        raise ProviderEgressError("EGRESS_TIME_BUDGET_EXCEEDED") from exc
+    except (LLMUpstreamError, ProviderEgressError):
         raise
     except (httpx.HTTPError, ValueError) as exc:
         raise LLMUpstreamError(

@@ -38,10 +38,18 @@ from .predictive_research.contracts import (
 )
 from .predictive_research.classification_adapters import (
     dispatch_classification_runtime_binding,
+    get_classification_adapter,
 )
 from .predictive_research.classification_contracts import ClassificationTaskSpecV1, DecisionPolicyV1
+from .predictive_research.classification_explanations import (
+    compute_cross_fitted_permutation_explanations,
+    summarize_shift,
+)
 from .predictive_research.classification_protocol import run_classification_protocol
-from .predictive_research.preprocessing import ClassificationPreprocessingStepV1
+from .predictive_research.preprocessing import (
+    ClassificationFoldPreprocessingV1,
+    ClassificationPreprocessingStepV1,
+)
 from .predictive_research.persistence import (
     PredictionPersistenceAdmission,
     classification_artifact_id,
@@ -321,6 +329,184 @@ def run_classification_model_v189_test_seam(
     )
 
 
+def _classification_unavailable_diagnostic(reason_code: str) -> dict[str, Any]:
+    return {
+        "status": "unavailable",
+        "reason_code": reason_code,
+        "interpretation": "descriptive_not_deployment_safety",
+    }
+
+
+def _build_classification_diagnostics(
+    frame: pd.DataFrame,
+    *,
+    row_refs: Sequence[str],
+    task: ClassificationTaskSpecV1,
+    protocol: Mapping[str, Any],
+    selected_model: str,
+    model_ids: Sequence[str],
+    seed: int,
+    preprocessing_steps: Sequence[ClassificationPreprocessingStepV1] | None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str]]:
+    """Build safe diagnostics from development folds and holdout features only."""
+
+    model_hash = str(protocol["holdout"]["release_plan"]["model_hash"])
+    split_hash = str(protocol["comparison"]["split_hash"])
+    identity = {
+        "task_hash": task.content_hash,
+        "split_hash": split_hash,
+        "model_id": selected_model,
+        "model_hash": model_hash,
+        "feature_columns": list(task.feature_columns),
+        "feature_columns_hash": f"sha256:{sha256_canonical(list(task.feature_columns))}",
+    }
+
+    def unavailable(reason_code: str) -> dict[str, Any]:
+        payload = _classification_unavailable_diagnostic(reason_code)
+        payload.update(identity)
+        return payload
+
+    shap_unavailable = "CLASSIFICATION_EXPLANATION_PROVIDER_UNAVAILABLE"
+    blocked_reasons = [shap_unavailable]
+    selected = protocol["models"].get(selected_model)
+    if not isinstance(selected, Mapping):
+        diagnostic = unavailable("CLASSIFICATION_EXPLANATION_VALIDATION_DATA_UNAVAILABLE")
+        return diagnostic, diagnostic.copy(), diagnostic.copy(), blocked_reasons + [diagnostic["reason_code"]]
+
+    feature_frame = frame.loc[:, list(task.feature_columns)].copy()
+    feature_frame.index = tuple(row_refs)
+    target = frame.loc[:, task.target_column].copy()
+    target.index = tuple(row_refs)
+    weights_by_ref: dict[str, float] = {}
+    if task.weights is not None:
+        weights_by_ref = {
+            ref: float(value)
+            for ref, value in zip(row_refs, frame.loc[:, task.weights].tolist(), strict=True)
+        }
+    positive_raw = next(raw for raw, label in task.class_mapping.items() if label == task.positive_class)
+    budget_seconds = task.resource_budget.get("max_seconds")
+    if (
+        not isinstance(budget_seconds, (int, float))
+        or isinstance(budget_seconds, bool)
+        or budget_seconds <= 0
+    ):
+        diagnostic = unavailable("CLASSIFICATION_EXPLANATION_BUDGET_UNAVAILABLE")
+        return diagnostic, diagnostic.copy(), diagnostic.copy(), blocked_reasons + [diagnostic["reason_code"]]
+    repeats = min(5, max(1, int(budget_seconds)))
+    fold_inputs: list[dict[str, Any]] = []
+    try:
+        selected_position = tuple(model_ids).index(selected_model)
+        actual_parameters = selected.get("metadata", {}).get("actual_parameters", {})
+        if not isinstance(actual_parameters, Mapping):
+            actual_parameters = {}
+        steps = tuple(preprocessing_steps or ())
+        for fold_number, fold in enumerate(selected.get("preprocessing", {}).get("folds", ())):
+            training_refs = tuple(str(ref) for ref in fold["training_row_refs"])
+            validation_refs = tuple(str(ref) for ref in fold["validation_row_refs"])
+            if not training_refs or not validation_refs or set(training_refs) & set(validation_refs):
+                raise ContractError(
+                    "CLASSIFICATION_EXPLANATION_VALIDATION_DATA_UNAVAILABLE",
+                    "fold training and validation identities are unavailable",
+                )
+            train_frame = feature_frame.loc[list(training_refs)]
+            validation_frame = feature_frame.loc[list(validation_refs)]
+            train_weight = None if task.weights is None else [weights_by_ref[ref] for ref in training_refs]
+            if steps:
+                fitted = ClassificationFoldPreprocessingV1(steps=steps).fit(
+                    train_frame,
+                    fit_row_refs=training_refs,
+                    fit_rows=train_frame.to_dict(orient="index"),
+                    weight_name=task.weights,
+                    sample_weight=train_weight,
+                )
+                train_features = fitted.transform(train_frame, row_refs=training_refs)
+
+                def transform(values: pd.DataFrame, *, fitted=fitted) -> pd.DataFrame:
+                    return fitted.transform(values, row_refs=tuple(str(ref) for ref in values.index))
+            else:
+                train_features = train_frame
+
+                def transform(values: pd.DataFrame) -> pd.DataFrame:
+                    return values
+
+            adapter = get_classification_adapter(
+                selected_model,
+                seed=seed + selected_position,
+                parameters=dict(actual_parameters),
+            )
+            adapter.fit(train_features, target.loc[list(training_refs)], sample_weight=train_weight)
+
+            def predict_proba(values: pd.DataFrame, *, adapter=adapter, transform=transform) -> Sequence[float]:
+                probabilities = adapter.predict_proba(transform(values))
+                positive_index = list(adapter._classes).index(positive_raw)
+                return probabilities[:, positive_index]
+
+            fold_inputs.append(
+                {
+                    "fold": fold.get("fold", fold_number),
+                    "frame": validation_frame,
+                    "target": target.loc[list(validation_refs)],
+                    "validation_row_refs": validation_refs,
+                    "predict_proba": predict_proba,
+                }
+            )
+        if not fold_inputs:
+            raise ContractError(
+                "CLASSIFICATION_EXPLANATION_VALIDATION_DATA_UNAVAILABLE",
+                "development validation folds are unavailable",
+            )
+        explanations = compute_cross_fitted_permutation_explanations(
+            fold_inputs,
+            model_id=selected_model,
+            feature_mapping={column: column for column in task.feature_columns},
+            seed=seed,
+            repeats=repeats,
+            positive_label=positive_raw,
+        )
+        explanations["shap"] = {
+            "status": "unavailable",
+            "reason_code": shap_unavailable,
+            "interpretation": "not_claimed",
+        }
+        explanations.update(identity)
+        stability = dict(explanations["stability"])
+        stability.update(identity)
+    except (ContractError, KeyError, TypeError, ValueError) as exc:
+        reason_code = exc.code if isinstance(exc, ContractError) else "CLASSIFICATION_EXPLANATION_VALIDATION_DATA_UNAVAILABLE"
+        explanations = unavailable(reason_code)
+        stability = unavailable(reason_code)
+        blocked_reasons.append(reason_code)
+
+    assignments = protocol.get("split", {}).get("assignments", [])
+    development_refs = tuple(
+        item["row_ref"] for item in assignments if item.get("partition") == "development"
+    )
+    holdout_refs = tuple(
+        item["row_ref"] for item in assignments if item.get("partition") == "final_holdout"
+    )
+    if not development_refs or not holdout_refs:
+        shift = unavailable("CLASSIFICATION_SHIFT_DATA_UNAVAILABLE")
+        blocked_reasons.append(shift["reason_code"])
+    else:
+        shift = summarize_shift(
+            development=feature_frame.loc[list(development_refs)],
+            validation=feature_frame.loc[list(holdout_refs)],
+        )
+        shift.update(
+            {
+                **identity,
+                "sample_scope": "development_vs_final_holdout_features",
+                "development_row_refs": list(development_refs),
+                "validation_row_refs": list(holdout_refs),
+                "development_row_refs_hash": f"sha256:{sha256_canonical(list(development_refs))}",
+                "validation_row_refs_hash": f"sha256:{sha256_canonical(list(holdout_refs))}",
+            }
+        )
+        if shift.get("status") == "unavailable":
+            blocked_reasons.append(str(shift["reason_code"]))
+    return explanations, stability, shift, list(dict.fromkeys(blocked_reasons))
+
+
 def _run_classification_model_v189(
     frame: pd.DataFrame,
     run_root: Path,
@@ -429,28 +615,17 @@ def _run_classification_model_v189(
     }
     policy_payload = protocol["decision_policy"]
     blocked_reasons = list(protocol.get("blocked_reasons", []))
-    unavailable_evidence = {
-        "explanations": {
-            "status": "unavailable",
-            "reason_code": "CLASSIFICATION_EXPLANATION_PROVIDER_UNAVAILABLE",
-            "shap": {"status": "unavailable", "reason_code": "CLASSIFICATION_EXPLANATION_PROVIDER_UNAVAILABLE"},
-        },
-        "stability": {
-            "status": "unavailable",
-            "reason_code": "CLASSIFICATION_STABILITY_UNAVAILABLE",
-        },
-        "shift": {
-            "status": "unavailable",
-            "reason_code": "CLASSIFICATION_SHIFT_UNAVAILABLE",
-        },
-    }
-    blocked_reasons.extend(
-        [
-            unavailable_evidence["explanations"]["reason_code"],
-            unavailable_evidence["stability"]["reason_code"],
-            unavailable_evidence["shift"]["reason_code"],
-        ]
+    explanations, stability, shift, diagnostic_blocked_reasons = _build_classification_diagnostics(
+        frame,
+        row_refs=refs,
+        task=task,
+        protocol=protocol,
+        selected_model=selected_model,
+        model_ids=model_ids,
+        seed=seed,
+        preprocessing_steps=preprocessing_steps,
     )
+    blocked_reasons.extend(diagnostic_blocked_reasons)
     blocked_reasons = list(dict.fromkeys(blocked_reasons))
     result_status = "degraded" if blocked_reasons else protocol["status"]
     evidence = {
@@ -475,7 +650,9 @@ def _run_classification_model_v189(
         "baselines": protocol["baselines"],
         "controls": protocol["controls"],
         "comparison": protocol["comparison"],
-        **unavailable_evidence,
+        "explanations": explanations,
+        "stability": stability,
+        "shift": shift,
         "decision_policy": policy_payload,
         "blocked_reasons": blocked_reasons,
         "evidence_refs": {

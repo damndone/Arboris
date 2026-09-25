@@ -43,8 +43,8 @@ Create a new candidate from the exact C3 baseline `05362b5697e10eb25fd219da00364
 - Do not add a second Agent/Notebook semantic engine or a fixed operation-specific dispatcher.
 
 ## Boundary
-- Affected paths: `docs/superpowers/objectives/2026-08-19-v1.8.9-hardening-integration-objective.md`, `docs/superpowers/release-trains/v1.8.9/work-orders/wo-hardening-integration.md`, `docs/superpowers/release-trains/v1.8.9/locks/c4-hardening.yaml`, `docs/superpowers/release-trains/v1.8.9/evidence/c4-hardening-gate.md`, `docs/superpowers/handoff/2026-08-19-v1.8.9-hardening-integration-handoff.md`, `tests/test_v189_hardening_integration.py`
-- Allowed paths: `docs/superpowers/objectives/2026-08-19-v1.8.9-hardening-integration-objective.md`, `docs/superpowers/release-trains/v1.8.9/work-orders/wo-hardening-integration.md`, `docs/superpowers/release-trains/v1.8.9/locks/c4-hardening.yaml`, `docs/superpowers/release-trains/v1.8.9/evidence/c4-hardening-gate.md`, `docs/superpowers/handoff/2026-08-19-v1.8.9-hardening-integration-handoff.md`, `tests/test_v189_hardening_integration.py`
+- Affected paths: `backend/workbench/agent/planner_benchmark_contracts.py`, `scripts/planner_benchmark.py`, `tests/evaluation/planner/test_deterministic_contracts.py`, `tests/evaluation/planner/test_benchmark.py`
+- Allowed paths: `backend/workbench/agent/planner_benchmark_contracts.py`, `scripts/planner_benchmark.py`, `tests/evaluation/planner/test_deterministic_contracts.py`, `tests/evaluation/planner/test_benchmark.py`
 - Protected paths: `backend/workbench`, `frontend/src`
 - Dependencies: none
 - Tests: `candidate_bound_acceptance`, `focused_regressions`, `frontend_typecheck`, `formal_verify`

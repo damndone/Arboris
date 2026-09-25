@@ -7,6 +7,7 @@ from workbench.agent.cutover_runtime import EvidenceCommitReceiptV1
 from workbench.agent.planning_contracts import DeploymentIdentityResolverV1
 from workbench.app import (
     bootstrap_builtin_agent_notebook_host,
+    configure_notebook_cutover_identity_resolver,
 )
 from workbench.canonical import sha256_canonical
 from workbench.providers.catalog import load_builtin_catalog
@@ -74,6 +75,18 @@ def test_host_bootstrap_rejects_missing_authority_before_mutating_app_state() ->
 
     assert not hasattr(host_app.state, "agent_notebook_cutover_store")
     assert not hasattr(host_app.state, "report_evidence_persistence")
+
+
+def test_legacy_identity_setter_rejects_untyped_callback() -> None:
+    host_app = FastAPI()
+
+    with pytest.raises(TypeError, match="DeploymentIdentityResolverV1"):
+        configure_notebook_cutover_identity_resolver(
+            lambda *_args: ("principal:caller", "session:caller", "project:caller"),
+            app_instance=host_app,
+        )
+
+    assert not hasattr(host_app.state, "notebook_cutover_identity_resolver")
 
 
 def test_host_bootstrap_installs_one_atomic_server_owned_bundle() -> None:

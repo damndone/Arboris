@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from .artifacts import read_json
-from .canonical import sha256_canonical
+from .canonical import CanonicalJSONError, sha256_canonical
 from .evidence.consumer_adapters import EvidenceProjectionError
-# Kept as a module attribute for legacy test/import compatibility.  The typed
-# report consumer below never invokes narrative rendering.
+# Text templates format only admitted section values in the typed consumer.
 from .narrative.render import render_template
 from .services.results_service import ReportEvidenceRequestIdentityV1
 from .survey.projection import (
@@ -24,6 +24,126 @@ _DEFAULT_SIGNIFICANCE_LEVELS: dict[str, float] = {
     "**": 0.05,
     "*": 0.1,
 }
+
+
+_VALIDATION_RECEIPT_ISSUER = object()
+
+
+@dataclass(frozen=True)
+class ServerOwnedValidationReceiptV1:
+    """An in-process receipt emitted by the actual statsmodels producer.
+
+    The receipt is deliberately not a JSON-shaped claim.  The owner factory
+    accepts it only while the server-owned object is still present, and binds
+    it to the run, input digest, and normalized result digest before emitting
+    C0 oracle checks.
+    """
+
+    run_id: str
+    model_id: str
+    input_digest: str
+    result_digest: str
+    checks: tuple[dict[str, Any], ...]
+    _issuer: object = field(repr=False, compare=False)
+
+    def is_server_owned(self) -> bool:
+        return self._issuer is _VALIDATION_RECEIPT_ISSUER
+
+    def check_for_term(self, term: str) -> dict[str, Any] | None:
+        for check in self.checks:
+            if check.get("term") == term:
+                return dict(check)
+        return None
+
+
+def build_server_owned_ols_validation_receipt(
+    *,
+    run_id: str,
+    model_id: str,
+    model_result: Mapping[str, Any],
+    fitted: Any,
+    input_digest: Any,
+) -> ServerOwnedValidationReceiptV1 | None:
+    """Replay an actual statsmodels OLS fit and return a bound receipt.
+
+    This is intentionally conservative: a persisted result that merely says
+    ``engine=statsmodels`` is insufficient.  The live fitted model must be
+    available, its OLS contract must be present, and every reported coefficient
+    must match a fresh same-library regression over the producer's immutable
+    model matrix.  Any ambiguity returns ``None`` so the caller remains
+    NOT_APPLICABLE rather than upgrading a claim.
+    """
+
+    if (
+        type(run_id) is not str
+        or not run_id
+        or type(model_id) is not str
+        or not model_id
+        or type(input_digest) is not str
+        or len(input_digest) != 64
+        or any(character not in "0123456789abcdef" for character in input_digest)
+        or not isinstance(model_result, Mapping)
+        or model_result.get("engine") != "statsmodels"
+        or model_result.get("model") != "ols"
+        or model_result.get("contract_version") != "ols_result_contract_v1"
+        or model_result.get("model_id") != model_id
+    ):
+        return None
+    try:
+        import numpy as np
+        import statsmodels.api as sm
+        from .econometrics.normalize import _public_term
+
+        fitted_model = getattr(fitted, "model")
+        endog = np.asarray(getattr(fitted_model, "endog"), dtype=float)
+        exog = np.asarray(getattr(fitted_model, "exog"), dtype=float)
+        if endog.ndim != 1 or exog.ndim != 2 or len(endog) != len(exog):
+            return None
+        oracle = sm.OLS(endog, exog).fit()
+        names = list(getattr(fitted_model, "exog_names"))
+        coefficients = model_result.get("coefficients")
+        if not isinstance(coefficients, Mapping) or len(names) != len(oracle.params):
+            return None
+        by_term = {
+            _public_term(name): index for index, name in enumerate(names)
+        }
+        result_digest = sha256_canonical(dict(model_result))
+        checks: list[dict[str, Any]] = []
+        import statsmodels
+
+        for term, value in coefficients.items():
+            if not isinstance(value, Mapping) or term not in by_term:
+                return None
+            estimate = value.get("estimate")
+            reference_value = float(oracle.params[by_term[term]])
+            if isinstance(estimate, bool) or not isinstance(estimate, (int, float)):
+                return None
+            observed_difference = abs(float(estimate) - reference_value)
+            checks.append(
+                {
+                    "term": str(term),
+                    "check_id": f"{run_id}:{model_id}:{term}:same-library-regression",
+                    "status": (
+                        "pass" if math.isfinite(observed_difference) and observed_difference <= 1e-10 else "fail"
+                    ),
+                    "basis": "same_library_regression",
+                    "reference": f"statsmodels-{statsmodels.__version__.replace('.', '-')}-OLS",
+                    "tolerance": "absolute<=1e-10",
+                    "observed_difference": observed_difference,
+                }
+            )
+        if not checks:
+            return None
+    except (AttributeError, ImportError, TypeError, ValueError, IndexError, OverflowError):
+        return None
+    return ServerOwnedValidationReceiptV1(
+        run_id=run_id,
+        model_id=model_id,
+        input_digest=input_digest,
+        result_digest=result_digest,
+        checks=tuple(checks),
+        _issuer=_VALIDATION_RECEIPT_ISSUER,
+    )
 
 
 def _projection_identity_fields(projection: Mapping[str, Any]) -> dict[str, str]:
@@ -46,6 +166,7 @@ def build_regression_table(
     *,
     variable_labels: Mapping[str, Any] | None = None,
     significance_levels: Mapping[str, float] | None = None,
+    validation_receipts: Mapping[str, ServerOwnedValidationReceiptV1] | None = None,
 ) -> dict[str, Any]:
     """Project multiple model packets into a side-by-side report table.
 
@@ -70,6 +191,12 @@ def build_regression_table(
         bounded_nobs, invalid_nobs = project_survey_model_count(
             raw_nobs, unavailable_reason="REPORT_MODEL_METADATA_INVALID"
         )
+        try:
+            result_digest: object = sha256_canonical(dict(model_result))
+        except CanonicalJSONError:
+            # A malformed source may still be displayed as explicitly missing,
+            # but cannot acquire a valid producer/receipt digest.
+            result_digest = {"status": "unavailable", "reason": "MODEL_RESULT_NOT_CANONICAL"}
         model_view = {
             "id": model_key,
             "label": (
@@ -81,6 +208,7 @@ def build_regression_table(
             "nobs": bounded_nobs,
             "r_squared": model_result.get("r_squared"),
             "adjusted_r_squared": model_result.get("adjusted_r_squared"),
+            "result_digest": result_digest,
         }
         # The terms every standard error in this column is conditional on are
         # optional persisted evidence; absent design metadata stays absent.
@@ -124,7 +252,7 @@ def build_regression_table(
             )
             row["models"][model_key] = cell
 
-    return {
+    table = {
         "payload_schema": "workbench.regression-table",
         "schema_version": 1,
         "models": model_views,
@@ -145,6 +273,9 @@ def build_regression_table(
             ),
         },
     }
+    if validation_receipts:
+        table["_server_owned_validation_receipts"] = dict(validation_receipts)
+    return table
 
 
 def _regression_significance_marker(
@@ -582,9 +713,12 @@ def _survey_design_facts(regression_table: Mapping[str, Any] | None) -> list[str
         bounded = _bounded_survey_design(model.get("survey_provenance"))
         if bounded is None or bounded.get("projection_status") == "unavailable":
             continue
+        variance_method = bounded.get("variance_method")
+        if not isinstance(variance_method, str):
+            continue
         facts = [
             "Standard errors are design-based, not the usual independent-sample "
-            f"kind: {bounded.get('variance_method', 'linearization')} over "
+            f"kind: {variance_method} over "
             f"{bounded.get('n_strata', 0)} strata and {bounded.get('n_psu', 0)} PSUs "
             f"(strata = {bounded.get('strata_column')}, PSU = {bounded.get('psu_column')})",
             f"Design degrees of freedom: {bounded.get('degf')} "
@@ -689,10 +823,11 @@ def build_report_view_model(
         from .evidence.consumer_adapters import default_projection_registry
         from .report_export import (
             EvidenceProjectionV1 as ReportEvidenceProjectionV1,
+            LocalReportCollectionV1,
             _validate_owner_bound_projection,
         )
 
-        if type(evidence_projection) is not ReportEvidenceProjectionV1:
+        if type(evidence_projection) not in (ReportEvidenceProjectionV1, LocalReportCollectionV1):
             return _unavailable_report_evidence(
                 artifact_id="unknown-artifact",
                 artifact_type="unknown",
@@ -701,11 +836,14 @@ def build_report_view_model(
         try:
             _validate_owner_bound_projection(evidence_projection, owner)
             canonical_source, _canonical_artifact = owner._canonical_report_source_and_artifact()  # type: ignore[attr-defined]
-            canonical_projection = default_projection_registry().project(
-                canonical_source,
-                consumer_id="report",
-                destination="local",
-            )
+            if type(evidence_projection) is LocalReportCollectionV1:
+                canonical_projection = evidence_projection._collection
+            else:
+                canonical_projection = default_projection_registry().project(
+                    canonical_source,
+                    consumer_id="report",
+                    destination="local",
+                )
             canonical_view = build_persisted_evidence_report_view(
                 canonical_projection,
                 owner=owner,
@@ -722,24 +860,18 @@ def build_report_view_model(
         if canonical_view.get("status") != "available":
             return canonical_view
 
-        # Preserve report presentation semantics only after typed evidence has
-        # been admitted. Presentation is never an authority source for facts.
-        presentation = _build_legacy_presentation(
-            summary,
-            run_root,
-            descriptive_stats=descriptive_stats,
-            statistical_tests=statistical_tests,
-            statistical_evidence=statistical_evidence,
-            regression_table=regression_table,
-            exploration=exploration,
-        )
+        # The owner-bound consumer path must not scan diagnostic_summary,
+        # model_results, staged statistical packets, or any other legacy
+        # presentation input.  Those artifacts are producer inputs only;
+        # the typed projection above is the sole Report fact source.
+        presentation = _empty_legacy_presentation()
         facts = list(canonical_view.get("facts", []))
         return {
             **presentation,
             **canonical_view,
             "facts": facts,
             "typedFacts": [dict(fact) for fact in facts],
-            "critical_errors": list(presentation["critical_errors"]),
+            "critical_errors": list(canonical_view.get("critical_errors", presentation["critical_errors"])),
             "typed_critical_errors": [],
         }
 
@@ -791,8 +923,11 @@ def _design_summary(design: Any) -> str | dict[str, Any]:
         return ""
     if bounded.get("projection_status") == "unavailable":
         return bounded
+    variance_method = bounded.get("variance_method")
+    if not isinstance(variance_method, str):
+        return ""
     parts = [
-        f"{bounded.get('variance_method', 'linearization')} design-based SE",
+        f"{variance_method} design-based SE",
         f"strata={bounded.get('strata_column')}",
         f"PSU={bounded.get('psu_column')}",
         f"degf={bounded.get('degf')}",
@@ -817,6 +952,250 @@ def _design_summary(design: Any) -> str | dict[str, Any]:
     return "; ".join(parts)
 
 
+def _render_admitted_issue(issue: object) -> object:
+    """Format admitted diagnostic metadata without loading any artifact."""
+    if not isinstance(issue, dict):
+        return issue
+    rendered = dict(issue)
+    message = issue.get("message", "")
+    text = message if isinstance(message, str) else ""
+    key, params = issue.get("template_key"), issue.get("template_params", {})
+    if isinstance(key, str) and key and isinstance(params, dict):
+        try:
+            text = render_template(key, params)
+        except (KeyError, TypeError, ValueError):
+            pass  # A missing text template never changes the admitted facts.
+    rendered["text"] = text
+    return rendered
+
+
+def _admitted_arma_presentation(family: object) -> dict[str, Any]:
+    """Pure presentation of dereferenced typed fields, never a source reader."""
+    if not isinstance(family, dict) or family.get("model_family") != "time_series.arma_garch":
+        return {}
+    results = family.get("results")
+    if not isinstance(results, dict) or len(results) != 1:
+        return {}
+    model = next(iter(results.values()))
+    report = model.get("report") if isinstance(model, dict) else None
+    if not isinstance(report, dict) or "status" in report:
+        return {}
+    charts = report.get("chart_artifacts")
+    if not isinstance(charts, list):
+        return {}  # Do not render an unavailable chart inventory as zero charts.
+
+    def record(value):
+        return value if isinstance(value, dict) and "reason" not in value else {}
+
+    def display(value):
+        if value is None or isinstance(value, (dict, list)):
+            return "unavailable"
+        return value
+
+    def rows(value):
+        return [{"field": key, "value": display(item)} for key, item in record(value).items()]
+
+    spec = record(model.get("selected_specification"))
+    def order_label(order):
+        if not isinstance(order, list) or not order or any(type(n) not in (int, float) for n in order):
+            return "unavailable"
+        return ",".join(str(n) for n in order)
+    label = f"ARMA({order_label(spec.get('mean_order'))})"
+    variance = spec.get("variance_model")
+    label += f"–{variance.upper() if isinstance(variance, str) else 'unavailable'}({order_label(spec.get('variance_order'))})"
+    contract, sample = record(report.get("contract")), record(report.get("sample"))
+    overview = [{"field": key, "value": display(value)} for key, value in contract.items()]
+    overview.extend(rows(sample))
+    overview.extend([{"field": "Selected model", "value": label},
+                     {"field": "Model status", "value": display(model.get("status"))}])
+    metrics = record(report.get("metrics"))
+    parameters = []
+    for component, values in record(report.get("parameters")).items():
+        for name, estimate in record(values).items():
+            parameters.append({"component": component, "parameter": name, "estimate": display(estimate)})
+    if not parameters:
+        parameters = [{"component": "unavailable", "parameter": "unavailable", "estimate": "unavailable"}]
+    selection = record(report.get("selection"))
+    selection_rows = []
+    for stage, candidate, basis in (("mean", "final_selected_candidate_id", "final_selection_basis"),
+                                     ("variance", "selected_candidate_id", "selection_basis")):
+        selected = record(selection.get(stage))
+        selection_rows.append({"stage": stage, "selected_candidate": display(selected.get(candidate)),
+                               "basis": display(selected.get(basis))})
+    diagnostics = record(report.get("diagnostics"))
+    diagnostic_rows = []
+    def diagnostic_row(name, item):
+        item = record(item)
+        diagnostic_rows.append({"test": name, "statistic": display(item.get("statistic")),
+            "p_value": display(item.get("p_value")), "status": display(item.get("status")),
+            "detail": "; ".join(f"{key}={display(value)}" for key, value in item.items()
+                                if key not in {"statistic", "p_value", "status"} and not isinstance(value, dict))})
+    for name in ("adf", "arch_lm", "normality", "residual_exceedance"):
+        diagnostic_row(name, diagnostics.get(name))
+    for item in diagnostics.get("ljung_box", []) if isinstance(diagnostics.get("ljung_box"), list) else []:
+        diagnostic_row("ljung_box", item)
+    for name in ("shapiro_wilk", "shapiro_francia"):
+        diagnostic_row(name, record(diagnostics.get("normality")).get(name))
+    forecast = record(report.get("next_forecast"))
+    forecast_rows = rows({key: value for key, value in forecast.items() if key != "forecast_origin"})
+    forecast_rows.extend({"field": f"forecast_origin.{row['field']}", "value": row["value"]}
+                         for row in rows(forecast.get("forecast_origin")))
+    if not forecast_rows:
+        forecast_rows = [{"field": "Forecast", "value": "unavailable"}]
+    limitations = []
+    for warnings in (report.get("warnings"), diagnostics.get("warnings")):
+        if isinstance(warnings, list):
+            limitations.extend(item for item in warnings if isinstance(item, str))
+    limitations.extend(f"{row['field']}: {row['value']}" for row in rows(report.get("forecast_limitations")))
+    return {"report_kind": "arma_garch", "title": "ARMA–GARCH Volatility Report", "model_label": label,
+        "overview": overview, "metrics": {key: display(metrics.get(key)) for key in (
+            "validation_n", "successful_forecast_n", "mae", "rmse", "interval_coverage", "average_interval_width")},
+        "parameters": parameters, "selection": selection_rows, "diagnostics": diagnostic_rows,
+        "next_forecast": forecast_rows, "chart_artifacts": charts, "limitations": limitations}
+
+
+def _structured_report_fields(projection: object) -> dict[str, Any]:
+    """Format already-selected values; this helper grants no read authority."""
+    from .contracts.evidence.result_sections import (
+        RESULT_SECTIONS_CONTRACT_DIGEST, resolve_section_content,
+    )
+
+    selected = tuple(getattr(projection, "sections", ()))
+    if not selected:
+        return {}
+    facts = {fact.fact_id: fact for fact in projection.facts}
+    resolved = []
+    for section in selected:
+        wire = section.to_dict()
+        resolved.append({
+            "sectionId": wire["section_id"], "sectionType": wire["section_type"],
+            "status": wire["status"], "reasonCodes": wire["reason_codes"],
+            "content": resolve_section_content(section, facts=facts),
+        })
+    fields = _empty_legacy_presentation()
+    fields.update({
+        "structuredResults": {"schema_version": 1, "contract_digest": RESULT_SECTIONS_CONTRACT_DIGEST,
+                              "sections": [section.to_dict() for section in selected]},
+        "resolvedSections": resolved,
+    })
+    # Existing renderer slots accept one declared section. All partitions remain
+    # losslessly represented in resolvedSections, never merged by recomputation.
+    slots = {"regression_table": "regression_table", "statistical_tests": "statistical_evidence",
+             "model_family_evidence": "model_family_evidence"}
+    for section_type, slot in slots.items():
+        matches = [row for row in resolved if row["sectionType"] == section_type and row["status"] == "available"]
+        if len(matches) == 1:
+            fields[slot] = matches[0]["content"]
+    descriptive = [row for row in resolved if row["sectionType"] == "descriptive_statistics" and row["status"] == "available"]
+    if len(descriptive) == 1:
+        fields["descriptive_stats"] = descriptive[0]["content"]["rows"]
+    table = fields.get("regression_table")
+    if isinstance(table, dict) and isinstance(table.get("rows"), list):
+        for row in table["rows"]:
+            if not isinstance(row, dict) or not isinstance(row.get("models"), dict):
+                continue
+            for model_id, cell in row["models"].items():
+                if not isinstance(cell, dict):
+                    continue
+                # Read exact admitted values only. No model-family, significance,
+                # effect-scale or reference-category inference belongs here.
+                params = {"model_id": model_id, "variable": row.get("term", "")}
+                for name in ("estimate", "p_value"):
+                    value = cell.get(name)
+                    params[name] = str(value) if type(value) in (int, float) else "not reported"
+                try:
+                    text = render_template("coef_exact_result", params)
+                except (KeyError, TypeError, ValueError):
+                    text = ""
+                fields["coefficient_interpretations"].append({
+                    "model_id": model_id, "variable": row.get("term", ""),
+                    "interpretation_guide": "exact_result", "text": text,
+                })
+                if cell.get("variance_source") != "survey_design":
+                    continue
+                parts = ["variance_source=survey_design"]
+                if isinstance(cell.get("source_id"), str):
+                    parts.append(f"source_id={cell['source_id']}")
+                warnings = cell.get("warnings")
+                if isinstance(warnings, list) and all(isinstance(warning, str) for warning in warnings):
+                    parts.append("warnings=" + ",".join(warnings))
+                fields["presentation_facts"].append(
+                    f"Coefficient provenance ({model_id}/{row.get('term', '')}): " + "; ".join(parts))
+    for row in resolved:
+        if row["sectionType"] == "survey_design" and row["status"] == "available":
+            designs = row["content"].get("design")
+            if isinstance(designs, dict):
+                for model_id, design in designs.items():
+                    if not isinstance(design, dict):
+                        continue
+                    method = design.get("variance_method")
+                    if isinstance(method, str):
+                        fields["presentation_facts"].append(f"Survey variance method ({model_id}): {method}")
+                    counts = []
+                    metadata = []
+                    for name, label in (("replicates_attempted", "replicates attempted"),
+                                        ("replicates_succeeded", "succeeded"), ("replicates_failed", "failed")):
+                        value = design.get(name)
+                        if type(value) in (int, float):
+                            counts.append(f"{label}={value}")
+                            metadata.append(f"{name}={value}")
+                    if counts:
+                        fields["presentation_facts"].append(f"Replicate status ({model_id}): " + "; ".join(counts))
+                    reasons = design.get("replicate_failure_reasons")
+                    if isinstance(reasons, dict):
+                        entries = [f"{reason}={count}" for reason, count in reasons.items() if type(count) in (int, float)]
+                        if entries:
+                            fields["presentation_facts"].append(f"Replicate failure reasons ({model_id}): " + ", ".join(entries))
+                            metadata.append("replicate_failure_reasons=" + ",".join(
+                                f"{reason}:{count}" for reason, count in reasons.items() if type(count) in (int, float)))
+                    if metadata:
+                        fields["presentation_facts"].append(f"Survey metadata ({model_id}): " + "; ".join(metadata))
+        if row["sectionType"] == "model_identity" and row["status"] == "available":
+            models = row["content"]["models"]
+            if isinstance(models, list):
+                identities = [model for model in models if isinstance(model, dict)]
+                for model in identities:
+                    label = model.get("model_label", model.get("label"))
+                    if isinstance(label, str):
+                        fields["presentation_facts"].append(f"Model: {label}")
+                        if len(models) == 1 and len([item for item in resolved if item["sectionType"] == "model_identity"]) == 1:
+                            fields["title"] = label
+                    outcome, variables = model.get("y_variable"), model.get("x_variables")
+                    if isinstance(outcome, str) and isinstance(variables, list) and all(isinstance(value, str) for value in variables):
+                        fields["presentation_facts"].append(f"y = {outcome};  X = {', '.join(variables)}")
+        if row["sectionType"] == "interpretation_constraints" and row["status"] == "available":
+            constraints = row["content"].get("constraints")
+            if isinstance(constraints, dict) and "status" not in constraints:
+                if constraints.get("must_note_categorical_encoded") is True:
+                    fields["presentation_facts"].append(
+                        "Categorical variables were dummy-coded, as declared by preprocessing.")
+                key = ("causal_caution_with_treatment"
+                       if constraints.get("must_not_interpret_treatment_independently") is True
+                       else "causal_caution_default")
+                try:
+                    caution = render_template(key, {})
+                except (KeyError, ValueError):
+                    caution = ""
+                if caution and caution not in fields["causal_caution"]:
+                    fields["causal_caution"] = "\n".join(filter(None, (fields["causal_caution"], caution)))
+        if row["sectionType"] == "diagnostics" and row["status"] == "available":
+            # Restore the diagnostic presentation slot from admitted sections
+            # only; never reload diagnostic_summary or model-result files.
+            diagnostic_sections = [item for item in resolved
+                if item["sectionType"] == "diagnostics" and item["status"] == "available"]
+            if len(diagnostic_sections) == 1 and isinstance(row["content"].get("results"), dict):
+                fields["model_diagnostics"] = row["content"]["results"]
+            for key, slot in (("blockers", "critical_errors"), ("warnings", "warnings"),
+                              ("cautions", "cautions"), ("info", "system_notes")):
+                if isinstance(row["content"][key], list):
+                    fields[slot].extend(_render_admitted_issue(issue) for issue in row["content"][key])
+    fields["typed_sections"] = {key: fields[key] for key in (
+        "descriptive_stats", "regression_table", "statistical_tests", "statistical_evidence",
+        "model_family_evidence", "model_diagnostics") if fields[key] is not None}
+    fields.update(_admitted_arma_presentation(fields.get("model_family_evidence")))
+    return fields
+
+
 def build_persisted_evidence_report_view(
     projection: "EvidenceProjectionV1",
     *,
@@ -832,6 +1211,10 @@ def build_persisted_evidence_report_view(
         default_projection_registry,
     )
     from .evidence.contracts import ArtifactAdmissionV1
+    from .evidence.result_collections import (
+        ServerOwnedLocalResultCollectionV1,
+        validate_server_owned_local_result_collection,
+    )
     from .services.results_service import ServerOwnedReportEvidencePersistenceV1
 
     raw_artifact_id = getattr(projection, "artifact_ref", None)
@@ -853,20 +1236,23 @@ def build_persisted_evidence_report_view(
                 "EVIDENCE_PROVENANCE_REQUIRED",
                 "Report provenance must be the exact owner-admitted artifact",
             )
-        if type(projection) is not EvidenceProjectionV1:
+        if type(projection) is ServerOwnedLocalResultCollectionV1:
+            validate_server_owned_local_result_collection(projection, owner=owner)
+        elif type(projection) is EvidenceProjectionV1:
+            expected_projection = default_projection_registry().project(
+                canonical_source,
+                consumer_id="report",
+                destination="local",
+            )
+            if projection.to_dict() != expected_projection.to_dict():
+                raise EvidenceProjectionError(
+                    "EVIDENCE_PROJECTION_CANONICAL_MISMATCH",
+                    "Report projection is not the owner-admitted canonical projection",
+                )
+        else:
             raise EvidenceProjectionError(
                 "EVIDENCE_PROJECTION_INVALID",
                 "Report projection must be an admitted typed projection",
-            )
-        expected_projection = default_projection_registry().project(
-            canonical_source,
-            consumer_id="report",
-            destination="local",
-        )
-        if projection.to_dict() != expected_projection.to_dict():
-            raise EvidenceProjectionError(
-                "EVIDENCE_PROJECTION_CANONICAL_MISMATCH",
-                "Report projection is not the owner-admitted canonical projection",
             )
     except EvidenceProjectionError as exc:
         return _unavailable_report_evidence(
@@ -910,6 +1296,16 @@ def build_persisted_evidence_report_view(
             row["confidenceInterval"] = {
                 "lower": fact.confidence_interval.lower,
                 "upper": fact.confidence_interval.upper,
+            }
+        validation_level = getattr(fact.validation_level, "value", None)
+        if isinstance(validation_level, str):
+            row["validationProvenance"] = {
+                "level": validation_level,
+                "oracleChecks": tuple(
+                    check.to_dict()
+                    for check in fact.oracle_checks
+                    if hasattr(check, "to_dict")
+                ),
             }
         facts.append(row)
     status = projection.status.value
@@ -982,6 +1378,16 @@ def build_persisted_evidence_report_view(
     )
     from .report_export import report_projection_digest
 
+    view.update(_structured_report_fields(projection))
+    if type(projection) is ServerOwnedLocalResultCollectionV1:
+        from .contracts.common.envelope import thaw_json
+
+        view.update({
+            "deliveryKind": "local_complete_collection",
+            "readCompleteness": projection.read_completeness,
+            "collectionDigest": projection.collection_digest,
+            "sectionDirectory": thaw_json(projection.section_directory),
+        })
     view["projectionDigest"] = report_projection_digest(view)
     return view
 

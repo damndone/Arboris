@@ -156,13 +156,25 @@ def test_manifest_ports_and_policy_are_contract_derived_and_budgeted() -> None:
 def test_builtin_agent_compiler_provider_manifest_is_declaration_only() -> None:
     path = Path(__file__).resolve().parents[1] / "backend" / "workbench" / "providers" / "builtin" / "agent_compiler.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
-    encoded = json.dumps(payload, sort_keys=True)
 
     assert payload["provider_id"] == "agent.compiler"
-    assert "execution_key" not in encoded
-    assert "server_authority" not in encoded
-    assert "provider_choice" not in encoded
-    assert "model_choice" not in encoded
-    assert "receipt" not in encoded
-    assert "code" not in encoded
+    assert payload["projection_declarations"][0]["fact_kinds"] == ["compiler_receipt"]
+
+    def has_key(value: object, key: str) -> bool:
+        if isinstance(value, dict):
+            return key in value or any(has_key(child, key) for child in value.values())
+        if isinstance(value, list):
+            return any(has_key(child, key) for child in value)
+        return False
+
+    for forbidden_field in (
+        "execution_key",
+        "server_authority",
+        "provider_choice",
+        "model_choice",
+        "receipt",
+        "client_receipt",
+        "code",
+    ):
+        assert not has_key(payload, forbidden_field)
     assert "agent.compiler" in load_builtin_catalog().provider_ids

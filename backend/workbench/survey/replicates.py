@@ -43,7 +43,8 @@ def build_replicates(
             "the replicate channel needs a replicate_type",
         )
     if kind == "provided":
-        return _provided(design)
+        weights, scales = _provided(design)
+        return _validate_replicates(design, weights, scales)
     if design.replicate_weight_columns:
         raise SurveyEngineError(
             "SURVEY_REPLICATE_COLUMNS_UNSUPPORTED",
@@ -53,12 +54,70 @@ def build_replicates(
             replicate_weight_columns=list(design.replicate_weight_columns)[:16],
         )
     if kind == "jackknife":
-        return _jackknife(design)
-    if kind == "brr":
-        return _brr(design)
-    if kind == "bootstrap":
-        return _bootstrap(design)
-    raise SurveyEngineError("SURVEY_REPLICATE_TYPE_INVALID", kind)
+        weights, scales = _jackknife(design)
+    elif kind == "brr":
+        weights, scales = _brr(design)
+    elif kind == "bootstrap":
+        weights, scales = _bootstrap(design)
+    else:
+        raise SurveyEngineError("SURVEY_REPLICATE_TYPE_INVALID", kind)
+    return _validate_replicates(design, weights, scales)
+
+
+def _validate_replicates(
+    design: SurveyDesign,
+    weights: np.ndarray,
+    scales: list[float],
+) -> tuple[np.ndarray, list[float]]:
+    """Validate generated and publisher-supplied weights at one boundary."""
+
+    try:
+        matrix = np.asarray(weights, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_WEIGHTS_INVALID",
+            "replicate weights cannot be represented as finite numeric values",
+            reason="non_numeric",
+        ) from exc
+    if matrix.ndim != 2 or matrix.shape[0] != len(design.frame) or matrix.shape[1] < 1:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_WEIGHTS_INVALID",
+            "replicate weights must be a non-empty observation-by-replicate matrix",
+            reason="shape",
+            expected_rows=len(design.frame),
+            actual_shape=list(matrix.shape),
+        )
+    if not np.isfinite(matrix).all():
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_WEIGHTS_INVALID",
+            "replicate weights must be finite",
+            reason="nonfinite",
+        )
+    if (matrix < 0).any():
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_WEIGHTS_INVALID",
+            "replicate weights must be nonnegative",
+            reason="negative",
+        )
+    try:
+        normalized_scales = [float(scale) for scale in scales]
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_WEIGHTS_INVALID",
+            "replicate scales must be finite positive numbers",
+            reason="scale_invalid",
+        ) from exc
+    if len(normalized_scales) != matrix.shape[1] or any(
+        not np.isfinite(scale) or scale <= 0 for scale in normalized_scales
+    ):
+        raise SurveyEngineError(
+            "SURVEY_REPLICATE_WEIGHTS_INVALID",
+            "replicate scales must align with the weight matrix and be positive",
+            reason="scale_invalid",
+            expected_replicates=matrix.shape[1],
+            actual_scales=len(normalized_scales),
+        )
+    return matrix, normalized_scales
 
 
 def _psu_index(design: SurveyDesign) -> tuple[np.ndarray, np.ndarray, dict[str, list[int]]]:
@@ -157,16 +216,59 @@ def _brr(design: SurveyDesign) -> tuple[np.ndarray, list[float]]:
     # under-specified.  Callers may supply one; otherwise a Sylvester matrix is
     # built and recorded on the result.
     if design.hadamard_matrix is not None:
-        matrix = np.asarray(design.hadamard_matrix, dtype=int)
+        try:
+            matrix = np.asarray(design.hadamard_matrix)
+        except (TypeError, ValueError) as exc:
+            raise SurveyEngineError(
+                "SURVEY_BRR_HADAMARD_INVALID",
+                "custom BRR matrix must be a finite numeric matrix",
+            ) from exc
+        if matrix.ndim != 2 or matrix.size == 0 or not np.issubdtype(matrix.dtype, np.number):
+            raise SurveyEngineError(
+                "SURVEY_BRR_HADAMARD_INVALID",
+                "custom BRR matrix must be a two-dimensional numeric matrix",
+            )
+        if not np.isfinite(matrix).all():
+            raise SurveyEngineError(
+                "SURVEY_BRR_HADAMARD_INVALID",
+                "custom BRR matrix must contain only finite values",
+            )
         if matrix.shape[0] < n_strata + 1 or matrix.shape[1] < n_strata + 1:
             raise SurveyEngineError(
                 "SURVEY_BRR_HADAMARD_TOO_SMALL",
                 f"a {matrix.shape} matrix cannot balance {n_strata} strata",
             )
+        unique_values = set(np.unique(matrix).tolist())
+        if unique_values <= {0, 1}:
+            normalized = np.where(matrix == 1, 1, -1)
+        elif unique_values <= {-1, 1}:
+            normalized = matrix.astype(int)
+        else:
+            raise SurveyEngineError(
+                "SURVEY_BRR_HADAMARD_INVALID",
+                "custom BRR matrix values must use either 0/1 or -1/1 coding",
+            )
+        if not np.all(normalized[:, 0] == 1):
+            raise SurveyEngineError(
+                "SURVEY_BRR_HADAMARD_INVALID",
+                "custom BRR matrix must start with an all-positive reference column",
+            )
         order = matrix.shape[0]
         # R emits 0/1; convert to the +/-1 half-sample selector, dropping the
         # leading all-ones column.
-        selector = np.where(matrix[:, 1 : n_strata + 1] > 0, 1, -1)
+        selector = normalized[:, 1 : n_strata + 1]
+        if (selector.sum(axis=0) != 0).any():
+            raise SurveyEngineError(
+                "SURVEY_BRR_HADAMARD_UNBALANCED",
+                "custom BRR selector columns must contain equal positive and negative assignments",
+            )
+        gram = selector.T @ selector
+        off_diagonal = gram - np.diag(np.diag(gram))
+        if (off_diagonal != 0).any():
+            raise SurveyEngineError(
+                "SURVEY_BRR_HADAMARD_NOT_ORTHOGONAL",
+                "custom BRR selector columns must be pairwise orthogonal",
+            )
     else:
         order = 1
         while order < n_strata + 1:
@@ -199,9 +301,17 @@ def _bootstrap(design: SurveyDesign, replicates: int = 500, seed: int = 20260805
         w = np.zeros_like(base)
         for stratum, psu_ids in groups.items():
             n_h = len(psu_ids)
+            if n_h < 2:
+                raise SurveyEngineError(
+                    "SURVEY_BOOTSTRAP_REQUIRES_TWO_PSU_PER_STRATUM",
+                    f"stratum {stratum!r} has fewer than two PSUs",
+                    strata=[stratum],
+                )
             drawn = rng.choice(n_h, size=n_h - 1, replace=True)
             counts = np.bincount(drawn, minlength=n_h)
-            factor = 1.0 + np.sqrt(n_h / (n_h - 1)) * (counts * n_h / (n_h - 1) - 1.0)
+            # Rao-Wu rescaling uses the nonnegative multiplicity of each PSU
+            # in an n_h-1 draw, then restores the stratum total by n_h/(n_h-1).
+            factor = counts * n_h / (n_h - 1)
             for pid, f in zip(psu_ids, factor, strict=True):
                 rows = psu == pid
                 w[rows] = base[rows] * f

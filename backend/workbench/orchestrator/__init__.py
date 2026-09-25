@@ -221,6 +221,7 @@ def run_workflow(
     survey_subpop: str | None = None,
     labels: dict[str, object] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
+    app_instance: Any | None = None,
 ) -> dict[str, str]:
     from ..lineage.hashing import dag_hash
     from ..lineage.run_inputs import write_run_inputs
@@ -433,6 +434,7 @@ def run_workflow(
             survey_subpop=survey_subpop,
             labels=normalized_labels,
             stop_reason=stop_reason,
+            app_instance=app_instance,
         )
     except OptionalDependencyNotInstalled as exc:
         details = exc.to_issue_details()
@@ -643,6 +645,7 @@ def _run_workflow(
     labels: dict[str, object] | None = None,
     lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,
+    app_instance: Any | None = None,
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
     terminal_status. All per-stage work lives in ``backend/workbench/engine/stages/``
@@ -676,6 +679,12 @@ def _run_workflow(
         stop_reason=stop_reason,
         lmm_execution_admission=lmm_execution_admission,
     )
+    from ..app import app as default_workbench_app
+
+    execution_app = default_workbench_app if app_instance is None else app_instance
+    if not hasattr(execution_app, "state"):
+        raise TypeError("app_instance must expose FastAPI application state")
+
     ctx = ModelingContext(
         data=DataHandle(
             frame=pd.DataFrame(),
@@ -691,11 +700,21 @@ def _run_workflow(
     # injected the exact server-owned capability.  Issue the opaque projection
     # here, at the real orchestrator-to-pipeline boundary; never synthesize a
     # caller-shaped owner or projection when the run is not bound to it.
-    from ..app import app as workbench_app
     from ..report_export import EvidenceProjectionV1
     from ..services.results_service import ServerOwnedReportEvidencePersistenceV1
 
-    report_owner = getattr(workbench_app.state, "report_evidence_persistence", None)
+    report_owner = getattr(execution_app.state, "report_evidence_persistence", None)
+    report_owner_factory = getattr(
+        execution_app.state,
+        "report_evidence_owner_factory",
+        None,
+    )
+    # Preserve the application binding even when the selected app has no
+    # factory.  ReportStage must distinguish an explicitly selected, unbound
+    # app from a legacy direct-stage caller; otherwise it could silently
+    # consume the canonical global app's evidence authority.
+    ctx.artifacts["_report_evidence_owner_factory_context_bound"] = app_instance is not None
+    ctx.artifacts["_report_evidence_owner_factory"] = report_owner_factory
     if type(report_owner) is ServerOwnedReportEvidencePersistenceV1:
         try:
             if report_owner.accepts_canonical_run_root(run_root):

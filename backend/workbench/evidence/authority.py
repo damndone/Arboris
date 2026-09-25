@@ -7,8 +7,10 @@ uid/pid, scope and session, and when the endpoint proves possession of the
 deployment handshake secret.  The resulting endpoint handle is process- and
 owner-bound; public Evidence factories never accept a raw socket.
 
-The host runtime is intentionally outside this package.  If no connected and
-pre-admitted host endpoint is supplied, all Evidence factories fail closed.
+The host runtime is intentionally outside this package for deployed hosts. A
+local macOS backend may instead use the explicit bootstrap-only local handle;
+it is still exact-object, process-bound and scope-bound, and it never accepts
+an authority-shaped value from an HTTP request or an LLM.
 """
 
 from __future__ import annotations
@@ -44,6 +46,9 @@ _CHANNEL_LOCKS: WeakKeyDictionary[object, threading.RLock] = WeakKeyDictionary()
 _CHANNEL_LOCKS_GUARD = threading.Lock()
 _ENDPOINT_ADMISSIONS: WeakKeyDictionary[object, tuple[object, ...]] = WeakKeyDictionary()
 _ENDPOINT_ADMISSIONS_GUARD = threading.Lock()
+_LOCAL_AUTHORITY_ISSUER = object()
+_LOCAL_AUTHORITY_ADMISSIONS: dict[int, tuple[object, ...]] = {}
+_LOCAL_AUTHORITY_ADMISSIONS_GUARD = threading.Lock()
 
 
 class EvidenceHostAuthorityError(ValueError):
@@ -218,6 +223,105 @@ class HostAuthorityEndpointV1:
         raise TypeError("host endpoint handles are deployment-bound capabilities")
 
 
+class LocalHostAuthorityHandleV1:
+    """Backend-owned authority for the explicitly supported local host.
+
+    The constructor and bootstrap issuer are intentionally blocked. The local
+    bootstrap service loads the key from its admission-gated project store and
+    creates one exact handle. Public evidence code can only use the live object
+    registered in ``_LOCAL_AUTHORITY_ADMISSIONS``; copying visible fields does
+    not create a capability.
+    """
+
+    __slots__ = (
+        "_authority_id",
+        "_scope_ref",
+        "_session_ref",
+        "_owner_pid",
+        "_secret",
+        "_secret_digest",
+        "_issuer",
+        "_closed",
+        "__weakref__",
+    )
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("local authority handles must come from local host bootstrap")
+
+    @classmethod
+    def _from_bootstrap(
+        cls,
+        *,
+        authority_id: str,
+        scope_ref: str,
+        session_ref: str,
+        secret: bytes,
+    ) -> "LocalHostAuthorityHandleV1":
+        if (
+            _LOCAL_AUTHORITY_ISSUER is None
+            or type(authority_id) is not str
+            or not authority_id
+            or type(scope_ref) is not str
+            or not scope_ref
+            or type(session_ref) is not str
+            or not session_ref
+            or type(secret) is not bytes
+            or len(secret) < 32
+        ):
+            raise _reject("local authority bootstrap material is invalid")
+        handle = object.__new__(cls)
+        object.__setattr__(handle, "_authority_id", authority_id)
+        object.__setattr__(handle, "_scope_ref", scope_ref)
+        object.__setattr__(handle, "_session_ref", session_ref)
+        object.__setattr__(handle, "_owner_pid", os.getpid())
+        object.__setattr__(handle, "_secret", bytes(secret))
+        object.__setattr__(handle, "_secret_digest", hashlib.sha256(secret).hexdigest())
+        object.__setattr__(handle, "_issuer", _LOCAL_AUTHORITY_ISSUER)
+        object.__setattr__(handle, "_closed", False)
+        with _LOCAL_AUTHORITY_ADMISSIONS_GUARD:
+            _LOCAL_AUTHORITY_ADMISSIONS[id(handle)] = (
+                handle,
+                authority_id,
+                scope_ref,
+                session_ref,
+                os.getpid(),
+                hashlib.sha256(secret).hexdigest(),
+                _LOCAL_AUTHORITY_ISSUER,
+            )
+        _require_local(handle)
+        return handle
+
+    @property
+    def authority_id(self) -> str:
+        _require_local(self)
+        return self._authority_id
+
+    @property
+    def scope_ref(self) -> str:
+        _require_local(self)
+        return self._scope_ref
+
+    @property
+    def session_ref(self) -> str:
+        _require_local(self)
+        return self._session_ref
+
+    def close(self) -> None:
+        _require_local(self)
+        with _LOCAL_AUTHORITY_ADMISSIONS_GUARD:
+            _LOCAL_AUTHORITY_ADMISSIONS.pop(id(self), None)
+        object.__setattr__(self, "_closed", True)
+
+    def __reduce__(self):
+        raise TypeError("local authority handles are backend-bound capabilities")
+
+    def __copy__(self):
+        raise TypeError("local authority handles cannot be copied")
+
+    def __deepcopy__(self, _memo: object):
+        raise TypeError("local authority handles cannot be copied")
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceAuthorityRequestV1:
     """The exact binding a host channel must authorize."""
@@ -275,6 +379,64 @@ def _reject(
     code: str = EVIDENCE_HOST_AUTHORITY_REQUIRED,
 ) -> EvidenceHostAuthorityError:
     return EvidenceHostAuthorityError(code=code, message=message)
+
+
+def _require_local(handle: object) -> LocalHostAuthorityHandleV1:
+    if type(handle) is not LocalHostAuthorityHandleV1:
+        raise _reject("Evidence requires a server-owned local authority handle")
+    try:
+        with _LOCAL_AUTHORITY_ADMISSIONS_GUARD:
+            record = _LOCAL_AUTHORITY_ADMISSIONS.get(id(handle))
+        if (
+            record is None
+            or record[0] is not handle
+            or handle._issuer is not _LOCAL_AUTHORITY_ISSUER
+            or handle._closed is not False
+            or handle._owner_pid != os.getpid()
+            or record[1] != handle._authority_id
+            or record[2] != handle._scope_ref
+            or record[3] != handle._session_ref
+            or record[4] != handle._owner_pid
+            or record[5] != handle._secret_digest
+            or hashlib.sha256(handle._secret).hexdigest() != handle._secret_digest
+            or record[6] is not _LOCAL_AUTHORITY_ISSUER
+        ):
+            raise _reject("the local authority handle binding changed")
+        return handle
+    except EvidenceHostAuthorityError:
+        raise
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise _reject("the local authority handle is invalid") from exc
+
+
+def _is_local_handle(handle: object) -> bool:
+    return type(handle) is LocalHostAuthorityHandleV1
+
+
+def _local_request_wire(
+    handle: LocalHostAuthorityHandleV1,
+    request: EvidenceAuthorityRequestV1,
+) -> bytes:
+    _require_local(handle)
+    if type(request) is not EvidenceAuthorityRequestV1:
+        raise _reject("the local authority request is malformed")
+    if (
+        request.owner_pid != os.getpid()
+        or request.scope_ref != handle._scope_ref
+        or request.session_ref != handle._session_ref
+        or not request.purpose.startswith("evidence.")
+    ):
+        raise _reject("the local authority request is not backend-bound")
+    if request.root_fd is not None:
+        root_device, root_inode = _root_identity(request.root_fd)
+        if (root_device, root_inode) != (request.root_device, request.root_inode):
+            raise _reject("the local authority root identity changed")
+    return canonical_json_v1(
+        {
+            "authority_id": handle._authority_id,
+            "request": request.to_wire(),
+        }
+    ).encode("utf-8")
 
 
 def _copy_endpoint_config(config: HostAuthorityEndpointConfigV1) -> HostAuthorityEndpointConfigV1:
@@ -616,7 +778,9 @@ def admit_host_authority_fd(
         raise
 
 
-def _require_endpoint(handle: object) -> HostAuthorityEndpointV1:
+def _require_endpoint(handle: object) -> object:
+    if _is_local_handle(handle):
+        return _require_local(handle)
     if type(handle) is not HostAuthorityEndpointV1:
         raise _reject("Evidence requires an admitted host endpoint handle")
     try:
@@ -673,6 +837,29 @@ def build_authority_request(
 ) -> EvidenceAuthorityRequestV1:
     """Build a request from live process, endpoint and descriptor identity."""
 
+    if _is_local_handle(handle):
+        local = _require_local(handle)
+        if scope_ref != local._scope_ref:
+            raise _reject("local authority scope is not backend-bound")
+        if type(purpose) is not str or not purpose.startswith("evidence."):
+            raise _reject("local authority purpose is not allowed")
+        root_device, root_inode = _root_identity(root_fd)
+        try:
+            return EvidenceAuthorityRequestV1(
+                purpose=purpose,
+                scope_ref=scope_ref,
+                owner_pid=os.getpid(),
+                session_ref=local._session_ref,
+                root_fd=root_fd,
+                root_device=root_device,
+                root_inode=root_inode,
+                subject_id=subject_id,
+                payload_digest=payload_digest,
+            )
+        except EvidenceHostAuthorityError:
+            raise
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise _reject("the local authority request is malformed") from exc
     endpoint = _require_endpoint(handle)
     if scope_ref != endpoint._config.scope_ref:
         raise _reject("authority scope is not bound to the configured endpoint")
@@ -700,6 +887,12 @@ def build_authority_request(
 def issue_host_proof(handle: object, request: EvidenceAuthorityRequestV1) -> str:
     """Ask the external host to issue an opaque proof."""
 
+    if _is_local_handle(handle):
+        local = _require_local(handle)
+        wire = _local_request_wire(local, request)
+        digest = hmac.new(local._secret, wire, hashlib.sha256).hexdigest()
+        return f"local.v1:{local._authority_id}:{digest}"
+
     endpoint, channel = _endpoint_channel(handle)
     if type(request) is not EvidenceAuthorityRequestV1:
         raise _reject("the host authority request is malformed")
@@ -724,6 +917,19 @@ def validate_host_proof(
     proof: object,
 ) -> None:
     """Fail closed unless the configured host validates the exact request."""
+
+    if _is_local_handle(handle):
+        local = _require_local(handle)
+        wire = _local_request_wire(local, request)
+        if type(proof) is not str or not proof.startswith(
+            f"local.v1:{local._authority_id}:"
+        ):
+            raise _reject("the local authority proof is invalid")
+        supplied = proof.rsplit(":", 1)[-1]
+        expected = hmac.new(local._secret, wire, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(supplied, expected):
+            raise _reject("the local authority rejected the exact request")
+        return
 
     endpoint, channel = _endpoint_channel(handle)
     if type(request) is not EvidenceAuthorityRequestV1:
@@ -785,6 +991,7 @@ __all__ = [
     "EvidenceHostAuthorityError",
     "HostAuthorityEndpointConfigV1",
     "HostAuthorityEndpointV1",
+    "LocalHostAuthorityHandleV1",
     "HostAuthorityChannelV1",
     "HostAuthorityHandleV1",
     "admit_host_authority_endpoint",

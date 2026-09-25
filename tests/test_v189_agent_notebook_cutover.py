@@ -46,14 +46,24 @@ from workbench.http.agent_routes import (
     register_agent_notebook_cutover_authority,
 )
 from workbench.providers.catalog import load_builtin_catalog
+from tests.v189_cutover_test_host import make_test_identity_resolver
 from tests.v189_cutover_test_host import CutoverTestHostCompiler
 
 
-def _runtime_registry(catalog, *, fixture_enabled: bool = True) -> TrustedExecutorRegistry:
+def _runtime_registry(
+    catalog,
+    *,
+    fixture_enabled: bool = True,
+    enabled_provider_ids: set[str] | None = None,
+) -> TrustedExecutorRegistry:
     contributions = []
+    enabled_provider_ids = set(enabled_provider_ids or ())
     for provider in catalog.providers:
         for declaration in provider.adapter_declarations:
-            enabled = provider.provider_id == "fixture.contracts" and fixture_enabled
+            enabled = (
+                (provider.provider_id == "fixture.contracts" and fixture_enabled)
+                or provider.provider_id in enabled_provider_ids
+            )
 
             def validate_request(request: Mapping[str, object]) -> dict[str, object]:
                 if not isinstance(request, Mapping):
@@ -127,9 +137,16 @@ def _receipt(
     )
 
 
-def _cutover(*, evidence_committer=None) -> tuple[CutoverCapabilityCatalogV1, AgentNotebookCompilerV1]:
+def _cutover(
+    *,
+    evidence_committer=None,
+    enabled_provider_ids: set[str] | None = None,
+) -> tuple[CutoverCapabilityCatalogV1, AgentNotebookCompilerV1]:
     provider_catalog = load_builtin_catalog()
-    runtime_registry = _runtime_registry(provider_catalog)
+    runtime_registry = _runtime_registry(
+        provider_catalog,
+        enabled_provider_ids=enabled_provider_ids,
+    )
     catalog = CutoverCapabilityCatalogV1.from_provider_catalog(
         provider_catalog,
         runtime_registry,
@@ -206,6 +223,17 @@ def test_cutover_requires_a_host_compiler_and_has_no_local_issuer_fallback() -> 
             runtime_registry=runtime_registry,
             evidence_committer=lambda _context, _result: None,
         )
+
+
+def test_direct_ui_cutover_binding_is_server_issued_before_confirmation() -> None:
+    _catalog, compiler = _cutover(enabled_provider_ids={"workflow.post_estimation"})
+    preview = compiler.compile(_intent(), entrypoint="agent")
+
+    binding = compiler.bind_direct_compilation(preview.compilation_record_id)
+
+    assert binding.to_dict()["proposal_id"].startswith("cutover-proposal:")
+    confirmation = compiler.confirm(preview.compilation_record_id)
+    assert confirmation.to_dict()["proposal_id"] == binding.proposal_id
 
 
 def test_cutover_rejects_a_malformed_host_compilation_result() -> None:
@@ -375,6 +403,48 @@ def test_confirmation_and_evidence_gate_execution(tmp_path) -> None:
     assert compiler.operation(plan.operation_id).state == "completed"
 
 
+def test_execution_dispatches_the_server_resolved_path_for_ambiguous_capability_ids(
+    monkeypatch,
+) -> None:
+    _catalog, compiler = _cutover(
+        enabled_provider_ids={"workflow.post_estimation"},
+    )
+    intent = replace(
+        _intent(),
+        capability_id="workflow.post_estimation.joint_f_test",
+    )
+    plan = compiler.compile(intent, entrypoint="agent")
+    compiler.bind_direct_compilation(plan.compilation_record_id)
+    confirmation = compiler.confirm(plan.compilation_record_id)
+    dispatched: dict[str, object] = {}
+
+    def dispatch(
+        _catalog,
+        _runtime_registry,
+        capability_id: str,
+        _context,
+        request,
+    ) -> dict[str, object]:
+        dispatched["capability_id"] = capability_id
+        dispatched["request_capability_id"] = request["capability_id"]
+        return {
+            "status": "completed",
+            "provider_id": "workflow.post_estimation",
+            "artifact_ref": "artifact:post-estimation",
+            "evidence_ref": "evidence:post-estimation",
+        }
+
+    monkeypatch.setattr(
+        "workbench.agent.workflow_capability_adapters.dispatch_registered_provider",
+        dispatch,
+    )
+    result = compiler.execute(plan.compilation_record_id, confirmation)
+
+    assert result.status == "completed"
+    assert dispatched["capability_id"] == "workflow.post_estimation.joint_f_test"
+    assert dispatched["request_capability_id"] == "workflow.post_estimation.joint_f_test"
+
+
 def test_client_shaped_authority_and_stale_snapshot_are_rejected(tmp_path) -> None:
     _catalog, compiler = _cutover()
     _proposal_store, plan = _persisted_plan(compiler, tmp_path / "proposal")
@@ -527,10 +597,12 @@ def test_http_cutover_requires_explicit_server_authority_and_keeps_confirmation_
         app_instance=host_app,
     )
     configure_notebook_cutover_identity_resolver(
-        lambda _request, _project, _session, _notebook: (
-            scope["actor_ref"],
-            scope["session_ref"],
-            scope["project_ref"],
+        make_test_identity_resolver(
+            lambda _request, _project, _session, _notebook: (
+                scope["actor_ref"],
+                scope["session_ref"],
+                scope["project_ref"],
+            )
         ),
         app_instance=host_app,
     )
@@ -562,7 +634,10 @@ def test_http_cutover_requires_explicit_server_authority_and_keeps_confirmation_
             ).model_dump(),
         )
     assert isinstance(record_id, str)
-    assert missing_proposal.status_code == 409, missing_proposal.text
-    assert missing_proposal.json()["error"]["code"] == "PROPOSAL_BINDING_REQUIRED"
+    # The compile route is the server-owned direct-UI bridge: it binds the
+    # proposal before returning the preview.  The client still cannot mint a
+    # confirmation or execution authority by copying the visible payload.
+    assert missing_proposal.status_code == 200, missing_proposal.text
+    assert missing_proposal.json()["confirmation"]["compilation_record_id"] == record_id
     assert forged.status_code == 409, forged.text
     assert forged.json()["error"]["code"] == "SERVER_CONFIRMATION_UNKNOWN"

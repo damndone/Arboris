@@ -15,8 +15,13 @@ from workbench.llm.client import (
     LLMUpstreamError,
     async_stream_chat_completion,
     deepseek_v4_request_config,
+    provider_egress_ref,
+    _chat_request_payload,
 )
 from workbench.llm.config import LLMConfig
+from workbench.services.provider_egress import (
+    ProviderEgressError, provider_payload_bytes, require_provider_send,
+)
 
 
 _TRANSIENT_UPSTREAM_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -133,6 +138,8 @@ class ModelRequest:
     response_schema: dict[str, Any] | None = None
     model_config: Mapping[str, Any] = field(default_factory=dict)
     abort_event: Any | None = None
+    # Opaque host-issued authority; never populated from model/HTTP dictionaries.
+    provider_admission: object | None = None
 
 
 @dataclass(frozen=True)
@@ -215,11 +222,14 @@ class ModelAdapter(Protocol):
 class OpenAICompatibleModelAdapter:
     """Adapt OpenAI-compatible public SSE to the normalized stream contract."""
 
-    def __init__(self, config: LLMConfig, *, idle_timeout_s: float = 90.0) -> None:
+    def __init__(self, config: LLMConfig, *, idle_timeout_s: float = 90.0,
+                 project_ref: str | None = None, purpose_ref: str | None = None) -> None:
         self.config = config
         if idle_timeout_s <= 0:
             raise ValueError("idle_timeout_s must be positive")
         self.idle_timeout_s = float(idle_timeout_s)
+        self.project_ref = project_ref
+        self.purpose_ref = purpose_ref
 
     def supports_named_tool_choice(self) -> bool:
         """Return whether this provider accepts a named ``tool_choice``.
@@ -266,6 +276,12 @@ class OpenAICompatibleModelAdapter:
             received_event = False
             public_progress = False
             try:
+                body = provider_payload_bytes(_chat_request_payload(
+                    wire_messages, self.config, wire_tools if request.tools else None,
+                    model_config=request.model_config, stream=True))
+                require_provider_send(request.provider_admission, body=body,
+                    project_ref=self.project_ref, purpose_ref=self.purpose_ref,
+                    provider_ref=provider_egress_ref(self.config))
                 request_config = (
                     {"model_config": request.model_config}
                     if request.model_config
@@ -275,6 +291,9 @@ class OpenAICompatibleModelAdapter:
                     wire_messages,
                     self.config,
                     tools=wire_tools if request.tools else None,
+                    provider_admission=request.provider_admission,
+                    project_ref=self.project_ref,
+                    purpose_ref=self.purpose_ref,
                     **request_config,
                 )
                 while True:
@@ -318,14 +337,22 @@ class OpenAICompatibleModelAdapter:
                             public_progress = True
                     elif event_type == "done":
                         finish_reason = item.get("finish_reason")
+                        upstream_id = item.get("provider_request_id")
                         yield ModelStreamEvent(
                             type="done",
                             request_id=request.request_id,
                             finish_reason=finish_reason if isinstance(finish_reason, str) else "stop",
-                            provider_request_id=request.request_id,
+                            # Local correlation is request_id, never proof of
+                            # an identifier issued by the upstream provider.
+                            provider_request_id=(upstream_id if isinstance(upstream_id, str)
+                                                 and upstream_id.strip() else None),
                         )
                         return
                 raise LLMUpstreamError("LLM provider ended the stream without a completion")
+            except ProviderEgressError as exc:
+                # Contract errors contain only stable codes, never payloads.
+                yield ModelStreamEvent.from_error(request.request_id, str(exc))
+                return
             except LLMToolCallArgumentsError:
                 # The provider completed a typed call, but the arguments are
                 # not executable JSON. Preserve the failed first turn and let

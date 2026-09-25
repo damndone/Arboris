@@ -54,6 +54,49 @@ _ARTIFACT_RECORD_OPTIONAL_FIELDS = frozenset(
         "server_identity",
         "receipt_path",
         "receipt_sha256",
+        # C0 Report rows are still inventory records, but their provenance is
+        # part of the canonical row so generic artifact consumers do not fail
+        # when a run has an owner-bound evidence artifact.
+        "actor_ref",
+        "project_ref",
+        "session_ref",
+        "scope_ref",
+        "confirmation_ref",
+        "run_id",
+        "model_run_id",
+        "evidence_run_id",
+        "evidence_model_run_id",
+        "evidence_artifact_ref",
+        "evidence_artifact_admission_ref",
+        "evidence_content_hash",
+        "evidence_commit_ref",
+        "evidence_envelope_ref",
+        "source_ref",
+        "validator_ref",
+        "execution_ref",
+        "contract_digest",
+    }
+)
+_REPORT_EVIDENCE_RECORD_FIELDS = frozenset(
+    {
+        "actor_ref",
+        "project_ref",
+        "session_ref",
+        "scope_ref",
+        "confirmation_ref",
+        "run_id",
+        "model_run_id",
+        "evidence_run_id",
+        "evidence_model_run_id",
+        "evidence_artifact_ref",
+        "evidence_artifact_admission_ref",
+        "evidence_content_hash",
+        "evidence_commit_ref",
+        "evidence_envelope_ref",
+        "source_ref",
+        "validator_ref",
+        "execution_ref",
+        "contract_digest",
     }
 )
 _ARTIFACT_INDEX_FIELDS = frozenset(
@@ -67,6 +110,7 @@ _ARTIFACT_INDEX_FIELDS = frozenset(
 # repository -> HTTP -> ReportWorkspace boundary as a usable group.
 _KNOWN_ARTIFACT_TYPES = frozenset(
     {
+        "ai_report",
         "classification_artifacts",
         "classification_evidence",
         "custom_json",
@@ -82,6 +126,7 @@ _KNOWN_ARTIFACT_TYPES = frozenset(
         "json",
         "lmm_diagnostic_packet",
         "lmm_recovery_packet",
+        "measurement_advisory",
         "metadata",
         "model_diagnostic",
         "model_output",
@@ -102,6 +147,7 @@ _KNOWN_ARTIFACT_TYPES = frozenset(
         "raw_dataset",
         "report",
         "report_collection",
+        "result_input",
         "run_metadata",
         "statistical_exploration",
         "statistical_test",
@@ -148,6 +194,46 @@ def _validate_artifact_digest(value: Any) -> None:
         raise ValueError("artifact digest is not a lowercase SHA-256 value")
 
 
+def _validate_report_evidence_record(record: dict[str, Any]) -> None:
+    present = set(record) & _REPORT_EVIDENCE_RECORD_FIELDS
+    if not present:
+        return
+    if present != _REPORT_EVIDENCE_RECORD_FIELDS:
+        raise ValueError("Report evidence provenance fields must be supplied together")
+    for field in (
+        "actor_ref",
+        "project_ref",
+        "session_ref",
+        "scope_ref",
+        "confirmation_ref",
+        "run_id",
+        "model_run_id",
+        "evidence_run_id",
+        "evidence_model_run_id",
+        "evidence_artifact_ref",
+        "evidence_artifact_admission_ref",
+        "evidence_commit_ref",
+        "evidence_envelope_ref",
+        "source_ref",
+        "execution_ref",
+        "contract_digest",
+    ):
+        if type(record[field]) is not str or not record[field].strip():
+            raise ValueError(f"Report evidence provenance field {field} is invalid")
+    if type(record["validator_ref"]) not in {str, dict} or not record["validator_ref"]:
+        raise ValueError("Report evidence validator reference is invalid")
+    _validate_artifact_digest(record["evidence_content_hash"])
+    _validate_artifact_digest(record["contract_digest"])
+    if record["run_id"] != record["evidence_run_id"]:
+        raise ValueError("Report evidence run identity disagrees with its evidence identity")
+    if record["model_run_id"] != record["evidence_model_run_id"]:
+        raise ValueError("Report evidence model identity disagrees with its evidence identity")
+    if record["artifact_id"] != record["evidence_artifact_ref"]:
+        raise ValueError("Report evidence artifact identity disagrees with its row identity")
+    if record["artifact_id"] != record["evidence_artifact_admission_ref"]:
+        raise ValueError("Report evidence admission identity disagrees with its row identity")
+
+
 def _validate_payload_contract(value: Any) -> None:
     if (
         not isinstance(value, dict)
@@ -172,6 +258,7 @@ def _validate_artifact_record(run_root: Path, record: Any) -> dict[str, Any]:
             raise ValueError(f"artifact record field {field} is invalid")
     if record["artifact_type"] not in _canonical_artifact_types():
         raise ValueError("artifact record kind is not in the canonical vocabulary")
+    _validate_report_evidence_record(record)
     if not isinstance(record["inputs"], list) or any(
         type(item) is not str or not item.strip() for item in record["inputs"]
     ):

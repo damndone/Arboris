@@ -2,7 +2,8 @@
 
 The egress boundary carries only opaque materialization references and digests.
 The provider-facing receipt is issued only after the server materializer has
-redacted and revalidated the actual payload.
+redacted and revalidated generic context, or validated central structured
+source admission. Neither materialization route grants permission to send.
 """
 
 from __future__ import annotations
@@ -760,7 +761,7 @@ def _make_context_materialization_store_v1() -> type:
         return authority
 
     def materialize(self, context: dict[str, object], *, selected_refs: tuple[str, ...]) -> ContextMaterializationResultV1:
-        state = state_for(self)
+        state_for(self)
         if type(context) is not dict:
             raise _error("EGRESS_NESTED_DICT_REQUIRED", "source context must be a built-in dict")
         _validate_json(context, "source_context")
@@ -782,6 +783,50 @@ def _make_context_materialization_store_v1() -> type:
         selected_context = {ref: context[ref] for ref in selected}
         redacted, observed, redacted_refs = _classify_and_redact(selected_context)
         frozen = _frozen_mapping(redacted, "materialized_context")
+        return persist_materialization(self, frozen, selected, observed, redacted_refs)
+
+    def materialize_structured_projection(self, admission: object) -> ContextMaterializationResultV1:
+        """Materialize central source proof, never a caller-provided payload.
+
+        The central validator checks issuer identity, current source/closure,
+        destination/consumer binding and budgets BEFORE returning a deeply
+        immutable canonical context. Its return tuple is not itself authority.
+        Sending still requires the existing policy/gateway/receipt chain and
+        the central final remote projection's full-payload equality check.
+        """
+        state_for(self)
+        # Runtime import: consumer_adapters itself imports the egress contracts.
+        from workbench.evidence.consumer_adapters import (
+            EvidenceProjectionError,
+            validate_server_owned_structured_projection_admission,
+        )
+
+        try:
+            context, observed = validate_server_owned_structured_projection_admission(admission)
+        except EvidenceProjectionError as exc:
+            raise _error("EGRESS_STRUCTURED_ADMISSION_INVALID", "central structured source admission is invalid") from exc
+        if type(observed) is not SensitivityClassV1 or observed is SensitivityClassV1.UNKNOWN:
+            raise _error("EGRESS_SENSITIVITY_DENIED", "structured source sensitivity must be known")
+        if not isinstance(context, Mapping) or set(context) != {"evidence:projection"}:
+            raise _error("EGRESS_SCHEMA_INVALID", "central structured context must contain exactly evidence:projection")
+        # No copying, resolving, redaction, or generic classification precedes
+        # central admission. Preserve every admitted field, including labels
+        # and dependency metadata, under the SOURCE RECORD sensitivity.
+        frozen = _frozen_mapping(_plain(context), "materialized_context")
+        return persist_materialization(self, frozen, ("evidence:projection",), observed, ())
+
+    def materialize_provider_request(self, admission: object) -> ContextMaterializationResultV1:
+        """Only a live host-classified and explicitly granted exact request."""
+        state_for(self)
+        from workbench.services.provider_egress import validate_provider_request_admission
+        context, sensitivity = validate_provider_request_admission(admission)
+        frozen = _frozen_mapping(context, "materialized_context")
+        return persist_materialization(self, frozen, ("source:provider-request",), sensitivity, ())
+
+    def persist_materialization(self, frozen, selected, observed, redacted_refs) -> ContextMaterializationResultV1:
+        # Closure-private: never expose an unchecked tuple/dict issuance method
+        # on the public store. Both callers above have completed admission.
+        state = state_for(self)
         digest = sha256_canonical(_plain(frozen))
         result_ref = f"materialization:{len(state['snapshots']) + 1}"
         payload = {
@@ -833,6 +878,8 @@ def _make_context_materialization_store_v1() -> type:
     ContextMaterializationStoreV1._project = _project
     ContextMaterializationStoreV1._authority_record = _authority_record
     ContextMaterializationStoreV1.materialize = materialize
+    ContextMaterializationStoreV1.materialize_structured_projection = materialize_structured_projection
+    ContextMaterializationStoreV1.materialize_provider_request = materialize_provider_request
     ContextMaterializationStoreV1.is_server_issued = is_server_issued
     ContextMaterializationStoreV1.resolve = resolve
     public_class = ContextMaterializationStoreV1

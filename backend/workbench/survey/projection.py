@@ -398,6 +398,11 @@ def project_survey_design(
         else:
             projected[field] = value
 
+    if projected.get("variance_method") not in {"linearization", "replicate"}:
+        invalid = True
+    if projected.get("variance_source") != "survey_design":
+        invalid = True
+
     if "warnings" in design:
         warnings = _bounded_warnings(design.get("warnings"))
         if warnings is None:
@@ -443,7 +448,10 @@ def project_survey_design(
             safe={
                 key: value
                 for key, value in projected.items()
-                if key in _STRING_FIELDS
+                if key in _COUNT_FIELDS
+                or key in _DEGREE_FIELDS
+                or key in _NUMERIC_FIELDS
+                or key in _STRING_FIELDS
                 or key in {
                     "variance_source",
                     "source_id",

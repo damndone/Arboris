@@ -243,7 +243,7 @@ def test_run_detail_returns_valid_generic_response_without_versioned_packet(
     assert response.json()["model_results"] == []
 
 
-def test_run_detail_maps_invalid_declared_packet_to_controlled_422(
+def test_run_detail_hides_invalid_declared_packet_behind_unavailable_typed_evidence(
     tmp_path: Path,
 ) -> None:
     from fastapi.testclient import TestClient
@@ -260,20 +260,20 @@ def test_run_detail_maps_invalid_declared_packet_to_controlled_422(
         "/runs/invalid-packet-run", params={"project_root": str(project_root)}
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 200, response.text
     body = response.json()
-    assert body == {
-        "error": {
-            "code": "UNKNOWN_MODEL_RESULT_PACKET_CONTRACT",
-            "message": "The versioned model result cannot be read.",
-            "details": {"artifact_path": _LMM_RESULT_PATH},
-        }
-    }
+    assert body["model_results"] == []
+    assert body["model_results_authority"] == "non-authoritative"
+    assert body["results_evidence"]["status"] == "unavailable"
+    assert body["results_evidence"]["facts"] == []
+    assert body["results_evidence_receipt"] is None
+    assert body["report_evidence"]["status"] == "unavailable"
+    assert body["report_evidence"]["facts"] == []
     assert "Traceback" not in response.text
     assert "untrusted.packet" not in response.text
 
 
-def test_run_detail_rejects_a_dangling_artifact_index_symlink(
+def test_run_detail_hides_a_dangling_artifact_index_behind_unavailable_typed_evidence(
     tmp_path: Path,
 ) -> None:
     """A lexical index entry is never silently treated as legacy absence."""
@@ -289,11 +289,13 @@ def test_run_detail_rejects_a_dangling_artifact_index_symlink(
         "/runs/dangling-index-run", params={"project_root": str(project_root)}
     )
 
-    assert response.status_code == 422
-    assert response.json() == {
-        "error": {
-            "code": "ARTIFACT_INDEX_INVALID",
-            "message": "The versioned model result cannot be read.",
-            "details": {},
-        }
-    }
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["model_results"] == []
+    assert body["model_results_authority"] == "non-authoritative"
+    assert body["results_evidence"]["status"] == "unavailable"
+    assert body["results_evidence"]["facts"] == []
+    assert body["results_evidence_receipt"] is None
+    assert body["report_evidence"]["status"] == "unavailable"
+    assert body["report_evidence"]["facts"] == []
+    assert "missing-index.json" not in response.text

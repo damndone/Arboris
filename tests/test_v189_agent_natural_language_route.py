@@ -24,6 +24,7 @@ from workbench.http.agent_routes import (
 )
 from workbench.llm.config import LLMConfig
 from tests.test_v189_agent_notebook_runtime_bridge import _runtime
+from tests.v189_cutover_test_host import make_test_identity_resolver
 
 
 COMPILER_PREVIEW_TOOL_ID = "compile_natural_language"
@@ -168,10 +169,12 @@ def _bound_runtime(
     )
     if identity:
         configure_notebook_cutover_identity_resolver(
-            lambda _request, _project_ref, _claimed_session_ref, _notebook_id: (
-                f"principal:agent:{session_id}",
-                _server_session_ref(session_id),
-                project_ref,
+            make_test_identity_resolver(
+                lambda _request, _project_ref, _claimed_session_ref, _notebook_id: (
+                    f"principal:agent:{session_id}",
+                    _server_session_ref(session_id),
+                    project_ref,
+                )
             ),
             app_instance=host_app,
         )

@@ -77,14 +77,11 @@ import {
   fetchRunDetail,
   executePipelineDraft,
   deletePipelineDraft,
-  waitForRunTerminal,
   type RerunResponseV1,
   type DraftExecutionResult,
 } from "../api";
-import { completeNotebookOptionExecution } from "../notebook/notebookApi";
 import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
 import { usePendingRun, type PendingRun } from "./usePendingRun";
-import { AgentSurfaceProvider } from "./agent/AgentSurfaceContext";
 import { PanelHost } from "./PanelHost";
 import "./panelHost.css";
 import { PanelWindowControls, PanelWindowDragHandle } from "./PanelWindowControls";
@@ -98,8 +95,8 @@ import {
   applyAgentNavigationRef,
 } from "./agent/agentNavigation";
 import { registerBuiltinFeatureViews } from "./agent/builtinFeatureViews";
-import { NotebookRouteView } from "../notebook/NotebookRouteView";
-import type { NotebookMaterializationResponse } from "../notebook/notebookApi";
+import { AgentCutoverProvider } from "./agent/AgentCutoverPanel";
+import { NotebookCutoverView } from "../notebook/NotebookCutoverView";
 
 type PendingFocusTarget = {
   runId: string;
@@ -749,26 +746,6 @@ function ForestWorkbench({
         validated_draft_hash: entry.validation?.validated_draft_hash ?? entry.draftHash,
         execution_mode: executionMode,
       });
-      const provenance = entry.draft?.notebook_provenance;
-      if (provenance?.notebook_id && provenance.option_id) {
-        // The Graph editor is another execution surface for a Notebook Draft.
-        // Reconcile only after the real run reaches a terminal state; otherwise
-        // Notebook could advance its active head on a merely-dispatched run.
-        void waitForRunTerminal(projectRoot, result.run_id).then((detail) => {
-          if (!detail) return;
-          return completeNotebookOptionExecution(
-            projectRoot,
-            provenance.notebook_id,
-            provenance.option_id,
-            {
-              run_id: result.run_id,
-            },
-          );
-        }).catch(() => {
-          // The Run remains authoritative; a remounted Notebook can retry the
-          // reconciliation from the persisted Draft provenance.
-        });
-      }
       if (executionMode === "genesis") {
         handleGenesisDraftExecuted(result, draftId);
         return;
@@ -862,11 +839,6 @@ function ForestWorkbench({
     <NotebookOnlyShell
       projectRoot={projectRoot}
       activeRunId={notebookActiveRunId}
-      onOpenMemorySettings={() => setSettingsOpen(true)}
-      onMaterializedDraft={(response) => {
-        draftHandlers.onForkDraft(response);
-        void refetch();
-      }}
     />
   ) : !shellRunId && selectedView === "home" ? (
     <HomeOnlyShell
@@ -907,27 +879,25 @@ function ForestWorkbench({
           >
             <LineageBridge model={model}>
               <CompareProvider>
-                <AgentSurfaceProvider projectRoot={projectRoot} runId={shellRunId}>
-                  <ReportWorkspaceProvider projectRoot={projectRoot}>
-                    <WorkbenchShell
-                      runId={shellRunId}
-                      projectRoot={projectRoot}
-                      onOpenGenesisWizard={openGenesisWizard}
-                      hasGenesisDraft={Boolean(draftOnlyRunId)}
-                      pendingFocusTarget={pendingFocusTarget}
-                      onPendingFocusConsumed={() => setPendingFocusTarget(null)}
-                      onPendingFocusRetry={() => {
-                        setPendingFocusTarget((current) =>
-                          current === null
-                            ? null
-                            : { ...current, attempts: current.attempts + 1 },
-                        );
-                        void refetch();
-                      }}
-                      onOpenSettings={() => setSettingsOpen(true)}
-                    />
-                  </ReportWorkspaceProvider>
-                </AgentSurfaceProvider>
+                <ReportWorkspaceProvider projectRoot={projectRoot}>
+                  <WorkbenchShell
+                    runId={shellRunId}
+                    projectRoot={projectRoot}
+                    onOpenGenesisWizard={openGenesisWizard}
+                    hasGenesisDraft={Boolean(draftOnlyRunId)}
+                    pendingFocusTarget={pendingFocusTarget}
+                    onPendingFocusConsumed={() => setPendingFocusTarget(null)}
+                    onPendingFocusRetry={() => {
+                      setPendingFocusTarget((current) =>
+                        current === null
+                          ? null
+                          : { ...current, attempts: current.attempts + 1 },
+                      );
+                      void refetch();
+                    }}
+                    onOpenSettings={() => setSettingsOpen(true)}
+                  />
+                </ReportWorkspaceProvider>
               </CompareProvider>
             </LineageBridge>
           </DraftActionsProvider>
@@ -1000,13 +970,9 @@ function HomeOnlyShell({
 function NotebookOnlyShell({
   projectRoot,
   activeRunId,
-  onOpenMemorySettings,
-  onMaterializedDraft,
 }: {
   projectRoot: string;
   activeRunId: string | null;
-  onOpenMemorySettings: () => void;
-  onMaterializedDraft: (response: NotebookMaterializationResponse) => void;
 }) {
   const navigate = useNavigate();
 
@@ -1047,12 +1013,7 @@ function NotebookOnlyShell({
           Graph
         </button>
       </div>
-      <NotebookRouteView
-        projectRoot={projectRoot}
-        activeRunId={activeRunId}
-        onOpenMemorySettings={onOpenMemorySettings}
-        onMaterializedDraft={onMaterializedDraft}
-      />
+      <NotebookCutoverView projectRoot={projectRoot} activeRunId={activeRunId} />
     </div>
   );
 }
@@ -1269,15 +1230,13 @@ function LegacyGraphWorkbench({
   return (
     <WorkbenchStateProvider runId={runId} validNodeKeys={validNodeKeys}>
       <LineageBridge model={model}>
-        <AgentSurfaceProvider projectRoot={projectRoot} runId={runId}>
-          <ReportWorkspaceProvider projectRoot={projectRoot}>
-            <WorkbenchShell
-              runId={runId}
-              projectRoot={projectRoot}
-              onOpenSettings={onOpenSettings}
-            />
-          </ReportWorkspaceProvider>
-        </AgentSurfaceProvider>
+        <ReportWorkspaceProvider projectRoot={projectRoot}>
+          <WorkbenchShell
+            runId={runId}
+            projectRoot={projectRoot}
+            onOpenSettings={onOpenSettings}
+          />
+        </ReportWorkspaceProvider>
       </LineageBridge>
     </WorkbenchStateProvider>
   );
@@ -2009,7 +1968,12 @@ function WorkbenchShell({
           ) : null
         }
       />
-      <AgentNavigationContext.Provider value={openAgentNavigation}>
+      <AgentCutoverProvider
+        projectRoot={projectRoot}
+        runId={runId}
+        enabled={state.bottomPanel === "agent"}
+      >
+        <AgentNavigationContext.Provider value={openAgentNavigation}>
         <div
           data-testid="workbench-main-row"
           style={{
@@ -2087,19 +2051,20 @@ function WorkbenchShell({
                 />
               )}
         </div>
-      </AgentNavigationContext.Provider>
-      {state.view !== "home" && <ContextMenu />}
-      {state.view !== "home" && <SearchPalette />}
-      {state.view !== "home" && <CommandPalette projectRoot={projectRoot} />}
-      {state.view !== "home" && (
-        <RawJsonModal
-          open={rawJsonOpen}
-          onClose={() => setRawJsonOpen(false)}
-          node={selectedNode}
-        />
-      )}
-      {reportReviewFloating}
-      {nodePanelFloating}
+        </AgentNavigationContext.Provider>
+        {state.view !== "home" && <ContextMenu />}
+        {state.view !== "home" && <SearchPalette />}
+        {state.view !== "home" && <CommandPalette projectRoot={projectRoot} />}
+        {state.view !== "home" && (
+          <RawJsonModal
+            open={rawJsonOpen}
+            onClose={() => setRawJsonOpen(false)}
+            node={selectedNode}
+          />
+        )}
+        {reportReviewFloating}
+        {nodePanelFloating}
+      </AgentCutoverProvider>
     </div>
   );
 }

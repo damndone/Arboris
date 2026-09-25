@@ -415,6 +415,43 @@ class EvidenceRegistryV1:
     def admit_bytes(self, **kwargs: object) -> ArtifactAdmissionV1:
         return self.admit_artifact(**kwargs)  # type: ignore[arg-type]
 
+    def rehydrate_artifact(self, record: object) -> ArtifactAdmissionV1:
+        """Rebuild one registry entry from a packet already verified on disk.
+
+        Rehydration is deliberately narrower than ``admit_artifact``: the
+        packet store must first validate the canonical packet/index binding and
+        then pass the exact typed ``ArtifactAdmissionV1``. The registry still
+        recomputes the complete content hash before retaining the record, so a
+        disk file is not promoted to authority merely because it parses.
+        """
+
+        self._require_authority()
+        if type(record) is not ArtifactAdmissionV1:
+            raise _registry_error(
+                "EVIDENCE_ADMISSION_INVALID",
+                "registry rehydration requires a typed artifact admission",
+            )
+        if record.scope_ref != self._scope_ref:
+            raise _registry_error("EVIDENCE_CROSS_SCOPE", "rehydrated artifact scope is not the registry scope")
+        if self._record_content_hash(record) != record.content_hash:
+            raise _registry_error("EVIDENCE_TAMPERED", "rehydrated artifact content hash is invalid")
+        raw = record.envelope.canonical_bytes()
+        with self._lock:
+            existing = self._records.get(record.artifact_id)
+            if existing is not None:
+                if existing.to_dict() != record.to_dict() or self._raw[record.artifact_id] != raw:
+                    raise _registry_error(
+                        "EVIDENCE_ARTIFACT_MUTATED",
+                        "rehydration conflicts with the live registry record",
+                    )
+                if record.artifact_id not in self._receipts:
+                    self._receipts[record.artifact_id] = self._mint_receipt(existing)
+                return existing
+            self._records[record.artifact_id] = record
+            self._raw[record.artifact_id] = raw
+            self._receipts[record.artifact_id] = self._mint_receipt(record)
+            return record
+
     def admit_file(
         self,
         *,

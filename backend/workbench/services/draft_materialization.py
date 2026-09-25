@@ -316,7 +316,23 @@ def _genesis_model_editor_schema(
     selected = model_type or "auto"
     if selected not in model_options:
         raise ValueError(f"MODEL_TYPE_UNSUPPORTED: {selected}")
-    if model_type is None:
+    # ``auto`` is the live selector capability, not a model-family contract.
+    # Keep it on the same two-phase selector schema after the first table patch
+    # instead of attempting to resolve it through model_family_contract().
+    if model_type is None or selected == "auto":
+        covariance_options = [
+            str(item["key"])
+            for item in manifest.get("covariance_options", [])
+            if isinstance(item, Mapping) and item.get("key")
+        ]
+        covariance_default = next(
+            (
+                str(item["key"])
+                for item in manifest.get("covariance_options", [])
+                if isinstance(item, Mapping) and item.get("key") and item.get("default") is True
+            ),
+            covariance_options[0] if covariance_options else "",
+        )
         return GENESIS_SELECTOR_SCHEMA_ID, [
             {
                 "key": "model_type",
@@ -338,6 +354,14 @@ def _genesis_model_editor_schema(
                 "label": "Regressors (X)",
                 "required": True,
                 "options": list(columns),
+            },
+            {
+                "key": "covariance",
+                "kind": "select",
+                "label": "Covariance",
+                "required": False,
+                "options": covariance_options,
+                "value": covariance_default,
             },
         ]
 

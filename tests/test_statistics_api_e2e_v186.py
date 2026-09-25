@@ -1,12 +1,10 @@
 import io
 import json
 import time
-from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
 from fastapi.testclient import TestClient
-from openpyxl import load_workbook
 
 from workbench.agent.context_tools import (
     NodeOperationContextProvider,
@@ -78,14 +76,22 @@ def test_http_run_exposes_advanced_statistics_evidence_to_consumers(tmp_path):
     run_id = response.json()["run_id"]
     detail = _wait_for_completed_run(client, project_root, run_id)
     assert detail["status"] == "completed"
-    assert detail["table_1"]
-    assert detail["labels"]["variable_labels"]["y"] == "Outcome"
-    assert detail["labels"]["value_labels"]["group"]["a"] == "Group A"
+    # These compatibility fields are deliberately not an HTTP authority.  A
+    # report/table projection needs a server-owned identity and lineage
+    # binding, so the unbound route remains unavailable instead of falling back
+    # to diagnostic_summary.json or report.html.
+    assert detail["table_1"] == []
+    assert detail["table_1_authority"] == "non-authoritative"
+    assert detail["statistical_evidence"] is None
+    assert detail["statistical_evidence_authority"] == "non-authoritative"
+    assert detail["labels"] == {"variable_labels": {}, "value_labels": {}}
+    assert detail["labels_authority"] == "non-authoritative"
 
     run_root = Path(project_root) / "runs" / run_id
     packet = read_json(run_root / "statistical_tests" / "evidence.json")
     assert packet["payload_schema"] == "workbench.statistics.evidence-packet"
-    assert detail["statistical_evidence"]["payload_schema"] == packet["payload_schema"]
+    assert detail["results_evidence"]["status"] == "unavailable"
+    assert detail["results_evidence"]["facts"] == []
     assert packet["schema_version"] == 1
     assert len(packet["dataset_ref"]["dataset_sha256"]) == 64
     assert packet["lineage_parent"] == "cleaned_dataset"
@@ -116,53 +122,30 @@ def test_http_run_exposes_advanced_statistics_evidence_to_consumers(tmp_path):
     assert evidence_record["step"] == "statistical_tests"
     assert evidence_record["inputs"] == ["cleaned_dataset"]
 
-    artifact_listing = client.get(
-        f"/runs/{run_id}/artifacts", params={"project_root": project_root}
-    )
-    assert artifact_listing.status_code == 200, artifact_listing.text
-    assert any(
-        record["artifact_id"] == "statistical_tests_evidence"
-        for group in artifact_listing.json()["groups"]
-        for record in group["items"]
-    )
-
     report_response = client.get(
         f"/runs/{run_id}/report", params={"project_root": project_root}
     )
-    assert report_response.status_code == 200, report_response.text
-    report_html = report_response.text
-    assert 'id="statistical-evidence"' in report_html
-    assert "anova_posthoc" in report_html
-    assert "cohens_d" in report_html
-    assert str(anova["statistic"]) in report_html
-    assert str(anova["p_value_corrected"]) in report_html
-
-    workbook_response = client.get(
-        f"/runs/{run_id}/artifacts/tables_xlsx",
-        params={"project_root": project_root},
-    )
-    assert workbook_response.status_code == 404, workbook_response.text
+    assert report_response.status_code == 409, report_response.text
+    report_error = report_response.json()["error"]
+    assert report_error["code"] == "REPORT_EVIDENCE_UNAVAILABLE"
+    report_projection = report_error["details"]["projection"]
+    assert report_projection["status"] == "unavailable"
+    assert report_projection["facts"] == []
+    assert str(anova["statistic"]) not in report_response.text
+    assert str(anova["p_value_corrected"]) not in report_response.text
 
     explicit_export = client.post(
         f"/runs/{run_id}/report/result-table-export",
         params={"project_root": project_root},
         json={"sections": ["regression_table", "statistical_evidence"]},
     )
-    assert explicit_export.status_code == 200, explicit_export.text
-    workbook = load_workbook(BytesIO(explicit_export.content), read_only=True)
-    assert "statistical_evidence" in workbook.sheetnames
-    evidence_sheet = workbook["statistical_evidence"]
-    evidence_rows = list(evidence_sheet.iter_rows(values_only=True))
-    headers = list(evidence_rows[0])
-    exported = [
-        dict(zip(headers, row, strict=True))
-        for row in evidence_rows[1:]
-    ]
-    exported_anova = next(
-        row for row in exported if row["test_type"] == "anova_posthoc"
-    )
-    assert exported_anova["statistic"] == anova["statistic"]
-    assert exported_anova["p_value"] == anova["p_value"]
+    assert explicit_export.status_code == 409, explicit_export.text
+    export_error = explicit_export.json()["error"]
+    assert export_error["code"] == "RESULT_TABLE_EXPORT_UNAVAILABLE"
+    assert export_error["details"]["projection"]["status"] == "unavailable"
+    assert export_error["details"]["projection"]["facts"] == []
+    assert str(anova["statistic"]) not in explicit_export.text
+    assert str(anova["p_value"]) not in explicit_export.text
 
     agent_projection = _bounded_statistics_evidence(run_root)
     assert agent_projection is not None
@@ -199,7 +182,17 @@ def test_http_run_exposes_advanced_statistics_evidence_to_consumers(tmp_path):
         },
         ToolContext(session_id="v186-statistics-agent-session"),
     )
-    agent_packet = agent_result["result_summary"]["statistical_evidence"]
+    # The canonical registry now admits the run's measurement_advisory record,
+    # so inspect_result_summary can expose the bounded typed projection.  It
+    # must still omit raw model/statistical files and use the indexed digest
+    # path rather than a legacy fallback.
+    result_summary = agent_result["result_summary"]
+    assert result_summary["available"] is True
+    assert result_summary["summary_status"] == "complete"
+    assert result_summary["summary_projection_status"] == "available"
+    assert "statistical_evidence" in result_summary
+
+    agent_packet = result_summary["statistical_evidence"]
     assert agent_packet["payload_schema"] == packet["payload_schema"]
     assert agent_packet["schema_version"] == packet["schema_version"]
     agent_anova = next(row for row in agent_packet["results"] if row.get("test_id") == anova["test_id"])

@@ -7,7 +7,11 @@ import {
   type DataOperationManifest,
   parseDataOperationManifest,
 } from "../../dataOperationManifest";
-import type { DataProfileV1, DataProfileVariableV1 } from "../../dataOperations";
+import type {
+  DataMetadataUpdateV1,
+  DataProfileV1,
+  DataProfileVariableV1,
+} from "../../dataOperations";
 
 export interface DataOperationSourceIdentity {
   source_run_id: string;
@@ -103,12 +107,29 @@ function boundedDataProfile(value: unknown): DataProfileV1 | null {
     const labels = Object.fromEntries(
       Object.entries(valueLabels).filter(([, label]) => typeof label === "string"),
     ) as Record<string, string>;
+    const optionalTextFields = ["missing_policy", "role", "sensitivity"] as const;
+    const optionalText = Object.fromEntries(
+      optionalTextFields.map((field) => {
+        const value = candidate[field];
+        return [field, value === null || value === undefined ? null : typeof value === "string" ? value : null];
+      }),
+    );
+    if (
+      optionalTextFields.some(
+        (field) => candidate[field] !== undefined && candidate[field] !== null && typeof candidate[field] !== "string",
+      )
+    ) {
+      return null;
+    }
     if (count === null || rate === null) return null;
     normalized.push({
       name: candidate.name,
       label: typeof candidate.label === "string" ? candidate.label : null,
       measurement_level:
         typeof candidate.measurement_level === "string" ? candidate.measurement_level : null,
+      missing_policy: optionalText.missing_policy,
+      role: optionalText.role,
+      sensitivity: optionalText.sensitivity,
       missingness: { count, rate },
       user_missing_values: userMissingValues,
       value_labels: labels,
@@ -142,16 +163,20 @@ function profileValueText(value: unknown): string {
   return String(value);
 }
 
-function profileMetadata(profile: DataProfileV1): Record<string, Record<string, unknown>> {
+function profileMetadata(profile: DataProfileV1): DataMetadataUpdateV1 {
   return Object.fromEntries(
-    profile.variables.map((variable) => [
-      variable.name,
-      {
-        label: variable.label ?? "",
+    profile.variables.map((variable) => {
+      const declaration: DataMetadataUpdateV1[string] = {
         user_missing_values: [...variable.user_missing_values],
         value_labels: { ...variable.value_labels },
-      },
-    ]),
+      };
+      if (variable.label) declaration.variable_label = variable.label;
+      if (variable.measurement_level) declaration.measurement_level = variable.measurement_level;
+      if (variable.missing_policy) declaration.missing_policy = variable.missing_policy;
+      if (variable.role) declaration.role = variable.role;
+      if (variable.sensitivity) declaration.sensitivity = variable.sensitivity;
+      return [variable.name, declaration];
+    }),
   );
 }
 
@@ -668,9 +693,12 @@ function MetadataEditor({
   onChange,
 }: {
   profile: DataProfileV1;
-  metadata: Record<string, Record<string, unknown>>;
-  onChange: (metadata: Record<string, Record<string, unknown>>) => void;
+  metadata: DataMetadataUpdateV1;
+  onChange: (metadata: DataMetadataUpdateV1) => void;
 }) {
+  const [newValueKeys, setNewValueKeys] = useState<Record<string, string>>({});
+  const [newValueLabels, setNewValueLabels] = useState<Record<string, string>>({});
+
   function update(variable: DataProfileVariableV1, field: string, value: unknown) {
     onChange({
       ...metadata,
@@ -681,12 +709,35 @@ function MetadataEditor({
     });
   }
 
+  function addValueLabel(variable: DataProfileVariableV1, labels: Record<string, unknown>) {
+    const value = (newValueKeys[variable.name] ?? "").trim();
+    const label = (newValueLabels[variable.name] ?? "").trim();
+    if (!value || !label || Object.prototype.hasOwnProperty.call(labels, value)) return;
+    update(variable, "value_labels", { ...labels, [value]: label });
+    setNewValueKeys((current) => ({ ...current, [variable.name]: "" }));
+    setNewValueLabels((current) => ({ ...current, [variable.name]: "" }));
+  }
+
   return (
     <section aria-label="Metadata editor" data-testid="data-metadata-editor">
       <h4>Metadata editor</h4>
       {profile.variables.map((variable) => {
         const current = metadata[variable.name] ?? {};
-        const label = typeof current.label === "string" ? current.label : variable.label ?? "";
+        const label =
+          typeof current.variable_label === "string" ? current.variable_label : variable.label ?? "";
+        const measurementLevel =
+          typeof current.measurement_level === "string"
+            ? current.measurement_level
+            : variable.measurement_level ?? "unknown";
+        const missingPolicy =
+          typeof current.missing_policy === "string"
+            ? current.missing_policy
+            : variable.missing_policy ?? "unknown";
+        const role = typeof current.role === "string" ? current.role : variable.role ?? "unknown";
+        const sensitivity =
+          typeof current.sensitivity === "string"
+            ? current.sensitivity
+            : variable.sensitivity ?? "unknown";
         const missing = Array.isArray(current.user_missing_values)
           ? current.user_missing_values.map(profileValueText).join(", ")
           : variable.user_missing_values.map(profileValueText).join(", ");
@@ -701,8 +752,58 @@ function MetadataEditor({
               <input
                 aria-label={`${variable.name} label`}
                 value={label}
-                onChange={(event) => update(variable, "label", event.target.value)}
+                onChange={(event) => update(variable, "variable_label", event.target.value)}
               />
+            </label>
+            <label>
+              {variable.name} measurement level
+              <select
+                aria-label={`${variable.name} measurement level`}
+                value={measurementLevel}
+                onChange={(event) => update(variable, "measurement_level", event.target.value)}
+              >
+                {[
+                  ["unknown", "Unknown"],
+                  ["nominal", "Nominal"],
+                  ["ordinal", "Ordinal"],
+                  ["scale", "Scale"],
+                  ["time", "Time"],
+                ].map(([value, text]) => (
+                  <option key={value} value={value}>
+                    {text}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {variable.name} missing policy
+              <input
+                aria-label={`${variable.name} missing policy`}
+                value={missingPolicy}
+                onChange={(event) => update(variable, "missing_policy", event.target.value)}
+              />
+            </label>
+            <label>
+              {variable.name} role
+              <input
+                aria-label={`${variable.name} role`}
+                value={role}
+                onChange={(event) => update(variable, "role", event.target.value)}
+              />
+            </label>
+            <label>
+              {variable.name} sensitivity
+              <select
+                aria-label={`${variable.name} sensitivity`}
+                value={sensitivity}
+                onChange={(event) => update(variable, "sensitivity", event.target.value)}
+              >
+                {["unknown", "public", "internal", "restricted"].map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               {variable.name} user missing values
@@ -727,6 +828,29 @@ function MetadataEditor({
                 />
               </label>
             ))}
+            <label>
+              {variable.name} value label key
+              <input
+                aria-label={`${variable.name} value label key`}
+                value={newValueKeys[variable.name] ?? ""}
+                onChange={(event) =>
+                  setNewValueKeys((current) => ({ ...current, [variable.name]: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              {variable.name} value label text
+              <input
+                aria-label={`${variable.name} value label text`}
+                value={newValueLabels[variable.name] ?? ""}
+                onChange={(event) =>
+                  setNewValueLabels((current) => ({ ...current, [variable.name]: event.target.value }))
+                }
+              />
+            </label>
+            <button type="button" onClick={() => addValueLabel(variable, labels)}>
+              Add value label for {variable.name}
+            </button>
           </fieldset>
         );
       })}
@@ -975,7 +1099,7 @@ function ParsedDataOperationsSection({
           profile={normalizedProfile}
           metadata={
             isObject(values.metadata)
-              ? (values.metadata as Record<string, Record<string, unknown>>)
+              ? (values.metadata as DataMetadataUpdateV1)
               : profileMetadata(normalizedProfile)
           }
           onChange={(metadata) => changeValue("metadata", metadata)}

@@ -15,7 +15,6 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchHome, WorkbenchRouteContainer } from "./WorkbenchRouteContainer";
 import * as api from "../api";
-import * as notebookApi from "../notebook/notebookApi";
 import type { GraphResponse } from "../lineage/types";
 import type { HeadSetResponse } from "../lineage/api/graphViewTypes";
 
@@ -715,10 +714,75 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.getByTestId("bottom-panel-body")).toBeInTheDocument();
     });
 
-    it("keeps the Agent composer interactive while the Agent panel is collapsed", async () => {
+    it("opens the safe Agent cutover panel from the default Logs tab", async () => {
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+        schema_version: "agent-notebook-cutover-identity.v1",
+        actor_ref: "principal:local:backend",
+        session_ref: "session:local:backend",
+        project_ref: "project:local:test",
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+      mountAt("/?tab=lineage&panel=logs");
+      await screen.findByTestId("graph-workbench");
+      expect(screen.getByTestId("panel-tab-logs")).toHaveAttribute("aria-selected", "true");
+
+      fireEvent.click(screen.getByTestId("panel-tab-agent"));
+
+      expect(await screen.findByTestId("agent-cutover-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("panel-tab-agent")).toHaveAttribute("aria-selected", "true");
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/agent/cutover/identity"), undefined));
+    });
+
+    it("keeps one Agent draft across compact and expanded shells and compiles exactly once", async () => {
       sessionStorage.removeItem("workbench:bottomPanelOpen:r1");
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((request) => {
+        const url = String(request);
+        if (url.includes("/agent/cutover/identity")) {
+          return Promise.resolve(new Response(JSON.stringify({
+            schema_version: "agent-notebook-cutover-identity.v1",
+            actor_ref: "principal:local:backend",
+            session_ref: "session:local:backend",
+            project_ref: "project:local:test",
+          }), { status: 200, headers: { "Content-Type": "application/json" } }));
+        }
+        if (url.endsWith("/agent/cutover/compile")) {
+          return Promise.resolve(new Response(JSON.stringify({
+            preview: {
+              schema_version: "cutover-compilation-preview.v1",
+              entrypoint: "agent",
+              operation_id: "cutover-operation:compact",
+              compilation_record_id: "compilation:compact",
+              record_digest: "a".repeat(64),
+              semantic_plan_hash: "b".repeat(64),
+              server_execution_identity: "compile:local:compact",
+              preview_fingerprint: "c".repeat(64),
+              plan_diff: { effect: "read", target_ref: "run:r1" },
+              clarifications: [],
+            },
+            binding: {
+              schema_version: "server-proposal-binding.v1",
+              proposal_id: "cutover-proposal:compact",
+              proposal_revision: 1,
+              proposal_fingerprint: "d".repeat(64),
+              semantic_plan_hash: "b".repeat(64),
+              actor_ref: "principal:local:backend",
+              session_ref: "session:local:backend",
+              project_ref: "project:local:test",
+              confirmation_id: "confirmation:cutover:compact",
+              compilation_record_id: "compilation:compact",
+            },
+          }), { status: 200, headers: { "Content-Type": "application/json" } }));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ detail: "not mocked" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }));
+      });
       mountAt("/?tab=lineage&panel=agent");
       await screen.findByTestId("graph-workbench");
+      await waitFor(() => expect(fetchMock.mock.calls.some(
+        ([request]) => String(request).includes("/agent/cutover/identity"),
+      )).toBe(true));
 
       fireEvent.click(screen.getByRole("button", { name: "Close bottom panel" }));
 
@@ -726,14 +790,17 @@ describe("WorkbenchRouteContainer", () => {
       const compactComposer = screen.getByTestId("agent-compact-composer");
       const input = screen.getByRole("textbox", { name: "Ask Agent" });
       expect(compactComposer).toContainElement(input);
-      fireEvent.click(input);
-      expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "false");
-
-      fireEvent.click(screen.getByRole("button", { name: "Expand Agent panel" }));
+      fireEvent.change(input, { target: { value: "检查当前图并给出证据" } });
+      fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 
       expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "true");
-      expect(screen.getByTestId("agent-composer")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Agent request" })).toHaveValue("检查当前图并给出证据");
+      expect(await screen.findByTestId("agent-cutover-preview")).toHaveTextContent("run:r1");
       expect(screen.getByTestId("panel-tab-agent")).toHaveAttribute("aria-selected", "true");
+      const urls = fetchMock.mock.calls.map(([request]) => String(request));
+      expect(urls.filter((url) => url.endsWith("/agent/cutover/compile"))).toHaveLength(1);
+      expect(urls.some((url) => url.endsWith("/confirm"))).toBe(false);
+      expect(urls.some((url) => url.endsWith("/execute"))).toBe(false);
       sessionStorage.removeItem("workbench:bottomPanelOpen:r1");
     });
 
@@ -1709,13 +1776,10 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
     expect(screen.queryByTestId("forest-head-run_child")).toBeNull();
   });
 
-  it("reconciles a Notebook option when the Graph draft editor executes it", async () => {
+  it("does not reconcile a Graph draft through the retired Notebook execution route", async () => {
     vi.spyOn(api, "waitForRunTerminal").mockResolvedValue({
       status: "completed",
     } as never);
-    const completeSpy = vi
-      .spyOn(notebookApi, "completeNotebookOptionExecution")
-      .mockResolvedValue({} as never);
 
     await mountAndExecute({
       forestBody: soloForest,
@@ -1724,13 +1788,10 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
     });
 
     await flush();
-    expect(completeSpy).toHaveBeenCalledWith(
+    expect(api.executePipelineDraft).toHaveBeenCalledWith(
       "/proj",
-      "nb_1",
-      "opt_1",
-      {
-        run_id: "run_child",
-      },
+      "d1",
+      expect.objectContaining({ execution_mode: "rerun_child" }),
     );
   });
 

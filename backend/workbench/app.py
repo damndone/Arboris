@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+import hashlib
+import os
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +21,10 @@ from fastapi import FastAPI
 
 from .agent.cutover_runtime import AgentNotebookRuntimeV1
 from .agent.authority import HostAuthorityHandleV1
-from .agent.planning_contracts import DeploymentIdentityResolverV1
+from .agent.planning_contracts import (
+    DeploymentIdentityResolverV1,
+    LocalDeploymentIdentityResolverV1,
+)
 from .agent.orchestrator import AgentNotebookCompilerV1
 from .agent.trace import TraceSchemaDescriptor, register_trace_catalog
 from .api_errors import register_error_handlers
@@ -46,7 +51,12 @@ from .services.results_service import (
     ServerOwnedReportEvidencePersistenceV1,
     UnavailableReportEvidenceCapabilityV1,
     configure_report_evidence_persistence,
+    configure_report_evidence_owner_rehydrator,
 )
+from .services.report_evidence_owner_factory import (
+    ServerOwnedReportEvidenceOwnerFactoryV1,
+)
+from .services.local_host_bootstrap import LocalWorkbenchHostBundle
 from .http.agent_routes import (
     configure_agent_notebook_cutover_authority,
     new_agent_notebook_cutover_authority_store,
@@ -67,6 +77,21 @@ from .http.statistical_exploration_routes import router as statistical_explorati
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     _validate_supported_deployment()
+    local_bundle = None
+    local_root_value = os.environ.get("WORKBENCH_LOCAL_PROJECT_ROOT")
+    if local_root_value:
+        from .services.local_host_bootstrap import bootstrap_local_workbench_host
+
+        local_root = Path(local_root_value).expanduser().absolute().resolve(strict=False)
+        root_digest = hashlib.sha256(str(local_root).encode("utf-8")).hexdigest()[:32]
+        local_bundle = bootstrap_local_workbench_host(
+            project_root=local_root,
+            project_ref=os.environ.get("WORKBENCH_LOCAL_PROJECT_REF", f"project:local:{root_digest}"),
+            session_ref=os.environ.get("WORKBENCH_LOCAL_SESSION_REF", "session:local:backend"),
+            actor_ref=os.environ.get("WORKBENCH_LOCAL_ACTOR_REF", "principal:local:backend"),
+            app_instance=_app,
+        )
+        _app.state.local_host_bundle = local_bundle
     persistence = getattr(
         _app.state,
         "report_evidence_persistence",
@@ -90,7 +115,11 @@ async def _lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        configure_report_evidence_owner_rehydrator(None)
         configure_report_evidence_persistence(None)
+        if local_bundle is not None:
+            local_bundle.close()
+            _app.state.local_host_bundle = None
         # After shutdown, retain only the typed bootstrap result.  The
         # pre-start state remains empty and therefore cannot be mistaken for a
         # configured product owner.
@@ -115,6 +144,8 @@ app.state.notebook_cutover_identity_resolver = None
 # the product's default persistence owner.
 app.state.report_evidence_persistence = None
 app.state.report_evidence_identity_resolver = None
+app.state.report_evidence_owner_factory = None
+app.state.local_host_bundle = None
 app.state.capability_factory_runtime = None
 app.state.domain_memory_service = None
 app.state.domain_memory_review_service = None
@@ -138,6 +169,10 @@ def _bootstrap_app(app_instance: FastAPI | None) -> FastAPI:
         target.state.report_evidence_persistence = None
     if not hasattr(target.state, "report_evidence_identity_resolver"):
         target.state.report_evidence_identity_resolver = None
+    if not hasattr(target.state, "report_evidence_owner_factory"):
+        target.state.report_evidence_owner_factory = None
+    if not hasattr(target.state, "local_host_bundle"):
+        target.state.local_host_bundle = None
     return target
 
 
@@ -161,6 +196,28 @@ def configure_report_evidence_owner(
         raise TypeError("identity_resolver must be callable or None")
     target.state.report_evidence_persistence = persistence
     target.state.report_evidence_identity_resolver = identity_resolver
+
+
+def configure_report_evidence_owner_factory(
+    factory: ServerOwnedReportEvidenceOwnerFactoryV1 | None,
+    *,
+    app_instance: FastAPI | None = None,
+) -> None:
+    """Install the host-created per-run Report owner factory.
+
+    A factory is optional at bootstrap, but a non-``None`` value must already
+    be bound to the external evidence authority, registry, scope, and
+    canonical project root.  The app never constructs one from request data.
+    """
+
+    target = _bootstrap_app(app_instance)
+    if factory is not None and type(factory) is not ServerOwnedReportEvidenceOwnerFactoryV1:
+        raise TypeError(
+            "factory must be a server-owned Report owner factory or None"
+        )
+    if factory is not None:
+        factory._require_host_authority()  # type: ignore[attr-defined]
+    target.state.report_evidence_owner_factory = factory
 
 
 def register_v183_trace_catalogs() -> None:
@@ -244,21 +301,27 @@ def configure_agent_notebook_runtime(
 
 
 def configure_notebook_cutover_identity_resolver(
-    resolver: Callable[..., tuple[str, str] | tuple[str, str, str]] | None,
+    resolver: DeploymentIdentityResolverV1 | LocalDeploymentIdentityResolverV1 | None,
     *,
     app_instance: FastAPI | None = None,
 ) -> None:
     """Install the server-owned identity/session binding for Notebook cutover.
 
-    The resolver is supplied by the host authentication/session layer and is
-    called as ``resolver(request, project_ref, claimed_session_ref, notebook_id)``.
-    Notebook and Agent requests may only assert the returned actor/session;
-    they cannot mint either identity themselves.
+    The resolver must already be the deployment-admitted
+    ``DeploymentIdentityResolverV1`` produced by the external host authority
+    bootstrap.  A bare callable is intentionally rejected: its return value
+    cannot prove that the scope was issued and revalidated by the host.
     """
 
+    if resolver is not None and type(resolver) not in {
+        DeploymentIdentityResolverV1,
+        LocalDeploymentIdentityResolverV1,
+    }:
+        raise TypeError(
+            "resolver must be a DeploymentIdentityResolverV1, "
+            "LocalDeploymentIdentityResolverV1, or None"
+        )
     target = _bootstrap_app(app_instance)
-    if resolver is not None and not callable(resolver):
-        raise TypeError("resolver must be callable or None")
     target.state.notebook_cutover_identity_resolver = resolver
 
 
@@ -291,6 +354,7 @@ def bootstrap_builtin_agent_notebook_runtime(
     data_project_root: Path | str | None = None,
     data_consumer_execution_port: Any | None = None,
     classification_execution_port: Any | None = None,
+    workflow_post_estimation_execution_port: Any | None = None,
     ttl_seconds: int = 900,
     clock: Callable[[], Any] | None = None,
     app_instance: FastAPI | None = None,
@@ -314,6 +378,7 @@ def bootstrap_builtin_agent_notebook_runtime(
         data_project_root=data_project_root,
         data_consumer_execution_port=data_consumer_execution_port,
         classification_execution_port=classification_execution_port,
+        workflow_post_estimation_execution_port=workflow_post_estimation_execution_port,
         ttl_seconds=ttl_seconds,
         clock=clock,
     )
@@ -335,11 +400,13 @@ def bootstrap_builtin_agent_notebook_host(
     host_compiler: Any,
     report_evidence_persistence: ServerOwnedReportEvidencePersistenceV1
     | UnavailableReportEvidenceCapabilityV1,
-    notebook_identity_resolver: DeploymentIdentityResolverV1,
+    notebook_identity_resolver: DeploymentIdentityResolverV1 | LocalDeploymentIdentityResolverV1,
+    report_evidence_owner_factory: ServerOwnedReportEvidenceOwnerFactoryV1 | None = None,
     report_identity_resolver: Callable[..., object] | None = None,
     data_project_root: Path | str | None = None,
     data_consumer_execution_port: Any | None = None,
     classification_execution_port: Any | None = None,
+    workflow_post_estimation_execution_port: Any | None = None,
     ttl_seconds: int = 900,
     clock: Callable[[], Any] | None = None,
     app_instance: FastAPI | None = None,
@@ -365,7 +432,21 @@ def bootstrap_builtin_agent_notebook_host(
         raise TypeError(
             "report_evidence_persistence must be a server-owned Report capability"
         )
-    if type(notebook_identity_resolver) is not DeploymentIdentityResolverV1:
+    if report_evidence_owner_factory is not None and type(report_evidence_owner_factory) is not ServerOwnedReportEvidenceOwnerFactoryV1:
+        raise TypeError(
+            "report_evidence_owner_factory must be a server-owned Report owner factory or None"
+        )
+    if report_evidence_owner_factory is not None:
+        report_evidence_owner_factory._require_host_authority()  # type: ignore[attr-defined]
+        report_evidence_owner_factory.validate_runtime_binding(
+            project_ref=project_ref,
+            session_ref=session_ref,
+            data_project_root=data_project_root,
+        )
+    if type(notebook_identity_resolver) not in {
+        DeploymentIdentityResolverV1,
+        LocalDeploymentIdentityResolverV1,
+    }:
         raise ValueError(
             "notebook_identity_resolver must be a deployment identity resolver"
         )
@@ -386,6 +467,7 @@ def bootstrap_builtin_agent_notebook_host(
         data_project_root=data_project_root,
         data_consumer_execution_port=data_consumer_execution_port,
         classification_execution_port=classification_execution_port,
+        workflow_post_estimation_execution_port=workflow_post_estimation_execution_port,
         ttl_seconds=ttl_seconds,
         clock=clock,
     )
@@ -408,6 +490,9 @@ def bootstrap_builtin_agent_notebook_host(
         "report_evidence_identity_resolver": getattr(
             target.state, "report_evidence_identity_resolver", None
         ),
+        "report_evidence_owner_factory": getattr(
+            target.state, "report_evidence_owner_factory", None
+        ),
         "notebook_cutover_identity_resolver": getattr(
             target.state, "notebook_cutover_identity_resolver", None
         ),
@@ -420,6 +505,7 @@ def bootstrap_builtin_agent_notebook_host(
     try:
         target.state.report_evidence_persistence = report_evidence_persistence
         target.state.report_evidence_identity_resolver = report_identity_resolver
+        target.state.report_evidence_owner_factory = report_evidence_owner_factory
         target.state.notebook_cutover_identity_resolver = notebook_identity_resolver
         configure_agent_notebook_runtime_bundle(
             project_ref=project_ref,
@@ -433,6 +519,9 @@ def bootstrap_builtin_agent_notebook_host(
         ]
         target.state.report_evidence_identity_resolver = previous_state[
             "report_evidence_identity_resolver"
+        ]
+        target.state.report_evidence_owner_factory = previous_state[
+            "report_evidence_owner_factory"
         ]
         target.state.notebook_cutover_identity_resolver = previous_state[
             "notebook_cutover_identity_resolver"
@@ -479,10 +568,12 @@ def bootstrap_builtin_agent_notebook_host_from_deployment(
     host_compiler: Any,
     report_evidence_persistence: ServerOwnedReportEvidencePersistenceV1
     | UnavailableReportEvidenceCapabilityV1,
+    report_evidence_owner_factory: ServerOwnedReportEvidenceOwnerFactoryV1 | None = None,
     report_identity_resolver: Callable[..., object] | None = None,
     data_project_root: Path | str | None = None,
     data_consumer_execution_port: Any | None = None,
     classification_execution_port: Any | None = None,
+    workflow_post_estimation_execution_port: Any | None = None,
     ttl_seconds: int = 900,
     clock: Callable[[], Any] | None = None,
     app_instance: FastAPI | None = None,
@@ -500,14 +591,65 @@ def bootstrap_builtin_agent_notebook_host_from_deployment(
         evidence_committer=evidence_committer,
         host_compiler=host_compiler,
         report_evidence_persistence=report_evidence_persistence,
+        report_evidence_owner_factory=report_evidence_owner_factory,
         notebook_identity_resolver=identity_resolver,
         report_identity_resolver=report_identity_resolver,
         data_project_root=data_project_root,
         data_consumer_execution_port=data_consumer_execution_port,
         classification_execution_port=classification_execution_port,
+        workflow_post_estimation_execution_port=workflow_post_estimation_execution_port,
         ttl_seconds=ttl_seconds,
         clock=clock,
         app_instance=app_instance,
+    )
+
+
+def install_local_workbench_host(
+    bundle: LocalWorkbenchHostBundle,
+    *,
+    app_instance: FastAPI | None = None,
+) -> AgentNotebookRuntimeV1:
+    """Install the local Darwin bundle through the same shared cutover path.
+
+    This is called only by local process startup after the bundle has admitted
+    its project root, authority, registry and owner factory. HTTP/LLM input
+    cannot invoke it or supply any of its dependencies.
+    """
+
+    if type(bundle) is not LocalWorkbenchHostBundle:
+        raise TypeError("local Workbench host bundle is required")
+    from .providers.catalog import load_builtin_catalog
+    from .services.results_service import (
+        UnavailableReportEvidenceCapabilityV1,
+        configure_report_evidence_owner_rehydrator,
+        report_evidence_request_identity_for_run,
+    )
+
+    target = _bootstrap_app(app_instance)
+    root = bundle.workflow_endpoint.project_root
+
+    def report_identity(_request: object, run_id: str) -> object:
+        return report_evidence_request_identity_for_run(
+            project_root=root,
+            run_id=run_id,
+        )
+
+    configure_report_evidence_owner_rehydrator(
+        bundle.report_owner_factory.rehydrate_for_run,
+    )
+    return bootstrap_builtin_agent_notebook_host(
+        project_ref=bundle.identity.project_ref,
+        session_ref=bundle.identity.session_ref,
+        provider_catalog=load_builtin_catalog(),
+        evidence_committer=bundle.evidence_committer,
+        host_compiler=bundle.host_compiler,
+        report_evidence_persistence=UnavailableReportEvidenceCapabilityV1(),
+        notebook_identity_resolver=bundle.identity_resolver,  # type: ignore[arg-type]
+        report_evidence_owner_factory=bundle.report_owner_factory,
+        report_identity_resolver=report_identity,
+        data_project_root=root,
+        workflow_post_estimation_execution_port=bundle.workflow_post_estimation_execution_port,
+        app_instance=target,
     )
 
 

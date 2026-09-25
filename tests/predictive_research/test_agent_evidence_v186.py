@@ -97,21 +97,18 @@ def test_agent_statistics_evidence_covers_every_test_family_not_just_the_largest
     assert {"anova_posthoc", "eta_squared", "cohens_d"} <= observed, observed
 
 
-def test_result_summary_tool_advertises_the_statistics_evidence_it_carries(tmp_path) -> None:
+def test_result_summary_tool_routes_statistics_to_registered_section_tools(tmp_path) -> None:
     """The Agent picks tools from their descriptors alone.
 
-    inspect_result_summary is the only place post-hoc, effect-size and
-    assumption tests are reachable, so a descriptor that does not say so makes
-    the Agent report that those tests were never run.
+    Summary selects coefficients, not every run section. Statistics questions
+    must discover the actual section reader rather than a legacy raw packet.
     """
     from workbench.agent.context_tools import NodeOperationContextProvider
 
     provider = NodeOperationContextProvider(tmp_path)
-    definition = next(
-        item
-        for item in provider.tool_definitions(chain_id="c", session_id="s")
-        if item.tool_id == "inspect_result_summary"
-    )
+    definitions = {item.tool_id: item for item in
+                   provider.tool_definitions(chain_id="c", session_id="s")}
+    definition = definitions["inspect_result_summary"]
 
     descriptor = definition.descriptor()
     description = str(descriptor.get("description") or "")
@@ -119,6 +116,12 @@ def test_result_summary_tool_advertises_the_statistics_evidence_it_carries(tmp_p
     lowered = description.lower()
     assert "statistic" in lowered
     assert "post-hoc" in lowered or "posthoc" in lowered
+    assert "effect size" in lowered and "assumption" in lowered
+    assert "use inspect_result_section" in lowered
+    assert "coefficient estimates" in lowered
+    section = definitions["inspect_result_section"]
+    assert "statistical_tests" in section.input_schema["properties"]["section_type"]["enum"]
+    assert section.side_effect == "none"
 
 
 def test_a_dedicated_statistical_evidence_tool_is_offered_to_the_agent(tmp_path) -> None:
@@ -143,12 +146,12 @@ def test_a_dedicated_statistical_evidence_tool_is_offered_to_the_agent(tmp_path)
     assert "post-hoc" in str(definition.descriptor().get("description") or "").lower()
 
 
-def test_global_agent_can_reach_statistical_evidence(tmp_path) -> None:
-    """The bottom-panel Agent runs on global_tool_definitions, not the chain set.
+def test_global_agent_rejects_unowned_statistical_evidence(tmp_path) -> None:
+    """A raw statistical packet is not an Agent evidence authority.
 
-    None of those seven tools exposed the statistics packet, so the Agent
-    answered "those tests were never run" for a run that had persisted 138
-    statistical evidence rows.
+    v1.8.9 consumers must read the server-owned projection, receipt, and
+    project/run binding.  A legacy-shaped evidence.json without that binding
+    is deliberately unavailable instead of becoming an implicit fallback.
     """
     from workbench.agent.context_tools import (
         InspectProjectStatisticalEvidenceRequest,
@@ -187,7 +190,11 @@ def test_global_agent_can_reach_statistical_evidence(tmp_path) -> None:
     payload = provider.inspect_project_statistical_evidence(
         InspectProjectStatisticalEvidenceRequest(run_ids=(run_id,))
     )
-    rows = payload["runs"][0]["statistical_evidence"]["results"]
-    posthoc = next(row for row in rows if row["test_type"] == "anova_posthoc")
-    assert posthoc["statistic"] == pytest.approx(0.30106559564465674)
-    assert posthoc["correction"] == "tukey"
+    run = payload["runs"][0]
+    assert run["projection_status"] == "unavailable"
+    assert run["unavailable_reason"] in {
+        "EVIDENCE_OWNER_REQUEST_REQUIRED",
+        "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+        "EVIDENCE_OWNER_CONTEXT_CONFLICT",
+    }
+    assert "0.30106559564465674" not in str(payload)

@@ -17,10 +17,11 @@ from workbench.agent.model import (
     ModelStreamEvent,
     OpenAICompatibleModelAdapter,
 )
-from workbench.agent.tools import ToolDefinition, ToolRegistry
+from workbench.agent.tools import ToolDefinition, ToolRegistry, ToolVisibleError
 from workbench.llm.config import LLMConfig
 from workbench.llm import client as llm_client
 from workbench.agent.session import JsonlSessionRepository
+from tests.test_llm_providers import admitted_adapter, egress_host
 
 
 def test_tool_registry_surfaces_analysis_loop_source_errors_to_agent() -> None:
@@ -213,7 +214,7 @@ def test_tool_registry_validates_and_executes_allowlisted_tool() -> None:
     assert registry.descriptors()[0]["tool_id"] == "inspect_node_context"
 
 
-def test_tool_registry_returns_bounded_partial_output_instead_of_budget_error() -> None:
+def test_tool_registry_rejects_oversize_without_partial_evidence() -> None:
     async def handler(arguments, context):
         return {
             "request_id": "request-1",
@@ -245,11 +246,91 @@ def test_tool_registry_returns_bounded_partial_output_instead_of_budget_error() 
         )
     )
 
+    assert result.ok is False
+    assert result.error == "tool_output_budget_exceeded"
+    assert result.output is None
+    assert len(json.dumps(result.to_payload(), ensure_ascii=False).encode("utf-8")) <= 240
+
+
+@pytest.mark.parametrize("extra", [0, 1])
+@pytest.mark.parametrize("character", ["x", "界"])
+def test_tool_registry_final_utf8_budget_boundary(extra, character) -> None:
+    output = {"qualification": character * 60}
+    payload = {"ok": True, "output": output, "error": None}
+    size = len(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    registry = ToolRegistry()
+    registry.register(ToolDefinition(
+        tool_id="inspect", version="v1", input_schema={"type": "object"},
+        side_effect="none", handler=lambda _a, _c: output,
+        max_output_budget=size - extra,
+    ))
+    result = asyncio.run(registry.execute(
+        {"tool_id": "inspect", "arguments": {"max_output_budget": 999999}},
+        session_id="utf8-registry",
+    ))
+    assert result.ok is (extra == 0)
+    assert result.output == (output if extra == 0 else None)
+    assert result.error == (None if extra == 0 else "tool_output_budget_exceeded")
+    assert len(json.dumps(result.to_payload(), ensure_ascii=False).encode("utf-8")) <= size - extra
+
+
+@pytest.mark.parametrize("limit", [262144, None])
+def test_tool_registry_preserves_large_schema_and_undeclared_budget(limit) -> None:
+    output = {"schema": {"description": "完整词表" * 10000}}
+    registry = ToolRegistry()
+    registry.register(ToolDefinition(
+        tool_id="inspect_operation_contract", version="v1", input_schema={"type": "object"},
+        side_effect="none", handler=lambda _a, _c: output, max_output_budget=limit,
+    ))
+    result = asyncio.run(registry.execute(
+        {"tool_id": "inspect_operation_contract", "arguments": {"max_output_budget": 1}},
+        session_id="schema-budget",
+    ))
     assert result.ok is True
-    assert result.error is None
-    assert len(json.dumps(result.output, ensure_ascii=False, sort_keys=True)) <= 240
-    assert result.output["status"] == "partial"
-    assert "large_section" in result.output["omitted_sections"]
+    assert result.output == output
+    assert registry.descriptors()[0]["max_output_budget"] == limit
+
+
+@pytest.mark.parametrize("limit", [256, None])
+def test_tool_registry_preserves_serialization_failure_semantics(limit) -> None:
+    output = {"unsupported": object()}
+    registry = ToolRegistry()
+    registry.register(ToolDefinition(
+        tool_id="inspect", version="v1", input_schema={"type": "object"},
+        side_effect="none", handler=lambda _a, _c: output, max_output_budget=limit,
+    ))
+    result = asyncio.run(registry.execute(
+        {"tool_id": "inspect", "arguments": {}}, session_id="serialization",
+    ))
+    if limit is None:
+        # Without a declaration the original Registry did not serialize output.
+        assert result.ok is True and result.output is output
+    else:
+        assert result.ok is False and result.output is None
+        assert result.error == "TypeError"
+
+
+@pytest.mark.parametrize("extra", [0, 1])
+def test_tool_registry_error_details_final_utf8_boundary(extra) -> None:
+    message = "完整拒绝原因" * 30
+
+    def handler(_arguments, _context):
+        raise ToolVisibleError(message)
+
+    expected = {"ok": False, "output": None, "error": "ToolVisibleError",
+                "error_details": [{"message": message}]}
+    size = len(json.dumps(expected, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    registry = ToolRegistry()
+    registry.register(ToolDefinition(
+        tool_id="inspect", version="v1", input_schema={"type": "object"},
+        side_effect="none", handler=handler, max_output_budget=size - extra,
+    ))
+    result = asyncio.run(registry.execute(
+        {"tool_id": "inspect", "arguments": {}}, session_id="failure-bytes",
+    ))
+    assert result.to_payload() == (expected if extra == 0 else {
+        "ok": False, "output": None, "error": "tool_output_budget_exceeded",
+    })
 
 
 def test_agent_core_round_trips_tool_call_and_persists_tool_result(tmp_path: Path) -> None:
@@ -507,10 +588,10 @@ def test_completed_workflow_answer_uses_the_same_two_evidence_calls_for_eight_or
     assert eight == twenty == (2, 3)
 
 
-def test_openai_compatible_adapter_normalizes_provider_tool_calls(monkeypatch) -> None:
+def test_openai_compatible_adapter_normalizes_provider_tool_calls(monkeypatch, admitted_adapter) -> None:
     config = LLMConfig(base_url="https://api.example.test", api_key="secret", model="deepseek-chat")
 
-    async def fake_stream(messages, actual_config, *, tools):
+    async def fake_stream(messages, actual_config, *, tools, **_egress):
         assert actual_config == config
         assert tools[0] == {
             "type": "function",
@@ -538,7 +619,7 @@ def test_openai_compatible_adapter_normalizes_provider_tool_calls(monkeypatch) -
     )
 
     async def scenario() -> None:
-        adapter = OpenAICompatibleModelAdapter(config)
+        adapter = admitted_adapter(config)
         request = ModelRequest(
             request_id="request-tools",
             messages=[{"role": "user", "content": "inspect"}],
@@ -557,7 +638,7 @@ def test_openai_compatible_adapter_normalizes_provider_tool_calls(monkeypatch) -
     asyncio.run(scenario())
 
 
-def test_cancellable_openai_adapter_propagates_task_cancellation(monkeypatch) -> None:
+def test_cancellable_openai_adapter_propagates_task_cancellation(monkeypatch, admitted_adapter) -> None:
     config = LLMConfig(
         base_url="https://api.example.test",
         api_key="secret",
@@ -567,7 +648,7 @@ def test_cancellable_openai_adapter_propagates_task_cancellation(monkeypatch) ->
     started = asyncio.Event()
     cancelled = False
 
-    async def slow_stream(messages, actual_config, *, tools):
+    async def slow_stream(messages, actual_config, *, tools, **_egress):
         nonlocal cancelled
         assert actual_config == config
         started.set()
@@ -584,7 +665,7 @@ def test_cancellable_openai_adapter_propagates_task_cancellation(monkeypatch) ->
     )
 
     async def scenario() -> None:
-        adapter = agent_model.CancellableOpenAICompatibleModelAdapter(config)
+        adapter = admitted_adapter(config, adapter_type=agent_model.CancellableOpenAICompatibleModelAdapter)
         request = ModelRequest(
             request_id="request-cancellable",
             messages=[{"role": "user", "content": "plan"}],
@@ -604,7 +685,7 @@ def test_cancellable_openai_adapter_propagates_task_cancellation(monkeypatch) ->
     assert cancelled is True
 
 
-def test_openai_wire_format_converts_workbench_tool_descriptor(monkeypatch) -> None:
+def test_openai_wire_format_converts_workbench_tool_descriptor(monkeypatch, admitted_adapter) -> None:
     config = LLMConfig(
         base_url="https://api.example.test",
         api_key="secret",
@@ -653,7 +734,7 @@ def test_openai_wire_format_converts_workbench_tool_descriptor(monkeypatch) -> N
                 handler=lambda arguments, context: arguments,
             )
         )
-        adapter = OpenAICompatibleModelAdapter(config)
+        adapter = admitted_adapter(config)
         request = ModelRequest(
             request_id="request-wire",
             messages=[{"role": "user", "content": "inspect"}],
@@ -755,6 +836,7 @@ def test_existing_openai_compatible_client_wires_and_normalizes_tool_calls(
 
 def test_openai_compatible_adapter_keeps_first_malformed_typed_tool_response(
     monkeypatch,
+    admitted_adapter,
 ) -> None:
     """A malformed typed call is first-attempt evidence, never retried or repaired."""
 
@@ -798,7 +880,7 @@ def test_openai_compatible_adapter_keeps_first_malformed_typed_tool_response(
     )
 
     async def scenario() -> None:
-        adapter = OpenAICompatibleModelAdapter(config)
+        adapter = admitted_adapter(config)
         events = [
             event
             async for event in adapter.stream(
@@ -821,7 +903,7 @@ def test_openai_compatible_adapter_keeps_first_malformed_typed_tool_response(
     assert len(seen) == 1
 
 
-def test_openai_wire_format_converts_internal_tool_messages(monkeypatch) -> None:
+def test_openai_wire_format_converts_internal_tool_messages(monkeypatch, admitted_adapter) -> None:
     """Live DeepSeek regression (v1.7 browser smoke): the second provider call
     after a tool execution must serialize the internal assistant tool_calls and
     the tool-result message in OpenAI wire format, or the upstream rejects the
@@ -856,7 +938,7 @@ def test_openai_wire_format_converts_internal_tool_messages(monkeypatch) -> None
     )
 
     async def scenario() -> None:
-        adapter = OpenAICompatibleModelAdapter(config)
+        adapter = admitted_adapter(config)
         request = ModelRequest(
             request_id="request-wire-2",
             messages=[

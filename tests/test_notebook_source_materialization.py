@@ -122,26 +122,28 @@ def test_upload_only_notebook_rejects_legacy_confirmation_before_source_material
             ]
         },
     )
-    assert proposed.status_code == 200, proposed.text
-    option = proposed.json()["options"][0]
-    client.post(
+    assert proposed.status_code == 409, proposed.text
+    assert proposed.json()["error"]["code"] == "UNSUPPORTED_VERSION"
+    decision = client.post(
         f"/notebooks/{notebook_id}/options/{option_id}/decision",
         params=params,
         json={"decision": "selected", "actor": "ui"},
     )
+    assert decision.status_code == 409, decision.text
+    assert decision.json()["error"]["code"] == "UNSUPPORTED_VERSION"
     confirmed = client.post(
         f"/notebooks/{notebook_id}/options/{option_id}/confirm",
         params=params,
         json={
-            "option_revision": option["option_revision"],
-            "proposal_id": option["typed_proposal_id"],
-            "proposal_revision": option["typed_proposal_revision"],
+            "option_revision": 1,
+            "proposal_id": proposal["proposal_id"],
+            "proposal_revision": proposal["proposal_revision"],
         },
     )
 
     assert confirmed.status_code == 409, confirmed.text
     assert confirmed.json()["error"]["code"] == (
-        "NOTEBOOK_LEGACY_COMPILATION_REQUIRED"
+        "UNSUPPORTED_VERSION"
     )
     assert not source_run_root.exists()
     listed = client.get(f"/notebooks/{notebook_id}/options", params=params)

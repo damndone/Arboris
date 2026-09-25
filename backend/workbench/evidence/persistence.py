@@ -736,6 +736,64 @@ class EvidencePacketStoreV1:
             raise
         return True
 
+    def rehydrate_registry(self, registry: object) -> int:
+        """Rebuild a live registry from verified packet/index bytes.
+
+        The registry is process-local by design. This method is the explicit
+        restart seam: every packet, commit binding and index row is validated
+        through the admitted FD before the registry retains the typed record.
+        A raw path or a caller-shaped JSON mapping never becomes an owner.
+        """
+
+        if type(registry) is not EvidenceRegistryV1:
+            raise _error(
+                EVIDENCE_PERSISTENCE_ADMISSION_REQUIRED,
+                "registry rehydration requires the owning EvidenceRegistryV1",
+            )
+        if registry.scope_ref != self._admission._scope_ref:
+            raise _error(
+                EVIDENCE_PERSISTENCE_ADMISSION_REQUIRED,
+                "registry rehydration scope does not match the persistence admission",
+            )
+        with self._lock:
+            with self._index_lock():
+                index = self._load_index()
+                rows = index["artifacts"]
+                count = 0
+                for row in rows:
+                    if type(row) is not dict:
+                        raise _error(EVIDENCE_PERSISTENCE_INDEX_TAMPERED, "evidence index row is invalid")
+                    content_hash = row.get("content_hash")
+                    if type(content_hash) is not str:
+                        raise _error(EVIDENCE_PERSISTENCE_INDEX_TAMPERED, "evidence index content hash is invalid")
+                    packet = _parse_canonical(self._read_bytes(("packets", f"{content_hash}.json")))
+                    if (
+                        set(packet) != {"contract", "contract_version", "producer_version", "payload"}
+                        or packet["contract"] != _PACKET_CONTRACT
+                        or packet["contract_version"] != _PACKET_VERSION
+                        or packet["producer_version"] != _PACKET_PRODUCER_VERSION
+                    ):
+                        raise _error(EVIDENCE_PERSISTENCE_PACKET_TAMPERED, "stored packet envelope is invalid")
+                    payload = packet["payload"]
+                    if type(payload) is not dict or set(payload) != {"artifact", "binding"}:
+                        raise _error(EVIDENCE_PERSISTENCE_PACKET_TAMPERED, "stored packet payload is invalid")
+                    try:
+                        record = ArtifactAdmissionV1.from_dict(payload["artifact"])
+                        binding = EvidenceCommitBindingV1.from_dict(payload["binding"])
+                    except (ContractError, EvidenceCoreContractError, TypeError, KeyError, ValueError) as exc:
+                        raise _error(EVIDENCE_PERSISTENCE_PACKET_TAMPERED, "stored packet evidence is corrupt") from exc
+                    if binding != self._binding_for(record) or self._index_row(record, binding) != row:
+                        raise _error(EVIDENCE_PERSISTENCE_INDEX_TAMPERED, "stored packet is not bound to its index row")
+                    commit_raw = self._read_bytes(("commits", f"{content_hash}.json"))
+                    stored_commit = EvidenceCommitBindingV1.from_dict(_parse_canonical(commit_raw))
+                    if stored_commit != binding:
+                        raise _error(EVIDENCE_PERSISTENCE_PACKET_TAMPERED, "stored commit disagrees with packet")
+                    admitted = registry.rehydrate_artifact(record)
+                    receipt = registry.persistence_receipt(admitted)
+                    self.load(binding.commit_id, registry=registry, receipt=receipt)
+                    count += 1
+                return count
+
     def _require_load_authority(
         self,
         packet_artifact: ArtifactAdmissionV1,

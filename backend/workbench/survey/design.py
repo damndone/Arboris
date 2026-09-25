@@ -291,6 +291,17 @@ class SurveyDesign:
                 raise SurveyEngineError(
                     "SURVEY_DESIGN_COLUMN_MISSING", f"column {column!r} is not in the frame"
                 )
+        for column in filter(None, (self.strata, self.psu)):
+            values = self.frame[column]
+            blank = values.astype("string").str.strip().eq("").fillna(False)
+            missing = values.isna() | blank
+            if bool(missing.any()):
+                raise SurveyEngineError(
+                    "SURVEY_DESIGN_IDENTIFIER_MISSING",
+                    f"survey design identifier column {column!r} contains missing values",
+                    column=column,
+                    invalid_rows=[str(index) for index in self.frame.index[missing][:16]],
+                )
         if self.replicate_type == "provided" and not self.replicate_weight_columns:
             raise SurveyEngineError(
                 "SURVEY_REPLICATE_WEIGHTS_MISSING",
@@ -571,7 +582,14 @@ class SurveyDesign:
                 # natural-looking alternative and lands about 1% out, close enough to
                 # read as rounding.
                 s2 = float((w * (values - mean) ** 2).sum(dtype=float) / total) * n_obs / (n_obs - 1)
-                var_srs = s2 * (total - n_obs) / (total * n_obs)
+                if total < n_obs:
+                    # A normalized weight vector may sum below the row count.
+                    # The finite-population reference is undefined there; use
+                    # the with-replacement SRS reference instead of allowing a
+                    # negative variance to become an unavailable design effect.
+                    var_srs = s2 / n_obs
+                else:
+                    var_srs = s2 * (total - n_obs) / (total * n_obs)
 
                 # Kish's effective sample size is a separate, weight-only summary: how
                 # many equally-weighted observations this sample behaves like.

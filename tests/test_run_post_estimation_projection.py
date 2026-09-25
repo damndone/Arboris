@@ -12,15 +12,18 @@ a user opens to read the model, and therefore the one that matters here.
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.test_data_column_cast import _source_project
-from tests.test_workflow_runtime import _compile
+from tests.test_workflow_runtime import _compile, _source_project
 from workbench.agent.workflow import WorkflowExecutor
 from workbench.agent.workflow_runtime import (
+    _admit_workflow_host_endpoint_from_supervisor,
     build_workflow_step_executor,
     collect_post_estimation_results,
 )
@@ -28,6 +31,7 @@ from workbench.api import app
 from workbench.events import get_event_manager
 from workbench.lineage.run_inputs import write_run_inputs
 from workbench.lineage.upload_store import store_upload_bytes
+import workbench.agent.workflow_runtime as workflow_runtime
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +45,30 @@ def _reset_event_manager():
     """
 
     get_event_manager()._reset_for_testing()
+
+
+def _execute_workflow_with_admitted_host(project: Path, draft):
+    """Model the deployment-owned host admission boundary for one test run."""
+
+    workflow_directory = project / "workbench" / "workflows"
+    workflow_directory.mkdir(parents=True, exist_ok=True)
+    endpoint_fd = os.open(
+        workflow_directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        endpoint = _admit_workflow_host_endpoint_from_supervisor(project, endpoint_fd)
+        with patch.object(
+            workflow_runtime,
+            "_deployment_host_endpoint_from_supervisor",
+            return_value=endpoint,
+        ):
+            return WorkflowExecutor(project).execute(
+                draft,
+                build_workflow_step_executor(project, draft),
+            )
+    finally:
+        os.close(endpoint_fd)
 
 
 def _curved_frame() -> pd.DataFrame:
@@ -104,9 +132,7 @@ def _run_workflow(tmp_path, *, with_stationary_point: bool):
     draft = _compile(
         (run_id, artifact_id), frame, workflow_id="wf-projection", steps=steps
     )
-    state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
-    )
+    state = _execute_workflow_with_admitted_host(project, draft)
     assert state.status == "completed", {
         step_id: step.error for step_id, step in state.steps.items() if step.error
     }

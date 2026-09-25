@@ -621,6 +621,9 @@ class NodeOperationContextProvider:
             )
 
         return [
+            self._result_section_tool_definition(session_id=session_id, chain_id=chain_id),
+            self._result_facts_tool_definition(session_id=session_id, chain_id=chain_id),
+            self._result_provenance_tool_definition(session_id=session_id, chain_id=chain_id),
             ToolDefinition(
                 tool_id="list_project_datasets",
                 version="v1",
@@ -970,13 +973,13 @@ class NodeOperationContextProvider:
                 max_output_budget=8192,
                 handler=inspect_result_summary,
                 description=(
-                    "Read the persisted result summary for one model node: model "
-                    "identity, fit metrics, coefficient rows, the regression table, "
-                    "model-family evidence, and the run's statistical evidence packet "
-                    "(ANOVA post-hoc comparisons and their correction method, Cohen's d, "
-                    "eta squared, omega squared, Levene, Bartlett and Shapiro-Wilk). "
-                    "Use this whenever the question is about statistical tests, effect "
-                    "sizes, post-hoc comparisons or assumption checks for a completed run."
+                    "Read centrally admitted coefficient estimates selected for one model node. "
+                    "For survey design, marginal effects, model-family evidence, statistical tests "
+                    "or other complete run-level sections, use inspect_result_section. "
+                    "Select statistical_tests for post-hoc comparisons, effect sizes and assumption "
+                    "checks, or use inspect_statistical_evidence for that section; these are not "
+                    "included in the coefficient summary. Use inspect_result_facts for explicit "
+                    "numeric-only pages of fit or interval facts; section qualifications remain unread."
                 ),
             ),
             ToolDefinition(
@@ -1208,6 +1211,9 @@ class NodeOperationContextProvider:
             )
 
         return [
+            self._result_section_tool_definition(session_id=session_id),
+            self._result_facts_tool_definition(session_id=session_id),
+            self._result_provenance_tool_definition(session_id=session_id),
             ToolDefinition(
                 tool_id="inspect_project_model_coefficients",
                 version="v1",
@@ -1344,6 +1350,9 @@ class NodeOperationContextProvider:
                 scope_requirements=("project",),
                 max_output_budget=8192,
                 handler=inspect_project_linear_interaction_effects,
+                description="Read the complete centrally admitted marginal-effects section for each owner run. "
+                    "Request terms are not relabeled as measured effects; no interaction slope is computed. "
+                    "Prefer inspect_project_result_section for direct section selection.",
             ),
             ToolDefinition(
                 tool_id="inspect_project_coefficient_transforms",
@@ -1614,75 +1623,190 @@ class NodeOperationContextProvider:
             error.code = exc.code  # type: ignore[attr-defined]
             raise error from exc
 
+    def _result_provenance_tool_definition(self, *, session_id: str, chain_id: str | None = None) -> ToolDefinition:
+        from ..evidence.consumer_adapters import ModelProvenanceSelectionV1, PROVENANCE_ROLE_PATHS_V1
+
+        properties = {
+            "owner_run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "model_id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "terms": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": True,
+                      "items": {"type": "string", "maxLength": 300}},
+            "roles": {"type": "array", "minItems": 1, "maxItems": len(PROVENANCE_ROLE_PATHS_V1),
+                      "uniqueItems": True, "items": {"type": "string", "enum": sorted(PROVENANCE_ROLE_PATHS_V1)}},
+        }
+        required = ["owner_run_id", "model_id", "roles"]
+        if chain_id is not None:
+            properties.update({key: {"type": "string", "minLength": 1, "maxLength": 200}
+                for key in ("request_id", "op_node_id", "active_head_run_id")})
+            required.extend(("op_node_id", "active_head_run_id"))
+
+        def inspect(arguments, context):
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered scope")
+            run_root = self._project_run_root(arguments["owner_run_id"])
+            canonical = {}
+            if chain_id is not None:
+                canonical, node, _manifest = self._read_node_snapshot(
+                    request_id=arguments.get("request_id", "inspect-result-provenance"),
+                    owner_run_id=arguments["owner_run_id"], op_node_id=arguments["op_node_id"],
+                    active_head_run_id=self._tool_active_head(chain_id, arguments["active_head_run_id"]))
+                model = _coefficient_selection_for_node(node)
+                if model is None or model.model_id != arguments["model_id"]:
+                    raise ValueError("requested model differs from the server-resolved graph node")
+            selection = ModelProvenanceSelectionV1(arguments["model_id"],
+                terms=tuple(arguments["terms"]) if "terms" in arguments else None,
+                roles=tuple(arguments["roles"]))
+            evidence = read_persisted_evidence_for_agent(run_root, provenance_selection=selection)
+            payload = {"scope": "semantic_selection", "read_completeness": "PARTIAL",
+                "owner_run_id": arguments["owner_run_id"], "persisted_evidence": evidence}
+            if canonical:
+                payload["context"] = canonical
+            # Atomic rejection precedes ToolRegistry's generic truncation. Do
+            # not trim a warning, source binding or receipt to make it fit.
+            if len(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")) > 8192:
+                return {"status": "unavailable", "scope": "semantic_selection",
+                    "read_completeness": "PARTIAL", "reason_code": "tool_output_budget_exceeded"}
+            return payload
+
+        return ToolDefinition(
+            tool_id="inspect_result_provenance" if chain_id is not None else "inspect_project_result_provenance",
+            version="v1", input_schema={"type": "object", "required": required,
+                "properties": properties, "additionalProperties": False},
+            side_effect="none", scope_requirements=("project", "chain") if chain_id is not None else ("project",),
+            max_output_budget=8192, handler=inspect,
+            description="Read selected survey methods, design degrees of freedom, coefficient variance sources "
+                "and warnings from owner-bound typed evidence. Choose declared roles and exact terms. "
+                "This is a selected query, not a complete result read or statistical validation. "
+                "Oversized queries are unavailable: narrow explicitly, never discard warnings.",
+        )
+
+    def _result_facts_tool_definition(self, *, session_id: str, chain_id: str | None = None) -> ToolDefinition:
+        """Explicit numeric-only query; never silently replace a section read."""
+        properties = {
+            "owner_run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "section_id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 64},
+            "expected_envelope_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        }
+        required = ["owner_run_id", "section_id", "offset", "limit"]
+        if chain_id is not None:
+            properties.update({key: {"type": "string", "minLength": 1, "maxLength": 200}
+                for key in ("request_id", "op_node_id", "active_head_run_id")})
+            required.extend(("op_node_id", "active_head_run_id"))
+
+        def inspect(arguments, context):
+            from ..services.results_service import read_persisted_consumer_result_facts_for_run
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered scope")
+            self._project_run_root(arguments["owner_run_id"])
+            if chain_id is not None:
+                self._read_node_snapshot(request_id=arguments.get("request_id", "inspect-result-facts"),
+                    owner_run_id=arguments["owner_run_id"], op_node_id=arguments["op_node_id"],
+                    active_head_run_id=self._tool_active_head(chain_id, arguments["active_head_run_id"]))
+            evidence = read_persisted_consumer_result_facts_for_run(consumer_id="agent",
+                project_root=self.project_root, run_id=arguments["owner_run_id"],
+                section_id=arguments["section_id"], offset=arguments["offset"], limit=arguments["limit"],
+                expected_envelope_digest=arguments.get("expected_envelope_digest"))
+            # Identity, scope, snapshot, selection and its warnings are already
+            # bound inside the owner receipt; do not append unsigned aliases.
+            return self._atomic_section_output({"persisted_evidence": evidence})
+
+        return ToolDefinition(
+            tool_id="inspect_result_facts" if chain_id is not None else "inspect_project_result_facts",
+            version="v1", input_schema={"type": "object", "properties": properties,
+                "required": required, "additionalProperties": False},
+            side_effect="none", scope_requirements=("project", "chain") if chain_id is not None else ("project",),
+            max_output_budget=8192, handler=inspect,
+            description="Read an explicit numeric-only slice of an owner-admitted section's fact references, "
+                "including fit, interval or marginal-effect facts. Start at offset 0 with limit 1; "
+                "continuations require the returned envelope_digest as expected_envelope_digest. "
+                "Always PARTIAL: section text, warnings and qualifications remain unread, even on the last page. "
+                "Not a complete result or inferential conclusion. Oversized slices are unavailable; "
+                "narrow explicitly. No raw data, byte fragments, automatic paging or remote-send authority.",
+        )
+
+    def _result_section_tool_definition(self, *, session_id: str, chain_id: str | None = None) -> ToolDefinition:
+        from ..contracts.evidence.result_sections import SECTION_FIELDS
+
+        properties = {
+            "owner_run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "section_type": {"type": "string", "enum": sorted(SECTION_FIELDS)},
+        }
+        required = list(properties)
+        if chain_id is not None:
+            properties.update({key: {"type": "string", "minLength": 1, "maxLength": 200}
+                for key in ("request_id", "op_node_id", "active_head_run_id")})
+            required.extend(("op_node_id", "active_head_run_id"))
+
+        def inspect(arguments, context):
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered scope")
+            canonical = {}
+            if chain_id is not None:
+                canonical, _node, _manifest = self._read_node_snapshot(
+                    request_id=arguments.get("request_id", "inspect-result-section"),
+                    owner_run_id=arguments["owner_run_id"], op_node_id=arguments["op_node_id"],
+                    active_head_run_id=self._tool_active_head(chain_id, arguments["active_head_run_id"]))
+            return self._inspect_owner_result_section(arguments["owner_run_id"], arguments["section_type"],
+                context=canonical)
+
+        return ToolDefinition(
+            tool_id="inspect_result_section" if chain_id is not None else "inspect_project_result_section",
+            version="v1", input_schema={"type": "object", "required": required,
+                "properties": properties, "additionalProperties": False},
+            side_effect="none", scope_requirements=("project", "chain") if chain_id is not None else ("project",),
+            max_output_budget=8192, handler=inspect,
+            description="Read one centrally admitted owner-run result section, including survey design, marginal effects, "
+                "model-family evidence or diagnostics. May include multiple models; not a node-specific claim. "
+                "Missing or oversized evidence remains unavailable; no raw artifact fallback. "
+                f"For an explicit numeric-only subset use {'inspect_result_facts' if chain_id is not None else 'inspect_project_result_facts'}; "
+                "that does not read the section's warnings or qualifications.",
+        )
+
+    @staticmethod
+    def _atomic_section_output(payload: dict[str, Any]) -> dict[str, Any]:
+        # Charge the complete tool result before the generic registry can
+        # truncate lists or strings inside a canonical projection or receipt.
+        if len(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")) > 8192:
+            return {"status": "unavailable", "scope": "owner_run",
+                "reason_code": "tool_output_budget_exceeded"}
+        return payload
+
+    def _inspect_owner_result_section(self, owner_run_id: str, section_type: str,
+                                      *, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        from ..contracts.evidence.result_sections import SECTION_FIELDS
+
+        if type(section_type) is not str or section_type not in SECTION_FIELDS:
+            raise ToolVisibleError("RESULT_SECTION_TYPE_INVALID: select a declared section type")
+        run_root = self._project_run_root(owner_run_id)
+        evidence = read_persisted_evidence_for_agent(run_root, requested_section_types=(section_type,))
+        payload = {"scope": "owner_run", "owner_run_id": owner_run_id,
+            "section_type": section_type, "persisted_evidence": evidence}
+        if context:
+            payload["context"] = context
+        return self._atomic_section_output(payload)
+
     def inspect_diagnostics(
         self,
         request: InspectDiagnosticsRequest,
     ) -> dict[str, Any]:
-        """Return a bounded, read-only view of the existing diagnostic preview."""
+        """Return the central typed evidence packet for Agent diagnostics."""
 
-        canonical, node, manifest = self._read_node_snapshot(
+        canonical, node, _manifest = self._read_node_snapshot(
             request_id=request.request_id,
             owner_run_id=request.owner_run_id,
             op_node_id=request.op_node_id,
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
-        persisted_evidence = read_persisted_evidence_for_agent(run_root)
-        model_results, verification_error = _verified_model_results(run_root)
-        if verification_error is not None:
-            return {
-                **canonical,
-                "node": _bounded_node(node),
-                "diagnostics": _agent_result_unavailable(verification_error),
-                "persisted_evidence": persisted_evidence,
-                "omitted_sections": ["raw_model_results", "coefficient_risk"],
-            }
-        summary, summary_status = _read_diagnostic_summary(run_root)
-        if summary_status != "complete":
-            return {
-                **canonical,
-                "node": _bounded_node(node),
-                "diagnostics": _agent_result_unavailable(
-                    "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
-                ),
-                "persisted_evidence": persisted_evidence,
-                "omitted_sections": ["raw_model_results", "coefficient_risk"],
-            }
-        summary_projection = project_survey_result_summary(
-            summary,
-            summary_status=summary_status,
-            unavailable_reason="AGENT_DIAGNOSTIC_SUMMARY_INVALID",
-            run_id=run_root.name,
-            artifact_id="diagnostic_summary",
-        )
-        if summary_projection.get("projection_status") != "available":
-            return {
-                **canonical,
-                "node": _bounded_node(node),
-                "diagnostics": _agent_result_unavailable(
-                    "AGENT_DIAGNOSTIC_SUMMARY_INVALID"
-                ),
-                "persisted_evidence": persisted_evidence,
-                "omitted_sections": ["raw_model_results", "coefficient_risk"],
-            }
-        preview = build_diagnostic_summary_preview(
-            run_root,
-            manifest,
-            model_results,
-        )
-        diagnostics, omitted_sections = _bounded_diagnostics(preview)
-        survey_design = _bounded_survey_design(model_results)
-        if survey_design is not None:
-            diagnostics["survey_design"] = survey_design
-        regression_table = _bounded_regression_table(model_results)
-        if regression_table is not None:
-            diagnostics["regression_table"] = regression_table
+        persisted_evidence = read_persisted_evidence_for_agent(run_root, requested_section_types=("diagnostics",))
         return {
             **canonical,
             "node": _bounded_node(node),
-            "diagnostics": diagnostics,
+            "diagnostics": _agent_typed_evidence_projection(persisted_evidence),
             "persisted_evidence": persisted_evidence,
-            "omitted_sections": omitted_sections,
+            "omitted_sections": ["raw_model_results", "compatibility_diagnostics"],
         }
 
     def inspect_design_advisories(
@@ -1745,10 +1869,10 @@ class NodeOperationContextProvider:
     ) -> dict[str, Any]:
         """Return only the run's statistical evidence packet.
 
-        The same facts are reachable through inspect_result_summary, but tool
-        choice is name-driven in practice: a question about post-hoc tests or
-        effect sizes has to meet a tool whose name says so, or the model
-        concludes the tests were never run.
+        This selects the same centrally admitted statistical_tests section as
+        inspect_result_section, not the coefficient-only inspect_result_summary.
+        Naming the statistical surface makes post-hoc and effect-size evidence
+        discoverable without a raw-result fallback.
         """
 
         canonical, node, _manifest = self._read_node_snapshot(
@@ -1758,11 +1882,11 @@ class NodeOperationContextProvider:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
-        persisted_evidence = read_persisted_evidence_for_agent(run_root)
+        persisted_evidence = read_persisted_evidence_for_agent(run_root, requested_section_types=("statistical_tests",))
         return {
             **canonical,
             "node": _bounded_node(node),
-            "statistical_evidence": _bounded_statistics_evidence(run_root),
+            "statistical_evidence": _agent_typed_evidence_projection(persisted_evidence),
             "persisted_evidence": persisted_evidence,
         }
 
@@ -1772,41 +1896,25 @@ class NodeOperationContextProvider:
     ) -> dict[str, Any]:
         """Return bounded result facts without exposing raw model result payloads."""
 
-        canonical, node, manifest = self._read_node_snapshot(
+        canonical, node, _manifest = self._read_node_snapshot(
             request_id=request.request_id,
             owner_run_id=request.owner_run_id,
             op_node_id=request.op_node_id,
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
-        persisted_evidence = read_persisted_evidence_for_agent(run_root)
-        model_results, verification_error = _verified_model_results(run_root)
-        if verification_error is not None:
-            return {
-                **canonical,
-                "node": _bounded_node(node),
-                "result_summary": _agent_result_unavailable(verification_error),
-                "persisted_evidence": persisted_evidence,
-                "omitted_sections": ["raw_model_results", "coefficient_rows"],
-            }
-        preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
-        summary, summary_status = _read_diagnostic_summary(run_root)
-        result_summary = _bounded_result_summary(
-            summary,
-            summary_status=summary_status,
-            preview=preview,
-            model_results=model_results,
-            run_root=run_root,
-        )
-        omitted_sections = ["raw_model_results"]
-        if result_summary.get("coefficient_rows_omitted"):
-            omitted_sections.append("coefficient_rows")
+        selection = _coefficient_selection_for_node(node)
+        if selection is not None:
+            persisted_evidence = read_persisted_evidence_for_agent(run_root,
+                coefficient_selection=selection)
+        else:
+            persisted_evidence = {"status": "unavailable", "reason_code": "semantic_model_unavailable", "facts": []}
         return {
             **canonical,
             "node": _bounded_node(node),
-            "result_summary": result_summary,
+            "result_summary": _agent_typed_evidence_projection(persisted_evidence),
             "persisted_evidence": persisted_evidence,
-            "omitted_sections": omitted_sections,
+            "omitted_sections": ["raw_model_results", "compatibility_result_summary"],
         }
 
     def list_project_datasets(
@@ -1998,6 +2106,62 @@ class NodeOperationContextProvider:
             detail["missing_rate"] = missing_rate
         return detail
 
+    def _central_agent_section(
+        self,
+        run_id: str,
+        *,
+        statistic_ids: tuple[str, ...],
+        terms: tuple[str, ...] | None = None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
+        """Read one Agent section only through the shared persisted projection."""
+
+        from ..services.results_service import read_persisted_consumer_evidence_for_run
+        query: dict[str, Any] = {"requested_fact_ids": ()}
+        if "model_coefficient" in statistic_ids:
+            try:
+                graph = graph_to_json(GraphStore(self.project_root / "runs").read(run_id))
+                nodes = [n for n in graph["nodes"].values() if n.get("kind") == "model"]
+                selection = _coefficient_selection_for_node(nodes[0], terms=terms) if len(nodes) == 1 else None
+            except (ValueError, OSError, KeyError):
+                selection = None
+            if selection is None:
+                return {}, [], _agent_section_unavailable(run_id, "semantic_selection_ambiguous")
+            query = {"coefficient_selection": selection}
+        elif "marginal_effect" in statistic_ids:
+            query = {"requested_section_types": ("marginal_effects",)}
+        elif "statistical_test" in statistic_ids:
+            query = {"requested_section_types": ("statistical_tests",)}
+        evidence = read_persisted_consumer_evidence_for_run(
+            consumer_id="agent",
+            project_root=self.project_root,
+            run_id=run_id,
+            **query,
+        )
+        status = evidence.get("status")
+        if status not in {"available", "degraded"}:
+            return {}, [], _agent_section_unavailable(
+                run_id,
+                _agent_failure_reason(evidence),
+                status=status,
+                audit=evidence.get("audit"),
+            )
+        raw_facts = evidence.get("facts")
+        semantic = evidence.get("semantic_selection")
+        bound_ids = {b["fact_id"] for b in semantic["bindings"]} if isinstance(semantic, Mapping) else None
+        facts = [
+            dict(fact)
+            for fact in raw_facts
+            if isinstance(fact, Mapping)
+            and (fact.get("fact_id") in bound_ids if bound_ids is not None else fact.get("statistic_id") in statistic_ids)
+        ] if isinstance(raw_facts, (list, tuple)) else []
+        if not facts:
+            return dict(evidence), [], _agent_section_unavailable(
+                run_id,
+                "AGENT_TYPED_SECTION_UNAVAILABLE",
+                status="degraded" if status == "degraded" else "unavailable",
+            )
+        return dict(evidence), facts, None
+
     def inspect_project_model_coefficients(
         self,
         request: InspectProjectModelCoefficientsRequest,
@@ -2012,23 +2176,57 @@ class NodeOperationContextProvider:
 
         models: list[dict[str, Any]] = []
         for run_id in request.run_ids:
-            run_root = self._project_run_root(run_id)
-            model_results, verification_error = _verified_model_results(run_root)
-            if verification_error is not None:
-                models.append({
-                    "run_id": run_id,
-                    "projection_status": "unavailable",
-                    "unavailable_reason": verification_error,
-                })
+            evidence, facts, unavailable = self._central_agent_section(
+                run_id,
+                statistic_ids=("model_coefficient", "ols-coefficient", "coefficient"),
+                terms=tuple(request.terms),
+            )
+            if unavailable is not None:
+                models.append(unavailable)
                 continue
-            for result in model_results:
-                public_model = _public_requested_model_coefficients(
-                    run_id=run_id,
-                    result=result,
-                    requested_terms=request.terms,
-                )
-                if public_model is not None:
-                    models.append(public_model)
+            binding = evidence.get("semantic_selection")
+            model_id = binding.get("model_id") if isinstance(binding, Mapping) else None
+            if not isinstance(model_id, str) or not model_id:
+                models.append(_agent_section_unavailable(run_id, "AGENT_MODEL_ID_UNAVAILABLE"))
+                continue
+            coefficients: list[dict[str, Any]] = []
+            missing_terms: list[str] = []
+            for term in binding["terms"]:
+                term_key = term
+                bound_ids = {b["fact_id"] for b in binding["bindings"] if b["term"] == term and b["role"] == "estimate"}
+                matching = [fact for fact in facts if fact.get("fact_id") in bound_ids]
+                if len(matching) != 1 or _public_stat_number(matching[0].get("value")) is None:
+                    missing_terms.append(term_key)
+                    continue
+                fact = matching[0]
+                cell: dict[str, Any] = {
+                    "term": term_key,
+                    "estimate": fact["value"],
+                    "fact_id": fact.get("fact_id"),
+                    "projection_digest": evidence.get("projection_digest"),
+                }
+                if "standard_error" in fact:
+                    cell["std_error"] = fact["standard_error"]
+                if "confidence_interval" in fact:
+                    cell["confidence_interval"] = fact["confidence_interval"]
+                coefficients.append(cell)
+            if not coefficients and missing_terms:
+                models.append(_agent_section_unavailable(run_id, "AGENT_TYPED_SECTION_UNAVAILABLE"))
+                continue
+            model: dict[str, Any] = {
+                "run_id": run_id,
+                "model_id": model_id,
+                "projection_status": evidence.get("status", "available"),
+                "evidence_ref": {
+                    "run_id": run_id,
+                    "model_id": model_id,
+                    "projection_digest": evidence.get("projection_digest"),
+                },
+                "coefficients": coefficients,
+            }
+            if missing_terms:
+                model["missing_terms"] = missing_terms
+            models.append(model)
         return {
             "models": models,
             "omitted_sections": ["raw_model_results", "raw_rows"],
@@ -2156,71 +2354,17 @@ class NodeOperationContextProvider:
                 )
             run_id = item["run_id"]
             artifact_id = item["artifact_id"]
-            run_root = self._project_run_root(run_id)
-            try:
-                index = read_json(run_root / "artifacts_index.json")
-                records = index.get("artifacts") if isinstance(index, dict) else None
-                record = next(
-                    (
-                        value
-                        for value in records or []
-                        if isinstance(value, dict) and value.get("artifact_id") == artifact_id
-                    ),
-                    None,
-                )
-            except (FileNotFoundError, OSError, ValueError, TypeError) as exc:
-                raise ToolVisibleError(
-                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: the persisted artifact index is unavailable."
-                ) from exc
-            if not isinstance(record, dict) or record.get("artifact_type") != "figure":
-                raise ToolVisibleError(
-                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: requested artifact is not a persisted figure."
-                )
-            models, verification_error = _verified_model_results(run_root)
-            if verification_error is not None:
-                raise ToolVisibleError(
-                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: "
-                    f"{verification_error}."
-                )
-            if len(models) != 1 or not isinstance(models[0].get("model_id"), str):
-                raise ToolVisibleError(
-                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: the figure does not resolve to exactly one persisted model."
-                )
-            model_id = str(models[0]["model_id"])
-            numeric_source = _bounded_model_figure_numeric_source(
-                run_root,
-                node_id=f"model:{model_id}",
-                artifact_id=artifact_id,
+            _evidence, _facts, unavailable = self._central_agent_section(
+                run_id,
+                statistic_ids=("figure", "figure_numeric_source"),
             )
-            if numeric_source is None:
-                raise ToolVisibleError(
-                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: the figure has no bounded numeric evidence."
-                )
-            try:
-                from ..figure_context import resolve_figure_ai_context
-
-                packet = resolve_figure_ai_context(
-                    self.project_root, run_id=run_id, artifact_id=artifact_id
-                )
-            except (FileNotFoundError, OSError, TypeError, ValueError) as exc:
-                raise ToolVisibleError(
-                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: figure metadata is unavailable."
-                ) from exc
-            figure = packet.get("figure") if isinstance(packet, dict) else None
-            evidence.append(
-                {
-                    "run_id": run_id,
-                    "model_id": model_id,
-                    "artifact_id": artifact_id,
-                    "chart_type": figure.get("chart_type") if isinstance(figure, dict) else None,
-                    "numeric_source": numeric_source,
-                    "evidence_ref": {
-                        "run_id": run_id,
-                        "model_id": model_id,
-                        "artifact_id": artifact_id,
-                    },
-                }
+            packet = (
+                unavailable
+                if unavailable is not None
+                else _agent_section_unavailable(run_id, "AGENT_TYPED_FIGURE_SECTION_UNAVAILABLE")
             )
+            packet["artifact_id"] = artifact_id
+            evidence.append(packet)
         return {
             "figures": evidence,
             "omitted_sections": ["raw_rows", "raw_model_results", "image_pixels", "figure_paths"],
@@ -2230,14 +2374,10 @@ class NodeOperationContextProvider:
         self,
         request: InspectProjectLinearInteractionEffectsRequest,
     ) -> dict[str, Any]:
-        """Compute OLS-scale interaction slopes from persisted public inputs.
+        """Return admitted run-level marginal sections, without inferring a slope.
 
-        This is deliberately a read-only, server-side calculation rather than
-        asking a language model to do floating-point arithmetic.  It is only
-        available for OLS results, where the requested derivative on the
-        recorded outcome scale is beta_focal + beta_interaction * mean(moderator).
-        No standard error or interval is implied because that requires a
-        covariance term which this bounded reader does not expose.
+        Legacy request terms remain accepted but do not identify or relabel a
+        numeric fact. The returned section retains its actual model/term fields.
         """
 
         effects: list[dict[str, Any]] = []
@@ -2261,90 +2401,13 @@ class NodeOperationContextProvider:
                     "PROJECT_INTERACTION_EFFECT_INVALID: focal term, interaction term, "
                     "and moderator column must be distinct."
                 )
-            run_root = self._project_run_root(run_id)
-            matches: list[tuple[str, dict[str, Any]]] = []
-            model_results, verification_error = _verified_model_results(run_root)
-            if verification_error is not None:
-                raise ToolVisibleError(
-                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: "
-                    f"{verification_error}."
-                )
-            for result in model_results:
-                model_id = result.get("model_id")
-                model_type = result.get("model_type")
-                coefficients = result.get("coefficients")
-                if (
-                    not isinstance(model_id, str)
-                    or not isinstance(model_type, str)
-                    or not model_type.startswith("ols")
-                    or not isinstance(coefficients, dict)
-                ):
-                    continue
-                focal = coefficients.get(focal_term)
-                interaction = coefficients.get(interaction_term)
-                if (
-                    isinstance(focal, dict)
-                    and isinstance(interaction, dict)
-                    and _public_stat_number(focal.get("estimate")) is not None
-                    and _public_stat_number(interaction.get("estimate")) is not None
-                ):
-                    matches.append((model_id, coefficients))
-            if len(matches) != 1:
-                raise ToolVisibleError(
-                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: exactly one persisted OLS "
-                    f"model in {run_id!r} must contain the requested focal and interaction terms."
-                )
-            try:
-                profile = read_json(run_root / "staged" / "data_profile.json")
-            except (FileNotFoundError, OSError, ValueError) as exc:
-                raise ToolVisibleError(
-                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: the moderator mean is not persisted."
-                ) from exc
-            columns = profile.get("columns") if isinstance(profile, dict) else None
-            metadata = columns.get(moderator_column) if isinstance(columns, dict) else None
-            moderator_mean = (
-                _public_stat_number(metadata.get("mean"))
-                if isinstance(metadata, dict)
-                else None
-            )
-            if moderator_mean is None:
-                raise ToolVisibleError(
-                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: the requested moderator has "
-                    "no persisted numeric mean."
-                )
-            model_id, coefficients = matches[0]
-            focal_estimate = _public_stat_number(coefficients[focal_term].get("estimate"))
-            interaction_estimate = _public_stat_number(
-                coefficients[interaction_term].get("estimate")
-            )
-            assert focal_estimate is not None and interaction_estimate is not None
-            marginal_effect = float(focal_estimate) + float(interaction_estimate) * float(moderator_mean)
-            if not math.isfinite(marginal_effect):
-                raise ToolVisibleError(
-                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: persisted inputs produced a "
-                    "non-finite marginal effect."
-                )
-            effects.append(
-                {
-                    "run_id": run_id,
-                    "model_id": model_id,
-                    "focal_term": focal_term,
-                    "interaction_term": interaction_term,
-                    "moderator_column": moderator_column,
-                    "moderator_mean": moderator_mean,
-                    "marginal_effect": marginal_effect,
-                    "evidence_ref": {
-                        "run_id": run_id,
-                        "model_id": model_id,
-                        "result_ref": f"model_results:{model_id}",
-                        "profile_ref": "staged/data_profile.json",
-                    },
-                }
-            )
-        return {
+            if any(entry.get("owner_run_id") == run_id for entry in effects):
+                continue
+            effects.append(self._inspect_owner_result_section(run_id, "marginal_effects"))
+        return self._atomic_section_output({
             "effects": effects,
             "omitted_sections": ["raw_model_results", "raw_rows", "correlations"],
-        }
+        })
 
     def inspect_project_coefficient_transforms(
         self,
@@ -2375,48 +2438,32 @@ class NodeOperationContextProvider:
                     "PROJECT_COEFFICIENT_TRANSFORM_INVALID: transform must be "
                     "scale_0_01 or expm1_percent."
                 )
-            run_root = self._project_run_root(run_id)
-            matches: list[tuple[str, float]] = []
-            model_results, verification_error = _verified_model_results(run_root)
-            if verification_error is not None:
-                raise ToolVisibleError(
-                    "PROJECT_COEFFICIENT_TRANSFORM_UNAVAILABLE: "
-                    f"{verification_error}."
-                )
-            for result in model_results:
-                model_id = result.get("model_id")
-                coefficients = result.get("coefficients")
-                coefficient = coefficients.get(term) if isinstance(coefficients, dict) else None
-                estimate = (
-                    _public_stat_number(coefficient.get("estimate"))
-                    if isinstance(coefficient, dict)
-                    else None
-                )
-                if isinstance(model_id, str) and estimate is not None:
-                    matches.append((model_id, float(estimate)))
-            if len(matches) != 1:
-                raise ToolVisibleError(
-                    "PROJECT_COEFFICIENT_TRANSFORM_UNAVAILABLE: exactly one persisted "
-                    f"model in {run_id!r} must contain {term!r}."
-                )
-            model_id, estimate = matches[0]
-            value = estimate * 0.01 if transform == "scale_0_01" else math.expm1(estimate) * 100.0
-            if not math.isfinite(value):
-                raise ToolVisibleError(
-                    "PROJECT_COEFFICIENT_TRANSFORM_UNAVAILABLE: persisted input produced "
-                    "a non-finite transformed value."
-                )
+            evidence, facts, unavailable = self._central_agent_section(
+                run_id,
+                statistic_ids=("coefficient_transform",),
+            )
+            if unavailable is not None:
+                values.append(unavailable | {"term": term, "transform": transform})
+                continue
+            identity = evidence.get("identity") if isinstance(evidence, Mapping) else None
+            model_id = identity.get("model_run_id") if isinstance(identity, Mapping) else None
+            matching = [fact for fact in facts if fact.get("estimand_id") == term]
+            if len(matching) != 1 or not isinstance(model_id, str):
+                values.append(_agent_section_unavailable(run_id, "AGENT_TYPED_SECTION_UNAVAILABLE") | {"term": term, "transform": transform})
+                continue
             values.append(
                 {
                     "run_id": run_id,
                     "model_id": model_id,
                     "term": term,
                     "transform": transform,
-                    "value": value,
+                    "value": matching[0].get("value"),
+                    "projection_status": evidence.get("status", "available"),
                     "evidence_ref": {
                         "run_id": run_id,
                         "model_id": model_id,
-                        "result_ref": f"model_results:{model_id}",
+                        "fact_id": matching[0].get("fact_id"),
+                        "projection_digest": evidence.get("projection_digest"),
                     },
                 }
             )
@@ -2433,11 +2480,27 @@ class NodeOperationContextProvider:
 
         runs: list[dict[str, Any]] = []
         for run_id in sorted(set(request.run_ids)):
-            run_root = self._project_run_root(run_id)
-            evidence = _bounded_statistics_evidence(run_root)
-            if evidence is None:
+            evidence, facts, unavailable = self._central_agent_section(
+                run_id,
+                statistic_ids=("statistical_test", "test_statistic", "p_value"),
+            )
+            if unavailable is not None:
+                runs.append(unavailable)
                 continue
-            runs.append({"run_id": run_id, "statistical_evidence": evidence})
+            if not facts:
+                runs.append(_agent_section_unavailable(run_id, "AGENT_TYPED_SECTION_UNAVAILABLE"))
+                continue
+            runs.append(
+                {
+                    "run_id": run_id,
+                    "projection_status": evidence.get("status", "available"),
+                    "statistical_evidence": {
+                        "status": evidence.get("status", "available"),
+                        "facts": facts,
+                        "projection_digest": evidence.get("projection_digest"),
+                    },
+                }
+            )
         return {
             "runs": runs,
             "omitted_sections": ["raw_artifact_payloads", "raw_rows"],
@@ -2695,60 +2758,28 @@ class NodeOperationContextProvider:
             op_node_id=request.op_node_id,
             active_head_run_id=request.active_head_run_id,
         )
-        run_root = self.project_root / "runs" / request.owner_run_id
-        model_results, verification_error = _verified_model_results(run_root)
-        if verification_error is not None:
+        _central_evidence, _central_facts, unavailable = self._central_agent_section(
+            request.owner_run_id,
+            statistic_ids=("artifact_preview",),
+        )
+        if unavailable is not None:
             return {
                 **canonical,
                 "node": _bounded_node(node),
                 "artifact_preview": {
                     "available": False,
-                    "preview_status": "unavailable",
-                    "unavailable_reason": verification_error,
+                    "preview_status": unavailable["projection_status"],
+                    "unavailable_reason": unavailable["unavailable_reason"],
                 },
                 "omitted_sections": ["raw_artifact_payloads", "raw_model_results"],
             }
-        artifact_manifest = _bounded_artifact_manifest(
-            build_artifact_manifest(run_root, model_results)
-        )
-        lifecycle = str(manifest.get("status") or "completed")
-        if lifecycle in {"queued", "running"}:
-            available = False
-            preview_status = "pending"
-        elif lifecycle in {"interrupted", "cancelled"}:
-            available = False
-            preview_status = "lifecycle_unavailable"
-        else:
-            available = True
-            preview_status = "complete"
-        counts = {
-            "sections": len(artifact_manifest),
-            "expected": sum(
-                value.get("expected") is True for value in artifact_manifest.values()
-            ),
-            "available": sum(
-                value.get("available") is True for value in artifact_manifest.values()
-            ),
-        }
         return {
             **canonical,
             "node": _bounded_node(node),
             "artifact_preview": {
-                "available": available,
-                "preview_status": preview_status,
-                "run_lifecycle_status": lifecycle,
-                "artifact_counts": counts,
-                "artifact_manifest": artifact_manifest,
-                "public_result_evidence": _node_public_result_evidence(
-                    self.project_root,
-                    owner_run_id=request.owner_run_id,
-                    op_node_id=request.op_node_id,
-                ),
-                "figure_evidence": _bounded_run_figure_evidence(
-                    self.project_root,
-                    run_id=request.owner_run_id,
-                    node=node,
-                ),
+                "available": True,
+                "preview_status": "available",
+                "typed_facts": _central_facts,
             },
             "omitted_sections": ["raw_artifact_payloads", "raw_rows", "image_pixels"],
         }
@@ -5490,6 +5521,107 @@ def _agent_result_unavailable(reason: str) -> dict[str, Any]:
     }
 
 
+def _agent_section_unavailable(
+    run_id: str,
+    reason: str,
+    *,
+    status: object = "unavailable",
+    audit: object = None,
+) -> dict[str, Any]:
+    normalized_status = status if status in {"unavailable", "degraded", "blocked"} else "unavailable"
+    safe_audit = _agent_safe_failure_audit(audit)
+    return {
+        "run_id": run_id,
+        "projection_status": normalized_status,
+        "unavailable_reason": reason,
+        **({"audit": safe_audit} if safe_audit is not None else {}),
+    }
+
+
+def _agent_stable_cause(value: object) -> str | None:
+    return value if type(value) is str and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,127}", value) else None
+
+
+def _agent_failure_reason(evidence: Mapping[str, object]) -> str:
+    audit = evidence.get("audit")
+    return (_agent_stable_cause(evidence.get("reason_code"))
+            or (_agent_stable_cause(audit.get("restriction_reason")) if isinstance(audit, Mapping) else None)
+            or "AGENT_TYPED_EVIDENCE_UNAVAILABLE")
+
+
+def _agent_safe_failure_audit(audit: object) -> dict[str, Any] | None:
+    """Retain bounded policy/cause metadata, never denied selections or content."""
+    if not isinstance(audit, Mapping):
+        return None
+    result: dict[str, Any] = {}
+    reason = _agent_stable_cause(audit.get("restriction_reason"))
+    if reason is not None:
+        result["restriction_reason"] = reason
+    if audit.get("destination") in ("local", "remote"):
+        result["destination"] = audit["destination"]
+    for key, ceiling in (("token_budget", 65536), ("row_budget", 1024)):
+        value = audit.get(key)
+        if type(value) is int and 0 <= value <= ceiling:
+            result[key] = value
+    if type(audit.get("raw_rows_rejected")) is bool:
+        result["raw_rows_rejected"] = audit["raw_rows_rejected"]
+    policy = audit.get("policy_ref")
+    if (isinstance(policy, Mapping)
+            and set(policy) == {"kind", "logical_id", "semantic_version", "contract_digest"}
+            and all(type(policy[key]) is str and re.fullmatch(r"[A-Za-z0-9_.:-]{1,256}", policy[key])
+                    for key in ("kind", "logical_id", "semantic_version"))
+            and type(policy["contract_digest"]) is str and re.fullmatch(r"[0-9a-f]{64}", policy["contract_digest"])):
+        result["policy_ref"] = dict(policy)
+    return result
+
+
+def _coefficient_selection_for_node(node: Mapping[str, Any], *, terms=None):
+    """Use the server-resolved graph model and its agreeing payload identity."""
+    from ..evidence.consumer_adapters import ModelCoefficientSelectionV1
+    node_id = node.get("id")
+    if node.get("kind") != "model" or not isinstance(node_id, str) or not node_id.startswith("model:"):
+        return None
+    model_id = node_id.removeprefix("model:")
+    if not model_id or node.get("payload_ref") not in (
+        f"model_results/{model_id}.json", f"artifacts/model_results/{model_id}.result.json"
+    ):
+        return None
+    return ModelCoefficientSelectionV1(model_id, terms=terms)
+
+
+def _agent_typed_evidence_projection(
+    evidence: Mapping[str, object],
+) -> dict[str, Any]:
+    """Render only the server-owned typed evidence for a central Agent tool."""
+
+    status = evidence.get("status")
+    usable = status in {"available", "degraded"}
+    normalized_status = (
+        status
+        if status in {"available", "degraded", "blocked", "unavailable"}
+        else "unavailable"
+    )
+    raw_facts = evidence.get("facts")
+    facts = list(raw_facts) if usable and isinstance(raw_facts, (list, tuple)) else []
+    packet: dict[str, Any] = {
+        "available": usable,
+        "status": normalized_status,
+        "summary_status": (evidence.get("completeness_status") or normalized_status) if usable else normalized_status,
+        "summary_projection_status": normalized_status,
+        "authority": "server-owned",
+        "source": "persisted-typed-evidence",
+        "facts": facts,
+        "sections": list(evidence.get("sections", ())) if usable else [],
+        "semantic_selection": evidence.get("semantic_selection") if usable else None,
+        "audit": evidence.get("audit") if usable else _agent_safe_failure_audit(evidence.get("audit")),
+        "projection_digest": evidence.get("projection_digest") if usable else None,
+        "receipt": evidence.get("receipt") if usable else None,
+    }
+    if not usable:
+        packet["unavailable_reason"] = _agent_failure_reason(evidence)
+    return packet
+
+
 def _verified_model_results(run_root: Path) -> tuple[list[dict[str, Any]], str | None]:
     """Read model results only through the server-owned artifact boundary."""
     try:
@@ -5957,6 +6089,10 @@ def project_persisted_evidence_for_agent(
     *,
     destination: str = "local",
     requested_fact_ids: tuple[str, ...] | None = None,
+    requested_section_ids: tuple[str, ...] | None = None,
+    coefficient_selection: object | None = None,
+    provenance_selection: object | None = None,
+    requested_section_types: tuple[str, ...] | None = None,
     registry: object | None = None,
     gateway: object | None = None,
     receipt: object | None = None,
@@ -5980,6 +6116,10 @@ def project_persisted_evidence_for_agent(
         consumer_id="agent",
         destination=destination,
         requested_fact_ids=requested_fact_ids,
+        requested_section_ids=requested_section_ids,
+        coefficient_selection=coefficient_selection,
+        provenance_selection=provenance_selection,
+        requested_section_types=requested_section_types,
         gateway=gateway,  # type: ignore[arg-type]
         receipt=receipt,  # type: ignore[arg-type]
         issuer=issuer,  # type: ignore[arg-type]
@@ -5990,6 +6130,10 @@ def read_persisted_evidence_for_agent(
     run_root: Path,
     *,
     requested_fact_ids: tuple[str, ...] | None = None,
+    requested_section_ids: tuple[str, ...] | None = None,
+    coefficient_selection: object | None = None,
+    provenance_selection: object | None = None,
+    requested_section_types: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
     """Read Agent evidence through the server-owned central consumer port."""
 
@@ -6000,4 +6144,8 @@ def read_persisted_evidence_for_agent(
         project_root=Path(run_root).expanduser().resolve(strict=False).parent.parent,
         run_id=Path(run_root).name,
         requested_fact_ids=requested_fact_ids,
+        requested_section_ids=requested_section_ids,
+        coefficient_selection=coefficient_selection,
+        provenance_selection=provenance_selection,
+        requested_section_types=requested_section_types,
     )

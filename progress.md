@@ -36,3 +36,13 @@
 Browser, provider, central, production live-host, full repository gate,
 release, merge, push, tag, deployment, and browser-visible acceptance remain
 `NOT VERIFIED`.
+
+# v1.8.9 Notebook/Graph Agent UI restoration
+
+- User declined visual-companion work and explicitly authorized direct
+  restoration against the v1.8.8 UI/UX reference.
+- Captured the live Notebook and Graph DOM through the already-running in-app
+  Workbench. Services and the user browser tab remain running.
+- Confirmed current candidate HEAD `afc7649c81eb54ee8adcb89edc6be14fc8378d6f`
+  and v1.8.8 reference `ebba33f18037d3569f3d39dae8773b21a870e6e5`.
+- No production code changed yet; root-cause investigation is in progress.

@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import json
 import asyncio
+import hashlib
+from dataclasses import replace
+from datetime import timedelta
 from threading import Event, Thread
 
 import httpx
@@ -22,8 +25,203 @@ from workbench.llm.provider_store import (
     load_provider_store,
     save_provider_store,
 )
+from tests.test_v189_provider_egress import host as egress_host
+
+
+def _admit_synthetic_payload(host, config, payload, **grant_limits):
+    """Test host resolves only synthetic fixture content, never project files."""
+    from workbench.services.provider_egress import provider_payload_bytes
+    authority, handle, now = host
+    digest = hashlib.sha256(provider_payload_bytes(payload)).hexdigest()
+    source = ("source:synthetic-protocol-fixture", digest, "user_text")
+    authority.classify(authority_handle=handle, source_ref=source[0],
+        source_digest=digest, category=source[2], sensitivity="public")
+    provider_ref = llm_client.provider_egress_ref(config)
+    grant = authority.grant(authority_handle=handle, provider_ref=provider_ref,
+        purpose_ref="purpose:protocol-test", categories=("user_text",),
+        allowed_sensitivity=("public",), expires_at=now[0] + timedelta(minutes=5), **grant_limits)
+    assembly = authority.mint_trusted_assembly(authority_handle=handle,
+        project_ref="project:egress", payload=payload, sources=(source,), admitted_rows=0)
+    admission = authority.prepare(project_ref="project:egress", provider_ref=provider_ref,
+        purpose_ref="purpose:protocol-test", assembly=assembly)
+    return admission, grant
+
+
+def _admit_synthetic_request(host, config, request):
+    from workbench.agent.model import _to_openai_wire_messages, _to_openai_tool_descriptors
+    payload = llm_client._chat_request_payload(_to_openai_wire_messages(request.messages), config,
+        _to_openai_tool_descriptors(request.tools), model_config=request.model_config, stream=True)
+    admission, grant = _admit_synthetic_payload(host, config, payload)
+    return replace(request, provider_admission=admission), grant, payload
+
+
+@pytest.fixture
+def admitted_adapter(egress_host):
+    """Real adapter/security boundary with explicitly admitted synthetic inputs."""
+    def make(config, *, adapter_type=OpenAICompatibleModelAdapter, **kwargs):
+        class SyntheticFixtureAdapter(adapter_type):
+            async def stream(self, request):
+                admitted, _grant, _payload = _admit_synthetic_request(egress_host, self.config, request)
+                async for event in super().stream(admitted):
+                    yield event
+        return SyntheticFixtureAdapter(config, project_ref="project:egress",
+            purpose_ref="purpose:protocol-test", **kwargs)
+    return make
+
+
+@pytest.fixture
+def admitted_stream(egress_host):
+    async def stream(messages, config, *, tools=None, model_config=None):
+        payload = llm_client._chat_request_payload(messages, config, tools,
+            model_config=model_config, stream=True)
+        admission, _grant = _admit_synthetic_payload(egress_host, config, payload)
+        async for event in llm_client.async_stream_chat_completion(messages, config,
+                tools=tools, model_config=model_config, provider_admission=admission,
+                project_ref="project:egress", purpose_ref="purpose:protocol-test"):
+            yield event
+    return stream
+
+
+def test_admitted_agent_sends_exact_bytes_and_revocation_blocks_replay(monkeypatch, egress_host):
+    from workbench.services.provider_egress import provider_payload_bytes
+    seen = _install_async_upstream(monkeypatch, lambda request: httpx.Response(200,
+        content=b'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n'))
+    config = LLMConfig(base_url="https://provider.example/v1", api_key="test-only", model="test")
+    request, grant, payload = _admit_synthetic_request(egress_host, config,
+        ModelRequest(messages=[{"role": "user", "content": "synthetic e\u0301"}]))
+    adapter = OpenAICompatibleModelAdapter(config, project_ref="project:egress",
+        purpose_ref="purpose:protocol-test")
+
+    async def run():
+        return [event async for event in adapter.stream(request)]
+
+    events = asyncio.run(run())
+    assert events[-1].type == "done", events
+    assert len(seen) == 1 and seen[0].content == provider_payload_bytes(payload)
+    authority, handle, _ = egress_host
+    authority.revoke(authority_handle=handle, grant_id=grant)
+    denied = asyncio.run(run())
+    assert len(seen) == 1
+    assert denied[-1].error == "EGRESS_GRANT_REQUIRED"
+
+
+@pytest.mark.parametrize("attack,code", [
+    ("payload", "EGRESS_PAYLOAD_MISMATCH"), ("project", "EGRESS_SCOPE_MISMATCH"),
+    ("purpose", "EGRESS_SCOPE_MISMATCH"), ("provider", "EGRESS_SCOPE_MISMATCH"),
+    ("credential", "EGRESS_SCOPE_MISMATCH"), ("forged", "EGRESS_ADMISSION_REQUIRED"),
+    ("expired", "EGRESS_GRANT_REQUIRED"), ("reclassified", "EGRESS_SOURCE_CLASSIFICATION_REQUIRED"),
+])
+def test_send_mutations_reject_before_transport(monkeypatch, egress_host, attack, code):
+    from workbench.services.provider_egress import provider_payload_bytes
+    seen = _install_async_upstream(monkeypatch, lambda request: pytest.fail("unauthorized HTTP send"))
+    config = LLMConfig(base_url="https://provider.example/v1", api_key="test-only", model="test")
+    request, _grant, payload = _admit_synthetic_request(egress_host, config,
+        ModelRequest(messages=[{"role": "user", "content": "synthetic"}]))
+    project, purpose = "project:egress", "purpose:protocol-test"
+    if attack == "payload":
+        request.messages[0]["content"] = "changed historical content"
+    elif attack == "project": project = "project:foreign"
+    elif attack == "purpose": purpose = "purpose:foreign"
+    elif attack == "provider": config = replace(config, base_url="https://foreign.example/v1")
+    elif attack == "credential": config = replace(config, api_key="changed-test-key")
+    elif attack == "forged": request = replace(request, provider_admission={"approved": True})
+    elif attack == "expired": egress_host[2][0] += timedelta(minutes=5)
+    elif attack == "reclassified":
+        egress_host[0].classify(authority_handle=egress_host[1],
+            source_ref="source:synthetic-protocol-fixture",
+            source_digest=hashlib.sha256(provider_payload_bytes(payload)).hexdigest(),
+            category="conversation", sensitivity="restricted")
+
+    async def run():
+        return [event async for event in OpenAICompatibleModelAdapter(config,
+            project_ref=project, purpose_ref=purpose).stream(request)]
+
+    events = asyncio.run(run())
+    assert seen == [] and len(events) == 1 and events[0].error == code
+
+
+def test_retry_rechecks_revocation_instead_of_replaying_admitted_body(monkeypatch, egress_host):
+    config = LLMConfig(base_url="https://provider.example/v1", api_key="test-only", model="test")
+    request, grant, _payload = _admit_synthetic_request(egress_host, config,
+        ModelRequest(messages=[{"role": "user", "content": "synthetic"}]))
+
+    def revoke_and_retry(_request):
+        egress_host[0].revoke(authority_handle=egress_host[1], grant_id=grant)
+        return httpx.Response(503)
+
+    seen = _install_async_upstream(monkeypatch, revoke_and_retry)
+
+    async def run():
+        return [event async for event in OpenAICompatibleModelAdapter(config,
+            project_ref="project:egress", purpose_ref="purpose:protocol-test").stream(request)]
+
+    events = asyncio.run(run())
+    assert len(seen) == 1 and events[-1].error == "EGRESS_GRANT_REQUIRED"
+
+
+def test_provider_stream_stops_at_granted_total_time_budget(monkeypatch, egress_host):
+    from workbench.services.provider_egress import ProviderEgressError
+    config = LLMConfig(base_url="https://provider.example/v1", api_key="test-only", model="test", timeout_s=60)
+    messages = [{"role": "user", "content": "synthetic"}]
+    payload = llm_client._chat_request_payload(messages, config, None, stream=True)
+    admission, _grant = _admit_synthetic_payload(egress_host, config, payload, timeout_ms=20)
+    cancelled = []
+
+    class SlowStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            try:
+                await asyncio.sleep(0.2)
+                yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            except asyncio.CancelledError:
+                cancelled.append(True)
+                raise
+
+    _install_async_upstream(monkeypatch,
+        lambda request: httpx.Response(200, stream=SlowStream()))
+
+    async def run():
+        with pytest.raises(ProviderEgressError, match="EGRESS_TIME_BUDGET_EXCEEDED"):
+            async for _ in llm_client.async_stream_chat_completion(messages, config,
+                    provider_admission=admission, project_ref="project:egress",
+                    purpose_ref="purpose:protocol-test"):
+                pass
+    asyncio.run(run())
+    assert cancelled == [True]
 
 API_KEY = "sk-provider-secret"
+
+
+def test_provider_egress_identity_binds_effective_destination_and_credential():
+    from dataclasses import replace
+    identity = getattr(llm_client, "provider_egress_ref", None)
+    assert callable(identity), "provider grant has no effective destination binding"
+    config = LLMConfig(base_url="https://provider.example/v1", api_key="test-only", model="test")
+    ref = identity(config)
+    assert ref == identity(replace(config, timeout_s=config.timeout_s + 1))
+    assert "test-only" not in ref and "provider.example" not in ref
+    for changes in ({"base_url": "https://other.example/v1"}, {"model": "other"},
+                    {"api_key": "other-test-key"}, {"provider_id": "other-account"}):
+        assert identity(replace(config, **changes)) != ref
+
+
+def test_agent_send_without_host_admission_never_opens_transport(monkeypatch):
+    opened = []
+
+    def forbidden_transport(config):
+        opened.append(config.model)
+        raise AssertionError("unadmitted provider request reached transport")
+
+    monkeypatch.setattr(llm_client, "_async_client_factory", forbidden_transport)
+    config = LLMConfig(base_url="https://provider.example/v1", api_key="test-only", model="test")
+
+    async def run():
+        return [event async for event in OpenAICompatibleModelAdapter(config).stream(
+            ModelRequest(messages=[{"role": "user", "content": "local project result"}]))]
+
+    events = asyncio.run(run())
+    assert opened == [], "an API key is not authority to send project content"
+    assert len(events) == 1 and events[0].type == "error"
+    assert events[0].error == "EGRESS_ADMISSION_REQUIRED"
 
 
 @pytest.fixture
@@ -1287,7 +1485,7 @@ def test_chat_completion_preserves_existing_base_url_joining(monkeypatch):
     assert str(seen[0].url) == "https://api.example.com/v1/chat/completions"
 
 
-def test_async_stream_chat_completion_yields_public_text_deltas(monkeypatch) -> None:
+def test_async_stream_chat_completion_yields_public_text_deltas(monkeypatch, admitted_stream) -> None:
     seen = _install_async_upstream(
         monkeypatch,
         lambda request: httpx.Response(
@@ -1303,7 +1501,7 @@ def test_async_stream_chat_completion_yields_public_text_deltas(monkeypatch) -> 
     async def scenario() -> list[dict[str, object]]:
         return [
             event
-            async for event in llm_client.async_stream_chat_completion(
+            async for event in admitted_stream(
                 [{"role": "user", "content": "stream a public answer"}],
                 LLMConfig(
                     base_url="https://api.example.com/v1",
@@ -1323,7 +1521,30 @@ def test_async_stream_chat_completion_yields_public_text_deltas(monkeypatch) -> 
     assert json.loads(seen[0].content)["stream"] is True
 
 
-def test_async_stream_chat_completion_assembles_split_typed_tool_call(monkeypatch) -> None:
+@pytest.mark.parametrize("second_id", ["upstream-42", "different-upstream"])
+def test_async_stream_preserves_only_consistent_upstream_identity(monkeypatch, second_id, admitted_stream) -> None:
+    chunks = [
+        {"id": "upstream-42", "choices": [{"delta": {"content": "answer"}, "finish_reason": None}]},
+        {"id": second_id, "choices": [{"delta": {}, "finish_reason": "stop"}]},
+    ]
+    _install_async_upstream(monkeypatch, lambda request: httpx.Response(
+        200, content="".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks).encode(),
+    ))
+
+    async def scenario():
+        return [event async for event in admitted_stream(
+            [{"role": "user", "content": "inspect"}],
+            LLMConfig(base_url="https://api.example.com/v1", api_key=API_KEY, model="test-model"),
+        )]
+
+    if second_id != "upstream-42":
+        with pytest.raises(llm_client.LLMUpstreamError, match="identity changed"):
+            asyncio.run(scenario())
+    else:
+        assert asyncio.run(scenario())[-1]["provider_request_id"] == "upstream-42"
+
+
+def test_async_stream_chat_completion_assembles_split_typed_tool_call(monkeypatch, admitted_stream) -> None:
     _install_async_upstream(
         monkeypatch,
         lambda request: httpx.Response(
@@ -1339,7 +1560,7 @@ def test_async_stream_chat_completion_assembles_split_typed_tool_call(monkeypatc
     async def scenario() -> list[dict[str, object]]:
         return [
             event
-            async for event in llm_client.async_stream_chat_completion(
+            async for event in admitted_stream(
                 [{"role": "user", "content": "inspect the selected node"}],
                 LLMConfig(
                     base_url="https://api.example.com/v1",
@@ -1365,7 +1586,7 @@ def test_async_stream_chat_completion_assembles_split_typed_tool_call(monkeypatc
     ]
 
 
-def test_async_stream_classifies_complete_invalid_tool_arguments(monkeypatch) -> None:
+def test_async_stream_classifies_complete_invalid_tool_arguments(monkeypatch, admitted_stream) -> None:
     """Malformed completed arguments are a correctable tool contract, not transport loss."""
 
     _install_async_upstream(
@@ -1381,7 +1602,7 @@ def test_async_stream_classifies_complete_invalid_tool_arguments(monkeypatch) ->
 
     async def scenario() -> None:
         with pytest.raises(llm_client.LLMToolCallArgumentsError):
-            async for _event in llm_client.async_stream_chat_completion(
+            async for _event in admitted_stream(
                 [{"role": "user", "content": "submit"}],
                 LLMConfig(
                     base_url="https://api.example.com/v1",
@@ -1400,7 +1621,7 @@ def test_async_stream_classifies_complete_invalid_tool_arguments(monkeypatch) ->
     asyncio.run(scenario())
 
 
-def test_openai_adapter_exposes_invalid_tool_arguments_without_replay(monkeypatch) -> None:
+def test_openai_adapter_exposes_invalid_tool_arguments_without_replay(monkeypatch, admitted_adapter) -> None:
     """The planner can correct invalid JSON while the adapter preserves attempt one."""
 
     attempts = 0
@@ -1416,7 +1637,7 @@ def test_openai_adapter_exposes_invalid_tool_arguments_without_replay(monkeypatc
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
     async def scenario():
-        adapter = OpenAICompatibleModelAdapter(
+        adapter = admitted_adapter(
             LLMConfig(
                 base_url="https://api.example.test",
                 api_key=API_KEY,
@@ -1443,7 +1664,7 @@ def test_openai_adapter_exposes_invalid_tool_arguments_without_replay(monkeypatc
     assert events[-1].error == "provider_tool_arguments_invalid"
 
 
-def test_async_stream_chat_completion_forwards_safe_model_request_config(monkeypatch) -> None:
+def test_async_stream_chat_completion_forwards_safe_model_request_config(monkeypatch, admitted_stream) -> None:
     seen = _install_async_upstream(
         monkeypatch,
         lambda request: httpx.Response(
@@ -1458,7 +1679,7 @@ def test_async_stream_chat_completion_forwards_safe_model_request_config(monkeyp
     async def scenario() -> list[dict[str, object]]:
         return [
             event
-            async for event in llm_client.async_stream_chat_completion(
+            async for event in admitted_stream(
                 [{"role": "user", "content": "submit"}],
                 LLMConfig(
                     base_url="https://api.example.com/v1",
@@ -1487,7 +1708,7 @@ def test_async_stream_chat_completion_forwards_safe_model_request_config(monkeyp
     assert payload["max_tokens"] == 4096
 
 
-def test_openai_adapter_retries_after_private_reasoning_only(monkeypatch) -> None:
+def test_openai_adapter_retries_after_private_reasoning_only(monkeypatch, admitted_adapter) -> None:
     attempts = 0
 
     async def fake_stream(*_args, **_kwargs):
@@ -1501,7 +1722,7 @@ def test_openai_adapter_retries_after_private_reasoning_only(monkeypatch) -> Non
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
     async def scenario():
-        adapter = OpenAICompatibleModelAdapter(
+        adapter = admitted_adapter(
             LLMConfig(
                 base_url="https://api.example.test",
                 api_key=API_KEY,
@@ -1520,7 +1741,7 @@ def test_openai_adapter_retries_after_private_reasoning_only(monkeypatch) -> Non
     assert events[-1].type == "done"
 
 
-def test_openai_adapter_does_not_retry_after_partial_tool_call_activity(monkeypatch) -> None:
+def test_openai_adapter_does_not_retry_after_partial_tool_call_activity(monkeypatch, admitted_adapter) -> None:
     seen = _install_async_upstream(
         monkeypatch,
         lambda request: httpx.Response(
@@ -1532,7 +1753,7 @@ def test_openai_adapter_does_not_retry_after_partial_tool_call_activity(monkeypa
     )
 
     async def scenario():
-        adapter = OpenAICompatibleModelAdapter(
+        adapter = admitted_adapter(
             LLMConfig(
                 base_url="https://api.example.com/v1",
                 api_key=API_KEY,
@@ -1551,7 +1772,7 @@ def test_openai_adapter_does_not_retry_after_partial_tool_call_activity(monkeypa
     assert events[-1].type == "error"
 
 
-def test_openai_adapter_never_retries_a_typed_agent_request(monkeypatch) -> None:
+def test_openai_adapter_never_retries_a_typed_agent_request(monkeypatch, admitted_adapter) -> None:
     """A typed request keeps its first provider failure as immutable evidence."""
 
     attempts = 0
@@ -1569,7 +1790,7 @@ def test_openai_adapter_never_retries_a_typed_agent_request(monkeypatch) -> None
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
     async def scenario():
-        adapter = OpenAICompatibleModelAdapter(
+        adapter = admitted_adapter(
             LLMConfig(
                 base_url="https://api.example.test",
                 api_key=API_KEY,
@@ -1597,7 +1818,7 @@ def test_openai_adapter_never_retries_a_typed_agent_request(monkeypatch) -> None
     assert events[-1].error == "LLMUpstreamError:upstream_503"
 
 
-def test_openai_adapter_retries_transient_provider_status_before_failing(monkeypatch) -> None:
+def test_openai_adapter_retries_transient_provider_status_before_failing(monkeypatch, admitted_adapter) -> None:
     attempts = 0
 
     async def fake_stream(*_args, **_kwargs):
@@ -1610,7 +1831,7 @@ def test_openai_adapter_retries_transient_provider_status_before_failing(monkeyp
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
     async def scenario():
-        adapter = OpenAICompatibleModelAdapter(
+        adapter = admitted_adapter(
             LLMConfig(
                 base_url="https://api.example.test",
                 api_key=API_KEY,
@@ -1629,7 +1850,7 @@ def test_openai_adapter_retries_transient_provider_status_before_failing(monkeyp
     assert events[-1].type == "done"
 
 
-def test_openai_adapter_preserves_complete_non_object_tool_json_failure(monkeypatch) -> None:
+def test_openai_adapter_preserves_complete_non_object_tool_json_failure(monkeypatch, admitted_adapter) -> None:
     """A completed malformed tool call is not hidden by a second provider turn."""
 
     responses = iter(
@@ -1658,7 +1879,7 @@ def test_openai_adapter_preserves_complete_non_object_tool_json_failure(monkeypa
     )
 
     async def scenario():
-        adapter = OpenAICompatibleModelAdapter(
+        adapter = admitted_adapter(
             LLMConfig(
                 base_url="https://api.example.com/v1",
                 api_key=API_KEY,
@@ -1678,7 +1899,7 @@ def test_openai_adapter_preserves_complete_non_object_tool_json_failure(monkeypa
     assert events[0].error == "provider_tool_arguments_invalid"
 
 
-def test_openai_adapter_stops_one_no_progress_stream_without_retry(monkeypatch) -> None:
+def test_openai_adapter_stops_one_no_progress_stream_without_retry(monkeypatch, admitted_adapter) -> None:
     attempts = 0
 
     async def fake_stream(*_args, **_kwargs):
@@ -1690,7 +1911,7 @@ def test_openai_adapter_stops_one_no_progress_stream_without_retry(monkeypatch) 
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
     async def scenario():
-        adapter = OpenAICompatibleModelAdapter(
+        adapter = admitted_adapter(
             LLMConfig(
                 base_url="https://api.deepseek.com",
                 api_key=API_KEY,
@@ -1711,7 +1932,7 @@ def test_openai_adapter_stops_one_no_progress_stream_without_retry(monkeypatch) 
     assert events[-1].error == "provider_no_progress"
 
 
-def test_openai_adapter_abort_event_interrupts_a_hung_provider_stream(monkeypatch) -> None:
+def test_openai_adapter_abort_event_interrupts_a_hung_provider_stream(monkeypatch, admitted_adapter) -> None:
     started = asyncio.Event()
 
     async def fake_stream(*_args, **_kwargs):
@@ -1723,7 +1944,7 @@ def test_openai_adapter_abort_event_interrupts_a_hung_provider_stream(monkeypatc
 
     async def scenario():
         abort_event = asyncio.Event()
-        adapter = OpenAICompatibleModelAdapter(
+        adapter = admitted_adapter(
             LLMConfig(
                 base_url="https://api.example.com/v1",
                 api_key=API_KEY,

@@ -193,6 +193,14 @@ TEMPLATES: dict[str, dict] = {
             "This may indicate redundancy or near-identity."
         ),
     },
+    "coef_exact_result": {
+        "category": "coefficient",
+        "required_params": ["model_id", "variable", "estimate", "p_value"],
+        "text": (
+            "Model {model_id}, term {variable}: coefficient = {estimate}; "
+            "p-value = {p_value}. Effect scale and causal interpretation are not inferred."
+        ),
+    },
     "coef_continuous_association": {
         "category": "coefficient",
         "required_params": ["variable", "estimate", "p_label", "y"],

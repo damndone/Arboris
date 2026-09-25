@@ -40,6 +40,7 @@ import {
 } from "./ReportWorkspaceContext";
 import { DataConsumerReportEvidence } from "./ReportDataConsumerEvidence";
 import { SurveyReportEvidence } from "./SurveyReportEvidence";
+import { ResultEvidenceReader } from "./ResultEvidenceReader";
 import type { CitableFact } from "./factTable";
 import type { ReportRecord } from "./reportHistory";
 import "./report.css";
@@ -170,11 +171,15 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
   const activeRunId = workspace.activeRunId;
   const excludedIds = new Set(workspace.excludedFactIds);
   const excludedFigureIds = new Set(workspace.excludedFigureIds);
+  const resultReader = workspace.projectRoot && activeRunId
+    ? <ResultEvidenceReader projectRoot={workspace.projectRoot} runId={activeRunId} />
+    : null;
 
   if (!forest || !forest.activeRunId || !table) {
     return (
       <div style={{ padding: 24, fontSize: 13, color: "var(--label-tertiary)" }}>
         Pick a run (version) on the graph first — the report covers the active run's lineage.
+        {resultReader}
       </div>
     );
   }
@@ -270,6 +275,7 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
       />
 
       <ReportActionBar />
+      {resultReader}
 
       <section data-testid="report-scope-summary" className="report-scope-summary">
         <div className="report-scope-summary__heading">

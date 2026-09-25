@@ -15,26 +15,12 @@ from .chains import (
     RerunExecutor,
 )
 from .events import AgentEvent, AgentEventStream
-from .context_tools import (
-    AnalysisLoopContextError,
-    AnalysisLoopPacketPayloadError,
-    InspectArtifactPreviewRequest,
-    InspectDiagnosticsRequest,
-    InspectNodeContextRequest,
-    InspectOperationContractRequest,
-    InspectResultSummaryRequest,
-    NodeOperationContextProvider,
-    WorkbenchContextProvider,
-    inspect_analysis_loop_context,
-    parse_analysis_loop_packet_payloads,
-)
 from .model import (
     ModelAdapter,
     ModelRequest,
     ModelStreamEvent,
     OpenAICompatibleModelAdapter,
 )
-from .orchestrator import AgentCommand, WorkbenchOrchestrator
 from .operations import (
     OperationDefinition,
     OperationRecord,
@@ -59,6 +45,32 @@ from .tools import (
     ToolResult,
     ToolRuntime,
 )
+
+# Importing leaf contracts must not bootstrap their consumers. In particular,
+# the data manifest imports operations before the host resolver can consume it.
+_LAZY_EXPORTS = {
+    **dict.fromkeys((
+        "AnalysisLoopContextError", "AnalysisLoopPacketPayloadError",
+        "InspectArtifactPreviewRequest", "InspectDiagnosticsRequest",
+        "InspectNodeContextRequest", "InspectOperationContractRequest",
+        "InspectResultSummaryRequest", "NodeOperationContextProvider",
+        "WorkbenchContextProvider", "inspect_analysis_loop_context",
+        "parse_analysis_loop_packet_payloads",
+    ), ".context_tools"),
+    "AgentCommand": ".orchestrator",
+    "WorkbenchOrchestrator": ".orchestrator",
+}
+
+
+def __getattr__(name: str):
+    from importlib import import_module
+
+    module = _LAZY_EXPORTS.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module, __name__), name)
+    globals()[name] = value
+    return value
 
 __all__ = [
     "AgentCore",

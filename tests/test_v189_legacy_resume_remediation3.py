@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests.test_v189_agent_notebook_cutover import _cutover, _intent
-from tests.test_v189_legacy_route_authority import _server_receipt
+from tests.test_v189_legacy_route_authority import _server_owned_request, _server_receipt
 from workbench.agent.orchestrator import CutoverCompilerError
 from workbench.agent.proposals import ProposalStore
 from workbench.api_errors import WorkbenchAPIError
@@ -238,6 +238,11 @@ def test_route_rejects_persisted_target_tamper_with_original_fingerprint_before_
         ) or Compiler(),
     )
     monkeypatch.setattr(agent_routes, "_cutover_store", lambda **_kwargs: cutover_store)
+    request = _server_owned_request(
+        actor_ref=f"actor:agent:{session_id}",
+        session_ref=session_id,
+        project_ref=project_ref,
+    )
 
     with pytest.raises(WorkbenchAPIError, match="integrity|fingerprint|proposal") as error:
         asyncio.run(
@@ -250,6 +255,7 @@ def test_route_rejects_persisted_target_tamper_with_original_fingerprint_before_
                     fingerprint=proposal.fingerprint,
                     active_head_run_id="run:1",
                 ),
+                request=request,
             )
         )
 
@@ -265,6 +271,7 @@ def test_route_rejects_incomplete_persisted_compilation_before_execute(
     tmp_path, monkeypatch
 ) -> None:
     session_id = "session-1"
+    project_ref = f"project:{tmp_path.resolve()}"
     store, proposal = _proposal_store(
         tmp_path,
         preconditions={},
@@ -301,6 +308,11 @@ def test_route_rejects_incomplete_persisted_compilation_before_execute(
         ) or Compiler(),
     )
     monkeypatch.setattr(agent_routes, "_cutover_store", lambda **_kwargs: cutover_store)
+    request = _server_owned_request(
+        actor_ref=f"actor:agent:{session_id}",
+        session_ref=session_id,
+        project_ref=project_ref,
+    )
 
     with pytest.raises(WorkbenchAPIError, match="compilation|proposal") as error:
         asyncio.run(
@@ -313,6 +325,7 @@ def test_route_rejects_incomplete_persisted_compilation_before_execute(
                     fingerprint=proposal.fingerprint,
                     active_head_run_id="run:1",
                 ),
+                request=request,
             )
         )
 
@@ -381,6 +394,11 @@ def test_route_rejects_cross_scope_server_compilation_before_execute(
         ) or Compiler(),
     )
     monkeypatch.setattr(agent_routes, "_cutover_store", lambda **_kwargs: cutover_store)
+    request = _server_owned_request(
+        actor_ref=f"actor:agent:{session_id}",
+        session_ref=session_id,
+        project_ref=project_ref,
+    )
 
     with pytest.raises(WorkbenchAPIError, match="scope|proposal") as error:
         asyncio.run(
@@ -393,6 +411,7 @@ def test_route_rejects_cross_scope_server_compilation_before_execute(
                     fingerprint=proposal.fingerprint,
                     active_head_run_id="run:1",
                 ),
+                request=request,
             )
         )
 

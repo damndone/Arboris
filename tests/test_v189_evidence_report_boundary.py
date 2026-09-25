@@ -183,6 +183,8 @@ def _server_owned_evidence(
     model_run_id: str = "run-1",
     canonical_project_root: Path | None = None,
     keep_open: bool = False,
+    envelope_payload: dict[str, object] | None = None,
+    with_project_file_store: bool = False,
 ) -> Iterator[tuple[ArtifactAdmissionV1, EvidenceCommitBindingV1, ServerOwnedReportEvidencePersistenceV1]]:
     """Build the same C0 registry/store/receipt capability as the owner seam."""
 
@@ -194,7 +196,11 @@ def _server_owned_evidence(
         artifact_id="artifact-1",
         artifact_type="post_estimation",
         scope_ref="scope:project:1",
-        content=json.loads(_FIXTURE.read_text(encoding="utf-8")),
+        content=(
+            envelope_payload
+            if envelope_payload is not None
+            else json.loads(_FIXTURE.read_text(encoding="utf-8"))
+        ),
         source_ref="source:dataset:1",
         validator_ref="validator:evidence-envelope:1",
         execution_ref=f"execution:{run_id}",
@@ -204,7 +210,12 @@ def _server_owned_evidence(
     store = store_context.__enter__()
     if keep_open:
         _LIVE_SERVER_EVIDENCE_CONTEXTS.append(store_context)
+    project_files = None
     try:
+        if with_project_file_store:
+            from workbench.services.report_evidence_owner_factory import HostBoundProjectFileStoreV1
+            project_files = HostBoundProjectFileStoreV1.from_host(
+                canonical_project_root, authority_handle=host.channel, scope_ref="scope:project:1")
         receipt = registry.persistence_receipt(record)
         binding = store.commit(record, receipt=receipt)
         owner_payload = {
@@ -232,9 +243,12 @@ def _server_owned_evidence(
             artifact_file_sha256=hashlib.sha256(owner_raw).hexdigest(),
             canonical_project_root=canonical_project_root,
             authority_handle=host.channel,
+            project_file_store=project_files,
         )
         yield record, binding, capability
     finally:
+        if project_files is not None:
+            project_files.close()
         if not keep_open:
             store_context.__exit__(None, None, None)
 
@@ -280,9 +294,353 @@ def _owner_issued_projection(tmp_path: Path):
         return owner.issue_report_projection(wire)
 
 
+@contextmanager
+def _produced_report(run_root, *, model_results, diagnostic_summary, report_fields=None, variable_labels=None,
+                     complete_collection=False):
+    """Use real producer/host admission; never append display fields after issuance."""
+    from types import SimpleNamespace
+    from workbench.artifacts import initialize_artifact_index, register_artifact, write_json
+    from workbench.report_view_model import build_regression_table, build_report_view_model
+    from workbench.services.report_evidence_owner_factory import (
+        ServerOwnedReportEvidenceOwnerFactoryV1, register_report_evidence_artifact,
+    )
+    from tests.test_v189_evidence_envelope import _admit_store, _authorized_registry
+
+    run_root.mkdir(parents=True, exist_ok=True)
+    initialize_artifact_index(run_root)
+    for model_id, packet in model_results.items():
+        path = run_root / "model_results" / f"{model_id}.json"
+        write_json(path, packet)
+        register_artifact(run_root, model_id, path, "model_result", "econometrics", [])
+    registry, host = _authorized_registry("scope:project:report-fixture")
+    store_root = run_root.parent.parent / f"evidence-store-{uuid4().hex}"
+    store_root.mkdir()
+    with _admit_store(store_root, registry) as store:
+        factory = ServerOwnedReportEvidenceOwnerFactoryV1.from_host(store, registry,
+            actor_ref="actor:report-fixture", project_ref="project:report-fixture",
+            session_ref="session:report-fixture", scope_ref="scope:project:report-fixture",
+            canonical_project_root=run_root.parent.parent, authority_handle=host.channel)
+        try:
+            primary = next(iter(model_results))
+            envelope = factory.prepare_report_evidence_envelope(
+                run_id=run_root.name, model_run_id=primary, upload_hash="a" * 64,
+                primary_model_type=model_results[primary]["model_type"],
+                regression_table=build_regression_table(list(model_results.items()), variable_labels=variable_labels),
+                model_artifact_ids=list(model_results), diagnostic_summary=diagnostic_summary,
+                report_fields=report_fields or {}, issue_dicts=[])
+            receipt = factory.issue_production_receipt(run_id=run_root.name, model_run_id=primary, upload_hash="a" * 64)
+            owner = factory.create_for_run(run_id=run_root.name, model_run_id=primary,
+                production_receipt=receipt, envelope=envelope,
+                artifact_file_sha256=factory.report_evidence_file_sha256(envelope))
+            factory.write_report_evidence_file(owner=owner, production_receipt=receipt, envelope=envelope)
+            register_report_evidence_artifact(owner, run_root=run_root,
+                path=run_root / "report_evidence.json", inputs=list(model_results))
+            if complete_collection:
+                issue = getattr(owner, "issue_complete_report_collection", None)
+                assert callable(issue), "owner must issue a dedicated complete local collection"
+                projection = issue()
+            else:
+                projection = owner.issue_report_projection(owner._canonical_report_wire())
+            view = build_report_view_model({}, run_root, evidence_projection=projection,
+                owner=owner, artifact_admission=owner._canonical_report_artifact())
+            writer = owner.issue_report_document_writer(view, projection, canonical_run_root=run_root)
+            yield SimpleNamespace(view=view, writer=writer, owner=owner, projection=projection)
+        finally:
+            factory.close()
+
+
+def _collection_model(count=1):
+    return {"ols_1": {"model_id": "ols_1", "model_type": "ols", "model_label": "Collection OLS",
+        "nobs": 30, "coefficients": {
+            f"term_{i}": {"estimate": 1.25 + i, "std_error": 0.2, "p_value": 1e-24}
+            for i in range(count)}}}
+
+
+@pytest.mark.parametrize("replace_existing", [False, True])
+def test_export_withdraws_index_under_persistent_fsync_eio(tmp_path, monkeypatch, replace_existing):
+    import errno
+    import os
+    import stat
+
+    from workbench.evidence.persistence import EvidencePersistenceError
+    from workbench.reporting import render_html_report
+
+    run = tmp_path / "project" / "runs" / "persistent-eio"
+    with _produced_report(run, model_results=_collection_model(), diagnostic_summary={},
+                          complete_collection=True) as case:
+        if replace_existing:
+            render_html_report(case.writer, run)
+        index_path = run / "artifacts_index.json"
+        original_index = json.loads(index_path.read_bytes())
+        expected = {**original_index, "artifacts": [row for row in original_index["artifacts"]
+            if row["artifact_id"] != "report_html" and row["path"] != "reports/report.html"]}
+        original_fsync, original_open, original_replace = os.fsync, os.open, os.replace
+        failed = False
+        file_syncs_after_failure = []
+
+        def persistent_eio(fd):
+            nonlocal failed
+            info = os.fstat(fd)
+            if failed and stat.S_ISREG(info.st_mode):
+                file_syncs_after_failure.append(info.st_ino)
+            if not failed and (info.st_dev, info.st_ino) == (run.stat().st_dev, run.stat().st_ino):
+                failed = any(row["artifact_id"] == "report_html"
+                    for row in json.loads(index_path.read_bytes())["artifacts"])
+            if failed:
+                raise OSError(errno.EIO, "persistent export fsync failure")
+            return original_fsync(fd)
+
+        def fd_only_open(path, flags, *args, **kwargs):
+            if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT):
+                assert isinstance(kwargs.get("dir_fd"), int), "export writes must remain FD-only"
+                assert not Path(path).is_absolute()
+            return original_open(path, flags, *args, **kwargs)
+
+        def fd_only_replace(src, dst, *args, **kwargs):
+            assert isinstance(kwargs.get("src_dir_fd"), int)
+            assert isinstance(kwargs.get("dst_dir_fd"), int)
+            assert not Path(src).is_absolute() and not Path(dst).is_absolute()
+            return original_replace(src, dst, *args, **kwargs)
+
+        with monkeypatch.context() as faults:
+            faults.setattr(os, "fsync", persistent_eio)
+            faults.setattr(os, "open", fd_only_open)
+            faults.setattr(os, "replace", fd_only_replace)
+            with pytest.raises(EvidencePersistenceError) as failure:
+                render_html_report(case.writer, run)
+        assert failure.value.code == "EVIDENCE_PERSISTENCE_WRITE_FAILED"
+        assert failed, "inject only after the complete export index was renamed into place"
+        assert json.loads(index_path.read_bytes()) == expected, "failed export must be withdrawn without losing other records"
+        assert file_syncs_after_failure == [], "withdrawal must not fsync a new staged file"
+        assert not list(run.rglob("*.tmp"))
+        assert not list(run.glob("*.rollback"))
+
+
+def test_export_withdraws_index_if_rollback_snapshot_cleanup_fails(tmp_path, monkeypatch):
+    import errno
+    import os
+
+    from workbench.reporting import render_html_report
+
+    run = tmp_path / "project" / "runs" / "rollback-cleanup"
+    with _produced_report(run, model_results=_collection_model(), diagnostic_summary={},
+                          complete_collection=True) as case:
+        index_path = run / "artifacts_index.json"
+        original_index = json.loads(index_path.read_bytes())
+        original_unlink = os.unlink
+        failed = False
+
+        def fail_snapshot_cleanup(path, *args, **kwargs):
+            nonlocal failed
+            if str(path).endswith(".rollback") and not failed:
+                assert isinstance(kwargs.get("dir_fd"), int)
+                assert any(row["artifact_id"] == "report_html"
+                    for row in json.loads(index_path.read_bytes())["artifacts"])
+                failed = True
+                raise OSError(errno.EIO, "rollback snapshot cleanup failure")
+            return original_unlink(path, *args, **kwargs)
+
+        with monkeypatch.context() as faults:
+            faults.setattr(os, "unlink", fail_snapshot_cleanup)
+            with pytest.raises(OSError, match="rollback snapshot cleanup failure"):
+                render_html_report(case.writer, run)
+        assert failed
+        assert json.loads(index_path.read_bytes()) == original_index
+        assert not list(run.glob("*.rollback"))
+
+
+def test_local_collection_exports_full_oversized_content(tmp_path, monkeypatch):
+    from workbench import report_export
+    from workbench.evidence.consumer_adapters import ConsumerProjectionRegistryV1, _structured_row_count
+    from workbench.canonical import canonical_json_v1
+    from workbench.reporting import render_html_report
+    from workbench.exports import export_xlsx, export_pdf
+    cls = getattr(report_export, "LocalReportCollectionV1", None)
+    assert cls is not None, "complete collections must not masquerade as EvidenceProjectionV1"
+    run = tmp_path / "project" / "runs" / "r1"
+    with _produced_report(run, model_results=_collection_model(100), diagnostic_summary={},
+                          variable_labels={"term_99": "Final labelled term"},
+                          complete_collection=True) as case:
+        assert type(case.projection) is cls
+        assert not isinstance(case.projection, report_export.EvidenceProjectionV1)
+        wire = case.projection.wire
+        assert wire["deliveryKind"] == "local_complete_collection"
+        assert wire["readCompleteness"] == "COMPLETE" and wire["sectionDirectory"]
+        assert len(case.view["regression_table"]["rows"]) == 100
+        assert case.view["regression_table"]["rows"][-1]["label"] == "Final labelled term"
+        assert all(section["status"] in {"available", "unavailable", "not_applicable", "blocked"}
+                   for section in wire["resolvedSections"])
+        source, _ = case.owner._canonical_report_source_and_artifact()
+        single = default_projection_registry().project(source, consumer_id="report", destination="local")
+        assert single.status.value == "unavailable", "fixture must exceed single delivery budget"
+        assert single.audit.restriction_reason == "structured_projection_budget_exceeded"
+        central = case.projection._collection
+        assert _structured_row_count(central.facts, central.sections, central.result_dependencies) <= 1024
+        original = json.loads((run / "report_evidence.json").read_text())
+        assert canonical_json_v1([fact.to_dict() for fact in central.facts]) == canonical_json_v1(original["numeric_facts"])
+        assert canonical_json_v1(central.result_dependencies) == canonical_json_v1(original["family_evidence"]["result_dependencies"])
+        assert {s["sectionId"]: (s["status"], list(s["reasonCodes"])) for s in wire["resolvedSections"]} == {
+            s["section_id"]: (s["status"], s["reason_codes"])
+            for s in original["family_evidence"]["structured_results"]["sections"]}
+        def no_default_all(*args, **kwargs):
+            pytest.fail("complete collection rendering must not reproject default-all")
+        monkeypatch.setattr(ConsumerProjectionRegistryV1, "project", no_default_all)
+        view = build_report_view_model({}, run, evidence_projection=case.projection,
+            owner=case.owner, artifact_admission=case.owner._canonical_report_artifact())
+        assert view["status"] == "available" and view["facts"] == case.view["facts"]
+        html = render_html_report(case.writer, run).read_text()
+        assert "term_99" in html and "1e-24" in html and "Final labelled term" in html
+        pdf = export_pdf(case.writer, run).read_bytes()
+        assert b"Collection OLS" in pdf and b"1e-24" in pdf and b"Final labelled term" in pdf
+        writer = case.owner.issue_report_evidence_writer(case.projection, sections=("regression_table",))
+        workbook = load_workbook(export_xlsx(writer, run), data_only=False)
+        try:
+            rows = list(workbook.active.iter_rows(values_only=True))
+            assert len(rows) == 101
+            assert rows[-1][rows[0].index("label")] == "Final labelled term"
+            cell = json.loads(rows[-1][rows[0].index("models")])["ols_1"]
+            assert cell["estimate"] == 100.25 and cell["p_value"] == 1e-24
+        finally:
+            workbook.close()
+
+
+def test_local_collection_preserves_locked_section_row_cap(tmp_path):
+    from workbench.evidence.consumer_adapters import EvidenceProjectionError
+    with pytest.raises(EvidenceProjectionError, match="RESULT_PAGE_ROW_BUDGET_EXCEEDED"):
+        with _produced_report(tmp_path / "project" / "runs" / "over-row-cap",
+                              model_results=_collection_model(180), diagnostic_summary={},
+                              complete_collection=True):
+            pytest.fail("over-budget section was issued as complete")
+
+
+@pytest.mark.parametrize("attack", ["copy", "pickle", "forged", "wire", "directory", "incomplete", "source", "view"])
+def test_local_collection_rejects_forgery_and_changes_before_export(tmp_path, attack):
+    from workbench import report_export
+    from workbench.reporting import render_html_report
+    cls = getattr(report_export, "LocalReportCollectionV1", None)
+    assert cls is not None, "dedicated owner-issued collection is required"
+    run = tmp_path / "project" / "runs" / "r1"
+    with _produced_report(run, model_results=_collection_model(), diagnostic_summary={},
+                          complete_collection=True) as case:
+        collection = case.projection
+        if attack in {"copy", "pickle"}:
+            with pytest.raises(TypeError):
+                (copy.copy if attack == "copy" else pickle.dumps)(collection)
+            return
+        if attack == "forged":
+            fake = object.__new__(cls)
+            for key in ("wire", "_owner", "_collection", "_issuer_token"):
+                object.__setattr__(fake, key, getattr(collection, key))
+            with pytest.raises(TypeError):
+                case.owner.issue_report_document_writer(case.view, fake, canonical_run_root=run)
+            return
+        if attack == "view":
+            view = json.loads(json.dumps(case.writer.view_model))
+            view["regression_table"]["rows"][0]["label"] = "unbound replacement"
+            object.__setattr__(case.writer, "view_model", view)
+        elif attack == "source":
+            (run / "model_results" / "ols_1.json").write_bytes(b"tampered")
+        else:
+            wire = json.loads(json.dumps(collection.wire))
+            if attack == "wire": wire["facts"][0]["value"] += 7
+            elif attack == "directory": wire["sectionDirectory"] = []
+            else: wire["readCompleteness"] = "PARTIAL"
+            object.__setattr__(collection, "wire", wire)
+        with pytest.raises((TypeError, ValueError)):
+            render_html_report(case.writer, run)
+        assert not (run / "reports" / "report.html").exists()
+
+
+def test_local_collection_rejects_foreign_owner(tmp_path):
+    with _produced_report(tmp_path / "project" / "runs" / "a",
+                          model_results=_collection_model(), diagnostic_summary={},
+                          complete_collection=True) as first:
+        with _produced_report(tmp_path / "project" / "runs" / "b",
+                              model_results=_collection_model(), diagnostic_summary={},
+                              complete_collection=True) as second:
+            with pytest.raises((TypeError, ValueError)):
+                second.owner.issue_report_evidence_writer(first.projection)
+            from workbench.report_export import LocalReportCollectionV1
+            with pytest.raises((TypeError, ValueError)):
+                LocalReportCollectionV1._from_server_collection(first.projection.wire,
+                    owner=second.owner, collection=first.projection._collection)
+
+
+def test_local_collection_admission_releases_unreferenced_capability():
+    import gc
+    import weakref
+    from workbench.report_export import LocalReportCollectionV1, _REPORT_COLLECTION_ADMISSIONS
+
+    # Registry ownership alone must not retain a potentially large report wire.
+    instance = object.__new__(LocalReportCollectionV1)
+    reference = weakref.ref(instance)
+    before = len(_REPORT_COLLECTION_ADMISSIONS)
+    _REPORT_COLLECTION_ADMISSIONS[instance] = (object(), object(), object())
+    del instance
+    gc.collect()
+    assert reference() is None
+    assert len(_REPORT_COLLECTION_ADMISSIONS) == before
+
+
+@pytest.mark.parametrize("term", ["x", "<script>untrusted</script>"])
+def test_actual_producer_owner_preserves_report_presentation(tmp_path, term):
+    from workbench.reporting import render_html_report
+    run_root = tmp_path / "project" / "runs" / "r1"
+    packet = {"model_id": "ols_1", "model_type": "ols", "model_label": "Declared OLS",
+              "nobs": 20, "coefficients": {term: {"estimate": 1.25, "std_error": 0.2, "p_value": 1e-20}}}
+    summary = {"diagnostics": {"blockers": [], "warnings": [{"code": "W", "severity": "WARNING",
+                    "message": "Declared warning <unsafe>"}], "cautions": [], "info": []},
+               "narrative_contract": {"constraints": {"must_not_interpret_treatment_independently": True},
+                                      "required_mentions": [], "forbidden_claims": []}}
+    with _produced_report(run_root, model_results={"ols_1": packet}, diagnostic_summary=summary) as case:
+        assert case.view["status"] == "available"
+        assert case.view["title"] == "Declared OLS"
+        assert case.view["warnings"][0]["text"] == "Declared warning <unsafe>"
+        assert "treatment-like variable" in case.view["causal_caution"]
+        path = render_html_report(case.writer, run_root)
+        html = path.read_text()
+        assert "Declared OLS" in html and "Declared warning &lt;unsafe&gt;" in html
+        assert 'id="coefficient-interpretation"' in html
+        assert "coefficient = 1.25; p-value = 1e-20" in html
+        assert "<script>untrusted</script>" not in html
+        if term.startswith("<"):
+            assert "&lt;script&gt;untrusted&lt;/script&gt;" in html
+        from workbench.exports import export_pdf, export_xlsx
+        from openpyxl import load_workbook
+        pdf_path = export_pdf(case.writer, run_root)
+        assert b"Declared OLS" in pdf_path.read_bytes()
+        table_writer = case.owner.issue_report_evidence_writer(case.projection, sections=("regression_table",))
+        workbook_path = export_xlsx(table_writer, run_root)
+        workbook = load_workbook(workbook_path, data_only=False)
+        try:
+            rows = list(workbook.active.iter_rows(values_only=True))
+            model_column = rows[0].index("models")
+            cell = json.loads(rows[1][model_column])["ols_1"]
+            assert cell["estimate"] == 1.25 and cell["p_value"] == 1e-20
+        finally:
+            workbook.close()
+
+
+def test_actual_producer_survey_text_preserves_counts_without_inventing_missing_design(tmp_path):
+    run_root = tmp_path / "project" / "runs" / "r1"
+    packet = {"model_id": "ols_1", "model_type": "ols", "nobs": 20,
+              "coefficients": {"x": {"estimate": 1.25, "std_error": 0.2}},
+              "survey_design": {"variance_method": "jackknife", "replicates_attempted": 12,
+                                "replicates_succeeded": 10, "replicates_failed": 2,
+                                "replicate_failure_reasons": {"singular_fit": 2}}}
+    with _produced_report(run_root, model_results={"ols_1": packet}, diagnostic_summary={}) as case:
+        text = "\n".join(case.view["presentation_facts"])
+        assert "jackknife" in text
+        assert "replicates attempted=12" in text and "succeeded=10" in text and "failed=2" in text
+        assert "singular_fit=2" in text
+        assert "0 strata" not in text and "confidence intervals use this" not in text
+        from workbench.reporting import render_html_report
+        html = render_html_report(case.writer, run_root).read_text()
+        assert "replicates attempted=12" in html and "singular_fit=2" in html
+
+
 def _owner_issued_document_writer(
     tmp_path: Path,
-    report: dict[str, object],
     run_root: Path,
 ):
     with _server_owned_evidence(
@@ -295,36 +653,10 @@ def _owner_issued_document_writer(
         wire = _owner_wire(owner, _report_projection_wire())
         wire["envelopeDigest"] = record.envelope_digest
         projection = owner.issue_report_projection(wire)
-        authority_fields = {
-            "schemaVersion",
-            "projectionId",
-            "consumerId",
-            "consumerVersion",
-            "artifactRef",
-            "envelopeRef",
-            "commitId",
-            "envelopeDigest",
-            "status",
-            "executionStatus",
-            "availability",
-            "completenessStatus",
-            "validationStatus",
-            "validationSummary",
-            "facts",
-            "sections",
-            "provenance",
-            "projectionDigest",
-            "actorRef",
-            "projectRef",
-            "sessionRef",
-            "scopeRef",
-            "runId",
-            "modelRunId",
-            "confirmationRef",
-        }
-        bound_report = dict(wire)
-        bound_report["presentation_facts"] = report.get("facts", [])
-        bound_report.update({key: value for key, value in report.items() if key not in authority_fields and key != "facts"})
+        bound_report = build_report_view_model(
+            {}, run_root, evidence_projection=projection, owner=owner,
+            artifact_admission=owner._canonical_report_artifact(),
+        )
         return owner.issue_report_document_writer(
             bound_report,
             projection,
@@ -380,6 +712,58 @@ def test_copied_registry_receipt_is_typed_rejected_before_report_projection(tmp_
         )
 
     assert view["status"] == "available"
+
+
+def test_report_accepts_owner_issued_degraded_typed_projection(tmp_path: Path) -> None:
+    envelope = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    envelope["completeness_status"] = "degraded"
+    envelope["degradation_reasons"] = [
+        {
+            "code": "CATEGORICAL_AUTO_DUMMY_CODED",
+            "message": "Categorical predictors were dummy coded automatically.",
+            "source_refs": ["run:run-1"],
+        }
+    ]
+
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        envelope_payload=envelope,
+    ) as (record, _binding, owner):
+        wire = dict(owner._canonical_report_wire())  # type: ignore[attr-defined]
+        assert wire["executionStatus"] == "completed"
+        assert wire["availability"] == "available"
+        assert wire["completenessStatus"] == "degraded"
+        assert wire["facts"]
+        wire["envelopeDigest"] = record.envelope_digest
+
+        projection = owner.issue_report_projection(wire)
+
+    assert projection.wire["status"] == "degraded"
+    assert projection.wire["completenessStatus"] == "degraded"
+    assert projection.wire["facts"]
+
+
+def test_degraded_available_report_projection_mints_a_server_receipt() -> None:
+    view = {
+        "status": "degraded",
+        "projectionDigest": "a" * 64,
+        "provenance": {"scopeRef": "scope:project:1"},
+        "actorRef": "actor:1",
+        "projectRef": "project:1",
+        "sessionRef": "session:1",
+        "scopeRef": "scope:project:1",
+        "runId": "run-1",
+        "modelRunId": "run-1",
+        "artifactRef": "artifact:1",
+        "commitId": "commit:1",
+        "confirmationRef": "confirmation:1",
+    }
+
+    receipt = runs_routes._report_evidence_server_receipt(view)
+
+    assert receipt is not None
+    assert receipt["kind"] == "evidence.report.server-receipt.v1"
+    assert receipt["projectionDigest"] == view["projectionDigest"]
 
 
 def test_indexed_post_estimation_without_committed_binding_is_unavailable_and_not_scalarized() -> None:
@@ -480,15 +864,12 @@ def test_remediation_five_caller_mapping_cannot_build_or_render_legacy_report_be
     run_root = tmp_path / "run-1"
     run_root.mkdir()
     write_bytes = __import__("unittest.mock", fromlist=["Mock"]).Mock()
-    register = __import__("unittest.mock", fromlist=["Mock"]).Mock()
-    monkeypatch.setattr(reporting, "write_bytes_durable", write_bytes)
-    monkeypatch.setattr(reporting, "register_artifact", register)
+    monkeypatch.setattr(reporting, "_write_report_output", write_bytes)
 
     with pytest.raises(TypeError, match="owner|capability|projection|Report"):
         render_legacy_html_report(forged_projection, run_root)
 
     write_bytes.assert_not_called()
-    register.assert_not_called()
 
 
 def test_remediation_five_object_new_html_writer_cannot_reach_io(
@@ -502,15 +883,12 @@ def test_remediation_five_object_new_html_writer_cannot_reach_io(
     object.__setattr__(forged_writer, "projection", object.__new__(EvidenceProjectionV1))
     object.__setattr__(forged_writer, "canonical_run_root", run_root)
     write_bytes = __import__("unittest.mock", fromlist=["Mock"]).Mock()
-    register = __import__("unittest.mock", fromlist=["Mock"]).Mock()
-    monkeypatch.setattr(reporting, "write_bytes_durable", write_bytes)
-    monkeypatch.setattr(reporting, "register_artifact", register)
+    monkeypatch.setattr(reporting, "_write_report_output", write_bytes)
 
     with pytest.raises(TypeError, match="owner|capability|projection|Report"):
         reporting.render_html_report(forged_writer, run_root)
 
     write_bytes.assert_not_called()
-    register.assert_not_called()
 
 
 def test_remediation_five_server_admitted_owner_can_build_and_render_legacy_report(
@@ -527,6 +905,7 @@ def test_remediation_five_server_admitted_owner_can_build_and_render_legacy_repo
         run_id="run-1",
         model_run_id="run-1",
         canonical_project_root=project_root,
+        with_project_file_store=True,
     ) as (record, _binding, owner):
         wire = _owner_wire(owner, _report_projection_wire())
         wire["envelopeDigest"] = record.envelope_digest
@@ -619,10 +998,30 @@ def test_report_view_serializes_the_declared_renderer_identity(tmp_path: Path) -
         view = build_persisted_evidence_report_view(
             projection,
             owner=owner,
+            request_identity=owner._report_request_identity,  # type: ignore[attr-defined]
             artifact_admission=owner._canonical_report_artifact(),  # type: ignore[attr-defined]
         )
 
     assert view["rendererKey"] == "workbench.consumer_projection.report"
+
+
+def test_report_view_preserves_numeric_fact_validation_provenance(tmp_path: Path) -> None:
+    with _server_owned_evidence(tmp_path / "fact-validation") as (_record, _binding, owner):
+        projection = default_projection_registry().project(
+            owner._canonical_record,  # type: ignore[attr-defined]
+            consumer_id="report",
+            destination="local",
+        )
+        view = build_persisted_evidence_report_view(
+            projection,
+            owner=owner,
+            request_identity=owner._report_request_identity,  # type: ignore[attr-defined]
+            artifact_admission=owner._canonical_report_artifact(),  # type: ignore[attr-defined]
+        )
+
+    first_fact = view["facts"][0]
+    assert first_fact["validationProvenance"]["level"] == "same_library_regression"
+    assert first_fact["validationProvenance"]["oracleChecks"][0]["status"] == "pass"
 
 
 @pytest.mark.parametrize(
@@ -1708,29 +2107,22 @@ def test_result_table_export_missing_evidence_is_a_typed_unavailable_contract(tm
 def test_result_table_export_valid_commit_downloads_only_typed_facts(tmp_path: Path, monkeypatch) -> None:
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-1"
-    artifact_path = run_root / "artifacts" / "post_estimation" / "result.json"
-    artifact_path.parent.mkdir(parents=True)
+    run_root.mkdir(parents=True)
     (run_root / "run_manifest.json").write_text(
         json.dumps({"run_id": "run-1", "status": "completed", "mode": "auto", "lineage": []}),
         encoding="utf-8",
     )
-    owner_root = tmp_path / "owner-store"
-    owner_root.mkdir()
-    with _server_owned_evidence(owner_root, canonical_project_root=project_root) as (record, binding, capability):
-        index, payload, _content_hash = _canonical_indexed_artifact(record, binding)
-        index["path"] = "artifacts/post_estimation/result.json"
-        index.pop("evidence_commit_binding")
-        index.pop("evidence_envelope")
-        artifact_path.write_bytes(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
-        (run_root / "artifacts_index.json").write_text(
-            json.dumps({"schema_version": 1, "artifacts": [index]}),
-            encoding="utf-8",
-        )
+    packet = {"model_id": "ols_1", "model_type": "ols", "nobs": 30,
+              "coefficients": {"x": {"estimate": 2.0, "std_error": 0.2, "p_value": 1e-24}}}
+    with _produced_report(run_root, model_results={"ols_1": packet}, diagnostic_summary={}) as case:
         monkeypatch.setattr(
             runs_routes,
             "current_report_evidence_persistence",
-            lambda **_kwargs: capability,
+            lambda **_kwargs: case.owner,
         )
+        expected = case.owner.issue_report_evidence_writer(
+            case.projection, sections=("regression_table",),
+        ).tables()["regression_table"]
         response = TestClient(app).post(
             "/runs/run-1/report/result-table-export",
             params={"project_root": str(project_root)},
@@ -1744,10 +2136,15 @@ def test_result_table_export_valid_commit_downloads_only_typed_facts(tmp_path: P
     workbook = load_workbook(io.BytesIO(response.content), read_only=True, data_only=True)
     values = list(workbook["regression_table"].values)
     workbook.close()
-    assert values[0][:3] == ("fact_id", "statistic_id", "value")
-    assert values[1][2] == 2.0
-    assert binding.commit_id in values[1]
-    assert record.envelope_digest in values[1]
+    assert len(values) == 2
+    row = dict(zip(values[0], values[1]))
+    assert row["section_type"] == "regression_table" and row["status"] == "available"
+    assert row["term"] == "x"
+    cell = json.loads(row["models"])["ols_1"]
+    assert cell["estimate"] == 2.0 and cell["p_value"] == 1e-24
+    for key, value in expected[0].items():
+        observed = json.loads(row[key]) if isinstance(value, (dict, list, tuple)) else row[key]
+        assert sha256_canonical(observed) == sha256_canonical(value), key
 
 
 def test_result_table_export_download_failure_is_typed_blocked(tmp_path: Path, monkeypatch) -> None:
@@ -2002,6 +2399,7 @@ def test_remediation_six_exact_identity_rejects_copied_valid_projection_and_writ
             object.__setattr__(cloned, slot, value)
         return cloned
 
+    attacks_reached = []
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-1"
     with _server_owned_evidence(
@@ -2011,6 +2409,8 @@ def test_remediation_six_exact_identity_rejects_copied_valid_projection_and_writ
     ) as (record, _binding, owner):
         projection = owner.issue_report_projection(owner._canonical_report_wire())  # type: ignore[attr-defined]
         evidence_writer = owner.issue_report_evidence_writer(projection, sections=("facts",))
+        projection._assert_server_owned()
+        evidence_writer._assert_server_owned()
 
         monkeypatch.setattr(
             type(owner),
@@ -2018,6 +2418,7 @@ def test_remediation_six_exact_identity_rejects_copied_valid_projection_and_writ
             lambda _owner: pytest.fail("copied projection reached canonical evidence IO"),
         )
         with pytest.raises(TypeError, match="issuer|identity|owner|projection"):
+            attacks_reached.append("projection")
             clone(projection)._assert_server_owned()  # type: ignore[attr-defined]
 
         monkeypatch.setattr(
@@ -2026,14 +2427,15 @@ def test_remediation_six_exact_identity_rejects_copied_valid_projection_and_writ
             lambda _projection: pytest.fail("copied evidence writer reached projection/facts IO"),
         )
         with pytest.raises(TypeError, match="issuer|identity|writer|owner"):
+            attacks_reached.append("evidence_writer")
             clone(evidence_writer)._assert_server_owned()  # type: ignore[attr-defined]
 
     monkeypatch.undo()
     document_writer = _owner_issued_document_writer(
         tmp_path / "document-owner",
-        {"title": "Report", "facts": []},
         run_root,
     )
+    document_writer._assert_server_owned()
     cloned_document_writer = clone(document_writer)
     monkeypatch.setattr(
         reporting,
@@ -2041,7 +2443,9 @@ def test_remediation_six_exact_identity_rejects_copied_valid_projection_and_writ
         lambda *_args, **_kwargs: pytest.fail("copied document writer reached template IO"),
     )
     with pytest.raises(TypeError, match="issuer|identity|writer|owner"):
+        attacks_reached.append("document_writer")
         reporting.render_html_report(cloned_document_writer, run_root)  # type: ignore[arg-type]
+    assert attacks_reached == ["projection", "evidence_writer", "document_writer"]
 
 
 def test_remediation_six_report_stage_adapts_exact_owner_projection_and_fails_closed_without_one(
@@ -2076,6 +2480,61 @@ def test_remediation_six_report_stage_adapts_exact_owner_projection_and_fails_cl
     assert admitted is not None
     assert admitted[0] is owner
     assert admitted[1] is projection
+
+
+def test_report_owner_admission_rejects_a_locally_fabricated_confirmation(
+    tmp_path: Path,
+) -> None:
+    from workbench.artifacts import initialize_artifact_index
+    from workbench.engine.stages.report import _admit_report_evidence_from_factory
+    from workbench.services.report_evidence_owner_factory import (
+        ServerOwnedReportEvidenceOwnerFactoryV1,
+    )
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    initialize_artifact_index(run_root)
+    regression_table = {
+        "models": [{"id": "ols_1", "nobs": 1}],
+        "rows": [{"term": "x", "models": {"ols_1": {"estimate": 1.0}}}],
+    }
+
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        run_id="run-1",
+        model_run_id="ols_1",
+        canonical_project_root=project_root,
+        keep_open=True,
+    ) as (_record, _binding, owner):
+        factory = ServerOwnedReportEvidenceOwnerFactoryV1.from_host(
+            owner._evidence_store,  # type: ignore[attr-defined]
+            owner._registry,  # type: ignore[attr-defined]
+            actor_ref=owner.actor_ref,
+            project_ref=owner.project_ref,
+            session_ref=owner.session_ref,
+            scope_ref=owner.scope_ref,
+            canonical_project_root=project_root,
+            authority_handle=owner._authority_handle,  # type: ignore[attr-defined]
+        )
+        context = SimpleNamespace(
+            artifacts={
+                "_report_evidence_owner_factory": factory,
+                "_upload_hash": "a" * 64,
+                "_report_confirmation_ref": "confirmation:run-1",
+            }
+        )
+
+        with pytest.raises(EvidenceProjectionError, match="confirmation"):
+            _admit_report_evidence_from_factory(
+                context,
+                run_root=run_root,
+                run_id="run-1",
+                model_run_id="ols_1",
+                primary_model_type="ols",
+                regression_table=regression_table,
+                issue_dicts=(),
+            )
 
 
 def _arma_report_stage_context(
@@ -2268,12 +2727,16 @@ def test_arma_garch_report_admission_valid_real_workflow_renders_owner_document(
 ) -> None:
     from tests.models.arma_garch.test_pack_runtime import _options, _source
     from workbench import orchestrator
-    from workbench.app import app
+    from fastapi import FastAPI
+    from tests.test_v189_evidence_envelope import _admit_store, _authorized_registry
+    from workbench.app import configure_report_evidence_owner_factory
     from workbench.artifacts import initialize_artifact_index, read_json, sha256_file
     from workbench.config import WorkbenchConfig
     from workbench.engine.packs.loader import bootstrap_builtin_packs
     from workbench.lineage import incremental
     from workbench.model_options import bind_new_model_options
+    from workbench.report_export import LocalReportCollectionV1
+    from workbench.services.report_evidence_owner_factory import ServerOwnedReportEvidenceOwnerFactoryV1
 
     project_root = tmp_path / "project"
     run_root = project_root / "runs" / "run-1"
@@ -2307,14 +2770,17 @@ def test_arma_garch_report_admission_valid_real_workflow_renders_owner_document(
         "run_pipeline_traced",
         run_pipeline_traced_with_capture,
     )
-    with _server_owned_evidence(
-        tmp_path / "owner-store",
-        run_id="run-1",
-        model_run_id="run-1",
-        canonical_project_root=project_root,
-        keep_open=True,
-    ) as (record, binding, owner):
-        configure_report_evidence_owner(owner)
+    registry, host = _authorized_registry("scope:project:arma-report")
+    store_root = tmp_path / "owner-store"
+    store_root.mkdir()
+    execution_app = FastAPI()
+    with _admit_store(store_root, registry) as store:
+        factory = ServerOwnedReportEvidenceOwnerFactoryV1.from_host(
+            store, registry, actor_ref="actor:arma-report", project_ref="project:arma-report",
+            session_ref="session:arma-report", scope_ref="scope:project:arma-report",
+            canonical_project_root=project_root, authority_handle=host.channel,
+        )
+        configure_report_evidence_owner_factory(factory, app_instance=execution_app)
         try:
             result = orchestrator._run_workflow(
                 run_root,
@@ -2328,27 +2794,44 @@ def test_arma_garch_report_admission_valid_real_workflow_renders_owner_document(
                 model_type="time_series.arma_garch",
                 model_options=_options(),
                 model_options_binding=bound_options.binding.to_dict(),
+                app_instance=execution_app,
             )
+            assert result == {"run_id": "run-1", "status": "completed"}
+            ctx = captured["after_ctx"]
+            owner = ctx.artifacts["_report_evidence_owner"]
+            projection = ctx.artifacts["_report_evidence_projection"]
+            assert type(projection) is LocalReportCollectionV1
+            assert projection._owner is owner
+            projection._assert_server_owned()
+            artifact = owner._canonical_report_artifact()
+            assert projection.wire["artifactRef"] == artifact.artifact_id
+            assert projection.wire["commitId"] == owner._commit_id
+            assert projection.wire["envelopeDigest"] == artifact.envelope_digest
+            assert projection.wire["readCompleteness"] == "COMPLETE"
+            assert owner.accepts_canonical_run_root(run_root)
+            runtime = read_json(run_root / "model_results" / "arma_garch_1.json")
+            assert projection.wire["metrics"]["mae"] == runtime["validation"]["metrics"]["mae"]
+            assert projection.wire["metrics"]["validation_n"] == runtime["validation"]["metrics"]["validation_n"]
+            assert projection.wire["parameters"], "specialized report must contain real admitted estimates"
+            expected_charts = sorted(key for key in runtime["artifact_refs"] if key.startswith("ts.chart."))
+            assert expected_charts
+            assert list(projection.wire["chart_artifacts"]) == expected_charts
+            expected_forecast = runtime["production_child"]["next_forecast"]["conditional_mean"]
+            assert next(row["value"] for row in projection.wire["next_forecast"]
+                        if row["field"] == "conditional_mean") == expected_forecast
         finally:
-            configure_report_evidence_owner(None)
-
-    assert result == {"run_id": "run-1", "status": "completed"}
-    ctx = captured["before_ctx"]
-    assert ctx.artifacts["_report_evidence_owner"] is owner
-    projection = ctx.artifacts["_report_evidence_projection"]
-    assert type(projection) is EvidenceProjectionV1
-    assert projection._owner is owner
-    assert projection.wire["artifactRef"] == record.artifact_id
-    assert projection.wire["commitId"] == binding.commit_id
-    assert projection.wire["envelopeDigest"] == record.envelope_digest
-    assert owner.accepts_canonical_run_root(run_root)
-    assert app.state.report_evidence_persistence is None
+            configure_report_evidence_owner_factory(None, app_instance=execution_app)
+            factory.close()
+    assert execution_app.state.report_evidence_owner_factory is None
 
     report_path = run_root / "reports" / "report.html"
     assert report_path.is_file()
     html = report_path.read_text(encoding="utf-8")
     assert 'id="time-series-overview"' in html
     assert "ARMA(1,0)" in html
+    assert str(runtime["validation"]["metrics"]["mae"]) in html
+    assert str(expected_forecast) in html
+    assert all(artifact_id in html for artifact_id in expected_charts)
     index = read_json(run_root / "artifacts_index.json")
     report_record = next(
         item for item in index["artifacts"] if item["artifact_id"] == "report_html"
@@ -2396,3 +2879,156 @@ def test_report_view_model_does_not_recompute_raw_summary_values(tmp_path: Path)
     assert blocked["status"] in {"blocked", "unavailable"}
     assert blocked["facts"] == []
     assert "raw-secret-456" not in json.dumps(blocked, sort_keys=True)
+
+
+def test_report_template_does_not_render_unsupported_raw_sections() -> None:
+    from jinja2 import Environment, FileSystemLoader
+
+    environment = Environment(
+        loader=FileSystemLoader(Path(__file__).parents[1] / "backend" / "workbench" / "templates"),
+        autoescape=True,
+    )
+    html = environment.get_template("report.html.j2").render(
+        view_model={
+            "title": "Unavailable report",
+            "status": "unavailable",
+            "reasonCode": "EVIDENCE_PROJECTION_UNAVAILABLE",
+            "facts": [],
+            "typedFacts": [],
+            "critical_errors": [],
+            "warnings": [],
+            "cautions": [],
+            "system_notes": [],
+            "coefficient_interpretations": [],
+            "causal_caution": "",
+            "regression_table": {
+                "models": [{"id": "raw-model", "nobs": 999}],
+                "rows": [{"term": "raw-secret", "models": {"raw-model": {"estimate": 999.0}}}],
+            },
+            "descriptive_stats": [{"column": "raw-column", "mean": 998.0}],
+            "statistical_tests": {"y_related": [{"interpretation": "raw-stat-997"}]},
+            "statistical_evidence": {"results": [{"statistic": 996.0}]},
+            "model_family_evidence": {"raw_family_value": 995.0},
+            "model_diagnostics": {"raw-diagnostic": {"durbin_watson": 994.0}},
+            "exploration": None,
+        }
+    )
+
+    assert "EVIDENCE_PROJECTION_UNAVAILABLE" in html
+    assert all(value not in html for value in ("999.0", "998.0", "raw-stat-997", "996.0", "995.0", "994.0"))
+
+
+def test_owner_bound_report_view_and_html_ignore_legacy_raw_sections(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ReportStage owner path receives only safe presentation inputs."""
+
+    from jinja2 import Environment, FileSystemLoader
+    from workbench import orchestrator as orchestrator_module
+    from workbench import report_view_model as report_view_model_module
+    from workbench.engine.context import RunEnv
+    from workbench.engine.stages.report import ReportStage
+
+    project_root = tmp_path / "project"
+    run_root = project_root / "runs" / "run-1"
+    run_root.mkdir(parents=True)
+    raw_values = (
+        "raw-model-family-995",
+        "raw-diagnostic-994",
+        "raw-statistical-996",
+        "raw-regression-999",
+    )
+    raw_regression = {
+        "models": [{"id": "run-1", "nobs": 999}],
+        "rows": [{"term": "raw-regression-999", "models": {"run-1": {"estimate": 999.0}}}],
+    }
+    raw_summary = {
+        "model_identity": {"model_label": "raw-model-family-995"},
+        "model_family_evidence": {"value": "raw-model-family-995"},
+        "diagnostics": {"warnings": [{"message": "raw-diagnostic-994"}]},
+        "statistical_evidence": {"results": [{"statistic": "raw-statistical-996"}]},
+    }
+    with _server_owned_evidence(
+        tmp_path / "owner-store",
+        run_id="run-1",
+        model_run_id="run-1",
+        canonical_project_root=project_root,
+        keep_open=True,
+    ) as (record, _binding, owner):
+        projection = owner.issue_report_projection(owner._canonical_report_wire())  # type: ignore[attr-defined]
+        ctx = _arma_report_stage_context(
+            run_root,
+            owner=owner,
+            projection=projection,
+        )
+        ctx.artifacts.update(
+            {
+                "_model_results": [("run-1", {"model_type": "ols"})],
+                "_routing": {"kind": "regression"},
+                "_model_type": "ols",
+                "_normalized_x": ["x"],
+                "_diagnostic_artifacts": raw_summary["diagnostics"],
+                "_statistical_tests": raw_summary["statistical_evidence"],
+                "_statistical_test_summaries": [
+                    {"interpretation": "raw-statistical-996"}
+                ],
+            }
+        )
+        events = _patch_report_stage_side_effects(monkeypatch)
+        monkeypatch.setattr(
+            orchestrator_module,
+            "_build_descriptive_stats",
+            lambda *_a, **_k: [{"column": "raw-column", "mean": 998.0}],
+        )
+        monkeypatch.setattr(
+            orchestrator_module,
+            "build_diagnostic_summary",
+            lambda **_k: raw_summary,
+        )
+        monkeypatch.setattr(
+            report_view_model_module,
+            "build_regression_table",
+            lambda *_a, **_k: raw_regression,
+        )
+        real_builder = build_report_view_model
+        captured: dict[str, object] = {}
+
+        def capture_builder(summary: dict[str, object], root: Path, **kwargs: object) -> dict[str, object]:
+            captured["summary"] = summary
+            captured["kwargs"] = kwargs
+            view = real_builder(summary, root, **kwargs)  # type: ignore[arg-type]
+            captured["view"] = view
+            return view
+
+        monkeypatch.setattr(
+            report_view_model_module,
+            "build_report_view_model",
+            capture_builder,
+        )
+        result = ReportStage().run(
+            ctx,
+            RunEnv(run_root=run_root, run_id="run-1", recorder=SimpleNamespace()),
+        )
+
+    environment = Environment(
+        loader=FileSystemLoader(Path(__file__).parents[1] / "backend" / "workbench" / "templates"),
+        autoescape=True,
+    )
+    view = captured["view"]
+    assert result.terminal_status == "completed"
+    assert captured["summary"] == {}
+    safe_kwargs = captured["kwargs"]
+    assert isinstance(safe_kwargs, dict)
+    assert safe_kwargs["descriptive_stats"] == []
+    assert safe_kwargs["statistical_tests"] == {}
+    assert safe_kwargs["statistical_evidence"] == {}
+    assert safe_kwargs["regression_table"] == {}
+    assert safe_kwargs["include_legacy_presentation"] is False
+    assert events["rendered"]
+    html = environment.get_template("report.html.j2").render(view_model=view)
+    serialized_view = json.dumps(view, sort_keys=True)
+    assert view["status"] == "available"  # type: ignore[index]
+    assert view["typedFacts"]  # type: ignore[index]
+    assert all(value not in serialized_view for value in raw_values)
+    assert all(value not in html for value in raw_values)

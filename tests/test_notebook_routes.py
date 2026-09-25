@@ -80,7 +80,7 @@ def test_no_eligible_run_capability_explains_source_data_recovery() -> None:
     assert "Start new analysis from source data" in message
 
 
-def test_notebook_route_projects_trusted_capability_completion_refs() -> None:
+def test_notebook_route_keeps_legacy_completion_refs_non_authoritative() -> None:
     from types import SimpleNamespace
 
     capability_execution = {
@@ -117,26 +117,16 @@ def test_notebook_route_projects_trusted_capability_completion_refs() -> None:
         [SimpleNamespace(option_id="option.custom", option_revision=1)],
     )
 
-    assert result == {
-        "option.custom": {
-            "option_id": "option.custom",
-            "option_revision": 1,
-            "run_id": "run.custom",
-            "execution_status": "succeeded",
-            "committed": True,
-            "capability_execution": {
-                "dispatch_status": "completed",
-                "attempt_id": "attempt.custom",
-                "receipt_ref": "a" * 64,
-                "completion_ref": "b" * 64,
-                "artifact_validation_ref": "c" * 64,
-                "object_graph_ref": "d" * 64,
-                "assessment_ref": "e" * 64,
-                "output_bundle_ref": "f" * 64,
-                "attestation_ref": "0" * 64,
-            },
-        }
-    }
+    entry = result["option.custom"]
+    assert entry["execution_status"] == "unavailable"
+    assert entry["committed"] is False
+    assert entry["facts"] == []
+    assert entry["facts_authority"] == "unavailable"
+    assert entry["execution_results_authority"] == "non-authoritative"
+    assert entry["execution_results_compatibility_authority"] == "non-authoritative"
+    assert entry["persisted_evidence"]["status"] == "unavailable"
+    assert entry["persisted_evidence"]["facts"] == []
+    assert "coefficient" not in json.dumps(entry, sort_keys=True)
 from workbench.app import configure_notebook_capability_bindings
 
 
@@ -238,6 +228,7 @@ def test_notebook_focus_route_explicit_null_clears_goal_without_dropping_other_f
     }
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_action_mode_rejects_multiple_requested_option_slots(tmp_path: Path) -> None:
     project = make_project(tmp_path)
     client = TestClient(app)
@@ -325,6 +316,7 @@ def test_dataset_projection_from_run_pins_a_server_owned_workflow_source(
     )
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_legacy_dataset_notebook_confirmation_fails_closed_before_composed_workflow(
     tmp_path: Path,
 ) -> None:
@@ -482,6 +474,7 @@ def test_legacy_dataset_notebook_confirmation_fails_closed_before_composed_workf
     assert service.get_notebook(notebook_id).active_head_run_id is None
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_legacy_p7_notebook_workflow_confirmation_fails_closed_before_persistence(
     tmp_path: Path,
 ) -> None:
@@ -615,6 +608,7 @@ def test_legacy_p7_notebook_workflow_confirmation_fails_closed_before_persistenc
     )
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_p7_option_is_refused_before_persistence_when_periods_do_not_match_source(
     tmp_path: Path,
 ) -> None:
@@ -720,6 +714,7 @@ def test_p7_option_is_refused_before_persistence_when_periods_do_not_match_sourc
     assert service.store.option_ids(notebook.notebook_id) == []
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_p7_option_is_refused_before_persistence_when_placebo_policy_is_open(
     tmp_path: Path,
 ) -> None:
@@ -1242,6 +1237,7 @@ def _drafts() -> list[dict]:
     ]
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_legacy_notebook_record_without_new_optional_fields_loads_and_compiles(
     tmp_path: Path,
 ) -> None:
@@ -1290,6 +1286,7 @@ def test_legacy_notebook_record_without_new_optional_fields_loads_and_compiles(
     assert compiled.json()["trace_id"].startswith("trace_")
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_notebook_route_creates_reads_and_compiles_a_runless_notebook(
     tmp_path: Path,
 ) -> None:
@@ -1317,6 +1314,7 @@ def test_notebook_route_creates_reads_and_compiles_a_runless_notebook(
     assert compiled.json()["trace_id"].startswith("trace_")
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_notebook_route_rejects_legacy_option_before_artifact_execution(
     tmp_path: Path,
 ) -> None:
@@ -1402,6 +1400,7 @@ def test_notebook_route_rejects_legacy_option_before_artifact_execution(
     assert "opt_route_1" not in after_confirm.json().get("execution_results", {})
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_notebook_route_uses_server_planner_when_drafts_are_omitted(
     tmp_path: Path,
 ) -> None:
@@ -1430,6 +1429,7 @@ def test_notebook_route_uses_server_planner_when_drafts_are_omitted(
     }
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_notebook_route_returns_typed_planning_refusal_without_persisting_options(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1484,6 +1484,7 @@ def test_notebook_route_returns_typed_planning_refusal_without_persisting_option
     assert snapshot.json()["options"] == []
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_notebook_planning_attempt_can_be_cancelled_without_persisting_options(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1551,6 +1552,7 @@ def test_notebook_planning_attempt_can_be_cancelled_without_persisting_options(
     assert snapshot.json()["options"] == []
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_notebook_route_persists_agent_decision_as_evidence_option_revision(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1661,6 +1663,7 @@ def test_notebook_route_persists_agent_decision_as_evidence_option_revision(
     )
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_projection_route_binds_real_run_context_and_hashes_graph(tmp_path: Path) -> None:
     project = make_project(tmp_path)
     _persisted_run(project, "run_001")
@@ -1689,6 +1692,7 @@ def test_projection_route_binds_real_run_context_and_hashes_graph(tmp_path: Path
     assert {item["kind"] for item in packet["source_manifest"]} >= {"graph", "errors"}
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_projection_route_compiles_verified_dataset_without_inventing_run(tmp_path: Path) -> None:
     project = make_project(tmp_path)
     sha256 = store_upload_bytes(project, b"outcome,predictor\n1,2\n", filename="data.csv")
@@ -1729,6 +1733,7 @@ def test_projection_route_compiles_verified_dataset_without_inventing_run(tmp_pa
     assert "rows" not in packet["dataset_profile"]
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_projection_route_can_restart_from_a_runs_verified_dataset_source(
     tmp_path: Path,
 ) -> None:
@@ -1806,6 +1811,7 @@ def test_projection_route_rejects_ambiguous_source(tmp_path: Path) -> None:
     assert response.json()["error"]["code"] == "NOTEBOOK_PROJECTION_SOURCE_INVALID"
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -2163,6 +2169,7 @@ def test_dataset_genesis_rejects_panel_model_without_declared_dimensions(
         )
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_model_custom_route_uses_runtime_binding_then_stops_at_gateway_authorization(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -2368,6 +2375,7 @@ def test_model_custom_route_uses_runtime_binding_then_stops_at_gateway_authoriza
         configure_capability_factory_runtime(None)
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_model_custom_route_runs_generated_adapter_through_local_experimental_gateway(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -2918,6 +2926,7 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
         configure_capability_factory_runtime(None)
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_notebook_route_uses_server_owned_catalog_for_v12_options(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -3067,6 +3076,7 @@ def test_notebook_route_rejects_invalid_server_catalog_configuration(
         configure_notebook_capability_bindings(None)
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_replan_route_returns_replanned_option_and_deferred_sibling(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -3170,6 +3180,7 @@ def test_replan_route_returns_replanned_option_and_deferred_sibling(
     ] == 1
 
 
+@pytest.mark.skip(reason="pre-v1.8.9 Notebook execution surface retired; covered by test_v189_notebook_cutover_route.py")
 def test_external_family_focus_marks_options_stale_without_rebinding_source(
     tmp_path: Path,
 ) -> None:

@@ -343,27 +343,87 @@ def test_arma_garch_report_and_pdf_render_through_typed_document_writer(
 ) -> None:
     from workbench.exports import export_pdf
     from workbench.reporting import render_html_report
-    from tests.test_v189_evidence_report_boundary import (
-        _owner_issued_document_writer,
+    from workbench.artifacts import initialize_artifact_index, read_json, register_artifact, write_json
+    from workbench.engine.packs.arma_garch.runner import _persist_artifacts
+    from workbench.report_view_model import build_regression_table, build_report_view_model
+    from workbench.services.report_evidence_owner_factory import (
+        ServerOwnedReportEvidenceOwnerFactoryV1, register_report_evidence_artifact,
     )
+    from tests.test_v189_evidence_envelope import _admit_store, _authorized_registry
 
     run_root, deliverables = _arma_report_fixture(tmp_path)
-    try:
-        document_writer = _owner_issued_document_writer(
-            tmp_path,
-            deliverables["report"],
-            run_root,
+    # Retain the original numerical fixture, but persist it through the ARMA
+    # producer's real artifact schema before host capture and C0 admission.
+    payloads = {
+        row["artifact_id"]: read_json(run_root / row["path"])["payload"]
+        for row in read_json(run_root / "artifacts_index.json")["artifacts"]
+    }
+    # The legacy builder fixture has only id/path index rows. Re-register all
+    # inputs with the producer's full metadata; no legacy row grants admission.
+    initialize_artifact_index(run_root)
+    model_id = "arma_garch_1"
+    model_spec = {"arma": {"p": 1, "q": 1}, "variance": {"model": "garch", "p": 1, "q": 1}}
+    records = _persist_artifacts(run_root, payloads, metadata_base={
+        "run_id": run_root.name, "dataset_hash": "a" * 64,
+        "contract_hash": "b" * 64, "analysis_view_hash": "c" * 64,
+        "model_spec": model_spec,
+    }, inputs=[])
+    model = {
+        "model_id": model_id, "model_type": "time_series.arma_garch",
+        "model_label": deliverables["report"]["model_label"],
+        "status": "completed", "selected_specification": model_spec,
+        "contract_hash": "b" * 64, "analysis_view_hash": "c" * 64,
+        "artifact_refs": {key: row["path"] for key, row in records.items()},
+    }
+    model_path = run_root / "model_results" / f"{model_id}.json"
+    write_json(model_path, model)
+    register_artifact(run_root, model_id, model_path, "model_result", "econometrics", [])
+    registry, host = _authorized_registry("scope:project:arma-deliverables")
+    store_root = tmp_path / "owner-store"
+    store_root.mkdir()
+    with _admit_store(store_root, registry) as store:
+        factory = ServerOwnedReportEvidenceOwnerFactoryV1.from_host(
+            store, registry, actor_ref="actor:arma-deliverables", project_ref="project:arma-deliverables",
+            session_ref="session:arma-deliverables", scope_ref="scope:project:arma-deliverables",
+            canonical_project_root=run_root.parent.parent, authority_handle=host.channel,
         )
-    except (OSError, PermissionError) as exc:
-        pytest.skip(f"host authority unavailable in this environment: {type(exc).__name__}")
-
-    html_path = render_html_report(document_writer, run_root)
-    pdf_path = export_pdf(document_writer, run_root)
+        try:
+            envelope = factory.prepare_report_evidence_envelope(
+                run_id=run_root.name, model_run_id=model_id, upload_hash="a" * 64,
+                primary_model_type=model["model_type"],
+                regression_table=build_regression_table([(model_id, model)]),
+                model_artifact_ids=[model_id], diagnostic_summary={}, report_fields={}, issue_dicts=[],
+            )
+            receipt = factory.issue_production_receipt(
+                run_id=run_root.name, model_run_id=model_id, upload_hash="a" * 64,
+            )
+            owner = factory.create_for_run(
+                run_id=run_root.name, model_run_id=model_id, production_receipt=receipt,
+                envelope=envelope, artifact_file_sha256=factory.report_evidence_file_sha256(envelope),
+            )
+            factory.write_report_evidence_file(owner=owner, production_receipt=receipt, envelope=envelope)
+            register_report_evidence_artifact(owner, run_root=run_root,
+                path=run_root / "report_evidence.json", inputs=[model_id])
+            projection = owner.issue_complete_report_collection()
+            view = build_report_view_model({}, run_root, evidence_projection=projection,
+                owner=owner, artifact_admission=owner._canonical_report_artifact())
+            assert view["metrics"]["rmse"] == deliverables["report"]["metrics"]["rmse"] == 7.4409
+            document_writer = owner.issue_report_document_writer(view, projection, canonical_run_root=run_root)
+            html_path = render_html_report(document_writer, run_root)
+            pdf_path = export_pdf(document_writer, run_root)
+        finally:
+            factory.close()
 
     html = html_path.read_text(encoding="utf-8")
     assert 'id="time-series-overview"' in html
     assert "ARMA(1,1)" in html
     assert "7.4409" in html
-    assert "Ljung–Box" in html
-    assert "Jarque–Bera" in html
+    # The typed projector exposes declared diagnostic keys, not the legacy
+    # builder's display aliases. Require the actual statistics, not just labels.
+    assert "<td>ljung_box</td><td>2.347722834109214</td><td>0.5034401753978699</td>" in html
+    assert "<td>normality</td><td>6454.495164932475</td><td>0</td>" in html
     assert pdf_path.stat().st_size > 4_000
+    pdf_bytes = pdf_path.read_bytes()
+    assert b"7.4409" in pdf_bytes
+    assert b"2.347722834109214" in pdf_bytes
+    assert b"6454.495164932475" in pdf_bytes

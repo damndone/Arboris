@@ -680,6 +680,13 @@ class WorkbenchOrchestrator:
             },
             steps=composed_steps,
             available_columns=[str(column) for column in frame.columns],
+            # OperationRecord is not a compiler receipt. Bind this legacy
+            # server-owned workflow to the resolved host root and the recorded
+            # Agent session, never to optional client target claims.
+            project_ref="project:local:" + hashlib.sha256(
+                str(Path(project_root).resolve()).encode("utf-8")
+            ).hexdigest()[:32],
+            session_ref=record.agent_session_id,
         )
 
     def _workflow_post_estimation_results(
@@ -3371,6 +3378,21 @@ class ServerProposalBindingV1:
                 "SERVER_PROPOSAL_BINDING_INVALID", "proposal_revision is invalid"
             )
 
+    def to_dict(self) -> dict[str, object]:
+        """Expose only the public identity needed by the cutover UI."""
+
+        return {
+            "schema_version": "server-proposal-binding.v1",
+            "proposal_id": self.proposal_id,
+            "proposal_revision": self.proposal_revision,
+            "proposal_fingerprint": self.proposal_fingerprint,
+            "semantic_plan_hash": self.semantic_plan_hash,
+            "actor_ref": self.actor_ref,
+            "session_ref": self.session_ref,
+            "project_ref": self.project_ref,
+            "confirmation_id": self.confirmation_id,
+        }
+
 
 @dataclass(frozen=True)
 class ServerConfirmationReceiptV1:
@@ -3985,6 +4007,58 @@ class AgentNotebookCompilerV1:
             )
         self._bind_persisted_proposal(compilation_record_id, proposal_store, proposal_id)
 
+    def bind_direct_compilation(
+        self,
+        compilation_record_id: str | None,
+    ) -> ServerProposalBindingV1:
+        """Bind a direct UI preview to a server-owned confirmation identity.
+
+        The direct UI lane has no client-created ProposalStore revision.  This
+        method is therefore the only server-side bridge for the explicit
+        compile/confirm/execute UI endpoints.  It accepts only a live record
+        id already held by this compiler and derives every other field from
+        the host-owned record and operation table.
+        """
+
+        if type(compilation_record_id) is not str or not compilation_record_id.strip():
+            raise CutoverCompilerError("SERVER_RECORD_ID_REQUIRED")
+        record = self.record(compilation_record_id)
+        existing = self._proposal_bindings.get(record.record_id)
+        if existing is not None:
+            return existing
+        operation_id = self._operation_by_record.get(record.record_id)
+        if type(operation_id) is not str or not operation_id:
+            raise CutoverCompilerError("OPERATION_CONFIRMATION_STATE_INVALID")
+        binding_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "schema": "server-direct-cutover-binding.v1",
+                    "record_id": record.record_id,
+                    "record_digest": record.record_digest,
+                    "operation_id": operation_id,
+                    "principal_ref": record.principal_ref,
+                    "session_ref": record.session_ref,
+                    "project_ref": record.project_ref,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        binding = ServerProposalBindingV1(
+            proposal_id=f"cutover-proposal:{record.record_id}",
+            proposal_revision=1,
+            proposal_fingerprint=binding_digest,
+            semantic_plan_hash=record.semantic_plan_hash,
+            actor_ref=record.principal_ref,
+            session_ref=record.session_ref,
+            project_ref=record.project_ref,
+            confirmation_id=f"confirmation:cutover:{binding_digest[:32]}",
+            _authority_token=self._authority_token,
+        )
+        self._proposal_bindings[record.record_id] = binding
+        return binding
+
     def bind_persisted_proposal(
         self,
         compilation_record_id: str,
@@ -4263,22 +4337,38 @@ class AgentNotebookCompilerV1:
             admission_receipt = self._admission_gate.admit(request, binding)
             require_execution_admission_receipt(admission_receipt, gate=self._admission_gate)
             self._operations.transition(operation.operation_id, expected="admitted", state="executing")
+            runtime_contribution = self.runtime_registry.require(descriptor.executor_ref)
             context = ProviderRuntimeContextV1(
                 compilation_record_id=record.record_id,
                 execution_instance_hash=execution_hash,
                 actor_ref=record.principal_ref,
                 session_ref=record.session_ref,
                 project_ref=record.project_ref,
-                effect=record.compiled_workflow.effect.value,
+                # The plan effect (for example ``report``) describes the
+                # user's requested outcome and is enforced by the admission
+                # gate above.  Provider policy must receive the declaration's
+                # own effect (post-estimation is read-only) so a report
+                # projection cannot accidentally be treated as a mutable
+                # provider operation.
+                effect=runtime_contribution.effect,
             )
             intent_node = record.compiled_workflow.nodes[0]
             result = dispatch_registered_provider(
                 self.catalog,
                 self.runtime_registry,
-                descriptor.capability_id,
+                # ``capability_id`` may intentionally be shared by several
+                # provider paths.  Compilation resolved the concrete path
+                # and the server-bound descriptor is the authority for that
+                # choice; dispatching the generic capability id would make
+                # execution ambiguous (or invite an unsafe fallback).
+                descriptor.path_id,
                 context,
                 {
-                    "capability_id": descriptor.capability_id,
+                    # The runtime request is adapter-scoped.  The logical
+                    # capability may be shared by several paths, while the
+                    # server-bound descriptor has already resolved the exact
+                    # adapter identity used by both dispatch and validation.
+                    "capability_id": descriptor.path_id,
                     "target_ref": resolved_run_identity,
                     "data_snapshot_ref": record.compiled_workflow.data_impact["read_refs"][0],
                     "source_text_digest": record.compiled_workflow.intent_ref,

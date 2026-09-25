@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -33,6 +36,28 @@ def _descriptors():
 
     manifest = build_data_operation_manifest()
     return manifest, {item.operation_id: item for item in manifest.operations}
+
+
+def test_live_manifest_import_is_stable_in_a_fresh_process() -> None:
+    root = Path(__file__).parents[1]
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = str(root / "backend")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from workbench.data_operation_manifest import build_data_operation_manifest; "
+            "print(build_data_operation_manifest().schema_version)",
+        ],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "data-operation-manifest.v1"
 
 
 def test_manifest_is_derived_from_the_single_live_data_operation_surface() -> None:

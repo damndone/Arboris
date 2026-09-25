@@ -328,7 +328,7 @@ def test_classification_projection_emits_enforced_catalog_constraints(tmp_path) 
 
     assert constraints["observed_sensitivity"] == "public"
     assert constraints["row_count"] <= constraints["max_row_budget"] == 64
-    assert constraints["token_count"] <= constraints["max_token_budget"] == 4096
+    assert constraints["token_count"] <= constraints["max_token_budget"] == 8192
     assert set(constraints["observed_fact_kinds"]).issubset(
         set(constraints["fact_kinds"])
     )

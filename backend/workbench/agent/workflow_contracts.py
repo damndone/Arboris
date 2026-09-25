@@ -212,7 +212,10 @@ class StepSpecVariant:
             raise ValueError("workflow step variant required fields must be allowed")
 
     def matches(self, spec: Mapping[str, Any]) -> bool:
-        request_fields = set(spec) - {"source_artifact_fingerprint"}
+        # `source` belongs to the workflow composition seam, not to one
+        # operation variant. Compiled steps retain it while runtime dispatch
+        # resolves the operation variant from the typed request fields.
+        request_fields = set(spec) - {"source", "source_artifact_fingerprint"}
         return (
             (not self.allowed_fields or request_fields <= set(self.allowed_fields))
             and all(

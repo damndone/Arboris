@@ -81,6 +81,43 @@ def test_genesis_draft_publishes_initial_server_owned_editor_schema(tmp_path):
     assert controls["x"]["options"] == ["y", "x"]
 
 
+def test_auto_genesis_model_patch_keeps_selector_schema(tmp_path):
+    """The default Auto choice remains an executable legacy selector."""
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)["draft"]
+    draft_id = draft["draft_id"]
+
+    table = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": "", "transpose": False}, "columns": ["y", "x"]},
+    )
+    assert table.status_code == 200, table.text
+
+    response = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={
+            "params": {
+                "model_type": "auto",
+                "y": "y",
+                "x": ["x"],
+                "covariance": "robust",
+            }
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    model = next(
+        node for node in response.json()["draft"]["graph"]["nodes"] if node["node_id"] == "model_1"
+    )
+    assert model["schema_id"] == "genesis.selector@v1"
+    assert model["params"] == {
+        "model_type": "auto",
+        "y": "y",
+        "x": ["x"],
+        "covariance": "robust",
+    }
+
+
 def test_genesis_model_selector_derives_injected_manifest_entry(monkeypatch):
     """A newly declared model family must appear without a second value list."""
     import workbench.engine.capabilities as capabilities

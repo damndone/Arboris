@@ -91,6 +91,7 @@ from .workflow import (
 )
 from .post_estimation_registry import (
     PostEstimationRegistryError,
+    POST_ESTIMATION_UNSUPPORTED_FAMILY,
     post_estimation_registry,
 )
 from .workflow_contracts import (
@@ -107,6 +108,7 @@ _NUMERIC_DERIVATION_SCHEMA = "workflow-derived-numeric.v1"
 # Versioned because a consuming step reads this block back from persisted state
 # on resume, and because every dataset-producing operation will publish it.
 _PRODUCED_DATASET_SCHEMA = "workflow-produced-dataset.v1"
+_DERIVED_NODE_IDENTITY_SCHEMA = "workflow-derived-node-identity.v1"
 
 # The artifact types a declared workflow-analysis step can persist. All are
 # registered evidence; this is the read side of the same contract.
@@ -116,6 +118,42 @@ POST_ESTIMATION_ARTIFACT_TYPES = (
     "p7_analysis",
     "workflow_capability_result",
 )
+
+
+def _input_bound_output_identity(
+    *,
+    draft: WorkflowDraft,
+    step: Any,
+    lineage: Mapping[str, str],
+    producer: str,
+) -> tuple[str, str]:
+    """Return a deterministic output identity bound to the resolved source."""
+
+    source = {
+        "run_id": str(draft.target.get("run_id", "")),
+        "node_ref": str(lineage.get("node_ref", "")),
+        "artifact_id": str(lineage.get("artifact_id", "")),
+        "sha256": str(lineage.get("sha256", "")),
+    }
+    missing = [name for name, value in source.items() if not value]
+    if missing:
+        raise WorkflowExecutionError(
+            "workflow derived output source identity is incomplete: "
+            + ", ".join(missing)
+        )
+    identity = _fingerprint(
+        {
+            "schema_version": _DERIVED_NODE_IDENTITY_SCHEMA,
+            "workflow_id": str(draft.workflow_id),
+            "workflow_step_id": str(step.step_id),
+            "operation_id": str(step.operation_id),
+            "operation_version": str(step.operation_version),
+            "producer": str(producer),
+            "step_fingerprint": str(step.fingerprint),
+            "source": source,
+        }
+    )
+    return identity, identity.removeprefix("sha256:")[:24]
 
 # Some established producers publish a stable artifact ``step`` label rather
 # than the workflow dispatcher id.  Keep this translation explicit and small:
@@ -148,6 +186,9 @@ _EVIDENCE_LOCKS: dict[str, threading.RLock] = {}
 _EVIDENCE_RECEIPT_OWNER = f"workflow-evidence-process:{secrets.token_hex(16)}"
 _PROCESS_GENERATION = secrets.token_hex(16)
 _EVIDENCE_COMPLETION_SEAL_KEY = secrets.token_bytes(32)
+_WORKFLOW_AUTHORITY_FILENAME = ".workflow-host-authority.v1"
+_WORKFLOW_AUTHORITY_SECRET_BYTES = 32
+_EVIDENCE_COMPLETION_SEAL_KEYS: dict[str, bytes] = {}
 _WRITE_CONTEXT: ContextVar[tuple[Any, ...] | None] = ContextVar(
     "workbench_workflow_write_context", default=None
 )
@@ -156,6 +197,140 @@ _PENDING_RUNTIME_OUTPUTS: ContextVar[
 ] = ContextVar("workbench_pending_runtime_outputs", default=None)
 _ISSUED_EVIDENCE_PORTS: dict[int, Any] = {}
 _SUPERVISOR_HOST_ENDPOINTS: dict[int, tuple[Any, ...]] = {}
+_LOCAL_HOST_ENDPOINTS: dict[str, "WorkflowHostEndpointV1"] = {}
+
+
+def _workflow_host_authority_id(identity: tuple[int, int]) -> str:
+    """Derive the durable authority from the admitted directory inode only."""
+
+    device, inode = identity
+    if type(device) is not int or type(inode) is not int or device < 0 or inode <= 0:
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: workflow host identity is invalid"
+        )
+    return f"workflow-host-{device:x}-{inode:x}"
+
+
+def _load_workflow_host_authority(
+    endpoint_fd: int, identity: tuple[int, int]
+) -> tuple[str, bytes]:
+    """Load or atomically create the authority material for one admitted FD.
+
+    The directory descriptor is the only trust root.  The fixed-name record is
+    opened relative to that descriptor, so a caller-supplied path, id, or
+    serialized capability cannot select the authority or the seal key.
+    """
+
+    if type(endpoint_fd) is not int or endpoint_fd < 0:
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: admitted workflow endpoint fd is invalid"
+        )
+    try:
+        endpoint_stat = os.fstat(endpoint_fd)
+    except OSError as exc:
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: admitted workflow endpoint is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISDIR(endpoint_stat.st_mode)
+        or (endpoint_stat.st_dev, endpoint_stat.st_ino) != identity
+    ):
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: admitted workflow endpoint identity changed"
+        )
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if type(nofollow) is not int:
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: no-follow authority storage is unavailable"
+        )
+    secret: bytes | None = None
+    authority_fd: int | None = None
+    created = False
+    created_complete = False
+    try:
+        fcntl.flock(endpoint_fd, fcntl.LOCK_EX)
+        try:
+            authority_fd = os.open(
+                _WORKFLOW_AUTHORITY_FILENAME,
+                os.O_RDONLY | nofollow,
+                dir_fd=endpoint_fd,
+            )
+        except FileNotFoundError:
+            secret = secrets.token_bytes(_WORKFLOW_AUTHORITY_SECRET_BYTES)
+            try:
+                authority_fd = os.open(
+                    _WORKFLOW_AUTHORITY_FILENAME,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow,
+                    0o600,
+                    dir_fd=endpoint_fd,
+                )
+                created = True
+            except FileExistsError:
+                authority_fd = os.open(
+                    _WORKFLOW_AUTHORITY_FILENAME,
+                    os.O_RDONLY | nofollow,
+                    dir_fd=endpoint_fd,
+                )
+            else:
+                view = memoryview(secret)
+                while view:
+                    written = os.write(authority_fd, view)
+                    if written <= 0:
+                        raise OSError("workflow authority write made no progress")
+                    view = view[written:]
+                os.fsync(authority_fd)
+                os.close(authority_fd)
+                authority_fd = None
+                os.fsync(endpoint_fd)
+                created_complete = True
+        if authority_fd is not None:
+            authority_stat = os.fstat(authority_fd)
+            if (
+                not stat.S_ISREG(authority_stat.st_mode)
+                or authority_stat.st_size != _WORKFLOW_AUTHORITY_SECRET_BYTES
+                or stat.S_IMODE(authority_stat.st_mode) & 0o077
+            ):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_CORRUPT: workflow host authority record is invalid"
+                )
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(authority_fd, _WORKFLOW_AUTHORITY_SECRET_BYTES)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            secret = b"".join(chunks)
+        if secret is None or len(secret) != _WORKFLOW_AUTHORITY_SECRET_BYTES:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: workflow host authority record is invalid"
+            )
+    except WorkflowExecutionError:
+        raise
+    except (OSError, TypeError, ValueError) as exc:
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: workflow host authority record is unavailable"
+        ) from exc
+    finally:
+        if authority_fd is not None:
+            try:
+                os.close(authority_fd)
+            except OSError:
+                pass
+        if created and not created_complete:
+            try:
+                os.unlink(_WORKFLOW_AUTHORITY_FILENAME, dir_fd=endpoint_fd)
+            except OSError:
+                pass
+        try:
+            fcntl.flock(endpoint_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+    authority_id = (
+        f"{_workflow_host_authority_id(identity)}-"
+        f"{hashlib.sha256(secret).hexdigest()}"
+    )
+    _EVIDENCE_COMPLETION_SEAL_KEYS[authority_id] = secret
+    return authority_id, secret
 
 
 def _invalidate_inherited_workflow_authority() -> None:
@@ -166,6 +341,8 @@ def _invalidate_inherited_workflow_authority() -> None:
     _EVIDENCE_RECEIPT_OWNER = f"workflow-evidence-process:{secrets.token_hex(16)}"
     _ISSUED_EVIDENCE_PORTS.clear()
     _SUPERVISOR_HOST_ENDPOINTS.clear()
+    _LOCAL_HOST_ENDPOINTS.clear()
+    _EVIDENCE_COMPLETION_SEAL_KEYS.clear()
     with _EVIDENCE_LOCK_GUARD:
         _EVIDENCE_LOCKS.clear()
     _WRITE_CONTEXT.set(None)
@@ -188,12 +365,26 @@ class WorkflowHostEndpointV1:
     workflow_evidence_root_fd: int
     owner_pid: int = 0
     process_generation: str = ""
+    authority_id: str = ""
     supervisor_admitted: bool = False
 
     def __post_init__(self) -> None:
         raise TypeError(
             "WorkflowHostEndpointV1 must be admitted by the deployment supervisor"
         )
+
+    def close(self) -> None:
+        """Release a locally bootstrapped endpoint without making it reusable."""
+
+        _require_supervisor_host_endpoint(self)
+        _SUPERVISOR_HOST_ENDPOINTS.pop(id(self), None)
+        _LOCAL_HOST_ENDPOINTS.pop(str(self.project_root), None)
+        fd = self.workflow_evidence_root_fd
+        object.__setattr__(self, "workflow_evidence_root_fd", -1)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def _admit_workflow_host_endpoint_from_supervisor(
@@ -225,17 +416,23 @@ def _admit_workflow_host_endpoint_from_supervisor(
             "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: supervisor workflow endpoint is not a directory"
         )
     endpoint = object.__new__(WorkflowHostEndpointV1)
+    endpoint_identity = (endpoint_stat.st_dev, endpoint_stat.st_ino)
     object.__setattr__(endpoint, "project_root", normalized_root)
     object.__setattr__(endpoint, "workflow_evidence_root_fd", workflow_evidence_root_fd)
     object.__setattr__(endpoint, "owner_pid", os.getpid())
     object.__setattr__(endpoint, "process_generation", _PROCESS_GENERATION)
+    authority_id, _authority_secret = _load_workflow_host_authority(
+        workflow_evidence_root_fd,
+        endpoint_identity,
+    )
+    object.__setattr__(endpoint, "authority_id", authority_id)
     object.__setattr__(endpoint, "supervisor_admitted", True)
     _SUPERVISOR_HOST_ENDPOINTS[id(endpoint)] = (
         endpoint,
         workflow_evidence_root_fd,
         os.getpid(),
         _PROCESS_GENERATION,
-        (endpoint_stat.st_dev, endpoint_stat.st_ino),
+        endpoint_identity,
     )
     return endpoint
 
@@ -251,6 +448,11 @@ def _require_supervisor_host_endpoint(endpoint: object) -> None:
         or admitted[0] is not endpoint
         or endpoint.owner_pid != os.getpid()
         or endpoint.process_generation != _PROCESS_GENERATION
+        or endpoint.authority_id
+        != _load_workflow_host_authority(
+            endpoint.workflow_evidence_root_fd,
+            admitted[4],
+        )[0]
         or endpoint.supervisor_admitted is not True
         or admitted[2] != os.getpid()
         or admitted[3] != _PROCESS_GENERATION
@@ -282,9 +484,116 @@ def _deployment_host_endpoint_from_supervisor(
     external boundary.
     """
 
+    local = _LOCAL_HOST_ENDPOINTS.get(str(_project_root))
+    if local is not None:
+        _require_supervisor_host_endpoint(local)
+        return local
     raise WorkflowExecutionError(
         "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: no deployment-owned workflow host resolver is configured"
     )
+
+
+def _open_local_child_directory(parent_fd: int, name: str) -> int:
+    """Open/create one trusted directory component relative to an admitted FD."""
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    for _attempt in range(2):
+        try:
+            fd = os.open(name, flags, dir_fd=parent_fd)
+        except FileNotFoundError:
+            try:
+                os.mkdir(name, 0o700, dir_fd=parent_fd)
+            except FileExistsError:
+                continue
+            continue
+        except OSError as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: local workflow directory is not FD-safe"
+            ) from exc
+        try:
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: local workflow path is not a directory"
+                )
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+    raise WorkflowExecutionError(
+        "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: local workflow directory could not be admitted"
+    )
+
+
+def bootstrap_local_workflow_host(project_root: Path | str) -> WorkflowHostEndpointV1:
+    """Bootstrap the server-owned workflow endpoint for the local macOS host.
+
+    This is an application-startup seam, not an HTTP or LLM capability. The
+    caller supplies a trusted local project directory; the endpoint is then
+    admitted from an FD and registered by its exact object identity. The
+    durable authority material lives below that admitted directory, so a new
+    backend process can reopen the same project and retain the same authority
+    id without trusting a serialized endpoint or request path.
+    """
+
+    raw_root = Path(project_root).expanduser().absolute()
+    normalized_root = raw_root.resolve(strict=False)
+    if raw_root.exists() and raw_root.is_symlink():
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: local project root is a symlink"
+        )
+    if os.name != "posix" or not getattr(os, "O_DIRECTORY", 0) or not getattr(os, "O_NOFOLLOW", 0):
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: local FD-safe workflow bootstrap is unavailable"
+        )
+    existing = _LOCAL_HOST_ENDPOINTS.get(str(normalized_root))
+    if existing is not None:
+        try:
+            _require_supervisor_host_endpoint(existing)
+            return existing
+        except WorkflowExecutionError:
+            _LOCAL_HOST_ENDPOINTS.pop(str(normalized_root), None)
+    root_fd = -1
+    workbench_fd = -1
+    endpoint_fd = -1
+    try:
+        normalized_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        root_fd = os.open(
+            normalized_root,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+        )
+        if not stat.S_ISDIR(os.fstat(root_fd).st_mode):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: local project root is not a directory"
+            )
+        workbench_fd = _open_local_child_directory(root_fd, "workbench")
+        endpoint_fd = _open_local_child_directory(workbench_fd, "workflows")
+        endpoint = _admit_workflow_host_endpoint_from_supervisor(
+            normalized_root,
+            endpoint_fd,
+        )
+        endpoint_fd = -1
+        _LOCAL_HOST_ENDPOINTS[str(normalized_root)] = endpoint
+        return endpoint
+    except WorkflowExecutionError:
+        for fd in (endpoint_fd, workbench_fd, root_fd):
+            if fd >= 0:
+                os.close(fd)
+        raise
+    except (OSError, TypeError, ValueError) as exc:
+        for fd in (endpoint_fd, workbench_fd, root_fd):
+            if fd >= 0:
+                os.close(fd)
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: local workflow endpoint could not be admitted"
+        ) from exc
 
 
 class _EvidencePathLock:
@@ -324,9 +633,12 @@ class _EvidencePathLock:
                         "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: host endpoint is not the admitted workflow directory"
                     )
             fcntl.flock(self._directory_fd, fcntl.LOCK_EX)
-        except Exception:
+        except BaseException:
             if self._directory_fd is not None:
-                os.close(self._directory_fd)
+                try:
+                    os.close(self._directory_fd)
+                except OSError:
+                    pass
                 self._directory_fd = None
             lock.release()
             self._thread_lock = None
@@ -405,6 +717,18 @@ def _append_evidence_record(
     os.fsync(directory_fd)
 
 
+def _evidence_seal_key(record: Mapping[str, Any]) -> bytes:
+    authority_id = record.get("authority_id")
+    if authority_id is None:
+        return _EVIDENCE_COMPLETION_SEAL_KEY
+    key = _EVIDENCE_COMPLETION_SEAL_KEYS.get(authority_id)
+    if key is None:
+        raise WorkflowExecutionError(
+            "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: durable workflow authority is not admitted"
+        )
+    return key
+
+
 def _completion_seal(record: Mapping[str, Any]) -> str:
     payload = {
         str(key): value
@@ -418,7 +742,61 @@ def _completion_seal(record: Mapping[str, Any]) -> str:
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
-    return hmac.new(_EVIDENCE_COMPLETION_SEAL_KEY, encoded, hashlib.sha256).hexdigest()
+    return hmac.new(_evidence_seal_key(record), encoded, hashlib.sha256).hexdigest()
+
+
+def _admission_integrity_seal(record: Mapping[str, Any]) -> str:
+    """Seal the immutable server admission, including its lifecycle status."""
+
+    payload = {
+        str(key): value
+        for key, value in record.items()
+        if key != "admission_integrity_seal"
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hmac.new(_evidence_seal_key(record), encoded, hashlib.sha256).hexdigest()
+
+
+def _abort_integrity_seal(record: Mapping[str, Any]) -> str:
+    """Seal an abort lifecycle record with the same durable host authority."""
+
+    payload = {
+        str(key): value
+        for key, value in record.items()
+        if key != "abort_integrity_seal"
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hmac.new(_evidence_seal_key(record), encoded, hashlib.sha256).hexdigest()
+
+
+def _uncertain_commit_seal(record: Mapping[str, Any]) -> str:
+    """Seal a durable marker that forces a later workflow retry to stop."""
+
+    payload = {
+        str(key): value
+        for key, value in record.items()
+        if key != "uncertain_commit_seal"
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hmac.new(_evidence_seal_key(record), encoded, hashlib.sha256).hexdigest()
 
 
 def _artifact_admission_seal(record: Mapping[str, Any]) -> str:
@@ -434,7 +812,7 @@ def _artifact_admission_seal(record: Mapping[str, Any]) -> str:
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
-    return hmac.new(_EVIDENCE_COMPLETION_SEAL_KEY, encoded, hashlib.sha256).hexdigest()
+    return hmac.new(_evidence_seal_key(record), encoded, hashlib.sha256).hexdigest()
 
 
 def _persisted_admission_fingerprint(record: Mapping[str, Any]) -> str:
@@ -866,6 +1244,11 @@ class _FormalOutputTarget:
             # commit. Revalidate after the syscall and roll back a newly
             # created destination through the same FD if the path was rebound.
             self.temp_name = None
+            # Mark the replacement as committed before the first post-rename
+            # syscall.  If a process interruption lands in that tiny window,
+            # the caller can distinguish an uncertain replacement from a
+            # still-pending temporary file and fail closed.
+            self.committed = True
             destination_stat = os.stat(
                 self.filename,
                 dir_fd=self.parent_fd,
@@ -875,7 +1258,6 @@ class _FormalOutputTarget:
                 destination_stat.st_dev,
                 destination_stat.st_ino,
             )
-            self.committed = True
             try:
                 self._check_identity()
             except WorkflowExecutionError:
@@ -971,7 +1353,13 @@ class _FormalOutputTarget:
                     "WORKFLOW_ARTIFACT_PATH_CHANGED: formal output rollback failed"
                 ) from exc
             return
-        if self.destination_existed or self.destination_identity is None:
+        if self.destination_identity is None:
+            if self.committed:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_ARTIFACT_PATH_CHANGED: committed formal output identity is unavailable"
+                )
+            return
+        if self.destination_existed:
             return
         if current_identity is None:
             self.committed = False
@@ -1355,6 +1743,112 @@ def _read_runtime_artifact_json(
         output.close()
 
 
+def _persist_uncertain_commit_for_output(
+    output: _FormalOutputTarget,
+    error: BaseException,
+) -> None:
+    """Bridge an output rollback failure to the active workflow evidence log."""
+
+    evidence_port, receipt, _draft, _step = _require_active_write_context()
+    relative_path = output.path.relative_to(output.run_root).as_posix()
+    evidence_port._persist_uncertain_commit_marker(
+        receipt,
+        artifact_path=relative_path,
+        error=f"{type(error).__name__}: {error}",
+    )
+
+
+def _ensure_runtime_node_index_entry(
+    run_root: Path,
+    *,
+    child_node_id: str,
+    entry: Mapping[str, Any],
+    conflict_message: str,
+    not_object_message: str,
+) -> None:
+    """Append one node-index entry without treating other entries as a clash.
+
+    The node index is a shared JSON map, so a producer must compare the
+    requested key rather than compare the whole file with a one-key-larger
+    payload. Read and write stay on the admitted no-follow FD boundary; an
+    existing key with different evidence remains a hard conflict.
+    """
+
+    index_path = run_root / "node_index.json"
+    # Open the admitted run-root first.  The lock must be acquired against
+    # that exact directory inode; otherwise a replacement of ``run_root`` can
+    # split the pathname lock from the FD-backed output target.
+    output = prepare_formal_workflow_output(
+        None,
+        None,
+        run_root=run_root,
+        directory_name=".",
+        filename="node_index.json",
+    )
+    try:
+        with _evidence_lock(
+            index_path, admitted_directory_fd=output.root_fd
+        ) as lock:
+            existing = output.read_bytes()
+            if existing is None:
+                node_index: Any = {}
+            else:
+                try:
+                    node_index = json.loads(existing.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise WorkflowExecutionError(conflict_message) from exc
+            if not isinstance(node_index, Mapping):
+                raise WorkflowExecutionError(not_object_message)
+            if child_node_id in node_index:
+                if node_index[child_node_id] != entry:
+                    raise WorkflowExecutionError(conflict_message)
+                return
+            merged = {**node_index, child_node_id: dict(entry)}
+            output.write_bytes(
+                json.dumps(merged, indent=2, ensure_ascii=False).encode("utf-8")
+            )
+            output.finalize_committed()
+    except Exception:
+        if output.committed:
+            try:
+                output.rollback_committed()
+            except Exception as rollback_error:
+                try:
+                    _persist_uncertain_commit_for_output(output, rollback_error)
+                except BaseException as marker_error:
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_ARTIFACT_PATH_CHANGED: node-index rollback failed and uncertain-commit marker could not be persisted"
+                    ) from marker_error
+                raise WorkflowExecutionError(
+                    "WORKFLOW_UNCERTAIN_COMMIT: node-index replacement rollback failed; Resume is blocked"
+                ) from rollback_error
+        else:
+            output.abort()
+        raise
+    except BaseException:
+        # KeyboardInterrupt/SystemExit can arrive after os.replace() but
+        # before finalize_committed().  Do not leave that replacement silently
+        # consumable by a later Resume.
+        if output.committed:
+            try:
+                output.rollback_committed()
+            except BaseException as rollback_error:
+                try:
+                    _persist_uncertain_commit_for_output(output, rollback_error)
+                except BaseException as marker_error:
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_ARTIFACT_PATH_CHANGED: interrupted node-index rollback failed and uncertain-commit marker could not be persisted"
+                    ) from marker_error
+                raise WorkflowExecutionError(
+                    "WORKFLOW_UNCERTAIN_COMMIT: interrupted node-index rollback failed; Resume is blocked"
+                ) from rollback_error
+        else:
+            output.abort()
+        raise
+    finally:
+        output.close()
+
+
 @dataclass(frozen=True)
 class WorkflowAdmissionReceipt:
     """Server-owned, one-step admission capability."""
@@ -1373,6 +1867,7 @@ class WorkflowAdmissionReceipt:
     receipt_owner: str = ""
     owner_pid: int = 0
     process_generation: str = ""
+    authority_id: str = ""
 
 
 class EvidencePersistencePort:
@@ -1421,6 +1916,9 @@ class EvidencePersistencePort:
         self.project_root = normalized_root
         self._host_endpoint_fd = owned_fd
         self._host_endpoint_identity = (endpoint_stat.st_dev, endpoint_stat.st_ino)
+        self._authority_id, _authority_secret = _load_workflow_host_authority(
+            owned_fd, self._host_endpoint_identity
+        )
         self._owner_pid = os.getpid()
         self._process_generation = _PROCESS_GENERATION
         self._issued_receipts: dict[
@@ -1458,6 +1956,11 @@ class EvidencePersistencePort:
             != (current_stat.st_dev, current_stat.st_ino)
             or (endpoint_stat.st_dev, endpoint_stat.st_ino)
             != getattr(self, "_host_endpoint_identity", None)
+            or getattr(self, "_authority_id", None)
+            not in _EVIDENCE_COMPLETION_SEAL_KEYS
+            or not getattr(self, "_authority_id", "").startswith(
+                f"{_workflow_host_authority_id((endpoint_stat.st_dev, endpoint_stat.st_ino))}-"
+            )
         ):
             raise WorkflowExecutionError(
                 "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: real host endpoint is not the current workflow evidence directory"
@@ -1526,6 +2029,7 @@ class EvidencePersistencePort:
             receipt.receipt_owner,
             receipt.owner_pid,
             receipt.process_generation,
+            receipt.authority_id,
         )
 
     def _require_receipt(self, receipt: WorkflowAdmissionReceipt) -> None:
@@ -1539,7 +2043,8 @@ class EvidencePersistencePort:
             issued is None
             or issued[0] is not receipt
             or issued[1] != self._receipt_snapshot(receipt)
-            or receipt.receipt_owner != _EVIDENCE_RECEIPT_OWNER
+            or receipt.receipt_owner != getattr(self, "_authority_id", None)
+            or receipt.authority_id != getattr(self, "_authority_id", None)
             or receipt.owner_pid != getattr(self, "_owner_pid", None)
             or receipt.process_generation != getattr(self, "_process_generation", None)
         ):
@@ -2180,6 +2685,7 @@ class EvidencePersistencePort:
             "record_type": "workflow_artifact_admission",
             **_snapshot_json(dict(row)),
             "receipt_owner": receipt.receipt_owner,
+            "authority_id": receipt.authority_id,
             "owner_pid": receipt.owner_pid,
             "process_generation": receipt.process_generation,
         }
@@ -2226,8 +2732,7 @@ class EvidencePersistencePort:
             "workflow_step_id": receipt.step_id,
             "receipt_id": receipt.receipt_id,
             "receipt_owner": receipt.receipt_owner,
-            "owner_pid": receipt.owner_pid,
-            "process_generation": receipt.process_generation,
+            "authority_id": receipt.authority_id,
         }
         if any(record.get(key) != value for key, value in expected.items()):
             raise WorkflowExecutionError(
@@ -2241,10 +2746,53 @@ class EvidencePersistencePort:
                 "record_type",
                 "artifact_admission_seal",
                 "receipt_owner",
+                "authority_id",
                 "owner_pid",
                 "process_generation",
             }
         }
+
+    def _hydrate_resumed_server_artifacts(
+        self,
+        records: Iterable[Mapping[str, Any]],
+        *,
+        receipt: WorkflowAdmissionReceipt,
+        artifact_ids: list[str],
+        target_run_id: str,
+    ) -> None:
+        """Rebind persisted artifact admissions into this port's local registry."""
+
+        for raw_artifact_id in artifact_ids:
+            if raw_artifact_id.count(":") > 1:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed artifact identity is malformed"
+                )
+            if ":" in raw_artifact_id:
+                run_id, artifact_id = raw_artifact_id.split(":", 1)
+            else:
+                run_id, artifact_id = target_run_id, raw_artifact_id
+            _require_workflow_opaque_ref(run_id, "resumed artifact run_id")
+            _require_workflow_artifact_ref(artifact_id, "resumed artifact_id")
+            matching = [
+                item
+                for item in records
+                if item.get("record_type") == "workflow_artifact_admission"
+                and item.get("receipt_id") == receipt.receipt_id
+                and item.get("run_id") == run_id
+                and item.get("artifact_id") == artifact_id
+            ]
+            if len(matching) != 1:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: completed artifact is not in the server artifact registry"
+                )
+            row = self._resumed_server_artifact_row(matching[0], receipt=receipt)
+            key = (receipt.receipt_id, run_id, artifact_id)
+            current = self._server_artifact_registry.get(key)
+            if current is not None and current != row:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_RESUME_AUTHORITY_REQUIRED: server artifact registry changed before Resume"
+                )
+            self._server_artifact_registry[key] = row
 
     def validate_resumed_step_state(
         self,
@@ -2314,11 +2862,28 @@ class EvidencePersistencePort:
             completed_result=None,
             target_fingerprint=target_fingerprint,
             admission_fingerprint=compiler_receipt.admission_fingerprint,
-            receipt_owner=_EVIDENCE_RECEIPT_OWNER,
+            receipt_owner=self._authority_id,
             owner_pid=self._owner_pid,
             process_generation=self._process_generation,
+            authority_id=self._authority_id,
         )
         self._validate_admission_record(admission, receipt)
+        uncertain_markers = [
+            item
+            for item in records
+            if item.get("record_type") == "workflow_uncertain_commit"
+            and item.get("execution_key") == execution_key
+        ]
+        for marker in uncertain_markers:
+            self._validate_uncertain_commit_record(
+                marker,
+                admission=admission,
+                receipt=receipt,
+                execution_key=execution_key,
+            )
+            raise WorkflowExecutionError(
+                "WORKFLOW_UNCERTAIN_COMMIT: persisted output commit is uncertain; Resume is blocked"
+            )
         # Completion integrity is checked before any persisted metadata is
         # converted into a result.  A malformed row count must never leak the
         # built-in ValueError raised by int(), and a forged metadata field must
@@ -2326,11 +2891,20 @@ class EvidencePersistencePort:
         self._validate_completion_record(completion, receipt)
         completed_result = self._result_from_record(completion)
         receipt = replace(receipt, completed_result=completed_result)
-        if any(
-            item.get("record_type") == "workflow_abort"
-            and item.get("receipt_id") == receipt.receipt_id
+        abort_records = [
+            item
             for item in records
-        ):
+            if item.get("record_type") == "workflow_abort"
+            and item.get("receipt_id") == receipt.receipt_id
+        ]
+        for abort_record in abort_records:
+            self._validate_abort_record(
+                abort_record,
+                admission=admission,
+                receipt=receipt,
+                execution_key=execution_key,
+            )
+        if abort_records:
             raise WorkflowExecutionError(
                 "WORKFLOW_ADMISSION_ABORTED: completed state belongs to an aborted receipt"
             )
@@ -2869,16 +3443,22 @@ class EvidencePersistencePort:
         receipt: WorkflowAdmissionReceipt,
     ) -> None:
         _require_admitted_status(record)
-        if record.get("receipt_owner") != receipt.receipt_owner:
-            raise WorkflowExecutionError(
-                "WORKFLOW_RESTART_AUTHORITY_REQUIRED: persisted admission belongs to another worker"
-            )
         if (
-            record.get("owner_pid") != receipt.owner_pid
-            or record.get("process_generation") != receipt.process_generation
+            record.get("authority_id") != self._authority_id
+            or record.get("receipt_owner") != receipt.receipt_owner
+            or receipt.authority_id != self._authority_id
         ):
             raise WorkflowExecutionError(
-                "WORKFLOW_PROCESS_BOUNDARY: persisted admission belongs to another process generation"
+                "WORKFLOW_RESTART_AUTHORITY_REQUIRED: persisted admission belongs to another workflow host authority"
+            )
+        if (
+            type(record.get("owner_pid")) is not int
+            or record.get("owner_pid") <= 0
+            or type(record.get("process_generation")) is not str
+            or not record.get("process_generation")
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted admission process metadata is invalid"
             )
         if record.get("workflow_id") != receipt.workflow_id:
             raise WorkflowExecutionError(
@@ -2956,6 +3536,280 @@ class EvidencePersistencePort:
             raise WorkflowExecutionError(
                 "WORKFLOW_EVIDENCE_CORRUPT: persisted admission contract digest is invalid"
             )
+        try:
+            expected_seal = _admission_integrity_seal(record)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: admission integrity seal is invalid"
+            ) from exc
+        if record.get("admission_integrity_seal") != expected_seal:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: admission integrity seal is invalid"
+            )
+
+    def _validate_abort_record(
+        self,
+        record: Mapping[str, Any],
+        *,
+        admission: Mapping[str, Any],
+        receipt: WorkflowAdmissionReceipt,
+        execution_key: str,
+    ) -> None:
+        """Validate an abort before it can change admission lifecycle state."""
+
+        if not isinstance(record, Mapping):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted abort record is malformed"
+            )
+        if record.get("record_type") != "workflow_abort" or record.get("status") != "aborted":
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted abort lifecycle status is invalid"
+            )
+        receipt_id = record.get("receipt_id")
+        attempt = record.get("attempt")
+        if type(receipt_id) is not str or not receipt_id:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted abort receipt_id is invalid"
+            )
+        if type(attempt) is not int or isinstance(attempt, bool) or attempt < 1:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted abort attempt is invalid"
+            )
+        required_strings = (
+            "workflow_id",
+            "step_id",
+            "execution_key",
+            "target_fingerprint",
+            "plan_fingerprint",
+            "step_fingerprint",
+            "scope_ref",
+            "contract_fingerprint",
+            "admission_fingerprint",
+            "receipt_owner",
+            "authority_id",
+            "process_generation",
+            "error",
+        )
+        if any(
+            type(record.get(key)) is not str or not record.get(key)
+            for key in required_strings
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted abort identity is malformed"
+            )
+        if type(record.get("owner_pid")) is not int or record.get("owner_pid") <= 0:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted abort process metadata is invalid"
+            )
+        if record.get("authority_id") != self._authority_id or record.get(
+            "receipt_owner"
+        ) != self._authority_id:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESTART_AUTHORITY_REQUIRED: persisted abort belongs to another workflow host authority"
+            )
+        if record.get("execution_key") != execution_key:
+            raise WorkflowExecutionError(
+                "WORKFLOW_ADMISSION_MISMATCH: abort execution identity changed"
+            )
+        for key in (
+            "record_type",
+            "workflow_id",
+            "step_id",
+            "execution_key",
+            "target_fingerprint",
+            "plan_fingerprint",
+            "step_fingerprint",
+            "scope_ref",
+            "contract_fingerprint",
+            "admission_fingerprint",
+            "receipt_id",
+            "attempt",
+        ):
+            if record.get(key) != admission.get(key) and key != "record_type":
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_CORRUPT: abort is not bound to its admission"
+                )
+        expected_receipt = {
+            "workflow_id": receipt.workflow_id,
+            "step_id": receipt.step_id,
+            "execution_key": f"{receipt.workflow_id}:{receipt.step_id}:{receipt.step_fingerprint}",
+            "target_fingerprint": receipt.target_fingerprint,
+            "plan_fingerprint": receipt.plan_fingerprint,
+            "step_fingerprint": receipt.step_fingerprint,
+            "scope_ref": receipt.scope_ref,
+            "contract_fingerprint": receipt.contract_fingerprint,
+            "admission_fingerprint": receipt.admission_fingerprint,
+            "receipt_id": receipt.receipt_id,
+            "attempt": receipt.attempt,
+        }
+        if any(record.get(key) != value for key, value in expected_receipt.items()):
+            raise WorkflowExecutionError(
+                "WORKFLOW_ADMISSION_MISMATCH: abort receipt identity changed"
+            )
+        try:
+            expected_seal = _abort_integrity_seal(record)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: abort integrity seal is invalid"
+            ) from exc
+        if record.get("abort_integrity_seal") != expected_seal:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: abort integrity seal is invalid"
+            )
+
+    def _validate_uncertain_commit_record(
+        self,
+        record: Mapping[str, Any],
+        *,
+        admission: Mapping[str, Any],
+        receipt: WorkflowAdmissionReceipt,
+        execution_key: str,
+    ) -> None:
+        """Validate a commit-uncertainty marker before failing closed."""
+
+        if not isinstance(record, Mapping):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: uncertain commit marker is malformed"
+            )
+        if record.get("record_type") != "workflow_uncertain_commit" or record.get(
+            "status"
+        ) != "uncertain_commit":
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: uncertain commit marker status is invalid"
+            )
+        required_strings = (
+            "workflow_id",
+            "step_id",
+            "execution_key",
+            "target_run_id",
+            "artifact_path",
+            "scope_ref",
+            "plan_fingerprint",
+            "step_fingerprint",
+            "contract_fingerprint",
+            "admission_fingerprint",
+            "receipt_owner",
+            "authority_id",
+            "process_generation",
+            "receipt_id",
+            "error",
+        )
+        if any(
+            type(record.get(key)) is not str or not record.get(key)
+            for key in required_strings
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: uncertain commit identity is malformed"
+            )
+        if (
+            type(record.get("attempt")) is not int
+            or isinstance(record.get("attempt"), bool)
+            or record.get("attempt") < 1
+            or type(record.get("owner_pid")) is not int
+            or record.get("owner_pid") <= 0
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: uncertain commit process metadata is invalid"
+            )
+        if record.get("authority_id") != self._authority_id or record.get(
+            "receipt_owner"
+        ) != self._authority_id:
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESTART_AUTHORITY_REQUIRED: uncertain commit belongs to another workflow host authority"
+            )
+        if record.get("execution_key") != execution_key:
+            raise WorkflowExecutionError(
+                "WORKFLOW_ADMISSION_MISMATCH: uncertain commit execution identity changed"
+            )
+        identity_keys = (
+            "workflow_id",
+            "step_id",
+            "execution_key",
+            "scope_ref",
+            "plan_fingerprint",
+            "step_fingerprint",
+            "contract_fingerprint",
+            "admission_fingerprint",
+            "receipt_id",
+            "attempt",
+        )
+        if any(record.get(key) != admission.get(key) for key in identity_keys):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: uncertain commit is not bound to its admission"
+            )
+        expected_receipt = {
+            "workflow_id": receipt.workflow_id,
+            "step_id": receipt.step_id,
+            "execution_key": execution_key,
+            "scope_ref": receipt.scope_ref,
+            "plan_fingerprint": receipt.plan_fingerprint,
+            "step_fingerprint": receipt.step_fingerprint,
+            "contract_fingerprint": receipt.contract_fingerprint,
+            "admission_fingerprint": receipt.admission_fingerprint,
+            "receipt_id": receipt.receipt_id,
+            "attempt": receipt.attempt,
+        }
+        if any(record.get(key) != value for key, value in expected_receipt.items()):
+            raise WorkflowExecutionError(
+                "WORKFLOW_ADMISSION_MISMATCH: uncertain commit receipt identity changed"
+            )
+        try:
+            expected_seal = _uncertain_commit_seal(record)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: uncertain commit seal is invalid"
+            ) from exc
+        if record.get("uncertain_commit_seal") != expected_seal:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: uncertain commit seal is invalid"
+            )
+
+    def _validated_active_admission_receipt(
+        self,
+        record: Mapping[str, Any],
+        *,
+        draft: WorkflowDraft,
+        step: WorkflowStep,
+        scope_ref: str,
+        contract_fingerprint: str,
+        compiler_receipt: Any,
+        target_fingerprint: str,
+    ) -> WorkflowAdmissionReceipt:
+        """Validate an active admission before consuming its identity fields."""
+
+        if not isinstance(record, Mapping):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted admission record is malformed"
+            )
+        _require_admitted_status(record)
+        receipt_id = record.get("receipt_id")
+        if type(receipt_id) is not str or not receipt_id:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted admission receipt_id is invalid"
+            )
+        attempt = record.get("attempt")
+        if type(attempt) is not int or isinstance(attempt, bool) or attempt < 1:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_CORRUPT: persisted admission attempt is invalid"
+            )
+        receipt = WorkflowAdmissionReceipt(
+            workflow_id=draft.workflow_id,
+            step_id=step.step_id,
+            plan_fingerprint=draft.plan_fingerprint,
+            step_fingerprint=step.fingerprint,
+            scope_ref=scope_ref,
+            contract_fingerprint=contract_fingerprint,
+            receipt_id=receipt_id,
+            attempt=attempt,
+            target_fingerprint=target_fingerprint,
+            admission_fingerprint=compiler_receipt.admission_fingerprint,
+            receipt_owner=self._authority_id,
+            owner_pid=self._owner_pid,
+            process_generation=self._process_generation,
+            authority_id=self._authority_id,
+        )
+        self._validate_admission_record(record, receipt)
+        return receipt
 
     def validate_execution_snapshot(
         self,
@@ -3256,8 +4110,7 @@ class EvidencePersistencePort:
             "scope_ref": receipt.scope_ref,
             "contract_fingerprint": receipt.contract_fingerprint,
             "receipt_owner": receipt.receipt_owner,
-            "owner_pid": receipt.owner_pid,
-            "process_generation": receipt.process_generation,
+            "authority_id": receipt.authority_id,
             "receipt_id": receipt.receipt_id,
             "attempt": receipt.attempt,
             "admission_fingerprint": receipt.admission_fingerprint,
@@ -3303,6 +4156,41 @@ class EvidencePersistencePort:
                 for item in relevant
             ):
                 raise WorkflowExecutionError("WORKFLOW_STALE: workflow admission plan is stale")
+            uncertain_markers = [
+                item
+                for item in relevant
+                if item.get("record_type") == "workflow_uncertain_commit"
+            ]
+            for marker in uncertain_markers:
+                marker_receipt_id = marker.get("receipt_id")
+                matching_admissions = [
+                    item
+                    for item in relevant
+                    if item.get("record_type") == "workflow_admission"
+                    and item.get("receipt_id") == marker_receipt_id
+                ]
+                if len(matching_admissions) != 1:
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_EVIDENCE_CORRUPT: uncertain commit lacks its unique admission"
+                    )
+                marker_receipt = self._validated_active_admission_receipt(
+                    matching_admissions[0],
+                    draft=draft,
+                    step=step,
+                    scope_ref=scope_ref,
+                    contract_fingerprint=contract_fingerprint,
+                    compiler_receipt=compiler_receipt,
+                    target_fingerprint=target_fingerprint,
+                )
+                self._validate_uncertain_commit_record(
+                    marker,
+                    admission=matching_admissions[0],
+                    receipt=marker_receipt,
+                    execution_key=execution_key,
+                )
+                raise WorkflowExecutionError(
+                    "WORKFLOW_UNCERTAIN_COMMIT: persisted output commit is uncertain; Resume is blocked"
+                )
             completions = [
                 item for item in relevant if item.get("record_type") == "workflow_completion"
             ]
@@ -3314,9 +4202,12 @@ class EvidencePersistencePort:
                         "WORKFLOW_EVIDENCE_CORRUPT: duplicate completion identity"
                     )
                 completion = completions[-1]
-                if completion.get("receipt_owner") != _EVIDENCE_RECEIPT_OWNER:
+                if (
+                    completion.get("authority_id") != self._authority_id
+                    or completion.get("receipt_owner") != self._authority_id
+                ):
                     raise WorkflowExecutionError(
-                        "WORKFLOW_RESTART_AUTHORITY_REQUIRED: persisted completion belongs to another worker"
+                        "WORKFLOW_RESTART_AUTHORITY_REQUIRED: persisted completion belongs to another workflow host authority"
                     )
                 if completion.get("target_fingerprint") != target_fingerprint:
                     raise WorkflowExecutionError(
@@ -3363,9 +4254,10 @@ class EvidencePersistencePort:
                     completed_result=None,
                     target_fingerprint=target_fingerprint,
                     admission_fingerprint=compiler_receipt.admission_fingerprint,
-                    receipt_owner=_EVIDENCE_RECEIPT_OWNER,
+                    receipt_owner=self._authority_id,
                     owner_pid=self._owner_pid,
                     process_generation=self._process_generation,
+                    authority_id=self._authority_id,
                 )
                 self._validate_admission_record(completion_admissions[0], receipt)
                 self._validate_completion_record(completion, receipt)
@@ -3381,45 +4273,82 @@ class EvidencePersistencePort:
                     raise WorkflowExecutionError(
                         "WORKFLOW_ADMISSION_ABORTED: aborted receipt cannot replay"
                     )
+                completion_artifact_ids = _validated_artifact_ids(
+                    completion.get("artifact_ids", [])
+                )
+                target_run_id = _require_workflow_opaque_ref(
+                    completion_admissions[0].get("target", {}).get("run_id"),
+                    "workflow target run_id",
+                )
+                self._hydrate_resumed_server_artifacts(
+                    records,
+                    receipt=receipt,
+                    artifact_ids=completion_artifact_ids,
+                    target_run_id=target_run_id,
+                )
                 self._validate_completion_artifacts(
                     completion_admissions[0],
                     receipt=receipt,
-                    artifact_ids=_validated_artifact_ids(completion.get("artifact_ids", [])),
+                    artifact_ids=completion_artifact_ids,
                     output_bindings=completion.get("output_bindings") or {},
                     lineage=completion.get("lineage") or {},
                 )
                 self._register_receipt(receipt)
                 return receipt
-            aborted_receipts = {
-                str(item.get("receipt_id"))
-                for item in relevant
-                if item.get("record_type") == "workflow_abort"
-            }
-            active = [
-                item
-                for item in relevant
-                if item.get("record_type") == "workflow_admission"
-                and item.get("status") == "admitted"
-                and str(item.get("receipt_id")) not in aborted_receipts
-            ]
-            if active:
-                for item in active:
-                    active_receipt = WorkflowAdmissionReceipt(
-                        workflow_id=draft.workflow_id,
-                        step_id=step.step_id,
-                        plan_fingerprint=draft.plan_fingerprint,
-                        step_fingerprint=step.fingerprint,
-                        scope_ref=scope_ref,
-                        contract_fingerprint=contract_fingerprint,
-                        receipt_id=str(item["receipt_id"]),
-                        attempt=int(item.get("attempt", 1)),
-                        target_fingerprint=target_fingerprint,
-                        admission_fingerprint=compiler_receipt.admission_fingerprint,
-                        receipt_owner=_EVIDENCE_RECEIPT_OWNER,
-                        owner_pid=self._owner_pid,
-                        process_generation=self._process_generation,
+            aborted_receipts: set[str] = set()
+            for abort_record in relevant:
+                if abort_record.get("record_type") != "workflow_abort":
+                    continue
+                abort_receipt_id = abort_record.get("receipt_id")
+                matching_admissions = [
+                    item
+                    for item in relevant
+                    if item.get("record_type") == "workflow_admission"
+                    and item.get("receipt_id") == abort_receipt_id
+                ]
+                if len(matching_admissions) != 1:
+                    raise WorkflowExecutionError(
+                        "WORKFLOW_EVIDENCE_CORRUPT: abort lacks its unique admission"
                     )
-                    self._validate_admission_record(item, active_receipt)
+                abort_receipt = self._validated_active_admission_receipt(
+                    matching_admissions[0],
+                    draft=draft,
+                    step=step,
+                    scope_ref=scope_ref,
+                    contract_fingerprint=contract_fingerprint,
+                    compiler_receipt=compiler_receipt,
+                    target_fingerprint=target_fingerprint,
+                )
+                self._validate_abort_record(
+                    abort_record,
+                    admission=matching_admissions[0],
+                    receipt=abort_receipt,
+                    execution_key=execution_key,
+                )
+                aborted_receipts.add(abort_receipt.receipt_id)
+            active: list[WorkflowAdmissionReceipt] = []
+            for item in relevant:
+                if item.get("record_type") != "workflow_admission":
+                    continue
+                active_receipt = self._validated_active_admission_receipt(
+                    item,
+                    draft=draft,
+                    step=step,
+                    scope_ref=scope_ref,
+                    contract_fingerprint=contract_fingerprint,
+                    compiler_receipt=compiler_receipt,
+                    target_fingerprint=target_fingerprint,
+                )
+                if active_receipt.receipt_id not in aborted_receipts:
+                    if (
+                        item.get("owner_pid") != self._owner_pid
+                        or item.get("process_generation") != self._process_generation
+                    ):
+                        raise WorkflowExecutionError(
+                            "WORKFLOW_RESTART_AUTHORITY_REQUIRED: active admission belongs to another worker"
+                        )
+                    active.append(active_receipt)
+            if active:
                 raise WorkflowExecutionError(
                     "WORKFLOW_DUPLICATE_EXECUTION: an admitted workflow step has no completion"
                 )
@@ -3449,12 +4378,14 @@ class EvidencePersistencePort:
                 "scope_ref": scope_ref,
                 "contract_fingerprint": contract_fingerprint,
                 "admission_fingerprint": compiler_receipt.admission_fingerprint,
-                "receipt_owner": _EVIDENCE_RECEIPT_OWNER,
+                "receipt_owner": self._authority_id,
+                "authority_id": self._authority_id,
                 "owner_pid": self._owner_pid,
                 "process_generation": self._process_generation,
                 "receipt_id": receipt_id,
                 "attempt": attempt,
             }
+            record["admission_integrity_seal"] = _admission_integrity_seal(record)
             _append_evidence_record(path, record, directory_fd=lock.directory_fd)
             receipt = WorkflowAdmissionReceipt(
                 workflow_id=draft.workflow_id,
@@ -3467,9 +4398,10 @@ class EvidencePersistencePort:
                 attempt=attempt,
                 target_fingerprint=target_fingerprint,
                 admission_fingerprint=compiler_receipt.admission_fingerprint,
-                receipt_owner=_EVIDENCE_RECEIPT_OWNER,
+                receipt_owner=self._authority_id,
                 owner_pid=self._owner_pid,
                 process_generation=self._process_generation,
+                authority_id=self._authority_id,
             )
             self._register_receipt(receipt)
             return receipt
@@ -3496,6 +4428,7 @@ class EvidencePersistencePort:
             "contract_fingerprint": receipt.contract_fingerprint,
             "admission_fingerprint": receipt.admission_fingerprint,
             "receipt_owner": receipt.receipt_owner,
+            "authority_id": receipt.authority_id,
             "owner_pid": receipt.owner_pid,
             "process_generation": receipt.process_generation,
             "receipt_id": receipt.receipt_id,
@@ -3526,11 +4459,20 @@ class EvidencePersistencePort:
                 )
             admission = admissions[0]
             self._validate_admission_record(admission, receipt)
-            if any(
-                item.get("record_type") == "workflow_abort"
-                and item.get("receipt_id") == receipt.receipt_id
+            abort_records = [
+                item
                 for item in records
-            ):
+                if item.get("record_type") == "workflow_abort"
+                and item.get("receipt_id") == receipt.receipt_id
+            ]
+            for abort_record in abort_records:
+                self._validate_abort_record(
+                    abort_record,
+                    admission=admission,
+                    receipt=receipt,
+                    execution_key=f"{receipt.workflow_id}:{receipt.step_id}:{receipt.step_fingerprint}",
+                )
+            if abort_records:
                 raise WorkflowExecutionError(
                     "WORKFLOW_ADMISSION_ABORTED: aborted receipt cannot complete"
                 )
@@ -3607,24 +4549,34 @@ class EvidencePersistencePort:
                 raise WorkflowExecutionError(
                     "WORKFLOW_ADMISSION_REQUIRED: abort lacks a unique admission"
                 )
-            self._validate_admission_record(admissions[0], receipt)
+            admission = admissions[0]
+            self._validate_admission_record(admission, receipt)
+            abort_records = [
+                item
+                for item in records
+                if item.get("record_type") == "workflow_abort"
+                and item.get("receipt_id") == receipt.receipt_id
+            ]
+            for abort_record in abort_records:
+                self._validate_abort_record(
+                    abort_record,
+                    admission=admission,
+                    receipt=receipt,
+                    execution_key=f"{receipt.workflow_id}:{receipt.step_id}:{receipt.step_fingerprint}",
+                )
             if any(
                 item.get("record_type") == "workflow_completion"
                 and item.get("receipt_id") == receipt.receipt_id
                 for item in records
             ):
                 return
-            if any(
-                item.get("record_type") == "workflow_abort"
-                and item.get("receipt_id") == receipt.receipt_id
-                for item in records
-            ):
+            if abort_records:
                 return
             if admissions[0].get("status") != "admitted":
                 raise WorkflowExecutionError(
                     "WORKFLOW_ADMISSION_ABORTED: receipt is already aborted"
                 )
-            _append_evidence_record(path, {
+            record = {
                 "record_type": "workflow_abort",
                 "status": "aborted",
                 "execution_key": f"{receipt.workflow_id}:{receipt.step_id}:{receipt.step_fingerprint}",
@@ -3637,12 +4589,68 @@ class EvidencePersistencePort:
                 "contract_fingerprint": receipt.contract_fingerprint,
                 "admission_fingerprint": receipt.admission_fingerprint,
                 "receipt_owner": receipt.receipt_owner,
+                "authority_id": receipt.authority_id,
                 "owner_pid": receipt.owner_pid,
                 "process_generation": receipt.process_generation,
                 "receipt_id": receipt.receipt_id,
                 "attempt": receipt.attempt,
                 "error": str(error)[:2000],
-            }, directory_fd=lock.directory_fd)
+            }
+            record["abort_integrity_seal"] = _abort_integrity_seal(record)
+            _append_evidence_record(path, record, directory_fd=lock.directory_fd)
+
+    def _persist_uncertain_commit_marker(
+        self,
+        receipt: WorkflowAdmissionReceipt,
+        *,
+        artifact_path: str,
+        error: str,
+    ) -> None:
+        """Persist a fail-closed marker when an output rollback is uncertain."""
+
+        self._require_receipt(receipt)
+        draft = self._active_draft()
+        target_run_id = _require_workflow_opaque_ref(
+            draft.target.get("run_id"), "workflow target run_id"
+        )
+        record = {
+            "record_type": "workflow_uncertain_commit",
+            "status": "uncertain_commit",
+            "execution_key": f"{receipt.workflow_id}:{receipt.step_id}:{receipt.step_fingerprint}",
+            "workflow_id": receipt.workflow_id,
+            "step_id": receipt.step_id,
+            "target_run_id": target_run_id,
+            "artifact_path": str(artifact_path),
+            "scope_ref": receipt.scope_ref,
+            "plan_fingerprint": receipt.plan_fingerprint,
+            "step_fingerprint": receipt.step_fingerprint,
+            "contract_fingerprint": receipt.contract_fingerprint,
+            "admission_fingerprint": receipt.admission_fingerprint,
+            "receipt_owner": receipt.receipt_owner,
+            "authority_id": receipt.authority_id,
+            "owner_pid": receipt.owner_pid,
+            "process_generation": receipt.process_generation,
+            "receipt_id": receipt.receipt_id,
+            "attempt": receipt.attempt,
+            "error": str(error)[:2000],
+        }
+        record["uncertain_commit_seal"] = _uncertain_commit_seal(record)
+        path = self._path(receipt.workflow_id)
+        with _evidence_lock(path, admitted_directory_fd=self._host_endpoint_fd) as lock:
+            records = self._records(receipt.workflow_id)
+            matching = [
+                item
+                for item in records
+                if item.get("record_type") == "workflow_uncertain_commit"
+                and item.get("receipt_id") == receipt.receipt_id
+                and item.get("artifact_path") == record["artifact_path"]
+            ]
+            if len(matching) > 1 or (matching and matching[0] != record):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_CORRUPT: uncertain commit marker changed"
+                )
+            if not matching:
+                _append_evidence_record(path, record, directory_fd=lock.directory_fd)
 
 
 def issue_server_evidence_port(
@@ -3666,7 +4674,7 @@ def issue_server_evidence_port(
         resolved_endpoint = _deployment_host_endpoint_from_supervisor(normalized_root)
     except WorkflowExecutionError:
         raise
-    except BaseException as exc:
+    except Exception as exc:
         raise WorkflowExecutionError(
             "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: deployment workflow host resolver failed closed"
         ) from exc
@@ -3798,6 +4806,17 @@ def collect_post_estimation_results(
                 )
             artifact_type = record.get("artifact_type")
             if artifact_type not in POST_ESTIMATION_ARTIFACT_TYPES:
+                continue
+            # Report evidence is registered in the run artifact index for
+            # durable Report consumption, but it is a different namespace
+            # and envelope from workflow model post-estimation results.  Do
+            # not send that global owner artifact through the model-result
+            # parser; Report rehydration validates it separately.
+            if (
+                artifact_type == "post_estimation"
+                and str(record.get("artifact_id", "")).startswith("report:")
+                and str(record.get("path", "")) == "report_evidence.json"
+            ):
                 continue
             # The ordinary statistical-tests stage uses the historical
             # artifact type but has no workflow source/result envelope. It is
@@ -4322,17 +5341,25 @@ def _persist_numeric_derivation(
     # parent node named below always exists in the graph mutated here.
     source_run_id = str(draft.target["run_id"])
     run_root = root / "runs" / source_run_id
-    result_fingerprint = str(step.fingerprint)
-    fingerprint = result_fingerprint.replace(":", "_")
-    relative_dir = Path("derived") / "workflow_numeric" / fingerprint
+    step_fingerprint = str(step.fingerprint)
+    output_identity, identity_token = _input_bound_output_identity(
+        draft=draft,
+        step=step,
+        lineage=lineage,
+        producer="workflow.derive_numeric",
+    )
+    relative_dir = Path("derived") / "workflow_numeric" / identity_token
     data_rel = (relative_dir / "data.csv").as_posix()
     recipe_rel = (relative_dir / "recipe.json").as_posix()
     recipe = {
         "schema_version": _NUMERIC_DERIVATION_SCHEMA,
         "workflow_id": draft.workflow_id,
         "workflow_step_id": str(step.step_id),
-        "workflow_step_fingerprint": result_fingerprint,
+        "workflow_step_fingerprint": step_fingerprint,
+        "output_identity": output_identity,
         "source": {
+            "run_id": source_run_id,
+            "node_ref": lineage["node_ref"],
             "artifact_id": lineage["artifact_id"],
             "sha256": lineage["sha256"],
         },
@@ -4354,8 +5381,8 @@ def _persist_numeric_derivation(
         occupied_message="numeric derivation data path is occupied",
         retain_for_registry=True,
     )
-    data_artifact_id = f"workflow_derived_numeric_{fingerprint[:24]}"
-    recipe_artifact_id = f"workflow_derived_numeric_recipe_{fingerprint[:24]}"
+    data_artifact_id = f"workflow_derived_numeric_{identity_token}"
+    recipe_artifact_id = f"workflow_derived_numeric_recipe_{identity_token}"
     _ensure_runtime_artifact(
         run_root,
         artifact_id=data_artifact_id,
@@ -4372,12 +5399,20 @@ def _persist_numeric_derivation(
         step="workflow.derive_numeric",
         inputs=[lineage["artifact_id"], data_artifact_id],
     )
-    child_node_id = f"data-derive-numeric:{fingerprint[:24]}"
-    branch_id = f"workflow-numeric:{fingerprint[:20]}"
+    child_node_id = f"data-derive-numeric:{identity_token}"
+    branch_id = f"workflow-numeric:{identity_token[:20]}"
     source_node_id = lineage["node_ref"]
 
     def add_child(graph: Graph) -> Graph:
         if child_node_id in graph.nodes:
+            existing = graph.nodes[child_node_id]
+            if (
+                existing.payload_ref != data_rel
+                or existing.parent_stage_id != source_node_id
+            ):
+                raise WorkflowExecutionError(
+                    "numeric derivation graph child identity is not deterministic"
+                )
             return graph
         child = Node(
             id=child_node_id,
@@ -4429,31 +5464,22 @@ def _persist_numeric_derivation(
 
     GraphStore(root / "runs").mutate(source_run_id, add_child)
     data_sha256 = sha256_file(data_path)
-    node_index_relative = Path("node_index.json")
-    node_index = _read_runtime_artifact_json(
-        run_root, node_index_relative, missing={}
-    )
-    if not isinstance(node_index, Mapping):
-        raise WorkflowExecutionError("numeric derivation node index is not an object")
     entry = {
         "node_hash": data_sha256,
         "producing_stage": "workflow.derive_numeric",
         "cas_ref": {"node_hash": data_sha256, "artifact": data_rel},
     }
-    existing = node_index.get(child_node_id)
-    if existing is not None and existing != entry:
-        raise WorkflowExecutionError("numeric derivation node identity is not deterministic")
-    if existing is None:
-        _write_runtime_artifact_json(
-            run_root,
-            node_index_relative,
-            {**node_index, child_node_id: entry},
-            occupied_message="numeric derivation node identity is not deterministic",
-        )
+    _ensure_runtime_node_index_entry(
+        run_root,
+        child_node_id=child_node_id,
+        entry=entry,
+        conflict_message="numeric derivation node identity is not deterministic",
+        not_object_message="numeric derivation node index is not an object",
+    )
     return WorkflowStepResult(
         artifact_ids=[data_artifact_id, recipe_artifact_id],
         row_counts={item["output_name"]: item["nonmissing_count"] for item in summaries},
-        result_fingerprint=fingerprint,
+        result_fingerprint=output_identity,
         payload={
             "output_columns": summaries,
             # The standard binding a later step commits to consuming. Every
@@ -4474,7 +5500,7 @@ def _persist_numeric_derivation(
                 # can falsify. Verify with content_sha256, attribute with this.
                 "content_sha256": data_sha256,
                 "dataset_kind": "derived_data",
-                "result_fingerprint": fingerprint,
+                "result_fingerprint": output_identity,
             },
         },
     )
@@ -4497,10 +5523,15 @@ def _persist_workflow_dataset_frame(
 
     source_run_id = str(draft.target["run_id"])
     run_root = root / "runs" / source_run_id
-    result_fingerprint = str(step.fingerprint)
-    fingerprint = result_fingerprint.replace(":", "_")
+    step_fingerprint = str(step.fingerprint)
+    output_identity, identity_token = _input_bound_output_identity(
+        draft=draft,
+        step=step,
+        lineage=lineage,
+        producer=producer_step,
+    )
     safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", dataset_label)
-    relative_dir = Path("derived") / "workflow_datasets" / fingerprint[:24]
+    relative_dir = Path("derived") / "workflow_datasets" / identity_token
     data_rel = (relative_dir / f"{safe_label}.parquet").as_posix()
     metadata_rel = (relative_dir / f"{safe_label}.json").as_posix()
     serialized = frame.to_parquet(index=False)
@@ -4515,9 +5546,12 @@ def _persist_workflow_dataset_frame(
         "schema_version": "workflow-prepared-dataset.v1",
         "workflow_id": draft.workflow_id,
         "workflow_step_id": str(step.step_id),
-        "workflow_step_fingerprint": result_fingerprint,
+        "workflow_step_fingerprint": step_fingerprint,
+        "output_identity": output_identity,
         "producer": producer_step,
         "source": {
+            "run_id": source_run_id,
+            "node_ref": str(lineage["node_ref"]),
             "artifact_id": str(lineage["artifact_id"]),
             "sha256": str(lineage["sha256"]),
         },
@@ -4533,8 +5567,8 @@ def _persist_workflow_dataset_frame(
         occupied_message=f"{producer_step} metadata path is occupied by different content",
         retain_for_registry=True,
     )
-    data_artifact_id = f"workflow_{safe_label}_{fingerprint[:24]}"
-    metadata_artifact_id = f"workflow_{safe_label}_metadata_{fingerprint[:24]}"
+    data_artifact_id = f"workflow_{safe_label}_{identity_token}"
+    metadata_artifact_id = f"workflow_{safe_label}_metadata_{identity_token}"
     _ensure_runtime_artifact(
         run_root,
         artifact_id=data_artifact_id,
@@ -4551,8 +5585,8 @@ def _persist_workflow_dataset_frame(
         step=producer_step,
         inputs=[str(lineage["artifact_id"]), data_artifact_id],
     )
-    child_node_id = f"data-{safe_label}:{fingerprint[:24]}"
-    branch_id = f"workflow-{safe_label}:{fingerprint[:20]}"
+    child_node_id = f"data-{safe_label}:{identity_token}"
+    branch_id = f"workflow-{safe_label}:{identity_token[:20]}"
     source_node_id = str(lineage["node_ref"])
 
     def add_child(graph: Graph) -> Graph:
@@ -4611,33 +5645,22 @@ def _persist_workflow_dataset_frame(
 
     GraphStore(root / "runs").mutate(source_run_id, add_child)
     data_sha256 = sha256_file(data_path)
-    node_index_relative = Path("node_index.json")
-    node_index = _read_runtime_artifact_json(
-        run_root, node_index_relative, missing={}
-    )
-    if not isinstance(node_index, Mapping):
-        raise WorkflowExecutionError(f"{producer_step} node index is not an object")
     entry = {
         "node_hash": data_sha256,
         "producing_stage": producer_step,
         "cas_ref": {"node_hash": data_sha256, "artifact": data_rel},
     }
-    existing = node_index.get(child_node_id)
-    if existing is not None and existing != entry:
-        raise WorkflowExecutionError(
-            f"{producer_step} node identity is not deterministic"
-        )
-    if existing is None:
-        _write_runtime_artifact_json(
-            run_root,
-            node_index_relative,
-            {**node_index, child_node_id: entry},
-            occupied_message=f"{producer_step} node identity is not deterministic",
-        )
+    _ensure_runtime_node_index_entry(
+        run_root,
+        child_node_id=child_node_id,
+        entry=entry,
+        conflict_message=f"{producer_step} node identity is not deterministic",
+        not_object_message=f"{producer_step} node index is not an object",
+    )
     return WorkflowStepResult(
         artifact_ids=[data_artifact_id, metadata_artifact_id],
         row_counts={"source": int(len(frame))},
-        result_fingerprint=result_fingerprint,
+        result_fingerprint=output_identity,
         payload={
             "summary": dict(summary),
             "produced_dataset": {
@@ -4647,7 +5670,7 @@ def _persist_workflow_dataset_frame(
                 "artifact_id": data_artifact_id,
                 "content_sha256": data_sha256,
                 "dataset_kind": "derived_data",
-                "result_fingerprint": result_fingerprint,
+                "result_fingerprint": output_identity,
             },
         },
     )
@@ -6125,7 +7148,24 @@ def _execute_model_genesis_branches(
                 f"{model_family} branch {branch_id} completed under another run identity"
             )
         run_artifacts = _read_artifacts_index(run_root).get("artifacts", [])
-        ids = [str(item["artifact_id"]) for item in run_artifacts if item.get("artifact_id")]
+        admitted_run_artifacts: list[Mapping[str, Any]] = []
+        ids: list[str] = []
+        for item in run_artifacts:
+            if not isinstance(item, Mapping) or not item.get("artifact_id"):
+                continue
+            child_artifact_id = str(item["artifact_id"])
+            # A report evidence row is a separately owned, globally scoped
+            # projection. It may be present in a child run's index, but it is
+            # not a model-branch artifact and its ``report:<run>`` identity
+            # is intentionally outside the workflow artifact namespace.
+            if (
+                child_artifact_id.startswith("report:")
+                and item.get("artifact_type") == "post_estimation"
+            ):
+                continue
+            _require_workflow_artifact_ref(child_artifact_id, "workflow artifact_id")
+            ids.append(child_artifact_id)
+            admitted_run_artifacts.append(item)
         missing_artifacts = sorted(set(family_contract.expected_artifacts) - set(ids))
         if missing_artifacts:
             raise WorkflowExecutionError(
@@ -6153,7 +7193,7 @@ def _execute_model_genesis_branches(
         # that the typed result is about to expose in the active server-owned
         # registry first; otherwise admit_result_artifacts must (correctly)
         # reject a legitimate child-run reference as untrusted.
-        for item in run_artifacts:
+        for item in admitted_run_artifacts:
             if not isinstance(item, Mapping) or not item.get("artifact_id"):
                 continue
             child_artifact_id = str(item["artifact_id"])
@@ -7338,14 +8378,12 @@ def _dependent_model_branch(
                 typed_outputs.get("model_branches")
             )
         else:
-            # Bounded compatibility path for old results that predate typed
-            # model bindings. Only a result explicitly reconstructed from
-            # persisted state may use these aliases; a live producer without a
-            # canonical binding is rejected before any post-estimation read.
-            if not dependency.restored_from_state:
-                raise WorkflowExecutionError(
-                    "completed model branch has no canonical binding; a persisted model run is required"
-                )
+            # A post-estimation step commonly has two direct dependencies:
+            # the completed model branch and the dataset source that the
+            # operation also reads. A dataset result with no branch-shaped
+            # legacy payload is unrelated and must be skipped; treating it as
+            # a malformed model producer makes a valid typed plan fail before
+            # the selected model dependency is evaluated.
             lineage = dependency.lineage
             branches = lineage.get("branches") if isinstance(lineage, Mapping) else None
             if not isinstance(branches, list):
@@ -7357,6 +8395,17 @@ def _dependent_model_branch(
                 )
             if not isinstance(branches, list):
                 branches = dependency.payload.get("branches")
+            if not isinstance(branches, list):
+                continue
+            # Bounded compatibility path for old model results that predate
+            # typed model bindings. Only a result explicitly reconstructed
+            # from persisted state may use these aliases; a live model result
+            # without a canonical binding is rejected before any
+            # post-estimation read.
+            if not dependency.restored_from_state:
+                raise WorkflowExecutionError(
+                    "completed model branch has no canonical binding; a persisted model run is required"
+                )
         if not isinstance(branches, list):
             continue
         for branch in branches:
@@ -7430,6 +8479,10 @@ def _refit_completed_ols_branch(
     branch_spec = branch.get("branch_spec")
     if not isinstance(branch_spec, Mapping):
         raise WorkflowExecutionError("completed model branch lacks a branch specification")
+    if branch.get("model_family") != "ols" or branch_spec.get("model_family") != "ols":
+        raise WorkflowExecutionError(
+            f"{POST_ESTIMATION_UNSUPPORTED_FAMILY}: OLS refit requires an admitted OLS branch"
+        )
     try:
         branch_frame, predictor_columns, _references = expand_branch_terms(
             source_frame,
@@ -7462,7 +8515,7 @@ def _refit_completed_ols_branch(
             str(branch_spec["outcome"]),
             predictor_columns,
             robust=covariance == "robust",
-            model_id="ols_1",
+            model_id=_model_artifact_id(branch),
             cluster_col=cluster_col,
             covariance=covariance,
         )
@@ -7551,7 +8604,16 @@ def _persist_model_post_estimation_result(
     run_root = root / "runs" / str(draft.target["run_id"])
     token = str(step.fingerprint).removeprefix("sha256:")[:24]
     operation_token = str(step.operation_id).replace(".", "_")
-    artifact_id = f"workflow_{operation_token}_{token}"
+    # The step fingerprint is intentionally deterministic for the same
+    # calculation, but the payload also commits to the workflow execution
+    # identity.  Reusing only the step token would therefore make a fresh
+    # server-authorized execution collide with an older immutable artifact.
+    # Bind the artifact namespace to the workflow identity so retries create a
+    # new, auditable artifact instead of overwriting or falsely reusing one.
+    workflow_token = hashlib.sha256(
+        str(draft.workflow_id).encode("utf-8")
+    ).hexdigest()[:24]
+    artifact_id = f"workflow_{operation_token}_{token}_{workflow_token}"
     artifact_path = run_root / "artifacts" / artifact_type / f"{artifact_id}.json"
     payload = {
         "schema_version": "workbench.workflow.post-estimation/v1",
@@ -7708,7 +8770,8 @@ def _persist_workflow_capability_result(
 
     run_id = str(draft.target["run_id"])
     run_root = root / "runs" / run_id
-    token = str(step.fingerprint).removeprefix("sha256:")[:24]
+    step_fingerprint = str(step.fingerprint)
+    token = step_fingerprint.removeprefix("sha256:")[:24]
     operation_token = str(step.operation_id).replace(".", "_")
     request_fingerprint = _workflow_request_fingerprint(request)
     result_payload = dict(execution.payload)
@@ -7781,7 +8844,13 @@ def _persist_workflow_capability_result(
         raise WorkflowExecutionError(
             f"workflow capability {step.operation_id} returned a dataset without a server-owned dataset role"
         )
-    capability_dir = Path("derived") / "workflow_capability" / token
+    output_identity, identity_token = _input_bound_output_identity(
+        draft=draft,
+        step=step,
+        lineage=lineage,
+        producer=f"workflow.capability:{step.operation_id}",
+    )
+    capability_dir = Path("derived") / "workflow_capability" / identity_token
     data_rel = (capability_dir / "data.csv").as_posix()
     data_path = _write_runtime_artifact_bytes(
         run_root,
@@ -7800,11 +8869,15 @@ def _persist_workflow_capability_result(
         retain_for_registry=True,
     )
     data_sha256 = sha256_file(data_path)
-    data_artifact_id = f"workflow_capability_dataset_{operation_token}_{token}"
-    metadata_artifact_id = f"workflow_capability_dataset_metadata_{operation_token}_{token}"
+    data_artifact_id = f"workflow_capability_dataset_{operation_token}_{identity_token}"
+    metadata_artifact_id = f"workflow_capability_dataset_metadata_{operation_token}_{identity_token}"
     metadata_rel = (capability_dir / "metadata.json").as_posix()
     metadata = {
         "schema_version": "workbench.workflow.capability-dataset/v1",
+        "workflow_id": draft.workflow_id,
+        "workflow_step_id": str(step.step_id),
+        "workflow_step_fingerprint": step_fingerprint,
+        "output_identity": output_identity,
         "operation_id": str(step.operation_id),
         "dataset_kind": dataset_kind,
         "source": {
@@ -7841,11 +8914,19 @@ def _persist_workflow_capability_result(
         step=str(step.operation_id),
         inputs=[str(lineage["artifact_id"]), data_artifact_id],
     )
-    child_node_id = f"workflow-capability:{operation_token}:{token}"
-    branch_id = f"workflow-capability:{token[:20]}"
+    child_node_id = f"workflow-capability:{operation_token}:{identity_token}"
+    branch_id = f"workflow-capability:{identity_token[:20]}"
 
     def add_child(graph: Graph) -> Graph:
         if child_node_id in graph.nodes:
+            existing = graph.nodes[child_node_id]
+            if (
+                existing.payload_ref != data_rel
+                or existing.parent_stage_id != str(lineage["node_ref"])
+            ):
+                raise WorkflowExecutionError(
+                    "workflow capability dataset graph child identity is not deterministic"
+                )
             return graph
         child = Node(
             id=child_node_id,
@@ -7893,27 +8974,18 @@ def _persist_workflow_capability_result(
         )
 
     GraphStore(root / "runs").mutate(run_id, add_child)
-    node_index_relative = Path("node_index.json")
-    node_index = _read_runtime_artifact_json(
-        run_root, node_index_relative, missing={}
-    )
-    if not isinstance(node_index, Mapping):
-        raise WorkflowExecutionError("workflow capability dataset node index is not an object")
     node_entry = {
         "node_hash": data_sha256,
         "producing_stage": str(step.operation_id),
         "cas_ref": {"node_hash": data_sha256, "artifact": data_rel},
     }
-    existing_node = node_index.get(child_node_id)
-    if existing_node is not None and existing_node != node_entry:
-        raise WorkflowExecutionError("workflow capability dataset node identity is not deterministic")
-    if existing_node is None:
-        _write_runtime_artifact_json(
-            run_root,
-            node_index_relative,
-            {**node_index, child_node_id: node_entry},
-            occupied_message="workflow capability dataset node identity is not deterministic",
-        )
+    _ensure_runtime_node_index_entry(
+        run_root,
+        child_node_id=child_node_id,
+        entry=node_entry,
+        conflict_message="workflow capability dataset node identity is not deterministic",
+        not_object_message="workflow capability dataset node index is not an object",
+    )
     result_payload = {
         **result_payload,
         "produced_dataset": {
@@ -7923,7 +8995,7 @@ def _persist_workflow_capability_result(
             "artifact_id": data_artifact_id,
             "content_sha256": data_sha256,
             "dataset_kind": dataset_kind,
-            "result_fingerprint": str(step.fingerprint),
+            "result_fingerprint": output_identity,
         },
     }
     return WorkflowStepResult(
@@ -7932,7 +9004,7 @@ def _persist_workflow_capability_result(
             "input_rows": int(result_payload.get("input_rows", 0) or 0),
             "output_rows": int(len(output_frame)),
         },
-        result_fingerprint=str(step.fingerprint),
+        result_fingerprint=output_identity,
         payload={"result": result_payload, "produced_dataset": result_payload["produced_dataset"]},
     )
 
@@ -8390,6 +9462,7 @@ __all__ = [
     "EvidencePersistencePort",
     "WorkflowHostEndpointV1",
     "WorkflowAdmissionReceipt",
+    "bootstrap_local_workflow_host",
     "build_workflow_step_executor",
     "issue_server_evidence_port",
 ]

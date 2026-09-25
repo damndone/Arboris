@@ -523,9 +523,90 @@ describe("DataOperationsSection", () => {
       ...SOURCE_IDENTITY,
       metadata: {
         score: {
-          label: "Updated score",
+          variable_label: "Updated score",
           user_missing_values: [-999],
           value_labels: { "1": "Approved" },
+        },
+      },
+    });
+  });
+
+  it("edits every canonical metadata field and can add a value label", async () => {
+    previewMock.mockResolvedValue({
+      preview: { status: "ready", fingerprint: "metadata-preview" },
+    });
+    const profile = {
+      schema_version: "data-profile.v1",
+      source: { run_id: "run-1", node_id: "node-1", artifact_id: "artifact-1" },
+      variables: [
+        {
+          name: "score",
+          label: "Score label",
+          measurement_level: "scale",
+          missing_policy: "system",
+          role: "outcome",
+          sensitivity: "public",
+          missingness: { count: 1, rate: 0.25 },
+          user_missing_values: [-99],
+          value_labels: { "1": "Yes" },
+          sample_values: [1, 2, 3],
+        },
+      ],
+    };
+    const metadataManifest = manifest({
+      operation_id: "data.metadata.update",
+      request_schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["source_run_id", "source_node_id", "source_artifact_id", "metadata"],
+        properties: {
+          source_run_id: { type: "string", minLength: 1 },
+          source_node_id: { type: "string", minLength: 1 },
+          source_artifact_id: { type: "string", minLength: 1 },
+          metadata: { type: "object", additionalProperties: true },
+        },
+      },
+    });
+
+    render(
+      <DataOperationsSection
+        {...({ ...sectionProps(metadataManifest), profile } as DataOperationsSectionProps)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit metadata" }));
+    fireEvent.change(screen.getByLabelText("score measurement level"), {
+      target: { value: "ordinal" },
+    });
+    fireEvent.change(screen.getByLabelText("score missing policy"), {
+      target: { value: "user_defined" },
+    });
+    fireEvent.change(screen.getByLabelText("score role"), {
+      target: { value: "outcome" },
+    });
+    fireEvent.change(screen.getByLabelText("score sensitivity"), {
+      target: { value: "internal" },
+    });
+    fireEvent.change(screen.getByLabelText("score value label key"), {
+      target: { value: "2" },
+    });
+    fireEvent.change(screen.getByLabelText("score value label text"), {
+      target: { value: "Rejected" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add value label for score" }));
+    fireEvent.click(screen.getByTestId("data-operation-preview"));
+
+    await waitFor(() => expect(previewMock).toHaveBeenCalledTimes(1));
+    expect(previewMock.mock.calls[0][2]).toMatchObject({
+      ...SOURCE_IDENTITY,
+      metadata: {
+        score: {
+          variable_label: "Score label",
+          measurement_level: "ordinal",
+          missing_policy: "user_defined",
+          role: "outcome",
+          sensitivity: "internal",
+          user_missing_values: [-99],
+          value_labels: { "1": "Yes", "2": "Rejected" },
         },
       },
     });

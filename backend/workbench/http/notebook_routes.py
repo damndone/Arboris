@@ -8,7 +8,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import threading
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, NoReturn
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -294,6 +294,8 @@ def _notebook_cutover_identity(
     request: Request,
     notebook: Any,
     body: NotebookCutoverCompileRequest,
+    *,
+    project_ref: str,
 ) -> tuple[str, str]:
     """Resolve actor/session from a server-owned host binding.
 
@@ -305,9 +307,9 @@ def _notebook_cutover_identity(
     from .agent_routes import resolve_agent_notebook_server_identity
 
     try:
-        actor_ref, session_ref, _canonical_project_ref = resolve_agent_notebook_server_identity(
+        actor_ref, session_ref, canonical_project_ref = resolve_agent_notebook_server_identity(
             request,
-            project_ref=f"project:{notebook.project_id}",
+            project_ref=project_ref,
             claimed_session_ref=None,
             notebook_id=str(notebook.notebook_id),
         )
@@ -319,6 +321,12 @@ def _notebook_cutover_identity(
                 message="The request identity does not match the server-owned Notebook session.",
             ) from exc
         raise
+    if canonical_project_ref is not None and canonical_project_ref != project_ref:
+        raise WorkbenchAPIError(
+            status_code=403,
+            code="NOTEBOOK_CUTOVER_SCOPE_MISMATCH",
+            message="The server identity resolver returned a different Notebook project scope.",
+        )
     if (body.actor_ref, body.session_ref) != (actor_ref, session_ref):
         raise WorkbenchAPIError(
             status_code=403,
@@ -340,12 +348,43 @@ def _notebook_cutover_error(exc: Exception) -> WorkbenchAPIError:
     return WorkbenchAPIError(status_code=status, code=code, message=str(exc))
 
 
+def _unsupported_legacy_notebook_execution(route: str) -> NoReturn:
+    """Fail closed for the pre-v1.8.9 Notebook execution surface.
+
+    The current product has one server-owned Agent/Notebook compiler.  Keeping
+    the historical route names registered avoids an ambiguous 404, but they
+    must never compile, authorize, materialize, or execute a request.  In
+    particular, an old persisted option is not silently upgraded into a live
+    capability or sent through a legacy fallback.
+    """
+
+    raise WorkbenchAPIError(
+        status_code=409,
+        code="UNSUPPORTED_VERSION",
+        message=(
+            "This historical Notebook execution route is disabled in the "
+            "local v1.8.9 cutover; use the server-owned /cutover/compile route."
+        ),
+        details={"route": route, "replacement": "/notebooks/{notebook_id}/cutover/compile"},
+    )
+
+
 def _notebook_cutover_project_ref(
     root: Path,
     notebook: Any,
     requested_project_ref: str | None,
+    *,
+    request: Request | None = None,
 ) -> str:
-    """Derive the project scope from the persisted Notebook identity."""
+    """Derive the project scope from the server-bound Notebook identity.
+
+    The persisted Notebook id is only a resource binding.  A local host may
+    publish an opaque project reference (for example, a root digest), so the
+    route must use that bootstrap-issued scope instead of reconstructing one
+    from the directory name.  External deployments retain their injected
+    ``project:<project-id>`` scope until their identity resolver supplies a
+    canonical scope.
+    """
 
     persisted_project_id = str(notebook.project_id)
     if persisted_project_id != root.name:
@@ -355,6 +394,25 @@ def _notebook_cutover_project_ref(
             message="The Notebook is not bound to the requested project root.",
         )
     server_project_ref = f"project:{persisted_project_id}"
+    local_bundle = getattr(getattr(request, "app", None), "state", None)
+    local_bundle = getattr(local_bundle, "local_host_bundle", None)
+    if local_bundle is not None:
+        bound_root = Path(local_bundle.workflow_endpoint.project_root).resolve(strict=False)
+        if bound_root != root:
+            raise WorkbenchAPIError(
+                status_code=403,
+                code="NOTEBOOK_CUTOVER_SCOPE_MISMATCH",
+                message="The Notebook is not bound to the bootstrapped local project.",
+            )
+        bound_identity = getattr(local_bundle, "identity", None)
+        bound_project_ref = getattr(bound_identity, "project_ref", None)
+        if type(bound_project_ref) is not str or not bound_project_ref.strip():
+            raise WorkbenchAPIError(
+                status_code=503,
+                code="AGENT_NOTEBOOK_PROJECT_NOT_BOUND",
+                message="The local host has not published a valid Notebook project scope.",
+            )
+        server_project_ref = bound_project_ref
     if requested_project_ref is not None and requested_project_ref != server_project_ref:
         raise WorkbenchAPIError(
             status_code=403,
@@ -916,7 +974,16 @@ def _execution_results_packet(
     model-specific result payloads remain in the Run's artifacts.
     """
 
+    from ..services.results_service import read_persisted_consumer_evidence_for_run
+
     results: dict[str, dict[str, Any]] = {}
+    service_project_root = getattr(service, "project_root", None)
+    project_root = None
+    if service_project_root is not None:
+        try:
+            project_root = Path(service_project_root).expanduser().resolve(strict=False)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            project_root = None
     for revision in revisions:
         view = service.store.read_option(notebook_id, revision.option_id)
         if not view.execution_results:
@@ -926,66 +993,74 @@ def _execution_results_packet(
             # Do not display a result from an older revision as if it proved
             # the current proposal.  The option revision is the pin.
             continue
-        validation = raw.get("artifact_validation")
-        if not isinstance(validation, dict):
-            capability_execution = raw.get("capability_execution")
-            if isinstance(capability_execution, dict):
-                # CF4 has already committed the full ArtifactContract@1.1
-                # aggregate in its own durable store.  The Notebook route
-                # exposes only its server-owned refs; it never accepts or
-                # reconstructs adapter payloads here.
-                results[revision.option_id] = {
-                    "option_id": revision.option_id,
-                    "option_revision": revision.option_revision,
-                    "run_id": raw.get("run_id"),
-                    "execution_status": raw.get("execution_status"),
-                    "committed": raw.get("committed"),
-                    "capability_execution": {
-                        key: capability_execution.get(key)
-                        for key in (
-                            "dispatch_status",
-                            "attempt_id",
-                            "receipt_ref",
-                            "completion_ref",
-                            "artifact_validation_ref",
-                            "object_graph_ref",
-                            "assessment_ref",
-                            "output_bundle_ref",
-                            "attestation_ref",
-                        )
-                    },
-                }
-            continue
-        raw_issues = [dict(issue) for issue in validation.get("issues", [])]
-        bounded_issues = raw_issues[:64]
-        validation_packet: dict[str, Any] = {
-            "contract_profile": validation.get("contract_profile"),
-            "validation_status": validation.get("validation_status"),
-            "checked_dimensions": list(validation.get("checked_dimensions", [])),
-            "not_evaluated_dimensions": list(
-                validation.get("not_evaluated_dimensions", [])
-            ),
-            "issues": bounded_issues,
+        run_id = raw.get("run_id")
+        if project_root is None:
+            central_evidence = {
+                "status": "unavailable",
+                "availability": "unavailable",
+                "execution_status": "unavailable",
+                "completeness_status": "unavailable",
+                "facts": [],
+                "projection_digest": None,
+                "reason_code": "NOTEBOOK_PROJECT_ROOT_UNAVAILABLE",
+                "receipt": None,
+            }
+        else:
+            central_evidence = read_persisted_consumer_evidence_for_run(
+                consumer_id="notebook",
+                project_root=project_root,
+                run_id=run_id if isinstance(run_id, str) else "",
+            )
+        central_status = central_evidence.get("status")
+        central_facts = central_evidence.get("facts")
+        facts = (
+            list(central_facts)
+            if central_status in {"available", "degraded"}
+            and isinstance(central_facts, (list, tuple))
+            else []
+        )
+
+        # Keep the historical execution packet only as a visibly
+        # non-authoritative compatibility view.  No model-specific payload,
+        # label, artifact-validation fact, or capability receipt is copied
+        # into the central Notebook facts surface.
+        compatibility: dict[str, Any] = {
+            "execution_status": raw.get("execution_status"),
+            "committed": raw.get("committed"),
         }
-        if len(raw_issues) > len(bounded_issues):
-            validation_packet["omitted_issue_count"] = len(raw_issues) - len(bounded_issues)
+        capability_execution = raw.get("capability_execution")
+        if isinstance(capability_execution, dict):
+            compatibility["capability_execution"] = {
+                key: capability_execution.get(key)
+                for key in (
+                    "dispatch_status",
+                    "attempt_id",
+                    "receipt_ref",
+                    "completion_ref",
+                    "artifact_validation_ref",
+                    "object_graph_ref",
+                    "assessment_ref",
+                    "output_bundle_ref",
+                    "attestation_ref",
+                )
+            }
+
         results[revision.option_id] = {
             "option_id": revision.option_id,
             "option_revision": revision.option_revision,
-            "run_id": raw.get("run_id"),
-            "execution_status": raw.get("execution_status"),
-            "committed": raw.get("committed") is True,
-            "artifact_validation": validation_packet,
-            **(
-                {"artifact_validation_scope": dict(raw["artifact_validation_scope"])}
-                if isinstance(raw.get("artifact_validation_scope"), Mapping)
-                else {}
+            "run_id": run_id if isinstance(run_id, str) else None,
+            "execution_status": central_evidence.get("execution_status"),
+            "committed": central_status in {"available", "degraded"},
+            "facts": facts,
+            "facts_authority": (
+                "server-owned"
+                if central_status in {"available", "degraded"}
+                else "unavailable"
             ),
-            **(
-                {"workflow_execution": dict(raw["workflow_execution"])}
-                if isinstance(raw.get("workflow_execution"), Mapping)
-                else {}
-            ),
+            "persisted_evidence": central_evidence,
+            "execution_results_authority": "non-authoritative",
+            "execution_results_compatibility": compatibility,
+            "execution_results_compatibility_authority": "non-authoritative",
         }
     return results
 
@@ -1587,20 +1662,7 @@ def compile_notebook_context_endpoint(
     notebook_id: str,
     focused_run_id: str | None = None,
 ) -> dict[str, Any]:
-    root, service = _service(request, project_root)
-    try:
-        context, trace = _compile(
-            root,
-            service,
-            notebook_id,
-            focused_run_id=focused_run_id,
-            request=request,
-        )
-        return _context_packet(context)
-    except NotebookOptionError as exc:
-        raise _notebook_error(exc) from exc
-    except (OSError, ValueError, KeyError) as exc:
-        raise _request_error(exc) from exc
+    _unsupported_legacy_notebook_execution("/notebooks/{notebook_id}/context/compile")
 
 
 @router.post("/notebooks/{notebook_id}/cutover/compile")
@@ -1619,13 +1681,19 @@ def compile_notebook_cutover_endpoint(
             root,
             notebook,
             body.project_ref,
+            request=request,
         )
     except NotebookOptionError as exc:
         raise _notebook_error(exc) from exc
     except (OSError, ValueError, KeyError) as exc:
         raise _request_error(exc) from exc
 
-    actor_ref, session_ref = _notebook_cutover_identity(request, notebook, body)
+    actor_ref, session_ref = _notebook_cutover_identity(
+        request,
+        notebook,
+        body,
+        project_ref=server_project_ref,
+    )
     try:
         compiler = _notebook_cutover_authority(server_project_ref, session_ref, request)
     except WorkbenchAPIError:
@@ -1661,7 +1729,17 @@ def compile_notebook_cutover_endpoint(
         raise
     except Exception as exc:
         raise _notebook_cutover_error(exc) from exc
-    return {"preview": preview.to_dict()}
+    payload: dict[str, Any] = {"preview": preview.to_dict()}
+    if preview.compilation_record_id is not None:
+        try:
+            binding = compiler.bind_direct_compilation(preview.compilation_record_id)
+        except Exception as exc:
+            raise _notebook_cutover_error(exc) from exc
+        payload["binding"] = {
+            **binding.to_dict(),
+            "compilation_record_id": preview.compilation_record_id,
+        }
+    return payload
 
 
 def _planning_attempt_key(
@@ -1713,200 +1791,7 @@ async def propose_options_endpoint(
     notebook_id: str,
     body: ProposeOptionsRequest,
 ) -> dict[str, Any]:
-    root, service = _service(request, project_root)
-    trace: TraceWriter | None = None
-    planning_started = False
-    try:
-        notebook = service.get_notebook(notebook_id)
-        if notebook.user_focus.get("interaction_mode") == "action":
-            if body.count not in {None, 1} or len(body.drafts) > 1:
-                raise ValueError(
-                    "Action mode permits exactly one checked Draft path"
-                )
-        context, trace = _compile(
-            root,
-            service,
-            notebook_id,
-            request=request,
-        )
-        recommendation_decision = None
-        drafts = (
-            [_draft(item) for item in body.drafts]
-            if body.drafts
-            else []
-        )
-        if not drafts:
-            planning_started = True
-            attempt_key = None
-            current_task = None
-            try:
-                agent = _planning_agent(root, service, notebook_id, context, trace)
-                initial_evidence = _baseline_planning_evidence(
-                    service, notebook_id, context, trace
-                )
-                attempt_key = (
-                    _planning_attempt_key(root, notebook_id, body.attempt_id)
-                    if body.attempt_id is not None
-                    else None
-                )
-                current_task = asyncio.current_task()
-                if attempt_key is not None and current_task is not None:
-                    with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
-                        active = _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key)
-                        if active is not None and not active.done():
-                            raise WorkbenchAPIError(
-                                status_code=409,
-                                code="NOTEBOOK_PLANNING_ATTEMPT_ACTIVE",
-                                message="Notebook planning attempt is already active",
-                            )
-                        _ACTIVE_PLANNING_ATTEMPTS[attempt_key] = current_task
-                result = await _run_planning_agent(
-                    agent,
-                    context=context,
-                    initial_evidence=initial_evidence,
-                )
-            except asyncio.CancelledError as exc:
-                _record_planning_terminal_error(
-                    trace,
-                    code="NOTEBOOK_PLANNING_CANCELLED",
-                    fatal=False,
-                    detail="notebook planning cancelled by user",
-                )
-                raise WorkbenchAPIError(
-                    status_code=409,
-                    code="NOTEBOOK_PLANNING_CANCELLED",
-                    message="Notebook planning was cancelled",
-                ) from exc
-            finally:
-                if attempt_key is not None and current_task is not None:
-                    with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
-                        if _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key) is current_task:
-                            _ACTIVE_PLANNING_ATTEMPTS.pop(attempt_key, None)
-            if isinstance(result, PlanningRefusal):
-                _record_planning_terminal_error(
-                    trace,
-                    code="NOTEBOOK_PLAN_REFUSED",
-                    fatal=False,
-                    detail=f"planner refused: {result.reason_code}",
-                )
-                raise WorkbenchAPIError(
-                    status_code=422,
-                    code="NOTEBOOK_PLAN_REFUSED",
-                    message=result.message,
-                    details={"reason_code": result.reason_code},
-                )
-            # Each bounded inspection is persisted separately by the service.
-            # Persist the planner's final append-only view as well, because the
-            # recommendation decision may cite evidence from more than one
-            # inspection round and materialization must be able to replay that
-            # exact pack by hash.
-            final_evidence = getattr(result, "evidence_pack", None)
-            if isinstance(final_evidence, DataEvidencePackV1):
-                service.store.append_evidence_pack(notebook_id, final_evidence.to_dict())
-            recommendation_evidence = (
-                final_evidence
-                if isinstance(final_evidence, DataEvidencePackV1)
-                else initial_evidence
-            )
-            # Inspection calls persist Evidence Packs. Recompile the context
-            # before pinning the v1.1 revision so evidence_pack_refs belong to
-            # the same freshness fingerprint that the Draft gate will observe.
-            context, trace = _compile(
-                root,
-                service,
-                notebook_id,
-                request=request,
-            )
-            drafts, recommendation_decision = service.derive_server_recommendation(
-                notebook_id,
-                context=context,
-                drafts=tuple(result.option_drafts),
-                batch_id=result.decision.batch_id,
-                evidence_pack=recommendation_evidence,
-            )
-        revisions = service.propose_batch(
-            notebook_id,
-            context=context,
-            drafts=drafts,
-            trace=trace,
-            batch_id=(recommendation_decision.batch_id if not body.drafts else None),
-            recommendation_decision=(recommendation_decision if not body.drafts else None),
-            # Provider-generated planning is the only path that may
-            # deliberately revalidate existing stable option ids.  Manual
-            # draft submission keeps the strict reuse-conflict behavior.
-            revalidate_existing=not bool(body.drafts),
-        )
-        # The Notebook projection is the fold of every persisted option, not
-        # only the candidates returned by the latest planning pass.  This is
-        # especially important for explicit replans: unchanged/deferred
-        # siblings must remain visible while the replanned stable ids expose
-        # their new option revisions.
-        projected = service.list_options(notebook_id, context=context)
-        projected_revisions = [
-            replace(
-                item.current_revision,
-                lifecycle_status=item.lifecycle_status,
-                freshness_status=item.freshness_status
-                or item.current_revision.freshness_status,
-            )
-            for item in projected
-        ]
-        return {
-            "context": _context_packet(context),
-            "options": [revision.to_dict() for revision in projected_revisions],
-            "materializations": _materializations_packet(
-                service, notebook_id, projected_revisions
-            ),
-            "execution_results": _execution_results_packet(
-                service, notebook_id, projected_revisions
-            ),
-            "trace_id": trace.trace_id,
-        }
-    except NotebookOptionError as exc:
-        if planning_started:
-            _record_planning_terminal_error(
-                trace,
-                code=exc.code,
-                fatal=True,
-                detail="notebook planning failed",
-            )
-        raise _notebook_error(exc) from exc
-    except NotebookNoEligibleCapability as exc:
-        if planning_started:
-            _record_planning_terminal_error(
-                trace,
-                code=exc.code,
-                fatal=True,
-                detail="notebook planning failed",
-            )
-        raise WorkbenchAPIError(status_code=409, code=exc.code, message=str(exc)) from exc
-    except NotebookPlanningContractError as exc:
-        if planning_started:
-            _record_planning_terminal_error(
-                trace,
-                code=exc.code,
-                fatal=True,
-                detail="notebook planning failed",
-            )
-        raise WorkbenchAPIError(status_code=422, code=exc.code, message=str(exc)) from exc
-    except NotebookPlanningUnavailable as exc:
-        if planning_started:
-            _record_planning_terminal_error(
-                trace,
-                code=exc.code,
-                fatal=True,
-                detail="notebook planning failed",
-            )
-        raise WorkbenchAPIError(status_code=409, code=exc.code, message=str(exc)) from exc
-    except (OSError, ValueError, KeyError) as exc:
-        if planning_started:
-            _record_planning_terminal_error(
-                trace,
-                code="NOTEBOOK_REQUEST_INVALID",
-                fatal=True,
-                detail="notebook planning failed",
-            )
-        raise _request_error(exc) from exc
+    _unsupported_legacy_notebook_execution("/notebooks/{notebook_id}/options/propose")
 
 
 @router.get("/notebooks/{notebook_id}/options")
@@ -1991,25 +1876,9 @@ def revalidate_option_endpoint(
     option_id: str,
     body: RevalidateOptionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(request, project_root)
-    try:
-        context, trace = _compile(root, service, notebook_id)
-        revision = service.revalidate_option(
-            notebook_id,
-            option_id,
-            context=context,
-            draft=_draft(body),
-            trace=trace,
-        )
-        return {
-            "context": _context_packet(context),
-            "option": revision.to_dict(),
-            "trace_id": trace.trace_id,
-        }
-    except NotebookOptionError as exc:
-        raise _notebook_error(exc) from exc
-    except (OSError, ValueError, KeyError) as exc:
-        raise _request_error(exc) from exc
+    _unsupported_legacy_notebook_execution(
+        "/notebooks/{notebook_id}/options/{option_id}/revalidate"
+    )
 
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/confirm")
@@ -2020,61 +1889,9 @@ def confirm_option_endpoint(
     option_id: str,
     body: ConfirmOptionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(request, project_root)
-    try:
-        context, trace = _compile(root, service, notebook_id)
-        current = service.store.read_option(notebook_id, option_id).current_revision
-        proposal = service.store.read_option(notebook_id, option_id).current_stored_revision.proposal
-        _require_historical_notebook_execution_boundary(
-            current,
-            proposal,
-            confirm_and_execute=False,
-        )
-        if proposal.operation_id == "operation.multi_step":
-            result = service.confirm_and_execute_workflow(
-                notebook_id,
-                option_id,
-                option_revision=body.option_revision,
-                proposal_id=body.proposal_id,
-                proposal_revision=body.proposal_revision,
-                context=context,
-                trace=trace,
-            )
-            return {**result, "trace_id": trace.trace_id}
-        if current.materializable:
-            if (body.option_revision, body.proposal_id, body.proposal_revision) != (
-                current.option_revision,
-                current.typed_proposal_id,
-                current.typed_proposal_revision,
-            ):
-                raise OptionRevisionStale(
-                    "materialization request does not match the current option revision",
-                    option_id=option_id,
-                    requested_revision=body.option_revision,
-                    current_revision=current.option_revision,
-                    reason="proposal_pin_mismatch",
-                )
-            result = service.materialize_option(
-                notebook_id,
-                option_id,
-                context=context,
-                trace=trace,
-            )
-            return {**result.to_dict(), "trace_id": trace.trace_id}
-        execution = service.confirm(
-            notebook_id,
-            option_id,
-            option_revision=body.option_revision,
-            proposal_id=body.proposal_id,
-            proposal_revision=body.proposal_revision,
-            context=context,
-            trace=trace,
-        )
-        return {"execution": execution.to_dict(), "trace_id": trace.trace_id}
-    except NotebookOptionError as exc:
-        raise _notebook_error(exc) from exc
-    except (OSError, ValueError, KeyError) as exc:
-        raise _request_error(exc) from exc
+    _unsupported_legacy_notebook_execution(
+        "/notebooks/{notebook_id}/options/{option_id}/confirm"
+    )
 
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/confirm-and-execute")
@@ -2091,39 +1908,9 @@ def confirm_and_execute_option_endpoint(
     Run intent, dispatch reservation, and all result facts are server-owned.
     """
 
-    root, service = _service(request, project_root)
-    try:
-        context, trace = _compile(root, service, notebook_id)
-        current = service.store.read_option(notebook_id, option_id).current_revision
-        proposal = service.store.read_option(notebook_id, option_id).current_stored_revision.proposal
-        _require_historical_notebook_execution_boundary(
-            current,
-            proposal,
-            confirm_and_execute=True,
-        )
-        if (body.option_revision, body.proposal_id, body.proposal_revision) != (
-            current.option_revision,
-            current.typed_proposal_id,
-            current.typed_proposal_revision,
-        ):
-            raise OptionRevisionStale(
-                "execution request does not match the current option revision",
-                option_id=option_id,
-                requested_revision=body.option_revision,
-                current_revision=current.option_revision,
-                reason="proposal_pin_mismatch",
-            )
-        dispatch = service.confirm_and_execute(
-            notebook_id,
-            option_id,
-            context=context,
-            trace=trace,
-        )
-        return {"dispatch": dispatch.to_dict(), "trace_id": trace.trace_id}
-    except NotebookOptionError as exc:
-        raise _notebook_error(exc) from exc
-    except (OSError, ValueError, KeyError) as exc:
-        raise _request_error(exc) from exc
+    _unsupported_legacy_notebook_execution(
+        "/notebooks/{notebook_id}/options/{option_id}/confirm-and-execute"
+    )
 
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/materialize")
@@ -2133,20 +1920,9 @@ def materialize_option_endpoint(
     notebook_id: str,
     option_id: str,
 ) -> dict[str, Any]:
-    root, service = _service(request, project_root)
-    try:
-        context, trace = _compile(root, service, notebook_id)
-        result = service.materialize_option(
-            notebook_id,
-            option_id,
-            context=context,
-            trace=trace,
-        )
-        return {**result.to_dict(), "trace_id": trace.trace_id}
-    except NotebookOptionError as exc:
-        raise _notebook_error(exc) from exc
-    except (OSError, ValueError, KeyError) as exc:
-        raise _request_error(exc) from exc
+    _unsupported_legacy_notebook_execution(
+        "/notebooks/{notebook_id}/options/{option_id}/materialize"
+    )
 
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/authorize-execution")
@@ -2164,31 +1940,9 @@ def authorize_option_execution_endpoint(
     ``confirm-and-execute``.
     """
 
-    root, service = _service(request, project_root)
-    try:
-        current = service.store.read_option(notebook_id, option_id).current_revision
-        if getattr(current, "capability_resolution_binding_ref", None) is not None:
-            raise OptionRevisionStale(
-                "capability execution authorization is server-owned; use explicit confirm-and-execute",
-                option_id=option_id,
-                option_revision=current.option_revision,
-                reason="authorization_server_owned",
-            )
-        context, trace = _compile(root, service, notebook_id)
-        authorization = OptionExecutionAuthorization.from_dict(body.authorization)
-        persisted = service.authorize_option_execution(
-            notebook_id,
-            option_id,
-            context=context,
-            authorization=authorization,
-        )
-        return {"authorization": persisted.to_dict(), "trace_id": trace.trace_id}
-    except NotebookOptionError as exc:
-        raise _notebook_error(exc) from exc
-    except ExecutionAuthorizationError as exc:
-        raise _request_error(exc) from exc
-    except (OSError, ValueError, KeyError) as exc:
-        raise _request_error(exc) from exc
+    _unsupported_legacy_notebook_execution(
+        "/notebooks/{notebook_id}/options/{option_id}/authorize-execution"
+    )
 
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/decision")
@@ -2199,28 +1953,9 @@ def record_decision_endpoint(
     option_id: str,
     body: DecisionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(request, project_root)
-    try:
-        notebook = service.get_notebook(notebook_id)
-        trace = _notebook_trace(root, service, notebook.notebook_id)
-        option = service.record_decision(
-            notebook_id,
-            option_id,
-            decision=body.decision,
-            actor=body.actor,
-            edited_fields=body.edited_fields,
-            note_ref=body.note_ref,
-            trace=trace,
-        )
-        # The service needs the full OptionView to fold lifecycle state, but
-        # this public route is consumed by the frontend revision parser. Do
-        # not leak the internal view (revisions, execution history, and
-        # materialization details) as if it were a NotebookOptionRevision.
-        return {**option.current_revision.to_dict(), "lifecycle_status": option.lifecycle_status}
-    except NotebookOptionError as exc:
-        raise _notebook_error(exc) from exc
-    except (OSError, ValueError, KeyError) as exc:
-        raise _request_error(exc) from exc
+    _unsupported_legacy_notebook_execution(
+        "/notebooks/{notebook_id}/options/{option_id}/decision"
+    )
 
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/execute")
@@ -2231,41 +1966,9 @@ def complete_option_execution_endpoint(
     option_id: str,
     body: ExecuteOptionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(request, project_root)
-    try:
-        if (
-            body.execution_status is not None
-            or body.produced_artifacts is not None
-            or body.error_code is not None
-        ):
-            raise WorkbenchAPIError(
-                status_code=409,
-                code="NOTEBOOK_CLIENT_EXECUTION_FACTS_FORBIDDEN",
-                message=(
-                    "Notebook execution completion accepts only a server-owned "
-                    "terminal run reference; status and artifact facts are not client-authored."
-                ),
-                details={"required_field": "run_id"},
-            )
-        if body.run_id is None:
-            raise WorkbenchAPIError(
-                status_code=422,
-                code="NOTEBOOK_SERVER_RUN_REQUIRED",
-                message="Notebook execution completion requires a server-owned run_id.",
-            )
-        notebook = service.get_notebook(notebook_id)
-        trace = _notebook_trace(root, service, notebook.notebook_id)
-        outcome = service.complete_execution_from_server_run(
-            notebook_id,
-            option_id,
-            run_id=body.run_id,
-            trace=trace,
-        )
-        return {**outcome.to_dict(), "trace_id": trace.trace_id}
-    except NotebookOptionError as exc:
-        raise _notebook_error(exc) from exc
-    except (OSError, ValueError, KeyError) as exc:
-        raise _request_error(exc) from exc
+    _unsupported_legacy_notebook_execution(
+        "/notebooks/{notebook_id}/options/{option_id}/execute"
+    )
 
 
 __all__ = ["router"]

@@ -103,8 +103,7 @@ def test_workflow_writes_prediction_artifact_only_when_configured(tmp_path: Path
     assert len(evaluation["cv"]) == 20
     assert split_plan["effective_parameters"]["cv_folds"] == 20
     assert (run_root / "model_results" / "ols_1.json").is_file()
-    report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
-    assert "prediction_random_forest" not in report_html
+    assert not (run_root / "reports" / "report.html").exists()
 
 
 def test_workflow_accepts_explicit_prediction_model_type(tmp_path: Path):
@@ -134,9 +133,7 @@ def test_workflow_accepts_explicit_prediction_model_type(tmp_path: Path):
     assert prediction["model_type"] == "prediction_lasso"
     manifest = read_json(run_root / "run_manifest.json")
     assert manifest["model_routing"]["requested_model_type"] == "prediction_lasso"
-    assert "prediction_lasso" not in (
-        run_root / "reports" / "report.html"
-    ).read_text(encoding="utf-8")
+    assert not (run_root / "reports" / "report.html").exists()
 
 
 def test_prediction_missing_sklearn_raises_structured_optional_dependency(monkeypatch, tmp_path: Path):

@@ -15,7 +15,22 @@
     </style>
   </head>
   <body>
+    {% from "result_sections.html.j2" import section_value, structured_evidence %}
+    {% set typed_sections = view_model.typed_sections if view_model.typed_sections is mapping else {} %}
+    {% set typed_facts = view_model.typedFacts if view_model.typedFacts is sequence else [] %}
     <h1>{{ view_model.title }}</h1>
+
+    {% if view_model.status is defined and view_model.status == "degraded" %}
+    <section id="evidence-status" class="warning">
+      <h2>Evidence available with warnings</h2>
+      <p>The persisted evidence is usable, but its completeness is degraded. Review the stated caveats before interpreting the facts.</p>
+    </section>
+    {% elif view_model.status is defined and view_model.status != "available" %}
+    <section id="evidence-status" class="critical-error">
+      <h2>Evidence unavailable</h2>
+      <p>{{ view_model.reasonCode if view_model.reasonCode is defined else "EVIDENCE_PROJECTION_UNAVAILABLE" }}</p>
+    </section>
+    {% endif %}
 
     {% if view_model.critical_errors %}
     <section id="critical-errors">
@@ -30,11 +45,22 @@
     <section id="facts">
       <h2>Facts</h2>
       <ul>
-        {% for fact in view_model.facts %}
+        {% for fact in typed_facts %}
         <li class="fact-item">{{ fact }}</li>
         {% endfor %}
       </ul>
     </section>
+
+    {% if view_model.presentation_facts %}
+    <section id="analysis-context">
+      <h2>Analysis Context</h2>
+      <ul>
+        {% for item in view_model.presentation_facts %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
 
     {% if view_model.system_notes %}
     <section id="data-diagnostics">
@@ -63,13 +89,13 @@
     </section>
     {% endif %}
 
-    {% if view_model.model_diagnostics %}
+    {% if typed_sections.get("model_diagnostics") %}
     <section id="regression-diagnostics">
       <h2>Regression Diagnostics</h2>
-      {% for diag_id, diag in view_model.model_diagnostics.items() %}
+      {% for diag_id, diag in typed_sections.get("model_diagnostics", {}).items() %}
       <h3>{{ diag_id }}</h3>
       {% set vif_data = diag.get("vif") %}
-      {% if vif_data %}
+      {% if vif_data is mapping and vif_data and vif_data.get("status") != "unavailable" %}
       <h4>Multicollinearity (VIF)</h4>
       <table>
         <thead><tr><th>Variable</th><th>VIF</th></tr></thead>
@@ -79,67 +105,70 @@
           <tr>
             <td>{{ var }}</td>
             <td>
-              {% if vif is none %}—{% else %}{{ "%.1f"|format(vif) }}{% endif %}
-              {% if vif is not none and vif > 10 %}⚠️ high{% elif vif is not none and vif > 5 %}⚡ moderate{% endif %}
+              {% if vif is boolean %}unavailable (invalid numeric value: boolean){% elif vif is number %}{{ "%.1f"|format(vif) }}{% else %}unavailable (not declared){% endif %}
+              {% if vif is number and vif is not boolean and vif > 10 %}⚠️ high{% elif vif is number and vif is not boolean and vif > 5 %}⚡ moderate{% endif %}
             </td>
           </tr>
           {% endif %}
           {% endfor %}
         </tbody>
       </table>
+      {% else %}
+      <p>Multicollinearity (VIF): unavailable (not declared)</p>
       {% endif %}
       {% set bp = diag.get("breusch_pagan", {}) %}
-      {% if bp and bp.get("lm") is not none %}
-      <p>Breusch-Pagan (heteroskedasticity): LM = {{ "%.2f"|format(bp.lm) }}, p {% if bp.p_value < 0.001 %}&lt; 0.001{% else %}= {{ "%.4f"|format(bp.p_value) }}{% endif %}</p>
+      {% if bp %}
+      <p>Breusch-Pagan (heteroskedasticity): LM = {% if bp.lm is boolean %}unavailable (invalid numeric value: boolean){% elif bp.lm is number %}{{ "%.2f"|format(bp.lm) }}{% else %}unavailable (not declared){% endif %}, p {% if bp.p_value is boolean %}unavailable (invalid numeric value: boolean){% elif bp.p_value is not number %}unavailable (not declared){% elif bp.p_value < 0.001 %}&lt; 0.001{% else %}= {{ "%.4f"|format(bp.p_value) }}{% endif %}</p>
       {% endif %}
       {% set dw = diag.get("durbin_watson") %}
-      {% if dw is not none %}
-      <p>Durbin-Watson: {{ "%.3f"|format(dw) }}</p>
-      {% endif %}
+      <p>Durbin-Watson: {% if dw is boolean %}unavailable (invalid numeric value: boolean){% elif dw is number %}{{ "%.3f"|format(dw) }}{% else %}unavailable (not declared){% endif %}</p>
       {% endfor %}
     </section>
     {% endif %}
 
-    {% if view_model.coefficient_interpretations %}
+    {% if view_model.get("coefficient_interpretations") %}
     <section id="coefficient-interpretation">
       <h2>Coefficient Interpretation</h2>
       <ul>
-        {% for coef in view_model.coefficient_interpretations %}
+        {% for coef in view_model.get("coefficient_interpretations", []) %}
         <li>{{ coef.text }}</li>
         {% endfor %}
       </ul>
     </section>
     {% endif %}
 
-    {% if view_model.model_family_evidence %}
+    {% if typed_sections.get("model_family_evidence") %}
     <section id="model-family-evidence">
       <h2>Model-family evidence</h2>
       <p>Exact family-specific estimates and diagnostics are retained in the typed packet below.</p>
-      <pre>{{ view_model.model_family_evidence | tojson(indent=2) }}</pre>
+      <pre>{{ typed_sections.get("model_family_evidence") | tojson(indent=2) }}</pre>
     </section>
     {% endif %}
 
-    {% if view_model.regression_table and view_model.regression_table.rows %}
+    {% if typed_sections.get("regression_table") and typed_sections.get("regression_table").get("rows") %}
     <section id="regression-table" aria-label="Regression Table">
       <h2>Regression Table</h2>
-      <p>Significance: {{ view_model.regression_table.significance.legend }}</p>
+      {% if typed_sections.get("regression_table").get("rows") is mapping %}
+      {{ section_value(typed_sections.get("regression_table")) }}
+      {% else %}
+      <p>Significance: {{ typed_sections.get("regression_table").get("significance", {}).get("legend", "not reported") }}</p>
       <table>
         <thead>
           <tr>
             <th>Term</th>
-            {% for model in view_model.regression_table.models %}
+            {% for model in typed_sections.get("regression_table").get("models", []) %}
             <th>{{ model.label }} ({{ model.id }})<br>Estimate{% if model.survey_design %}<br><small>survey: {{ model.survey_design }}</small>{% endif %}</th>
             <th>{{ model.label }} ({{ model.id }})<br>Std. error</th>
             <th>{{ model.label }} ({{ model.id }})<br>p-value</th>
-            <th>{{ model.label }} ({{ model.id }})<br>95% CI</th>
+            <th>{{ model.label }} ({{ model.id }})<br>Confidence interval</th>
             {% endfor %}
           </tr>
         </thead>
         <tbody>
-          {% for row in view_model.regression_table.rows %}
+          {% for row in typed_sections.get("regression_table").get("rows", []) %}
           <tr>
             <td>{{ row.label }} ({{ row.term }})</td>
-            {% for model in view_model.regression_table.models %}
+            {% for model in typed_sections.get("regression_table").get("models", []) %}
             {% set cell = row.models.get(model.id) %}
             {% if cell %}
             <td>
@@ -150,7 +179,10 @@
             </td>
             <td>{{ cell.std_error if cell.std_error is defined else "—" }}</td>
             <td>{{ cell.p_value if cell.p_value is defined else "—" }}</td>
-            <td>{{ cell.confidence_interval if cell.confidence_interval is defined else "—" }}</td>
+            <td>{{ cell.confidence_interval if cell.confidence_interval is defined else "—" }}
+              <br><small>{% if cell.confidence_level is number and cell.confidence_level is not boolean %}{{ "%g"|format(cell.confidence_level * 100) }}%{% else %}Level not declared{% endif %}
+              · {{ cell.confidence_interval_method if cell.confidence_interval_method is string else "Method not declared" }}</small>
+            </td>
             {% else %}
             <td>—</td><td>—</td><td>—</td><td>—</td>
             {% endif %}
@@ -159,6 +191,7 @@
           {% endfor %}
         </tbody>
       </table>
+      {% endif %}
     </section>
     {% endif %}
 
@@ -167,30 +200,39 @@
       <p>{{ view_model.causal_caution }}</p>
     </section>
 
-    {% if view_model.descriptive_stats %}
+    {% if typed_sections.get("descriptive_stats") %}
     <section id="table-1" aria-label="Table 1 descriptive statistics">
       <h2>Descriptive Statistics</h2>
       <table>
         <thead><tr><th>Column</th><th>Label</th><th>Label source</th><th>Value labels</th><th>Dtype</th><th>Count</th><th>Missing</th><th>Mean</th><th>Std</th></tr></thead>
         <tbody>
-        {% for row in view_model.descriptive_stats %}
-          <tr><td>{{ row.column }}</td><td>{{ row.label if row.label is defined else row.column }}</td><td>{{ row.label_source if row.label_source is defined else "column_name_fallback" }}</td><td>{{ row.value_labels|tojson if row.value_labels is defined else "{}" }}</td><td>{{ row.dtype }}</td><td>{{ row.count }}</td><td>{{ "%.1f"|format(row.missing_rate * 100) }}%</td><td>{{ row.mean if row.mean is not none else "—" }}</td><td>{{ row.std if row.std is not none else "—" }}</td></tr>
+        {% for row in typed_sections.get("descriptive_stats", []) %}
+          <tr>
+            <td>{{ row.column }}</td><td>{{ row.label if row.label is string else row.column }}</td>
+            <td>{{ row.label_source if row.label_source is string else "Not declared" }}</td>
+            <td>{{ row.value_labels|tojson if row.value_labels is defined else "Not declared" }}</td>
+            <td>{{ row.dtype if row.dtype is string else "Not declared" }}</td>
+            <td>{{ row.count if row.count is number and row.count is not boolean else "Not declared" }}</td>
+            <td>{% if row.missing_rate is number and row.missing_rate is not boolean %}{{ "%.1f"|format(row.missing_rate * 100) }}%{% else %}Not declared{% endif %}</td>
+            <td>{{ row.mean if row.mean is number and row.mean is not boolean else "Not declared" }}</td>
+            <td>{{ row.std if row.std is number and row.std is not boolean else "Not declared" }}</td>
+          </tr>
           {% endfor %}
         </tbody>
       </table>
     </section>
     {% endif %}
 
-    {% if view_model.exploration %}
+    {% if typed_sections.get("exploration") %}
     <section id="statistical-exploration">
       <h2>Statistical Exploration</h2>
-      <p>Operation: {{ view_model.exploration.operation }} · Source rows: {{ view_model.exploration.source_row_count }} · Filtered rows: {{ view_model.exploration.filtered_row_count }}</p>
-      {% if view_model.exploration.missing_policy %}<p>Missing policy: {{ view_model.exploration.missing_policy }}</p>{% endif %}
-      {% if view_model.exploration.rows %}
+      <p>Operation: {{ typed_sections.get("exploration").operation }} · Source rows: {{ typed_sections.get("exploration").source_row_count }} · Filtered rows: {{ typed_sections.get("exploration").filtered_row_count }}</p>
+      {% if typed_sections.get("exploration").missing_policy %}<p>Missing policy: {{ typed_sections.get("exploration").missing_policy }}</p>{% endif %}
+      {% if typed_sections.get("exploration").rows %}
       <table>
         <thead><tr><th>Field</th><th>Value</th></tr></thead>
         <tbody>
-        {% for row in view_model.exploration.rows %}
+        {% for row in typed_sections.get("exploration").rows %}
           {% for key, value in row.items() %}
           <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
           {% endfor %}
@@ -201,12 +243,12 @@
     </section>
     {% endif %}
 
-    {% if view_model.statistical_tests %}
+    {% if typed_sections.get("statistical_tests") %}
     <section id="statistical-tests">
       <h2>Statistical Tests</h2>
-      {% if view_model.statistical_tests.y_related %}
+      {% if typed_sections.get("statistical_tests").y_related %}
       <ul>
-        {% for test in view_model.statistical_tests.y_related %}
+        {% for test in typed_sections.get("statistical_tests").y_related %}
         <li>{{ test.label }}: {{ test.interpretation }}</li>
         {% endfor %}
       </ul>
@@ -214,16 +256,17 @@
     </section>
     {% endif %}
 
-    {% if view_model.statistical_evidence and view_model.statistical_evidence.results %}
+    {% if typed_sections.get("statistical_evidence") and typed_sections.get("statistical_evidence").get("results") %}
     <section id="statistical-evidence">
-      <h2>Statistical Evidence</h2>
-      {% if view_model.statistical_evidence.correction_scope %}
-      <p>Multiple-testing correction scope: {{ view_model.statistical_evidence.correction_scope }}</p>
+      <h2>Statistical Tests</h2>
+      <h3>Statistical Evidence</h3>
+      {% if typed_sections.get("statistical_evidence").correction_scope %}
+      <p>Multiple-testing correction scope: {{ typed_sections.get("statistical_evidence").correction_scope }}</p>
       {% endif %}
       <table>
         <thead><tr><th>Test</th><th>N</th><th>Statistic</th><th>p-value</th><th>Effect size</th><th>Assumptions</th><th>Comparisons / CI</th></tr></thead>
         <tbody>
-        {% for row in view_model.statistical_evidence.results %}
+        {% for row in typed_sections.get("statistical_evidence").results %}
           <tr>
             <td>{{ row.test_type }}</td>
             <td>{{ row.nobs }}</td>
@@ -238,5 +281,6 @@
       </table>
     </section>
     {% endif %}
+    {{ structured_evidence(view_model) }}
   </body>
 </html>

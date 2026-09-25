@@ -9,16 +9,17 @@ Extracted verbatim from ``api.py`` in v1.6.10 (D1 decomposition, Phase 2).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import weakref
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 
 from ..artifacts import read_json
-from ..canonical import sha256_canonical
+from ..canonical import canonical_json_v1, sha256_canonical
 from ..domain import GuardrailIssue, Severity
 from ..evidence.authority import (
     EvidenceHostAuthorityError,
@@ -29,6 +30,12 @@ from ..evidence.authority import (
 from ..term_parser import is_q_quoted_dummy, parse_term
 from .lmm_result_adapter import read_lmm_public_results
 from .classification_consumer_service import read_classification_report_evidence
+
+
+def _delivery_wire_size(value: object) -> int:
+    # Match JSONResponse bytes; canonical JSON normalizes identity strings to
+    # NFC for hashing, but the transport must preserve the exact owner value.
+    return len(json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8"))
 
 
 def read_classification_evidence_for_report(
@@ -230,6 +237,7 @@ class ReportEvidenceRequestIdentityV1:
 
 
 _REPORT_OWNER_ADMISSIONS: weakref.WeakKeyDictionary[object, object] = weakref.WeakKeyDictionary()
+_REPORT_OWNER_SOURCE_BINDINGS: weakref.WeakKeyDictionary[object, ServerOwnedEvidenceProjectionSourceV1] = weakref.WeakKeyDictionary()
 _REPORT_OWNER_ADMISSIONS_LOCK = RLock()
 _REPORT_REQUEST_IDENTITY_ADMISSIONS: dict[tuple[int, int], ReportEvidenceRequestIdentityV1] = {}
 
@@ -294,6 +302,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         "_confirmation_ref",
         "_artifact_file_sha256",
         "_canonical_project_root",
+        "_project_file_store",
         "_canonical_record",
         "_authority_handle",
         "_authority_request",
@@ -321,6 +330,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         confirmation_ref: str,
         artifact_file_sha256: str,
         canonical_project_root: Path | str | None = None,
+        project_file_store: object | None = None,
         authority_handle: object | None = None,
     ) -> None:
         if authority_handle is None:
@@ -424,7 +434,7 @@ class ServerOwnedReportEvidencePersistenceV1:
                 artifact_id=artifact.artifact_id,
                 commit_id=binding.commit_id,
                 envelope_digest=binding.envelope_digest,
-                sensitivity="public",
+                sensitivity="unknown",
                 authority_handle=authority_handle,
             )
             canonical_record = ServerOwnedEvidenceProjectionSourceV1(
@@ -437,6 +447,10 @@ class ServerOwnedReportEvidencePersistenceV1:
                 sensitivity_policy=sensitivity_policy,
                 envelope_digest=binding.envelope_digest,
                 authority_handle=authority_handle,
+                project_file_store=project_file_store,
+                project_ref=project_ref,
+                run_id=run_id,
+                canonical_project_root=canonical_project_root,
             )
         except EvidenceProjectionError:
             raise
@@ -464,6 +478,7 @@ class ServerOwnedReportEvidencePersistenceV1:
             if canonical_project_root is not None
             else None
         )
+        self._project_file_store = project_file_store
         self._canonical_record = canonical_record
         self._authority_handle = authority_handle
         self._authority_request = authority_request
@@ -484,6 +499,7 @@ class ServerOwnedReportEvidencePersistenceV1:
         self._report_authority_marker = object()
         with _REPORT_OWNER_ADMISSIONS_LOCK:
             _REPORT_OWNER_ADMISSIONS[self] = self
+            _REPORT_OWNER_SOURCE_BINDINGS[self] = canonical_record
 
     @staticmethod
     def _issue_report_authority(
@@ -615,6 +631,16 @@ class ServerOwnedReportEvidencePersistenceV1:
             )
             if self._authority_request.payload_digest != expected_payload:
                 raise ValueError("Report owner payload binding changed")
+            # The cached record is not authority and may be discarded/rebuilt.
+            # Retain the originally issued host binding outside mutable caches.
+            with _REPORT_OWNER_ADMISSIONS_LOCK:
+                source = _REPORT_OWNER_SOURCE_BINDINGS[self]
+            source._require_source_authority()
+            if (source._project_file_store is not self._project_file_store
+                    or source._project_ref != self._project_ref
+                    or source._run_id != self._run_id
+                    or source._canonical_project_root != self._canonical_project_root):
+                raise ValueError("Report owner host context differs from its issued source")
             admission._validate_authority()
             validate_host_proof(handle, self._authority_request, self._authority_proof)
         except EvidenceProjectionError:
@@ -812,7 +838,7 @@ class ServerOwnedReportEvidencePersistenceV1:
                 artifact_id=artifact.artifact_id,
                 commit_id=binding.commit_id,
                 envelope_digest=binding.envelope_digest,
-                sensitivity="public",
+                sensitivity="unknown",
                 authority_handle=self._authority_handle,
             )
             source = ServerOwnedEvidenceProjectionSourceV1(
@@ -825,6 +851,10 @@ class ServerOwnedReportEvidencePersistenceV1:
                 sensitivity_policy=sensitivity_policy,
                 envelope_digest=binding.envelope_digest,
                 authority_handle=self._authority_handle,
+                project_file_store=self._project_file_store,
+                project_ref=self._project_ref,
+                run_id=self._run_id,
+                canonical_project_root=self._canonical_project_root,
             )
             return source, admitted
         except EvidenceProjectionError:
@@ -834,6 +864,130 @@ class ServerOwnedReportEvidencePersistenceV1:
                 "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
                 "Report owner canonical source is not backed by the live C0 store and registry",
             ) from exc
+
+    def read_result_section_directory(
+        self, *, consumer_id: str,
+        request_identity: ReportEvidenceRequestIdentityV1 | None = None,
+        max_wire_bytes: int | None = None,
+    ) -> dict[str, object]:
+        """Bounded LOCAL discovery; reading a directory does not read its results."""
+        from ..evidence.consumer_adapters import default_projection_registry, ProjectionStatus
+        from ..contracts.evidence.result_pages import MAX_PAGE_BYTES
+        from ..contracts.evidence.result_sections import RESULT_SECTIONS_CONTRACT_DIGEST
+
+        self._require_report_authority()
+        identity = self._require_report_request_identity(request_identity)
+        source, _artifact = self._canonical_report_source_and_artifact()
+        fields, _sensitivity, policy, extended, deliver = default_projection_registry()._prepare_selection(
+            source, consumer_id=consumer_id, destination="local")
+        if (not extended or not deliver or not fields["sections"]
+                or fields["status"] not in {ProjectionStatus.AVAILABLE, ProjectionStatus.DEGRADED}):
+            raise EvidenceProjectionError(fields["audit"].restriction_reason or "RESULT_DIRECTORY_UNAVAILABLE",
+                                          "source-bound section directory is unavailable")
+        limit = min(MAX_PAGE_BYTES, policy.max_token_budget * 4)
+        if max_wire_bytes is not None:
+            if type(max_wire_bytes) is not int or not 0 < max_wire_bytes <= limit:
+                raise EvidenceProjectionError("RESULT_PAGE_BUDGET_EXCEEDED", "directory budget exceeds policy")
+            limit = max_wire_bytes
+        sections = [{key: s.to_dict()[key] for key in (
+            "section_id", "section_type", "status", "reason_codes")} for s in fields["sections"]]
+        wire = dict(schema_version=1, authority="server-owned", consumer_id=consumer_id,
+            destination="local", identity={key: getattr(identity, key) for key in (
+                "actor_ref", "project_ref", "session_ref", "scope_ref", "run_id", "model_run_id", "confirmation_ref")},
+            artifact_ref=self.artifact_id, commit_id=self.commit_id, envelope_digest=self._envelope_digest,
+            section_contract_digest=RESULT_SECTIONS_CONTRACT_DIGEST,
+            read_completeness="PARTIAL", completion_scope="run", sections=sections,
+            directory_digest=sha256_canonical(sections))
+        wire["receipt"] = dict(schema_version=1, kind=f"evidence.{consumer_id}.directory-receipt.v1",
+                               wire_digest=sha256_canonical(wire))
+        if (_delivery_wire_size(wire) > limit
+                or len(sections) > policy.max_row_budget):
+            raise EvidenceProjectionError("RESULT_PAGE_BUDGET_EXCEEDED", "complete directory exceeds policy")
+        return wire
+
+    def read_result_section_page(
+        self, *, consumer_id: str, section_id: str, offset: int,
+        request_identity: ReportEvidenceRequestIdentityV1 | None = None,
+        max_wire_bytes: int | None = None,
+    ) -> dict[str, object]:
+        """Deliver a locally admitted fragment, never a complete Report claim.
+
+        Routes must resolve this owner on the server. Caller offsets and page
+        digests do not create authority; the receiver proves complete coverage.
+        This receipt binds local delivery only and cannot authorize remote egress.
+        """
+        from ..evidence.consumer_adapters import default_projection_registry, _local_structured_spec
+        from ..contracts.common.envelope import thaw_json
+        from ..contracts.evidence.result_pages import MAX_PAGE_BYTES
+
+        if type(consumer_id) is not str or not consumer_id.strip():
+            raise EvidenceProjectionError("PROJECTION_CONSUMER_INVALID", "page consumer must be a nonempty string")
+        self._require_report_authority()
+        identity = self._require_report_request_identity(request_identity)
+        source, _artifact = self._canonical_report_source_and_artifact()
+        registry = default_projection_registry()
+        declared = registry.resolve(consumer_id)
+        if declared is None:
+            raise EvidenceProjectionError("PROJECTION_CONSUMER_UNKNOWN", "unknown page consumer")
+        policy = _local_structured_spec(declared, "local")
+        limit = min(MAX_PAGE_BYTES, policy.max_token_budget * 4)
+        if max_wire_bytes is not None:
+            if type(max_wire_bytes) is not int or not 0 < max_wire_bytes <= limit:
+                raise EvidenceProjectionError("RESULT_PAGE_BUDGET_EXCEEDED", "page delivery budget is outside policy")
+            limit = max_wire_bytes
+        bound_identity = {key: getattr(identity, key) for key in (
+            "actor_ref", "project_ref", "session_ref", "scope_ref", "run_id", "model_run_id", "confirmation_ref")}
+        wire = dict(schema_version=1, authority="server-owned", consumer_id=consumer_id,
+            destination="local", identity=bound_identity, artifact_ref=self.artifact_id,
+            commit_id=self.commit_id, envelope_digest=self._envelope_digest,
+            read_completeness="PARTIAL", completion_scope="section", delivery={},
+            audit={"token_budget": 0, "row_budget": 0})
+        receipt = dict(schema_version=1, kind=f"evidence.{consumer_id}.page-receipt.v1",
+            identity=dict(bound_identity), provenance={"artifact_ref": self.artifact_id,
+                "commit_id": self.commit_id, "envelope_digest": self._envelope_digest},
+            payload_digest="0" * 64, wire_digest="0" * 64)
+        # Both count fields may grow from zero to their policy maximum. Reserve
+        # their entire width, not a guessed small constant or a raised budget.
+        reserve = _delivery_wire_size({**wire, "receipt": receipt}) - 2
+        reserve += len(str(policy.max_token_budget)) + len(str(policy.max_row_budget))
+        admission = registry.prepare_local_result_page_admission(source,
+            consumer_id=consumer_id, section_id=section_id)
+        delivery = thaw_json(admission.page(offset=offset, max_wire_bytes=limit,
+                                            envelope_reserve_bytes=reserve))
+        if (delivery["artifact_ref"] != self.artifact_id or delivery["commit_id"] != self.commit_id
+                or delivery["envelope_digest"] != self._envelope_digest):
+            raise EvidenceProjectionError("RESULT_PAGE_BINDING_CHANGED", "page differs from its current owner")
+        wire["delivery"] = delivery
+        wire["audit"]["row_budget"] = delivery["audit"]["row_budget"]
+        receipt["payload_digest"] = delivery["wire_digest"]
+        while True:
+            receipt["wire_digest"] = sha256_canonical(wire)
+            final = {**wire, "receipt": dict(receipt)}
+            size = _delivery_wire_size(final)
+            charge = (size + 3) // 4
+            if (size > limit or charge > policy.max_token_budget
+                    or wire["audit"]["row_budget"] > policy.max_row_budget):
+                raise EvidenceProjectionError("RESULT_PAGE_BUDGET_EXCEEDED", "final owner page exceeds policy")
+            if wire["audit"]["token_budget"] == charge:
+                return final
+            wire["audit"]["token_budget"] = charge
+
+    def _canonical_complete_report_wire(self, collection) -> dict[str, object]:
+        from ..evidence.result_collections import validate_server_owned_local_result_collection
+        from ..report_view_model import build_persisted_evidence_report_view
+
+        validate_server_owned_local_result_collection(collection, owner=self)
+        return build_persisted_evidence_report_view(collection, owner=self,
+            artifact_admission=self._canonical_report_artifact())
+
+    def issue_complete_report_collection(self):
+        """Assemble bounded local pages; never issue an oversized projection."""
+        from ..evidence.result_collections import collect_server_owned_local_results
+        from ..report_export import LocalReportCollectionV1
+
+        collection = collect_server_owned_local_results(self)
+        wire = self._canonical_complete_report_wire(collection)
+        return LocalReportCollectionV1._from_server_collection(wire, owner=self, collection=collection)
 
     def issue_report_projection(self, wire: Mapping[str, object]):
         """Issue an opaque Report projection only for this exact C0 owner."""
@@ -877,10 +1031,10 @@ class ServerOwnedReportEvidencePersistenceV1:
     ):
         """Construct the opaque XLSX writer from this owner-issued projection."""
 
-        from ..report_export import EvidenceProjectionV1, ReportEvidenceWriterV1
+        from ..report_export import EvidenceProjectionV1, LocalReportCollectionV1, ReportEvidenceWriterV1
 
         self._require_report_authority()
-        if type(projection) is not EvidenceProjectionV1:
+        if type(projection) not in (EvidenceProjectionV1, LocalReportCollectionV1):
             raise TypeError("Report writer requires an owner-issued projection")
         if table_rows is not None:
             raise TypeError("ReportEvidenceWriterV1 rejects caller-owned raw tables")
@@ -899,13 +1053,13 @@ class ServerOwnedReportEvidencePersistenceV1:
     ):
         """Construct the HTML document writer only inside the C0 owner seam."""
 
-        from ..report_export import EvidenceProjectionV1
+        from ..report_export import EvidenceProjectionV1, LocalReportCollectionV1
         from ..reporting import ReportDocumentWriterV1
 
         self._require_report_authority()
         if not isinstance(view_model, Mapping):
             raise TypeError("Report document payload must be server-produced")
-        if type(projection) is not EvidenceProjectionV1:
+        if type(projection) not in (EvidenceProjectionV1, LocalReportCollectionV1):
             raise TypeError("Report document requires an owner-issued projection")
         if getattr(projection, "_owner", None) is not self:
             raise TypeError("Report document requires an owner-issued projection")
@@ -1035,7 +1189,7 @@ class ServerOwnedReportEvidencePersistenceV1:
                 artifact_id=artifact.artifact_id,
                 commit_id=binding.commit_id,
                 envelope_digest=binding.envelope_digest,
-                sensitivity="public",
+                sensitivity="unknown",
                 authority_handle=self._authority_handle,
             )
             source = ServerOwnedEvidenceProjectionSourceV1(
@@ -1048,6 +1202,10 @@ class ServerOwnedReportEvidencePersistenceV1:
                 sensitivity_policy=sensitivity_policy,
                 envelope_digest=binding.envelope_digest,
                 authority_handle=self._authority_handle,
+                project_file_store=self._project_file_store,
+                project_ref=self._project_ref,
+                run_id=self._run_id,
+                canonical_project_root=self._canonical_project_root,
             )
             if envelope_digest is not None and binding.envelope_digest != envelope_digest:
                 raise EvidenceProjectionError(
@@ -1076,6 +1234,163 @@ class UnavailableReportEvidenceCapabilityV1:
 
 
 _REPORT_EVIDENCE_PERSISTENCE: ServerOwnedReportEvidencePersistenceV1 | UnavailableReportEvidenceCapabilityV1 = UnavailableReportEvidenceCapabilityV1()
+_REPORT_EVIDENCE_OWNER_REHYDRATOR: Callable[..., object] | None = None
+_REPORT_EVIDENCE_OWNER_CATALOG: dict[
+    tuple[str, str, str, str, str, str, str],
+    ServerOwnedReportEvidencePersistenceV1,
+] = {}
+_REPORT_EVIDENCE_OWNER_CATALOG_LOCK = RLock()
+
+
+def _report_owner_key(owner: ServerOwnedReportEvidencePersistenceV1) -> tuple[str, str, str, str, str, str, str]:
+    return (
+        owner.actor_ref,
+        owner.project_ref,
+        owner.session_ref,
+        owner.scope_ref,
+        owner.run_id,
+        owner.model_run_id,
+        owner.confirmation_ref,
+    )
+
+
+def register_report_evidence_owner(
+    owner: ServerOwnedReportEvidencePersistenceV1,
+) -> None:
+    """Register one host-created owner without replacing another run's owner."""
+
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        raise TypeError("Report owner catalog accepts only the server-owned capability")
+    owner._require_report_authority()
+    key = _report_owner_key(owner)
+    with _REPORT_EVIDENCE_OWNER_CATALOG_LOCK:
+        existing = _REPORT_EVIDENCE_OWNER_CATALOG.get(key)
+        if existing is not None and existing is not owner:
+            raise EvidenceProjectionError(
+                "EVIDENCE_OWNER_CONTEXT_CONFLICT",
+                "the exact Report owner identity is already bound to another capability",
+            )
+        _REPORT_EVIDENCE_OWNER_CATALOG[key] = owner
+
+
+def _catalog_report_evidence_owner(
+    *,
+    actor_ref: str,
+    run_id: str,
+    project_ref: str,
+    session_ref: str,
+    scope_ref: str,
+    model_run_id: str,
+    confirmation_ref: str,
+) -> ServerOwnedReportEvidencePersistenceV1 | None:
+    key = (
+        actor_ref,
+        project_ref,
+        session_ref,
+        scope_ref,
+        run_id,
+        model_run_id,
+        confirmation_ref,
+    )
+    with _REPORT_EVIDENCE_OWNER_CATALOG_LOCK:
+        owner = _REPORT_EVIDENCE_OWNER_CATALOG.get(key)
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        return None
+    try:
+        owner._require_report_authority()
+    except (AttributeError, TypeError, ValueError, EvidenceProjectionError):
+        return None
+    return owner
+
+
+def _catalog_report_evidence_owner_for_identity(
+    *,
+    actor_ref: str,
+    run_id: str,
+    project_ref: str,
+    session_ref: str,
+    scope_ref: str,
+    model_run_id: str,
+    confirmation_ref: str,
+) -> tuple[ServerOwnedReportEvidencePersistenceV1 | None, bool]:
+    """Resolve an exact catalog owner without allowing a run-level fallback.
+
+    The catalog is authoritative once a run has an entry.  A missing exact
+    identity therefore means a typed conflict, not permission to consult the
+    deployment-wide owner.
+    """
+
+    key = (
+        actor_ref,
+        project_ref,
+        session_ref,
+        scope_ref,
+        run_id,
+        model_run_id,
+        confirmation_ref,
+    )
+    with _REPORT_EVIDENCE_OWNER_CATALOG_LOCK:
+        exact = _REPORT_EVIDENCE_OWNER_CATALOG.get(key)
+        run_entries = [
+            candidate
+            for candidate in _REPORT_EVIDENCE_OWNER_CATALOG.values()
+            if getattr(candidate, "run_id", None) == run_id
+        ]
+    if len(run_entries) != 1 or exact is not run_entries[0]:
+        return None, bool(run_entries) or exact is not None
+    if type(exact) is not ServerOwnedReportEvidencePersistenceV1:
+        return None, True
+    try:
+        exact._require_report_authority()
+    except (AttributeError, TypeError, ValueError, EvidenceProjectionError):
+        return None, True
+    return exact, False
+
+
+def _catalog_report_evidence_owner_for_run(
+    *,
+    run_id: str,
+    project_root: Path | str,
+) -> tuple[ServerOwnedReportEvidencePersistenceV1 | None, bool]:
+    """Resolve the one catalog owner for an internal consumer run.
+
+    Agent and Notebook consumers intentionally do not supply HTTP identity
+    fields.  They may still use the host-created per-run catalog, but only
+    when exactly one live owner matches the run and canonical project root.
+    The boolean distinguishes "no catalog entry" (where the legacy global
+    owner may still be used) from an ambiguous or stale catalog entry (which
+    must fail closed).
+    """
+
+    try:
+        canonical_root = Path(project_root).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None, True
+    with _REPORT_EVIDENCE_OWNER_CATALOG_LOCK:
+        run_entries = [
+            owner
+            for owner in _REPORT_EVIDENCE_OWNER_CATALOG.values()
+            if getattr(owner, "run_id", None) == run_id
+        ]
+    if not run_entries:
+        return None, False
+    # A run-level catalog entry is authoritative even when it is no longer
+    # live.  Filtering stale entries before deciding whether the catalog is
+    # empty would let the deployment-wide compatibility owner become a
+    # confused-run fallback.  Preserve the run's existence first, then admit
+    # exactly one live owner bound to the exact project root.
+    if len(run_entries) != 1:
+        return None, True
+    owner = run_entries[0]
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        return None, True
+    if not owner.accepts_project_root(canonical_root):
+        return None, True
+    try:
+        owner._require_report_authority()
+    except (AttributeError, TypeError, ValueError, EvidenceProjectionError):
+        return None, True
+    return owner, False
 
 
 def configure_report_evidence_persistence(
@@ -1094,6 +1409,37 @@ def configure_report_evidence_persistence(
         persistence._require_report_authority()
     global _REPORT_EVIDENCE_PERSISTENCE
     _REPORT_EVIDENCE_PERSISTENCE = persistence
+    if type(persistence) is UnavailableReportEvidenceCapabilityV1:
+        with _REPORT_EVIDENCE_OWNER_CATALOG_LOCK:
+            _REPORT_EVIDENCE_OWNER_CATALOG.clear()
+
+
+def configure_report_evidence_owner_rehydrator(
+    rehydrator: Callable[..., object] | None,
+) -> None:
+    """Install the deployment-owned restart seam for durable Report owners."""
+
+    if rehydrator is not None and not callable(rehydrator):
+        raise TypeError("Report evidence owner rehydrator must be callable or None")
+    global _REPORT_EVIDENCE_OWNER_REHYDRATOR
+    _REPORT_EVIDENCE_OWNER_REHYDRATOR = rehydrator
+
+
+def _rehydrate_report_evidence_owner(
+    *,
+    project_root: Path | str,
+    run_id: str,
+) -> ServerOwnedReportEvidencePersistenceV1 | None:
+    rehydrator = _REPORT_EVIDENCE_OWNER_REHYDRATOR
+    if rehydrator is None:
+        return None
+    try:
+        candidate = rehydrator(project_root=project_root, run_id=run_id)
+    except Exception:
+        # A durable row that cannot be revalidated is unavailable.  The
+        # callback is a host seam; HTTP input never gets to replace it.
+        return None
+    return candidate if type(candidate) is ServerOwnedReportEvidencePersistenceV1 else None
 
 
 def current_report_evidence_persistence(
@@ -1118,9 +1464,6 @@ def current_report_evidence_persistence(
     artifact index or hash a file.  Partial triples remain invalid.
     """
 
-    capability = _REPORT_EVIDENCE_PERSISTENCE
-    if type(capability) is not ServerOwnedReportEvidencePersistenceV1:
-        return None
     context = (
         run_id,
         actor_ref,
@@ -1137,6 +1480,27 @@ def current_report_evidence_persistence(
         all(value is None for value in artifact_fields)
         or all(type(value) is str and value.strip() for value in artifact_fields)
     ):
+        return None
+    capability, catalog_conflict = _catalog_report_evidence_owner_for_identity(
+        actor_ref=actor_ref,
+        run_id=run_id,
+        project_ref=project_ref,
+        session_ref=session_ref,
+        scope_ref=scope_ref,
+        model_run_id=model_run_id,
+        confirmation_ref=confirmation_ref,
+    )
+    if catalog_conflict:
+        return None
+    if capability is None:
+        capability = _REPORT_EVIDENCE_PERSISTENCE
+    if type(capability) is not ServerOwnedReportEvidencePersistenceV1 and not catalog_conflict:
+        if project_root is not None:
+            capability = _rehydrate_report_evidence_owner(
+                project_root=project_root,
+                run_id=run_id,
+            )
+    if type(capability) is not ServerOwnedReportEvidencePersistenceV1:
         return None
     if (
         capability.actor_ref != actor_ref
@@ -1192,6 +1556,52 @@ def _unavailable_consumer_evidence(
     }
 
 
+def _central_consumer_projection_digest(evidence: Mapping[str, object]) -> str:
+    """Hash the shared typed source projection, not its surface metadata.
+
+    Agent and Notebook may render the same persisted facts differently, but
+    their source digest must prove that both read the same owner-bound
+    envelope through the same registry.  Consumer ids, renderer refs, policy
+    refs, and audit transport metadata are deliberately excluded because they
+    are surface selection details rather than statistical evidence.
+    """
+
+    return sha256_canonical(
+        {
+            "schema_version": evidence.get("schema_version"),
+            "authority": evidence.get("authority"),
+            "source": evidence.get("source"),
+            "artifact_ref": evidence.get("artifact_ref"),
+            "commit_id": evidence.get("commit_id"),
+            "envelope_ref": evidence.get("envelope_ref"),
+            "envelope_digest": evidence.get("envelope_digest"),
+            "data_snapshot_ref": evidence.get("data_snapshot_ref"),
+            "data_snapshot_digest": evidence.get("data_snapshot_digest"),
+            "result_identity": evidence.get("result_identity"),
+            "execution_status": evidence.get("execution_status"),
+            "availability": evidence.get("availability"),
+            "completeness_status": evidence.get("completeness_status"),
+            "numerical_method": evidence.get("numerical_method"),
+            "inference_basis": evidence.get("inference_basis"),
+            "evaluation_design": evidence.get("evaluation_design"),
+            "validation_summary": evidence.get("validation_summary"),
+            "facts": evidence.get("facts"),
+            "sections": evidence.get("sections"),
+            "result_dependencies": evidence.get("result_dependencies"),
+            **({"semantic_selection": evidence["semantic_selection"]} if "semantic_selection" in evidence else {}),
+            **({"fact_selection": evidence["fact_selection"]} if "fact_selection" in evidence else {}),
+            "section_audit": {
+                key: evidence.get("audit", {}).get(key)
+                for key in ("requested_section_ids", "selected_section_ids", "omitted_section_ids",
+                            "redacted_section_ids", "restriction_reason")
+            },
+            "status": evidence.get("status"),
+            "lineage_refs": evidence.get("lineage_refs"),
+            "identity": evidence.get("identity"),
+        }
+    )
+
+
 def _project_server_owned_consumer_evidence(
     *,
     consumer_id: str,
@@ -1199,6 +1609,11 @@ def _project_server_owned_consumer_evidence(
     request_identity: ReportEvidenceRequestIdentityV1 | None,
     project_root: Path | str | None,
     requested_fact_ids: Sequence[str] | None = None,
+    requested_section_ids: Sequence[str] | None = None,
+    coefficient_selection: object | None = None,
+    provenance_selection: object | None = None,
+    requested_section_types: Sequence[str] | None = None,
+    _section_fact_page: tuple[str, int, int, str | None] | None = None,
 ) -> dict[str, object]:
     """Read and project one C0 packet without accepting a caller-owned source."""
 
@@ -1241,22 +1656,70 @@ def _project_server_owned_consumer_evidence(
                 "consumer evidence owner is not bound to this canonical run root",
             )
         source, _artifact = owner._canonical_report_source_and_artifact()
-        from ..evidence.consumer_adapters import default_projection_registry
+        from ..evidence.consumer_adapters import default_projection_registry, _spec_for_audit_policy
 
-        projection = default_projection_registry().project(
+        registry = default_projection_registry()
+        fact_selection = None
+        section_dependencies = None
+        if _section_fact_page is not None:
+            if any(value is not None for value in (requested_fact_ids, requested_section_ids,
+                    coefficient_selection, provenance_selection, requested_section_types)):
+                raise EvidenceProjectionError("semantic_selection_mixed", "fact page cannot mix selectors")
+            section_id, offset, limit, expected_digest = _section_fact_page
+            # Admission validates the selected section's entire dependency
+            # closure, but does not deliver its oversized tree or qualifiers.
+            admitted, _, policy, _, deliver = registry._prepare_selection(source,
+                consumer_id=consumer_id, destination="local", requested_fact_ids=(),
+                requested_section_ids=(section_id,))
+            if (not deliver or admitted["status"].value not in {"available", "degraded"}
+                    or len(admitted["sections"]) != 1):
+                raise EvidenceProjectionError(admitted["audit"].restriction_reason or
+                    "RESULT_FACT_SECTION_UNAVAILABLE", "section is not admitted")
+            section = admitted["sections"][0]
+            if section.to_dict()["status"] not in {"available", "degraded"}:
+                raise EvidenceProjectionError("RESULT_FACT_SECTION_UNAVAILABLE", "section is closed")
+            if expected_digest is not None and admitted["envelope_digest"] != expected_digest:
+                raise EvidenceProjectionError("RESULT_FACT_SNAPSHOT_MISMATCH", "source snapshot changed")
+            if limit > policy.max_row_budget:
+                raise EvidenceProjectionError("RESULT_FACT_SELECTOR_INVALID", "limit exceeds declared rows")
+            total = len(section.fact_refs)
+            if offset >= total:
+                raise EvidenceProjectionError("RESULT_FACT_OFFSET_INVALID", "offset is outside section facts")
+            requested_fact_ids = section.fact_refs[offset:offset + limit]
+            requested_section_ids = ()
+            fact_selection = dict(section_id=section.section_id,
+                section_type=section.to_dict()["section_type"], section_digest=sha256_canonical(section.to_dict()),
+                scope="section_numeric_facts", read_completeness="PARTIAL", numeric_only=True,
+                full_section_read=False, offset=offset, limit=limit, total_facts=total,
+                next_offset=offset + len(requested_fact_ids) if offset + len(requested_fact_ids) < total else None,
+                warning="Numeric facts only; section text, warnings and qualifications have not been read. "
+                        "Do not treat this as a complete result or inferential conclusion.")
+            section_dependencies = admitted["result_dependencies"]
+        projection = registry.project(
             source,
             consumer_id=consumer_id,
             destination="local",
             requested_fact_ids=requested_fact_ids,
+            requested_section_ids=requested_section_ids,
+            coefficient_selection=coefficient_selection,
+            provenance_selection=provenance_selection,
+            requested_section_types=requested_section_types,
         )
         evidence = projection.to_dict()
+        if fact_selection is not None:
+            if (evidence["status"] not in {"available", "degraded"}
+                    or {fact["fact_id"] for fact in evidence["facts"]} != set(requested_fact_ids)
+                    or evidence["envelope_digest"] != admitted["envelope_digest"]):
+                return _unavailable_consumer_evidence(consumer_id,
+                    evidence["audit"].get("restriction_reason") or "RESULT_FACT_SELECTION_UNAVAILABLE")
+            # Both selections were admitted from this owner-bound snapshot.
+            # Preserve the full parent dependency closure and bind all paging
+            # metadata BEFORE calculating either digest or the owner receipt.
+            evidence["result_dependencies"] = section_dependencies
+            evidence["fact_selection"] = fact_selection
         evidence["schema_version"] = 1
-        # The digest covers the canonical typed projection plus its schema
-        # version.  Transport metadata and the receipt are deliberately not
-        # part of the digest, so consumers cannot alter evidence by wrapping it.
-        evidence["projection_digest"] = sha256_canonical(evidence)
-        evidence["authority"] = "server-owned"
-        evidence["source"] = "persisted-typed-evidence"
+        # Final delivery includes owner/transport metadata and the receipt.
+        # Its complete UTF-8 wire must fit the same declared projection policy.
         evidence["identity"] = {
             "actor_ref": owner.actor_ref,
             "project_ref": owner.project_ref,
@@ -1266,7 +1729,53 @@ def _project_server_owned_consumer_evidence(
             "model_run_id": owner.model_run_id,
             "confirmation_ref": owner.confirmation_ref,
         }
-        evidence["receipt"] = _consumer_evidence_receipt(evidence)
+        evidence["authority"] = "server-owned"
+        evidence["source"] = "persisted-typed-evidence"
+        spec = registry.resolve(consumer_id)
+        spec = _spec_for_audit_policy(spec, "local", projection.audit.policy_ref)
+        if fact_selection is not None:
+            from ..evidence.consumer_adapters import _structured_row_count
+            # Charge the additional parent dependencies and the selection
+            # record, not just the smaller facts-only projection's rows.
+            rows = _structured_row_count(evidence["facts"], (), section_dependencies) + 1
+            if rows > spec.max_row_budget:
+                return _unavailable_consumer_evidence(consumer_id, "consumer_delivery_budget_exceeded")
+            evidence["audit"]["row_budget"] = rows
+        while True:
+            # Reissue after adjusting the serialized audit count. Hashes have
+            # fixed width, so only the count's decimal width needs to settle.
+            evidence.pop("projection_digest", None)
+            evidence.pop("receipt", None)
+            if consumer_id in {"agent", "notebook"}:
+                evidence["projection_digest"] = _central_consumer_projection_digest(evidence)
+            else:
+                evidence["projection_digest"] = sha256_canonical(evidence)
+            evidence["receipt"] = _consumer_evidence_receipt(evidence)
+            tokens = (len(canonical_json_v1(evidence).encode("utf-8")) + 3) // 4
+            if tokens > spec.max_token_budget:
+                return _unavailable_consumer_evidence(consumer_id, "consumer_delivery_budget_exceeded")
+            if fact_selection is not None and len(json.dumps(
+                    {"persisted_evidence": evidence}, ensure_ascii=False, sort_keys=True,
+                    allow_nan=False).encode("utf-8")) > min(8192, spec.max_token_budget * 4):
+                return _unavailable_consumer_evidence(consumer_id, "tool_output_budget_exceeded")
+            if evidence["audit"]["token_budget"] == tokens:
+                break
+            evidence["audit"]["token_budget"] = tokens
+        if fact_selection is not None:
+            # The facts-only central projection checks its direct sources.
+            # Recheck the whole parent closure at the final delivery boundary
+            # as well; a sibling model dependency may have changed meanwhile.
+            final, _, _, _, deliver = registry._prepare_selection(source,
+                consumer_id=consumer_id, destination="local", requested_fact_ids=(),
+                requested_section_ids=(fact_selection["section_id"],))
+            if (not deliver or final["status"].value not in {"available", "degraded"}
+                    or len(final["sections"]) != 1):
+                return _unavailable_consumer_evidence(consumer_id,
+                    final["audit"].restriction_reason or "RESULT_FACT_SECTION_UNAVAILABLE")
+            if (final["envelope_digest"] != evidence["envelope_digest"]
+                    or sha256_canonical(final["sections"][0].to_dict()) != fact_selection["section_digest"]
+                    or final["result_dependencies"] != section_dependencies):
+                return _unavailable_consumer_evidence(consumer_id, "RESULT_FACT_SNAPSHOT_MISMATCH")
         return evidence
     except EvidenceProjectionError as exc:
         return _unavailable_consumer_evidence(consumer_id, exc.code)
@@ -1321,6 +1830,7 @@ def _consumer_evidence_receipt(
         "schema_version": 1,
         "kind": f"evidence.{consumer_id}.server-receipt.v1",
         "projection_digest": digest,
+        "wire_digest": sha256_canonical({key: value for key, value in evidence.items() if key != "receipt"}),
         "identity": dict(identity),
         "provenance": {
             "artifact_ref": evidence.get("artifact_ref"),
@@ -1336,6 +1846,10 @@ def read_persisted_consumer_evidence_for_run(
     project_root: Path | str,
     run_id: str,
     requested_fact_ids: Sequence[str] | None = None,
+    requested_section_ids: Sequence[str] | None = None,
+    coefficient_selection: object | None = None,
+    provenance_selection: object | None = None,
+    requested_section_types: Sequence[str] | None = None,
 ) -> dict[str, object]:
     """Read one consumer projection from the server-configured owner.
 
@@ -1349,7 +1863,21 @@ def read_persisted_consumer_evidence_for_run(
         return _unavailable_consumer_evidence("unknown", "EVIDENCE_CONSUMER_REQUIRED")
     if type(run_id) is not str or not run_id.strip():
         return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_RUN_ID_REQUIRED")
-    configured = _REPORT_EVIDENCE_PERSISTENCE
+    catalog_owner, catalog_conflict = _catalog_report_evidence_owner_for_run(
+        run_id=run_id,
+        project_root=project_root,
+    )
+    if catalog_conflict:
+        return _unavailable_consumer_evidence(
+            consumer_id,
+            "EVIDENCE_OWNER_CONTEXT_CONFLICT",
+        )
+    configured = catalog_owner or _REPORT_EVIDENCE_PERSISTENCE
+    if type(configured) is not ServerOwnedReportEvidencePersistenceV1 and not catalog_conflict:
+        configured = _rehydrate_report_evidence_owner(
+            project_root=project_root,
+            run_id=run_id,
+        )
     if type(configured) is not ServerOwnedReportEvidencePersistenceV1:
         return _unavailable_consumer_evidence(
             consumer_id,
@@ -1368,7 +1896,135 @@ def read_persisted_consumer_evidence_for_run(
         request_identity=identity,
         project_root=project_root,
         requested_fact_ids=requested_fact_ids,
+        requested_section_ids=requested_section_ids,
+        coefficient_selection=coefficient_selection,
+        provenance_selection=provenance_selection,
+        requested_section_types=requested_section_types,
     )
+
+
+def read_persisted_consumer_result_facts_for_run(
+    *, consumer_id: str, project_root: Path | str, run_id: str, section_id: str,
+    offset: int = 0, limit: int = 1, expected_envelope_digest: str | None = None,
+) -> dict[str, object]:
+    """LOCAL numeric-only selection; offsets and digests grant no authority.
+
+    Each call resolves the current owner and revalidates the parent section.
+    Continuations must bind the preceding snapshot. The exact requested slice
+    is either delivered in full under the conversational budget or rejected;
+    this is not byte transport or a complete section/read claim.
+    """
+    if type(consumer_id) is not str or consumer_id not in {"agent", "notebook"}:
+        return _unavailable_consumer_evidence("unknown", "PROJECTION_CONSUMER_UNKNOWN")
+    if (type(run_id) is not str or not run_id.strip() or run_id in {".", ".."}
+            or any(char in run_id for char in ("/", "\\", "\x00"))):
+        return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_RUN_ID_REQUIRED")
+    if (type(section_id) is not str or not section_id or len(section_id) > 200
+            or type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 64
+            or (expected_envelope_digest is not None and (type(expected_envelope_digest) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", expected_envelope_digest) is None))):
+        return _unavailable_consumer_evidence(consumer_id, "RESULT_FACT_SELECTOR_INVALID")
+    if offset > 0 and expected_envelope_digest is None:
+        return _unavailable_consumer_evidence(consumer_id, "RESULT_FACT_SNAPSHOT_REQUIRED")
+    try:
+        owner, conflict = _catalog_report_evidence_owner_for_run(run_id=run_id, project_root=project_root)
+        if conflict:
+            return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_OWNER_CONTEXT_CONFLICT")
+        owner = owner or _REPORT_EVIDENCE_PERSISTENCE
+        if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+            owner = _rehydrate_report_evidence_owner(project_root=project_root, run_id=run_id)
+        if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+            return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED")
+        identity = owner._require_report_request_identity(None)
+        run_root = Path(project_root).expanduser().resolve(strict=False) / "runs" / run_id
+        if (owner.run_id != run_id or not owner.accepts_project_root(project_root)
+                or not owner.accepts_canonical_run_root(run_root)):
+            return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_OWNER_CONTEXT_MISMATCH")
+        return _project_server_owned_consumer_evidence(consumer_id=consumer_id, run_root=run_root,
+            request_identity=identity, project_root=project_root,
+            _section_fact_page=(section_id, offset, limit, expected_envelope_digest))
+    except EvidenceProjectionError as exc:
+        return _unavailable_consumer_evidence(consumer_id, exc.code)
+    except (AttributeError, EvidenceHostAuthorityError, EvidencePersistenceError,
+            EvidenceRegistryError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+        return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_PROJECTION_UNAVAILABLE")
+
+
+def read_persisted_consumer_result_page_for_run(
+    *,
+    consumer_id: str,
+    project_root: Path | str,
+    run_id: str,
+    section_id: str,
+    offset: int,
+    max_wire_bytes: int | None = None,
+) -> dict[str, object]:
+    """Read a local PARTIAL page using only the host-resolved run owner.
+
+    Selectors grant no identity or destination authority. Catalog conflicts
+    cannot fall back to the deployment owner or restart seam, and the owner
+    retains all source checks and final page budgets.
+    """
+    from ..evidence.consumer_adapters import default_projection_registry
+
+    if type(consumer_id) is not str or not consumer_id.strip():
+        return _unavailable_consumer_evidence("unknown", "EVIDENCE_CONSUMER_REQUIRED")
+    if default_projection_registry().resolve(consumer_id) is None:
+        return _unavailable_consumer_evidence(consumer_id, "PROJECTION_CONSUMER_UNKNOWN")
+    if (type(run_id) is not str or not run_id.strip() or run_id in {".", ".."}
+            or any(char in run_id for char in ("/", "\\", "\x00"))):
+        return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_RUN_ID_REQUIRED")
+    try:
+        owner, conflict = _catalog_report_evidence_owner_for_run(
+            run_id=run_id, project_root=project_root,
+        )
+        if conflict:
+            return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_OWNER_CONTEXT_CONFLICT")
+        owner = owner or _REPORT_EVIDENCE_PERSISTENCE
+        if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+            owner = _rehydrate_report_evidence_owner(project_root=project_root, run_id=run_id)
+        if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+            return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED")
+        owner._require_report_authority()
+        run_root = Path(project_root).expanduser().resolve(strict=False) / "runs" / run_id
+        if (owner.run_id != run_id or not owner.accepts_project_root(project_root)
+                or not owner.accepts_canonical_run_root(run_root)):
+            return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_OWNER_CONTEXT_MISMATCH")
+        return owner.read_result_section_page(
+            consumer_id=consumer_id, section_id=section_id, offset=offset,
+            max_wire_bytes=max_wire_bytes,
+        )
+    except EvidenceProjectionError as exc:
+        return _unavailable_consumer_evidence(consumer_id, exc.code)
+    except (AttributeError, EvidenceHostAuthorityError, EvidencePersistenceError,
+            EvidenceRegistryError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+        return _unavailable_consumer_evidence(consumer_id, "EVIDENCE_PROJECTION_UNAVAILABLE")
+
+
+def report_evidence_request_identity_for_run(
+    *,
+    project_root: Path | str,
+    run_id: str,
+) -> ReportEvidenceRequestIdentityV1 | None:
+    """Resolve a route identity from the exact host-created catalog owner."""
+
+    owner, conflict = _catalog_report_evidence_owner_for_run(
+        run_id=run_id,
+        project_root=project_root,
+    )
+    if conflict:
+        return None
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        owner = _rehydrate_report_evidence_owner(
+            project_root=project_root,
+            run_id=run_id,
+        )
+    if type(owner) is not ServerOwnedReportEvidencePersistenceV1:
+        return None
+    try:
+        return owner._require_report_request_identity(None)
+    except (AttributeError, EvidenceProjectionError, TypeError, ValueError, RuntimeError):
+        return None
 
 
 def project_persisted_results_evidence(
@@ -1425,8 +2081,13 @@ __all__ = [
     "ServerOwnedReportEvidencePersistenceV1",
     "UnavailableReportEvidenceCapabilityV1",
     "configure_report_evidence_persistence",
+    "configure_report_evidence_owner_rehydrator",
+    "register_report_evidence_owner",
     "current_report_evidence_persistence",
     "read_persisted_consumer_evidence_for_run",
+    "read_persisted_consumer_result_page_for_run",
+    "read_persisted_consumer_result_facts_for_run",
+    "report_evidence_request_identity_for_run",
     "project_persisted_results_evidence",
     "results_evidence_server_receipt",
 ]

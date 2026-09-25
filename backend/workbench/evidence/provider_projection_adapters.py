@@ -29,7 +29,10 @@ from workbench.providers.catalog import (
 
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
-_MAX_TOKEN_BUDGET = 4096
+# Classification evidence is a typed, bounded packet rather than a raw data
+# export.  Its complete metrics/diagnostics contract needs this provider-local
+# ceiling; the catalog must declare the same value for every central consumer.
+_MAX_TOKEN_BUDGET = 8192
 _MAX_ROW_BUDGET = 64
 _ALLOWED_SENSITIVITIES = frozenset({"public", "internal"})
 _ALLOWED_ORDERING = frozenset({"fact_id"})

@@ -504,6 +504,8 @@ def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
         assert completed.status == "completed"
         state = completed.outputs["workflow_state"]
         assert state["status"] == "completed"
+        assert state["session_ref"] == record.agent_session_id
+        assert state["project_ref"].startswith("project:local:")
         assert state["steps"]["test_terms"]["artifact_ids"]
         assert state["steps"]["stationary_point"]["artifact_ids"]
 

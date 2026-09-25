@@ -3,7 +3,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { vi } from "vitest";
 import * as api from "../api";
-import * as notebookApi from "../notebook/notebookApi";
 import { DraftGraphRoute } from "./DraftGraphRoute";
 
 vi.mock("react-router-dom", async () => {
@@ -21,7 +20,6 @@ vi.mock("react-router-dom", async () => {
 });
 
 vi.mock("../api");
-vi.mock("../notebook/notebookApi");
 
 function makeDraftResponse({
   draftHash = "h1",
@@ -445,7 +443,7 @@ test("uses the persisted Genesis execution mode and returns to the parent Graph"
   ));
 });
 
-test("reconciles a materialized Notebook option after the Draft run reaches terminal state", async () => {
+test("does not reconcile a materialized Notebook option through the retired execution route", async () => {
   const navigate = vi.fn();
   vi.mocked(useNavigate).mockReturnValue(navigate);
   vi.mocked(api.getPipelineDraft).mockResolvedValue(makeGenesisDraftResponse());
@@ -468,19 +466,6 @@ test("reconciles a materialized Notebook option after the Draft run reaches term
     produced_lineage: { genesis: true },
     focus: { status: "pending_index", run_id: "run_genesis", poll: { genesis: true } },
   });
-  vi.mocked(api.waitForRunTerminal).mockResolvedValue({
-    run_id: "run_genesis",
-    status: "completed",
-    mode: "auto",
-    started_at: null,
-    y: "outcome",
-    x: ["treatment"],
-    lineage: [],
-    artifact_counts: { model_result: 1 },
-    errors: { issues: [] },
-  });
-  vi.mocked(notebookApi.completeNotebookOptionExecution).mockResolvedValue({});
-
   render(
     <MemoryRouter initialEntries={["/pipeline-drafts/draft_genesis?project_root=/tmp/project"]}>
       <Routes>
@@ -494,10 +479,9 @@ test("reconciles a materialized Notebook option after the Draft run reaches term
   await waitFor(() => expect(screen.getByRole("button", { name: "Execute Draft" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Execute Draft" }));
 
-  await waitFor(() => expect(notebookApi.completeNotebookOptionExecution).toHaveBeenCalledWith(
+  await waitFor(() => expect(api.executePipelineDraft).toHaveBeenCalledWith(
     "/tmp/project",
-    "nb_1",
-    "opt_1",
-    { run_id: "run_genesis" },
+    "draft_genesis",
+    { validated_draft_hash: "g1", execution_mode: "genesis" },
   ));
 });

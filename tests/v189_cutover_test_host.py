@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from workbench.agent.planning_contracts import (
+    DeploymentIdentityResolverV1,
     HostCompilationRequestV1,
     HostCompilationResultV1,
+    ServerScopeBindingV1,
 )
 from workbench.canonical import sha256_canonical
 from workbench.contracts.agent.planning import (
@@ -65,4 +69,49 @@ class CutoverTestHostCompiler:
         )
 
 
-__all__ = ["CutoverTestHostCompiler"]
+class _TestScopeAuthority:
+    """Non-authoritative scope adapter used only after route-boundary tests."""
+
+    def resolve(
+        self,
+        *,
+        scope_ref: str,
+        principal_ref: str,
+        session_ref: str,
+        project_ref: str,
+    ) -> ServerScopeBindingV1:
+        return ServerScopeBindingV1(
+            scope_ref=scope_ref,
+            principal_ref=principal_ref,
+            session_ref=session_ref,
+            project_ref=project_ref,
+        )
+
+
+def make_test_identity_resolver(
+    callback: Callable[..., Any],
+) -> DeploymentIdentityResolverV1:
+    """Wrap a deterministic callback in the typed resolver test seam.
+
+    The production app setter accepts only ``DeploymentIdentityResolverV1``.
+    Route tests still need a deterministic identity fixture without pretending
+    that a caller-created object is a deployment authority, so this helper is
+    deliberately isolated from production code and never used by startup.
+    """
+
+    def authenticated_identity(*args: Any) -> Any:
+        resolved = callback(*args)
+        # The historical test callbacks used ``None`` as the optional project
+        # slot.  The typed deployment contract represents that as its 2-tuple
+        # form; a real 3-tuple must carry the request's exact project scope.
+        if isinstance(resolved, tuple) and len(resolved) == 3 and resolved[2] is None:
+            return resolved[:2]
+        return resolved
+
+    resolver = object.__new__(DeploymentIdentityResolverV1)
+    object.__setattr__(resolver, "_scope_resolver", _TestScopeAuthority())
+    object.__setattr__(resolver, "_authenticated_identity_resolver", authenticated_identity)
+    return resolver
+
+
+__all__ = ["CutoverTestHostCompiler", "make_test_identity_resolver"]

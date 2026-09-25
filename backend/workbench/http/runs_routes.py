@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -68,6 +68,7 @@ from ..services.results_service import (
     ServerOwnedReportEvidencePersistenceV1,
     current_report_evidence_persistence,
     read_classification_evidence_for_report,
+    report_evidence_request_identity_for_run,
     project_persisted_results_evidence,
     results_evidence_server_receipt,
 )
@@ -390,7 +391,7 @@ def _report_evidence_server_receipt(
     digest = view.get("projectionDigest")
     provenance = view.get("provenance")
     if (
-        view.get("status") != "available"
+        view.get("status") not in {"available", "degraded"}
         or not isinstance(digest, str)
         or len(digest) != 64
         or any(char not in "0123456789abcdef" for char in digest)
@@ -437,14 +438,20 @@ def _report_identity_for_request(
         return identity if type(identity) is ReportEvidenceRequestIdentityV1 else None
 
     persistence = getattr(request.app.state, "report_evidence_persistence", None)
-    if type(persistence) is not ServerOwnedReportEvidencePersistenceV1:
+    if type(persistence) is ServerOwnedReportEvidencePersistenceV1:
+        if persistence.run_id != run_id:
+            return None
+        try:
+            return persistence._require_report_request_identity(None)
+        except (AttributeError, TypeError, ValueError, RuntimeError, EvidenceProjectionError):
+            return None
+    project_root = request.query_params.get("project_root")
+    if not isinstance(project_root, str) or not project_root.strip():
         return None
-    if persistence.run_id != run_id:
-        return None
-    try:
-        return persistence._require_report_request_identity(None)
-    except (AttributeError, TypeError, ValueError, RuntimeError, EvidenceProjectionError):
-        return None
+    return report_evidence_request_identity_for_run(
+        project_root=project_root,
+        run_id=run_id,
+    )
 
 
 def _admit_report_owner_for_run(
@@ -914,6 +921,48 @@ def list_runs_endpoint(project_root: str) -> dict:
     return {"runs": summaries}
 
 
+def _result_read_owner(request: Request, project_root: str, run_id: str):
+    """Reuse the server identity resolver without requiring a whole-result delivery."""
+    identity = _report_identity_for_request(request, run_id)
+    if type(identity) is not ReportEvidenceRequestIdentityV1:
+        raise WorkbenchAPIError(403, "EVIDENCE_OWNER_REQUEST_REQUIRED", "Server identity is unavailable.")
+    owner = current_report_evidence_persistence(
+        actor_ref=identity.actor_ref, project_ref=identity.project_ref, session_ref=identity.session_ref,
+        scope_ref=identity.scope_ref, run_id=run_id, model_run_id=identity.model_run_id,
+        confirmation_ref=identity.confirmation_ref, artifact_id=None, commit_id=None,
+        artifact_file_sha256=None, project_root=project_root)
+    if (type(owner) is not ServerOwnedReportEvidencePersistenceV1
+            or not owner.accepts_project_root(project_root)
+            or not owner.accepts_canonical_run_root(Path(project_root).expanduser().resolve(strict=False) / "runs" / run_id)):
+        raise WorkbenchAPIError(403, "EVIDENCE_OWNER_CONTEXT_MISMATCH", "Result owner does not match this scope.")
+    return owner, identity
+
+
+@router.get("/runs/{run_id}/results/directory")
+def result_section_directory_endpoint(run_id: str, project_root: str, request: Request) -> dict:
+    try:
+        owner, identity = _result_read_owner(request, project_root, run_id)
+        return owner.read_result_section_directory(consumer_id="report", request_identity=identity)
+    except EvidenceProjectionError as exc:
+        raise WorkbenchAPIError(409, exc.code, "Formal result directory is unavailable.") from exc
+
+
+@router.get("/runs/{run_id}/results/page")
+def result_section_page_endpoint(
+    run_id: str, project_root: str, request: Request,
+    section_id: str = Query(min_length=1, max_length=4096),
+    offset: int = Query(ge=0, le=16 * 1024 * 1024),
+    max_wire_bytes: int | None = Query(default=None, gt=0, le=262144),
+) -> dict:
+    from ..contracts.evidence.result_pages import ResultPageError
+    try:
+        owner, identity = _result_read_owner(request, project_root, run_id)
+        return owner.read_result_section_page(consumer_id="report", section_id=section_id,
+            offset=offset, max_wire_bytes=max_wire_bytes, request_identity=identity)
+    except (EvidenceProjectionError, ResultPageError) as exc:
+        raise WorkbenchAPIError(409, exc.code, "Formal result page is unavailable.") from exc
+
+
 @router.get("/runs/{run_id}")
 def get_run_endpoint(run_id: str, project_root: str, request: Request) -> dict:
     run_root = _resolve_run_root(project_root, run_id)
@@ -1126,7 +1175,7 @@ def export_report_endpoint(
         _report_identity_for_request(http_request, run_id),
         project_root=project_root,
     )
-    if projection.get("status") != "available":
+    if projection.get("status") not in {"available", "degraded"}:
         raise WorkbenchAPIError(
             status_code=409,
             code="REPORT_EVIDENCE_UNAVAILABLE",
@@ -1265,7 +1314,7 @@ def export_result_table_endpoint(
         _report_identity_for_request(http_request, run_id),
         project_root=project_root,
     )
-    if projection.get("status") != "available":
+    if projection.get("status") not in {"available", "degraded"}:
         raise WorkbenchAPIError(
             status_code=409,
             code="RESULT_TABLE_EXPORT_UNAVAILABLE",
@@ -1699,7 +1748,7 @@ def get_report_endpoint(run_id: str, project_root: str, request: Request) -> Res
         _report_identity_for_request(request, run_id),
         project_root=project_root,
     )
-    if projection.get("status") != "available":
+    if projection.get("status") not in {"available", "degraded"}:
         raise WorkbenchAPIError(
             status_code=409,
             code="REPORT_EVIDENCE_UNAVAILABLE",

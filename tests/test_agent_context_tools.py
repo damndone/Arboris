@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import importlib
 import json
+from contextlib import ExitStack
 from pathlib import Path
 
 import pandas as pd
@@ -30,6 +31,27 @@ class IdleAdapter:
     async def stream(self, request):
         if False:
             yield request
+
+
+@pytest.fixture
+def central_owner(monkeypatch):
+    """Install an actual producer/host owner for a fixture run, scoped to a test."""
+    from tests.test_v189_evidence_report_boundary import _produced_report
+    from workbench.services import results_service
+
+    monkeypatch.setattr(results_service, "_REPORT_EVIDENCE_OWNER_CATALOG", {})
+    monkeypatch.setattr(results_service, "_REPORT_EVIDENCE_PERSISTENCE",
+                        results_service.UnavailableReportEvidenceCapabilityV1())
+    monkeypatch.setattr(results_service, "_REPORT_EVIDENCE_OWNER_REHYDRATOR", None)
+    with ExitStack() as stack:
+        def install(project_root):
+            run_root = project_root / "runs" / "run-a"
+            packet = json.loads((run_root / "model_results" / "ols_1.json").read_text())
+            case = stack.enter_context(_produced_report(run_root,
+                model_results={"ols_1": packet}, diagnostic_summary={}))
+            results_service.register_report_evidence_owner(case.owner)
+            return case.owner
+        yield install
 
 
 def test_p7_public_projection_preserves_hurdle_approximation_labels() -> None:
@@ -174,6 +196,7 @@ def _write_project_run(
                     parent_stage_id=None,
                     branch_id="main",
                     stage=Stage.MODEL,
+                    payload_ref="model_results/ols_1.json",
                 )
             },
             edges={},
@@ -697,23 +720,15 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     assert diagnostics_result.ok is True
     assert diagnostics_result.output["context_fingerprint"] == result.output["context_fingerprint"]
     diagnostics = diagnostics_result.output["diagnostics"]
-    assert diagnostics["available"] is True
-    assert diagnostics["preview_status"] == "complete"
-    assert diagnostics["run_status"]["report_render_status"] == "complete"
-    assert diagnostics["run_status"]["report_available"] is True
-    assert diagnostics["trust_label"] == "interpret_with_caution"
-    assert diagnostics["trust_counts"] == {
-        "blockers": 0,
-        "warnings": 1,
-        "cautions": 0,
-        "info": 0,
-    }
-    assert diagnostics["primary_reasons"][0]["reason_key"] == "MODEL_DIAGNOSTIC_WARNING"
-    assert diagnostics["diagnostic_highlights"][0]["linked_issue_ids"] == ["issue-1"]
-    assert diagnostics["interpretation_restrictions"][0]["restriction_type"] == "causal"
+    assert diagnostics["available"] is False
+    assert diagnostics["status"] == "unavailable"
+    assert diagnostics["facts"] == []
+    assert diagnostics["authority"] == "server-owned"
+    assert diagnostics["source"] == "persisted-typed-evidence"
+    assert diagnostics["unavailable_reason"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
     assert diagnostics_result.output["omitted_sections"] == [
-        "artifact_manifest",
-        "coefficient_risk",
+        "raw_model_results",
+        "compatibility_diagnostics",
     ]
 
     result_summary = asyncio.run(
@@ -735,22 +750,15 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     assert result_summary.ok is True
     assert result_summary.output["context_fingerprint"] == result.output["context_fingerprint"]
     summary = result_summary.output["result_summary"]
-    assert summary["available"] is True
-    assert summary["summary_status"] == "complete"
-    assert summary["run_lifecycle_status"] == "completed"
-    assert summary["trust_label"] == "interpret_with_caution"
-    assert summary["model_identity"] == {
-        "model_family": "ols",
-        "model_label": "OLS regression",
-        "y_variable": "y",
-        "n_observations": 100,
-        "x_variable_count": 1,
-    }
-    assert summary["metrics"] == {"r_squared": 0.72, "aic": 120.5, "bic": 125.1}
-    assert summary["primary_metric_keys"] == ["r_squared", "aic"]
-    assert summary["coefficient_rows"] == []
-    assert "full_table_ref" not in summary
-    assert result_summary.output["omitted_sections"] == ["raw_model_results"]
+    assert summary["available"] is False
+    assert summary["status"] == "unavailable"
+    assert summary["facts"] == []
+    assert summary["authority"] == "server-owned"
+    assert summary["unavailable_reason"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    assert result_summary.output["omitted_sections"] == [
+        "raw_model_results",
+        "compatibility_result_summary",
+    ]
 
     artifact_result = asyncio.run(
         registry.execute(
@@ -771,27 +779,12 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     assert artifact_result.ok is True
     assert artifact_result.output["context_fingerprint"] == result.output["context_fingerprint"]
     artifact_preview = artifact_result.output["artifact_preview"]
-    assert artifact_preview["available"] is True
-    assert artifact_preview["preview_status"] == "complete"
-    assert artifact_preview["run_lifecycle_status"] == "completed"
-    assert artifact_preview["artifact_manifest"]["diagnostic_summary_json"] == {
-        "expected": True,
-        "available": True,
-        "readable": True,
-        "artifact_id": "diagnostic_summary",
-        "filename": "diagnostic_summary.json",
-        "schema_valid": True,
-    }
-    assert artifact_preview["artifact_manifest"]["primary_model_results"] == {
-        "expected": True,
-        "available": True,
-        "readable": True,
-        "model_id": "ols_1",
-    }
+    assert artifact_preview["available"] is False
+    assert artifact_preview["preview_status"] == "unavailable"
+    assert artifact_preview["unavailable_reason"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
     assert artifact_result.output["omitted_sections"] == [
         "raw_artifact_payloads",
-        "raw_rows",
-        "image_pixels",
+        "raw_model_results",
     ]
     assert before == {
         path.relative_to(project_root): path.read_bytes()
@@ -1527,56 +1520,32 @@ def test_global_numeric_summary_and_linear_interaction_effect_are_bounded(
         "omitted_sections": ["raw_rows", "correlations"],
     }
     assert effects.ok is True
-    assert effects.output == {
-        "effects": [
-            {
-                "run_id": "run-a",
-                "model_id": "ols_1",
-                "focal_term": "share",
-                "interaction_term": "share_x_group",
-                "moderator_column": "group",
-                "moderator_mean": 0.4,
-                "marginal_effect": 1.4,
-                "evidence_ref": {
-                    "run_id": "run-a",
-                    "model_id": "ols_1",
-                    "result_ref": "model_results:ols_1",
-                    "profile_ref": "staged/data_profile.json",
-                },
-            }
-        ],
-        "omitted_sections": ["raw_model_results", "raw_rows", "correlations"],
-    }
+    effect = effects.output["effects"][0]
+    assert effect["scope"] == "owner_run"
+    assert effect["owner_run_id"] == "run-a"
+    assert effect["section_type"] == "marginal_effects"
+    assert effect["persisted_evidence"]["status"] == "unavailable"
+    assert effect["persisted_evidence"]["reason_code"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    assert effect["persisted_evidence"]["facts"] == []
+    assert "1.4" not in json.dumps(effects.output)
     assert transformed.ok is True
-    assert transformed.output == {
-        "transforms": [
-            {
-                "run_id": "run-a",
-                "model_id": "ols_1",
-                "term": "ln_size",
-                "transform": "scale_0_01",
-                "value": -40.521594,
-                "evidence_ref": {
-                    "run_id": "run-a",
-                    "model_id": "ols_1",
-                    "result_ref": "model_results:ols_1",
-                },
-            },
-            {
-                "run_id": "run-a",
-                "model_id": "ols_1",
-                "term": "middle",
-                "transform": "expm1_percent",
-                "value": pytest.approx(2.315092),
-                "evidence_ref": {
-                    "run_id": "run-a",
-                    "model_id": "ols_1",
-                    "result_ref": "model_results:ols_1",
-                },
-            },
-        ],
-        "omitted_sections": ["raw_model_results", "raw_rows"],
-    }
+    assert transformed.output["transforms"] == [
+        {
+            "run_id": "run-a",
+            "projection_status": "unavailable",
+            "unavailable_reason": "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+            "term": "ln_size",
+            "transform": "scale_0_01",
+        },
+        {
+            "run_id": "run-a",
+            "projection_status": "unavailable",
+            "unavailable_reason": "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
+            "term": "middle",
+            "transform": "expm1_percent",
+        },
+    ]
+    assert "-40.521594" not in json.dumps(transformed.output)
 
 
 def test_workflow_step_contract_is_rejected_before_direct_inspection(
@@ -2157,20 +2126,18 @@ def test_result_summary_bounds_coefficient_rows_and_preserves_artifact_ref(
 
     assert result.ok is True
     summary_output = result.output["result_summary"]
-    assert summary_output["coefficient_row_count"] == 10
-    assert summary_output["coefficient_rows_omitted"] == 2
-    assert len(summary_output["coefficient_rows"]) == 8
-    assert summary_output["coefficient_rows"][0]["ci_lower"] == -0.2
-    assert summary_output["coefficient_rows"][0]["ci_upper"] == 0.2
-    assert all("raw_payload" not in row for row in summary_output["coefficient_rows"])
-    assert summary_output["full_table_ref"] == "model_results/ols_1.json"
-    assert summary_output["interpretation_mode"] == "associational"
+    assert summary_output["available"] is False
+    assert summary_output["status"] == "unavailable"
+    assert summary_output["facts"] == []
+    assert summary_output["unavailable_reason"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    assert "coefficient_rows" not in summary_output
     assert "raw_model_results" in result.output["omitted_sections"]
-    assert "coefficient_rows" in result.output["omitted_sections"]
+    assert "compatibility_result_summary" in result.output["omitted_sections"]
+    assert "999" not in json.dumps(result.output)
 
 
 def test_global_coefficient_inspector_returns_requested_persisted_intervals(
-    tmp_path: Path,
+    tmp_path: Path, central_owner,
 ) -> None:
     project_root = tmp_path / "project"
     _write_project_run(
@@ -2220,6 +2187,9 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                     "p_value": 0.001,
                     "ci_lower": 0.61,
                     "ci_upper": 1.79,
+                    "confidence_interval_method": "normal_z",
+                    "confidence_level": 0.95,
+                    "confidence_interval": [0.61, 1.79],
                     "variance_source": "survey_design",
                     "source_id": "model_results.ols_1.coefficients.share",
                     "warnings": ["SURVEY_REPLICATE_FAILURES"],
@@ -2229,6 +2199,7 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
             "raw_rows": [{"outcome": 99}],
         },
     )
+    central_owner(project_root)
     provider = _load_provider_type()(project_root)
     registry = ToolRegistry()
     for definition in provider.global_tool_definitions(session_id="main-session"):
@@ -2246,66 +2217,18 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
     )
 
     assert result.ok is True
-    assert result.output == {
-        "models": [
-            {
-                "run_id": "run-a",
-                "model_id": "ols_1",
-                "model_type": "ols_robust",
-                "nobs": 100,
-                "r_squared": 0.42,
-                "r_squared_adj": 0.41,
-                "df_model": 2,
-                "df_resid": 97,
-                "outcome": "outcome",
-                "predictors": ["share", "control"],
-                "entity_col": "firm_id",
-                "time_col": "year",
-                "covariance": "robust",
-                "covariance_estimator": "HC1",
-                "confidence_interval": {"level": 0.95, "method": "normal_z"},
-                "survey_design": {
-                    "n_obs": 100,
-                    "n_strata": 4,
-                    "n_psu": 8,
-                    "degf": 4,
-                    "residual_degf": 3,
-                    "design_effect": 2.5,
-                    "effective_sample_size": 40.0,
-                    "variance_method": "linearization",
-                    "strata_column": "stratum",
-                    "psu_column": "psu",
-                    "weight_column": "weight",
-                    "subpopulation": "region == 'north'",
-                    "lonely_psu_policy": "adjust",
-                },
-                "coefficients": [
-                    {
-                        "term": "share",
-                        "estimate": 1.2,
-                        "std_error": 0.3,
-                        "p_value": 0.001,
-                        "ci_lower": 0.61,
-                        "ci_upper": 1.79,
-                        "variance_source": "survey_design",
-                        "source_id": "model_results.ols_1.coefficients.share",
-                        "provenance": {
-                            "run_id": "run-a",
-                            "source_id": "model_results.ols_1.coefficients.share",
-                        },
-                        "warnings": ["SURVEY_REPLICATE_FAILURES"],
-                    }
-                ],
-                "evidence_ref": {
-                    "run_id": "run-a",
-                    "model_id": "ols_1",
-                    "result_ref": "model_results:ols_1",
-                },
-            }
-        ],
-        "omitted_sections": ["raw_model_results", "raw_rows"],
-    }
-    assert "99" not in json.dumps(result.output)
+    model = result.output["models"][0]
+    assert model["model_id"] == "ols_1"
+    assert model["projection_status"] in {"available", "degraded"}
+    assert len(model["coefficients"]) == 1
+    coefficient = model["coefficients"][0]
+    assert coefficient["term"] == "share"
+    assert coefficient["estimate"] == 1.2
+    assert coefficient["std_error"] == 0.3
+    assert coefficient["confidence_interval"] == {"lower": 0.61, "upper": 1.79, "method": "normal_z"}
+    assert model["evidence_ref"]["projection_digest"] == coefficient["projection_digest"]
+    assert coefficient["fact_id"]
+    assert "raw_rows" not in json.dumps(model)
 
 
 def test_global_coefficient_inspector_does_not_invent_optional_survey_provenance():
@@ -2438,12 +2361,9 @@ def test_chain_context_exposes_the_same_bounded_exact_coefficient_reader(
 
 
 def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
-    tmp_path: Path,
+    tmp_path: Path, central_owner,
 ) -> None:
-    from workbench.agent.context_tools import (
-        InspectResultSummaryRequest,
-        _verified_model_results,
-    )
+    from workbench.agent.context_tools import _verified_model_results
     from workbench.artifacts import sha256_file
 
     project_root = tmp_path / "project"
@@ -2454,7 +2374,7 @@ def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
             "model_type": "ols",
             "nobs": 100,
             "r_squared": 0.42,
-            "r_squared_adj": 0.41,
+            "adjusted_r_squared": 0.41,
             "coefficients": {
                 "share": {"estimate": 1.2, "ci_lower": 0.61, "ci_upper": 1.79},
             },
@@ -2487,56 +2407,112 @@ def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
     verified, verification_error = _verified_model_results(run_root)
     assert verification_error is None
     assert verified == [result_payload]
+    central_owner(project_root)
     provider = _load_provider_type()(project_root)
+    registry = ToolRegistry()
+    for definition in provider.tool_definitions(chain_id="chain-a", session_id="chain-session"):
+        registry.register(definition)
 
-    output = provider.inspect_result_summary(
-        InspectResultSummaryRequest(
-            request_id="summary", owner_run_id="run-a", op_node_id="model:ols_1", active_head_run_id="run-a"
-        )
-    )
+    def read(tool_id, **extra):
+        result = asyncio.run(registry.execute({"tool_call_id": tool_id, "tool_id": tool_id,
+            "arguments": {"owner_run_id": "run-a", "op_node_id": "model:ols_1",
+                          "active_head_run_id": "run-a", **extra}}, session_id="chain-session"))
+        assert result.ok, result
+        return result.output
 
-    assert output["result_summary"]["persisted_models"] == [
-        {
-            "model_id": "ols_1",
-            "r_squared": 0.42,
-            "r_squared_adj": 0.41,
-            "coefficients": [
-                {
-                    "term": "share",
-                    "estimate": 1.2,
-                    "ci_lower": 0.61,
-                    "ci_upper": 1.79,
-                    "source_id": "model_results.ols_1.coefficients.share",
-                    "warnings": [],
-                }
-            ],
-        }
-    ]
+    output = read("inspect_result_summary")
+    assert output["result_summary"]["available"] is True
+    assert [fact["value"] for fact in output["result_summary"]["facts"]] == [1.2]
+    # Read explicit numeric pages; no page claims the section's qualifications
+    # or warnings were read. Do not turn this into an all-in-one summary.
+    facts_by_role = {}
+    offset, digest = 0, None
+    while offset is not None:
+        args = {"section_id": "regression_table", "offset": offset, "limit": 1}
+        if digest is not None:
+            args["expected_envelope_digest"] = digest
+        page = read("inspect_result_facts", **args)["persisted_evidence"]
+        assert page["status"] in {"available", "degraded"}, page
+        assert page["fact_selection"]["read_completeness"] == "PARTIAL"
+        assert page["fact_selection"]["full_section_read"] is False
+        assert page["receipt"] and not page["sections"]
+        facts_by_role.update({fact["statistic_id"]: fact["value"] for fact in page["facts"]})
+        digest, offset = page["envelope_digest"], page["fact_selection"]["next_offset"]
+
+    assert facts_by_role["nobs"] == 100
+    assert facts_by_role["r_squared"] == 0.42
+    assert facts_by_role["adjusted_r_squared"] == 0.41
+    assert facts_by_role["model_coefficient"] == 1.2
+    assert facts_by_role["ci_lower"] == 0.61
+    assert facts_by_role["ci_upper"] == 1.79
 
     mutated = json.loads(result_path.read_text(encoding="utf-8"))
     mutated["coefficients"]["share"]["estimate"] = 999.0
     result_path.write_text(json.dumps(mutated), encoding="utf-8")
-    # Keep the file digest synchronized so the self-digesting payload binding
-    # is the boundary that rejects the changed model fact.
+    # Rewriting the mutable index cannot reauthorize a changed sealed source.
     index = json.loads(index_path.read_text(encoding="utf-8"))
     next(
         item for item in index["artifacts"] if item["artifact_id"] == "ols_1"
     )["sha256"] = sha256_file(result_path)
     index_path.write_text(json.dumps(index), encoding="utf-8")
-    unavailable = provider.inspect_result_summary(
-        InspectResultSummaryRequest(
-            request_id="summary-after-result-mutation",
-            owner_run_id="run-a",
-            op_node_id="model:ols_1",
-            active_head_run_id="run-a",
-        )
-    )
-    assert unavailable["result_summary"] == {
-        "available": False,
-        "status": "unavailable",
-        "summary_status": "unavailable",
-        "unavailable_reason": "AGENT_RESULT_ARTIFACT_INVALID",
-    }
+    unavailable = read("inspect_result_summary")
+    assert unavailable["result_summary"]["available"] is False
+    assert unavailable["result_summary"]["facts"] == []
+    assert unavailable["result_summary"]["unavailable_reason"] == "EVIDENCE_DEPENDENCY_MISMATCH"
+    denied_section = read("inspect_result_section", section_type="regression_table")["persisted_evidence"]
+    assert denied_section["status"] == "unavailable"
+    assert denied_section["facts"] == []
+    assert not denied_section.get("sections")
+    assert "999.0" not in json.dumps(denied_section)
+    denied_page = read("inspect_result_facts", section_id="regression_table", offset=1, limit=1,
+                       expected_envelope_digest=digest)["persisted_evidence"]
+    assert denied_page["status"] == "unavailable"
+    assert denied_page["facts"] == [] and denied_page["receipt"] is None
+    assert denied_page["reason_code"] == "EVIDENCE_DEPENDENCY_MISMATCH"
+
+
+@pytest.mark.parametrize("chain", [False, True])
+def test_registered_numeric_fact_query_preserves_marginal_effect_without_truncation(tmp_path, central_owner, chain):
+    from workbench.agent.model import _to_openai_wire_messages
+    project_root = tmp_path / "project"
+    _write_project_run(project_root, model_result={"model_id": "ols_1", "model_type": "ols", "nobs": 20,
+        "coefficients": {"x": {"estimate": 1.25, "std_error": 0.2, "p_value": 0.125}},
+        "survey_design": {"variance_method": "jackknife", "degf": 12},
+        "marginal_effects": [{"term": "x", "estimate": 0.3, "p_value": 0.02}],
+        "marginal_effects_method": "average"})
+    central_owner(project_root)
+    provider = _load_provider_type()(project_root)
+    definitions = (provider.tool_definitions(chain_id="chain-a", session_id="fact-test") if chain
+                   else provider.global_tool_definitions(session_id="fact-test"))
+    name = "inspect_result_facts" if chain else "inspect_project_result_facts"
+    definition = next((item for item in definitions if item.tool_id == name), None)
+    assert definition is not None, "bounded numeric fact tool must be registered"
+    assert definition.max_output_budget == 8192 and definition.side_effect == "none"
+    registry = ToolRegistry()
+    registry.register(definition)
+    arguments = {"owner_run_id": "run-a", "section_id": "marginal_effects", "offset": 0, "limit": 1}
+    if chain:
+        arguments.update(op_node_id="model:ols_1", active_head_run_id="run-a")
+    values = []
+    while True:
+        result = asyncio.run(registry.execute({"tool_call_id": "fact-page", "tool_id": name,
+            "arguments": arguments}, session_id="fact-test"))
+        assert result.ok, result
+        wire = result.output["persisted_evidence"]
+        assert wire["status"] == "available", wire
+        assert wire["fact_selection"]["read_completeness"] == "PARTIAL"
+        assert "warnings" in wire["fact_selection"]["warning"]
+        assert len(json.dumps(result.output, ensure_ascii=False, sort_keys=True).encode()) <= 8192
+        content = json.dumps(result.to_payload(), ensure_ascii=False, sort_keys=True)
+        messages = _to_openai_wire_messages([{"role": "tool", "tool_call_id": "fact-page", "content": content}])
+        assert json.loads(messages[0]["content"])["output"] == result.output
+        assert "omitted_sections" not in result.output and result.output.get("status") != "partial"
+        values.extend(fact["value"] for fact in wire["facts"])
+        offset = wire["fact_selection"]["next_offset"]
+        if offset is None:
+            break
+        arguments.update(offset=offset, expected_envelope_digest=wire["envelope_digest"])
+    assert values == [0.3, 0.02]
 
 
 def test_model_figure_evidence_exposes_binned_numeric_facts_not_raw_vectors(
@@ -2590,13 +2566,11 @@ def test_model_figure_evidence_exposes_binned_numeric_facts_not_raw_vectors(
         )
     )
 
-    figure = output["artifact_preview"]["figure_evidence"][0]
-    assert figure["chart_type"] == "residuals-vs-fitted diagnostic scatter"
-    assert figure["numeric_source"]["kind"] == "residuals_vs_fitted_bins"
-    assert figure["numeric_source"]["bins"]
-    serialized = json.dumps(figure["numeric_source"])
-    assert '"residuals":' not in serialized
-    assert '"fitted_values":' not in serialized
+    artifact_preview = output["artifact_preview"]
+    assert artifact_preview["available"] is False
+    assert artifact_preview["preview_status"] == "unavailable"
+    assert artifact_preview["unavailable_reason"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    assert "figure_evidence" not in artifact_preview
 
 
 def test_model_predictor_residual_figure_exposes_binned_numeric_facts_not_rows(
@@ -2669,27 +2643,21 @@ def test_model_predictor_residual_figure_exposes_binned_numeric_facts_not_rows(
             active_head_run_id="run-a",
         )
     )
-    figure = next(
-        item
-        for item in output["artifact_preview"]["figure_evidence"]
-        if item["artifact_id"] == "residuals_vs_exposure"
-    )
-    assert figure["chart_type"] == "residuals-vs-predictor diagnostic scatter"
-    assert figure["numeric_source"]["kind"] == "residuals_vs_predictor_bins"
-    serialized = json.dumps(figure["numeric_source"])
-    assert '"residuals": [' not in serialized
-    assert '"exposure": [' not in serialized
+    artifact_preview = output["artifact_preview"]
+    assert artifact_preview["available"] is False
+    assert artifact_preview["preview_status"] == "unavailable"
+    assert artifact_preview["unavailable_reason"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    assert "figure_evidence" not in artifact_preview
 
     project_figure = _load_provider_type()(project_root).inspect_project_model_figure_evidence(
         InspectProjectModelFigureEvidenceRequest(
             figures=({"run_id": "run-a", "artifact_id": "residuals_vs_exposure"},)
         )
     )
-    assert project_figure["figures"][0]["chart_type"] == "residuals-vs-predictor diagnostic scatter"
-    assert project_figure["figures"][0]["numeric_source"]["kind"] == "residuals_vs_predictor_bins"
-    assert project_figure["figures"][0]["evidence_ref"] == {
+    assert project_figure["figures"][0] == {
         "run_id": "run-a",
-        "model_id": "ols_1",
+        "projection_status": "unavailable",
+        "unavailable_reason": "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED",
         "artifact_id": "residuals_vs_exposure",
     }
 
@@ -2773,10 +2741,12 @@ def test_raw_node_preview_exposes_only_registered_statistical_result_facts(
         )
     )
 
-    evidence = output["artifact_preview"]["public_result_evidence"]
-    assert evidence[0]["artifact_id"] == "summary"
-    assert evidence[0]["result"]["variables"]["outcome"]["mean"] == 2.5
-    assert "raw_rows" not in json.dumps(evidence)
+    artifact_preview = output["artifact_preview"]
+    assert artifact_preview["available"] is False
+    assert artifact_preview["preview_status"] == "unavailable"
+    assert artifact_preview["unavailable_reason"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    assert "public_result_evidence" not in artifact_preview
+    assert "2.5" not in json.dumps(output)
 
 
 def test_time_series_summary_reads_only_bounded_public_artifacts(
@@ -3221,12 +3191,11 @@ def test_diagnostics_preserves_malformed_summary_as_read_only_preview_state(
     )
 
     assert result.ok is True
-    assert result.output["diagnostics"] == {
-        "available": False,
-        "status": "unavailable",
-        "summary_status": "unavailable",
-        "unavailable_reason": "AGENT_RESULT_ARTIFACT_INVALID",
-    }
+    diagnostics = result.output["diagnostics"]
+    assert diagnostics["available"] is False
+    assert diagnostics["status"] == "unavailable"
+    assert diagnostics["facts"] == []
+    assert diagnostics["unavailable_reason"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
 
 
 def test_result_summary_preserves_malformed_summary_state_without_raw_results(
@@ -3257,15 +3226,13 @@ def test_result_summary_preserves_malformed_summary_state_without_raw_results(
 
     assert result.ok is True
     summary = result.output["result_summary"]
-    assert summary == {
-        "available": False,
-        "status": "unavailable",
-        "summary_status": "unavailable",
-        "unavailable_reason": "AGENT_RESULT_ARTIFACT_INVALID",
-    }
+    assert summary["available"] is False
+    assert summary["status"] == "unavailable"
+    assert summary["facts"] == []
+    assert summary["unavailable_reason"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
     assert result.output["omitted_sections"] == [
         "raw_model_results",
-        "coefficient_rows",
+        "compatibility_result_summary",
     ]
 
 
@@ -3303,13 +3270,12 @@ def test_artifact_preview_reports_running_lifecycle_without_writes(
     assert result.ok is True
     artifact_preview = result.output["artifact_preview"]
     assert artifact_preview["available"] is False
-    assert artifact_preview["preview_status"] == "pending"
-    assert artifact_preview["run_lifecycle_status"] == "running"
-    assert artifact_preview["artifact_manifest"]["primary_model_results"]["available"] is True
+    assert artifact_preview["preview_status"] == "unavailable"
+    assert artifact_preview["unavailable_reason"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    assert "artifact_manifest" not in artifact_preview
     assert result.output["omitted_sections"] == [
         "raw_artifact_payloads",
-        "raw_rows",
-        "image_pixels",
+        "raw_model_results",
     ]
     assert before == {
         path.relative_to(project_root): path.read_bytes()
@@ -3421,3 +3387,134 @@ def test_the_arma_garch_contract_payload_fits_the_tool_output_budget(
         f"contract payload is {len(serialized)} chars against a {budget} budget; "
         "the Agent would receive tool_output_budget_exceeded instead of the contract"
     )
+
+
+def test_specialized_agent_consumers_do_not_fallback_to_raw_results_without_central_evidence(
+    tmp_path: Path,
+) -> None:
+    """Every listed Agent fact surface must fail closed at the central reader."""
+
+    from workbench.agent.context_tools import (
+        InspectArtifactPreviewRequest,
+        InspectProjectCoefficientTransformsRequest,
+        InspectProjectLinearInteractionEffectsRequest,
+        InspectProjectModelCoefficientsRequest,
+        InspectProjectModelFigureEvidenceRequest,
+        InspectProjectStatisticalEvidenceRequest,
+    )
+    from workbench.services.results_service import configure_report_evidence_persistence
+
+    project_root = tmp_path / "project"
+    _write_project_run(
+        project_root,
+        model_result={
+            "model_id": "ols_1",
+            "model_type": "ols",
+            "nobs": 100,
+            "coefficients": {
+                "x": {"estimate": 999.0},
+                "moderator": {"estimate": 2.0},
+                "interaction": {"estimate": 3.0},
+            },
+            "residuals": [0.0, 1.0],
+            "fitted_values": [1.0, 2.0],
+        },
+    )
+    run_root = project_root / "runs" / "run-a"
+    (run_root / "staged").mkdir()
+    (run_root / "staged" / "data_profile.json").write_text(
+        json.dumps({"columns": {"moderator": {"mean": 4.0}}}),
+        encoding="utf-8",
+    )
+    statistics_root = run_root / "statistical_tests"
+    statistics_root.mkdir()
+    (statistics_root / "evidence.json").write_text(
+        json.dumps(
+            {
+                "payload_schema": "workbench.statistics.evidence-packet",
+                "schema_version": 1,
+                "dataset_ref": "dataset:raw",
+                "results": [
+                    {
+                        "test_type": "shapiro_wilk",
+                        "nobs": 100,
+                        "statistic": 999.0,
+                        "p_value": 0.001,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    configure_report_evidence_persistence(None)
+    provider = _load_provider_type()(project_root)
+    coefficients = provider.inspect_project_model_coefficients(
+        InspectProjectModelCoefficientsRequest(run_ids=("run-a",), terms=("x",))
+    )
+    effects = provider.inspect_project_linear_interaction_effects(
+        InspectProjectLinearInteractionEffectsRequest(
+            effects=(
+                {
+                    "run_id": "run-a",
+                    "focal_term": "x",
+                    "interaction_term": "interaction",
+                    "moderator_column": "moderator",
+                },
+            )
+        )
+    )
+    transforms = provider.inspect_project_coefficient_transforms(
+        InspectProjectCoefficientTransformsRequest(
+            transforms=({"run_id": "run-a", "term": "x", "transform": "scale_0_01"},)
+        )
+    )
+    statistical = provider.inspect_project_statistical_evidence(
+        InspectProjectStatisticalEvidenceRequest(run_ids=("run-a",))
+    )
+    figures = provider.inspect_project_model_figure_evidence(
+        InspectProjectModelFigureEvidenceRequest(
+            figures=({"run_id": "run-a", "artifact_id": "residuals_fitted"},)
+        )
+    )
+    preview = provider.inspect_artifact_preview(
+        InspectArtifactPreviewRequest(
+            request_id="preview-no-central-evidence",
+            owner_run_id="run-a",
+            op_node_id="model:ols_1",
+            active_head_run_id="run-a",
+        )
+    )
+
+    for packet, key in (
+        (coefficients, "models"),
+        (transforms, "transforms"),
+        (statistical, "runs"),
+        (figures, "figures"),
+    ):
+        assert packet[key]
+        assert all(item["projection_status"] == "unavailable" for item in packet[key])
+        assert all("unavailable_reason" in item for item in packet[key])
+    assert len(effects["effects"]) == 1
+    effect = effects["effects"][0]
+    assert effect["scope"] == "owner_run"
+    assert effect["owner_run_id"] == "run-a"
+    assert effect["section_type"] == "marginal_effects"
+    assert effect["persisted_evidence"]["status"] == "unavailable"
+    assert effect["persisted_evidence"]["reason_code"] == "EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED"
+    assert effect["persisted_evidence"]["facts"] == []
+    assert effect["persisted_evidence"]["receipt"] is None
+    assert preview["artifact_preview"]["preview_status"] == "unavailable"
+    assert "artifact_manifest" not in preview["artifact_preview"]
+    serialized = json.dumps(
+        {
+            "coefficients": coefficients,
+            "effects": effects,
+            "transforms": transforms,
+            "statistical": statistical,
+            "figures": figures,
+            "preview": preview,
+        },
+        sort_keys=True,
+    )
+    assert "999.0" not in serialized

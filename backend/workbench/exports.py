@@ -11,15 +11,40 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
+from reportlab.pdfbase.pdfmetrics import getFont, stringWidth
 from reportlab.pdfgen import canvas
 
-from .artifacts import register_artifact, write_bytes_durable
-from .report_export import ReportEvidenceWriterV1
+from .report_export import ReportEvidenceWriterV1, ReportExportError
 from .reporting import (
     ReportDocumentWriterV1,
     WorkflowReportWriterV1,
-    _assert_report_output_path,
+    _write_report_output,
 )
+
+
+def _require_pdf_glyphs(text: str, font_name: str) -> None:
+    """Reject missing glyphs before ReportLab can silently substitute squares.
+
+    The renderer currently uses Type 1 fonts. This is a coverage guard, not
+    Unicode/font-fallback support; no system fonts or new resources are loaded.
+    """
+    font = getFont(font_name)
+    try:
+        encoded = text.encode(font.encName, errors="strict")
+    except UnicodeEncodeError as exc:
+        raise ReportExportError(
+            f"PDF_FONT_GLYPH_UNSUPPORTED: {font_name} lacks U+{ord(text[exc.start]):04X}"
+        ) from exc
+    if (encoded.decode(font.encName, errors="strict") != text
+            or any(font.encoding.vector[code] not in font.face.glyphWidths for code in encoded)):
+        raise ReportExportError(
+            f"PDF_FONT_GLYPH_UNSUPPORTED: {font_name} cannot render text without substitution"
+        )
+
+
+def _draw_pdf_text(pdf: canvas.Canvas, x: float, y: float, text: str) -> None:
+    _require_pdf_glyphs(text, pdf._fontname)
+    pdf.drawString(x, y, text)
 
 
 def _render_pdf_bytes(
@@ -32,11 +57,17 @@ def _render_pdf_bytes(
     pdf = canvas.Canvas(output, pagesize=letter, pageCompression=0, **canvas_options)
     _, height = letter
     y = height - 72
-    if report.get("report_kind") == "arma_garch":
+    if report.get("resolvedSections"):
+        y = _draw_section(pdf, str(report.get("title", "Report")), [], y)
+        for section in report["resolvedSections"]:
+            lines = _structured_pdf_lines(section["content"]) if section["status"] == "available" else list(section["reasonCodes"])
+            label = str(section.get("sectionType", "result")).replace("_", " ").capitalize()
+            y = _draw_section(pdf, f"{label}: {section['sectionId']} ({section['status']})", lines, y)
+    elif report.get("report_kind") == "arma_garch":
         _draw_arma_garch_pdf(pdf, report, y)
     else:
         pdf.setFont("Helvetica-Bold", 14)
-        pdf.drawString(72, y, str(report.get("title", "Report")))
+        _draw_pdf_text(pdf, 72, y, str(report.get("title", "Report")))
         y -= 32
         y = _draw_section(pdf, "Facts", report.get("presentation_facts", report.get("facts", [])), y)
         y = _draw_section(pdf, "Descriptive statistics", report.get("descriptive_stats", []), y)
@@ -55,6 +86,18 @@ def _render_pdf_bytes(
         _draw_section(pdf, "Warnings", report.get("warnings", []), y)
     pdf.save()
     return output.getvalue()
+
+
+def _structured_pdf_lines(value: Any, prefix: str = "") -> list[str]:
+    """Walk all admitted fields without computing or truncating statistics."""
+    if isinstance(value, Mapping) and value:
+        return [line for key, item in value.items()
+                for line in _structured_pdf_lines(item, f"{prefix}.{key}" if prefix else str(key))]
+    if isinstance(value, (list, tuple)) and value:
+        return [line for index, item in enumerate(value)
+                for line in _structured_pdf_lines(item, f"{prefix}[{index}]")]
+    return [f"{prefix}: {value}"]
+
 
 def export_pdf(
     writer: ReportDocumentWriterV1 | WorkflowReportWriterV1,
@@ -88,11 +131,11 @@ def export_pdf(
         raise ValueError("REPORT_WRITER_RUN_ROOT_MISMATCH")
     report = writer.view_model
     output = _render_pdf_bytes(report)
-    pdf_path = run_root / "reports" / filename
-    _assert_report_output_path(run_root, pdf_path)
-    write_bytes_durable(pdf_path, output)
-    register_artifact(run_root, artifact_id, pdf_path, "report", "export", list(inputs))
-    return pdf_path
+    return _write_report_output(
+        writer, run_root, directory="reports", filename=filename,
+        artifact_id=artifact_id, artifact_type="report", step="export", inputs=inputs,
+        content=output,
+    )
 
 
 def export_xlsx(
@@ -121,11 +164,11 @@ def export_xlsx(
             content=_render_workflow_xlsx(writer),
         )
     xlsx_bytes = render_typed_xlsx(writer)
-    xlsx_path = run_root / "exports" / filename
-    _assert_report_output_path(run_root, xlsx_path)
-    write_bytes_durable(xlsx_path, xlsx_bytes)
-    register_artifact(run_root, artifact_id, xlsx_path, "table_export", "export", list(inputs))
-    return xlsx_path
+    return _write_report_output(
+        writer, run_root, directory="exports", filename=filename,
+        artifact_id=artifact_id, artifact_type="table_export", step="export", inputs=inputs,
+        content=xlsx_bytes,
+    )
 
 
 def render_typed_xlsx(
@@ -165,13 +208,20 @@ def _render_tables_xlsx(tables: Mapping[str, Sequence[Mapping[str, Any]]]) -> by
         worksheet = workbook.create_sheet(title=_sheet_title(name))
         normalized_rows = list(rows)
         headers = _headers(normalized_rows)
-        worksheet.append(headers)
+        worksheet.append([_excel_value(header) for header in headers])
         worksheet.freeze_panes = "A2"
         for cell in worksheet[1]:
+            cell.data_type = "s"
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill("solid", fgColor="1F4E78")
         for row in normalized_rows:
-            worksheet.append([_excel_value(row.get(header, "")) for header in headers])
+            values = [_excel_value(row.get(header, "")) for header in headers]
+            worksheet.append(values)
+            for index, value in enumerate(values, start=1):
+                if isinstance(value, str):
+                    # Labels are data, never spreadsheet formulas. Preserve the
+                    # exact text rather than prefixing an extra apostrophe.
+                    worksheet.cell(worksheet.max_row, index).data_type = "s"
         worksheet.auto_filter.ref = worksheet.dimensions
         for index, header in enumerate(headers, start=1):
             values = [str(header)] + [str(row.get(header, "")) for row in normalized_rows[:200]]
@@ -183,19 +233,48 @@ def _render_tables_xlsx(tables: Mapping[str, Sequence[Mapping[str, Any]]]) -> by
     return output.getvalue()
 
 
+def _wrap_pdf_text(text: str, font: str, size: float, width: float) -> list[str]:
+    """Fit actual glyph advances; preserve spaces and hard line breaks."""
+    # Newlines are layout, not glyphs; every other character must be renderable
+    # before measuring widths (which can otherwise measure a substituted glyph).
+    _require_pdf_glyphs(text.replace("\n", ""), font)
+    lines = []
+    for paragraph in text.split("\n"):
+        while stringWidth(paragraph, font, size) > width:
+            low, high = 0, len(paragraph)
+            while low < high:
+                middle = (low + high + 1) // 2
+                if stringWidth(paragraph[:middle], font, size) <= width:
+                    low = middle
+                else:
+                    high = middle - 1
+            if low == 0:
+                raise ReportExportError("PDF_GLYPH_EXCEEDS_LINE_WIDTH")
+            # Prefer a word boundary, but split long unbroken labels as needed.
+            boundary = max((i + 1 for i, char in enumerate(paragraph[:low]) if char.isspace()), default=0)
+            cut = boundary or low
+            lines.append(paragraph[:cut])
+            paragraph = paragraph[cut:]
+        lines.append(paragraph)
+    return lines
+
+
 def _draw_section(pdf: canvas.Canvas, title: str, items: Any, y: float) -> float:
-    pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(72, y, title)
-    y -= 18
-    pdf.setFont("Helvetica", 10)
-    for item in items:
-        text = _report_item_text(item)
-        pdf.drawString(90, y, f"- {text}")
-        y -= 14
+    def draw(text: str, x: float, font: str, size: float, leading: float) -> None:
+        nonlocal y
         if y < 72:
             pdf.showPage()
             y = letter[1] - 72
-            pdf.setFont("Helvetica", 10)
+        pdf.setFont(font, size)
+        _draw_pdf_text(pdf, x, y, text)
+        y -= leading
+
+    for line in _wrap_pdf_text(title, "Helvetica-Bold", 12, letter[0] - 144):
+        draw(line, 72, "Helvetica-Bold", 12, 18)
+    body_width = letter[0] - 72 - 90 - stringWidth("- ", "Helvetica", 10)
+    for item in items:
+        for index, line in enumerate(_wrap_pdf_text(_report_item_text(item), "Helvetica", 10, body_width)):
+            draw(("- " if index == 0 else "  ") + line, 90, "Helvetica", 10, 14)
     return y - 10
 
 
@@ -208,7 +287,7 @@ def _draw_arma_garch_pdf(pdf: canvas.Canvas, report: Mapping[str, Any], y: float
             pdf.showPage()
             position = height - 72
         pdf.setFont("Helvetica-Bold", 14 if level == 1 else 11)
-        pdf.drawString(54, position, text)
+        _draw_pdf_text(pdf, 54, position, text)
         return position - (24 if level == 1 else 18)
 
     def line(label: str, value: object, position: float) -> float:
@@ -216,14 +295,14 @@ def _draw_arma_garch_pdf(pdf: canvas.Canvas, report: Mapping[str, Any], y: float
             pdf.showPage()
             position = height - 72
         pdf.setFont("Helvetica-Bold", 9)
-        pdf.drawString(64, position, _pdf_text(label, 27))
+        _draw_pdf_text(pdf, 64, position, _pdf_text(label, 27, font_name="Helvetica-Bold"))
         pdf.setFont("Helvetica", 9)
-        pdf.drawString(210, position, _pdf_text(value, 70))
+        _draw_pdf_text(pdf, 210, position, _pdf_text(value, 70))
         return position - 13
 
     y = heading(str(report.get("title", "ARMA-GARCH Volatility Report")), y)
     pdf.setFont("Helvetica", 10)
-    pdf.drawString(54, y, _pdf_text(report.get("model_label", ""), 100))
+    _draw_pdf_text(pdf, 54, y, _pdf_text(report.get("model_label", ""), 100))
     y -= 24
     y = heading("Run and model contract", y, level=2)
     for row in report.get("overview", []):
@@ -260,8 +339,11 @@ def _draw_arma_garch_pdf(pdf: canvas.Canvas, report: Mapping[str, Any], y: float
         y = line("artifact", artifact_id, y)
 
 
-def _pdf_text(value: object, length: int) -> str:
-    text = str(value).replace("\n", " ").replace("–", "-")
+def _pdf_text(value: object, length: int, *, font_name: str = "Helvetica") -> str:
+    text = str(value).replace("\n", " ")
+    # Check before the existing legacy length formatting, so an unsupported
+    # character beyond its cutoff cannot silently disappear into an ellipsis.
+    _require_pdf_glyphs(text, font_name)
     return text if len(text) <= length else f"{text[: length - 1]}…"
 
 
@@ -316,7 +398,11 @@ def _value_labels_text(value_labels: object) -> str:
 def _excel_value(value: Any) -> Any:
     """Convert structured metadata into a lossless, Excel-safe scalar."""
     if isinstance(value, (Mapping, list, tuple)):
-        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        value = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    # openpyxl silently slices strings during cell assignment. Fail before that
+    # boundary, including for serialized nested metadata and column headers.
+    if isinstance(value, str) and len(value) > 32767:
+        raise ReportExportError("XLSX_CELL_TEXT_LIMIT_EXCEEDED: cell text exceeds 32767 characters")
     return value
 
 

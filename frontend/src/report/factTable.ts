@@ -96,6 +96,31 @@ function asEvidenceRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/**
+ * Result identity has two intentionally supported wire shapes. The older
+ * browser fixtures use the generic evidence-envelope identity, while the
+ * server-owned Report envelope uses the concrete run/model identity emitted
+ * by the backend. Accept neither shape unless all of its required fields are
+ * present; this is a schema compatibility seam, not a raw JSON escape.
+ */
+function readResultIdentity(value: unknown): Record<string, unknown> | null {
+  const record = asEvidenceRecord(value);
+  if (!record || typeof record.schema_version !== "string" || record.schema_version.trim() === "") {
+    return null;
+  }
+  const hasEnvelopeIdentity = typeof record.contract === "string"
+    && record.contract.trim() !== ""
+    && typeof record.result_id === "string"
+    && record.result_id.trim() !== "";
+  const hasServerRunIdentity = typeof record.result_ref === "string"
+    && record.result_ref.trim() !== ""
+    && typeof record.run_id === "string"
+    && record.run_id.trim() !== ""
+    && typeof record.model_run_id === "string"
+    && record.model_run_id.trim() !== "";
+  return hasEnvelopeIdentity || hasServerRunIdentity ? record : null;
+}
+
 function readEvidenceProvenance(value: unknown): ReportEvidenceProvenance | null {
   const record = asEvidenceRecord(value);
   if (!record) return null;
@@ -181,11 +206,8 @@ function readEvidenceProvenance(value: unknown): ReportEvidenceProvenance | null
   if (!Array.isArray(record.lineageRefs) || !record.lineageRefs.every((item) => typeof item === "string" && item.trim() !== "")) {
     return null;
   }
-  const resultIdentity = asEvidenceRecord(record.resultIdentity);
+  const resultIdentity = readResultIdentity(record.resultIdentity);
   if (!resultIdentity) return null;
-  for (const key of ["contract", "result_id", "schema_version"] as const) {
-    if (typeof resultIdentity[key] !== "string" || resultIdentity[key] === "") return null;
-  }
   for (const key of requiredTextKeys) {
     parsedProvenance[key] = record[key];
   }
@@ -418,11 +440,23 @@ export function readReportEvidenceProjection(
   ) return null;
   const resultIdentity = provenance.resultIdentity;
   if (resultIdentity) {
-    for (const key of ["projectRef", "sessionRef", "scopeRef", "runId", "modelRunId"] as const) {
-      if (resultIdentity[key] !== undefined && resultIdentity[key] !== candidate[key]) return null;
+    for (const [camelKey, snakeKey] of [
+      ["projectRef", "project_ref"],
+      ["sessionRef", "session_ref"],
+      ["scopeRef", "scope_ref"],
+      ["runId", "run_id"],
+      ["modelRunId", "model_run_id"],
+    ] as const) {
+      const camelValue = resultIdentity[camelKey];
+      const snakeValue = resultIdentity[snakeKey];
+      if (camelValue !== undefined && typeof camelValue !== "string") return null;
+      if (snakeValue !== undefined && typeof snakeValue !== "string") return null;
+      if (camelValue !== undefined && snakeValue !== undefined && camelValue !== snakeValue) return null;
+      const boundValue = camelValue ?? snakeValue;
+      if (boundValue !== undefined && boundValue !== candidate[camelKey]) return null;
     }
   }
-  if (parsedStatus === "available") {
+  if (parsedStatus === "available" || parsedStatus === "degraded") {
     const serverReceipt = readReportEvidenceServerReceipt(serverReceiptValue);
     if (!serverReceipt || serverReceipt.projectionDigest !== candidate.projectionDigest) return null;
     if (identityKeys.some((key) => serverReceipt.identity[key] !== candidate[key])) return null;
@@ -434,16 +468,19 @@ export function readReportEvidenceProjection(
     if (
       candidate.availability !== "available"
       || candidate.executionStatus !== "completed"
-      || candidate.completenessStatus !== "complete"
       || candidate.validationStatus === "unavailable"
       || commitId === "UNAVAILABLE"
       || candidate.envelopeDigest === "UNAVAILABLE"
       || candidate.projectionId !== `${candidate.consumerId}:${commitId}`
       || identityKeys.some((key) => candidate[key] === "UNAVAILABLE")
     ) return null;
+    if (parsedStatus === "available" && candidate.completenessStatus !== "complete") return null;
+    if (parsedStatus === "degraded" && (
+      candidate.completenessStatus !== "degraded"
+      || ["met", "validated", "complete"].includes(parsedValidationStatus)
+    )) return null;
   } else {
     if (base.facts.length !== 0) return null;
-    if (["degraded", "blocked"].includes(parsedStatus) && ["met", "validated", "complete"].includes(parsedValidationStatus)) return null;
     if (parsedStatus === "unavailable" && candidate.availability === "available") return null;
   }
   return {
@@ -540,7 +577,11 @@ export function buildReportEvidenceFacts(
   evidence: ReportEvidenceProjection | null | undefined,
   startAt = 0,
 ): CitableFact[] {
-  if (!evidence || evidence.status !== "available") return [];
+  // A degraded projection is still citable when the server has explicitly
+  // admitted it as available and the projection carries its warnings. The
+  // warning belongs in the evidence status; dropping the facts here would
+  // make the Report writer silently disagree with the visible evidence table.
+  if (!evidence || !["available", "degraded"].includes(evidence.status)) return [];
   const commitId = evidence.commitId ?? evidence.provenance.commitId;
   return evidence.facts.slice(0, MAX_TYPED_EVIDENCE_FACTS).map((fact, index) => ({
     id: `c${startAt + index + 1}`,

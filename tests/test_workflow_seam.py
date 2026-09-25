@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -32,7 +34,18 @@ from workbench.agent.workflow_contracts import (
     workflow_step_vocabulary,
 )
 from workbench.agent.workflow_runtime import build_workflow_step_executor
-from workbench.artifacts import read_json, sha256_file, write_json
+from workbench.agent.workflow_runtime import (
+    _admit_workflow_host_endpoint_from_supervisor,
+    issue_server_evidence_port,
+)
+import workbench.agent.workflow_runtime as workflow_runtime
+from workbench.artifacts import (
+    initialize_artifact_index,
+    read_json,
+    register_artifact,
+    sha256_file,
+    write_json,
+)
 from workbench.graph_store import GraphStore
 from workbench.statistical_exploration import resolve_statistical_source
 
@@ -226,9 +239,81 @@ def _chain_frame() -> pd.DataFrame:
     )
 
 
+def _workflow_source_project(tmp_path: Path, frame: pd.DataFrame):
+    """Create the legacy source graph with the current canonical artifact record."""
+
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    run_root = project / "runs" / run_id
+    initialize_artifact_index(run_root)
+    register_artifact(
+        run_root,
+        artifact_id,
+        run_root / "data.csv",
+        "raw_data",
+        "fixture",
+        [],
+    )
+    return project, run_id, artifact_id
+
+
+def _admitted_evidence_port(project: Path):
+    """Issue the test's workflow evidence capability from an admitted directory."""
+
+    workflow_directory = project / "workbench" / "workflows"
+    workflow_directory.mkdir(parents=True, exist_ok=True)
+    endpoint_fd = os.open(
+        workflow_directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        endpoint = _admit_workflow_host_endpoint_from_supervisor(project, endpoint_fd)
+        with patch.object(
+            workflow_runtime,
+            "_deployment_host_endpoint_from_supervisor",
+            return_value=endpoint,
+        ):
+            return issue_server_evidence_port(project)
+    finally:
+        os.close(endpoint_fd)
+
+
+def _admitted_runtime(project: Path, draft):
+    """Return the raw receipt-gated callback and its server-issued evidence port."""
+
+    evidence_port = _admitted_evidence_port(project)
+    executor = build_workflow_step_executor(
+        project,
+        draft,
+        evidence_port=evidence_port,
+    )
+    return evidence_port, executor
+
+
+def _admitted_step_executor(project: Path, draft):
+    """Run one direct step call through its typed server admission."""
+
+    evidence_port, executor = _admitted_runtime(project, draft)
+
+    def execute(step, previous):
+        receipt = evidence_port.admit(draft, step)
+        try:
+            result = executor(
+                step,
+                previous,
+                admission_receipt=receipt,
+            )
+            evidence_port.complete(receipt, result)
+            return result
+        except Exception as error:
+            evidence_port.abort(receipt, str(error))
+            raise
+
+    return execute
+
+
 def _compiled_chain(tmp_path: Path, steps: list[dict]):
     frame = _chain_frame()
-    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    project, run_id, artifact_id = _workflow_source_project(tmp_path, frame)
     draft = compile_workflow(
         workflow_id="wf_seam",
         target={
@@ -236,7 +321,10 @@ def _compiled_chain(tmp_path: Path, steps: list[dict]):
             "node_ref": "stage:source",
             "artifact_id": artifact_id,
         },
-        preconditions={"context_fingerprint": "sha256:fixture"},
+        preconditions={
+            "context_fingerprint": "sha256:fixture",
+            "active_head_run_id": run_id,
+        },
         steps=steps,
         available_columns=list(frame.columns),
     )
@@ -247,7 +335,7 @@ def test_a_dataset_producing_step_publishes_a_resolvable_binding(tmp_path: Path)
     """The output block carries everything a downstream step needs to resolve."""
 
     project, draft = _compiled_chain(tmp_path, [_numeric_step("first", "doubled")])
-    executor = build_workflow_step_executor(project, draft)
+    executor = _admitted_step_executor(project, draft)
 
     result = executor(draft.steps[0], {})
 
@@ -320,8 +408,11 @@ def test_a_chained_plan_runs_end_to_end_with_the_right_numbers(tmp_path: Path) -
         ],
     )
 
+    evidence_port, executor = _admitted_runtime(project, draft)
     state = WorkflowExecutor(project).execute(
-        draft, build_workflow_step_executor(project, draft)
+        draft,
+        executor,
+        evidence_port=evidence_port,
     )
 
     assert state.steps["second"].status == "completed", state.steps["second"].error
@@ -374,7 +465,7 @@ def test_a_chained_step_reads_the_bytes_the_upstream_step_published(
             _chained_step("second", "first", "scaled", "doubled"),
         ],
     )
-    executor = build_workflow_step_executor(project, draft)
+    executor = _admitted_step_executor(project, draft)
     upstream = executor(draft.steps[0], {})
 
     produced = upstream.payload["produced_dataset"]
@@ -403,7 +494,7 @@ def test_an_unresolved_source_refuses_rather_than_falling_back(tmp_path: Path) -
             _chained_step("second", "first", "scaled", "doubled"),
         ],
     )
-    executor = build_workflow_step_executor(project, draft)
+    executor = _admitted_step_executor(project, draft)
 
     with pytest.raises(
         WorkflowExecutionError,
@@ -427,7 +518,7 @@ def test_an_upstream_without_the_declared_binding_refuses(tmp_path: Path) -> Non
             _chained_step("second", "first", "scaled", "doubled"),
         ],
     )
-    executor = build_workflow_step_executor(project, draft)
+    executor = _admitted_step_executor(project, draft)
     upstream = executor(draft.steps[0], {})
     without_binding = WorkflowStepResult(
         artifact_ids=list(upstream.artifact_ids),
@@ -586,7 +677,7 @@ def _binding_but(tmp_path: Path, **overrides: object):
         tmp_path,
         [_numeric_step("first", "doubled"), _chained_step("second", "first", "scaled", "doubled")],
     )
-    executor = build_workflow_step_executor(project, draft)
+    executor = _admitted_step_executor(project, draft)
     upstream = executor(draft.steps[0], {})
     binding = {**upstream.payload["produced_dataset"], **overrides}
     for key, value in overrides.items():
@@ -655,7 +746,7 @@ def _run_chain(tmp_path: Path) -> tuple[Path, object, dict]:
             _chained_step("second", "first", "scaled", "doubled"),
         ],
     )
-    executor = build_workflow_step_executor(project, draft)
+    executor = _admitted_step_executor(project, draft)
     upstream = executor(draft.steps[0], {})
     downstream = executor(draft.steps[1], {"first": upstream})
     return project, draft, {"first": upstream, "second": downstream}
@@ -743,7 +834,7 @@ def test_a_sourceless_step_still_claims_the_original_table(tmp_path: Path) -> No
     """
 
     project, draft = _compiled_chain(tmp_path, [_numeric_step("first", "doubled")])
-    executor = build_workflow_step_executor(project, draft)
+    executor = _admitted_step_executor(project, draft)
 
     result = executor(draft.steps[0], {})
 
@@ -1319,7 +1410,7 @@ def _meta_project(tmp_path: Path):
     from workbench.lineage.upload_store import store_upload_bytes
 
     frame = _meta_frame()
-    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    project, run_id, artifact_id = _workflow_source_project(tmp_path, frame)
     upload_sha = store_upload_bytes(
         project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
     )
@@ -1336,7 +1427,10 @@ def _meta_project(tmp_path: Path):
     draft = compile_workflow(
         workflow_id="wf_lineage_meta",
         target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
-        preconditions={"context_fingerprint": "sha256:fixture"},
+        preconditions={
+            "context_fingerprint": "sha256:fixture",
+            "active_head_run_id": run_id,
+        },
         steps=_meta_plan(
             secondary_run_id=run_id,
             secondary_artifact_id=artifact_id,
@@ -1632,7 +1726,7 @@ def test_every_consuming_operation_records_the_dataset_it_actually_read(
         )
 
     project, draft = _meta_project(tmp_path)
-    executor = build_workflow_step_executor(project, draft)
+    executor = _admitted_step_executor(project, draft)
     by_id = {step.step_id: step for step in draft.steps}
 
     results: dict[str, WorkflowStepResult] = {}
@@ -1706,18 +1800,26 @@ def _interrupted_chain(tmp_path: Path):
             _chained_step("second", "first", "scaled", "doubled"),
         ],
     )
-    real = build_workflow_step_executor(project, draft)
+    evidence_port, real = _admitted_runtime(project, draft)
 
-    def interrupted(step, previous):
+    callback = real._callback
+
+    def interrupted(step, previous, **kwargs):
         if step.step_id == "second":
             raise WorkflowExecutionError("simulated interruption")
-        return real(step, previous)
+        return callback(step, previous, **kwargs)
 
-    first_pass = WorkflowExecutor(project).execute(draft, interrupted)
+    real._callback = interrupted
+    first_pass = WorkflowExecutor(project).execute(
+        draft,
+        real,
+        evidence_port=evidence_port,
+    )
     assert first_pass.status == "failed"
     assert first_pass.steps["first"].status == "completed"
     assert first_pass.steps["second"].status == "failed"
-    return project, draft, real
+    real._callback = callback
+    return project, draft, real, evidence_port
 
 
 def test_a_resumed_chain_can_still_resolve_the_upstream_binding(tmp_path: Path) -> None:
@@ -1728,9 +1830,13 @@ def test_a_resumed_chain_can_still_resolve_the_upstream_binding(tmp_path: Path) 
     the rebuilt result carries an empty payload.
     """
 
-    project, draft, real = _interrupted_chain(tmp_path)
+    project, draft, real, evidence_port = _interrupted_chain(tmp_path)
 
-    resumed = WorkflowExecutor(project).execute(draft, real)
+    resumed = WorkflowExecutor(project).execute(
+        draft,
+        real,
+        evidence_port=evidence_port,
+    )
 
     assert resumed.steps["second"].status == "completed", resumed.steps["second"].error
     assert resumed.status == "completed"
@@ -1744,7 +1850,7 @@ def test_the_published_binding_reaches_the_persisted_state_file(tmp_path: Path) 
     process gets is whatever is in this file.
     """
 
-    project, draft, _ = _interrupted_chain(tmp_path)
+    project, draft, _, _ = _interrupted_chain(tmp_path)
 
     completed = [
         record
@@ -1752,8 +1858,9 @@ def test_the_published_binding_reaches_the_persisted_state_file(tmp_path: Path) 
         if record["steps"]["first"]["status"] == "completed"
     ]
     assert completed, "the first step never reached a completed state record"
-    binding = completed[-1]["steps"]["first"]["produced_dataset"]
+    binding = completed[-1]["steps"]["first"]["output_bindings"][PERSISTED_STEP_OUTPUT]
 
+    assert binding["binding_type"] == "dataset"
     assert binding["schema_version"] == "workflow-produced-dataset.v1"
     assert binding["run_id"] == draft.target["run_id"]
     # The persisted binding must name the derived dataset, not the workflow's
@@ -1779,7 +1886,7 @@ def test_only_the_declared_output_binding_is_persisted(tmp_path: Path) -> None:
     the exact seam this slice exists to narrow.
     """
 
-    project, _, _ = _interrupted_chain(tmp_path)
+    project, _, _, _ = _interrupted_chain(tmp_path)
 
     completed = [
         record
@@ -1837,42 +1944,34 @@ def test_a_non_object_persisted_binding_is_refused_rather_than_read(tmp_path: Pa
 
 
 def test_a_binding_lost_across_resume_names_the_persistence_gap(tmp_path: Path) -> None:
-    """The two ways a binding can be absent send a reader to different places.
+    """A state binding changed after completion is rejected by the server seal.
 
-    "the upstream published nothing" points at the producing step's output;
-    "the binding did not survive resume" points at the round trip through the
-    state file. Reporting the first for the second sends whoever hits it to
-    audit a step whose output is intact.
-
-    What the branch may NOT do is pick one cause of the loss and assert it. A
-    stale state record and a producer that never published are both reachable
-    here, and they need opposite responses -- re-run, or fix the producer. A
-    message naming only the first tells whoever hit the second to re-run into an
-    identical failure.
+    The current resume protocol compares persisted state with the server-owned
+    completion before reconstructing a result. Removing a binding therefore
+    proves the stronger authority boundary: the tampered state cannot be
+    reinterpreted as a legitimate historical persistence gap.
     """
 
-    project, draft, real = _interrupted_chain(tmp_path)
+    project, draft, real, evidence_port = _interrupted_chain(tmp_path)
 
     # Rewrite the state the way a pre-persistence version of this executor
     # would have written it, then resume against it.
     stripped = []
     for record in _state_records(project):
         for step_state in record["steps"].values():
-            step_state.pop(PERSISTED_STEP_OUTPUT, None)
+            step_state.get("output_bindings", {}).pop(PERSISTED_STEP_OUTPUT, None)
         stripped.append(json.dumps(record, ensure_ascii=False))
     _state_path(project).write_text("\n".join(stripped) + "\n", encoding="utf-8")
 
-    resumed = WorkflowExecutor(project).execute(draft, real)
-
-    assert resumed.steps["second"].status == "failed"
-    error = resumed.steps["second"].error or ""
-    assert "did not survive" in error, error
-    assert "persisted workflow state" in error, error
-    # Must not be reported as an upstream that published nothing.
-    assert "published no" not in error, error
-    # Both causes have to be on offer, with what to do about each.
-    assert "re-running the plan from the start" in error, error
-    assert "without publishing the binding" in error, error
+    with pytest.raises(
+        WorkflowExecutionError,
+        match="persisted output_bindings differ from the server completion",
+    ):
+        WorkflowExecutor(project).execute(
+            draft,
+            real,
+            evidence_port=evidence_port,
+        )
 
 
 def test_a_step_publishing_an_unstorable_binding_fails_rather_than_losing_it(
@@ -1895,10 +1994,12 @@ def test_a_step_publishing_an_unstorable_binding_fails_rather_than_losing_it(
             _chained_step("second", "first", "scaled", "doubled"),
         ],
     )
-    real = build_workflow_step_executor(project, draft)
+    evidence_port, real = _admitted_runtime(project, draft)
 
-    def publishes_a_list(step, previous):
-        result = real(step, previous)
+    callback = real._callback
+
+    def publishes_a_list(step, previous, **kwargs):
+        result = callback(step, previous, **kwargs)
         if step.step_id != "first":
             return result
         return dataclasses.replace(
@@ -1906,11 +2007,16 @@ def test_a_step_publishing_an_unstorable_binding_fails_rather_than_losing_it(
             payload={**result.payload, "produced_dataset": ["not", "an", "object"]},
         )
 
-    state = WorkflowExecutor(project).execute(draft, publishes_a_list)
+    real._callback = publishes_a_list
+    state = WorkflowExecutor(project).execute(
+        draft,
+        real,
+        evidence_port=evidence_port,
+    )
 
     assert state.steps["first"].status == "failed"
     error = state.steps["first"].error or ""
-    assert "produced_dataset that must be an object, got list" in error, error
+    assert "workflow output binding 'produced_dataset' must be an object" in error, error
     # The step must not be recorded as completed-with-nothing-published, which
     # is the shape a later resume would misdiagnose.
     assert state.steps["first"].produced_dataset is None
@@ -1947,14 +2053,17 @@ def _two_plans_on_one_project(tmp_path: Path, plan_a: list[dict], plan_b: list[d
     """
 
     frame = _chain_frame()
-    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    project, run_id, artifact_id = _workflow_source_project(tmp_path, frame)
     target = {"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id}
 
     def build(steps: list[dict]):
         return compile_workflow(
             workflow_id="wf_seam",
             target=dict(target),
-            preconditions={"context_fingerprint": "sha256:fixture"},
+            preconditions={
+                "context_fingerprint": "sha256:fixture",
+                "active_head_run_id": run_id,
+            },
             steps=steps,
             available_columns=list(frame.columns),
         )
@@ -2034,14 +2143,21 @@ def test_a_failed_chain_head_blocks_the_step_below_it(tmp_path: Path) -> None:
             _chained_step("second", "first", "scaled", "weight"),
         ],
     )
-    real = build_workflow_step_executor(project, draft)
+    evidence_port, real = _admitted_runtime(project, draft)
 
-    def head_fails(step, previous):
+    callback = real._callback
+
+    def head_fails(step, previous, **kwargs):
         if step.step_id == "first":
             raise WorkflowExecutionError("simulated head failure")
-        return real(step, previous)
+        return callback(step, previous, **kwargs)
 
-    state = WorkflowExecutor(project).execute(draft, head_fails)
+    real._callback = head_fails
+    state = WorkflowExecutor(project).execute(
+        draft,
+        real,
+        evidence_port=evidence_port,
+    )
 
     assert state.steps["first"].status == "failed"
     # blocked, specifically: not `failed` (which would say `second` was tried
@@ -2112,7 +2228,7 @@ def test_the_same_exploration_on_a_derived_table_is_a_different_identity(
         by_id["derived"].spec
     )
 
-    executor = build_workflow_step_executor(project, draft)
+    executor = _admitted_step_executor(project, draft)
     upstream = executor(by_id["first"], {})
     direct = executor(by_id["direct"], {})
 

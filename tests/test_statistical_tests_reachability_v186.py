@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -116,6 +118,15 @@ def test_http_run_accepts_declared_paired_columns(tmp_path) -> None:
         time.sleep(0.1)
     assert detail["status"] == "completed", detail
 
-    kinds = {row["test_type"] for row in detail["statistical_evidence"]["results"]}
+    # The HTTP compatibility field is not a typed authority without a
+    # server-owned identity/lineage binding.  The durable packet below is the
+    # producer evidence; the central consumer surface is explicitly
+    # unavailable instead of reconstructing it from a raw artifact.
+    assert detail["statistical_evidence"] is None
+    assert detail["statistical_evidence_authority"] == "non-authoritative"
+    assert detail["results_evidence"]["status"] == "unavailable"
+    assert detail["results_evidence"]["facts"] == []
+
+    kinds = {row["test_type"] for row in _evidence(Path(root) / "runs" / run_id)}
     assert "paired_t_test" in kinds, kinds
     assert "wilcoxon_signed_rank" in kinds, kinds

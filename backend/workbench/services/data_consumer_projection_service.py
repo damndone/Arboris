@@ -17,7 +17,6 @@ import weakref
 
 from ..agent.operations import OperationRecord, OperationRecordStore
 from ..canonical import sha256_canonical
-from ..data_operation_manifest import _DATA_OPERATION_IDS, build_data_consumer_runtime_adapter
 from ..predictive_research.contracts import ContractError
 from .data_consumer_host_resolver import (
     DataConsumerHostResolverError,
@@ -71,6 +70,8 @@ def _require_identity(value: object, name: str) -> str:
 
 def _live_catalog_digest() -> str:
     try:
+        from ..data_operation_manifest import build_data_consumer_runtime_adapter
+
         return build_data_consumer_runtime_adapter().catalog_digest
     except (ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
         raise DataConsumerProjectionError(
@@ -183,6 +184,8 @@ def _opaque_claim_required(record: OperationRecord, field_name: str) -> str:
 
 
 def _record_matches(record: OperationRecord, scope: _CapabilityRecord) -> bool:
+    from ..data_operation_manifest import _DATA_OPERATION_IDS
+
     if record.operation_id not in _DATA_OPERATION_IDS:
         return False
     if record.agent_session_id != scope.session_ref:

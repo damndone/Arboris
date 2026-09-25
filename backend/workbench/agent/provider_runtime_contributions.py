@@ -80,6 +80,7 @@ def _package_contribution(
     *,
     data_consumer_execution_port: object | None = None,
     classification_execution_port: object | None = None,
+    workflow_post_estimation_execution_port: object | None = None,
 ) -> ProviderRuntimeContributionV1 | None:
     if declaration.executor_ref == "executor:workbench.data_consumer.adapter":
         from workbench.data_operation_manifest import build_data_consumer_runtime_contribution
@@ -100,6 +101,22 @@ def _package_contribution(
             )
         except TrustedExecutorRegistryError as exc:
             raise ProviderRuntimeCompositionError(exc.code, str(exc)) from exc
+    if declaration.executor_ref.startswith("executor:workflow.post_estimation."):
+        from workbench.services.workflow_post_estimation_host import (
+            build_workflow_post_estimation_runtime_contribution,
+        )
+
+        try:
+            return build_workflow_post_estimation_runtime_contribution(
+                provider,
+                declaration,
+                catalog_digest=provider_catalog.catalog_digest,
+                execution_port=workflow_post_estimation_execution_port,
+            )
+        except TrustedExecutorRegistryError as exc:
+            if workflow_post_estimation_execution_port is None:
+                return None
+            raise ProviderRuntimeCompositionError(exc.code, str(exc)) from exc
     return None
 
 
@@ -108,6 +125,7 @@ def build_builtin_runtime_contributions(
     *,
     data_consumer_execution_port: object | None = None,
     classification_execution_port: object | None = None,
+    workflow_post_estimation_execution_port: object | None = None,
 ) -> tuple[ProviderRuntimeContributionV1, ...]:
     """Build exactly one trusted contribution for every live adapter declaration.
 
@@ -135,6 +153,7 @@ def build_builtin_runtime_contributions(
                 declaration,
                 data_consumer_execution_port=data_consumer_execution_port,
                 classification_execution_port=classification_execution_port,
+                workflow_post_estimation_execution_port=workflow_post_estimation_execution_port,
             )
             contributions.append(
                 contribution

@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import stat
+import fcntl
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,13 +15,15 @@ from typing import Any, Mapping
 
 from ..exploration_log import ExplorationLog
 from .operations import OperationValidationError
-from .storage import append_jsonl_atomic, read_jsonl
 from .workflow_contracts import WORKFLOW_TEMPLATE, validate_workflow_steps
 
 
-# Written into every plan and state record. Nothing compares it on read, so
-# older records keep their previous value; it is metadata, not a gate.
+# Written into every plan record. Workflow execution state has its own exact
+# version gate below because a resumed callback can consume persisted output
+# bindings and evidence receipts. A missing or unknown execution-state schema
+# must never be normalized into the current runtime.
 WORKFLOW_SCHEMA_VERSION = "workflow.v1"
+WORKFLOW_EXECUTION_STATE_SCHEMA_VERSION = "workflow-execution-state.v1.8.9"
 
 # ``produced_dataset`` remains a read-compatible name for pre-v1.8.9 state.
 # New state is typed by output name and binding type.
@@ -30,6 +35,11 @@ MAX_PERSISTED_METADATA_BYTES = 64 * 1024
 MAX_PERSISTED_METADATA_DEPTH = 6
 MAX_PERSISTED_METADATA_ITEMS = 128
 MAX_PERSISTED_ARTIFACT_IDS = 256
+# State is append-only, but a corrupted or hostile file must not turn Resume
+# into an unbounded memory/CPU read.  These are deployment-independent format
+# limits, not a claim about the maximum size of a statistical result artifact.
+MAX_WORKFLOW_STATE_BYTES = 16 * 1024 * 1024
+MAX_WORKFLOW_STATE_RECORDS = 4096
 # Counts cross the Python/JSON/TypeScript boundary.  Keep them bounded rather
 # than allowing Python's arbitrary-precision integers to become unbounded
 # persisted metadata.
@@ -286,6 +296,8 @@ class WorkflowDraft:
     status: str = "planned"
     compiler_authority: str = SERVER_COMPILER_AUTHORITY
     compiler_receipt: WorkflowCompilerReceipt | None = None
+    project_ref: str | None = None
+    session_ref: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -298,6 +310,8 @@ class WorkflowDraft:
             "steps": [step.to_dict() for step in self.steps],
             "plan_fingerprint": self.plan_fingerprint,
             "status": self.status,
+            "project_ref": self.project_ref,
+            "session_ref": self.session_ref,
             "compiler_authority": self.compiler_authority,
             "compiler_receipt": (
                 self.compiler_receipt.to_dict()
@@ -309,6 +323,15 @@ class WorkflowDraft:
 
 class WorkflowExecutionError(RuntimeError):
     """Raised when a workflow cannot safely continue or resume."""
+
+
+class UnsupportedVersionError(WorkflowExecutionError):
+    """Raised when persisted workflow state is not the current exact contract."""
+
+    code = "UNSUPPORTED_VERSION"
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or self.code)
 
 
 def _source_commitment_digest(
@@ -418,6 +441,54 @@ def _validated_artifact_ids(value: Any) -> list[str]:
     result = [str(item) for item in value]
     if any(not item for item in result):
         raise WorkflowExecutionError("workflow artifact identities must be non-empty strings")
+    return result
+
+
+def _validated_model_branch_ids(value: Any) -> dict[str, tuple[str, ...]]:
+    """Validate the explicit model-branch identity index carried by Resume."""
+
+    if not isinstance(value, Mapping) or len(value) > MAX_PERSISTED_OUTPUT_BINDINGS:
+        raise WorkflowExecutionError("workflow model branch identity index is invalid")
+    normalized: dict[str, tuple[str, ...]] = {}
+    for step_id, branch_ids in value.items():
+        if type(step_id) is not str or not step_id:
+            raise WorkflowExecutionError(
+                "workflow model branch identity index contains an invalid step id"
+            )
+        if not isinstance(branch_ids, (list, tuple)) or not branch_ids:
+            raise WorkflowExecutionError(
+                f"workflow model branch identity index for {step_id!r} is invalid"
+            )
+        if len(branch_ids) > MAX_PERSISTED_ARTIFACT_IDS:
+            raise WorkflowExecutionError(
+                "workflow model branch identity index exceeds its persistence bound"
+            )
+        ids = tuple(str(branch_id) for branch_id in branch_ids)
+        if any(not branch_id for branch_id in ids) or len(set(ids)) != len(ids):
+            raise WorkflowExecutionError(
+                f"workflow model branch identity index for {step_id!r} is not unique"
+            )
+        normalized[step_id] = ids
+    return normalized
+
+
+def _model_branch_ids(states: Mapping[str, "WorkflowStepState"]) -> dict[str, tuple[str, ...]]:
+    """Derive the Resume branch identity index from typed completed outputs."""
+
+    result: dict[str, tuple[str, ...]] = {}
+    for step_id, state in states.items():
+        binding = state.output_bindings.get("model_branches")
+        branches = binding.get("branches") if isinstance(binding, Mapping) else None
+        if not isinstance(branches, list) or not branches:
+            continue
+        branch_ids: list[str] = []
+        for branch in branches:
+            if not isinstance(branch, Mapping) or type(branch.get("branch_id")) is not str:
+                raise WorkflowExecutionError(
+                    f"workflow step {step_id!r} has an invalid model branch identity"
+                )
+            branch_ids.append(branch["branch_id"])
+        result[step_id] = tuple(branch_ids)
     return result
 
 
@@ -647,43 +718,290 @@ class WorkflowExecutionState:
     plan_fingerprint: str
     status: str
     steps: dict[str, WorkflowStepState]
+    schema_version: str = WORKFLOW_EXECUTION_STATE_SCHEMA_VERSION
+    project_ref: str | None = None
+    session_ref: str | None = None
+    model_branch_ids: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "record_type": "workflow_state",
+            "schema_version": WORKFLOW_EXECUTION_STATE_SCHEMA_VERSION,
             "workflow_id": self.workflow_id,
             "plan_fingerprint": self.plan_fingerprint,
             "status": self.status,
+            "project_ref": self.project_ref,
+            "session_ref": self.session_ref,
+            "model_branch_ids": {
+                step_id: list(branch_ids)
+                for step_id, branch_ids in _validated_model_branch_ids(
+                    self.model_branch_ids
+                ).items()
+            },
             "steps": {key: value.to_dict() for key, value in self.steps.items()},
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "WorkflowExecutionState":
+        if not isinstance(value, Mapping):
+            raise UnsupportedVersionError("UNSUPPORTED_VERSION: workflow execution state is not an object")
+        schema_version = value.get("schema_version")
+        if schema_version != WORKFLOW_EXECUTION_STATE_SCHEMA_VERSION:
+            supplied = "missing" if schema_version is None else repr(schema_version)
+            raise UnsupportedVersionError(
+                "UNSUPPORTED_VERSION: workflow execution state schema "
+                f"{supplied} is not {WORKFLOW_EXECUTION_STATE_SCHEMA_VERSION}"
+            )
+        required_identity_fields = ("project_ref", "session_ref", "model_branch_ids")
+        if any(field_name not in value for field_name in required_identity_fields):
+            raise UnsupportedVersionError(
+                "UNSUPPORTED_VERSION: workflow execution state lacks the v1.8.9 "
+                "Resume identity and model-branch fields"
+            )
+        project_ref = value.get("project_ref")
+        session_ref = value.get("session_ref")
+        if project_ref is not None and (
+            type(project_ref) is not str or not project_ref.strip()
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_STATE_CORRUPT: project_ref is invalid"
+            )
+        if session_ref is not None and (
+            type(session_ref) is not str or not session_ref.strip()
+        ):
+            raise WorkflowExecutionError(
+                "WORKFLOW_STATE_CORRUPT: session_ref is invalid"
+            )
+        model_branch_ids = _validated_model_branch_ids(value.get("model_branch_ids"))
+        raw_steps = value.get("steps")
+        if not isinstance(raw_steps, Mapping):
+            raise WorkflowExecutionError("WORKFLOW_STATE_CORRUPT: workflow steps must be an object")
+        normalized_steps: dict[str, WorkflowStepState] = {}
+        for key, item in raw_steps.items():
+            if type(key) is not str or not isinstance(item, Mapping):
+                raise WorkflowExecutionError("WORKFLOW_STATE_CORRUPT: workflow step identity is invalid")
+            if item.get("step_id") != key:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_STATE_CORRUPT: persisted step key does not match step_id"
+                )
+            normalized_steps[key] = WorkflowStepState.from_dict(item)
         return cls(
             workflow_id=str(value["workflow_id"]),
             plan_fingerprint=str(value["plan_fingerprint"]),
             status=str(value.get("status", "planned")),
-            steps={
-                str(key): WorkflowStepState.from_dict(item)
-                for key, item in (value.get("steps") or {}).items()
-            },
+            steps=normalized_steps,
+            schema_version=schema_version,
+            project_ref=project_ref,
+            session_ref=session_ref,
+            model_branch_ids=model_branch_ids,
         )
 
 
 class WorkflowStateStore:
-    """Append-only workflow execution state used for resumable runs."""
+    """FD-admitted append-only workflow state used for resumable runs."""
 
-    def __init__(self, project_root: Path | str, workflow_id: str) -> None:
+    def __init__(
+        self,
+        project_root: Path | str,
+        workflow_id: str,
+        *,
+        evidence_port: object | None = None,
+    ) -> None:
         if not workflow_id or Path(workflow_id).name != workflow_id:
             raise ValueError("workflow_id must be path-safe")
-        self.path = Path(project_root) / "workbench" / "workflows" / f"{workflow_id}.jsonl"
+        root = Path(project_root).expanduser().resolve(strict=False)
+        self.path = root / "workbench" / "workflows" / f"{workflow_id}.jsonl"
+        self._owner_pid = os.getpid()
+        self._workflow_root_fd = -1
+        if evidence_port is not None:
+            from .workflow_runtime import EvidencePersistencePort
+
+            if type(evidence_port) is not EvidencePersistencePort:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_PORT_REQUIRED: state store requires the server evidence port"
+                )
+            evidence_port._require_server_host()
+            endpoint_root = Path(evidence_port.project_root).expanduser().resolve(strict=False)
+            if endpoint_root != root:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_SCOPE_MISMATCH: workflow state root does not match the server evidence port"
+                )
+            source_fd = getattr(evidence_port, "_host_endpoint_fd", None)
+            if type(source_fd) is not int or source_fd < 0:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: state store endpoint fd is unavailable"
+                )
+            try:
+                self._workflow_root_fd = os.dup(source_fd)
+            except OSError as exc:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: state store endpoint fd could not be retained"
+                ) from exc
+        else:
+            # Direct package callers are still required to pass through the
+            # local bootstrap seam on the verified Darwin host. This keeps
+            # focused state tests usable without reintroducing a pathname
+            # writer into the product execution path.
+            from .workflow_runtime import bootstrap_local_workflow_host
+
+            endpoint = bootstrap_local_workflow_host(root)
+            try:
+                self._workflow_root_fd = os.dup(endpoint.workflow_evidence_root_fd)
+            except OSError as exc:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: local state store endpoint fd is unavailable"
+                ) from exc
+        try:
+            root_stat = os.fstat(self._workflow_root_fd)
+        except OSError as exc:
+            self.close()
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: state store root is unavailable"
+            ) from exc
+        if not stat.S_ISDIR(root_stat.st_mode):
+            self.close()
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: state store root is not a directory"
+            )
 
     def append(self, state: WorkflowExecutionState) -> None:
-        append_jsonl_atomic(self.path, state.to_dict())
+        self._require_open()
+        if type(state) is not WorkflowExecutionState:
+            raise TypeError("workflow state store accepts only WorkflowExecutionState")
+        raw = (
+            json.dumps(
+                state.to_dict(),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+        lock_fd = os.dup(self._workflow_root_fd)
+        state_fd = -1
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            state_fd = os.open(
+                self.path.name,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_APPEND
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=self._workflow_root_fd,
+            )
+            if not stat.S_ISREG(os.fstat(state_fd).st_mode):
+                raise WorkflowExecutionError("WORKFLOW_STATE_PATH_INVALID: state file is not regular")
+            offset = 0
+            while offset < len(raw):
+                offset += os.write(state_fd, raw[offset:])
+            os.fsync(state_fd)
+        except WorkflowExecutionError:
+            raise
+        except (OSError, TypeError, ValueError) as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_STATE_WRITE_FAILED: workflow state could not be persisted safely"
+            ) from exc
+        finally:
+            if state_fd >= 0:
+                os.close(state_fd)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
 
     def current(self) -> WorkflowExecutionState | None:
-        records = [item for item in read_jsonl(self.path) if item.get("record_type") == "workflow_state"]
+        self._require_open()
+        lock_fd = os.dup(self._workflow_root_fd)
+        state_fd = -1
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_SH)
+            state_fd = os.open(
+                self.path.name,
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=self._workflow_root_fd,
+            )
+            if not stat.S_ISREG(os.fstat(state_fd).st_mode):
+                raise WorkflowExecutionError("WORKFLOW_STATE_PATH_INVALID: state file is not regular")
+            file_size = os.fstat(state_fd).st_size
+            if file_size > MAX_WORKFLOW_STATE_BYTES:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_STATE_TOO_LARGE: workflow state file exceeds its bounded size"
+                )
+            with os.fdopen(state_fd, "rb", closefd=True) as handle:
+                state_fd = -1
+                raw = handle.read(MAX_WORKFLOW_STATE_BYTES + 1)
+            if len(raw) > MAX_WORKFLOW_STATE_BYTES:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_STATE_TOO_LARGE: workflow state file exceeds its bounded size"
+                )
+        except FileNotFoundError:
+            return None
+        except WorkflowExecutionError:
+            raise
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_STATE_READ_FAILED: workflow state could not be read safely"
+            ) from exc
+        finally:
+            if state_fd >= 0:
+                os.close(state_fd)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
+        records: list[Mapping[str, Any]] = []
+        record_count = 0
+        for line_number, line in enumerate(raw.splitlines(), start=1):
+            if not line.strip():
+                continue
+            record_count += 1
+            if record_count > MAX_WORKFLOW_STATE_RECORDS:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_STATE_TOO_LARGE: workflow state contains too many records"
+                )
+            try:
+                value = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise WorkflowExecutionError(
+                    f"WORKFLOW_STATE_CORRUPT: invalid JSON at line {line_number}"
+                ) from exc
+            if not isinstance(value, Mapping) or value.get("record_type") != "workflow_state":
+                continue
+            records.append(value)
         return WorkflowExecutionState.from_dict(records[-1]) if records else None
+
+    def _require_open(self) -> None:
+        if self._owner_pid != os.getpid() or self._workflow_root_fd < 0:
+            raise WorkflowExecutionError(
+                "WORKFLOW_PROCESS_BOUNDARY: workflow state store belongs to another process"
+            )
+        try:
+            identity = os.fstat(self._workflow_root_fd)
+        except OSError as exc:
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: state store root is unavailable"
+            ) from exc
+        if not stat.S_ISDIR(identity.st_mode):
+            raise WorkflowExecutionError(
+                "WORKFLOW_EVIDENCE_HOST_ENDPOINT_REQUIRED: state store root is not a directory"
+            )
+
+    def close(self) -> None:
+        fd = getattr(self, "_workflow_root_fd", -1)
+        self._workflow_root_fd = -1
+        if isinstance(fd, int) and fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    def __del__(self) -> None:
+        self.close()
 
 
 class WorkflowExecutor:
@@ -730,10 +1048,26 @@ class WorkflowExecutor:
                 "the server receipt-gated callback"
             )
         step_executor._bind_evidence_port(evidence_port)
-        store = WorkflowStateStore(self.project_root, draft.workflow_id)
+        store = WorkflowStateStore(
+            self.project_root,
+            draft.workflow_id,
+            evidence_port=evidence_port,
+        )
         existing = store.current()
-        if existing is not None and existing.plan_fingerprint != draft.plan_fingerprint:
-            raise WorkflowExecutionError("source fingerprint changed; workflow plan cannot resume")
+        if existing is not None:
+            if existing.workflow_id != draft.workflow_id:
+                raise WorkflowExecutionError(
+                    "WORKFLOW_SCOPE_MISMATCH: persisted workflow identity cannot resume this draft"
+                )
+            if existing.plan_fingerprint != draft.plan_fingerprint:
+                raise WorkflowExecutionError("source fingerprint changed; workflow plan cannot resume")
+            if (
+                existing.project_ref != draft.project_ref
+                or existing.session_ref != draft.session_ref
+            ):
+                raise WorkflowExecutionError(
+                    "WORKFLOW_SCOPE_MISMATCH: persisted project/session binding cannot resume this draft"
+                )
 
         states: dict[str, WorkflowStepState] = {}
         if existing is not None:
@@ -759,11 +1093,19 @@ class WorkflowExecutor:
                 for step in draft.steps
             }
 
+        if existing is not None and existing.model_branch_ids != _model_branch_ids(states):
+            raise WorkflowExecutionError(
+                "WORKFLOW_RESUME_AUTHORITY_REQUIRED: persisted model branch identity index does not match typed outputs"
+            )
+
         state = WorkflowExecutionState(
             workflow_id=draft.workflow_id,
             plan_fingerprint=draft.plan_fingerprint,
             status="running",
             steps=states,
+            project_ref=draft.project_ref,
+            session_ref=draft.session_ref,
+            model_branch_ids=_model_branch_ids(states),
         )
         log = ExplorationLog(self.project_root, workflow_id=draft.workflow_id)
         completed_results: dict[str, WorkflowStepResult] = {
@@ -930,6 +1272,9 @@ class WorkflowExecutor:
             plan_fingerprint=draft.plan_fingerprint,
             status=status,
             steps=dict(states),
+            project_ref=draft.project_ref,
+            session_ref=draft.session_ref,
+            model_branch_ids=_model_branch_ids(states),
         )
         store.append(state)
         return state
@@ -1002,6 +1347,8 @@ def compile_workflow(
     available_columns: list[str] | tuple[str, ...] | None = None,
     workflow_template: str = "agent-composed-v1",
     bindings: Mapping[str, Any] | None = None,
+    project_ref: str | None = None,
+    session_ref: str | None = None,
 ) -> WorkflowDraft:
     """Compile an Agent-composed plan of arbitrary shape.
 
@@ -1026,6 +1373,24 @@ def compile_workflow(
     normalized_bindings = _validated_metadata(
         bindings or {}, field_name="workflow bindings"
     )
+    resolved_project_ref = project_ref
+    if resolved_project_ref is None:
+        candidate = target.get("project_ref", preconditions.get("project_ref"))
+        resolved_project_ref = candidate if isinstance(candidate, str) else None
+    resolved_session_ref = session_ref
+    if resolved_session_ref is None:
+        candidate = target.get("session_ref", preconditions.get("session_ref"))
+        resolved_session_ref = candidate if isinstance(candidate, str) else None
+    for name, value in (
+        ("project_ref", resolved_project_ref),
+        ("session_ref", resolved_session_ref),
+    ):
+        if value is not None and (
+            type(value) is not str or not value.strip() or "\x00" in value
+        ):
+            raise OperationValidationError(
+                f"workflow {name} must be a non-empty string when provided"
+            )
     source_artifact_fingerprint = str(
         preconditions.get("source_artifact_fingerprint")
         or preconditions["context_fingerprint"]
@@ -1062,6 +1427,8 @@ def compile_workflow(
         bindings=normalized_bindings,
         steps=compiled_steps,
         plan_fingerprint=plan_fingerprint,
+        project_ref=resolved_project_ref,
+        session_ref=resolved_session_ref,
         compiler_authority=SERVER_COMPILER_AUTHORITY,
         compiler_receipt=_issue_workflow_compiler_receipt(
             workflow_id=workflow_id,
@@ -1118,11 +1485,15 @@ __all__ = [
     "PERSISTED_STEP_OUTPUT",
     "PERSISTED_OUTPUT_BINDINGS",
     "PERSISTED_LINEAGE",
+    "MAX_WORKFLOW_STATE_BYTES",
+    "MAX_WORKFLOW_STATE_RECORDS",
     "SERVER_COMPILER_AUTHORITY",
     "WORKFLOW_SCHEMA_VERSION",
+    "WORKFLOW_EXECUTION_STATE_SCHEMA_VERSION",
     "WorkflowDraft",
     "WorkflowCompilerReceipt",
     "WorkflowExecutionError",
+    "UnsupportedVersionError",
     "WorkflowExecutionState",
     "WorkflowExecutor",
     "WorkflowStateStore",

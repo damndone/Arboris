@@ -13,7 +13,7 @@ import type { FC } from "react";
 import type { RegistryEntry } from "./registryTypes";
 import { LogsPanel } from "../panels/LogsPanel";
 import { AiActivityPanel } from "../panels/AiActivityPanel";
-import { AgentPanel } from "../agent/AgentPanel";
+import { AgentCutoverPanel } from "../agent/AgentCutoverPanel";
 
 export type BottomPanelId = "agent" | "logs" | "ai";
 
@@ -34,7 +34,7 @@ export const bottomPanelRegistry: BottomPanelEntry[] = [
     id: "agent",
     order: 5,
     label: "Agent",
-    Component: AgentPanel,
+    Component: AgentCutoverPanel,
     shouldRender: () => true,
   },
   {

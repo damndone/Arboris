@@ -36,6 +36,7 @@ from workbench.http.agent_routes import (
 )
 from workbench.providers.catalog import load_builtin_catalog
 from tests.v189_cutover_test_host import CutoverTestHostCompiler
+from tests.v189_cutover_test_host import make_test_identity_resolver
 
 
 _SCOPE_A = {
@@ -181,7 +182,7 @@ def _bound_agent_client(
         return scope["actor_ref"], scope["session_ref"], scope["project_ref"]
 
     configure_notebook_cutover_identity_resolver(
-        resolve_identity,
+        make_test_identity_resolver(resolve_identity),
         app_instance=host_app,
     )
     return host_app, TestClient(host_app)
@@ -382,10 +383,12 @@ def test_real_agent_http_requires_server_identity_and_canonical_project() -> Non
         app_instance=host_app,
     )
     configure_notebook_cutover_identity_resolver(
-        lambda _request, _project, _session, _notebook: (
-            _SCOPE_A["actor_ref"],
-            _SCOPE_A["session_ref"],
-            _SCOPE_A["project_ref"],
+        make_test_identity_resolver(
+            lambda _request, _project, _session, _notebook: (
+                _SCOPE_A["actor_ref"],
+                _SCOPE_A["session_ref"],
+                _SCOPE_A["project_ref"],
+            )
         ),
         app_instance=host_app,
     )
@@ -407,8 +410,11 @@ def test_real_agent_http_requires_server_identity_and_canonical_project() -> Non
             "/agent/cutover/compile",
             json={**payload, "project_ref": "project:other"},
         )
-        assert forged_project.status_code == 403, forged_project.text
-        assert forged_project.json()["error"]["code"] == "AGENT_NOTEBOOK_PROJECT_MISMATCH"
+        # The typed deployment resolver rejects the forged project before a
+        # compiler lookup.  It is a fail-closed unavailable binding, not a
+        # caller-controlled project mismatch response.
+        assert forged_project.status_code == 503, forged_project.text
+        assert forged_project.json()["error"]["code"] == "AGENT_NOTEBOOK_IDENTITY_NOT_BOUND"
     finally:
         configure_agent_notebook_runtime(
             project_ref=_SCOPE_A["project_ref"],

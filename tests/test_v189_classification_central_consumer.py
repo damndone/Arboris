@@ -109,6 +109,29 @@ def test_three_central_consumers_share_persisted_source_identity(tmp_path) -> No
     assert projections["agent"]["blocked_reasons"]
 
 
+def test_normal_classification_projection_fits_catalog_budget(tmp_path) -> None:
+    project_root = tmp_path / "project"
+    run_root = _materialize_run(project_root)
+
+    projections = {
+        consumer_id: read_classification_consumer_projection(
+            _server_capability(project_root, run_root.name),
+            consumer_id,
+        )
+        for consumer_id in ("agent", "notebook", "report")
+    }
+
+    for consumer_id, projection in projections.items():
+        assert projection["payload_schema"] == "workbench.prediction.classification-evidence"
+        assert projection["status"] in {"completed", "degraded"}
+        constraints = projection["projection_constraints"]
+        assert constraints["max_token_budget"] == 8192
+        assert constraints["token_count"] <= constraints["max_token_budget"]
+        assert constraints["row_count"] <= constraints["max_row_budget"]
+        assert projection["consumer"] == consumer_id
+        assert projection["server_identity"]["run_id"] == run_root.name
+
+
 def test_central_reader_rejects_path_and_arbitrary_project_root(tmp_path) -> None:
     project_root = tmp_path / "project"
     run_root = _materialize_run(project_root)

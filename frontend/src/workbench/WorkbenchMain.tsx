@@ -13,7 +13,7 @@ import { TableView } from "./views/TableView";
 import { PipelineView } from "./views/PipelineView";
 import { ReportView } from "../report/ReportView";
 import { WorkbenchHomeView } from "./views/WorkbenchHomeView";
-import { NotebookRouteView } from "../notebook/NotebookRouteView";
+import { NotebookCutoverView } from "../notebook/NotebookCutoverView";
 import { useForest } from "./ForestContext";
 
 export function WorkbenchMain({
@@ -59,10 +59,9 @@ export function WorkbenchMain({
       {state.view === "pipeline" && <PipelineView />}
       {state.view === "report" && <ReportView projectRoot={projectRoot} focusRequest={reportFocusRequest} />}
       {state.view === "notebook" && (
-        <NotebookRouteView
+        <NotebookCutoverView
           projectRoot={projectRoot}
           activeRunId={notebookActiveRunId}
-          onOpenMemorySettings={onOpenSettings}
         />
       )}
     </div>

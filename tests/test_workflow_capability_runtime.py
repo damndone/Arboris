@@ -3,17 +3,41 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
-from tests.test_data_column_cast import _source_project
-from workbench.agent.workflow import WorkflowExecutionError, compile_workflow
+from tests.test_data_column_cast import _source_project as _legacy_source_project
+from workbench.artifacts import initialize_artifact_index, register_artifact
+from workbench.agent.workflow import WorkflowExecutionError, WorkflowExecutor, compile_workflow
 from workbench.agent.workflow_runtime import (
+    _admit_workflow_host_endpoint_from_supervisor,
     build_workflow_step_executor,
     collect_post_estimation_results,
 )
+from workbench.lineage.run_inputs import write_run_inputs
+from workbench.lineage.upload_store import store_upload_bytes
+import workbench.agent.workflow_runtime as workflow_runtime
+
+
+def _source_project(tmp_path, frame: pd.DataFrame):
+    """Create the source fixture through the current artifact record contract."""
+
+    project, run_id, artifact_id = _legacy_source_project(tmp_path, frame)
+    run_root = project / "runs" / run_id
+    initialize_artifact_index(run_root)
+    register_artifact(
+        run_root,
+        artifact_id,
+        run_root / "data.csv",
+        "raw_data",
+        "fixture",
+        [],
+    )
+    return project, run_id, artifact_id
 
 
 def _frame() -> pd.DataFrame:
@@ -23,6 +47,14 @@ def _frame() -> pd.DataFrame:
             "x": [float((index * 3) % 11 + 1) for index in range(24)],
             "z": [float((index * 5) % 13 + 2) for index in range(24)],
         }
+    )
+
+
+def _model_frame() -> pd.DataFrame:
+    frame = _frame()
+    return pd.concat(
+        [frame, frame.assign(y=frame["y"] + len(frame))],
+        ignore_index=True,
     )
 
 
@@ -39,6 +71,30 @@ def _compile(project, run_id: str, artifact_id: str, frame: pd.DataFrame, steps:
         steps=steps,
         available_columns=list(frame.columns),
     )
+
+
+def _execute_steps_with_admitted_host(project, draft):
+    """Execute each step through the deployment-owned test host seam."""
+
+    workflow_directory = project / "workbench" / "workflows"
+    workflow_directory.mkdir(parents=True, exist_ok=True)
+    endpoint_fd = os.open(
+        workflow_directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        endpoint = _admit_workflow_host_endpoint_from_supervisor(project, endpoint_fd)
+        with patch.object(
+            workflow_runtime,
+            "_deployment_host_endpoint_from_supervisor",
+            return_value=endpoint,
+        ):
+            return WorkflowExecutor(project).execute(
+                draft,
+                build_workflow_step_executor(project, draft),
+            )
+    finally:
+        os.close(endpoint_fd)
 
 
 def test_generic_analysis_is_persisted_and_projected_with_replay_evidence(tmp_path) -> None:
@@ -64,7 +120,8 @@ def test_generic_analysis_is_persisted_and_projected_with_replay_evidence(tmp_pa
         ],
     )
 
-    result = build_workflow_step_executor(project, draft)(draft.steps[0], {})
+    state = _execute_steps_with_admitted_host(project, draft)
+    result = state.steps["correlation"]
 
     assert len(result.artifact_ids) == 1
     artifact_id = result.artifact_ids[0]
@@ -85,7 +142,7 @@ def test_generic_analysis_is_persisted_and_projected_with_replay_evidence(tmp_pa
 def test_generic_dataset_output_is_resolvable_and_role_checked(tmp_path) -> None:
     """A prepared dataset can feed a model, and its role survives persistence."""
 
-    frame = _frame()
+    frame = _model_frame()
     frame.loc[3, "x"] = None
     frame.loc[11, "z"] = None
     project, run_id, artifact_id = _source_project(tmp_path, frame)
@@ -106,28 +163,48 @@ def test_generic_dataset_output_is_resolvable_and_role_checked(tmp_path) -> None
             },
             {
                 "step_id": "estimate",
-                "operation_id": "model.auto",
+                "operation_id": "model.genesis",
                 "spec": {
-                    "input_mode": "frame",
-                    "column_bindings": {"outcome": "y", "features": ["x"]},
-                    "options": {},
                     "source": {"from_step": "prepare", "output": "produced_dataset"},
+                    "model_family": "ols",
+                    "covariance": "unadjusted",
+                    "branches": [
+                        {"branch_id": "prepared", "outcome": "y", "predictors": ["x"]}
+                    ],
                 },
             },
         ],
     )
-    execute = build_workflow_step_executor(project, draft)
+    upload_sha = store_upload_bytes(
+        project,
+        frame.to_csv(index=False).encode("utf-8"),
+        filename="fixture.csv",
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="fixture-dag",
+    )
+    state = _execute_steps_with_admitted_host(project, draft)
+    assert state.status == "completed", state.steps["estimate"].error
+    prepared = state.steps["prepare"]
+    estimated = state.steps["estimate"]
 
-    prepared = execute(draft.steps[0], {})
-    estimated = execute(draft.steps[1], {"prepare": prepared})
-
-    binding = prepared.payload["produced_dataset"]
+    binding = prepared.produced_dataset
+    assert binding is not None
     assert binding["dataset_kind"] == "prepared_data"
     assert binding["artifact_id"] in prepared.artifact_ids
-    assert estimated.payload["result"]["selected_model_type"] == "ols"
-    projected = collect_post_estimation_results(project, run_id)
-    assert [entry["operation_id"] for entry in projected] == ["model.auto"]
-    assert projected[0]["source_sha256"] == binding["content_sha256"]
+    model_binding = estimated.output_bindings["model_branches"]["branches"][0]
+    assert model_binding["branch_id"] == "prepared"
+    assert model_binding["source_artifact_id"] == binding["artifact_id"]
+    assert model_binding["source_sha256"] == binding["content_sha256"]
+    assert model_binding["run_id"] == model_binding["run_ref"]
+    assert model_binding["model_artifact_id"] in model_binding["artifact_ids"]
 
 
 def test_generic_dataset_schema_cannot_be_overwritten_after_replay(tmp_path) -> None:
@@ -154,16 +231,17 @@ def test_generic_dataset_schema_cannot_be_overwritten_after_replay(tmp_path) -> 
             }
         ],
     )
-    execute = build_workflow_step_executor(project, draft)
-    execute(draft.steps[0], {})
+    _execute_steps_with_admitted_host(project, draft)
 
-    schema_path = next((project / "runs" / run_id).rglob("*.schema.json"))
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    schema["dtypes"]["x"] = "tampered"
-    schema_path.write_text(json.dumps(schema), encoding="utf-8")
+    metadata_path = next(
+        (project / "runs" / run_id).rglob("workflow_capability/*/metadata.json")
+    )
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["columns"] = ["tampered"]
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
 
-    with pytest.raises(WorkflowExecutionError, match="schema path is occupied"):
-        execute(draft.steps[0], {})
+    with pytest.raises(WorkflowExecutionError, match="admitted artifact content digest changed"):
+        _execute_steps_with_admitted_host(project, draft)
 
 
 def test_generic_capability_failure_is_not_committed(tmp_path) -> None:
@@ -189,8 +267,10 @@ def test_generic_capability_failure_is_not_committed(tmp_path) -> None:
         ],
     )
 
-    with pytest.raises(WorkflowExecutionError, match="discrete target"):
-        build_workflow_step_executor(project, draft)(draft.steps[0], {})
+    state = _execute_steps_with_admitted_host(project, draft)
+    assert state.status == "failed"
+    assert state.steps["bad_resample"].status == "failed"
+    assert "discrete target" in (state.steps["bad_resample"].error or "")
 
     assert not list((project / "runs" / run_id / "artifacts").glob("workflow_capability/**"))
     assert collect_post_estimation_results(project, run_id) == []
@@ -226,7 +306,10 @@ def test_registered_post_estimation_record_must_be_an_object(tmp_path) -> None:
     index["artifacts"].append("not-an-artifact-record")
     index_path.write_text(json.dumps(index), encoding="utf-8")
 
-    with pytest.raises(WorkflowExecutionError, match="record must be an object"):
+    with pytest.raises(
+        WorkflowExecutionError,
+        match="registered post-estimation artifact index cannot be read",
+    ):
         collect_post_estimation_results(project, run_id)
 
 
@@ -265,14 +348,18 @@ def test_post_estimation_projection_rejects_a_changed_registered_file(tmp_path) 
             }
         ],
     )
-    result = build_workflow_step_executor(project, draft)(draft.steps[0], {})
+    state = _execute_steps_with_admitted_host(project, draft)
+    result = state.steps["correlation"]
     index_path = project / "runs" / run_id / "artifacts_index.json"
     index = json.loads(index_path.read_text(encoding="utf-8"))
     record = next(item for item in index["artifacts"] if item["artifact_id"] == result.artifact_ids[0])
     artifact_path = project / "runs" / run_id / record["path"]
     artifact_path.write_text(artifact_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
-    with pytest.raises(WorkflowExecutionError, match="fingerprint"):
+    with pytest.raises(
+        WorkflowExecutionError,
+        match="registered post-estimation artifact index cannot be read",
+    ):
         collect_post_estimation_results(project, run_id)
 
 

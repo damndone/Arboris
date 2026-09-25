@@ -8,6 +8,7 @@ import json
 import multiprocessing
 import os
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -36,12 +37,14 @@ from workbench.agent.workflow_runtime import (
     _execute_model_joint_f_test,
     _execute_model_white_test,
     _execute_workflow_report,
+    _ensure_runtime_node_index_entry,
     _persist_model_post_estimation_result,
     _PENDING_RUNTIME_OUTPUTS,
     _WRITE_CONTEXT,
     _write_runtime_artifact_bytes,
     _validate_persisted_model_branch,
     _model_artifact_id,
+    _refit_completed_ols_branch,
     _admit_workflow_host_endpoint_from_supervisor,
     build_workflow_step_executor,
     issue_server_evidence_port,
@@ -283,6 +286,25 @@ def test_default_evidence_port_requires_an_external_host_endpoint(tmp_path) -> N
         issue_server_evidence_port(tmp_path)
 
 
+@pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit])
+def test_workflow_host_resolver_preserves_process_control_signals(
+    tmp_path, monkeypatch, signal
+) -> None:
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    def raise_signal(_root):
+        raise signal()
+
+    monkeypatch.setattr(
+        workflow_runtime,
+        "_deployment_host_endpoint_from_supervisor",
+        raise_signal,
+    )
+
+    with pytest.raises(signal):
+        issue_server_evidence_port(tmp_path)
+
+
 def test_forged_evidence_port_object_is_rejected(tmp_path) -> None:
     """A real fd alone cannot turn an arbitrary object into the issued port."""
 
@@ -393,6 +415,39 @@ def test_direct_post_estimation_persistence_requires_receipt_before_write(tmp_pa
             lineage={"node_ref": "node-1", "artifact_id": "raw-1", "sha256": "sha256:x"},
         )
     assert not list(run_root.glob("artifacts/**"))
+
+
+def test_model_post_estimation_artifact_identity_is_bound_to_workflow(tmp_path) -> None:
+    """A fresh authorized execution cannot collide with an older result path."""
+
+    run_root = tmp_path / "runs" / "run-1"
+    run_root.mkdir(parents=True, exist_ok=True)
+    initialize_artifact_index(run_root)
+    artifact_ids: list[str] = []
+    for workflow_id in ("wf-post-estimation-a", "wf-post-estimation-b"):
+        draft = compile_fixture_workflow(workflow_id=workflow_id)
+        step = draft.steps[0]
+        port = EvidencePersistencePort(tmp_path)
+        receipt = port.admit(draft, step)
+        context_token = _WRITE_CONTEXT.set((port, receipt, draft, step))
+        try:
+            result = _persist_model_post_estimation_result(
+                tmp_path,
+                draft,
+                step,
+                artifact_type="post_estimation",
+                result={"ok": True},
+                model_run_id="model-run",
+                model_artifact_id="model-artifact",
+                lineage={"node_ref": "node-1", "artifact_id": "raw-1", "sha256": "sha256:x"},
+            )
+        finally:
+            _WRITE_CONTEXT.reset(context_token)
+        artifact_ids.extend(result.artifact_ids)
+
+    assert len(artifact_ids) == 2
+    assert len(set(artifact_ids)) == 2
+    assert len(list((run_root / "artifacts" / "post_estimation").glob("*.json"))) == 2
 
 
 def test_post_estimation_writer_rejects_a_symlink_parent_before_external_write(
@@ -518,7 +573,64 @@ def test_post_estimation_registry_is_family_and_output_strict() -> None:
         post_estimation_registry.resolve(
             model_family="ols", operation_id="model.white_test", output_id="wrong"
         )
-    assert error.value.code == POST_ESTIMATION_UNKNOWN_OUTPUT
+        assert error.value.code == POST_ESTIMATION_UNKNOWN_OUTPUT
+
+
+def test_direct_ols_refit_rejects_a_non_ols_branch_before_reconstruction() -> None:
+    foreign_branch = {
+        "branch_id": "main",
+        "model_family": "panel_ols",
+        "model_artifact_id": "panel_ols_main",
+        "branch_spec": {
+            "model_family": "panel_ols",
+            "outcome": "y",
+            "predictors": ["x"],
+            "categorical": [],
+            "polynomials": [],
+            "covariance": "unadjusted",
+        },
+        "predictor_columns": ["x"],
+    }
+
+    with pytest.raises(
+        WorkflowExecutionError,
+        match=POST_ESTIMATION_UNSUPPORTED_FAMILY,
+    ):
+        _refit_completed_ols_branch(pd.DataFrame(), foreign_branch)
+
+
+def test_ols_refit_derives_run_identity_from_the_admitted_branch(monkeypatch) -> None:
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    source_frame = pd.DataFrame(
+        {"y": [float(i) for i in range(30)], "x": [float(i) for i in range(30)]}
+    )
+    branch = {
+        "branch_id": "main",
+        "model_family": "ols",
+        "model_artifact_id": "ols_admitted_branch_main",
+        "branch_spec": {
+            "model_family": "ols",
+            "outcome": "y",
+            "predictors": ["x"],
+            "categorical": [],
+            "polynomials": [],
+            "covariance": "unadjusted",
+        },
+        "predictor_columns": ["x"],
+    }
+    original_run_ols = workflow_runtime.run_ols
+    observed: dict[str, str] = {}
+
+    def spy_run_ols(*args, **kwargs):
+        observed["model_id"] = kwargs["model_id"]
+        return original_run_ols(*args, **kwargs)
+
+    monkeypatch.setattr(workflow_runtime, "run_ols", spy_run_ols)
+    _refit_completed_ols_branch(source_frame, branch)
+
+    assert observed["model_id"] == branch["model_artifact_id"]
+    assert observed["model_id"] != "ols_1"
 
 
 def test_provider_manifest_is_declaration_only() -> None:
@@ -702,6 +814,206 @@ def test_concurrent_admission_reservation_is_one_atomic_decision(tmp_path, monke
         .splitlines()
     ]
     assert len([item for item in records if item["record_type"] == "workflow_admission"]) == 1
+
+
+def test_concurrent_runtime_node_index_merges_distinct_entries_atomically(
+    tmp_path, monkeypatch
+) -> None:
+    draft = compile_fixture_workflow(workflow_id="wf-node-index-merge")
+    run_root = tmp_path / "runs" / "run-1"
+    run_root.mkdir(parents=True, exist_ok=True)
+    (run_root / "node_index.json").write_text("{}", encoding="utf-8")
+    port = EvidencePersistencePort(tmp_path)
+    receipt = port.admit(draft, draft.steps[0])
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    original_loads = workflow_runtime.json.loads
+
+    def delayed_loads(value, *args, **kwargs):
+        if value == "{}":
+            time.sleep(0.05)
+        return original_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(workflow_runtime.json, "loads", delayed_loads)
+    start = threading.Barrier(2)
+
+    def persist(node_id):
+        context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[0]))
+        try:
+            start.wait(5)
+            _ensure_runtime_node_index_entry(
+                run_root,
+                child_node_id=node_id,
+                entry={"node_hash": f"sha256:{node_id}"},
+                conflict_message="node index conflict",
+                not_object_message="node index is not an object",
+            )
+        finally:
+            _WRITE_CONTEXT.reset(context_token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(persist, ("node-a", "node-b")))
+
+    assert json.loads((run_root / "node_index.json").read_text(encoding="utf-8")) == {
+        "node-a": {"node_hash": "sha256:node-a"},
+        "node-b": {"node_hash": "sha256:node-b"},
+    }
+
+
+def test_runtime_node_index_failure_after_replacement_restores_previous_content(
+    tmp_path, monkeypatch
+) -> None:
+    draft = compile_fixture_workflow(workflow_id="wf-node-index-rollback")
+    run_root = tmp_path / "runs" / "run-1"
+    run_root.mkdir(parents=True, exist_ok=True)
+    node_index = run_root / "node_index.json"
+    previous = {"existing": {"node_hash": "sha256:old"}}
+    node_index.write_text(json.dumps(previous), encoding="utf-8")
+    port = EvidencePersistencePort(tmp_path)
+    receipt = port.admit(draft, draft.steps[0])
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    def fail_after_replacement(_output):
+        raise WorkflowExecutionError("simulated node-index finalization failure")
+
+    monkeypatch.setattr(
+        workflow_runtime._FormalOutputTarget,
+        "finalize_committed",
+        fail_after_replacement,
+    )
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[0]))
+    try:
+        with pytest.raises(WorkflowExecutionError, match="finalization"):
+            _ensure_runtime_node_index_entry(
+                run_root,
+                child_node_id="node-new",
+                entry={"node_hash": "sha256:new"},
+                conflict_message="node index conflict",
+                not_object_message="node index is not an object",
+            )
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
+
+    assert json.loads(node_index.read_text(encoding="utf-8")) == previous
+    assert not list(run_root.glob(".node_index.json.*.bak"))
+
+
+def test_runtime_node_index_lock_uses_the_admitted_run_root_fd(
+    tmp_path, monkeypatch
+) -> None:
+    draft = compile_fixture_workflow(workflow_id="wf-node-index-admitted-fd")
+    run_root = tmp_path / "runs" / "run-1"
+    run_root.mkdir(parents=True, exist_ok=True)
+    (run_root / "node_index.json").write_text("{}", encoding="utf-8")
+    port = EvidencePersistencePort(tmp_path)
+    receipt = port.admit(draft, draft.steps[0])
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    original_lock = workflow_runtime._evidence_lock
+    observed: dict[str, object] = {}
+
+    def capture_lock(path, **kwargs):
+        observed.update(kwargs)
+        return original_lock(path, **kwargs)
+
+    monkeypatch.setattr(workflow_runtime, "_evidence_lock", capture_lock)
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[0]))
+    try:
+        _ensure_runtime_node_index_entry(
+            run_root,
+            child_node_id="node-fd",
+            entry={"node_hash": "sha256:fd"},
+            conflict_message="node index conflict",
+            not_object_message="node index is not an object",
+        )
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
+
+    assert type(observed.get("admitted_directory_fd")) is int
+
+
+def test_runtime_node_index_interrupt_after_replace_rolls_back(
+    tmp_path, monkeypatch
+) -> None:
+    draft = compile_fixture_workflow(workflow_id="wf-node-index-interrupt")
+    run_root = tmp_path / "runs" / "run-1"
+    run_root.mkdir(parents=True, exist_ok=True)
+    node_index = run_root / "node_index.json"
+    previous = {"existing": {"node_hash": "sha256:old"}}
+    node_index.write_text(json.dumps(previous), encoding="utf-8")
+    port = EvidencePersistencePort(tmp_path)
+    receipt = port.admit(draft, draft.steps[0])
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    def interrupt_after_replace(_output):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(
+        workflow_runtime._FormalOutputTarget,
+        "finalize_committed",
+        interrupt_after_replace,
+    )
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[0]))
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _ensure_runtime_node_index_entry(
+                run_root,
+                child_node_id="node-interrupt",
+                entry={"node_hash": "sha256:interrupt"},
+                conflict_message="node index conflict",
+                not_object_message="node index is not an object",
+            )
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
+
+    assert json.loads(node_index.read_text(encoding="utf-8")) == previous
+    assert not list(run_root.glob(".node_index.json.*.bak"))
+
+
+def test_runtime_node_index_rollback_failure_persists_uncertain_commit_marker(
+    tmp_path, monkeypatch
+) -> None:
+    draft = compile_fixture_workflow(workflow_id="wf-node-index-uncertain")
+    run_root = tmp_path / "runs" / "run-1"
+    run_root.mkdir(parents=True, exist_ok=True)
+    (run_root / "node_index.json").write_text("{}", encoding="utf-8")
+    port = EvidencePersistencePort(tmp_path)
+    receipt = port.admit(draft, draft.steps[0])
+    import workbench.agent.workflow_runtime as workflow_runtime
+
+    monkeypatch.setattr(
+        workflow_runtime._FormalOutputTarget,
+        "finalize_committed",
+        lambda _output: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+    monkeypatch.setattr(
+        workflow_runtime._FormalOutputTarget,
+        "rollback_committed",
+        lambda _output: (_ for _ in ()).throw(OSError("rollback unavailable")),
+    )
+    context_token = _WRITE_CONTEXT.set((port, receipt, draft, draft.steps[0]))
+    try:
+        with pytest.raises(WorkflowExecutionError, match="UNCERTAIN_COMMIT"):
+            _ensure_runtime_node_index_entry(
+                run_root,
+                child_node_id="node-uncertain",
+                entry={"node_hash": "sha256:uncertain"},
+                conflict_message="node index conflict",
+                not_object_message="node index is not an object",
+            )
+    finally:
+        _WRITE_CONTEXT.reset(context_token)
+
+    evidence_path = (
+        tmp_path
+        / "workbench"
+        / "workflows"
+        / f"{draft.workflow_id}.evidence.jsonl"
+    )
+    records = [json.loads(line) for line in evidence_path.read_text().splitlines()]
+    assert any(item["record_type"] == "workflow_uncertain_commit" for item in records)
+    with pytest.raises(WorkflowExecutionError, match="UNCERTAIN_COMMIT"):
+        port.admit(draft, draft.steps[0])
 
 
 def _admit_from_process(project_root: str, start_event, result_queue) -> None:

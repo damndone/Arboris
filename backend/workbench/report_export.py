@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
 from typing import Any
+from weakref import WeakKeyDictionary
 from xml.sax.saxutils import escape as xml_escape
 
 from .artifacts import read_json
@@ -37,7 +38,10 @@ _ORDERED = re.compile(r"^\d+[.)]\s+(.*)$")
 # marker/token fields) therefore cannot mint a new Report capability.
 _REPORT_PROJECTION_ADMISSIONS: dict[int, tuple[object, object, object]] = {}
 _REPORT_PROJECTION_ADMISSIONS_LOCK = RLock()
-_REPORT_EVIDENCE_WRITER_ADMISSIONS: dict[int, tuple[object, object, object]] = {}
+_REPORT_COLLECTION_ADMISSIONS: WeakKeyDictionary = WeakKeyDictionary()
+# Identity-hashed weak keys keep exact issuance without retaining completed
+# writers and their potentially large complete collections indefinitely.
+_REPORT_EVIDENCE_WRITER_ADMISSIONS: WeakKeyDictionary = WeakKeyDictionary()
 _REPORT_EVIDENCE_WRITER_ADMISSIONS_LOCK = RLock()
 
 
@@ -106,12 +110,15 @@ def _require_server_owned_owner(owner: object) -> object:
 
 
 def _validate_owner_bound_projection(
-    projection: "EvidenceProjectionV1",
+    projection: "EvidenceProjectionV1 | LocalReportCollectionV1",
     owner: object,
 ) -> None:
     """Re-check the C0 owner and the complete canonical wire before any render IO."""
 
     admitted_owner = _require_server_owned_owner(owner)
+    if type(projection) is LocalReportCollectionV1:
+        projection._validate_owner(admitted_owner)
+        return
     if type(projection) is not EvidenceProjectionV1:
         raise TypeError("Report evidence requires EvidenceProjectionV1")
     issuer_token = getattr(projection, "_issuer_token", None)
@@ -214,12 +221,15 @@ class EvidenceProjectionV1:
             or report_projection_digest(wire) != report_projection_digest(canonical_wire)
         ):
             raise ReportExportError("REPORT_EVIDENCE_OWNER_WIRE_MISMATCH")
-        if wire.get("status") != "available":
+        if wire.get("status") not in {"available", "degraded"}:
             raise ReportExportError("REPORT_EVIDENCE_PROJECTION_UNAVAILABLE")
         if wire.get("schemaVersion") != 1 or wire.get("consumerId") != "report":
             raise ReportExportError("REPORT_EVIDENCE_SCHEMA_INVALID")
         facts = wire.get("facts")
-        if not isinstance(facts, list) or len(facts) > 80 or any(
+        from .evidence.consumer_adapters import LOCAL_STRUCTURED_PROJECTION_PROFILE_V1
+        fact_limit = (LOCAL_STRUCTURED_PROJECTION_PROFILE_V1["max_row_budget"]
+                      if "structuredResults" in canonical_wire else 80)
+        if not isinstance(facts, list) or len(facts) > fact_limit or any(
             not isinstance(fact, Mapping)
             or not isinstance(fact.get("factId"), str)
             or not isinstance(fact.get("statisticId"), str)
@@ -291,18 +301,87 @@ class EvidenceProjectionV1:
         raise TypeError("server-issued Report evidence projections cannot be serialized")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False, weakref_slot=True)
+class LocalReportCollectionV1:
+    """Exact-owner local complete result capability, never a single projection."""
+
+    wire: Mapping[str, Any]
+    _owner: object = field(repr=False, compare=False)
+    _collection: object = field(repr=False, compare=False)
+    _issuer_token: object = field(repr=False, compare=False)
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        raise TypeError("LocalReportCollectionV1 is server-owned; use the owner factory")
+
+    @classmethod
+    def _from_server_collection(cls, value: Mapping[str, Any], *, owner: object,
+                                collection: object) -> "LocalReportCollectionV1":
+        from .evidence.result_collections import validate_server_owned_local_result_collection
+
+        if cls is not LocalReportCollectionV1:
+            raise TypeError("Report collection requires the exact server-issued type")
+        admitted_owner = _require_server_owned_owner(owner)
+        validate_server_owned_local_result_collection(collection, owner=admitted_owner)
+        canonical = admitted_owner._canonical_complete_report_wire(collection)
+        if (not isinstance(value, Mapping)
+                or value.get("projectionDigest") != canonical.get("projectionDigest")
+                or report_projection_digest(value) != report_projection_digest(canonical)
+                or value.get("projectionDigest") != report_projection_digest(value)):
+            raise ReportExportError("REPORT_EVIDENCE_OWNER_WIRE_MISMATCH")
+        if (value.get("deliveryKind") != "local_complete_collection"
+                or value.get("readCompleteness") != "COMPLETE"
+                or value.get("status") not in {"available", "degraded"}):
+            raise ReportExportError("REPORT_EVIDENCE_COLLECTION_INCOMPLETE")
+        instance = object.__new__(cls)
+        token = object()
+        for key, item in (("wire", _freeze_wire_value(value)), ("_owner", admitted_owner),
+                          ("_collection", collection), ("_issuer_token", token)):
+            object.__setattr__(instance, key, item)
+        with _REPORT_PROJECTION_ADMISSIONS_LOCK:
+            _REPORT_COLLECTION_ADMISSIONS[instance] = (admitted_owner, collection, token)
+        return instance
+
+    def _validate_owner(self, owner: object) -> None:
+        from .evidence.result_collections import validate_server_owned_local_result_collection
+
+        with _REPORT_PROJECTION_ADMISSIONS_LOCK:
+            admission = _REPORT_COLLECTION_ADMISSIONS.get(self)
+        if (admission is None or admission[0] is not owner
+                or getattr(self, "_owner", None) is not owner
+                or admission[1] is not getattr(self, "_collection", None)
+                or admission[2] is not getattr(self, "_issuer_token", None)):
+            raise TypeError("Report collection lacks the server-owned exact issuer identity")
+        validate_server_owned_local_result_collection(self._collection, owner=owner)
+        canonical = owner._canonical_complete_report_wire(self._collection)
+        if (self.wire.get("projectionDigest") != canonical.get("projectionDigest")
+                or report_projection_digest(self.wire) != report_projection_digest(canonical)):
+            raise TypeError("Report collection is not bound to the canonical owner wire")
+
+    def _assert_server_owned(self) -> None:
+        _validate_owner_bound_projection(self, getattr(self, "_owner", None))
+
+    def __copy__(self):
+        raise TypeError("server-issued Report collections cannot be copied")
+
+    def __deepcopy__(self, _memo):
+        raise TypeError("server-issued Report collections cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("server-issued Report collections cannot be serialized")
+
+
+@dataclass(frozen=True, slots=True, eq=False, weakref_slot=True)
 class ReportEvidenceWriterV1:
     """Server-owned typed writer capability; raw tables are not its input."""
 
-    projection: EvidenceProjectionV1
+    projection: EvidenceProjectionV1 | LocalReportCollectionV1
     sections: tuple[str, ...] = ("facts",)
     tables_override: dict[str, tuple[dict[str, Any], ...]] | None = None
     _issuer_token: object | None = field(init=False, repr=False, compare=False, default=None)
 
     def __init__(
         self,
-        projection: EvidenceProjectionV1,
+        projection: EvidenceProjectionV1 | LocalReportCollectionV1,
         sections: tuple[str, ...] = ("facts",),
         tables_override: dict[str, tuple[dict[str, Any], ...]] | None = None,
         *,
@@ -315,7 +394,7 @@ class ReportEvidenceWriterV1:
     @classmethod
     def from_projection(
         cls,
-        projection: EvidenceProjectionV1,
+        projection: EvidenceProjectionV1 | LocalReportCollectionV1,
         *,
         sections: tuple[str, ...] = ("facts",),
         tables: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
@@ -325,16 +404,18 @@ class ReportEvidenceWriterV1:
     @classmethod
     def _from_server_projection(
         cls,
-        projection: EvidenceProjectionV1,
+        projection: EvidenceProjectionV1 | LocalReportCollectionV1,
         *,
         owner: object,
         sections: tuple[str, ...],
         table_rows: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
     ) -> "ReportEvidenceWriterV1":
+        if cls is not ReportEvidenceWriterV1:
+            raise TypeError("Report evidence writer requires the exact server-issued type")
         _validate_owner_bound_projection(projection, owner)
         if not sections or any(type(section) is not str or not section.strip() for section in sections):
             raise TypeError("ReportEvidenceWriterV1 requires named typed sections")
-        if type(projection) is not EvidenceProjectionV1 or getattr(projection, "_owner", None) is not owner:
+        if type(projection) not in (EvidenceProjectionV1, LocalReportCollectionV1) or getattr(projection, "_owner", None) is not owner:
             raise TypeError("ReportEvidenceWriterV1 requires an owner-issued projection")
         if table_rows is not None:
             raise TypeError("ReportEvidenceWriterV1 rejects caller-owned raw tables")
@@ -345,22 +426,22 @@ class ReportEvidenceWriterV1:
         issuer_token = object()
         object.__setattr__(instance, "_issuer_token", issuer_token)
         with _REPORT_EVIDENCE_WRITER_ADMISSIONS_LOCK:
-            _REPORT_EVIDENCE_WRITER_ADMISSIONS[id(instance)] = (
-                instance,
+            _REPORT_EVIDENCE_WRITER_ADMISSIONS[instance] = (
                 owner,
                 issuer_token,
             )
         return instance
 
     def _assert_server_owned(self) -> None:
+        if type(self) is not ReportEvidenceWriterV1:
+            raise TypeError("Report evidence writer requires the exact server-issued type")
         issuer_token = getattr(self, "_issuer_token", None)
         with _REPORT_EVIDENCE_WRITER_ADMISSIONS_LOCK:
-            admission = _REPORT_EVIDENCE_WRITER_ADMISSIONS.get(id(self))
+            admission = _REPORT_EVIDENCE_WRITER_ADMISSIONS.get(self)
         if (
             admission is None
-            or admission[0] is not self
-            or admission[1] is not getattr(self.projection, "_owner", None)
-            or admission[2] is not issuer_token
+            or admission[0] is not getattr(self.projection, "_owner", None)
+            or admission[1] is not issuer_token
             or type(issuer_token) is not object
         ):
             raise TypeError("ReportEvidenceWriterV1 lacks the server-owned exact issuer identity")
@@ -383,6 +464,18 @@ class ReportEvidenceWriterV1:
 
     def tables(self) -> dict[str, list[dict[str, Any]]]:
         self._assert_server_owned()
+        resolved = self.projection.wire.get("resolvedSections", ())
+        if resolved and self.sections != ("facts",):
+            tables = {}
+            for requested in self.sections:
+                matches = [section for section in resolved
+                           if requested in (section["sectionId"], section["sectionType"])]
+                if len(matches) != 1:
+                    raise ReportExportError("Requested result section is missing or ambiguous")
+                tables[requested] = _structured_section_rows(matches[0])
+            return tables
+        if not resolved and self.sections != ("facts",):
+            raise ReportExportError("Named result sections require structured evidence")
         facts = self.projection.wire["facts"]
         rows = [
             {
@@ -408,6 +501,30 @@ class ReportEvidenceWriterV1:
             if isinstance(fact, Mapping)
         ]
         return {section: list(rows) for section in self.sections}
+
+
+def _structured_section_rows(section: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Lossless table formatting of a selected section; no evidence authority."""
+    identity = {"section_id": section["sectionId"], "section_type": section["sectionType"],
+                "status": section["status"], "reason_codes": section["reasonCodes"]}
+    if section["status"] != "available":
+        return [identity]
+    content = section["content"]
+    if not isinstance(content, Mapping):
+        raise ReportExportError("Available section has no object content")
+    row_key = next((key for key in ("rows", "results", "steps")
+                    if isinstance(content.get(key), (list, tuple))), None)
+    if row_key is None or not content[row_key]:
+        return [{**identity, "section_content": dict(content)}]
+    metadata = {key: value for key, value in content.items() if key != row_key}
+    rows = []
+    for item in content[row_key]:
+        row = dict(item) if isinstance(item, Mapping) else {"item": item}
+        # A user variable may collide with export metadata; preserve it nested.
+        if set(row) & (set(identity) | {"section_metadata", "section_row"}):
+            row = {"section_row": row}
+        rows.append({**row, **identity, "section_metadata": metadata})
+    return rows
 
 
 def _figure_assets(run_root: Path, figures: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -806,9 +923,9 @@ def export_report(
     markdown: str,
     figures: list[dict[str, Any]],
     format: str,
-    evidence_projection: EvidenceProjectionV1 | None = None,
+    evidence_projection: EvidenceProjectionV1 | LocalReportCollectionV1 | None = None,
 ) -> tuple[bytes, str, str]:
-    if type(evidence_projection) is not EvidenceProjectionV1:
+    if type(evidence_projection) not in (EvidenceProjectionV1, LocalReportCollectionV1):
         raise ReportExportError("REPORT_EVIDENCE_PROJECTION_REQUIRED")
     evidence_projection._assert_server_owned()
     projection = evidence_projection.wire
@@ -839,6 +956,7 @@ def export_report(
 
 __all__ = [
     "EvidenceProjectionV1",
+    "LocalReportCollectionV1",
     "ReportEvidenceWriterV1",
     "ReportExportError",
     "report_projection_digest",

@@ -477,6 +477,7 @@ def test_native_partial_writer_cleans_only_owned_targets(tmp_path, monkeypatch) 
     assert write_result.status == "unavailable"
     assert write_result.path is None
     assert existing_target.exists()
+    assert existing_target.read_bytes() == b"user-owned-artifact"
 
     roundtrip_dir = tmp_path / "roundtrip"
     roundtrip_result = api.round_trip_frame(
@@ -502,6 +503,48 @@ def test_native_partial_writer_cleans_only_owned_targets(tmp_path, monkeypatch) 
     assert roundtrip_result.status == "unavailable"
     assert roundtrip_result.path is None
     assert existing_roundtrip_path.exists()
+    assert existing_roundtrip_path.read_bytes() == b"user-owned-roundtrip"
+
+
+def test_writer_without_artifact_is_not_reported_as_written(tmp_path, monkeypatch) -> None:
+    api = _api()
+    frame = pd.DataFrame({"code": [1]})
+
+    monkeypatch.setattr(api, "_write_frame", lambda *_args, **_kwargs: None)
+    target = tmp_path / "missing-artifact.sav"
+
+    result = api.write_interchange_frame(frame, target_format="sav", path=target)
+
+    assert result.status == "unavailable"
+    assert result.path is None
+    assert result.capability.reason_code == "adapter_failure"
+    assert not target.exists()
+
+
+def test_corrupt_parquet_is_typed_unavailable(tmp_path) -> None:
+    api = _api()
+    target = tmp_path / "corrupt.parquet"
+    target.write_bytes(b"not a parquet artifact")
+
+    result = api.read_interchange_frame(target_format="parquet", path=target)
+
+    assert result.status == "unavailable"
+    assert result.path is None
+    assert result.frame is None
+    assert result.capability.reason_code == "adapter_failure"
+
+
+def test_bounded_ingestion_corrupt_parquet_is_typed_unavailable(tmp_path) -> None:
+    api = _api()
+    from workbench.ingestion import read_frame_bounded
+
+    target = tmp_path / "corrupt-bounded.parquet"
+    target.write_bytes(b"not a parquet artifact")
+
+    with pytest.raises(api.InterchangeUnavailableError) as error:
+        read_frame_bounded(target, max_rows=2)
+
+    assert error.value.capability.reason_code == "adapter_failure"
 
 
 def test_pyreadstat_admission_probes_sav_zsav_and_dta_modes(monkeypatch) -> None:
@@ -799,6 +842,30 @@ def test_native_round_trip_reports_unrepresentable_metadata_loss(tmp_path) -> No
             "workbench_value.measurement_level",
             "workbench_value.user_missing_values",
         }
+
+
+def test_native_loss_manifest_reports_dataset_level_metadata_loss() -> None:
+    api = _api()
+
+    manifest = api._native_loss_manifest(
+        {
+            "columns": {"x": {"variable_label": "X"}},
+            "weight": {"column": "sample_weight"},
+            "split": {"column": "fold"},
+            "group": {"column": "cohort"},
+        },
+        "sav",
+    )
+
+    assert {
+        item.field
+        for item in manifest.items
+        if item.status == "not_supported"
+    } >= {
+        "__dataset__.weight",
+        "__dataset__.split",
+        "__dataset__.group",
+    }
 
 
 def test_malformed_column_metadata_is_typed_and_not_reported_verified(tmp_path) -> None:

@@ -1,0 +1,25 @@
+{% macro section_value(value) -%}
+  {% if value is mapping %}
+  <dl>{% for key, item in value.items() %}<dt>{{ key }}</dt><dd>{{ section_value(item) }}</dd>{% endfor %}</dl>
+  {% elif value is sequence and value is not string %}
+  <ol>{% for item in value %}<li>{{ section_value(item) }}</li>{% endfor %}</ol>
+  {% elif value is none %}<span>Not declared</span>
+  {% else %}{{ value }}{% endif %}
+{%- endmacro %}
+
+{% macro structured_evidence(view_model) -%}
+  {% if view_model.resolvedSections %}
+  <section id="structured-evidence">
+    <h2>Structured result evidence</h2>
+    <p>Read completeness: {{ view_model.readCompleteness if view_model.readCompleteness is defined else "Not declared" }}.
+      Reading status only; not statistical validation or run completeness.</p>
+    {% for section in view_model.resolvedSections %}
+    <details open>
+      <summary>{{ section.sectionType }} · {{ section.sectionId }} · {{ section.status }}</summary>
+      {% if section.status == "available" %}{{ section_value(section.content) }}
+      {% else %}<p>{{ section.reasonCodes|join(", ") }}</p>{% endif %}
+    </details>
+    {% endfor %}
+  </section>
+  {% endif %}
+{%- endmacro %}

@@ -1050,6 +1050,268 @@
   font-size: 11px;
 }
 
+/* ---- v1.8.9 safe-cutover states inside the established Agent shell ---- */
+
+.wb-agent-cutover-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: var(--label);
+  font: 11px/1.35 var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-cutover-header > div {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.wb-agent-cutover-mode,
+.wb-agent-cutover-scope {
+  color: var(--label-tertiary);
+}
+
+.wb-agent-cutover-scope {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-agent-error-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-agent-error-row .wb-agent-error {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.wb-agent-cutover-empty-title {
+  margin-bottom: 4px;
+  color: var(--label);
+  font-weight: 650;
+}
+
+.wb-agent-execution-trace__step[data-state="pending"] {
+  color: var(--label-tertiary);
+}
+
+.wb-agent-execution-trace__step[data-state="failed"] {
+  color: var(--danger, #ff453a);
+  font-weight: 600;
+}
+
+.wb-agent-task-history {
+  display: grid;
+  gap: 6px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in oklch, var(--separator) 68%, transparent);
+  border-radius: 7px;
+  background: color-mix(in oklch, var(--bg-card-2) 68%, transparent);
+}
+
+.wb-agent-task-history > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--label-secondary);
+  font: 10px/1.3 var(--font-mono, ui-monospace, monospace);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.wb-agent-task-history ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-agent-task-history li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.wb-agent-task-history li > span {
+  overflow: hidden;
+  color: var(--label);
+  font: 11px/1.35 var(--font-mono, ui-monospace, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-agent-task-history li > small {
+  color: var(--label-tertiary);
+}
+
+.wb-agent-plan-grid {
+  display: grid;
+  gap: 0;
+  margin: 2px 0 0;
+  border: 1px solid color-mix(in oklch, var(--separator) 78%, transparent);
+  border-radius: 7px;
+  overflow: hidden;
+  font: 11px/1.45 var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-plan-grid--nested {
+  margin: 2px 0;
+  border-radius: 5px;
+}
+
+.wb-agent-plan-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.34fr) minmax(0, 1fr);
+  min-width: 0;
+}
+
+.wb-agent-plan-row + .wb-agent-plan-row {
+  border-top: 1px solid color-mix(in oklch, var(--separator) 68%, transparent);
+}
+
+.wb-agent-plan-row > dt,
+.wb-agent-plan-row > dd {
+  min-width: 0;
+  margin: 0;
+  padding: 5px 7px;
+  overflow-wrap: anywhere;
+}
+
+.wb-agent-plan-row > dt {
+  color: var(--label-secondary);
+  background: color-mix(in oklch, var(--bg-card-2) 82%, transparent);
+  font-weight: 600;
+}
+
+.wb-agent-plan-row > dd {
+  color: var(--label);
+  border-left: 1px solid color-mix(in oklch, var(--separator) 68%, transparent);
+}
+
+.wb-agent-plan-list,
+.wb-agent-evidence-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.wb-agent-plan-empty {
+  color: var(--label-tertiary);
+}
+
+.wb-agent-clarifications,
+.wb-agent-confirmation-card,
+.wb-agent-result-card {
+  display: grid;
+  gap: 7px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in oklch, var(--separator) 68%, transparent);
+}
+
+.wb-agent-clarification-field {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.32fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 9px;
+}
+
+.wb-agent-clarification-field > span {
+  color: var(--label);
+  font-weight: 600;
+}
+
+.wb-agent-clarification-field > small {
+  grid-column: 2;
+  color: var(--label-tertiary);
+  line-height: 1.35;
+}
+
+.wb-agent-clarification-field > input,
+.wb-agent-clarification-field > select {
+  grid-column: 2;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 6px 7px;
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  background: var(--bg-canvas);
+  color: var(--label);
+  font: 11px/1.35 var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-clarification-field > input:disabled,
+.wb-agent-clarification-field > select:disabled {
+  cursor: progress;
+  opacity: 0.68;
+}
+
+.wb-agent-confirmation-card .wb-agent-proposal-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.wb-agent-result-grid {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font: 10px/1.4 var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-result-grid > div {
+  display: grid;
+  grid-template-columns: minmax(105px, 0.3fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.wb-agent-result-grid dt {
+  color: var(--label-tertiary);
+}
+
+.wb-agent-result-grid dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--label);
+  overflow-wrap: anywhere;
+}
+
+.wb-agent-evidence-list {
+  color: var(--label-secondary);
+  font: 10px/1.4 var(--font-mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .wb-agent-plan-row,
+  .wb-agent-clarification-field,
+  .wb-agent-result-grid > div {
+    grid-template-columns: 1fr;
+  }
+
+  .wb-agent-plan-row > dd {
+    border-left: 0;
+    border-top: 1px solid color-mix(in oklch, var(--separator) 62%, transparent);
+  }
+
+  .wb-agent-clarification-field > small,
+  .wb-agent-clarification-field > input,
+  .wb-agent-clarification-field > select {
+    grid-column: 1;
+  }
+}
+
 /* ---- Accessibility fallbacks ---- */
 
 @media (prefers-reduced-transparency: reduce) {

@@ -4,6 +4,9 @@ import json
 import os
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 from collections.abc import Iterator
 
 from fastapi.testclient import TestClient
@@ -139,10 +142,79 @@ def test_agent_notebook_and_results_use_one_server_owned_projection_source(
     assert results["commit_id"] == agent["commit_id"] == notebook["commit_id"] == binding.commit_id
     assert results["envelope_digest"] == agent["envelope_digest"] == notebook["envelope_digest"] == record.envelope_digest
     assert results["projection_digest"] != agent["projection_digest"]
-    assert agent["projection_digest"] != notebook["projection_digest"]
+    assert agent["projection_digest"] == notebook["projection_digest"]
     assert results["receipt"]["projection_digest"] == results["projection_digest"]
     assert agent["receipt"]["projection_digest"] == agent["projection_digest"]
     assert notebook["receipt"]["projection_digest"] == notebook["projection_digest"]
+    assert agent["receipt"]["projection_digest"] == notebook["receipt"]["projection_digest"]
+
+
+@pytest.mark.parametrize(
+    "reason_code",
+    ("EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED", "EVIDENCE_OWNER_CONTEXT_CONFLICT"),
+)
+def test_notebook_execution_results_are_not_facts_without_central_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reason_code: str,
+) -> None:
+    from workbench.http import notebook_routes
+    from workbench.services import results_service
+
+    monkeypatch.setattr(
+        results_service,
+        "read_persisted_consumer_evidence_for_run",
+        lambda **_kwargs: {
+            "status": "unavailable",
+            "availability": "unavailable",
+            "execution_status": "unavailable",
+            "completeness_status": "unavailable",
+            "facts": [],
+            "projection_digest": None,
+            "reason_code": reason_code,
+            "receipt": None,
+        },
+    )
+
+    class _Store:
+        def read_option(self, _notebook_id: str, _option_id: str) -> object:
+            return SimpleNamespace(
+                execution_results=[
+                    {
+                        "option_revision": 1,
+                        "run_id": "run-1",
+                        "execution_status": "completed",
+                        "committed": True,
+                        "model_specific_execution_results": {
+                            "estimate": 999.0,
+                        },
+                        "capability_execution": {
+                            "dispatch_status": "completed",
+                            "attempt_id": "attempt:local",
+                            "receipt_ref": "receipt:local",
+                        },
+                    }
+                ]
+            )
+
+    service = SimpleNamespace(
+        project_root=tmp_path / "project",
+        store=_Store(),
+    )
+    revisions = [SimpleNamespace(option_id="option-1", option_revision=1)]
+
+    packet = notebook_routes._execution_results_packet(
+        service,
+        "notebook-1",
+        revisions,
+    )
+
+    entry = packet["option-1"]
+    assert entry["execution_results_authority"] == "non-authoritative"
+    assert entry["persisted_evidence"]["status"] == "unavailable"
+    assert entry["persisted_evidence"]["reason_code"] == reason_code
+    assert entry["persisted_evidence"]["facts"] == []
+    assert "999.0" not in json.dumps(entry, sort_keys=True)
 
 
 def test_central_consumer_evidence_is_explicitly_unavailable_without_owner(

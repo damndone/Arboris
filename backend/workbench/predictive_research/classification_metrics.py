@@ -321,6 +321,8 @@ def threshold_curve(
     p = np.asarray(probabilities, dtype=float)
     if len(y) != len(p) or not len(y):
         raise ContractError("CLASSIFICATION_THRESHOLD_INPUT_INVALID", "threshold inputs are invalid")
+    if not np.isfinite(p).all() or ((p < 0) | (p > 1)).any():
+        raise ContractError("CLASSIFICATION_THRESHOLD_INPUT_INVALID", "threshold probabilities must be in [0, 1]")
     weights = np.ones(len(y), dtype=float) if sample_weight is None else np.asarray(sample_weight, dtype=float)
     if len(weights) != len(y) or not np.isfinite(weights).all() or (weights < 0).any() or float(weights.sum()) <= 0:
         raise ContractError("CLASSIFICATION_WEIGHT_INVALID", "threshold weights are invalid")
@@ -335,7 +337,7 @@ def threshold_curve(
             "precision": float(sk_metrics.precision_score(binary, pred, zero_division=0, sample_weight=weights)),
             "recall": float(sk_metrics.recall_score(binary, pred, zero_division=0, sample_weight=weights)),
             "f1": float(sk_metrics.f1_score(binary, pred, zero_division=0, sample_weight=weights)),
-            "log_loss": float(sk_metrics.log_loss(binary, pred, labels=[0, 1], sample_weight=weights)),
+            "log_loss": float(sk_metrics.log_loss(binary, p, labels=[0, 1], sample_weight=weights)),
             "positive_rate": float(np.average(pred, weights=weights)),
             "weight_sum": float(weights.sum()),
         })

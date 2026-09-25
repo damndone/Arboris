@@ -166,6 +166,16 @@ def test_shift_summary_is_descriptive_and_subgroup_support_is_bounded() -> None:
     assert shift["subgroups"]["unsupported"]["status"] == "insufficient_support"
 
 
+def test_shift_summary_is_typed_unavailable_without_numeric_evidence() -> None:
+    shift = summarize_shift(
+        development=pd.DataFrame({"x": [None, None]}),
+        validation=pd.DataFrame({"x": [None, None]}),
+    )
+
+    assert shift["status"] == "unavailable"
+    assert shift["reason_code"] == "CLASSIFICATION_SHIFT_NUMERIC_DATA_UNAVAILABLE"
+
+
 def test_classification_projection_exposes_evidence_without_recomputing() -> None:
     projection = _project_classification_evidence(_packet_with_c0(_evidence_packet()), consumer="report")
 
@@ -383,3 +393,49 @@ def test_additive_classification_entrypoint_requires_typed_task_and_persists_pac
         "payload_schema": "workbench.prediction.classification-artifacts",
         "schema_version": 1,
     }
+
+
+def test_production_evidence_computes_safe_selected_model_diagnostics_without_holdout_labels(tmp_path) -> None:
+    frame = pd.DataFrame({
+        "target": [0, 0, 1, 1] * 4,
+        "x1": [0.0, 0.2, 0.8, 1.0] * 4,
+        "x2": [1.0, 0.9, 0.1, 0.0] * 4,
+    })
+    task = _task_spec()
+    (tmp_path / "artifacts_index.json").write_text(
+        json.dumps({"schema_version": 1, "artifacts": []}),
+        encoding="utf-8",
+    )
+
+    result = run_classification_model_v189(
+        frame,
+        tmp_path,
+        task=task,
+        row_refs=tuple(f"r{i}" for i in range(len(frame))),
+        model_ids=("logistic_regression", "random_forest"),
+        final_holdout_fraction=0.25,
+        cv_folds=2,
+        holdout_seal_store=HoldoutSealStoreV1(metric_bundle_store=HoldoutMetricBundleStoreV1()),
+        holdout_principal_ref="principal:test",
+        holdout_access_id="access:test",
+    )
+
+    evidence = result["evidence"]
+    selected_model = result["comparison"]["selected_model"]
+    holdout_refs = set(result["holdout"]["row_refs"])
+    explanations = evidence["explanations"]
+    assert explanations["status"] == "computed"
+    assert explanations["model_id"] == selected_model
+    assert explanations["sample_scope"] == "outer_validation"
+    assert set(explanations["validation_row_refs"]).isdisjoint(holdout_refs)
+    assert explanations["validation_row_refs_hash"].startswith("sha256:")
+    assert explanations["task_hash"] == task.content_hash
+    assert explanations["split_hash"] == result["split_hash"]
+    assert explanations["causal_interpretation"] == "not_causal"
+    assert explanations["shap"]["status"] == "unavailable"
+    assert evidence["stability"]["status"] == "computed"
+    assert evidence["stability"]["interpretation"] == "descriptive_not_deployment_safety"
+    assert evidence["shift"]["status"] == "descriptive"
+    assert evidence["shift"]["interpretation"] == "descriptive_not_deployment_safety"
+    assert "holdout_labels" not in evidence
+    _project_classification_evidence(evidence, consumer="report")

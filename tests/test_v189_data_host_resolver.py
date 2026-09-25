@@ -187,6 +187,7 @@ def test_default_resolver_rejects_malformed_or_uncommitted_output(tmp_path) -> N
 
 def test_resolver_factory_requires_the_server_issuer_and_absolute_root(tmp_path) -> None:
     import workbench.services.data_consumer_host_resolver as module
+    from workbench.data_operation_manifest import _SERVER_OWNED_CAPABILITY
 
     with pytest.raises(TypeError, match="issuer"):
         ServerOwnedDataConsumerHostResolverV1.from_server(
@@ -201,5 +202,5 @@ def test_resolver_factory_requires_the_server_issuer_and_absolute_root(tmp_path)
             project_ref="project:data-host",
             session_ref="session:data-host",
             catalog_digest=load_builtin_catalog().catalog_digest,
-            _capability=module._SERVER_OWNED_CAPABILITY,
+            _capability=_SERVER_OWNED_CAPABILITY,
         )

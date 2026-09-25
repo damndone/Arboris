@@ -625,6 +625,10 @@ def _string_or_not_applicable(value: object, name: str) -> str | NotApplicableV1
 
 
 def _float_or_not_applicable(value: object, name: str) -> float | NotApplicableV1:
+    # Canonical JSON encodes integral floats as integers. Normalize only at
+    # wire decoding, retaining portable-number checks and strict constructors.
+    if type(value) is int:
+        return float(_finite_number(value, name))
     if type(value) is float:
         return _finite_float(value, name)
     return _not_applicable(value, name)
@@ -1287,6 +1291,10 @@ class EvidenceEnvelopeV1:
     lineage_refs: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        if isinstance(self.family_evidence, Mapping) and "structured_results" in self.family_evidence:
+            from .result_sections import preflight_structured_results
+
+            preflight_structured_results(self.family_evidence["structured_results"])
         for name in (
             "result_identity",
             "method",
@@ -1327,6 +1335,18 @@ class EvidenceEnvelopeV1:
         fact_id_list = [fact.fact_id for fact in self.numeric_facts]
         if len(fact_id_list) != len(set(fact_id_list)):
             raise ContractError("numeric_facts must have unique fact_id values")
+        if "structured_results" in self.family_evidence:
+            from .result_sections import StructuredResultsV1
+
+            dependency_ids = {
+                dependency["artifact_ref"] for dependency in self.dependencies
+                if isinstance(dependency.get("artifact_ref"), str)
+            }
+            StructuredResultsV1.from_dict(
+                self.family_evidence["structured_results"],
+                facts={fact.fact_id: fact for fact in self.numeric_facts},
+                dependency_ids=dependency_ids,
+            )
         object.__setattr__(
             self,
             "lineage_refs",

@@ -14,14 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from workbench.agent.operations import OperationRecord, OperationRecordStore
 from workbench.canonical import sha256_canonical
-from workbench.data_operation_manifest import (
-    DataConsumerExecutionPortV1,
-    DataConsumerRuntimeOutputV1,
-    _DATA_OPERATION_IDS,
-    _SERVER_OWNED_CAPABILITY,
-    _SERVER_OWNED_ISSUER,
-    _reject_data_host_raw_payload,
-)
+from workbench.data_operation_manifest import _SERVER_OWNED_ISSUER
 
 
 class DataConsumerHostResolverError(ValueError):
@@ -98,6 +91,11 @@ def _require_safe_identity(value: object, field_name: str) -> str:
 
 
 def _validate_request(request: Mapping[str, object]) -> dict[str, object]:
+    from workbench.data_operation_manifest import (
+        _DATA_OPERATION_IDS,
+        _reject_data_host_raw_payload,
+    )
+
     if not isinstance(request, Mapping):
         raise DataConsumerHostResolverError("DATA_CONSUMER_HOST_REQUEST_INVALID")
     try:
@@ -147,6 +145,12 @@ def _validate_record_output(
     *,
     catalog_digest: str,
 ) -> DataConsumerRuntimeOutputV1:
+    from workbench.data_operation_manifest import (
+        DataConsumerRuntimeOutputV1,
+        _SERVER_OWNED_ISSUER,
+        _reject_data_host_raw_payload,
+    )
+
     if record.status != "completed" or record.effect_status != "committed" or record.projection_status != "committed":
         raise DataConsumerHostResolverError(
             "DATA_CONSUMER_HOST_RESULT_UNAVAILABLE",
@@ -293,6 +297,8 @@ class ServerOwnedDataConsumerHostResolverV1:
     _capability: object | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        from workbench.data_operation_manifest import _SERVER_OWNED_CAPABILITY
+
         if self._capability is not _SERVER_OWNED_CAPABILITY:
             raise TypeError("data host resolver can only be created by the server")
         if not isinstance(self.project_root, Path):
@@ -313,6 +319,8 @@ class ServerOwnedDataConsumerHostResolverV1:
         catalog_digest: str,
         _issuer: object | None = None,
     ) -> "ServerOwnedDataConsumerHostResolverV1":
+        from workbench.data_operation_manifest import _SERVER_OWNED_CAPABILITY
+
         if _issuer is not _SERVER_OWNED_ISSUER:
             raise TypeError("data host resolver requires the server-owned issuer")
         return cls(
@@ -324,6 +332,11 @@ class ServerOwnedDataConsumerHostResolverV1:
         )
 
     def as_execution_port(self) -> DataConsumerExecutionPortV1:
+        from workbench.data_operation_manifest import (
+            DataConsumerExecutionPortV1,
+            _SERVER_OWNED_ISSUER,
+        )
+
         return DataConsumerExecutionPortV1.from_server(
             self.resolve,
             catalog_digest=self.catalog_digest,

@@ -663,6 +663,7 @@ def _apply_survey_design_variance(
         "degf": result.degf,
         "residual_degf": result.residual_degf,
         "variance_method": result.method,
+        "variance_source": "survey_design",
         "replicate_type": declared_replicate or None,
         "lonely_psu_policy": design.lonely_psu,
         "design_effect": effects.deff,

@@ -1,23 +1,26 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from threading import RLock
 from typing import Any
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from weakref import WeakKeyDictionary
 
 from jinja2 import Environment, FileSystemLoader
 
-from .artifacts import register_artifact, write_bytes_durable
 from .report_export import (
     EvidenceProjectionV1,
+    LocalReportCollectionV1,
+    ReportEvidenceWriterV1,
     _validate_owner_bound_projection,
     _freeze_wire_value,
 )
 
 
-_REPORT_DOCUMENT_WRITER_ADMISSIONS: dict[int, tuple[object, object, object]] = {}
+_REPORT_DOCUMENT_WRITER_ADMISSIONS: WeakKeyDictionary = WeakKeyDictionary()
 _REPORT_DOCUMENT_WRITER_ADMISSIONS_LOCK = RLock()
 _WORKFLOW_REPORT_WRITER_FACTORY_TOKEN = object()
 _WORKFLOW_REPORT_WRITER_ADMISSIONS: dict[int, tuple[object, object, object]] = {}
@@ -103,12 +106,12 @@ class WorkflowReportPayloadV1:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False, weakref_slot=True)
 class ReportDocumentWriterV1:
     """Typed HTML/PDF document writer capability."""
 
     view_model: dict[str, Any]
-    projection: EvidenceProjectionV1
+    projection: EvidenceProjectionV1 | LocalReportCollectionV1
     canonical_run_root: Path
     _owner: object | None = field(init=False, repr=False, compare=False, default=None)
     _issuer_token: object | None = field(init=False, repr=False, compare=False, default=None)
@@ -116,7 +119,7 @@ class ReportDocumentWriterV1:
     def __init__(
         self,
         view_model: dict[str, Any],
-        projection: EvidenceProjectionV1,
+        projection: EvidenceProjectionV1 | LocalReportCollectionV1,
         canonical_run_root: Path,
         *,
         _factory_token: object | None = None,
@@ -129,7 +132,7 @@ class ReportDocumentWriterV1:
     def from_view_model(
         cls,
         view_model: Mapping[str, Any],
-        projection: EvidenceProjectionV1,
+        projection: EvidenceProjectionV1 | LocalReportCollectionV1,
         *,
         canonical_run_root: Path,
     ) -> "ReportDocumentWriterV1":
@@ -139,11 +142,13 @@ class ReportDocumentWriterV1:
     def _from_server_view_model(
         cls,
         view_model: Mapping[str, Any],
-        projection: EvidenceProjectionV1,
+        projection: EvidenceProjectionV1 | LocalReportCollectionV1,
         *,
         owner: object,
         canonical_run_root: Path,
     ) -> "ReportDocumentWriterV1":
+        if cls is not ReportDocumentWriterV1:
+            raise TypeError("Report document writer requires the exact server-issued type")
         _validate_owner_bound_projection(projection, owner)
         if not isinstance(view_model, Mapping):
             raise TypeError("ReportDocumentWriterV1 requires a bound typed report payload")
@@ -156,26 +161,27 @@ class ReportDocumentWriterV1:
         issuer_token = object()
         object.__setattr__(instance, "_issuer_token", issuer_token)
         with _REPORT_DOCUMENT_WRITER_ADMISSIONS_LOCK:
-            _REPORT_DOCUMENT_WRITER_ADMISSIONS[id(instance)] = (
-                instance,
+            _REPORT_DOCUMENT_WRITER_ADMISSIONS[instance] = (
                 owner,
                 issuer_token,
             )
         return instance
 
     def _assert_server_owned(self) -> None:
+        if type(self) is not ReportDocumentWriterV1:
+            raise TypeError("Report document writer requires the exact server-issued type")
         issuer_token = getattr(self, "_issuer_token", None)
         with _REPORT_DOCUMENT_WRITER_ADMISSIONS_LOCK:
-            admission = _REPORT_DOCUMENT_WRITER_ADMISSIONS.get(id(self))
+            admission = _REPORT_DOCUMENT_WRITER_ADMISSIONS.get(self)
         if (
             admission is None
-            or admission[0] is not self
-            or admission[1] is not getattr(self, "_owner", None)
-            or admission[2] is not issuer_token
+            or admission[0] is not getattr(self, "_owner", None)
+            or admission[1] is not issuer_token
             or type(issuer_token) is not object
         ):
             raise TypeError("ReportDocumentWriterV1 lacks the server-owned exact issuer identity")
         _validate_owner_bound_projection(self.projection, getattr(self, "_owner", None))
+        _validate_bound_report_view_model(self.view_model, self.projection)
 
     def __copy__(self):
         raise TypeError("server-issued Report document writers cannot be copied")
@@ -446,11 +452,28 @@ def issue_workflow_report_writer(
 
 def _validate_bound_report_view_model(
     view_model: Mapping[str, Any],
-    projection: EvidenceProjectionV1,
+    projection: EvidenceProjectionV1 | LocalReportCollectionV1,
 ) -> None:
     """Require citable report fields to be an exact owner-issued projection."""
 
     wire = projection.wire
+    from .canonical import sha256_canonical
+    from .report_view_model import _empty_legacy_presentation
+
+    # Validate the complete canonical content, not only a few identity fields.
+    # Builder-only aliases must equal their bound source; they cannot add facts.
+    expected = {**_empty_legacy_presentation(), **dict(wire)}
+    aliases = {"typedFacts": list(wire.get("facts", ())),
+               "typed_critical_errors": []}
+    for key, value in view_model.items():
+        if key not in expected and key not in aliases:
+            raise TypeError("Report document contains an unbound field")
+        bound = expected[key] if key in expected else aliases[key]
+        if sha256_canonical(value) != sha256_canonical(bound):
+            raise TypeError("Report document content differs from its owner-issued projection")
+    for key, value in wire.items():
+        if key not in view_model or sha256_canonical(view_model[key]) != sha256_canonical(value):
+            raise TypeError("Report document omits owner-issued projection content")
     for key in (
         "schemaVersion",
         "projectionId",
@@ -465,7 +488,7 @@ def _validate_bound_report_view_model(
     ):
         if view_model.get(key) != wire.get(key):
             raise TypeError("Report document payload is not bound to the owner-issued projection")
-    if view_model.get("facts") != list(wire.get("facts", ())):
+    if sha256_canonical(view_model.get("facts")) != sha256_canonical(wire.get("facts", ())):
         raise TypeError("Report document facts are not bound to the owner-issued projection")
     provenance = view_model.get("provenance")
     if not isinstance(provenance, Mapping):
@@ -523,24 +546,101 @@ def _normalize_to_view_model(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _assert_report_output_path(run_root: Path, output_path: Path) -> None:
-    """Reject traversal and symlinked report parents before any write."""
+def _write_report_output(
+    writer: ReportDocumentWriterV1 | ReportEvidenceWriterV1,
+    run_root: Path,
+    *,
+    directory: str,
+    filename: str,
+    artifact_id: str,
+    artifact_type: str,
+    step: str,
+    inputs: Any,
+    content: bytes,
+) -> Path:
+    """Publish complete bytes and their index through the admitted host FD store.
 
-    root = run_root.expanduser().resolve(strict=False)
-    path = output_path.expanduser()
+    Withdraw an earlier publication before replacing bytes, and roll back a
+    failed index commit. An interruption can leave an unindexed complete file.
+    Prepare withdrawal before publication so persistent fsync failure cannot
+    prevent the rollback rename. This does not guarantee power-loss recovery.
+    """
+    import os
+    from uuid import uuid4
+
+    from . import __version__
+    from .canonical import canonical_json_v1
+    from .domain import ArtifactRecord
+    from .services.report_evidence_owner_factory import HostBoundProjectFileStoreV1
+
+    if type(writer) not in (ReportDocumentWriterV1, ReportEvidenceWriterV1):
+        raise TypeError("Report export requires an exact server-owned writer")
+    writer._assert_server_owned()
+    owner = writer.projection._owner
+    store = getattr(owner, "_project_file_store", None)
+    if type(store) is not HostBoundProjectFileStoreV1:
+        raise TypeError("EVIDENCE_PERSISTENCE_CAPABILITY_REQUIRED: report export requires host FD store")
+    if not owner.accepts_canonical_run_root(run_root):
+        raise ValueError("REPORT_WRITER_RUN_ROOT_MISMATCH")
+    parts = store._parts(("runs", owner.run_id, directory, filename), create=True)
+    index_parts = ("runs", owner.run_id, "artifacts_index.json")
+    relative_path = "/".join(parts[2:])
+    record = ArtifactRecord(
+        artifact_id=artifact_id, path=relative_path, artifact_type=artifact_type,
+        step=step, sha256=hashlib.sha256(content).hexdigest(),
+        inputs=tuple(inputs), code_version=__version__,
+    ).to_dict()
+    fcntl, lock_fd = store._lock()
     try:
-        relative_parent = path.parent.relative_to(root)
-    except ValueError as exc:
-        raise ValueError("REPORT_OUTPUT_PATH_OUTSIDE_RUN_ROOT") from exc
-    current = root
-    for component in relative_parent.parts:
-        current = current / component
-        if current.is_symlink():
-            raise ValueError("REPORT_OUTPUT_PARENT_SYMLINK")
-        if current.exists() and not current.is_dir():
-            raise ValueError("REPORT_OUTPUT_PARENT_NOT_DIRECTORY")
-    if path.is_symlink():
-        raise ValueError("REPORT_OUTPUT_SYMLINK")
+        index = store.read_json(index_parts)
+        retained = [row for row in index["artifacts"]
+                    if row["artifact_id"] != artifact_id and row["path"] != relative_path]
+        unpublished = canonical_json_v1({**index, "artifacts": retained}).encode("utf-8")
+        if retained != index["artifacts"]:
+            index["artifacts"] = retained
+            store._replace_json_locked(index_parts, unpublished)
+        # This host primitive atomically replaces arbitrary bytes; no pathname
+        # is reopened for output, hashing, or index persistence.
+        store._replace_json_locked(parts, content)
+        if store.sha256(parts) != record["sha256"]:
+            raise ValueError("REPORT_OUTPUT_CONTENT_CHANGED")
+        rollback_parts = (*index_parts[:-1], f".artifacts_index.{uuid4().hex}.rollback")
+        parent = store._admission._directory(index_parts[:-1], create=False)
+        preserve_rollback = False
+        try:
+            # The host store durably prepares the unpublished index before any
+            # new complete record is visible. No post-failure file write or
+            # file fsync is needed to withdraw it, and unrelated rows survive.
+            store._replace_json_locked(rollback_parts, unpublished)
+            index["artifacts"].append(record)
+            try:
+                store._replace_json_locked(index_parts, canonical_json_v1(index).encode("utf-8"))
+                os.unlink(rollback_parts[-1], dir_fd=parent)
+            except BaseException as publish_error:
+                # Keep the prepared snapshot if rename itself fails; recovery
+                # from a filesystem that also rejects rename is not promised.
+                preserve_rollback = True
+                os.replace(rollback_parts[-1], index_parts[-1], src_dir_fd=parent, dst_dir_fd=parent)
+                preserve_rollback = False
+                try:
+                    os.fsync(parent)
+                except OSError as sync_error:
+                    publish_error.add_note(
+                        f"Export index withdrawn in the live filesystem; rollback durability unverified: {sync_error}"
+                    )
+                raise
+        finally:
+            try:
+                if not preserve_rollback:
+                    try:
+                        os.unlink(rollback_parts[-1], dir_fd=parent)
+                    except FileNotFoundError:
+                        pass
+            finally:
+                store._admission._close_directory(parent)
+    finally:
+        store._unlock(fcntl, lock_fd)
+    return store._root.joinpath(*parts)
 
 
 def render_html_report(
@@ -596,11 +696,11 @@ def render_html_report(
     else:
         template = environment.get_template("report.html.j2")
         rendered_view_model = _normalize_to_view_model(view_model)
-    html_path = run_root / "reports" / filename
-    _assert_report_output_path(run_root, html_path)
-    write_bytes_durable(html_path, template.render(view_model=rendered_view_model).encode("utf-8"))
-    register_artifact(run_root, artifact_id, html_path, "report", "reporting", list(inputs))
-    return html_path
+    return _write_report_output(
+        writer, run_root, directory="reports", filename=filename,
+        artifact_id=artifact_id, artifact_type="report", step="reporting", inputs=inputs,
+        content=template.render(view_model=rendered_view_model).encode("utf-8"),
+    )
 
 
 def render_legacy_html_report(
@@ -611,7 +711,7 @@ def render_legacy_html_report(
     artifact_id: str = "report_html",
     inputs: list[str] | tuple[str, ...] = (),
     owner: object | None = None,
-    projection: EvidenceProjectionV1 | None = None,
+    projection: EvidenceProjectionV1 | LocalReportCollectionV1 | None = None,
 ) -> Path:
     """Render a legacy-shaped view only through the server-owned writer seam.
 
@@ -622,7 +722,7 @@ def render_legacy_html_report(
 
     if not isinstance(view_model, Mapping):
         raise TypeError("legacy report view must be a mapping")
-    if type(projection) is not EvidenceProjectionV1:
+    if type(projection) not in (EvidenceProjectionV1, LocalReportCollectionV1):
         raise TypeError("legacy report render requires an owner-issued projection")
     if owner is None:
         raise TypeError("legacy report render requires a server-owned owner capability")

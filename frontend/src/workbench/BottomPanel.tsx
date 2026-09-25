@@ -14,7 +14,10 @@ import {
   type BottomPanelContext,
 } from "./registry/bottomPanelRegistry";
 import { useSessionByRunId } from "./state/useSessionByRunId";
-import { AgentComposer } from "./agent/AgentComposer";
+import {
+  AgentCutoverComposer,
+  AgentCutoverProvider,
+} from "./agent/AgentCutoverPanel";
 
 interface BottomPanelProps {
   runId: string;
@@ -116,6 +119,11 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
   }, [setOpen]);
 
   return (
+    <AgentCutoverProvider
+      projectRoot={projectRoot}
+      runId={runId}
+      enabled={state.bottomPanel === "agent"}
+    >
     <div
       className={`bottom-panel${showsCompactAgentComposer ? " bottom-panel--agent-compact" : ""}`}
       data-testid="bottom-panel"
@@ -252,7 +260,7 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
         </>
       ) : showsCompactAgentComposer ? (
         <div className="bottom-panel__compact-agent" data-testid="bottom-panel-compact-agent">
-          <AgentComposer variant="compact" onExpand={expandAgentPanel} />
+          <AgentCutoverComposer onExpand={expandAgentPanel} />
         </div>
       ) : (
         <button
@@ -276,5 +284,6 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
         </button>
       )}
     </div>
+    </AgentCutoverProvider>
   );
 }

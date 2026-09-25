@@ -251,6 +251,41 @@ const validatedProjection = {
 } as ReportEvidenceProjection;
 
 describe("Report evidence boundary v1.8.9", () => {
+  it("accepts the server-owned run/model result identity emitted by the backend", () => {
+    const serverProjection = {
+      ...committedProjection,
+      status: "degraded",
+      completenessStatus: "degraded",
+      validationStatus: "not_applicable",
+      validationSummary: {
+        levels_present: ["none"],
+        minimum_required: "none",
+        requirement_status: "not_applicable",
+      },
+      provenance: {
+        ...committedProjection.provenance,
+        resultIdentity: {
+          result_ref: "result-1",
+          run_id: "run-1",
+          model_run_id: "run-1",
+          schema_version: "1.0",
+        },
+      },
+    } as unknown as Record<string, unknown>;
+    serverProjection.projectionDigest = reportProjectionDigest(serverProjection);
+    const serverReceipt = {
+      ...committedServerReceipt,
+      projectionDigest: serverProjection.projectionDigest,
+      provenance: serverProjection.provenance,
+    } as unknown as ReportEvidenceServerReceipt;
+
+    const parsed = readReportEvidenceProjection(serverProjection, undefined, serverReceipt);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.status).toBe("degraded");
+    expect(parsed?.facts).toHaveLength(1);
+    expect(buildReportEvidenceFacts(parsed)).toHaveLength(1);
+  });
+
   it("rejects malformed, stale, and identity-inconsistent projections before rendering facts", () => {
     expect(readReportEvidenceProjection({ ...committedProjection, schemaVersion: 2 })).toBeNull();
     expect(readReportEvidenceProjection({
@@ -419,6 +454,44 @@ describe("Report evidence boundary v1.8.9", () => {
 
     expect(screen.getByTestId(`typed-evidence-${validatedProjection.projectionId}`)).toHaveTextContent("Validation");
     expect(screen.getByTestId(`typed-evidence-${validatedProjection.projectionId}`)).toHaveTextContent("MET");
+  });
+
+  it("accepts server-receipted degraded evidence with bounded facts", () => {
+    const degradedProjectionCandidate = {
+      ...committedProjection,
+      status: "degraded",
+      completenessStatus: "degraded",
+      validationStatus: "not_applicable",
+      validationSummary: {
+        levels_present: ["none"],
+        minimum_required: "none",
+        requirement_status: "not_applicable",
+      },
+      projectionDigest: "",
+    } as Record<string, unknown>;
+    degradedProjectionCandidate.projectionDigest = reportProjectionDigest(
+      degradedProjectionCandidate,
+    );
+    const degradedProjection = degradedProjectionCandidate as unknown as ReportEvidenceProjection;
+    const degradedReceipt = {
+      ...committedServerReceipt,
+      projectionDigest: degradedProjection.projectionDigest,
+    };
+
+    const parsed = readReportEvidenceProjection(
+      degradedProjection,
+      { runId: "run-1" },
+      degradedReceipt,
+    );
+
+    expect(parsed).toMatchObject({
+      status: "degraded",
+      availability: "available",
+      executionStatus: "completed",
+      completenessStatus: "degraded",
+      validationStatus: "not_applicable",
+    });
+    expect(parsed?.facts).toHaveLength(1);
   });
 
   it("wires the real ReportView path to the typed FamilyEvidence projection", () => {
