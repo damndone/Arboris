@@ -27,7 +27,7 @@ from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import verify_upload
 from ..model_options import ModelOptionsError, canonicalize_model_options, parse_model_options
 from ..repository.run_repository import _resolve_run_root
-from .run_service import _submit_run, merge_form_overrides
+from .run_service import _submit_run, encode_form_override, merge_form_overrides
 from .draft_materialization import normalize_ols_genesis_model_params
 
 
@@ -287,11 +287,10 @@ def execute_genesis_draft(
             "sheet_name": str(tp.get("sheet_name") or ""),
             "transpose": "true" if tp.get("transpose") else "false",
             "focal_x": ",".join(focal) if isinstance(focal, list) else str(focal),
-            # remaining model params share POST /runs' form field names — pass through:
-            **{
-                k: (json.dumps(v) if isinstance(v, (list, dict)) else str(v))
-                for k, v in mp.items()
-            },
+            # remaining model params share POST /runs' form field names. Encode
+            # them with the rerun path's rule so structured fields (`labels`)
+            # stay objects instead of becoming JSON text the run cannot read.
+            **{k: encode_form_override(k, v) for k, v in mp.items()},
         }
         try:
             raw_model_options = merged_form.get("model_options", "{}")

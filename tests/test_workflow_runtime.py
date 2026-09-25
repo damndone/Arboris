@@ -1146,6 +1146,66 @@ def test_post_estimation_resumes_against_the_model_fitted_before_interruption(
     )
 
 
+def test_genesis_with_measurement_level_declarations_executes(tmp_path) -> None:
+    """A genesis step may declare measurement levels alongside its branches.
+
+    The run form carries `labels` as an object. Encoding it to JSON text on the
+    way in failed every such step with MODEL_OPTIONS_NOT_OBJECT, so adding a
+    categorical regressor together with its declaration could never run.
+    """
+
+    frame = _frame(36).assign(region=[("north", "south", "east")[index % 3] for index in range(36)])
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="labels.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "labels.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="labels-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-genesis-labels",
+        steps=[
+            {
+                "step_id": "estimate",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "ols",
+                    "covariance": "robust",
+                    "labels": {"measurement_level": {"region": "nominal", "outcome": "scale"}},
+                    "branches": [
+                        {
+                            "branch_id": "main",
+                            "outcome": "outcome",
+                            "predictors": ["rate_a"],
+                            "categorical": ["region"],
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.status == "completed", state.steps["estimate"].error
+    branch_run = state.steps["estimate"].artifact_ids[0].split(":", 1)[0]
+    form = json.loads(
+        (project / "runs" / branch_run / "run_inputs.json").read_text(encoding="utf-8")
+    )["form"]
+    assert form["labels"]["measurement_level"] == {"region": "nominal", "outcome": "scale"}
+
+
 _OLS_ONLY_POST_ESTIMATION = (
     ("model.joint_f_test", {"term_selectors": [{"kind": "polynomial", "column": "exposure"}]}),
     ("model.white_test", {}),
