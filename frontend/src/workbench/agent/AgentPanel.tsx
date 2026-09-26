@@ -94,7 +94,7 @@ function transcriptIsAtBottom(element: HTMLElement): boolean {
  * shows what happened (tool id, ok/error, proposal-ready) instead of dumping
  * the bounded output payload into the transcript. Unparseable content falls
  * back to the raw string so nothing is silently hidden. */
-function toolStatusLine(content: string, toolName?: string | null): string {
+export function toolStatusLine(content: string, toolName?: string | null): string {
   let payload: unknown;
   try {
     payload = JSON.parse(content);
@@ -106,7 +106,14 @@ function toolStatusLine(content: string, toolName?: string | null): string {
     tool_id?: unknown;
     ok?: unknown;
     error?: unknown;
-    output?: { requires_confirmation?: unknown; proposal?: { proposal_id?: unknown } };
+    output?: {
+      requires_confirmation?: unknown;
+      proposal?: { proposal_id?: unknown };
+      confirmation_reason?: unknown;
+      executed?: unknown;
+      inferential_tests_run_this_session?: unknown;
+      operation?: { status?: unknown };
+    };
   };
   const toolId =
     typeof record.tool_id === "string"
@@ -118,10 +125,24 @@ function toolStatusLine(content: string, toolName?: string | null): string {
     const error = typeof record.error === "string" ? record.error : "failed";
     return `${toolId} ✗ ${error}`;
   }
+  if (record.output?.executed === true) {
+    // Read-only workflows run without a click; say so, and how many tests
+    // this session has run -- the count the report discloses.
+    const tests = record.output.inferential_tests_run_this_session;
+    const count = typeof tests === "number" ? ` · ${tests} test${tests === 1 ? "" : "s"} run this session` : "";
+    const status = record.output.operation?.status;
+    return status === "completed"
+      ? `${toolId} ✓ read-only analysis ran without confirmation (recorded)${count}`
+      : `${toolId} ✗ read-only analysis ${typeof status === "string" ? status : "failed"}`;
+  }
+  if (record.output?.executed === false) {
+    return `${toolId} ✗ read-only analysis could not run`;
+  }
   if (record.output?.requires_confirmation === true) {
     const proposalId = record.output.proposal?.proposal_id;
     const ref = typeof proposalId === "string" ? ` ${proposalId}` : "";
-    return `${toolId} ✓ proposal ready${ref} — awaiting confirmation`;
+    const reason = record.output.confirmation_reason;
+    return `${toolId} ✓ proposal ready${ref} — awaiting confirmation${typeof reason === "string" ? ` (${reason})` : ""}`;
   }
   return `${toolId} ✓ ok`;
 }
