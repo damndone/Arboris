@@ -148,11 +148,27 @@ def test_aggregates_and_model_results_reach_a_remote_provider(monkeypatch, tmp_p
     assert _tool_content(body)["output"]["models"][0]["coefficients"][0]["estimate"] == 1.234
 
 
+def test_a_failed_rows_call_reaches_the_model_as_the_error_it_is(monkeypatch, tmp_path: Path) -> None:
+    """Found live: the rows call failed, the guard withheld its error as 'rows',
+    and the model told the user the table was on screen."""
+
+    failed = {
+        "ok": False, "output": None, "error": "ToolVisibleError",
+        "error_details": [{"message": "DATASET_ROWS_UNAVAILABLE: source graph node was not found"}],
+    }
+    with egress_project(tmp_path):
+        body = _send(monkeypatch, _conversation("show_dataset_rows", failed), REMOTE)
+    assert _tool_content(body) == failed
+    assert read_audit(tmp_path)[0]["decisions"][0]["content_class"] == "workbench_state"
+
+
 def test_an_unclassified_tool_is_treated_as_the_most_restrictive(monkeypatch, tmp_path: Path) -> None:
     with egress_project(tmp_path):
         body = _send(monkeypatch, _conversation("brand_new_tool", {"ok": True, "output": {"x": 1}}), REMOTE)
     note = _tool_content(body)
     assert note == {**note, "egress_withheld": True, "content_class": "unclassified"}
+    # Nothing was shown to the user, so the note must not say it was.
+    assert "shown_to_user" not in note and "Workbench" not in note["guidance"]
 
 
 def test_a_project_may_allow_rows_for_one_provider(monkeypatch, tmp_path: Path) -> None:
@@ -316,6 +332,25 @@ def test_the_rows_tool_shows_rows_and_says_what_it_showed(project_run) -> None:
     assert len(result["rows"]) == 20 and set(result["rows"][0]) == {"educ"}
     assert result["row_numbers"][:2] == [1, 2]
     assert result["egress_summary"] == f"Rows 1-20 of 60 (1 column) of stage:raw in run {run_id} are shown to the user in Workbench."
+
+
+def test_the_rows_tool_accepts_the_forest_node_key_the_main_agent_sees(project_run) -> None:
+    from workbench.agent.tools import ToolContext
+
+    root, run_id = project_run
+    result = _rows_tool(root).handler(
+        {"run_id": run_id, "node_id": f"{'6d' * 32}::stage:raw", "limit": 2},
+        ToolContext(session_id="s1", metadata={}),
+    )
+    assert result["node_id"] == "stage:raw" and len(result["rows"]) == 2
+
+
+def test_the_main_agent_can_show_rows_too(project_run) -> None:
+    from workbench.agent.context_tools import NodeOperationContextProvider
+
+    root, _run_id = project_run
+    tools = {tool.tool_id: tool for tool in NodeOperationContextProvider(root).global_tool_definitions(session_id="m")}
+    assert tools["show_dataset_rows"].scope_requirements == ("project",)
 
 
 def test_the_rows_tool_names_the_real_columns_when_asked_for_an_absent_one(project_run) -> None:

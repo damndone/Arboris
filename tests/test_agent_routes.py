@@ -1390,6 +1390,9 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
         tool["tool_id"] for tool in FakeAgentAdapter.instances[-1].requests[0].tools
     }
     assert tool_ids == {
+        # Rows go to the user's screen; the provider sees them only if the
+        # project's sharing policy allows rows (workbench.egress).
+        "show_dataset_rows",
         "inspect_project_model_coefficients",
         "inspect_project_coefficient_transforms",
         "inspect_project_dataset_schema",

@@ -304,27 +304,33 @@ def _tool_names_by_call_id(messages: Sequence[Mapping[str, Any]]) -> dict[str, s
 
 
 def _withheld_note(tool_id: str, content_class: str, payload: Any) -> str:
+    # A tool may attach a summary it has declared safe to send (for example
+    # "Rows 1-20 of 240 ... are shown to the user in Workbench").
+    summary = None
+    if isinstance(payload, Mapping):
+        output = payload.get("output") if isinstance(payload.get("output"), Mapping) else payload
+        candidate = output.get("egress_summary") if isinstance(output, Mapping) else None
+        summary = candidate if isinstance(candidate, str) else None
     note: dict[str, Any] = {
         "egress_withheld": True,
         "tool_id": tool_id,
         "content_class": content_class,
         "reason": (
-            f"This project's data-sharing policy keeps {content_class} content on the user's "
-            "computer; it was not sent to the model provider."
+            f"The call succeeded. This project's data-sharing policy keeps {content_class} "
+            "content on the user's computer, so it was not sent to the model provider."
         ),
         "guidance": (
-            "Do not ask for this content again. The user can see it in Workbench. Answer "
+            "Never state, guess or reconstruct the withheld values. Answer questions about them "
             "from schema, labels, aggregates or model results, or plan workflow steps that "
-            "compute what you need locally."
+            "compute locally."
         ),
     }
-    # A tool may attach a summary it has declared safe to send (for example
-    # "20 rows x 6 columns shown to the user").
-    if isinstance(payload, Mapping):
-        output = payload.get("output") if isinstance(payload.get("output"), Mapping) else payload
-        summary = output.get("egress_summary") if isinstance(output, Mapping) else None
-        if isinstance(summary, str):
-            note["shown_to_user"] = summary
+    if summary is not None:
+        note["shown_to_user"] = summary
+        note["guidance"] = (
+            "Tell the user what was shown (shown_to_user); they can read it in Workbench. "
+            + note["guidance"]
+        )
     return json.dumps(note, ensure_ascii=False, sort_keys=True)
 
 
@@ -482,6 +488,10 @@ def guard_outgoing_messages(
         if role == "tool":
             tool_id = tool_names.get(str(message.get("tool_call_id", "")))
             content_class = tool_content_class(tool_id)
+            if isinstance(payload, Mapping) and payload.get("ok") is False and payload.get("output") is None:
+                # A failed call returned no content, only its error. Withholding
+                # the error would let the model believe the call succeeded.
+                content_class = "workbench_state"
             if content_class not in allowed:
                 outgoing["content"] = _withheld_note(tool_id or "unknown", content_class, payload)
                 decisions.append(_Decision(index, role, content_class, "withheld", tool_id))

@@ -89,9 +89,10 @@ export function SharingPanel({ projectRoot }: { projectRoot: string }) {
           </div>
           <div style={{ display: "grid", gap: 2, marginBottom: 6 }}>
             {view.content_classes.map((contentClass) => (
-              <label key={contentClass}>
+              <label key={contentClass} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <input
                   type="checkbox"
+                  style={{ width: "auto", margin: 0 }}
                   aria-label={`Send ${CLASS_LABELS[contentClass] ?? contentClass}`}
                   checked={draft.includes(contentClass)}
                   onChange={(event) =>
@@ -99,7 +100,7 @@ export function SharingPanel({ projectRoot }: { projectRoot: string }) {
                       event.target.checked ? [...current, contentClass] : current.filter((item) => item !== contentClass),
                     )
                   }
-                />{" "}
+                />
                 {CLASS_LABELS[contentClass] ?? contentClass}
               </label>
             ))}

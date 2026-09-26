@@ -209,6 +209,18 @@ class WorkbenchContextProvider(Protocol):
         """Return provider-owned, scope-bound read-only tool definitions."""
 
 
+_FOREST_NODE_KEY = re.compile(r"[0-9a-f]{64}::(?P<node>.+)")
+
+
+def _run_local_node_id(node_id: str) -> str:
+    """``stage:raw`` from either ``stage:raw`` or the forest key
+    ``<node_hash>::stage:raw`` the Main Agent sees in its project context.
+    The run is named separately, so the hash adds nothing here."""
+
+    match = _FOREST_NODE_KEY.fullmatch(node_id)
+    return match.group("node") if match else node_id
+
+
 class NodeOperationContextProvider:
     """Read node-operation context from one explicitly scoped project."""
 
@@ -611,7 +623,10 @@ class NodeOperationContextProvider:
             self._project_run_root(run_id)  # refuses anything but a project run id
             try:
                 exported = write_export(
-                    self.project_root, run_id, str(arguments.get("node_id") or ""), str(arguments.get("format") or "")
+                    self.project_root,
+                    run_id,
+                    _run_local_node_id(str(arguments.get("node_id") or "")),
+                    str(arguments.get("format") or ""),
                 )
             except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
                 raise ToolVisibleError(f"DATASET_EXPORT_UNAVAILABLE: {exc}") from exc
@@ -628,84 +643,8 @@ class NodeOperationContextProvider:
                 "notes_omitted": max(len(report["notes"]) - 40, 0),
             }
 
-        def show_dataset_rows(
-            arguments: dict[str, Any],
-            context: ToolContext,
-        ) -> dict[str, Any]:
-            if context.session_id != session_id:
-                raise ValueError("tool session is outside the registered chain scope")
-            from ..data_operations import DataColumnCastValidationError
-            from ..services.dataset_view import dataset_page
-
-            run_id = str(arguments.get("run_id") or "")
-            node_id = str(arguments.get("node_id") or "")
-            self._project_run_root(run_id)
-            offset = int(arguments.get("offset") or 0)
-            limit = int(arguments.get("limit") or 20)
-            try:
-                page = dataset_page(self.project_root, run_id, node_id, offset=offset, limit=limit)
-            except (DataColumnCastValidationError, ValueError, FileNotFoundError) as exc:
-                raise ToolVisibleError(f"DATASET_ROWS_UNAVAILABLE: {exc}") from exc
-            requested = [str(column) for column in arguments.get("columns") or []]
-            unknown = [column for column in requested if column not in page["columns"]]
-            if unknown:
-                raise ToolVisibleError(
-                    f"DATASET_ROWS_UNAVAILABLE: unknown columns {unknown}; the dataset has {page['columns']}"
-                )
-            columns = requested or page["columns"]
-            rows = [{column: row.get(column) for column in columns} for row in page["rows"]]
-            shown = len(rows)
-            first = offset + 1 if shown else offset
-            return {
-                "run_id": run_id,
-                "node_id": node_id,
-                "columns": columns,
-                "total_rows": page["total_rows"],
-                "offset": offset,
-                "row_numbers": page["row_numbers"],
-                "rows": rows,
-                # The only part of this result a remote provider receives under
-                # the default data-sharing policy (see workbench.egress).
-                "egress_summary": (
-                    f"Rows {first}-{offset + shown} of {page['total_rows']} "
-                    f"({len(columns)} column{'s' if len(columns) != 1 else ''}) "
-                    f"of {node_id} in run {run_id} are shown to the user in Workbench."
-                ),
-            }
-
         return [
-            ToolDefinition(
-                tool_id="show_dataset_rows",
-                version="v1",
-                input_schema={
-                    "type": "object",
-                    "required": ["run_id", "node_id"],
-                    "properties": {
-                        "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
-                        "node_id": {"type": "string", "minLength": 1, "maxLength": 300},
-                        "offset": {"type": "integer", "minimum": 0},
-                        "limit": {"type": "integer", "minimum": 1, "maximum": 50},
-                        "columns": {
-                            "type": "array",
-                            "items": {"type": "string", "minLength": 1},
-                            "maxItems": 40,
-                        },
-                    },
-                    "additionalProperties": False,
-                },
-                side_effect="none",
-                scope_requirements=("project", "chain"),
-                max_output_budget=16384,
-                handler=show_dataset_rows,
-                description=(
-                    "Show rows of one dataset node (e.g. stage:raw, stage:cleaned or a "
-                    "derived dataset) to the user as a table in Workbench, when the user "
-                    "asks to see records. Under the project's data-sharing policy the rows "
-                    "may stay on the user's computer: you then receive only a summary of "
-                    "what was shown. Do not repeat or guess row values; describe data with "
-                    "summaries, frequencies or models instead."
-                ),
-            ),
+            self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project", "chain")),
             ToolDefinition(
                 tool_id="export_dataset",
                 version="v1",
@@ -1192,12 +1131,98 @@ class NodeOperationContextProvider:
             ),
         ]
 
+    def show_dataset_rows_tool(
+        self, *, session_id: str, scope_requirements: tuple[str, ...]
+    ) -> ToolDefinition:
+        """Rows for the user's screen; the provider receives only the summary
+        unless the project's sharing policy allows rows (workbench.egress)."""
+
+        def show_dataset_rows(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered scope")
+            from ..data_operations import DataColumnCastValidationError
+            from ..services.dataset_view import dataset_page
+
+            run_id = str(arguments.get("run_id") or "")
+            node_id = _run_local_node_id(str(arguments.get("node_id") or ""))
+            self._project_run_root(run_id)
+            offset = int(arguments.get("offset") or 0)
+            limit = int(arguments.get("limit") or 20)
+            try:
+                page = dataset_page(self.project_root, run_id, node_id, offset=offset, limit=limit)
+            except (DataColumnCastValidationError, ValueError, FileNotFoundError) as exc:
+                raise ToolVisibleError(f"DATASET_ROWS_UNAVAILABLE: {exc}") from exc
+            requested = [str(column) for column in arguments.get("columns") or []]
+            unknown = [column for column in requested if column not in page["columns"]]
+            if unknown:
+                raise ToolVisibleError(
+                    f"DATASET_ROWS_UNAVAILABLE: unknown columns {unknown}; the dataset has {page['columns']}"
+                )
+            columns = requested or page["columns"]
+            rows = [{column: row.get(column) for column in columns} for row in page["rows"]]
+            shown = len(rows)
+            first = offset + 1 if shown else offset
+            return {
+                "run_id": run_id,
+                "node_id": node_id,
+                "columns": columns,
+                "total_rows": page["total_rows"],
+                "offset": offset,
+                "row_numbers": page["row_numbers"],
+                "rows": rows,
+                # The only part of this result a remote provider receives under
+                # the default data-sharing policy (see workbench.egress).
+                "egress_summary": (
+                    f"Rows {first}-{offset + shown} of {page['total_rows']} "
+                    f"({len(columns)} column{'s' if len(columns) != 1 else ''}) "
+                    f"of {node_id} in run {run_id} are shown to the user in Workbench."
+                ),
+            }
+
+
+        return ToolDefinition(
+            tool_id="show_dataset_rows",
+            version="v1",
+            input_schema={
+                "type": "object",
+                "required": ["run_id", "node_id"],
+                "properties": {
+                    "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "node_id": {"type": "string", "minLength": 1, "maxLength": 300},
+                    "offset": {"type": "integer", "minimum": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "maxItems": 40,
+                    },
+                },
+                "additionalProperties": False,
+            },
+            side_effect="none",
+            scope_requirements=scope_requirements,
+            max_output_budget=16384,
+            handler=show_dataset_rows,
+            description=(
+                "Show rows of one dataset node (e.g. stage:raw, stage:cleaned or a "
+                "derived dataset) to the user as a table in Workbench, when the user "
+                "asks to see records. Under the project's data-sharing policy the rows "
+                "may stay on the user's computer: you then receive only a summary of "
+                "what was shown. Do not repeat or guess row values; describe data with "
+                "summaries, frequencies or models instead."
+            ),
+        )
+
     def global_tool_definitions(self, *, session_id: str) -> list[ToolDefinition]:
         """Expose bounded project evidence readers to the Main Agent.
 
         The Main Agent remains unable to mutate a graph or run.  It may only
         inspect server-persisted aggregate evidence, without transferring model
-        payloads or data rows into its context.
+        payloads into its context. It can show data rows to the user; they
+        reach the model only when the project's sharing policy allows rows.
         """
 
         def inspect_project_model_coefficients(
@@ -1318,6 +1343,7 @@ class NodeOperationContextProvider:
             )
 
         return [
+            self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project",)),
             ToolDefinition(
                 tool_id="inspect_project_model_coefficients",
                 version="v1",
