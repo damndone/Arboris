@@ -4,6 +4,7 @@ export type StatisticalExplorationOperation =
   | "summarize"
   | "summarize_detail"
   | "misstable"
+  | "tabulate"
   | "corr"
   | "derive_boolean"
   | "scatter";

@@ -1973,10 +1973,15 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
     "statistical.explore": StepSpecContract(
         summary=(
             "One exploration over the source table: summarize / summarize_detail / "
-            "misstable / corr, or a scatter step when `plots` is present."
+            "misstable / tabulate / corr, or a scatter step when `plots` is present."
         ),
         fields={
-            "operation": "summarize | summarize_detail | misstable | corr.",
+            "operation": (
+                "summarize | summarize_detail | misstable | tabulate | corr. "
+                "summarize/summarize_detail cover numeric columns and list the "
+                "others as non_numeric_columns; tabulate gives frequency tables "
+                "for any column (use it for categorical variables)."
+            ),
             "selected_columns": "List of column names to analyse. NOT `columns`.",
             "filters": "List of {column, operator, value}; combined with AND.",
             "options": (

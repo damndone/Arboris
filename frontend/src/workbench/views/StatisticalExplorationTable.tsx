@@ -45,6 +45,14 @@ function correlationRowsOf(result: Record<string, unknown>): Array<Record<string
 function rowsOf(result: Record<string, unknown>): Array<Record<string, TableCell>> {
   const correlation = correlationRowsOf(result);
   if (correlation) return correlation;
+  // Frequency tables (tabulate) arrive as one flat row per variable value.
+  if (Array.isArray(result.rows)) {
+    return result.rows
+      .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object")
+      .map((row) => Object.fromEntries(
+        Object.entries(row).map(([key, cell]) => [key, key === "value" && cell === null ? "(missing)" : scalar(cell)]),
+      ));
+  }
   const groups = Array.isArray(result.groups) ? result.groups : [];
   if (groups.length > 0) {
     return groups.flatMap((group) => {
@@ -95,6 +103,9 @@ function ExplorationResultTable({ payload }: { payload: ExplorationPayload }) {
         {sourceRows !== null ? `${sourceRows} source rows` : null}
         {filteredRows !== null ? ` · ${filteredRows} rows after filters` : null}
         {groupCount > 0 ? ` · ${groupCount} groups` : null}
+        {Array.isArray(result.non_numeric_columns) && result.non_numeric_columns.length > 0
+          ? ` · not summarised (not numeric): ${result.non_numeric_columns.join(", ")}`
+          : null}
       </div>
       {rows.length > 0 ? (
         <div
