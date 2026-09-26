@@ -2933,6 +2933,44 @@ class NodeOperationContextProvider:
             "omitted_sections": omitted_sections,
         }
 
+    def executed_workflow_results(self, record: Any, *, max_chars: int = 6000) -> list[dict[str, Any]]:
+        """Public results of a just-executed workflow, step by step.
+
+        The same public-result view inspect_operation_artifact serves, handed
+        to the model with the execution receipt so a read-only workflow is
+        answered in the turn that ran it.
+        """
+
+        run_id = str((record.target or {}).get("run_id") or "")
+        state = ((record.outputs or {}).get("workflow_state") or {}).get("steps") or {}
+        steps = {item.get("step_id"): item for item in (record.changes or {}).get("steps") or () if isinstance(item, dict)}
+        results: list[dict[str, Any]] = []
+        for step_id, step_state in state.items():
+            entry: dict[str, Any] = {
+                "step_id": step_id,
+                "operation_id": (steps.get(step_id) or {}).get("operation_id"),
+                "status": step_state.get("status"),
+                "artifacts": [],
+            }
+            for artifact_id in step_state.get("artifact_ids") or ():
+                artifact = resolve_registered_artifact(self.project_root / "runs" / run_id, str(artifact_id))
+                if artifact is None:
+                    entry["artifacts"].append({"artifact_id": artifact_id, "available": False})
+                    continue
+                artifact_type, _sha256, payload = artifact
+                public_result, _omitted = _public_operation_artifact_result(artifact_type, payload)
+                item: dict[str, Any] = {"artifact_id": artifact_id, "artifact_type": artifact_type}
+                if public_result is None:
+                    item["available"] = False
+                elif len(json.dumps(public_result, ensure_ascii=False, default=str)) > max_chars:
+                    item["available"] = False
+                    item["reason"] = "too large to include; read it with inspect_operation_artifact"
+                else:
+                    item["result"] = public_result
+                entry["artifacts"].append(item)
+            results.append(entry)
+        return results
+
     def inspect_notebook_workflow_results(
         self,
         request: InspectNotebookWorkflowResultsRequest,
@@ -4383,11 +4421,29 @@ def _public_operation_artifact_result(
         "statistical_test",
         "post_estimation",
         "p7_analysis",
+        "workflow_capability_result",
     }:
         return None, ["raw_artifact_payloads"]
     result = payload.get("result")
     if not isinstance(result, dict):
         return None, ["raw_artifact_payloads"]
+    if artifact_type == "workflow_capability_result" and isinstance(result.get("result"), dict):
+        # {operation_id, family, source_columns, result: {...}}: the inner
+        # result holds the statistics; lifting it keeps them inside the
+        # projection's nesting limit.
+        result = {
+            "operation_id": result.get("operation_id"),
+            "source_columns": result.get("source_columns"),
+            **result["result"],
+        }
+    if (
+        artifact_type == "statistical_exploration"
+        and result.get("operation") == "tabulate"
+        and isinstance(result.get("rows"), list)
+    ):
+        # A frequency table is an aggregate. Its entries are stored under
+        # `rows` for the UI table, a key the projection withholds as raw data.
+        result = {**{key: value for key, value in result.items() if key != "rows"}, "frequencies": result["rows"]}
     return _bounded_public_result_value(result), ["raw_artifact_payloads", "raw_rows"]
 
 
@@ -4803,7 +4859,9 @@ def _bounded_public_result_value(
         if limit <= 0:
             budget.omitted_items += 1
             return "[omitted: result string budget]"
-        budget.remaining_string_characters -= limit
+        # Charge what is kept, not the cap: charging the cap let seven short
+        # labels exhaust the budget and blank out every later test name.
+        budget.remaining_string_characters -= min(len(value), limit)
         if len(value) > limit:
             budget.omitted_items += 1
         return value[:limit]

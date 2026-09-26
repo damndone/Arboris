@@ -8,6 +8,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
+from collections.abc import Awaitable, Callable
 from typing import Any, Iterable
 from uuid import uuid4
 
@@ -598,6 +599,10 @@ class WorkbenchOrchestrator:
         self._commands: dict[str, AgentCommand] = {}
         self._execution_locks: dict[str, asyncio.Lock] = {}
         self._operation_locks: dict[str, asyncio.Lock] = {}
+        # Set by the HTTP layer, which owns the context-fingerprint and active
+        # head checks a confirmation needs. When absent, every proposal waits
+        # for the user (see read_only_policy).
+        self.read_only_runner: Callable[[Any], Awaitable[OperationRecord]] | None = None
         self._lease_owner = f"agent:{uuid4().hex}"
 
     def _compile_workflow_record(
@@ -2019,7 +2024,10 @@ class WorkbenchOrchestrator:
             failpoint=self.failpoint,
             risk_authorization_store=self.risk_authorization_store,
         )
-        return await lifecycle.execute(record_id)
+        terminal = await lifecycle.execute(record_id)
+        if terminal.status in {"completed", "failed"}:
+            _record_operation_in_ledger(project_root, terminal)
+        return terminal
 
     async def recover_operations(
         self,
@@ -2874,7 +2882,7 @@ class WorkbenchOrchestrator:
             ):
                 registry.register(definition)
 
-        def propose_operation(arguments: dict[str, Any], context) -> dict[str, Any]:
+        async def propose_operation(arguments: dict[str, Any], context) -> dict[str, Any]:
             if context.session_id != session_id:
                 raise ValueError("tool session is outside the registered chain scope")
             operation_id = str(arguments["operation_id"])
@@ -2932,7 +2940,7 @@ class WorkbenchOrchestrator:
                 risks=arguments["risks"],
                 command_id=command_id,
             )
-            return {"requires_confirmation": True, "proposal": proposal.to_dict()}
+            return await self._run_or_await_confirmation(proposal, session_id=session_id)
 
         def propose_analysis_loop(arguments: dict[str, Any], context) -> dict[str, Any]:
             if context.session_id != session_id:
@@ -2989,6 +2997,67 @@ class WorkbenchOrchestrator:
             )
         )
         return registry
+
+    async def _run_or_await_confirmation(self, proposal: Any, *, session_id: str) -> dict[str, Any]:
+        """Run a read-only workflow now; leave anything else for the user.
+
+        The model receives the executed workflow's results in the same turn,
+        so it answers with the numbers instead of asking for a click.
+        """
+
+        from ..analysis_ledger import inferential_count, read as read_ledger
+        from .read_only_policy import ACTOR, decide
+
+        project_root = getattr(self.context_provider, "project_root", None)
+        if self.read_only_runner is None or project_root is None:
+            return {"requires_confirmation": True, "proposal": proposal.to_dict()}
+        prior = inferential_count(read_ledger(project_root), session_id=session_id)
+        decision = decide(proposal.operation_id, proposal.changes, prior_inferential_steps=prior)
+        if not decision.allowed:
+            return {
+                "requires_confirmation": True,
+                "proposal": proposal.to_dict(),
+                "confirmation_reason": decision.reason,
+            }
+        try:
+            record = await self.read_only_runner(proposal)
+        except Exception as exc:  # noqa: BLE001 - reported to the model, never swallowed
+            # A tool exception would end the turn as a runtime error; the user
+            # is better served by the Agent explaining what stopped the run.
+            detail = getattr(exc, "message", None) or str(exc) or type(exc).__name__
+            return {
+                "executed": False,
+                "proposal_id": proposal.proposal_id,
+                "error": f"{type(exc).__name__}: {detail}",
+                "guidance": (
+                    "The read-only workflow could not run. Tell the user what stopped it; "
+                    "do not report any result."
+                ),
+            }
+        results = []
+        results_reader = getattr(self.context_provider, "executed_workflow_results", None)
+        if record.status == "completed" and results_reader is not None:
+            results = results_reader(record)
+        tests_run = prior + (decision.inferential_steps if record.status == "completed" else 0)
+        return {
+            "executed": True,
+            "authorized_by": ACTOR,
+            "proposal_id": proposal.proposal_id,
+            "operation": {
+                "record_id": record.record_id,
+                "status": record.status,
+                "error": record.error,
+            },
+            "results": results,
+            "inferential_tests_run_this_session": tests_run,
+            "guidance": (
+                "This read-only workflow ran without a confirmation and is recorded in the "
+                "analysis ledger. Answer from these results only; say how many tests were run "
+                "in this session when you report a p-value."
+                if record.status == "completed"
+                else "The workflow failed; tell the user what failed from operation.error."
+            ),
+        }
 
     def dispatch_to_chain(
         self,
@@ -3099,3 +3168,34 @@ class WorkbenchOrchestrator:
             if event.event_type == "command_completed" and event.payload.get("command_id") == command_id:
                 return str(event.payload.get("result", ""))
         return None
+
+
+def _record_operation_in_ledger(project_root: Any, record: OperationRecord) -> None:
+    """Every executed Agent operation enters the analysis ledger."""
+
+    from ..analysis_ledger import LedgerEntry, LedgerStep, record as record_entry
+
+    if record.operation_id == "operation.multi_step":
+        steps = tuple(
+            LedgerStep.of(str(step.get("operation_id", "")), str(step.get("step_id", "")))
+            for step in (record.changes.get("steps") or ())
+            if isinstance(step, dict)
+        )
+    else:
+        steps = (LedgerStep.of(record.operation_id),)
+    outputs = record.outputs or {}
+    record_entry(
+        project_root,
+        LedgerEntry(
+            actor="agent",
+            authorized_by="read_only_policy" if record.actor_type == "read_only_policy" else "user",
+            source=record.operation_id,
+            status="completed" if record.status == "completed" else "failed",
+            steps=steps,
+            run_id=str(record.target.get("run_id") or "") or None,
+            node_id=str(record.target.get("node_ref") or "") or None,
+            produced_run_id=str(outputs.get("child_run_id") or outputs.get("run_id") or "") or None,
+            session_id=record.agent_session_id,
+            record_id=record.record_id,
+        ),
+    )

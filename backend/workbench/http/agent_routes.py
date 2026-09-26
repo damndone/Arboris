@@ -66,6 +66,7 @@ from ..agent.session import EntryRef, JsonlSessionRepository
 from ..agent.tools import ToolRegistry
 from ..api_errors import WorkbenchAPIError
 from ..control_plane import control_plane_capability
+from ..agent.analysis_integrity import ANALYSIS_INTEGRITY_RULES
 from ..egress import egress_project
 from ..llm.config import load_llm_config
 from ..lineage.node_index import NODE_INDEX_FILENAME
@@ -109,8 +110,9 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - The server owns statistical semantics: percentile method, missing-value policy, covariance validation, diagnostics and artifacts. Choose which steps to run over which columns; do not restate those fixed semantics in changes.
 - The plan's length, ordering and column choices belong to the request being answered. There is no fixed number of steps.
 - For other registered mutations, you must call propose_operation with a complete structured payload; a JSON or Markdown proposal in ordinary text is not a submitted proposal.
-- propose_operation creates a reviewable pending proposal only; it does not execute a Workbench mutation. Never claim that a run, graph, or data change was executed from this tool.
-- A successful propose_operation ends your turn: reply with a short summary of what you proposed and call no further tools. Continuing past it spends the step budget and can end the turn in an error even though the proposal was created.
+- propose_operation creates a reviewable pending proposal (requires_confirmation: true) for anything that changes data, metadata, a model or a report; it does not execute it. Never claim that a run, graph, or data change was executed from such a result.
+- A multi-step workflow whose every step only reads data (descriptive statistics, tabulations, inferential tests) runs at once: propose_operation then returns executed: true with each step's results. Answer the user's question from those results in this turn, citing the step and artifact ids; if it returns executed: false, explain the error and report no result. Do not split a question into many small workflows to run more tests.
+- A propose_operation result with requires_confirmation: true ends your turn: reply with a short summary of what you proposed and call no further tools. Continuing past it spends the step budget and can end the turn in an error even though the proposal was created.
 - Inspect only what the request needs. Calling every inspect tool wastes steps; tools for other model families return nothing useful about this node.
 - propose_analysis_loop also creates a reviewable pending proposal only; it never confirms or executes the rerun.
 - Use the exact operation_id and operation_version returned by inspect_operation_contract. For model.rerun, target contains run_id, node_ref, node_hash, and forest_node_key; map the inspection field op_node_id to node_ref, and do not put active_head_run_id in target. For graph.fork, the backend binds target.source_session_entry_id to the current Chain leaf; do not invent an Agent entry id. In preconditions, include exactly context_version, context_fingerprint, active_head_run_id, and owner_resolution.
@@ -123,6 +125,7 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - After a confirmed operation completes, its status is not numerical evidence. First use inspect_completed_operations for the current node, then inspect_operation_artifact only with an emitted artifact_id; cite that artifact id in the answer. A confirmed Notebook composed workflow has its own receipt lifecycle: when the question concerns sibling models or post-estimation results from that workflow, first use inspect_notebook_workflow_results. It discloses only committed workflows that contain the current run; use its returned branch run_ids with inspect_project_model_coefficients, and cite its returned post_estimation_evidence directly. That post_estimation_evidence is already the final bounded public result for the receipt: never call inspect_operation_artifact for those ids, because that separate tool intentionally admits only Agent operation records. Do not conclude that no composed workflow exists merely because inspect_completed_operations is empty. inspect_artifact_preview also exposes bounded public_result_evidence for already-persisted UI statistical artifacts that explicitly descend from the selected data node, and numeric figure_evidence for the selected model run. Cite the artifact id and state when figure evidence is run-scoped. If no public result view is available, say that the result cannot yet be verified. Never request raw rows, a filesystem path, or infer a figure from its title alone.
 - When interpreting a quadratic stationary point, use only the server-reported observed_min, observed_max, and stationary_point_within_observed_range fields. Never infer whether it is in range from a column name, label, or a typical domain.
 """
+CHAIN_AGENT_PROTOCOL += ANALYSIS_INTEGRITY_RULES
 
 MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):
 - You are the Workbench Global Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
@@ -148,6 +151,7 @@ MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):
 - Before sending a numeric answer, mechanically copy those returned fields rather than recalculate or silently retype them. Check that the displayed estimate, standard error, p value, and interval endpoints are mutually consistent with the returned record; if your prose rendering of a confidence interval contradicts the returned p value or interval endpoints, re-read the same evidence tool and report only its latest fields.
 - If the bounded overview is insufficient to identify the relevant run or exact term, say what evidence is missing and ask the user to select a chain or node for a narrower evidence packet.
 """
+MAIN_AGENT_PROTOCOL += ANALYSIS_INTEGRITY_RULES
 
 
 def _step_vocabulary_lines() -> str:
@@ -1845,6 +1849,39 @@ def revise_agent_proposal(
     }
 
 
+async def _run_read_only_proposal(root: Path, orchestrator: WorkbenchOrchestrator, proposal) -> Any:
+    """Confirm and execute a read-only workflow under the read-only policy.
+
+    The same checks as a user's confirmation -- current context fingerprint
+    and authoritative active head -- with the policy as the actor, so the
+    operation record says who allowed it."""
+
+    from ..agent.read_only_policy import ACTOR
+
+    active_head_run_id = _authoritative_active_head(
+        root,
+        chain_id=str(proposal.chain_id),
+        requested_active_head_run_id=proposal.preconditions.get("active_head_run_id"),
+    )
+    fingerprint = _current_proposal_context_fingerprint(
+        root, proposal, active_head_run_id=active_head_run_id
+    )
+    record = orchestrator.confirm_proposal(
+        proposal.proposal_id,
+        revision=proposal.revision,
+        fingerprint=proposal.fingerprint,
+        actor_type=ACTOR,
+        current_context_fingerprint=fingerprint,
+        current_active_head_run_id=active_head_run_id,
+    )
+    return await orchestrator.execute_confirmed_operation(
+        record.record_id,
+        project_root=root,
+        current_context_fingerprint=fingerprint,
+        current_active_head_run_id=active_head_run_id,
+    )
+
+
 @router.post("/agent/sessions/{session_id}/proposals/{proposal_id}/confirm")
 async def confirm_agent_proposal(
     session_id: str,
@@ -2066,6 +2103,7 @@ async def run_agent_turn(
             context_provider=NodeOperationContextProvider(root),
         )
         orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
+        orchestrator.read_only_runner = lambda proposal: _run_read_only_proposal(root, orchestrator, proposal)
         tool_context = {
             "allowed_operations": operation_registry.natural_language_operation_ids(
                 scope_requirements=("chain", "active_head")
