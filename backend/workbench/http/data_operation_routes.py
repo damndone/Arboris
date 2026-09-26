@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -10,6 +12,7 @@ from fastapi import APIRouter
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..analysis_ledger import record_ui_action
 from ..artifacts import read_json
 
 from ..agent.chains import ChainHeadConflict, ensure_chain_root
@@ -962,6 +965,10 @@ def confirm_feature_recipe_route(
             message="The FeatureRecipe could not be applied because its source changed.",
             details={"operation_id": "data.feature_recipe", "reason": str(exc)},
         ) from exc
+    record_ui_action(
+        root, source="POST /data-operations/feature-recipe/confirm", steps=["data.feature_recipe"],
+        run_id=spec.source_run_id, node_id=spec.source_node_id,
+    )
     return {"status": "completed", "effect": effect.to_dict(), "preview": preview.to_dict()}
 
 
@@ -997,6 +1004,11 @@ def confirm_data_transform_route(
             message="The data transform could not be applied because its source changed.",
             details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
         ) from exc
+    record_ui_action(
+        root, source="POST /data-operations/transform/confirm", steps=[f"data.{spec.operation}"],
+        run_id=spec.source_run_id, node_id=spec.source_node_id,
+        summary=json.dumps(dict(spec.parameters), ensure_ascii=False, sort_keys=True, default=str)[:500],
+    )
     return {"status": "completed", "effect": effect.to_dict(), "preview": preview.to_dict()}
 
 
@@ -1060,6 +1072,11 @@ def start_model_from_data_node_route(
             message="The data node could not be submitted to the existing model lifecycle.",
             details={"reason": str(exc), "source_node_id": source_node_id},
         ) from exc
+    record_ui_action(
+        root, source="POST /data-operations/model-run", steps=["run.submit"],
+        run_id=body.source_run_id, node_id=source_node_id, produced_run_id=str(result["run_id"]),
+        summary=f"model_type={body.model_type}",
+    )
     return {
         "status": result["status"],
         "run_id": result["run_id"],

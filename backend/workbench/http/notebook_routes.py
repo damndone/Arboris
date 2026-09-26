@@ -46,6 +46,7 @@ from ..agent.notebook.planning_agent import (
     NotebookPlanningUnavailable,
     PlanningRefusal,
 )
+from ..analysis_ledger import record_ui_action
 from ..egress import egress_project
 from ..llm.config import load_llm_config
 from ..agent.trace import (
@@ -1912,6 +1913,10 @@ def confirm_and_execute_option_endpoint(
             context=context,
             trace=trace,
         )
+        record_ui_action(
+            root, source="POST /notebooks/{notebook_id}/options/{option_id}/confirm-and-execute",
+            steps=["run.submit"], summary=f"notebook={notebook_id} option={option_id}",
+        )
         return {"dispatch": dispatch.to_dict(), "trace_id": trace.trace_id}
     except NotebookOptionError as exc:
         raise _notebook_error(exc) from exc
@@ -1934,6 +1939,10 @@ def materialize_option_endpoint(
             option_id,
             context=context,
             trace=trace,
+        )
+        record_ui_action(
+            root, source="POST /notebooks/{notebook_id}/options/{option_id}/materialize",
+            steps=["run.submit"], summary=f"notebook={notebook_id} option={option_id}",
         )
         return {**result.to_dict(), "trace_id": trace.trace_id}
     except NotebookOptionError as exc:

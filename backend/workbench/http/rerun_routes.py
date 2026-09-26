@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from ..analysis_ledger import record_ui_action
 from ..artifacts import read_json, write_json
 from ..events import get_event_manager
 from ..graph_store import GraphStore
@@ -55,6 +56,19 @@ class RerunRequest(BaseModel):
 
 @router.post("/runs/{run_id}/rerun")
 def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[str, Any]:
+    response = _submit_rerun(run_id, project_root, body)
+    rerun_from = response.get("rerun_from") or {}
+    record_ui_action(
+        project_root, source="POST /runs/{run_id}/rerun", steps=["run.rerun"],
+        run_id=str(rerun_from.get("owner_run_id") or run_id),
+        node_id=rerun_from.get("op_node_id"),
+        produced_run_id=response.get("run_id"),
+        summary=json.dumps(body.op_overrides or body.manual_patch or {}, ensure_ascii=False, sort_keys=True, default=str)[:500],
+    )
+    return response
+
+
+def _submit_rerun(run_id: str, project_root: str, body: RerunRequest) -> dict[str, Any]:
     """Create a new immutable run from a parent run's editable node, applying
     structurally-validated overrides. Full-pipeline re-execution; lineage preserved."""
     root = Path(project_root)

@@ -3187,7 +3187,9 @@ def _record_operation_in_ledger(project_root: Any, record: OperationRecord) -> N
     record_entry(
         project_root,
         LedgerEntry(
-            actor="agent",
+            # Typed UI data operations run through the same lifecycle as
+            # Agent proposals; their records carry actor_type "human_ui".
+            actor="user" if record.actor_type == "human_ui" else "agent",
             authorized_by="read_only_policy" if record.actor_type == "read_only_policy" else "user",
             source=record.operation_id,
             status="completed" if record.status == "completed" else "failed",

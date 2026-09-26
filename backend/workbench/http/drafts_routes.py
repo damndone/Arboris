@@ -9,6 +9,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
+from ..analysis_ledger import record_ui_action
 from ..lineage.pipeline_drafts import DraftHashConflict, DraftLockedForExecution, DraftNodeNotFound, DraftNodePatchConflict, DraftNotFound, DraftValidationFailure, PipelineDraftStore, validate_draft_for_execution
 from ..lineage.upload_store import delete_upload_if_unreferenced
 from ..services.draft_materialization import (
@@ -280,15 +281,23 @@ def execute_pipeline_draft(
     if not is_genesis and body.execution_mode == "genesis":
         raise HTTPException(status_code=409, detail="GENESIS_ONLY_FOR_GENESIS_DRAFTS")
     if is_genesis:
-        return execute_genesis_draft(
+        response = execute_genesis_draft(
             draft_id, root, store, first,
             validated_draft_hash=body.validated_draft_hash,
             execution_mode=body.execution_mode,
             idempotency_key=body.idempotency_key,
         )
-    return execute_rerun_child_draft(
-        draft_id, project_root, root, store, first,
-        validated_draft_hash=body.validated_draft_hash,
-        execution_mode=body.execution_mode,
-        idempotency_key=body.idempotency_key,
+    else:
+        response = execute_rerun_child_draft(
+            draft_id, project_root, root, store, first,
+            validated_draft_hash=body.validated_draft_hash,
+            execution_mode=body.execution_mode,
+            idempotency_key=body.idempotency_key,
+        )
+    produced = response.get("run_id") or response.get("child_run_id") if isinstance(response, dict) else None
+    record_ui_action(
+        root, source="POST /pipeline-drafts/{draft_id}/execute",
+        steps=["run.submit" if is_genesis else "run.rerun"],
+        produced_run_id=str(produced) if produced else None, summary=f"draft={draft_id}",
     )
+    return response

@@ -19,6 +19,7 @@ fails until someone classifies it.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
@@ -26,10 +27,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-Category = Literal["data_change", "metadata_change", "model", "inferential", "descriptive", "report", "export", "unclassified"]
+Category = Literal[
+    "data_change", "metadata_change", "deletion", "model", "inferential", "descriptive", "report", "export",
+    "unclassified",
+]
 CATEGORIES: tuple[str, ...] = (
-    "data_change", "metadata_change", "model", "inferential", "descriptive", "report", "export", "unclassified",
+    "data_change", "metadata_change", "deletion", "model", "inferential", "descriptive", "report", "export",
+    "unclassified",
 )
+# Deleting a run changes what the project shows, so it is disclosed with the
+# data changes: a deleted run is a path that was taken and then hidden.
+CHANGING_CATEGORIES = frozenset({"data_change", "metadata_change", "deletion"})
 
 # Exact ids first, then prefixes; the first match wins.
 _EXACT: Mapping[str, str] = {
@@ -61,12 +69,17 @@ _EXACT: Mapping[str, str] = {
     "metadata.edit": "metadata_change",
     "graph.fork": "descriptive",
     "code.execute": "data_change",
+    # UI actions that are not workflow steps
+    "run.delete": "deletion",
+    "run.submit": "model",
+    "run.rerun": "model",
 }
 _PREFIXES: tuple[tuple[str, str], ...] = (
     ("data.", "data_change"),
     ("resample.", "data_change"),
     ("imputation.", "data_change"),
     ("report.", "report"),
+    ("export.", "export"),
     ("model.", "model"),
     ("prediction.", "model"),
     ("glm.", "model"),
@@ -135,11 +148,12 @@ class LedgerEntry:
         value = asdict(self)
         value["steps"] = [asdict(step) for step in self.steps]
         value["inferential_steps"] = sum(1 for step in self.steps if step.category == "inferential")
-        value["changes_data"] = bool(self.categories & {"data_change", "metadata_change"})
+        value["changes_data"] = bool(self.categories & CHANGING_CATEGORIES)
         return value
 
 
 _LOCK = threading.Lock()
+_LOG = logging.getLogger(__name__)
 
 
 def ledger_path(project_root: Path | str) -> Path:
@@ -179,3 +193,36 @@ def inferential_count(entries: Iterable[Mapping[str, Any]], *, session_id: str |
         for entry in entries
         if entry.get("status") == "completed" and (session_id is None or entry.get("session_id") == session_id)
     )
+
+
+def record_ui_action(
+    project_root: Path | str,
+    *,
+    source: str,
+    steps: Iterable[str | LedgerStep],
+    run_id: str | None = None,
+    node_id: str | None = None,
+    produced_run_id: str | None = None,
+    summary: str = "",
+) -> None:
+    """Record an action the user took in the UI, after it succeeded.
+
+    The action has already happened, so a failed ledger write must not turn
+    it into an error response; it is logged loudly instead.
+    """
+
+    entry = LedgerEntry(
+        actor="user",
+        authorized_by="user",
+        source=source,
+        status="completed",
+        steps=tuple(step if isinstance(step, LedgerStep) else LedgerStep.of(step) for step in steps),
+        run_id=run_id,
+        node_id=node_id,
+        produced_run_id=produced_run_id,
+        summary=summary,
+    )
+    try:
+        record(project_root, entry)
+    except OSError:
+        _LOG.exception("analysis ledger write failed for %s", source)

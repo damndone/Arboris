@@ -21,6 +21,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..analysis_ledger import record_ui_action
 from ..api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
     ERROR_REPORT_NOT_FOUND,
@@ -362,6 +363,13 @@ async def run_endpoint(
         except ValueError as exc:  # bad imputation / iv request — no run created yet
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         run_id_for_cleanup = result["run_id"]
+        record_ui_action(
+            root, source="POST /runs", steps=["run.submit"], produced_run_id=str(result["run_id"]),
+            summary=json.dumps(
+                {key: form.get(key) for key in ("model_type", "y", "x") if form.get(key)},
+                ensure_ascii=False, sort_keys=True, default=str,
+            )[:500],
+        )
         return result
     except Exception:
         events.release_slot(run_id_for_cleanup)
@@ -434,7 +442,7 @@ async def batch_run_endpoint(
         upload_name = Path(file.filename or "upload.csv").name
         saved_path = uploads_dir / f"{timestamp}_{upload_name}"
         await _write_upload(file, saved_path, max_upload_bytes)
-        return run_batch_y_workflow(
+        batch = run_batch_y_workflow(
             root,
             [saved_path],
             mode=mode,
@@ -452,6 +460,11 @@ async def batch_run_endpoint(
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
         )
+        record_ui_action(
+            root, source="POST /runs/batch", steps=["run.submit"],
+            summary=json.dumps({"y": y_columns, "x": x_columns}, ensure_ascii=False, default=str)[:500],
+        )
+        return batch
     finally:
         events.release_slot(None)
         await file.close()
@@ -597,6 +610,7 @@ def confirm_run_deletion(
             message=str(exc),
             details={"run_id": run_id},
         ) from exc
+    record_ui_action(project_root, source="POST /runs/{run_id}/deletion-confirmation", steps=["run.delete"], run_id=run_id)
     return {"deletion": receipt.to_dict()}
 
 
@@ -990,7 +1004,7 @@ def export_dataset_endpoint(
     from ..tabular_io import StatisticalFileError
 
     try:
-        return export_dataset(project_root, run_id, request.node_id, request.format)
+        exported = export_dataset(project_root, run_id, request.node_id, request.format)
     except (DataColumnCastValidationError, StatisticalFileError) as exc:
         raise WorkbenchAPIError(
             status_code=422,
@@ -998,6 +1012,11 @@ def export_dataset_endpoint(
             message=str(exc),
             details={"run_id": run_id, "node_id": request.node_id},
         ) from exc
+    record_ui_action(
+        project_root, source="POST /runs/{run_id}/datasets/export", steps=["export.dataset"],
+        run_id=run_id, node_id=request.node_id, summary=f"format={request.format}",
+    )
+    return exported
 
 
 @router.post("/runs/{run_id}/ai-reports")

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..analysis_ledger import record_ui_action
 from ..api_errors import WorkbenchAPIError
 from ..data_operations import DataColumnCastValidationError
 from ..services.dataset_view import dataset_page, dataset_variables, list_dataset_nodes
@@ -121,4 +123,9 @@ def edit_metadata_endpoint(
             message=str(exc),
             details={"run_id": run_id},
         ) from exc
+    record_ui_action(
+        project_root, source="POST /runs/{run_id}/metadata", steps=["metadata.edit"],
+        run_id=run_id, produced_run_id=submission.run_id,
+        summary=json.dumps(request.labels, ensure_ascii=False, sort_keys=True, default=str)[:500],
+    )
     return {"source_run_id": run_id, "run_id": submission.run_id, "status": submission.status}
