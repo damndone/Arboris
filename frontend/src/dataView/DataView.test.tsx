@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DatasetVariable } from "./dataViewApi";
@@ -9,6 +10,13 @@ const api = {
   fetchDatasetVariables: vi.fn(),
   saveMetadata: vi.fn(),
 };
+
+const fetchRunDetail = vi.fn();
+
+vi.mock("../api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api")>()),
+  fetchRunDetail: (...args: unknown[]) => fetchRunDetail(...args),
+}));
 
 vi.mock("./dataViewApi", () => ({
   listDatasets: (...args: unknown[]) => api.listDatasets(...args),
@@ -36,6 +44,8 @@ const variables: DatasetVariable[] = [
 
 beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset());
+  fetchRunDetail.mockReset();
+  fetchRunDetail.mockResolvedValue({ status: "completed" });
   api.listDatasets.mockResolvedValue([
     { node_id: "stage:raw", label: "Raw input data", stage: "source", parent_stage_id: null },
     { node_id: "stage:cleaned", label: "Cleaned data", stage: "clean", parent_stage_id: null },
@@ -119,5 +129,50 @@ describe("buildMetadataPatch", () => {
       measurement_level: { region: "ordinal" },
     });
     expect(changes).toHaveLength(2);
+  });
+});
+
+describe("DataView on a run that is still running", () => {
+  it("waits for the run to finish before loading its datasets", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchRunDetail.mockReset();
+    fetchRunDetail
+      .mockResolvedValueOnce({ status: "running" })
+      .mockResolvedValueOnce({ status: "completed" });
+    renderView();
+    expect(await screen.findByTestId("data-view-running")).toBeTruthy();
+    expect(api.listDatasets).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(await screen.findByTestId("data-grid")).toBeTruthy();
+    expect(api.listDatasets).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+});
+
+describe("DataView switching to a new, running run", () => {
+  it("does not request the new run's data before it finishes", async () => {
+    api.saveMetadata.mockResolvedValue({ source_run_id: "r1", run_id: "r2", status: "running" });
+    fetchRunDetail.mockImplementation(async (_root: string, runId: string) => ({
+      status: runId === "r1" ? "completed" : "running",
+    }));
+    function Harness() {
+      const [active, setActive] = useState("r1");
+      return (
+        <ForestContext.Provider
+          value={{ forest: { heads: [] } as never, activeRunId: active, setActiveRunId: setActive, refetch: vi.fn() }}
+        >
+          <DataView projectRoot="/p" />
+        </ForestContext.Provider>
+      );
+    }
+    render(<Harness />);
+    await screen.findByTestId("data-grid");
+    fireEvent.click(screen.getByRole("tab", { name: "Variable View" }));
+    fireEvent.change(await screen.findByLabelText("Label of region"), { target: { value: "地区" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review changes (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save as new run" }));
+    expect(await screen.findByTestId("data-view-running")).toBeTruthy();
+    const requestedRuns = [...api.listDatasets.mock.calls, ...api.fetchDatasetVariables.mock.calls].map((call) => call[1]);
+    expect(requestedRuns).not.toContain("r2");
   });
 });
