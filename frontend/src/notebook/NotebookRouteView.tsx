@@ -1222,7 +1222,7 @@ export function NotebookRouteView({
           id="notebook-dataset-upload"
           aria-label="Dataset"
           type="file"
-          accept=".csv,.xlsx,.xls,.tsv"
+          accept=".csv,.xlsx,.xls,.tsv,.sav,.zsav,.dta"
           disabled={uploadBusy}
           onChange={(event) => {
             const file = event.target.files?.[0];

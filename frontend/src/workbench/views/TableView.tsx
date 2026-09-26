@@ -52,6 +52,7 @@ import {
   ARMA_GARCH_CHART_IDS,
   useArmaGarchCharts,
 } from "../../runResult/useArmaGarchCharts";
+import { DatasetExportPanel } from "./DatasetExportPanel";
 import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
 import { resolveTableRunScope } from "./tableRunScope";
 import { PredictionResearchEvidenceCard } from "../../runResult/PredictionResearchEvidenceCard";
@@ -1183,6 +1184,10 @@ function RunResultsPanel({
             </div>
           </div>
         </section>
+      )}
+
+      {!loading && !error && detail && projectRoot && (
+        <DatasetExportPanel projectRoot={projectRoot} runId={runId} />
       )}
 
       {!loading && !error && otherArtifacts.length > 0 && (

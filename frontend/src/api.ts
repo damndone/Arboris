@@ -733,27 +733,70 @@ function columnStats(name: string, rows: Record<string, unknown>[]): ColumnPrevi
   };
 }
 
+const STATISTICAL_FILE_PATTERN = /\.(sav|zsav|dta)$/i;
+
+/** SPSS/Stata files carry metadata the browser cannot parse; the server reads them. */
+export function isStatisticalFile(name: string): boolean {
+  return STATISTICAL_FILE_PATTERN.test(name);
+}
+
+type StatisticalUploadPreview = {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total_rows: number;
+  labels: Record<string, unknown>;
+};
+
+async function readStatisticalRows(
+  projectRoot: string,
+  file: File,
+): Promise<StatisticalUploadPreview> {
+  const form = new FormData();
+  form.append("project_root", projectRoot);
+  form.append("file", file);
+  const response = await fetch(apiUrl("/uploads/preview"), { method: "POST", body: form });
+  return readResponse<StatisticalUploadPreview>(response);
+}
+
 export async function previewFile(
   file: File,
   sheetName?: string,
   transpose?: boolean,
+  projectRoot?: string,
 ): Promise<FilePreview> {
-  const buffer =
-    typeof file.arrayBuffer === "function"
-      ? await file.arrayBuffer()
-      : await new Promise<ArrayBuffer>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as ArrayBuffer);
-          reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
-          reader.readAsArrayBuffer(file);
-        });
-  const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-  const selectedSheet = sheetName ?? workbook.SheetNames[0];
-  const sheet = workbook.Sheets[selectedSheet];
-  let rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-    defval: null,
-    raw: true,
-  });
+  let rows: Record<string, unknown>[];
+  let sheetNames: string[] = [];
+  let selectedSheet = "";
+  let headerNames: string[];
+  let totalRows: number | null = null;
+  if (isStatisticalFile(file.name)) {
+    if (!projectRoot) {
+      throw new Error("Previewing an SPSS or Stata file needs an open project.");
+    }
+    const statistical = await readStatisticalRows(projectRoot, file);
+    rows = statistical.rows;
+    headerNames = statistical.columns;
+    totalRows = statistical.total_rows;
+  } else {
+    const buffer =
+      typeof file.arrayBuffer === "function"
+        ? await file.arrayBuffer()
+        : await new Promise<ArrayBuffer>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as ArrayBuffer);
+            reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+            reader.readAsArrayBuffer(file);
+          });
+    const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+    sheetNames = workbook.SheetNames;
+    selectedSheet = sheetName ?? workbook.SheetNames[0];
+    const sheet = workbook.Sheets[selectedSheet];
+    rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: null,
+      raw: true,
+    });
+    headerNames = (XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 })[0] ?? []).map(String);
+  }
   if (transpose && rows.length > 0) {
     const originalKeys = Object.keys(rows[0]);
     const firstKey = originalKeys[0];
@@ -771,10 +814,7 @@ export async function previewFile(
     }
     rows = transposed;
   }
-  const columnNames =
-    rows.length > 0
-      ? Object.keys(rows[0])
-      : XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 })[0] ?? [];
+  const columnNames = rows.length > 0 ? Object.keys(rows[0]) : headerNames;
   const columns = columnNames.map((name) => columnStats(String(name), rows));
   const suggestedY =
     columns.find((column) => column.suggestedRole === "y" && column.dtype === "numeric")?.name ??
@@ -824,9 +864,10 @@ export async function previewFile(
 
   return {
     fileName: file.name,
-    sheetNames: workbook.SheetNames,
+    sheetNames,
     selectedSheet,
-    rowCount: rows.length,
+    // A server preview samples the first rows; the count is the whole file.
+    rowCount: totalRows ?? rows.length,
     columnCount: columns.length,
     columns,
     previewRows: rows.slice(0, 10),
@@ -1682,4 +1723,42 @@ export async function deleteCompareNode(
     { method: "DELETE" },
   );
   return readResponse<{ deleted: string }>(response);
+}
+
+// v1.8.9 step 5 — SPSS/Stata dataset export with a loss report.
+
+export type DatasetExportFormat = "sav" | "zsav" | "dta";
+
+export type DatasetExportNote = { column: string; field: string; message: string };
+
+export type DatasetExportResult = {
+  artifact_id: string;
+  filename: string;
+  download_url: string;
+  report: {
+    format: DatasetExportFormat;
+    rows: number;
+    columns: number;
+    renamed: Record<string, string>;
+    notes: DatasetExportNote[];
+  };
+};
+
+export async function exportDataset(
+  projectRoot: string,
+  runId: string,
+  nodeId: string,
+  format: DatasetExportFormat,
+): Promise<DatasetExportResult> {
+  const response = await fetch(
+    apiUrl(
+      `/runs/${encodeURIComponent(runId)}/datasets/export?project_root=${encodeURIComponent(projectRoot)}`,
+    ),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ node_id: nodeId, format }),
+    },
+  );
+  return readResponse<DatasetExportResult>(response);
 }

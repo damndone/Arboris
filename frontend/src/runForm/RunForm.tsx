@@ -310,7 +310,7 @@ export function RunForm(props: RunFormProps) {
       if (!lmmValue[key]) runErrors[key] = "Required";
     }
   }
-  if (!file) runErrors.file = "Select a CSV or Excel file";
+  if (!file) runErrors.file = "Select a CSV, Excel, SPSS or Stata file";
 
   const canRun =
     Object.keys(runErrors).length === 0 && requestState === "idle";
@@ -342,7 +342,7 @@ export function RunForm(props: RunFormProps) {
   ) {
     setPreviewState("loading");
     try {
-      const nextPreview = await previewFile(sourceFile, sheet, transposed);
+      const nextPreview = await previewFile(sourceFile, sheet, transposed, projectRoot);
       setPreview(nextPreview);
       if (sheet === undefined) setSheetName(nextPreview.selectedSheet);
       if (nextPreview.suggestedY) setY(nextPreview.suggestedY);
@@ -591,7 +591,7 @@ export function RunForm(props: RunFormProps) {
       <section className="panel" aria-labelledby="run-heading">
         <div className="panel-heading">
           <h2 id="run-heading">Run</h2>
-          <span>Upload CSV or Excel; preview data; submit workflow.</span>
+          <span>Upload CSV, Excel, SPSS (.sav) or Stata (.dta); preview data; submit workflow.</span>
         </div>
         <div className="control-grid run-grid">
           <label>
@@ -915,7 +915,7 @@ export function RunForm(props: RunFormProps) {
               aria-label="data file"
               aria-invalid={Boolean(runErrors.file)}
               type="file"
-              accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              accept=".csv,.xlsx,.xls,.sav,.zsav,.dta,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
               onChange={(event) => {
                 void onFileChange(event.target.files?.[0] ?? null);
               }}
