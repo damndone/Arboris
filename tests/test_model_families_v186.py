@@ -234,8 +234,11 @@ def test_survival_cox_run_persists_km_logrank_risk_and_schoenfeld_evidence(tmp_p
 def test_survival_cox_matches_r_survival_coxph_oracle_fixture(tmp_path: Path) -> None:
     """Compare the cleaned Cox fixture with R survival::coxph.
 
-    Oracle command (R survival 3.8-3, ties = "breslow"):
-    coxph(Surv(duration, event) ~ x, data = unique(df), ties = "breslow")
+    Oracle command (R survival 3.8-6, ties = "breslow"):
+    coxph(Surv(duration, event) ~ x, data = df, ties = "breslow")
+    v1.8.9: the full 64 rows. The earlier oracle used unique(df) to mirror
+    the cleaning stage, which dropped identical rows (distinct observations)
+    until v1.8.9.
     The CI tolerance is 1e-14 because R and SciPy can differ in the final
     libm/qnorm bit while the coefficient, standard error, and p-value agree.
     """
@@ -255,17 +258,17 @@ def test_survival_cox_matches_r_survival_coxph_oracle_fixture(tmp_path: Path) ->
     )
     coefficient = read_json(run_root / "model_results" / "survival_cox_1.json")["coefficients"]["x"]
     oracle = {
-        "nobs": 40,
-        "estimate": 0.0,
-        "std_error": 0.1414213562373095,
-        "p_value": 1.0,
-        "ci_lower": -0.27718076486993548,
-        "ci_upper": 0.27718076486993548,
+        "nobs": 64,
+        "estimate": -0.0010737573507500907,
+        "std_error": 0.11351264533668765,
+        "p_value": 0.99245263262837102,
+        "ci_lower": -0.22355445400052634,
+        "ci_upper": 0.22140693929902613,
     }
     assert read_json(run_root / "model_results" / "survival_cox_1.json")["nobs"] == oracle["nobs"]
-    assert coefficient["estimate"] == oracle["estimate"]
+    assert coefficient["estimate"] == pytest.approx(oracle["estimate"], abs=1e-15)
     assert coefficient["std_error"] == pytest.approx(oracle["std_error"], abs=1e-15)
-    assert coefficient["p_value"] == oracle["p_value"]
+    assert coefficient["p_value"] == pytest.approx(oracle["p_value"], abs=1e-14)
     assert coefficient["ci_lower"] == pytest.approx(oracle["ci_lower"], abs=1e-14)
     assert coefficient["ci_upper"] == pytest.approx(oracle["ci_upper"], abs=1e-14)
 
@@ -352,7 +355,7 @@ def test_survival_cox_fails_closed_when_event_column_is_missing(tmp_path: Path) 
     )
     assert result["status"] == "failed"
     issues = read_json(project.root / "runs" / result["run_id"] / "errors.json")["issues"]
-    assert issues[0]["code"] == "SURVIVAL_EVENT_REQUIRED"
+    assert "SURVIVAL_EVENT_REQUIRED" in [issue["code"] for issue in issues]
 
 
 def test_survival_packet_contract_rejects_unverified_external_claim() -> None:

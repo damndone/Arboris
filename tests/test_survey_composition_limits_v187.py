@@ -160,17 +160,18 @@ def test_a_design_declared_over_pre_filtered_data_is_flagged(tmp_path):
     invisible in the output.
     """
     frame = pd.read_csv(FIXTURES / "design.csv")
-    # Duplicated rows: cleaning removes them, so the analysis sample is a strict
-    # subset of the frame the declared design describes. (NaNs in a modelled
-    # column are rejected by the estimator before cleaning can drop them, so
-    # they exercise a different path.)
-    frame = pd.concat([frame, frame.iloc[:12]], ignore_index=True)
+    # Twelve declared missing codes in a modelled column: those rows leave the
+    # analysis sample, a strict subset of the frame the declared design
+    # describes. (Until v1.8.9 a missing covariate crashed the design refit,
+    # and this test used duplicated rows, which cleaning then dropped.)
+    frame.loc[:11, "x1"] = -99
 
     run_root, outcome = _run(
         tmp_path, "prefiltered", frame,
         model_type="ols", y="y", x=["x1", "x2"],
         sampling_weight="weight",
         survey_strata_col="stratum", survey_psu_col="psu",
+        labels={"user_missing_values": {"x1": [-99]}},
     )
     assert outcome["status"] == "completed", outcome
 
@@ -179,8 +180,8 @@ def test_a_design_declared_over_pre_filtered_data_is_flagged(tmp_path):
     assert filtered, [f["kind"] for f in findings]
 
     evidence = filtered[0]["evidence"]
-    assert evidence["rows_before"] == 92
-    assert evidence["rows_analysed"] == 80
+    assert evidence["rows_before"] == 80
+    assert evidence["rows_analysed"] == 68
     assert evidence["rows_dropped"] == 12
 
 
@@ -195,3 +196,28 @@ def test_an_unfiltered_design_run_is_not_flagged(tmp_path):
     assert outcome["status"] == "completed", outcome
     findings = read_json(run_root / "measurement" / "design_precheck.json")["findings"]
     assert not [f for f in findings if f["kind"] == "design_over_filtered_data"]
+
+
+def test_a_missing_covariate_uses_the_complete_case_design(tmp_path):
+    """Until v1.8.9 one missing covariate crashed the design refit.
+
+    Oracle (R survey): d <- svydesign(ids=~psu, strata=~stratum, weights=~weight,
+    data=df[complete.cases(df[, c("y","x1","x2")]), ], nest=TRUE);
+    SE(svyglm(y ~ x1 + x2, design=d)) with x1 missing in rows 1-12.
+    """
+    from workbench.services.results_service import read_model_results
+
+    frame = pd.read_csv(FIXTURES / "design.csv")
+    frame.loc[:11, "x1"] = -99
+    run_root, outcome = _run(
+        tmp_path, "missing", frame,
+        model_type="ols", y="y", x=["x1", "x2"],
+        sampling_weight="weight", survey_strata_col="stratum", survey_psu_col="psu",
+        labels={"user_missing_values": {"x1": [-99]}},
+    )
+    assert outcome["status"] == "completed", outcome
+    [result] = [item for item in read_model_results(run_root) if not item["model_id"].startswith("diag")]
+    assert result["nobs"] == 68
+    oracle = {"Intercept": 2.08565736782072, "x1": 0.249991862754264, "x2": 0.0858995453163831}
+    for term, se in oracle.items():
+        assert result["coefficients"][term]["std_error"] == pytest.approx(se, rel=1e-10), term

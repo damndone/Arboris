@@ -474,7 +474,19 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
     from ...survey.engine import estimate_with_design
     from ...survey.errors import SurveyEngineError
 
-    design = build_design_from_artifacts(ctx.data.frame, ctx.artifacts)
+    # The design variance must describe the same observations as the point
+    # estimate: rows missing a modelled variable are left out of both (Stata's
+    # svy default). Without this a single missing covariate crashed the run
+    # inside the design refit. design_precheck reports the rows left out.
+    frame = ctx.data.frame
+    modelled = [
+        column
+        for column in [ctx.artifacts["_normalized_y"], *ctx.artifacts["_normalized_x"]]
+        if column in frame.columns
+    ]
+    if modelled:
+        frame = frame.loc[frame[modelled].notna().all(axis=1)]
+    design = build_design_from_artifacts(frame, ctx.artifacts)
     if design is None:
         return
     estimator = _survey_estimator_for(
