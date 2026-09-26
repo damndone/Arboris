@@ -86,12 +86,9 @@ def test_natural_language_allowlist_is_registry_owned() -> None:
     assert registry.natural_language_operation_ids(
         scope_requirements=("chain", "active_head")
     ) == [
-        "data.append",
+        # Workflow-step identities (data.subset, data.recode, ...) are reached
+        # through operation.multi_step; only directly executable ones are here.
         "data.columns.cast",
-        "data.feature_recipe",
-        "data.merge",
-        "data.reshape",
-        "data.subset",
         "graph.fork",
         "model.rerun",
         "operation.multi_step",
@@ -264,12 +261,9 @@ def test_proposal_tool_schema_excludes_typed_operations_not_enabled_for_natural_
     schema = registry.proposal_tool_schema()
 
     assert schema["properties"]["operation_id"]["enum"] == [
-        "data.append",
+        # Workflow-step identities (data.subset, data.recode, ...) are reached
+        # through operation.multi_step; only directly executable ones are here.
         "data.columns.cast",
-        "data.feature_recipe",
-        "data.merge",
-        "data.reshape",
-        "data.subset",
         "graph.fork",
         "model.rerun",
         "operation.multi_step",

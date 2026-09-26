@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import math
 import re
 
@@ -2806,6 +2808,23 @@ def _data_management_step_contracts() -> dict[str, StepSpecContract]:
             },
         ),
     }
+    # Operations declared in the data-operation registry need nothing here:
+    # their step contract, including a worked example, comes from the
+    # declaration.
+    from ..data_operation_registry import data_operation_declarations
+
+    for declaration in data_operation_declarations():
+        example = json.dumps(dict(declaration.example), ensure_ascii=False, sort_keys=True)
+        contracts[declaration.workflow_operation_id] = contract(
+            declaration.workflow_operation_id,
+            f"{declaration.summary} Example spec: {example}",
+            dict(declaration.fields),
+            declaration.required,
+            dict(declaration.field_types),
+            {name: dict(schema) for name, schema in declaration.field_schemas.items()},
+            field_enums=dict(declaration.field_enums),
+            natural_language_enabled=declaration.natural_language_enabled,
+        )
     return contracts
 
 
@@ -2958,7 +2977,12 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
                 columns.add(str(selector["column"]))
     elif extractor_key and extractor_key.startswith("data."):
         operation = extractor_key.removeprefix("data.")
-        if operation in {"merge", "append"}:
+        from ..data_operation_registry import get_data_operation
+
+        declared = get_data_operation(operation)
+        if declared is not None:
+            columns.update(declared.referenced_columns(spec))
+        elif operation in {"merge", "append"}:
             columns.update(str(item) for item in spec.get("keys", []) or [])
         elif operation == "reshape":
             direction = spec.get("direction")
@@ -3661,6 +3685,15 @@ def _validate_data_management_step(operation_id: str, spec: Mapping[str, Any]) -
     )
 
     operation = operation_id.removeprefix("data.")
+    from ..data_operation_registry import get_data_operation
+
+    declared = get_data_operation(operation)
+    if declared is not None:
+        try:
+            declared.validate(spec)
+        except ValueError as exc:
+            raise OperationValidationError(f"{operation_id}: {exc}") from exc
+        return
 
     def text(value: Any, label: str) -> str:
         if not isinstance(value, str) or not value.strip():
@@ -3985,6 +4018,11 @@ def _data_output_columns(
     """Project a data-operation output shape for downstream compile checks."""
 
     operation = operation_id.removeprefix("data.")
+    from ..data_operation_registry import get_data_operation
+
+    declared = get_data_operation(operation)
+    if declared is not None:
+        return declared.output_columns(spec, set(visible))
     if operation == "subset":
         return {str(column) for column in spec.get("columns", [])}
     if operation == "rename":

@@ -130,10 +130,9 @@ class DataTransformRequest(BaseModel):
     source_run_id: str = Field(min_length=1, max_length=200)
     source_node_id: str = Field(min_length=1, max_length=300)
     source_artifact_id: str = Field(min_length=1, max_length=200)
-    operation: Literal[
-        "merge", "append", "reshape", "subset", "dedupe", "rename",
-        "aggregate", "fill_missing", "tsset", "lag", "recode",
-    ]
+    # Admission is by the data-operation registry (DataTransformSpecV1), so a
+    # newly declared operation needs no change here.
+    operation: str = Field(min_length=1, max_length=64)
     parameters: dict[str, Any] = Field(default_factory=dict)
     secondary_run_id: str | None = Field(default=None, max_length=200)
     secondary_node_id: str | None = Field(default=None, max_length=300)
@@ -324,7 +323,7 @@ def _data_transform_spec(body: DataTransformRequest) -> DataTransformSpecV1:
         raise WorkbenchAPIError(
             status_code=422,
             code="DATA_OPERATION_INVALID",
-            message="The typed data transform specification is invalid.",
+            message=f"The typed data transform specification is invalid: {exc}",
             details={"operation_id": f"data.{body.operation}", "reason": str(exc)},
         ) from exc
 

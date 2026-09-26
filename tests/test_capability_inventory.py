@@ -218,13 +218,10 @@ def test_inventory_records_only_live_natural_language_proposers() -> None:
         item.capability_id for item in by_id.values() if item.directly_reachable_by
     }
 
+    # v1.8.9: step identities are no longer offered as direct proposals (they
+    # could not execute alone); they stay reachable through operation.multi_step.
     assert direct_ids == {
-        "data.append",
         "data.columns.cast",
-        "data.feature_recipe",
-        "data.merge",
-        "data.reshape",
-        "data.subset",
         "graph.fork",
         "model.rerun",
         "operation.multi_step",
@@ -267,7 +264,7 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (129, 9, 123, 127, 2, 0)
+    ) == (130, 4, 124, 128, 2, 0)  # v1.8.9: +data.recode; step identities composable only
     assert {item.capability_id for item in report.gaps} == set()
     assert {item.capability_id for item in report.exempt} == {
         "code.execute",

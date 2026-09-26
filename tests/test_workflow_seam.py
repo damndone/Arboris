@@ -1588,9 +1588,18 @@ def test_the_lineage_case_registry_covers_every_consuming_operation() -> None:
     )
     assert generic_consumers
 
+    # Operations declared in the data-operation registry run through the same
+    # persistence path; test_data_operation_registry applies this guard's
+    # derived-source lineage check to every declaration.
+    from workbench.data_operation_registry import data_operation_declarations
+
+    declared_data_operations = {
+        declaration.workflow_operation_id for declaration in data_operation_declarations()
+    }
     covered = (
         set(_LINEAGE_META_STEPS)
         | set(_LINEAGE_META_UNRECORDED)
+        | declared_data_operations
         | (set(p7_pack_registry.operation_ids()) & set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME))
         | generic_consumers
     )

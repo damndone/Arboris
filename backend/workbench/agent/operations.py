@@ -86,6 +86,21 @@ class OperationDefinition:
             self.validator(target, preconditions, changes)
 
 
+WORKFLOW_STEP_DISPATCHER_PREFIX = "workbench.agent.workflow_runtime."
+
+
+def is_workflow_step_only(definition: OperationDefinition) -> bool:
+    """A step identity that only a composed workflow can execute.
+
+    Such definitions carry a workflow-step dispatcher and require a workflow
+    and step id; proposed on their own they failed validation or, after the
+    user confirmed, execution. The Agent reaches them through
+    operation.multi_step (a plan may have one step), which is the one path.
+    """
+
+    return str(definition.executor_key).startswith(WORKFLOW_STEP_DISPATCHER_PREFIX)
+
+
 class OperationRegistry:
     """Explicit registry for agent-facing operation identities."""
 
@@ -425,6 +440,7 @@ class OperationRegistry:
             for definition in self._definitions.values()
             if definition.natural_language_enabled
             and required.issubset(set(definition.scope_requirements))
+            and not is_workflow_step_only(definition)
         )
 
     def requires_risk_authorization(

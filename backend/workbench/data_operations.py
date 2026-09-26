@@ -138,7 +138,9 @@ DataTransformOperation = Literal[
     "lag",
     "recode",
 ]
-ALLOWED_DATA_TRANSFORM_OPERATIONS = frozenset(
+# Operations implemented before the declaration registry. Everything newer is
+# declared in data_operation_registry and admitted from there.
+LEGACY_DATA_TRANSFORM_OPERATIONS = frozenset(
     {
         "merge",
         "append",
@@ -150,9 +152,16 @@ ALLOWED_DATA_TRANSFORM_OPERATIONS = frozenset(
         "fill_missing",
         "tsset",
         "lag",
-        "recode",
     }
 )
+
+
+def allowed_data_transform_operations() -> frozenset[str]:
+    from .data_operation_registry import data_operation_declarations
+
+    return LEGACY_DATA_TRANSFORM_OPERATIONS | {
+        declaration.operation for declaration in data_operation_declarations()
+    }
 SUBSET_FILTER_OPERATORS = frozenset(
     {
         "eq",
@@ -194,10 +203,10 @@ class DataTransformSpecV1:
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field_name} must be a non-empty string")
-        if self.operation not in ALLOWED_DATA_TRANSFORM_OPERATIONS:
+        allowed = allowed_data_transform_operations()
+        if self.operation not in allowed:
             raise DataColumnCastValidationError(
-                "operation must be one of: "
-                + ", ".join(sorted(ALLOWED_DATA_TRANSFORM_OPERATIONS))
+                "operation must be one of: " + ", ".join(sorted(allowed))
             )
         if self.operation in {"merge", "append"}:
             if not all((self.secondary_run_id, self.secondary_node_id, self.secondary_artifact_id)):
@@ -476,6 +485,34 @@ def _recode_value(value: Any, name: str) -> Any:
     raise DataColumnCastValidationError(f"{name} must be a finite number, a non-empty string or null")
 
 
+def _recode_static_check(parameters: Mapping[str, Any]) -> tuple[str, str]:
+    """The checks that need no data: shape of the parameters and rules."""
+
+    _reject_unknown_parameters(parameters, {"column", "output", "rules"}, "recode")
+    column = _require_non_empty_string(parameters.get("column"), "recode.column")
+    output = _require_non_empty_string(parameters.get("output"), "recode.output")
+    rules = parameters.get("rules")
+    if not isinstance(rules, list) or not rules:
+        raise DataColumnCastValidationError("recode.rules must be a non-empty list")
+    for index, rule in enumerate(rules):
+        parsed = _require_nested_keys(rule, name=f"recode.rules[{index}]", required={"from", "to"}, optional=set())
+        if parsed["from"] == "else" and index != len(rules) - 1:
+            raise DataColumnCastValidationError("recode: the else rule must come last")
+        origin = parsed["from"]
+        if isinstance(origin, Mapping):
+            if set(origin) != {"low", "high"}:
+                raise DataColumnCastValidationError(f"recode.rules[{index}].from range needs exactly low and high")
+            low, high = origin["low"], origin["high"]
+            if not all(isinstance(bound, (int, float)) and not isinstance(bound, bool) for bound in (low, high)) or low > high:
+                raise DataColumnCastValidationError(f"recode.rules[{index}].from range must be numbers with low <= high")
+        elif origin not in {"else", "missing"}:
+            if _recode_value(origin, f"recode.rules[{index}].from") is None:
+                raise DataColumnCastValidationError(f"recode.rules[{index}].from: use \"missing\" to match missing values")
+        if parsed["to"] != "copy":
+            _recode_value(parsed["to"], f"recode.rules[{index}].to")
+    return column, output
+
+
 def _recode_into_new_column(frame: pd.DataFrame, parameters: Mapping[str, Any]) -> pd.DataFrame:
     """SPSS RECODE ... INTO: map values and closed ranges of one column to codes.
 
@@ -486,9 +523,7 @@ def _recode_into_new_column(frame: pd.DataFrame, parameters: Mapping[str, Any]) 
     cannot silently turn valid values into missing ones.
     """
 
-    _reject_unknown_parameters(parameters, {"column", "output", "rules"}, "recode")
-    column = _require_non_empty_string(parameters.get("column"), "recode.column")
-    output = _require_non_empty_string(parameters.get("output"), "recode.output")
+    column, output = _recode_static_check(parameters)
     _require_columns_exist(frame, [column], "recode")
     if output in frame.columns:
         raise DataColumnCastValidationError(
@@ -1017,8 +1052,11 @@ def _execute_data_transform(
             for lag in lags:
                 result[f"{column}_lag{lag}"] = base.shift(lag)
         return result
-    if spec.operation == "recode":
-        return _recode_into_new_column(left, parameters)
+    from .data_operation_registry import get_data_operation
+
+    declaration = get_data_operation(spec.operation)
+    if declaration is not None:
+        return declaration.execute(left, parameters)
     raise DataColumnCastValidationError(f"unsupported data operation: {spec.operation}")
 
 
@@ -2692,3 +2730,73 @@ __all__ = [
     "preview_data_columns_cast",
     "resolve_data_column_cast_context",
 ]
+
+
+def _declare_recode() -> None:
+    from .data_operation_registry import DataOperationDeclaration, register_data_operation
+
+    code = {"anyOf": [{"type": "number"}, {"type": "string", "minLength": 1}, {"type": "null"}]}
+    register_data_operation(
+        DataOperationDeclaration(
+            operation="recode",
+            summary=(
+                "Recode one variable into a NEW variable by ordered rules (SPSS RECODE "
+                "INTO): single values, closed numeric ranges {low, high}, \"missing\", and "
+                "a final \"else\". First matching rule wins; to: a code, null (missing) or "
+                "\"copy\". Values no rule covers are refused unless an else rule exists."
+            ),
+            fields={
+                "column": "Existing source column; it is not changed.",
+                "output": "Name of the new variable; must not exist yet.",
+                "rules": "Ordered list of {from, to}.",
+            },
+            required=("column", "output", "rules"),
+            field_types={"column": "string", "output": "string", "rules": "list"},
+            field_schemas={
+                "column": {"type": "string", "minLength": 1},
+                "output": {"type": "string", "minLength": 1},
+                "rules": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "required": ["from", "to"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {
+                                "anyOf": [
+                                    {"type": "number"},
+                                    {"type": "string", "minLength": 1},
+                                    {
+                                        "type": "object",
+                                        "required": ["low", "high"],
+                                        "additionalProperties": False,
+                                        "properties": {"low": {"type": "number"}, "high": {"type": "number"}},
+                                    },
+                                ]
+                            },
+                            "to": code,
+                        },
+                    },
+                },
+            },
+            referenced_columns=lambda spec: {str(spec["column"])} if spec.get("column") else set(),
+            output_columns=lambda spec, visible: visible | ({str(spec["output"])} if spec.get("output") else set()),
+            validate=lambda spec: _recode_static_check(spec) and None,
+            execute=_recode_into_new_column,
+            example={
+                "column": "age",
+                "output": "age_group",
+                "rules": [
+                    {"from": {"low": 18, "high": 39}, "to": 1},
+                    {"from": {"low": 40, "high": 120}, "to": 2},
+                    {"from": "missing", "to": 9},
+                ],
+            },
+            example_frame=lambda: pd.DataFrame({"age": [20.0, 45.0, None]}),
+        )
+    )
+
+
+_declare_recode()
+ALLOWED_DATA_TRANSFORM_OPERATIONS = allowed_data_transform_operations()
