@@ -9,6 +9,7 @@ import {
   type DatasetNode,
   type DatasetVariables,
 } from "./dataViewApi";
+import { TransformPanel } from "./TransformPanel";
 import { VariableView } from "./VariableView";
 
 type Tab = "data" | "variables";
@@ -26,6 +27,8 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
   const [variables, setVariables] = useState<DatasetVariables | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const [transforming, setTransforming] = useState(false);
+  const [datasetsVersion, setDatasetsVersion] = useState(0);
   // Keyed by run: a status left over from the previous run must never mark a
   // newly selected, still-running run as ready for one render.
   const [runState, setRunState] = useState<{ runId: string; status: string } | null>(null);
@@ -74,7 +77,7 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
     return () => {
       cancelled = true;
     };
-  }, [projectRoot, runId, ready]);
+  }, [projectRoot, runId, ready, datasetsVersion]);
 
   const loadVariables = useCallback(() => {
     if (!projectRoot || !runId || !nodeId || !ready) return () => {};
@@ -93,6 +96,14 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
   }, [projectRoot, runId, nodeId, ready]);
 
   useEffect(() => loadVariables(), [loadVariables]);
+
+  function onDatasetCreated(childNodeId: string) {
+    setTransforming(false);
+    setNodeId(childNodeId);
+    setTab("data");
+    setDatasetsVersion((version) => version + 1);
+    forest?.refetch?.();
+  }
 
   function onSaved(newRunId: string) {
     setSaved(newRunId);
@@ -130,6 +141,14 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
             ))}
           </select>
         </label>
+        <button
+          type="button"
+          aria-expanded={transforming}
+          disabled={!variables}
+          onClick={() => setTransforming((open) => !open)}
+        >
+          Transform…
+        </button>
         <span style={{ color: "var(--label-tertiary)" }}>run {runId.slice(-8)}</span>
       </div>
       {saved && (
@@ -150,6 +169,17 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
       )}
       {!error && (runStatus === null || (ready && !variables)) && (
         <div style={{ fontSize: 12, color: "var(--label-secondary)" }}>Loading…</div>
+      )}
+      {variables && transforming && (
+        <TransformPanel
+          key={`${runId}:${nodeId}`}
+          projectRoot={projectRoot}
+          runId={runId}
+          nodeId={nodeId}
+          artifactId={variables.artifact_id}
+          variables={variables.variables}
+          onCreated={onDatasetCreated}
+        />
       )}
       {variables && tab === "data" && (
         <DataGrid projectRoot={projectRoot} runId={runId} nodeId={nodeId} variables={variables.variables} />
