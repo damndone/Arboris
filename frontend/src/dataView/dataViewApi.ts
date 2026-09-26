@@ -36,7 +36,14 @@ export type DatasetVariable = {
   max?: number | null;
   mean?: number | null;
   values?: { value: unknown; count: number }[];
+  /** Project-wide: who may see this column's values (see Sharing). */
+  sensitivity?: SensitivityLevel;
+  sensitivity_source?: "project" | "suggested";
+  sensitivity_suggested?: SensitivityLevel;
 };
+
+export const SENSITIVITY_LEVELS = ["public", "internal", "sensitive", "restricted"] as const;
+export type SensitivityLevel = (typeof SENSITIVITY_LEVELS)[number];
 
 export type DatasetVariables = {
   run_id: string;
@@ -121,4 +128,81 @@ export async function saveMetadata(
     },
   );
   return readResponse(response);
+}
+
+export type EgressView = {
+  project_root: string;
+  policy: {
+    version: number;
+    providers: Record<string, { allow: string[] }>;
+    columns: Record<string, SensitivityLevel>;
+  };
+  policy_source: string;
+  content_classes: string[];
+  sensitivity_levels: SensitivityLevel[];
+  defaults: { remote: string[]; local: string[] };
+  active_provider: {
+    provider_id: string;
+    provider_name: string;
+    locality: "local" | "remote";
+    allowed_classes: string[];
+  } | null;
+};
+
+export type EgressAuditRecord = {
+  at: string;
+  provider_id: string;
+  provider_host: string;
+  provider_locality: "local" | "remote";
+  model: string;
+  message_count: number;
+  withheld_count: number;
+  redacted_columns: string[];
+  payload_bytes: number;
+  decisions: {
+    index: number;
+    role: string;
+    tool_id?: string;
+    content_class: string;
+    decision: string;
+    redacted_columns?: string[];
+    withheld_protocols?: string[];
+  }[];
+};
+
+export async function fetchEgress(projectRoot: string): Promise<EgressView> {
+  const response = await fetch(apiUrl(`/projects/egress?${query({ project_root: projectRoot })}`));
+  return readResponse<EgressView>(response);
+}
+
+/** A null level removes the project's choice; the column falls back to the suggestion. */
+export async function patchColumnSensitivity(
+  projectRoot: string,
+  columns: Record<string, SensitivityLevel | null>,
+): Promise<EgressView> {
+  const response = await fetch(apiUrl(`/projects/egress/columns?${query({ project_root: projectRoot })}`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ columns }),
+  });
+  return readResponse<EgressView>(response);
+}
+
+export async function replaceEgressPolicy(
+  projectRoot: string,
+  policy: EgressView["policy"],
+): Promise<EgressView> {
+  const response = await fetch(apiUrl(`/projects/egress/policy?${query({ project_root: projectRoot })}`), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(policy),
+  });
+  return readResponse<EgressView>(response);
+}
+
+export async function fetchEgressAudit(projectRoot: string, limit = 20): Promise<EgressAuditRecord[]> {
+  const response = await fetch(
+    apiUrl(`/projects/egress/audit?${query({ project_root: projectRoot, limit })}`),
+  );
+  return (await readResponse<{ records: EgressAuditRecord[] }>(response)).records;
 }

@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { saveMetadata, type DatasetVariable, type MetadataPatch } from "./dataViewApi";
+import {
+  patchColumnSensitivity,
+  saveMetadata,
+  SENSITIVITY_LEVELS,
+  type DatasetVariable,
+  type MetadataPatch,
+  type SensitivityLevel,
+} from "./dataViewApi";
 import {
   formatMissingCodes,
   formatValueLabels,
@@ -59,6 +66,10 @@ export function buildMetadataPatch(
   return { patch, changes };
 }
 
+const SHARING_HELP =
+  "Who may see this column's values. Sensitive: never sent to a remote AI provider. " +
+  "Restricted: never sent to any AI provider. The column's name is always visible.";
+
 /** SPSS "Variable View": one row per variable, metadata editable in place. */
 export function VariableView({
   projectRoot,
@@ -77,6 +88,37 @@ export function VariableView({
   const [reviewing, setReviewing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Sharing levels are project-wide policy, saved at once -- not a new run.
+  // The project's explicit level per column; absent means the suggestion applies.
+  const [explicitSharing, setExplicitSharing] = useState<Record<string, SensitivityLevel>>({});
+
+  useEffect(() => {
+    setExplicitSharing(
+      Object.fromEntries(
+        variables
+          .filter((variable) => variable.sensitivity_source === "project" && variable.sensitivity)
+          .map((variable) => [variable.name, variable.sensitivity as SensitivityLevel]),
+      ),
+    );
+  }, [variables]);
+
+  async function changeSharing(column: string, value: string) {
+    setError(null);
+    try {
+      const view = await patchColumnSensitivity(projectRoot, {
+        [column]: value === "" ? null : (value as SensitivityLevel),
+      });
+      setExplicitSharing((current) => {
+        const next = { ...current };
+        const level = view.policy.columns[column];
+        if (level) next[column] = level;
+        else delete next[column];
+        return next;
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not change sharing");
+    }
+  }
 
   useEffect(() => {
     setDrafts(Object.fromEntries(variables.map((variable) => [variable.name, draftOf(variable)])));
@@ -158,8 +200,8 @@ export function VariableView({
         <table className="wb-result-table" style={{ borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr style={{ textAlign: "left", color: "var(--label-secondary)" }}>
-              {["Name", "Type", "Label", "Values", "Measure", "Missing", "Summary"].map((heading) => (
-                <th key={heading} style={cell}>{heading}</th>
+              {["Name", "Type", "Label", "Values", "Measure", "Missing", "Sharing", "Summary"].map((heading) => (
+                <th key={heading} style={cell} title={heading === "Sharing" ? SHARING_HELP : undefined}>{heading}</th>
               ))}
             </tr>
           </thead>
@@ -191,6 +233,23 @@ export function VariableView({
                   </td>
                   <td style={cell}>
                     <input aria-label={`Missing codes of ${variable.name}`} value={draft.missing} onChange={(event) => update(variable.name, "missing", event.target.value)} size={12} />
+                  </td>
+                  <td style={cell}>
+                    {variable.sensitivity_suggested ? (
+                      <select
+                        aria-label={`Sharing of ${variable.name}`}
+                        title={SHARING_HELP}
+                        value={explicitSharing[variable.name] ?? ""}
+                        onChange={(event) => void changeSharing(variable.name, event.target.value)}
+                      >
+                        <option value="">auto ({variable.sensitivity_suggested})</option>
+                        {SENSITIVITY_LEVELS.map((level) => (
+                          <option key={level} value={level}>{level}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td style={{ ...cell, color: "var(--label-secondary)", whiteSpace: "nowrap" }}>{summary}</td>
                 </tr>

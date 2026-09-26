@@ -3,6 +3,7 @@ import { useAgentSurface } from "./AgentSurfaceContext";
 import { agentAuditExportUrl } from "./agentApi";
 import { AgentComposer } from "./AgentComposer";
 import type { AgentMessage } from "./agentTypes";
+import { AgentRowsTable, shownRows } from "./AgentRowsTable";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
 
@@ -428,6 +429,10 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
                   </div>
                 </details>
               )}
+              {turn.reasoning.map((message) => {
+                const shown = shownRows(message);
+                return shown ? <AgentRowsTable key={`rows-${message.entry_id}`} shown={shown} /> : null;
+              })}
               {turn.responses.map(renderTranscriptMessage)}
             </div>
           );

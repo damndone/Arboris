@@ -9,6 +9,7 @@ import {
   type DatasetNode,
   type DatasetVariables,
 } from "./dataViewApi";
+import { SharingPanel } from "./SharingPanel";
 import { TransformPanel } from "./TransformPanel";
 import { VariableView } from "./VariableView";
 
@@ -28,6 +29,7 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [transforming, setTransforming] = useState(false);
+  const [sharingOpen, setSharingOpen] = useState(false);
   const [datasetsVersion, setDatasetsVersion] = useState(0);
   // Keyed by run: a status left over from the previous run must never mark a
   // newly selected, still-running run as ready for one render.
@@ -149,6 +151,9 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
         >
           Transform…
         </button>
+        <button type="button" aria-expanded={sharingOpen} onClick={() => setSharingOpen((open) => !open)}>
+          AI sharing…
+        </button>
         <span style={{ color: "var(--label-tertiary)" }}>run {runId.slice(-8)}</span>
       </div>
       {saved && (
@@ -170,6 +175,7 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
       {!error && (runStatus === null || (ready && !variables)) && (
         <div style={{ fontSize: 12, color: "var(--label-secondary)" }}>Loading…</div>
       )}
+      {sharingOpen && <SharingPanel projectRoot={projectRoot} />}
       {variables && transforming && (
         <TransformPanel
           key={`${runId}:${nodeId}`}

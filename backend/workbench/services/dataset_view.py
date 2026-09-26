@@ -15,7 +15,7 @@ from typing import Any
 import pandas as pd
 
 from ..data_operations import _read_frame, resolve_data_column_cast_context
-from ..egress import EgressPolicyError, load_policy
+from ..egress import EgressPolicyError, load_policy, suggested_sensitivity
 from ..graph_model import NodeKind
 from ..graph_store import GraphStore
 from ..lineage.run_inputs import read_run_inputs
@@ -170,6 +170,7 @@ def dataset_variables(project_root: Path | str, run_id: str, node_id: str) -> di
             # Project-wide: who may see this column's values (workbench.egress).
             entry["sensitivity"] = policy.column_level(name)
             entry["sensitivity_source"] = "project" if name in policy.columns else "suggested"
+            entry["sensitivity_suggested"] = suggested_sensitivity(name)
         valid = series[~code_mask(series, codes)] if codes else series
         if kind == "numeric":
             numbers = valid.dropna()
