@@ -1081,9 +1081,12 @@ def _detail_variables(
     quantile_method = _quantile_method(options or {})
     details: dict[str, dict[str, Any]] = {}
     for column, summary in _summary_variables(frame, tuple(columns)).items():
-        series = frame[column].dropna()
+        series = frame[column].dropna().astype(float)
         details[column] = {
             **summary,
+            **_stata_moments(series),
+            "smallest": [_safe_number(value) for value in series.nsmallest(4).tolist()],
+            "largest": [_safe_number(value) for value in series.nlargest(4).sort_values().tolist()],
             "quantile_method": quantile_method,
             "percentiles": {
                 f"p{percentile}": _safe_number(_stata_percentile(series, percentile))
@@ -1091,6 +1094,26 @@ def _detail_variables(
             },
         }
     return details
+
+
+def _stata_moments(series: pd.Series) -> dict[str, Any]:
+    """Variance, sum, skewness and kurtosis as ``summarize, detail`` reports them.
+
+    Skewness and kurtosis use population moments (m3/m2^1.5 and m4/m2^2, not
+    bias-corrected), so a normal variable has kurtosis near 3, as in Stata.
+    """
+
+    n = int(series.size)
+    if n == 0:
+        return {"variance": None, "sum": None, "skewness": None, "kurtosis": None}
+    deviations = series - series.mean()
+    m2 = float((deviations**2).mean())
+    return {
+        "variance": _safe_number(series.var(ddof=1)) if n > 1 else None,
+        "sum": _safe_number(series.sum()),
+        "skewness": _safe_number(float((deviations**3).mean()) / m2**1.5) if m2 > 0 else None,
+        "kurtosis": _safe_number(float((deviations**4).mean()) / m2**2) if m2 > 0 else None,
+    }
 
 
 def _summarize_groups(
