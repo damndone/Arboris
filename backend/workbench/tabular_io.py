@@ -73,6 +73,26 @@ def _read_native(path: Path, fmt: str, **kwargs: Any) -> tuple[pd.DataFrame, Any
         raise
 
 
+def _restore_numeric_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    """Give integer columns with missing values back their numeric dtype.
+
+    pyreadstat returns a Stata integer column that has missing values as
+    ``object`` holding Python ints and NaN. Downstream that reads as text, so
+    a numeric variable would be treated as categorical or dropped.
+    """
+
+    for column in frame.columns:
+        series = frame[column]
+        if series.dtype != object:
+            continue
+        values = series.dropna()
+        if len(values) and all(
+            isinstance(value, (int, float)) and not isinstance(value, bool) for value in values
+        ):
+            frame[column] = pd.to_numeric(series)
+    return frame
+
+
 def read_statistical(
     path: Path, fmt: str, *, nrows: int | None = None, usecols: list[str] | None = None
 ) -> pd.DataFrame:
@@ -85,7 +105,7 @@ def read_statistical(
     if usecols is not None:
         kwargs["usecols"] = list(usecols)
     frame, _meta = _read_native(path, fmt, **kwargs)
-    return frame
+    return _restore_numeric_columns(frame)
 
 
 def _key(value: object) -> str:
@@ -276,11 +296,13 @@ def write_statistical(
                 except ValueError:
                     report.note(column, "value_labels", f"label for {raw!r} dropped: column is numeric")
                     continue
-                if fmt == "dta" and not number.is_integer():
+                integral_column = pd.api.types.is_integer_dtype(series)
+                if (fmt == "dta" or integral_column) and not number.is_integer():
                     # pyreadstat truncates 1.5 to 1 here without a word.
-                    report.note(column, "value_labels", f"label for {raw!r} dropped: Stata labels only integers")
+                    report.note(column, "value_labels", f"label for {raw!r} dropped: only integer values can be labelled here")
                     continue
-                converted[int(number) if fmt == "dta" else number] = str(label)
+                # pyreadstat requires keys of the column's own type.
+                converted[int(number) if fmt == "dta" or integral_column else number] = str(label)
             elif fmt == "dta":
                 report.note(column, "value_labels", f"label for {raw!r} dropped: Stata labels only numeric values")
             else:

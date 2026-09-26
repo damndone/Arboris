@@ -179,3 +179,45 @@ def test_r_haven_reads_our_exports_the_same_way(tmp_path, fmt) -> None:
     if fmt == "sav":
         assert seen["na_values"] == -99
         assert seen["na_range"] == [900, 999]
+
+
+def test_object_columns_holding_numbers_are_restored_to_numeric() -> None:
+    from workbench.tabular_io import _restore_numeric_columns
+
+    frame = pd.DataFrame(
+        {
+            "score": pd.Series([88, 95, np.nan, 83], dtype=object),
+            "name": pd.Series(["a", None, "c", "d"], dtype=object),
+            "flag": pd.Series([True, False, None, True], dtype=object),
+        }
+    )
+    restored = _restore_numeric_columns(frame)
+    assert pd.api.types.is_numeric_dtype(restored["score"])
+    assert restored["score"].isna().sum() == 1
+    assert restored["name"].dtype == object
+    assert restored["flag"].dtype == object
+
+
+@pytest.mark.skipif(shutil.which("Rscript") is None, reason="R not installed")
+def test_a_stata_integer_column_with_missing_values_reads_as_numeric(tmp_path) -> None:
+    """Real Stata files store small integers as byte/int; with missing values
+    pyreadstat returned them as text-like object columns."""
+
+    path = tmp_path / "ints.dta"
+    result = subprocess.run(
+        ["Rscript", "-e", f'haven::write_dta(data.frame(x = c(1L, NA, 3L), y = c(1.5, 2, NA)), "{path}")'],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        pytest.skip("R haven unavailable: " + result.stderr[-200:])
+    frame = read_table(path)
+    assert pd.api.types.is_numeric_dtype(frame["x"])
+    assert frame["x"].tolist()[0] == 1 and np.isnan(frame["x"].tolist()[1])
+
+
+def test_value_labels_on_an_integer_column_export_to_spss(tmp_path) -> None:
+    frame = pd.DataFrame({"income_group": pd.Series([1, 2, 3, 2], dtype="int8")})
+    labels = {"value_labels": {"income_group": {"1": "Low", "2": "Middle", "3": "High"}}}
+    path, report, restored, restored_labels = _round_trip(tmp_path, "sav", frame, labels)
+    assert report.notes == []
+    assert restored_labels["value_labels"]["income_group"] == {"1": "Low", "2": "Middle", "3": "High"}
