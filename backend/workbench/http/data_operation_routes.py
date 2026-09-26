@@ -130,7 +130,10 @@ class DataTransformRequest(BaseModel):
     source_run_id: str = Field(min_length=1, max_length=200)
     source_node_id: str = Field(min_length=1, max_length=300)
     source_artifact_id: str = Field(min_length=1, max_length=200)
-    operation: Literal["merge", "append", "reshape", "subset"]
+    operation: Literal[
+        "merge", "append", "reshape", "subset", "dedupe", "rename",
+        "aggregate", "fill_missing", "tsset", "lag", "recode",
+    ]
     parameters: dict[str, Any] = Field(default_factory=dict)
     secondary_run_id: str | None = Field(default=None, max_length=200)
     secondary_node_id: str | None = Field(default=None, max_length=300)

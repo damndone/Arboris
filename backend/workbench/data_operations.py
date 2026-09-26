@@ -136,6 +136,7 @@ DataTransformOperation = Literal[
     "fill_missing",
     "tsset",
     "lag",
+    "recode",
 ]
 ALLOWED_DATA_TRANSFORM_OPERATIONS = frozenset(
     {
@@ -149,6 +150,7 @@ ALLOWED_DATA_TRANSFORM_OPERATIONS = frozenset(
         "fill_missing",
         "tsset",
         "lag",
+        "recode",
     }
 )
 SUBSET_FILTER_OPERATORS = frozenset(
@@ -464,6 +466,87 @@ def _subset_filter_mask(series: pd.Series, filter_spec: Mapping[str, Any], name:
     if not isinstance(mask, pd.Series):
         raise DataColumnCastValidationError(f"{name} did not produce a row mask")
     return mask.fillna(False).astype(bool)
+
+
+def _recode_value(value: Any, name: str) -> Any:
+    if value is None or isinstance(value, str) and value:
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
+        return value
+    raise DataColumnCastValidationError(f"{name} must be a finite number, a non-empty string or null")
+
+
+def _recode_into_new_column(frame: pd.DataFrame, parameters: Mapping[str, Any]) -> pd.DataFrame:
+    """SPSS RECODE ... INTO: map values and closed ranges of one column to codes.
+
+    Rules apply in order and the first match wins; ranges include both ends;
+    a missing source value stays missing unless a {"from": "missing"} rule
+    maps it. Unlike SPSS, a non-missing value no rule covers is refused unless
+    an {"from": "else"} rule says what it becomes, so a range with a gap
+    cannot silently turn valid values into missing ones.
+    """
+
+    _reject_unknown_parameters(parameters, {"column", "output", "rules"}, "recode")
+    column = _require_non_empty_string(parameters.get("column"), "recode.column")
+    output = _require_non_empty_string(parameters.get("output"), "recode.output")
+    _require_columns_exist(frame, [column], "recode")
+    if output in frame.columns:
+        raise DataColumnCastValidationError(
+            f"recode.output {output!r} already exists; choose a new variable name"
+        )
+    rules = parameters.get("rules")
+    if not isinstance(rules, list) or not rules:
+        raise DataColumnCastValidationError("recode.rules must be a non-empty list")
+    source = frame[column]
+    numeric = pd.api.types.is_numeric_dtype(source) and not pd.api.types.is_bool_dtype(source)
+    result = pd.Series([None] * len(frame), index=frame.index, dtype=object)
+    assigned = pd.Series(False, index=frame.index)
+    missing = source.isna()
+    has_else = False
+    for index, rule in enumerate(rules):
+        parsed = _require_nested_keys(rule, name=f"recode.rules[{index}]", required={"from", "to"}, optional=set())
+        target = parsed["to"]
+        origin = parsed["from"]
+        if origin == "else":
+            if index != len(rules) - 1:
+                raise DataColumnCastValidationError("recode: the else rule must come last")
+            has_else = True
+            mask = ~assigned & ~missing
+        elif origin == "missing":
+            mask = ~assigned & missing
+        elif isinstance(origin, Mapping):
+            if set(origin) != {"low", "high"}:
+                raise DataColumnCastValidationError(f"recode.rules[{index}].from range needs exactly low and high")
+            low, high = origin["low"], origin["high"]
+            if not all(isinstance(bound, (int, float)) and not isinstance(bound, bool) for bound in (low, high)) or low > high:
+                raise DataColumnCastValidationError(f"recode.rules[{index}].from range must be numbers with low <= high")
+            if not numeric:
+                raise DataColumnCastValidationError(f"recode: ranges need a numeric column; {column} is not")
+            mask = ~assigned & source.between(low, high)
+        else:
+            value = _recode_value(origin, f"recode.rules[{index}].from")
+            if value is None:
+                raise DataColumnCastValidationError(f"recode.rules[{index}].from: use \"missing\" to match missing values")
+            if numeric and isinstance(value, str):
+                raise DataColumnCastValidationError(f"recode: {value!r} cannot match numeric column {column}")
+            mask = ~assigned & (source == value if numeric else source.astype("string") == str(value))
+        if target == "copy":
+            result[mask] = source[mask]
+        else:
+            result[mask] = _recode_value(target, f"recode.rules[{index}].to")
+        assigned |= mask.fillna(False)
+    unmatched = int((~assigned & ~missing).sum())
+    if unmatched and not has_else:
+        examples = ", ".join(str(value) for value in source[~assigned & ~missing].drop_duplicates().head(5))
+        raise DataColumnCastValidationError(
+            f"recode: {unmatched} value(s) of {column} match no rule (e.g. {examples}); "
+            'add rules for them or an {"from": "else"} rule saying what they become'
+        )
+    converted = pd.to_numeric(result, errors="coerce")
+    all_numeric = converted.notna().sum() == result.notna().sum()
+    out = frame.copy()
+    out[output] = converted if all_numeric else result.astype("string")
+    return out
 
 
 def _execute_data_transform(
@@ -931,6 +1014,8 @@ def _execute_data_transform(
             for lag in lags:
                 result[f"{column}_lag{lag}"] = base.shift(lag)
         return result
+    if spec.operation == "recode":
+        return _recode_into_new_column(left, parameters)
     raise DataColumnCastValidationError(f"unsupported data operation: {spec.operation}")
 
 
