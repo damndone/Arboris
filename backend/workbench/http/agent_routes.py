@@ -835,7 +835,7 @@ def _current_proposal_context_fingerprint(
     )
     if proposal.operation_id == "data.columns.cast":
         return _current_data_columns_cast_fingerprint(root, proposal)
-    if proposal.operation_id not in {"model.rerun", "graph.fork", "operation.multi_step"}:
+    if proposal.operation_id not in {"model.rerun", "metadata.edit", "graph.fork", "operation.multi_step"}:
         raise WorkbenchAPIError(
             status_code=422,
             code="AGENT_PROPOSAL_OPERATION_UNSUPPORTED",

@@ -223,6 +223,7 @@ def test_inventory_records_only_live_natural_language_proposers() -> None:
     assert direct_ids == {
         "data.columns.cast",
         "graph.fork",
+        "metadata.edit",
         "model.rerun",
         "operation.multi_step",
     }
@@ -264,7 +265,7 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (130, 4, 124, 128, 2, 0)  # v1.8.9: +data.recode; step identities composable only
+    ) == (131, 5, 124, 129, 2, 0)  # v1.8.9: +data.recode, +metadata.edit; step identities composable only
     assert {item.capability_id for item in report.gaps} == set()
     assert {item.capability_id for item in report.exempt} == {
         "code.execute",

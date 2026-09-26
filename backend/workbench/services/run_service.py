@@ -634,7 +634,8 @@ def reject_invalid_rerun_declarations(
             + f" is not a model variable (model: {y} ~ {' + '.join(x)}). A measurement "
             "level only changes how a column already in the model is treated; it never "
             "adds a column. To add a column as a regressor, propose model.genesis with "
-            "it in predictors or categorical.",
+            "it in predictors or categorical; to only record the declaration, propose "
+            "metadata.edit.",
         )
 
 

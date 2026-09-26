@@ -55,7 +55,13 @@ from .execution import (
     merge_execution,
 )
 from .events import AgentEventStream
-from .operations import OperationRecord, OperationRecordStore, OperationRegistry
+from .operations import (
+    RERUN_OPERATIONS,
+    OperationRecord,
+    OperationRecordStore,
+    OperationRegistry,
+    is_rerun_operation,
+)
 from .proposals import (
     ProposalConfirmation,
     ProposalConfirmationError,
@@ -752,7 +758,9 @@ class WorkbenchOrchestrator:
         except KeyError:
             return requested_active_head_run_id
 
-    def _preflight_model_rerun_declarations(self, arguments: dict[str, Any]) -> None:
+    def _preflight_model_rerun_declarations(
+        self, arguments: dict[str, Any], *, metadata_edit: bool = False
+    ) -> None:
         """Refuse, before the user is asked, a rerun that cannot do what it says.
 
         Execution applies the same shared check; running it here too means the
@@ -790,6 +798,7 @@ class WorkbenchOrchestrator:
                 _overrides_from_proposal_changes(dict(arguments.get("changes") or {})),
                 upload_bytes,
                 str((inputs.get("upload") or {}).get("filename") or ""),
+                metadata_edit=metadata_edit,
             )
         except RerunDeclarationError as exc:
             from .tools import ToolVisibleError
@@ -1380,6 +1389,8 @@ class WorkbenchOrchestrator:
                     from_node=request.source_node_ref,
                     op_overrides=_overrides_from_proposal_changes(request.changes),
                     rerun_reason="agent_confirmed",
+                    # metadata.edit may declare columns outside the model.
+                    metadata_edit=request.operation_id == "metadata.edit",
                     rerun_from={
                         "owner_run_id": request.source_run_id,
                         "op_node_id": request.source_node_ref,
@@ -1804,7 +1815,7 @@ class WorkbenchOrchestrator:
             raise ValueError("completed operation has no child chain")
         if not isinstance(fork_id, str) or not fork_id:
             raise ValueError("completed operation has no fork")
-        if record.operation_id == "model.rerun":
+        if is_rerun_operation(record.operation_id):
             target_run_id = effect.outputs.get("target_run_id") or bindings.get(
                 "child_run_id"
             )
@@ -2042,7 +2053,7 @@ class WorkbenchOrchestrator:
                 target_run_id = bindings.get("child_run_id") or record.outputs.get(
                     "target_run_id"
                 )
-                if record.operation_id == "model.rerun" and isinstance(
+                if is_rerun_operation(record.operation_id) and isinstance(
                     target_run_id, str
                 ) and target_run_id:
                     if record.outputs.get("target_run_id") != target_run_id:
@@ -2767,7 +2778,7 @@ class WorkbenchOrchestrator:
             return self._canonicalize_data_columns_cast_arguments(arguments)
         if operation_id == "operation.multi_step":
             return self._canonicalize_workflow_arguments(arguments)
-        if self.context_provider is None or operation_id not in {"model.rerun", "graph.fork"}:
+        if self.context_provider is None or operation_id not in {*RERUN_OPERATIONS, "graph.fork"}:
             return arguments
         inspect = getattr(self.context_provider, "inspect_node_context", None)
         if inspect is None:
@@ -2905,8 +2916,10 @@ class WorkbenchOrchestrator:
                     },
                     metadata=metadata,
                 )
-            if operation_id == "model.rerun":
-                self._preflight_model_rerun_declarations(arguments)
+            if is_rerun_operation(operation_id):
+                self._preflight_model_rerun_declarations(
+                    arguments, metadata_edit=operation_id == "metadata.edit"
+                )
             proposal = self.create_proposal(
                 chain_id=chain_id,
                 operation_id=operation_id,

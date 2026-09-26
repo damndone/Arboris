@@ -5,10 +5,12 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from shutil import copytree
 
+import pytest
 from fastapi.testclient import TestClient
 
 from workbench.agent.model import ModelRequest, ModelStreamEvent
 from workbench.agent.proposals import ProposalStore
+from workbench.agent.session import JsonlSessionRepository
 from workbench.app import app
 from workbench.llm.config import LLMConfig
 from workbench.lineage.node_write_validation import build_rerun_operation_context
@@ -1899,3 +1901,111 @@ def test_proposal_canonicalizes_model_supplied_target_references(
         assert proposal["target"]["node_hash"] == node_hash
         assert proposal["preconditions"]["context_fingerprint"].startswith("nocv1:")
         assert proposal["preconditions"]["owner_resolution"] == "active_head_contains_node"
+
+
+@pytest.mark.parametrize("operation_id", ["metadata.edit", "model.rerun"])
+def test_metadata_for_a_column_outside_the_model_goes_through_metadata_edit(
+    tmp_path: Path,
+    monkeypatch,
+    operation_id: str,
+) -> None:
+    """Declaring `region` nominal is legitimate metadata even though region is
+    not in the model. model.rerun still refuses it (the D1 guard against
+    implying region joins the model) and names metadata.edit; metadata.edit
+    records it through the same confirmation, rerun and reconciliation."""
+    import io
+    import time
+
+    from workbench.http import agent_routes
+    from workbench.lineage.node_write_validation import (
+        NodeWriteOperationRequestV1,
+        compute_context_fingerprint,
+    )
+    from workbench.projects import create_project
+
+    ProposingAdapter.instances.clear()
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+
+    with TestClient(app) as client:
+        project = create_project(tmp_path, "metadata")
+        rows = "\n".join(f"{1 + 2 * i + (i % 3)},{i},{['n', 's', 'w'][i % 3]}" for i in range(40))
+        created_run = client.post(
+            "/runs",
+            data={"project_root": str(project.root), "mode": "auto", "model_type": "ols", "y": "y", "x": "x1"},
+            files={"file": ("d.csv", io.BytesIO(("y,x1,region\n" + rows + "\n").encode()), "text/csv")},
+        )
+        parent_run_id = created_run.json()["run_id"]
+        for _ in range(150):
+            status = client.get(f"/runs/{parent_run_id}", params={"project_root": str(project.root)}).json().get("status")
+            if status in {"completed", "failed"}:
+                break
+            time.sleep(0.1)
+        assert status == "completed"
+        node_index = json.loads((project.root / "runs" / parent_run_id / "node_index.json").read_text())
+        model_node_id = next(k for k in node_index if k.startswith("model:"))
+        node_hash = node_index[model_node_id]["node_hash"]
+        fingerprint = compute_context_fingerprint(
+            project.root / "runs",
+            NodeWriteOperationRequestV1(
+                request_id="test-metadata", operation="rerun", context_version="node-operation-context/v1",
+                context_fingerprint="pending", owner_run_id=parent_run_id, op_node_id=model_node_id,
+                node_hash=node_hash, forest_node_key=node_hash,
+                owner_resolution="active_head_contains_node", active_head_run_id=parent_run_id,
+            ),
+        )
+        ProposingAdapter.proposal_arguments = {
+            "operation_id": operation_id,
+            "target": {"run_id": parent_run_id, "node_ref": model_node_id, "node_hash": node_hash, "forest_node_key": node_hash},
+            "preconditions": {
+                "context_version": "node-operation-context/v1", "context_fingerprint": fingerprint,
+                "active_head_run_id": parent_run_id, "owner_resolution": "active_head_contains_node",
+            },
+            "changes": {"labels": {"measurement_level": {"region": "nominal"}}},
+            "evidence_refs": ["schema:region"],
+            "expected_effect": ["region is declared nominal"],
+            "risks": ["re-estimates the run"],
+        }
+        session_id = client.post(
+            "/agent/sessions", params={"project_root": str(project.root)},
+            json={"role": "chain", "chain_id": "chain-a", "run_id": parent_run_id, "context_packet": _context_packet()},
+        ).json()["session_id"]
+        turn = client.post(
+            f"/agent/sessions/{session_id}/turns", params={"project_root": str(project.root)},
+            json={"question": "把 region 标记为名义变量"},
+        )
+        assert turn.status_code == 200
+        proposals = turn.json()["session"]["proposals"]
+
+        if operation_id == "model.rerun":
+            assert proposals == []
+            transcript = json.dumps(
+                [entry.payload for entry in JsonlSessionRepository(project.root / "workbench").get_branch(session_id)],
+                ensure_ascii=False,
+            )
+            assert "RERUN_HAS_NO_MODEL_EFFECT" in transcript and "metadata.edit" in transcript
+            return
+
+        proposal = proposals[0]
+        confirmed = client.post(
+            f"/agent/sessions/{session_id}/proposals/{proposal['proposal_id']}/confirm",
+            params={"project_root": str(project.root)},
+            json={"revision": proposal["revision"], "fingerprint": proposal["fingerprint"], "active_head_run_id": parent_run_id},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        operation = confirmed.json()["operation"]
+        child_run_id = operation["outputs"]["target_run_id"]
+        child_form = json.loads((project.root / "runs" / child_run_id / "run_inputs.json").read_text())["form"]
+        assert child_form["labels"]["measurement_level"] == {"region": "nominal"}
+        for _ in range(150):
+            status = client.get(f"/runs/{child_run_id}", params={"project_root": str(project.root)}).json().get("status")
+            if status in {"completed", "failed"}:
+                break
+            time.sleep(0.1)
+        assert status == "completed"
+        reconciled = client.post(
+            f"/agent/sessions/{session_id}/operations/{operation['record_id']}/reconcile",
+            params={"project_root": str(project.root)},
+        )
+        assert reconciled.status_code == 200
+        assert reconciled.json()["operation"]["status"] == "completed"

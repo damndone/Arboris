@@ -597,7 +597,63 @@ class NodeOperationContextProvider:
                 ListProjectDatasetsRequest(detail_for=tuple(detail_for))
             )
 
+        def export_dataset(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            from ..data_operations import DataColumnCastValidationError
+            from ..services.data_export import export_dataset as write_export
+            from ..tabular_io import StatisticalFileError
+
+            run_id = str(arguments.get("run_id") or "")
+            self._project_run_root(run_id)  # refuses anything but a project run id
+            try:
+                exported = write_export(
+                    self.project_root, run_id, str(arguments.get("node_id") or ""), str(arguments.get("format") or "")
+                )
+            except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
+                raise ToolVisibleError(f"DATASET_EXPORT_UNAVAILABLE: {exc}") from exc
+            report = exported["report"]
+            return {
+                "artifact_id": exported["artifact_id"],
+                "filename": exported["filename"],
+                "download_url": exported["download_url"],
+                "rows": report["rows"],
+                "columns": report["columns"],
+                "renamed": report["renamed"],
+                # What the format could not hold; tell the user every item.
+                "notes": report["notes"][:40],
+                "notes_omitted": max(len(report["notes"]) - 40, 0),
+            }
+
         return [
+            ToolDefinition(
+                tool_id="export_dataset",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_id", "node_id", "format"],
+                    "properties": {
+                        "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "node_id": {"type": "string", "minLength": 1, "maxLength": 300},
+                        "format": {"type": "string", "enum": ["sav", "zsav", "dta"]},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="artifact",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=export_dataset,
+                description=(
+                    "Write one dataset node (e.g. stage:raw, stage:cleaned or a derived "
+                    "dataset) as SPSS (.sav/.zsav) or Stata (.dta) with its declared "
+                    "labels. Creates a downloadable file only; changes no data or "
+                    "results. Report every item in notes to the user: they are labels "
+                    "or missing codes the format could not hold."
+                ),
+            ),
             ToolDefinition(
                 tool_id="list_project_datasets",
                 version="v1",

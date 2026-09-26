@@ -100,3 +100,21 @@ def test_a_missing_term_lists_the_terms_the_model_does_have(labelled_run) -> Non
     available = {item["term"]: item["label"] for item in model["available_terms"]}
     assert available["C(Q('region'))[T.2]"] == "地区: 南方"
     assert available["educ"] == "受教育年限"
+
+
+def test_the_agent_can_export_a_dataset_with_a_loss_report(labelled_run) -> None:
+    from workbench.agent.tools import ToolContext, ToolVisibleError
+
+    root, run_id = labelled_run
+    provider = NodeOperationContextProvider(root)
+    tools = {definition.tool_id: definition for definition in provider.tool_definitions(chain_id="c1", session_id="s1")}
+    export = tools["export_dataset"]
+    assert export.side_effect == "artifact"
+    context = ToolContext(session_id="s1", metadata={})
+    result = export.handler({"run_id": run_id, "node_id": "stage:raw", "format": "dta"}, context)
+    assert result["filename"].endswith(".dta")
+    assert any(note["field"] == "user_missing_values" for note in result["notes"])  # -99 has no Stata form
+    with pytest.raises(ToolVisibleError, match="DATASET_EXPORT_UNAVAILABLE"):
+        export.handler({"run_id": run_id, "node_id": "model:ols_1", "format": "sav"}, context)
+    with pytest.raises(ToolVisibleError):
+        export.handler({"run_id": "../../etc", "node_id": "stage:raw", "format": "sav"}, context)

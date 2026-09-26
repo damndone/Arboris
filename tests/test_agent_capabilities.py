@@ -90,6 +90,7 @@ def test_natural_language_allowlist_is_registry_owned() -> None:
         # through operation.multi_step; only directly executable ones are here.
         "data.columns.cast",
         "graph.fork",
+        "metadata.edit",
         "model.rerun",
         "operation.multi_step",
     ]
@@ -265,6 +266,7 @@ def test_proposal_tool_schema_excludes_typed_operations_not_enabled_for_natural_
         # through operation.multi_step; only directly executable ones are here.
         "data.columns.cast",
         "graph.fork",
+        "metadata.edit",
         "model.rerun",
         "operation.multi_step",
     ]
