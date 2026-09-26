@@ -523,13 +523,15 @@ def test_agent_core_enforces_max_steps_before_a_queued_follow_up_call(
             await asyncio.sleep(0)
         await agent.steer("queued follow-up")
 
-        assert await running == ""
+        # A budget stop now explains itself instead of returning nothing.
+        assert (await running).startswith("This request did not finish: the step budget ran out")
         assert len(adapter.requests) == 1
         assert repository.get_metadata("session-a")["status"] == "blocked"
         branch = repository.get_branch("session-a")
-        assert branch[-1].payload == {
+        payload = dict(branch[-1].payload)
+        assert payload.pop("content").startswith("This request did not finish")
+        assert payload == {
             "role": "assistant",
-            "content": "",
             "stop_reason": "error",
             "error": "max_steps_exceeded",
         }
@@ -578,14 +580,17 @@ def test_agent_core_blocks_consecutive_identical_tool_calls_before_max_steps(
             tool_runtime=tools,
         )
 
-        assert await agent.prompt("inspect the same node", budget={"max_steps": 6}) == ""
+        assert (await agent.prompt("inspect the same node", budget={"max_steps": 6})).startswith(
+            "This request did not finish: the same tool call repeated"
+        )
 
         assert len(adapter.requests) == 2
         assert repository.get_metadata("session-a")["status"] == "blocked"
         branch = repository.get_branch("session-a")
-        assert branch[-1].payload == {
+        payload = dict(branch[-1].payload)
+        assert payload.pop("content").startswith("This request did not finish")
+        assert payload == {
             "role": "assistant",
-            "content": "",
             "stop_reason": "error",
             "error": "repeated_tool_call_limit",
         }
@@ -645,7 +650,9 @@ def test_agent_core_resets_identical_tool_call_counter_when_arguments_change(
             tool_runtime=tools,
         )
 
-        assert await agent.prompt("inspect the requested nodes", budget={"max_steps": 6}) == ""
+        assert (await agent.prompt("inspect the requested nodes", budget={"max_steps": 6})).startswith(
+            "This request did not finish"
+        )
 
         assert len(adapter.requests) == 3
         # Filter by reason: replaying an already-answered inspection also emits

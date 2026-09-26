@@ -17,6 +17,12 @@ from .events import AgentEventStream
 from .model import ModelAdapter, ModelRequest
 from .session import JsonlSessionRepository
 from .tools import ToolResult, ToolRuntime
+from .turn_messages import (
+    budget_exhausted_message,
+    detect_language,
+    matches_language,
+    proposal_summary,
+)
 
 
 class AgentCoreBusyError(RuntimeError):
@@ -146,6 +152,7 @@ class AgentCore:
     ) -> str:
         normalized_budget = AgentRunBudget.from_value(budget)
         self._begin(normalized_budget)
+        self._user_text = text
         try:
             return await self._run_with_budget(
                 text,
@@ -213,6 +220,10 @@ class AgentCore:
         self._last_tool_call_fingerprint = None
         self._consecutive_identical_tool_calls = 0
         self._answered_tool_calls = {}
+        # Facts for the server-written closing message (see turn_messages).
+        self._tools_used: list[str] = []
+        self._last_tool_failure: str | None = None
+        self._ready_proposal: Mapping[str, Any] | None = None
 
     def _end(self) -> None:
         self.repository.update_status(self.session_id, self._final_status or "idle")
@@ -648,6 +659,15 @@ class AgentCore:
                         return self._persist_terminal_error(
                             "repeated_tool_call_limit"
                         )
+                    self._tools_used.append(result.tool_id)
+                    if not result.ok:
+                        details = result.error_details or []
+                        first = details[0] if details and isinstance(details[0], Mapping) else {}
+                        self._last_tool_failure = str(first.get("message") or result.error or "")[:300]
+                    if self._is_confirmation_ready(result):
+                        proposal = result.output.get("proposal")
+                        if isinstance(proposal, Mapping):
+                            self._ready_proposal = proposal
                     confirmation_ready = confirmation_ready or self._is_confirmation_ready(result)
                 self.events.emit(
                     self.session_id,
@@ -670,8 +690,20 @@ class AgentCore:
                     # explicit user confirmation. Requiring a further provider
                     # completion turn can only waste budget and turn a usable
                     # proposal into a misleading max-steps failure.
-                    if not content:
-                        content = "proposal is ready for confirmation"
+                    # The model's pre-tool narration is often in another
+                    # language than the question; the reply the user reads is
+                    # written from the persisted proposal instead.
+                    language = detect_language(getattr(self, "_user_text", None))
+                    summary = (
+                        proposal_summary(self._ready_proposal, language)
+                        if self._ready_proposal is not None
+                        else ""
+                    )
+                    if summary or not content:
+                        narration = content if matches_language(content, language) else ""
+                        content = "\n\n".join(
+                            part for part in (narration, summary) if part
+                        ) or "proposal is ready for confirmation"
                         summary_entry = self.repository.append(
                             self.session_id,
                             "message",
@@ -763,12 +795,24 @@ class AgentCore:
             )
             self._active_message_started = True
 
+        # A budget stop still owes the user an explanation; other errors keep
+        # the empty content their callers already handle.
+        content = (
+            budget_exhausted_message(
+                detect_language(getattr(self, "_user_text", None)),
+                error,
+                getattr(self, "_tools_used", []),
+                getattr(self, "_last_tool_failure", None),
+            )
+            if error in {"max_steps_exceeded", "repeated_tool_call_limit"}
+            else ""
+        )
         entry = self.repository.append(
             self.session_id,
             "message",
             {
                 "role": "assistant",
-                "content": "",
+                "content": content,
                 "stop_reason": "error",
                 "error": error,
             },
@@ -791,7 +835,7 @@ class AgentCore:
             "message_end",
             {
                 "entry_id": entry.entry_id,
-                "content": "",
+                "content": content,
                 "stop_reason": "error",
                 "error": error,
             },
@@ -821,7 +865,7 @@ class AgentCore:
         self._active_request_id = None
         self._active_message_started = False
         self._active_turn_started = False
-        return ""
+        return content
 
     def _mark_timeout(self) -> None:
         self._timeout_requested = True
