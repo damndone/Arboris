@@ -9,7 +9,10 @@ type Sort = { column: string; descending: boolean } | null;
 
 function display(value: unknown): string {
   if (value === null || value === undefined) return "";
-  if (typeof value === "number") return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(8)));
+  // Seven significant digits: what a single-precision (Stata float) value
+  // actually holds, so 84.800003 reads 84.8. Display only; the cell's title
+  // carries the stored value.
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(7)));
   return String(value);
 }
 
@@ -138,7 +141,7 @@ export function DataGrid({
                     <td
                       key={column}
                       data-declared-missing={declaredMissing || undefined}
-                      title={declaredMissing ? "Declared missing code" : undefined}
+                      title={declaredMissing ? "Declared missing code" : typeof value === "number" && !Number.isInteger(value) ? String(value) : undefined}
                       style={{
                         padding: "2px 8px",
                         whiteSpace: "nowrap",

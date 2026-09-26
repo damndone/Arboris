@@ -97,3 +97,22 @@ def test_recode_through_preview_and_confirm_creates_a_child_dataset(tmp_path) ->
     assert all(groups[age] == (1 if age <= 29 else 2 if age <= 49 else 3) for age in groups)
     nodes = [item["node_id"] for item in client.get(f"/runs/{run_id}/datasets", params=params).json()["datasets"]]
     assert child in nodes
+
+
+def test_a_refused_preview_tells_the_user_why(tmp_path) -> None:
+    frame = pd.DataFrame({"y": [1.0, 2.0, 3.0], "age": [20, 40.5, 60]})
+    source = tmp_path / "d.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "why")
+    run_id = run_workflow(project.root, [source], mode="auto", model_type="ols", y="y", x=["age"])["run_id"]
+    response = TestClient(app).post(
+        "/data-operations/transform/preview",
+        params={"project_root": str(project.root)},
+        json={
+            "source_run_id": run_id, "source_node_id": "stage:raw", "source_artifact_id": "raw_d.csv",
+            "operation": "recode",
+            "parameters": {"column": "age", "output": "g", "rules": [{"from": {"low": 0, "high": 40}, "to": 1}, {"from": {"low": 41, "high": 99}, "to": 2}]},
+        },
+    )
+    assert response.status_code == 422
+    assert "1 value(s) of age match no rule (e.g. 40.5)" in response.json()["error"]["message"]

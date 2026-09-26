@@ -176,3 +176,15 @@ describe("DataView switching to a new, running run", () => {
     expect(requestedRuns).not.toContain("r2");
   });
 });
+
+describe("DataGrid number display", () => {
+  it("shows single-precision noise as its real precision and keeps the stored value on hover", async () => {
+    api.fetchDatasetPage.mockResolvedValue({
+      run_id: "r1", node_id: "stage:raw", artifact_id: "a", columns: ["educ", "region"], total_rows: 1,
+      offset: 0, row_numbers: [1], rows: [{ educ: 84.80000305175781, region: 1 }],
+    });
+    renderView();
+    const cell = await screen.findByText("84.8");
+    expect(cell).toHaveAttribute("title", "84.80000305175781");
+  });
+});

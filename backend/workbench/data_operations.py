@@ -537,7 +537,10 @@ def _recode_into_new_column(frame: pd.DataFrame, parameters: Mapping[str, Any]) 
         assigned |= mask.fillna(False)
     unmatched = int((~assigned & ~missing).sum())
     if unmatched and not has_else:
-        examples = ", ".join(str(value) for value in source[~assigned & ~missing].drop_duplicates().head(5))
+        examples = ", ".join(
+            f"{value:.7g}" if isinstance(value, float) else str(value)
+            for value in source[~assigned & ~missing].drop_duplicates().head(5)
+        )
         raise DataColumnCastValidationError(
             f"recode: {unmatched} value(s) of {column} match no rule (e.g. {examples}); "
             'add rules for them or an {"from": "else"} rule saying what they become'

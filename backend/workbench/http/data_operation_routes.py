@@ -213,10 +213,11 @@ def _preview_or_error(root, spec: DataColumnCastSpecV1, *, confirm: bool):
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
             code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            # The reason is the validation text the user can act on.
             message=(
-                "The source data context changed before confirmation."
+                f"The source data context changed before confirmation: {exc}"
                 if confirm
-                else "The typed data operation cannot be previewed."
+                else f"The typed data operation cannot be previewed: {exc}"
             ),
             details={"operation_id": "data.column.cast", "reason": str(exc)},
         ) from exc
@@ -247,10 +248,11 @@ def _batch_preview_or_error(root, spec: DataColumnsCastSpecV1, *, confirm: bool)
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
             code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            # The reason is the validation text the user can act on.
             message=(
-                "The source data context changed before confirmation."
+                f"The source data context changed before confirmation: {exc}"
                 if confirm
-                else "The typed data operation cannot be previewed."
+                else f"The typed data operation cannot be previewed: {exc}"
             ),
             details={"operation_id": "data.columns.cast", "reason": str(exc)},
         ) from exc
@@ -296,10 +298,11 @@ def _feature_recipe_preview_or_error(root, spec: FeatureRecipeOperationSpecV1, *
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
             code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            # The reason is the validation text the user can act on.
             message=(
-                "The FeatureRecipe source changed before confirmation."
+                f"The FeatureRecipe source changed before confirmation: {exc}"
                 if confirm
-                else "The typed FeatureRecipe cannot be previewed."
+                else f"The typed FeatureRecipe cannot be previewed: {exc}"
             ),
             details={"operation_id": "data.feature_recipe", "reason": str(exc)},
         ) from exc
@@ -333,10 +336,11 @@ def _data_transform_preview_or_error(root, spec: DataTransformSpecV1, *, confirm
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
             code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            # The reason is the validation text the user can act on.
             message=(
-                "The data transform source changed before confirmation."
+                f"The data transform source changed before confirmation: {exc}"
                 if confirm
-                else "The typed data transform cannot be previewed."
+                else f"The typed data transform cannot be previewed: {exc}"
             ),
             details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
         ) from exc
@@ -450,10 +454,11 @@ def _code_preview_or_error(root, spec: CodeExecuteSpecV1, *, confirm: bool):
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
             code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            # The reason is the validation text the user can act on.
             message=(
-                "The source data context changed before confirmation."
+                f"The source data context changed before confirmation: {exc}"
                 if confirm
-                else "The typed data operation cannot be previewed."
+                else f"The typed data operation cannot be previewed: {exc}"
             ),
             details={"operation_id": "code.execute", "reason": str(exc)},
         ) from exc
