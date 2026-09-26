@@ -66,6 +66,7 @@ from ..agent.session import EntryRef, JsonlSessionRepository
 from ..agent.tools import ToolRegistry
 from ..api_errors import WorkbenchAPIError
 from ..control_plane import control_plane_capability
+from ..egress import egress_project
 from ..llm.config import load_llm_config
 from ..lineage.node_index import NODE_INDEX_FILENAME
 
@@ -2078,11 +2079,12 @@ async def run_agent_turn(
         agent.attach_tools(registry.descriptors(), registry)
     _ACTIVE_TURNS[turn_key] = agent
     try:
-        await agent.prompt(
-            body.question.strip(),
-            budget={"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S},
-            tool_context=tool_context,
-        )
+        with egress_project(root):
+            await agent.prompt(
+                body.question.strip(),
+                budget={"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S},
+                tool_context=tool_context,
+            )
     finally:
         if _ACTIVE_TURNS.get(turn_key) is agent:
             _ACTIVE_TURNS.pop(turn_key, None)

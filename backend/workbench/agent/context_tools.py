@@ -628,7 +628,84 @@ class NodeOperationContextProvider:
                 "notes_omitted": max(len(report["notes"]) - 40, 0),
             }
 
+        def show_dataset_rows(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            from ..data_operations import DataColumnCastValidationError
+            from ..services.dataset_view import dataset_page
+
+            run_id = str(arguments.get("run_id") or "")
+            node_id = str(arguments.get("node_id") or "")
+            self._project_run_root(run_id)
+            offset = int(arguments.get("offset") or 0)
+            limit = int(arguments.get("limit") or 20)
+            try:
+                page = dataset_page(self.project_root, run_id, node_id, offset=offset, limit=limit)
+            except (DataColumnCastValidationError, ValueError, FileNotFoundError) as exc:
+                raise ToolVisibleError(f"DATASET_ROWS_UNAVAILABLE: {exc}") from exc
+            requested = [str(column) for column in arguments.get("columns") or []]
+            unknown = [column for column in requested if column not in page["columns"]]
+            if unknown:
+                raise ToolVisibleError(
+                    f"DATASET_ROWS_UNAVAILABLE: unknown columns {unknown}; the dataset has {page['columns']}"
+                )
+            columns = requested or page["columns"]
+            rows = [{column: row.get(column) for column in columns} for row in page["rows"]]
+            shown = len(rows)
+            first = offset + 1 if shown else offset
+            return {
+                "run_id": run_id,
+                "node_id": node_id,
+                "columns": columns,
+                "total_rows": page["total_rows"],
+                "offset": offset,
+                "row_numbers": page["row_numbers"],
+                "rows": rows,
+                # The only part of this result a remote provider receives under
+                # the default data-sharing policy (see workbench.egress).
+                "egress_summary": (
+                    f"Rows {first}-{offset + shown} of {page['total_rows']} "
+                    f"({len(columns)} column{'s' if len(columns) != 1 else ''}) "
+                    f"of {node_id} in run {run_id} are shown to the user in Workbench."
+                ),
+            }
+
         return [
+            ToolDefinition(
+                tool_id="show_dataset_rows",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_id", "node_id"],
+                    "properties": {
+                        "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "node_id": {"type": "string", "minLength": 1, "maxLength": 300},
+                        "offset": {"type": "integer", "minimum": 0},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                        "columns": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                            "maxItems": 40,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=16384,
+                handler=show_dataset_rows,
+                description=(
+                    "Show rows of one dataset node (e.g. stage:raw, stage:cleaned or a "
+                    "derived dataset) to the user as a table in Workbench, when the user "
+                    "asks to see records. Under the project's data-sharing policy the rows "
+                    "may stay on the user's computer: you then receive only a summary of "
+                    "what was shown. Do not repeat or guess row values; describe data with "
+                    "summaries, frequencies or models instead."
+                ),
+            ),
             ToolDefinition(
                 tool_id="export_dataset",
                 version="v1",

@@ -41,6 +41,7 @@ from .http.agent_routes import router as agent_router
 from .http.drafts_routes import router as drafts_router
 from .http.data_operation_routes import router as data_operation_router
 from .http.dataset_routes import router as dataset_router
+from .http.egress_routes import router as egress_router
 from .http.graph_routes import router as graph_router
 from .http.llm_routes import router as llm_router
 from .http.memory_routes import router as memory_router
@@ -340,6 +341,7 @@ app.include_router(graph_router)
 app.include_router(drafts_router)
 app.include_router(data_operation_router)
 app.include_router(dataset_router)
+app.include_router(egress_router)
 app.include_router(agent_router)
 app.include_router(notebook_router)
 app.include_router(rerun_router)

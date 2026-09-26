@@ -46,6 +46,7 @@ from ..agent.notebook.planning_agent import (
     NotebookPlanningUnavailable,
     PlanningRefusal,
 )
+from ..egress import egress_project
 from ..llm.config import load_llm_config
 from ..agent.trace import (
     TraceWriter,
@@ -1562,11 +1563,12 @@ async def propose_options_endpoint(
                                 message="Notebook planning attempt is already active",
                             )
                         _ACTIVE_PLANNING_ATTEMPTS[attempt_key] = current_task
-                result = await _run_planning_agent(
-                    agent,
-                    context=context,
-                    initial_evidence=initial_evidence,
-                )
+                with egress_project(root):
+                    result = await _run_planning_agent(
+                        agent,
+                        context=context,
+                        initial_evidence=initial_evidence,
+                    )
             except asyncio.CancelledError as exc:
                 _record_planning_terminal_error(
                     trace,

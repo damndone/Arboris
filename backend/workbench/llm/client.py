@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from ..egress import EgressPolicyError, guard_outgoing_messages
 from .config import LLMConfig
 
 # Test seam: monkeypatch to inject httpx.MockTransport-backed clients.
@@ -316,9 +317,20 @@ def _chat_request_payload(
     model_config: Mapping[str, Any] | None = None,
     stream: bool = False,
 ) -> dict[str, Any]:
+    # The single egress checkpoint: every provider call is built here.
+    try:
+        guarded = guard_outgoing_messages(
+            messages,
+            base_url=config.base_url,
+            provider_id=config.provider_id,
+            model=config.model,
+        )
+    except EgressPolicyError as exc:
+        # A broken policy blocks the call; it never falls back to sending more.
+        raise LLMUpstreamError(f"Data-sharing policy is invalid: {exc}") from exc
     payload: dict[str, Any] = {
         "model": config.model,
-        "messages": messages,
+        "messages": guarded,
         "stream": stream,
     }
     if tools:

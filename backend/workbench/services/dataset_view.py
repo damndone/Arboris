@@ -15,6 +15,7 @@ from typing import Any
 import pandas as pd
 
 from ..data_operations import _read_frame, resolve_data_column_cast_context
+from ..egress import EgressPolicyError, load_policy
 from ..graph_model import NodeKind
 from ..graph_store import GraphStore
 from ..lineage.run_inputs import read_run_inputs
@@ -140,6 +141,11 @@ def dataset_variables(project_root: Path | str, run_id: str, node_id: str) -> di
     value_labels = labels.get("value_labels") or {}
     levels = labels.get("measurement_level") or {}
     missing_codes = labels.get("user_missing_values") or {}
+    try:
+        policy = load_policy(Path(project_root))
+        sensitivity_error = None
+    except EgressPolicyError as exc:
+        policy, sensitivity_error = None, str(exc)
     variables = []
     for position, column in enumerate(frame.columns):
         name = str(column)
@@ -160,6 +166,10 @@ def dataset_variables(project_root: Path | str, run_id: str, node_id: str) -> di
             "measurement_level": levels.get(name),
             "user_missing_values": codes,
         }
+        if policy is not None:
+            # Project-wide: who may see this column's values (workbench.egress).
+            entry["sensitivity"] = policy.column_level(name)
+            entry["sensitivity_source"] = "project" if name in policy.columns else "suggested"
         valid = series[~code_mask(series, codes)] if codes else series
         if kind == "numeric":
             numbers = valid.dropna()
@@ -178,4 +188,5 @@ def dataset_variables(project_root: Path | str, run_id: str, node_id: str) -> di
         "artifact_id": context["source_artifact_id"],
         "total_rows": int(len(frame)),
         "variables": variables,
+        "sensitivity_error": sensitivity_error,
     }
