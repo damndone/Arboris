@@ -22,6 +22,7 @@ from .turn_messages import (
     detect_language,
     matches_language,
     proposal_summary,
+    provider_failure_message,
 )
 
 
@@ -474,6 +475,9 @@ class AgentCore:
             error = "tool_runtime_unavailable"
 
         content = "".join(chunks)
+        if finish_reason == "error" and not content.strip() and not tool_calls and error != "tool_runtime_unavailable":
+            # An empty failed turn reads as a hang; say what happened instead.
+            content = provider_failure_message(detect_language(getattr(self, "_user_text", None)), str(error))
         payload: dict[str, Any] = {
             "role": "assistant",
             "content": content,

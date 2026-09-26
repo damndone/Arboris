@@ -200,15 +200,17 @@ def test_common_figures_use_variable_and_value_labels(monkeypatch, tmp_path: Pat
 
 
 @pytest.mark.parametrize("suffix", [".dta", ".sav"])
-def test_external_label_formats_remain_explicitly_unsupported(
+def test_an_unreadable_statistical_file_is_refused_without_a_snapshot(
     tmp_path: Path, suffix: str
 ) -> None:
+    # v1.8.9 reads .sav and .dta (tabular_io); a corrupt one must still be
+    # refused before anything is snapshotted.
     source = tmp_path / f"external-labels{suffix}"
-    source.write_bytes(b"not parsed by this release")
+    source.write_bytes(b"not a statistical file")
     project = create_project(tmp_path, f"unsupported{suffix[1:]}")
     run = create_run(project.root, mode="auto")
 
-    with pytest.raises(ValueError, match="unsupported file type"):
+    with pytest.raises(ValueError, match="not a readable"):
         ingest_files([source], run.root, WorkbenchConfig())
 
     assert not (run.root / "raw_snapshot" / source.name).exists()

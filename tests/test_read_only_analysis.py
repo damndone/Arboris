@@ -201,3 +201,20 @@ def test_a_step_that_produces_a_dataset_is_never_read_only() -> None:
         if contract.produces_dataset:
             assert analysis_ledger.step_category(operation_id) not in read_only_policy.READ_ONLY_CATEGORIES, operation_id
 
+
+
+def test_choosing_columns_is_not_a_data_change_but_choosing_rows_is() -> None:
+    columns_only = {"step_id": "cols", "operation_id": "data.subset", "spec": {"columns": ["wage", "group"]}}
+    rows = {"step_id": "rows", "operation_id": "data.subset",
+            "spec": {"columns": ["wage", "group"], "filters": [{"column": "wage", "op": "gt", "value": 20}]}}
+    assert read_only_policy.decide("operation.multi_step", {"steps": [columns_only, _t_test("tt")]},
+                                   prior_inferential_steps=0).allowed
+    decision = read_only_policy.decide("operation.multi_step", {"steps": [rows, _t_test("tt")]}, prior_inferential_steps=0)
+    assert not decision.allowed and "data_change" in decision.reason
+
+
+def test_a_failed_provider_call_leaves_an_explanation_not_an_empty_reply() -> None:
+    from workbench.agent.turn_messages import provider_failure_message
+
+    assert "没有执行任何操作" in provider_failure_message("zh", "LLMUpstreamError")
+    assert "nothing was run" in provider_failure_message("en", "LLMUpstreamError")

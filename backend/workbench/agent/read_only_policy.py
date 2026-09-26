@@ -36,13 +36,25 @@ class AutoRunDecision:
         return {"allowed": self.allowed, "reason": self.reason, "inferential_steps": self.inferential_steps}
 
 
+_ROW_SELECTIONS = ("filters", "equals", "row_indices", "row_index_range", "row_range")
+
+
+def _category(step: Mapping[str, Any]) -> str:
+    operation_id = str(step.get("operation_id", ""))
+    spec = step.get("spec") if isinstance(step.get("spec"), Mapping) else {}
+    if operation_id == "data.subset" and not any(spec.get(key) for key in _ROW_SELECTIONS):
+        # Choosing columns keeps every row: nothing about the sample changes.
+        return "descriptive"
+    return step_category(operation_id)
+
+
 def decide(operation_id: str, changes: Mapping[str, Any], *, prior_inferential_steps: int) -> AutoRunDecision:
     if operation_id != "operation.multi_step":
         return AutoRunDecision(False, "only composed read-only workflows run without confirmation")
     steps: Sequence[Any] = changes.get("steps") or ()
     if not steps:
         return AutoRunDecision(False, "the workflow has no steps")
-    categories = [step_category(str(step.get("operation_id", ""))) for step in steps if isinstance(step, Mapping)]
+    categories = [_category(step) for step in steps if isinstance(step, Mapping)]
     if len(categories) != len(steps):
         return AutoRunDecision(False, "a step is malformed")
     changing = sorted({category for category in categories if category not in READ_ONLY_CATEGORIES})

@@ -74,3 +74,21 @@ def budget_exhausted_message(
         parts.append(f"Last failure: {last_failure}")
     parts.append("Try a more specific request (name the variables or the method), or ask me to continue.")
     return "\n".join(parts)
+
+
+def provider_failure_message(language: str, error: str) -> str:
+    """Why the answer is missing when the model provider failed mid-turn.
+
+    Nothing the provider did can have taken effect: tools run only after a
+    complete model response, so the user can simply ask again.
+    """
+
+    if language == "zh":
+        return (
+            f"AI 服务商这次没有正常响应（{error}），我没有给出回答，也没有执行任何操作。"
+            "请稍后重试；如果反复出现，请在设置里检查 AI 服务商的配置和网络。"
+        )
+    return (
+        f"The AI provider did not respond properly ({error}), so there is no answer and nothing was run. "
+        "Please try again; if it keeps happening, check the AI provider settings and the network."
+    )
