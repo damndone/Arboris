@@ -534,27 +534,20 @@ def _require_editable_rerun_target(
     node. Saying so here, with the node to use, lets it re-plan.
     """
 
-    from ..graph_store import GraphStore
-    from ..lineage.op_contract import resolve_operation_contract
-    from ..repository.run_repository import _read_manifest
+    from ..services.rerun_service import editable_rerun_nodes
 
     node_ref = (arguments.get("target") or {}).get("node_ref")
     if not isinstance(node_ref, str) or not node_ref:
         return
     try:
-        graph = GraphStore(runs_root=run_root.parent).read(run_id)
-        manifest = _read_manifest(run_root)
+        candidates = editable_rerun_nodes(run_root.parent.parent, run_id)
+        from ..graph_store import GraphStore
+
+        known = GraphStore(runs_root=run_root.parent).read(run_id).nodes
     except Exception:
         return
-
-    def editable(node: Any) -> bool:
-        stage = node.stage.value if node.stage is not None else None
-        return resolve_operation_contract(stage=stage, manifest=manifest) is not None
-
-    node = graph.nodes.get(node_ref)
-    if node is None or editable(node):
+    if node_ref not in known or node_ref in candidates:
         return
-    candidates = sorted(node_id for node_id, item in graph.nodes.items() if editable(item))
     from .tools import ToolVisibleError
 
     raise ToolVisibleError(

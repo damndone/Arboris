@@ -553,6 +553,8 @@ def reject_invalid_rerun_declarations(
     overrides: Mapping[str, object],
     upload_bytes: bytes,
     upload_filename: str = "",
+    *,
+    metadata_edit: bool = False,
 ) -> None:
     """Refuse measurement-level declarations that cannot take effect.
 
@@ -574,7 +576,14 @@ def reject_invalid_rerun_declarations(
     from ..cleaning import normalize_column_name
 
     levels = _declared_levels(overrides)
-    if not levels:
+    labels_patch = overrides.get("labels")
+    declared_missing = (
+        labels_patch.get("user_missing_values") if isinstance(labels_patch, Mapping) else None
+    )
+    # Both act in the pipeline on the uploaded data, so both must name its
+    # columns; display labels may also name columns derived later.
+    acting = {**levels, **(dict(declared_missing) if isinstance(declared_missing, Mapping) else {})}
+    if not acting:
         return
 
     try:
@@ -584,7 +593,7 @@ def reject_invalid_rerun_declarations(
     if header is not None:
         known = {str(name) for name in header.columns}
         known |= {normalize_column_name(str(name)) for name in header.columns}
-        missing = sorted(str(column) for column in levels if str(column) not in known)
+        missing = sorted(str(column) for column in acting if str(column) not in known)
         if missing:
             raise RerunDeclarationError(
                 "MEASUREMENT_LEVEL_UNKNOWN_COLUMN",
@@ -592,6 +601,10 @@ def reject_invalid_rerun_declarations(
                 + ", ".join(missing),
             )
 
+    if metadata_edit:
+        # An explicit metadata edit (the Variable view) may declare any column;
+        # it claims no model effect, so there is nothing to mislead about.
+        return
     other_changes = set(overrides) - {"labels"}
     labels = overrides.get("labels")
     other_label_changes = (

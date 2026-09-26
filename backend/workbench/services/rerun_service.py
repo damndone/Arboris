@@ -39,6 +39,22 @@ TERMINAL_RUN_STATUSES = frozenset(
 )
 
 
+def editable_rerun_nodes(project_root: Path | str, run_id: str) -> list[str]:
+    """Nodes of a run that a rerun can start from (its editable stages)."""
+
+    runs_root = Path(project_root) / "runs"
+    graph = GraphStore(runs_root=runs_root).read(run_id)
+    manifest = _read_manifest(runs_root / run_id)
+    return sorted(
+        node_id
+        for node_id, node in graph.nodes.items()
+        if resolve_operation_contract(
+            stage=node.stage.value if node.stage is not None else None, manifest=manifest
+        )
+        is not None
+    )
+
+
 class RerunServiceError(RuntimeError):
     """A request-independent rerun rejection with a stable error code."""
 
@@ -61,6 +77,9 @@ class RerunSubmissionRequest:
     rerun_from: dict[str, Any] | None = None
     workbench_context: dict[str, Any] | None = None
     before_dispatch: Callable[[str], None] | None = None
+    # True only for an explicit variable-metadata edit, which may declare
+    # columns outside the model (see reject_invalid_rerun_declarations).
+    metadata_edit: bool = False
 
 
 @dataclass(frozen=True)
@@ -226,6 +245,7 @@ class RerunService:
                 request.op_overrides,
                 upload_bytes,
                 str((inputs.get("upload") or {}).get("filename") or ""),
+                metadata_edit=request.metadata_edit,
             )
         except RerunDeclarationError as exc:
             raise RerunServiceError(exc.code, str(exc)) from exc
