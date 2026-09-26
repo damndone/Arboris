@@ -998,8 +998,38 @@ def _included_report_snapshot(
 class DatasetExportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    node_id: str = Field(min_length=1, max_length=256)
-    format: Literal["sav", "zsav", "dta"]
+    node_id: str = Field(min_length=1, max_length=300)
+    format: Literal["sav", "zsav", "dta", "csv", "xlsx"]
+    columns: list[str] | None = Field(default=None, max_length=5000)
+    filters: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    dta_version: Literal[13, 14, 15] = 14
+    value_labels: Literal["labels", "strings", "none"] = "labels"
+    missing_codes: Literal["as_missing", "keep_codes"] = "as_missing"
+    filename: str | None = Field(default=None, max_length=120)
+
+    def options(self) -> dict[str, Any]:
+        return self.model_dump(exclude={"node_id"})
+
+
+@router.post("/runs/{run_id}/datasets/export/preview")
+def preview_dataset_export_endpoint(
+    run_id: str, project_root: str, request: DatasetExportRequest
+) -> dict[str, Any]:
+    """What the export will contain -- counts, renames, losses, a few rows."""
+
+    from ..data_operations import DataColumnCastValidationError
+    from ..services.data_export import preview_export
+    from ..tabular_io import StatisticalFileError
+
+    try:
+        return preview_export(project_root, run_id, request.node_id, request.options())
+    except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATASET_EXPORT_UNAVAILABLE",
+            message=str(exc),
+            details={"run_id": run_id, "node_id": request.node_id},
+        ) from exc
 
 
 @router.post("/runs/{run_id}/datasets/export")
@@ -1017,8 +1047,8 @@ def export_dataset_endpoint(
     from ..tabular_io import StatisticalFileError
 
     try:
-        exported = export_dataset(project_root, run_id, request.node_id, request.format)
-    except (DataColumnCastValidationError, StatisticalFileError) as exc:
+        exported = export_dataset(project_root, run_id, request.node_id, request.options())
+    except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=422,
             code="DATASET_EXPORT_UNAVAILABLE",
@@ -1027,7 +1057,8 @@ def export_dataset_endpoint(
         ) from exc
     record_ui_action(
         project_root, source="POST /runs/{run_id}/datasets/export", steps=["export.dataset"],
-        run_id=run_id, node_id=request.node_id, summary=f"format={request.format}",
+        run_id=run_id, node_id=request.node_id,
+        summary=json.dumps(request.options(), ensure_ascii=False, sort_keys=True, default=str)[:500],
     )
     return exported
 

@@ -9,6 +9,7 @@ import {
   type DatasetNode,
   type DatasetVariables,
 } from "./dataViewApi";
+import { DatasetExportPanel } from "../workbench/views/DatasetExportPanel";
 import { SharingPanel } from "./SharingPanel";
 import { TransformPanel } from "./TransformPanel";
 import { VariableView } from "./VariableView";
@@ -30,6 +31,7 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
   const [saved, setSaved] = useState<string | null>(null);
   const [transforming, setTransforming] = useState(false);
   const [sharingOpen, setSharingOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [datasetsVersion, setDatasetsVersion] = useState(0);
   // Keyed by run: a status left over from the previous run must never mark a
   // newly selected, still-running run as ready for one render.
@@ -151,6 +153,9 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
         >
           Transform…
         </button>
+        <button type="button" aria-expanded={exportOpen} disabled={!variables} onClick={() => setExportOpen((open) => !open)}>
+          Export…
+        </button>
         <button type="button" aria-expanded={sharingOpen} onClick={() => setSharingOpen((open) => !open)}>
           AI sharing…
         </button>
@@ -176,6 +181,7 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
         <div style={{ fontSize: 12, color: "var(--label-secondary)" }}>Loading…</div>
       )}
       {sharingOpen && <SharingPanel projectRoot={projectRoot} />}
+      {exportOpen && variables && <DatasetExportPanel projectRoot={projectRoot} runId={runId} nodeId={nodeId} />}
       {variables && transforming && (
         <TransformPanel
           key={`${runId}:${nodeId}`}

@@ -621,12 +621,17 @@ class NodeOperationContextProvider:
 
             run_id = str(arguments.get("run_id") or "")
             self._project_run_root(run_id)  # refuses anything but a project run id
+            options = {
+                key: arguments[key]
+                for key in ("format", "columns", "filters", "dta_version", "value_labels", "missing_codes", "filename")
+                if key in arguments
+            }
             try:
                 exported = write_export(
                     self.project_root,
                     run_id,
                     _run_local_node_id(str(arguments.get("node_id") or "")),
-                    str(arguments.get("format") or ""),
+                    options,
                 )
             except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
                 raise ToolVisibleError(f"DATASET_EXPORT_UNAVAILABLE: {exc}") from exc
@@ -654,7 +659,28 @@ class NodeOperationContextProvider:
                     "properties": {
                         "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
                         "node_id": {"type": "string", "minLength": 1, "maxLength": 300},
-                        "format": {"type": "string", "enum": ["sav", "zsav", "dta"]},
+                        "format": {"type": "string", "enum": ["sav", "zsav", "dta", "csv", "xlsx"]},
+                        "columns": {
+                            "type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1,
+                            "description": "Variables to export, in this order; all when omitted.",
+                        },
+                        "filters": {
+                            "type": "array", "maxItems": 20, "items": {"type": "object"},
+                            "description": "Rows to keep, in data.subset filter form {column, op, value}.",
+                        },
+                        "dta_version": {
+                            "type": "integer", "enum": [13, 14, 15],
+                            "description": "13 = Stata 13; 14 = Stata 14-18 (default); 15 = over 32,767 variables.",
+                        },
+                        "value_labels": {
+                            "type": "string", "enum": ["labels", "strings", "none"],
+                            "description": "labels: codes with label sets; strings: label text instead of codes; none: codes only.",
+                        },
+                        "missing_codes": {
+                            "type": "string", "enum": ["as_missing", "keep_codes"],
+                            "description": "as_missing: declared missing codes become missing; keep_codes: keep them as values.",
+                        },
+                        "filename": {"type": "string", "minLength": 1, "maxLength": 120},
                     },
                     "additionalProperties": False,
                 },
@@ -664,10 +690,12 @@ class NodeOperationContextProvider:
                 handler=export_dataset,
                 description=(
                     "Write one dataset node (e.g. stage:raw, stage:cleaned or a derived "
-                    "dataset) as SPSS (.sav/.zsav) or Stata (.dta) with its declared "
-                    "labels. Creates a downloadable file only; changes no data or "
-                    "results. Report every item in notes to the user: they are labels "
-                    "or missing codes the format could not hold."
+                    "dataset) as SPSS (.sav/.zsav), Stata (.dta), CSV or Excel, with its "
+                    "declared labels -- choosing the variables, the rows, the Stata "
+                    "version, how value labels and missing codes are written, and the "
+                    "file name when the user asks. Creates a downloadable file only; "
+                    "changes no data or results. Report every item in notes to the user: "
+                    "they are labels or missing codes the format could not hold."
                 ),
             ),
             ToolDefinition(

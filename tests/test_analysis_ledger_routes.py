@@ -40,6 +40,7 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/statistical-explorations/ols-context"): NO_ANALYSIS,
     ("POST", "/runs/arma-garch/transform-preflight"): "preview only",
     ("POST", "/uploads/preview"): "preview only",
+    ("POST", "/runs/{run_id}/datasets/export/preview"): "preview only",
     # Drafts are edited freely; only executing one runs anything.
     ("POST", "/pipeline-drafts/from-node"): NO_ANALYSIS,
     ("POST", "/pipeline-drafts/genesis"): NO_ANALYSIS,

@@ -1727,7 +1727,7 @@ export async function deleteCompareNode(
 
 // v1.8.9 step 5 — SPSS/Stata dataset export with a loss report.
 
-export type DatasetExportFormat = "sav" | "zsav" | "dta";
+export type DatasetExportFormat = "sav" | "zsav" | "dta" | "csv" | "xlsx";
 
 export type DatasetExportNote = { column: string; field: string; message: string };
 
@@ -1744,21 +1744,62 @@ export type DatasetExportResult = {
   };
 };
 
+export type DatasetExportFilter = { column: string; op: string; value?: unknown };
+
+/** What to export and how, like Stata's export/save options. */
+export type DatasetExportOptions = {
+  format: DatasetExportFormat;
+  columns?: string[] | null;
+  filters?: DatasetExportFilter[];
+  dta_version?: 13 | 14 | 15;
+  value_labels?: "labels" | "strings" | "none";
+  missing_codes?: "as_missing" | "keep_codes";
+  filename?: string | null;
+};
+
+export type DatasetExportPreview = DatasetExportResult["report"] & {
+  source_rows: number;
+  column_names: string[];
+  sample: Record<string, unknown>[];
+  filename: string;
+};
+
+function exportBody(nodeId: string, options: DatasetExportFormat | DatasetExportOptions): string {
+  const chosen = typeof options === "string" ? { format: options } : options;
+  const body: Record<string, unknown> = { node_id: nodeId, ...chosen };
+  for (const key of Object.keys(body)) {
+    if (body[key] === null || body[key] === undefined || body[key] === "") delete body[key];
+  }
+  return JSON.stringify(body);
+}
+
 export async function exportDataset(
   projectRoot: string,
   runId: string,
   nodeId: string,
-  format: DatasetExportFormat,
+  options: DatasetExportFormat | DatasetExportOptions,
 ): Promise<DatasetExportResult> {
   const response = await fetch(
     apiUrl(
       `/runs/${encodeURIComponent(runId)}/datasets/export?project_root=${encodeURIComponent(projectRoot)}`,
     ),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ node_id: nodeId, format }),
-    },
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: exportBody(nodeId, options) },
   );
   return readResponse<DatasetExportResult>(response);
+}
+
+/** Exactly what the file will contain, without writing it. */
+export async function previewDatasetExport(
+  projectRoot: string,
+  runId: string,
+  nodeId: string,
+  options: DatasetExportOptions,
+): Promise<DatasetExportPreview> {
+  const response = await fetch(
+    apiUrl(
+      `/runs/${encodeURIComponent(runId)}/datasets/export/preview?project_root=${encodeURIComponent(projectRoot)}`,
+    ),
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: exportBody(nodeId, options) },
+  );
+  return readResponse<DatasetExportPreview>(response);
 }

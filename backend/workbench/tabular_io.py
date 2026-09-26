@@ -258,33 +258,130 @@ def _safe_names(columns: list[str], fmt: str, report: ExportReport) -> dict[str,
     return mapping
 
 
-def write_statistical(
-    frame: pd.DataFrame, labels: Mapping[str, Any], path: Path, fmt: str
-) -> ExportReport:
-    """Write ``frame`` with its declared labels; report everything not carried."""
+EXPORT_FORMATS = ("sav", "zsav", "dta", "csv", "xlsx")
+# pyreadstat's version argument -> the .dta release it writes and who reads it.
+DTA_VERSIONS: dict[int, str] = {
+    13: "Stata 13 (format 117)",
+    14: "Stata 14-18 (format 118)",
+    15: "Stata 15-18, over 32,767 variables (format 119)",
+}
+# Format 118 is what Stata 14-18 save by default; 119 is unreadable before 15.
+DEFAULT_DTA_VERSION = 14
+VALUE_LABEL_MODES = ("labels", "strings", "none")
+MISSING_CODE_MODES = ("as_missing", "keep_codes")
 
-    if fmt not in {"sav", "zsav", "dta"}:
+
+@dataclass
+class PreparedExport:
+    """A frame ready to write, the writer's options, and what was not carried."""
+
+    data: pd.DataFrame
+    fmt: str
+    options: dict[str, Any]
+    report: ExportReport
+
+
+def _labelled_as_text(series: pd.Series, mapping: Mapping[str, Any]) -> pd.Series:
+    by_key = {str(key): str(label) for key, label in mapping.items()}
+
+    def text(value: Any) -> Any:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        key = _key(value) if isinstance(value, (int, float)) else str(value)
+        return by_key.get(key, key)
+
+    return series.map(text).astype("string")
+
+
+def prepare_export(
+    frame: pd.DataFrame,
+    labels: Mapping[str, Any],
+    fmt: str,
+    *,
+    value_label_mode: str = "labels",
+    missing_code_mode: str = "as_missing",
+    dta_version: int = DEFAULT_DTA_VERSION,
+) -> PreparedExport:
+    """Translate declared metadata into what ``fmt`` can hold; report the rest.
+
+    ``value_label_mode``: ``labels`` writes codes with their label sets,
+    ``strings`` replaces labelled codes by their label text, ``none`` writes
+    codes only. ``missing_code_mode``: ``as_missing`` writes declared missing
+    codes as missing (SPSS keeps them as native user-missing where it can),
+    ``keep_codes`` writes them as ordinary values.
+    """
+
+    if fmt not in EXPORT_FORMATS:
         raise StatisticalFileError(f"unsupported export format: {fmt}")
-    module = _pyreadstat()
+    if value_label_mode not in VALUE_LABEL_MODES:
+        raise StatisticalFileError(f"value_label_mode must be one of {VALUE_LABEL_MODES}")
+    if missing_code_mode not in MISSING_CODE_MODES:
+        raise StatisticalFileError(f"missing_code_mode must be one of {MISSING_CODE_MODES}")
+    if fmt == "dta" and dta_version not in DTA_VERSIONS:
+        raise StatisticalFileError(f"dta_version must be one of {sorted(DTA_VERSIONS)}")
+    statistical = fmt in {"sav", "zsav", "dta"}
     report = ExportReport(format=fmt)
     data = frame.copy()
-    names = _safe_names([str(column) for column in data.columns], fmt, report)
-    data.columns = [names[str(column)] for column in data.columns]
+    if statistical:
+        names = _safe_names([str(column) for column in data.columns], fmt, report)
+        data.columns = [names[str(column)] for column in data.columns]
+    else:
+        names = {str(column): str(column) for column in data.columns}
 
     def target(column: str) -> str | None:
         return names.get(column)
 
-    column_labels: dict[str, str] = {}
-    for column, label in (labels.get("variable_labels") or {}).items():
-        if target(column):
-            column_labels[target(column)] = str(label)
-    for original, renamed in report.renamed.items():
-        column_labels.setdefault(renamed, original)
+    # Missing codes first: the label step may turn a column into text.
+    missing_ranges: dict[str, list[Any]] = {}
+    for column, codes in (labels.get("user_missing_values") or {}).items():
+        name = target(column)
+        if not name or not codes:
+            continue
+        discrete = [code for code in codes if not isinstance(code, dict)]
+        ranges = [code for code in codes if isinstance(code, dict)]
+        native = fmt in {"sav", "zsav"} and (
+            (not ranges and len(discrete) <= _SPSS_MAX_DISCRETE_MISSING)
+            or (len(ranges) == 1 and len(discrete) <= 1)
+        ) and all(not isinstance(code, str) for code in discrete)
+        if native:
+            # SPSS keeps the values and knows they are missing: both modes agree.
+            missing_ranges[name] = [
+                *({"lo": code["low"], "hi": code["high"]} for code in ranges),
+                *discrete,
+            ]
+            continue
+        mask = code_mask(data[name], codes)
+        count = int(mask.sum())
+        if missing_code_mode == "keep_codes":
+            where = {"dta": "Stata (declare them with mvdecode)", "csv": "the CSV file", "xlsx": "the Excel file"}.get(
+                fmt, "SPSS (at most three codes, or one range and one code, can be declared)"
+            )
+            report.note(
+                column, "user_missing_values",
+                f"{count} value(s) matching {codes} kept as ordinary values, as chosen; {where} treats them as valid",
+            )
+            continue
+        if count:
+            data[name] = data[name].mask(mask)
+        reason = {
+            "dta": "Stata has no user-missing codes",
+            "csv": "CSV has no user-missing codes",
+            "xlsx": "Excel has no user-missing codes",
+        }.get(fmt, "SPSS allows at most three codes, or one range and one code")
+        report.note(column, "user_missing_values", f"{count} value(s) matching {codes} written as missing: {reason}")
 
     value_labels: dict[str, dict[Any, str]] = {}
     for column, mapping in (labels.get("value_labels") or {}).items():
         name = target(column)
         if not name or not mapping:
+            continue
+        if value_label_mode == "none":
+            report.note(column, "value_labels", "not written, as chosen: codes only")
+            continue
+        if value_label_mode == "strings" or not statistical:
+            data[name] = _labelled_as_text(data[name], mapping)
+            if value_label_mode != "strings":
+                report.note(column, "value_labels", f"codes replaced by their labels: {fmt.upper()} has no value labels")
             continue
         series = data[name]
         numeric = pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series)
@@ -310,18 +407,26 @@ def write_statistical(
         if converted:
             value_labels[name] = converted
 
+    column_labels: dict[str, str] = {}
+    for column, label in (labels.get("variable_labels") or {}).items():
+        if target(column):
+            if statistical:
+                column_labels[target(column)] = str(label)
+            else:
+                report.note(column, "variable_labels", f"not stored: {fmt.upper()} has no variable labels")
+    for original, renamed in report.renamed.items():
+        column_labels.setdefault(renamed, original)
+
     options: dict[str, Any] = {}
     if column_labels:
         options["column_labels"] = column_labels
     if value_labels:
         options["variable_value_labels"] = value_labels
+    if missing_ranges:
+        options["missing_ranges"] = missing_ranges
 
     levels = labels.get("measurement_level") or {}
-    if fmt == "dta":
-        for column in levels:
-            if target(column):
-                report.note(column, "measurement_level", "not stored: Stata has no measurement level")
-    else:
+    if fmt in {"sav", "zsav"}:
         measures: dict[str, str] = {}
         for column, level in levels.items():
             name = target(column)
@@ -334,54 +439,62 @@ def write_statistical(
                 measures[name] = level
         if measures:
             options["variable_measure"] = measures
+    else:
+        for column, level in levels.items():
+            if target(column) and level != "unspecified":
+                software = "Stata" if fmt == "dta" else fmt.upper()
+                report.note(column, "measurement_level", f"not stored: {software} has no measurement level")
 
-    missing_ranges: dict[str, list[Any]] = {}
-    for column, codes in (labels.get("user_missing_values") or {}).items():
-        name = target(column)
-        if not name or not codes:
-            continue
-        discrete = [code for code in codes if not isinstance(code, dict)]
-        ranges = [code for code in codes if isinstance(code, dict)]
-        native = fmt != "dta" and (
-            (not ranges and len(discrete) <= _SPSS_MAX_DISCRETE_MISSING)
-            or (len(ranges) == 1 and len(discrete) <= 1)
-        ) and all(not isinstance(code, str) for code in discrete)
-        if native:
-            missing_ranges[name] = [
-                *({"lo": code["low"], "hi": code["high"]} for code in ranges),
-                *discrete,
-            ]
-            continue
-        # No native form: write the codes as missing so the target software
-        # can never treat them as valid values.
-        mask = code_mask(data[name], codes)
-        converted = int(mask.sum())
-        if converted:
-            data[name] = data[name].mask(mask)
-        reason = (
-            "Stata has no user-missing codes"
-            if fmt == "dta"
-            else "SPSS allows at most three codes, or one range and one code"
-        )
-        report.note(
-            column,
-            "user_missing_values",
-            f"{converted} value(s) matching {codes} written as system missing: {reason}",
-        )
-    if missing_ranges:
-        options["missing_ranges"] = missing_ranges
+    if fmt == "dta":
+        options["version"] = dta_version
+        if dta_version == 13:
+            _ascii_for_stata13(data, options, report)
+    return PreparedExport(data=data, fmt=fmt, options=options, report=report)
 
+
+def _ascii_for_stata13(data: pd.DataFrame, options: dict[str, Any], report: ExportReport) -> None:
+    """Stata 13 files are not Unicode; say which names and labels cannot survive."""
+
+    for name in data.columns:
+        if not str(name).isascii():
+            report.note(str(name), "name", "Stata 13 files cannot hold non-ASCII names; choose Stata 14-18")
+    for name, label in (options.get("column_labels") or {}).items():
+        if not str(label).isascii():
+            report.note(str(name), "variable_labels", "Stata 13 files cannot hold non-ASCII labels; choose Stata 14-18")
+
+
+def write_prepared(prepared: PreparedExport, path: Path) -> ExportReport:
     path = Path(path)
     tmp = path.with_name(f".{path.name}.partial")
+    fmt, options = prepared.fmt, dict(prepared.options)
     try:
         if fmt == "dta":
-            module.write_dta(data, str(tmp), version=15, **options)
+            if any(note["field"] in {"name", "variable_labels"} and "Stata 13" in note["message"]
+                   for note in prepared.report.notes):
+                raise StatisticalFileError(
+                    "Stata 13 cannot hold this dataset's non-ASCII names or labels; export for Stata 14-18"
+                )
+            _pyreadstat().write_dta(prepared.data, str(tmp), **options)
+        elif fmt in {"sav", "zsav"}:
+            _pyreadstat().write_sav(prepared.data, str(tmp), compress=(fmt == "zsav"), **options)
+        elif fmt == "csv":
+            prepared.data.to_csv(tmp, index=False, encoding="utf-8")
         else:
-            module.write_sav(data, str(tmp), compress=(fmt == "zsav"), **options)
+            prepared.data.to_excel(tmp, index=False, engine="openpyxl")
         tmp.replace(path)
     except Exception as exc:
         tmp.unlink(missing_ok=True)
         if type(exc).__name__ in {"ReadstatError", "PyreadstatError"}:
             raise StatisticalFileError(f"could not write {fmt.upper()}: {exc}") from exc
         raise
-    return report
+    return prepared.report
+
+
+def write_statistical(
+    frame: pd.DataFrame, labels: Mapping[str, Any], path: Path, fmt: str
+) -> ExportReport:
+    """Write ``frame`` with its declared labels; report everything not carried."""
+
+    if fmt not in {"sav", "zsav", "dta"}:
+        raise StatisticalFileError(f"unsupported export format: {fmt}")
+    return write_prepared(prepare_export(frame, labels, fmt), path)
