@@ -67,6 +67,8 @@ from ..agent.tools import ToolRegistry
 from ..api_errors import WorkbenchAPIError
 from ..control_plane import control_plane_capability
 from ..agent.analysis_integrity import ANALYSIS_INTEGRITY_RULES
+from ..agent.proposal_text import proposal_lines
+from ..services.dataset_view import run_labels
 from ..egress import egress_project
 from ..llm.config import load_llm_config
 from ..lineage.node_index import NODE_INDEX_FILENAME
@@ -760,10 +762,26 @@ def _proposal_for_session(
     return proposal
 
 
+def _proposal_labels(store: ProposalStore, proposal: dict[str, Any]) -> dict[str, str]:
+    run_id = (proposal.get("target") or {}).get("run_id")
+    if not run_id:
+        return {}
+    try:
+        # ProposalStore lives under <project>/workbench.
+        labels = run_labels(Path(store.root).parent, str(run_id))
+    except (OSError, ValueError):
+        return {}
+    variable_labels = labels.get("variable_labels")
+    return dict(variable_labels) if isinstance(variable_labels, dict) else {}
+
+
 def _public_proposal(store: ProposalStore, proposal_id: str) -> dict[str, Any]:
     revision = store.latest_revision(proposal_id)
     proposal = revision.to_dict()
     proposal["status"] = store.latest_status(proposal_id)
+    # What it will do, in sentences with the data's own variable labels; the
+    # raw changes stay beside it for anyone who wants to check them.
+    proposal["readable"] = proposal_lines(proposal, _proposal_labels(store, proposal))
     confirmation = store.latest_confirmation(proposal_id)
     if confirmation is not None:
         proposal["confirmation"] = confirmation.to_dict()

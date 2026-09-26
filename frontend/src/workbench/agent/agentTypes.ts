@@ -98,6 +98,8 @@ export type AgentEvent = {
 };
 
 export type AgentProposal = {
+  /** What it will do, as sentences derived by the server from `changes`. */
+  readable?: string[];
   record_type: "revision";
   proposal_id: string;
   operation_id: string;

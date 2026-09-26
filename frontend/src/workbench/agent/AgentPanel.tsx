@@ -579,7 +579,23 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
               <span>revision {proposal.revision}</span>
               <span className="wb-agent-proposal-status">{proposal.status}</span>
             </div>
-            <div className="wb-agent-proposal-change">{changeSummary(proposal.changes)}</div>
+            {proposal.readable && proposal.readable.length > 0 ? (
+              <>
+                <ol data-testid="agent-proposal-readable" className="wb-agent-proposal-change" style={{ margin: "4px 0", paddingLeft: 18 }}>
+                  {proposal.readable.map((line, index) => (
+                    <li key={index}>{line}</li>
+                  ))}
+                </ol>
+                <details className="wb-agent-proposal-detail">
+                  <summary>Technical parameters</summary>
+                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, margin: 0 }}>
+                    {JSON.stringify(proposal.changes, null, 2)}
+                  </pre>
+                </details>
+              </>
+            ) : (
+              <div className="wb-agent-proposal-change">{changeSummary(proposal.changes)}</div>
+            )}
             {proposal.expected_effect.length > 0 && (
               <div className="wb-agent-proposal-detail">Expected: {proposal.expected_effect.join("; ")}</div>
             )}

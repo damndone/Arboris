@@ -942,7 +942,7 @@ def test_chain_turn_persists_structured_proposal_from_tool_call(
             "covariance": {"old": "robust", "new": "unadjusted"}
         }
         assert payload["assistant"]["content"].startswith("已生成待确认的提案（model.rerun）")
-        assert '"covariance"' in payload["assistant"]["content"]
+        assert "Change covariance from robust to unadjusted" in payload["assistant"]["content"]
 
     assert not list((project_root / "runs").glob("run-b"))
 

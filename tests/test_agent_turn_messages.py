@@ -28,8 +28,8 @@ def test_a_multi_step_proposal_is_summarised_from_its_steps() -> None:
     }
     text = proposal_summary(proposal, "zh")
     assert text.startswith("已生成待确认的提案（operation.multi_step），尚未执行")
-    assert "1. data.subset" in text and "2. model.genesis" in text
-    assert '"age"' in text
+    # Sentences from the proposal's own content, not raw JSON.
+    assert "1. Keep rows where age ≥ 25" in text and "2. Estimate OLS model" in text
     assert "has not run yet" in proposal_summary(proposal, "en")
 
 

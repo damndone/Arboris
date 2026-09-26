@@ -28,8 +28,11 @@ DECLARATIONS = data_operation_declarations()
 IDS = [declaration.operation for declaration in DECLARATIONS]
 
 
-def test_the_registry_is_not_empty() -> None:
-    assert "recode" in IDS
+def test_every_data_operation_is_declared() -> None:
+    assert set(IDS) == {
+        "aggregate", "append", "dedupe", "fill_missing", "lag", "merge", "recode",
+        "rename", "reshape", "subset", "tsset",
+    }
 
 
 @pytest.mark.parametrize("declaration", DECLARATIONS, ids=IDS)
@@ -39,9 +42,13 @@ def test_the_agent_and_the_route_both_offer_it(declaration) -> None:
     assert tuple(contract.required) == declaration.required
     assert "Example spec:" in contract.summary
     assert declaration.workflow_operation_id in str(workflow_step_vocabulary())
+    example = dict(declaration.example)
     DataTransformSpecV1(
         source_run_id="r", source_node_id="n", source_artifact_id="a",
-        operation=declaration.operation, parameters=dict(declaration.example),
+        operation=declaration.operation, parameters=declaration.parameters_of(example),
+        secondary_run_id=example.get("secondary_run_id"),
+        secondary_node_id=example.get("secondary_node_id"),
+        secondary_artifact_id=example.get("secondary_artifact_id"),
     )
 
 
@@ -50,8 +57,25 @@ def test_the_example_executes_and_the_projection_matches_execution(declaration) 
     frame = declaration.example_frame()
     declaration.validate(declaration.example)
     assert declaration.referenced_columns(declaration.example) <= set(frame.columns)
-    result = declaration.execute(frame, declaration.example)
-    assert set(result.columns) == declaration.output_columns(declaration.example, set(frame.columns))
+    secondary = declaration.example_secondary_frame() if declaration.secondary_input else None
+    result = declaration.run(frame, declaration.example, secondary)
+    projected = declaration.output_columns(declaration.example, set(frame.columns))
+    if declaration.secondary_input:
+        # The secondary dataset's columns are bound at runtime; the projection
+        # promises only what the primary side and the spec determine.
+        assert projected <= set(result.columns)
+    else:
+        assert set(result.columns) == projected
+
+
+@pytest.mark.parametrize("declaration", DECLARATIONS, ids=IDS)
+def test_it_reads_as_a_sentence_with_labels(declaration) -> None:
+    labels = {column: f"label of {column}" for column in declaration.example_frame().columns}
+    sentence = declaration.sentence(declaration.example, labels)
+    assert declaration.describe is not None
+    assert sentence and "{" not in sentence and "[" not in sentence
+    referenced = declaration.referenced_columns(declaration.example)
+    assert all(f"{column} (label of {column})" in sentence for column in referenced), sentence
 
 
 @pytest.mark.parametrize("declaration", DECLARATIONS, ids=IDS)
@@ -59,6 +83,9 @@ def test_the_agent_workflow_runs_it_and_records_what_it_read(tmp_path: Path, dec
     """The same lineage guard as legacy data steps (test_workflow_seam): run the
     declared step on a DERIVED dataset and require every durable record to
     name that dataset, never the workflow's original target."""
+
+    if declaration.secondary_input:
+        pytest.skip("two-input lineage is covered by test_workflow_seam with a real secondary dataset")
 
     from tests.test_workflow_seam import _data_management_claims, _numeric_step
 

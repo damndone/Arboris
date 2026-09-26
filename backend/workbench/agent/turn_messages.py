@@ -29,27 +29,13 @@ def matches_language(text: str | None, language: str) -> bool:
     return bool(text and text.strip()) and detect_language(text) == language
 
 
-def _compact(value: Any, limit: int = 160) -> str:
-    text = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return text if len(text) <= limit else text[: limit - 1] + "…"
-
-
-def _step_line(step: Mapping[str, Any]) -> str:
-    operation = str(step.get("operation_id") or "?")
-    spec = step.get("spec") if isinstance(step.get("spec"), Mapping) else {}
-    return f"{operation} {_compact(spec)}" if spec else operation
-
-
 def proposal_summary(proposal: Mapping[str, Any], language: str) -> str:
     """What the proposal will do, taken only from its persisted content."""
 
+    from .proposal_text import proposal_lines
+
     operation = str(proposal.get("operation_id") or "operation")
-    changes = proposal.get("changes") if isinstance(proposal.get("changes"), Mapping) else {}
-    steps = changes.get("steps") if isinstance(changes.get("steps"), list) else None
-    if steps:
-        lines = [_step_line(step) for step in steps if isinstance(step, Mapping)]
-    else:
-        lines = [f"{operation} {_compact(changes)}" if changes else operation]
+    lines = proposal_lines(proposal)
     body = "\n".join(f"{index}. {line}" for index, line in enumerate(lines, start=1))
     if language == "zh":
         return (
