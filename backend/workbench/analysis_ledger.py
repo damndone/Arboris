@@ -138,6 +138,9 @@ class LedgerEntry:
     summary: str = ""
     session_id: str | None = None
     record_id: str | None = None
+    # The data this entry is about, resolved when it is written: a run that
+    # is later deleted can no longer be traced back to its data.
+    source_upload_sha256: str | None = None
     at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="milliseconds"))
 
     @property
@@ -165,6 +168,8 @@ def record(project_root: Path | str, entry: LedgerEntry) -> dict[str, Any]:
     a failure to write is itself surfaced by the caller's tests, not hidden."""
 
     payload = entry.to_dict()
+    if not payload.get("source_upload_sha256"):
+        payload["source_upload_sha256"] = upload_sha(project_root, entry.run_id or entry.produced_run_id)
     path = ledger_path(project_root)
     line = json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
     with _LOCK:
@@ -172,6 +177,22 @@ def record(project_root: Path | str, entry: LedgerEntry) -> dict[str, Any]:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line)
     return payload
+
+
+def upload_sha(project_root: Path | str, run_id: str | None) -> str | None:
+    """The sha256 of the upload a run was estimated on, or None."""
+
+    if not run_id:
+        return None
+    from .lineage.run_inputs import read_run_inputs
+
+    try:
+        inputs = read_run_inputs(Path(project_root) / "runs" / run_id)
+    except (OSError, ValueError):
+        return None
+    upload = inputs.get("upload") if isinstance(inputs, Mapping) else None
+    sha = upload.get("sha256") if isinstance(upload, Mapping) else None
+    return str(sha) if sha else None
 
 
 def read(project_root: Path | str) -> list[dict[str, Any]]:
@@ -204,6 +225,7 @@ def record_ui_action(
     node_id: str | None = None,
     produced_run_id: str | None = None,
     summary: str = "",
+    source_upload_sha256: str | None = None,
 ) -> None:
     """Record an action the user took in the UI, after it succeeded.
 
@@ -221,6 +243,7 @@ def record_ui_action(
         node_id=node_id,
         produced_run_id=produced_run_id,
         summary=summary,
+        source_upload_sha256=source_upload_sha256,
     )
     try:
         record(project_root, entry)

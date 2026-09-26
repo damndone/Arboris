@@ -21,7 +21,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..analysis_ledger import record_ui_action
+from .. import analysis_disclosure
+from ..analysis_ledger import record_ui_action, upload_sha
 from ..api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
     ERROR_REPORT_NOT_FOUND,
@@ -597,6 +598,9 @@ def confirm_run_deletion(
     """Permanently remove a previously previewed terminal leaf run."""
 
     service = RunDeletionService(project_root)
+    # Resolved before the run's files are gone, so the deletion stays
+    # attributable to its data in the report's disclosure.
+    deleted_run_upload = upload_sha(project_root, run_id)
     try:
         receipt = service.delete(
             run_id,
@@ -610,7 +614,10 @@ def confirm_run_deletion(
             message=str(exc),
             details={"run_id": run_id},
         ) from exc
-    record_ui_action(project_root, source="POST /runs/{run_id}/deletion-confirmation", steps=["run.delete"], run_id=run_id)
+    record_ui_action(
+        project_root, source="POST /runs/{run_id}/deletion-confirmation", steps=["run.delete"], run_id=run_id,
+        source_upload_sha256=deleted_run_upload,
+    )
     return {"deletion": receipt.to_dict()}
 
 
@@ -722,6 +729,12 @@ def export_report_endpoint(
             )
         markdown = str(stored["text"])
         figures = list(included_figures)
+    settings = analysis_disclosure.read_settings(project_root)
+    if settings["include_in_exports"]:
+        # Deterministic, written by Workbench from the ledger -- not by the
+        # language model and not subject to the writer's evidence contract.
+        disclosed = analysis_disclosure.disclosure(project_root, run_id)
+        markdown = markdown.rstrip() + "\n\n" + analysis_disclosure.markdown(disclosed, detail=settings["detail"])
     try:
         payload, media_type, filename = export_report(
             run_root,
