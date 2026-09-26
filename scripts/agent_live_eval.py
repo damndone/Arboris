@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -31,6 +32,7 @@ from workbench.app import app  # noqa: E402
 from workbench.dev_fixtures.agent_navigation import _seed_source_run  # noqa: E402
 from workbench.llm.config import load_llm_config  # noqa: E402
 from workbench.projects import create_project  # noqa: E402
+from workbench.agent.turn_messages import detect_language  # noqa: E402
 
 
 def _dataset(path: Path, seed: int = 20260925) -> Path:
@@ -99,6 +101,14 @@ def _confirm_and_wait(client, root: Path, session_id: str, run_id: str, proposal
     deadline = time.monotonic() + 300
     while operation.get("status") not in {"completed", "failed", "stale", "cancelled"} and time.monotonic() < deadline:
         time.sleep(1)
+        # A rerun-type operation completes when the UI reconciles it after its
+        # child run finishes; do the same.
+        reconciled = client.post(
+            f"/agent/sessions/{session_id}/operations/{record_id}/reconcile", params={"project_root": str(root)}
+        )
+        if reconciled.status_code == 200:
+            operation = reconciled.json().get("operation") or operation
+            continue
         polled = client.get(
             f"/agent/sessions/{session_id}/operations/{record_id}", params={"project_root": str(root)}
         )
@@ -194,6 +204,11 @@ def main() -> int:
             "proposals": proposals.json() if proposals.status_code == 200 else {"http_status": proposals.status_code},
             "executions": executions,
             "session_id": session_id,
+            # Judge the language of the prose, not of quoted step specs (JSON).
+            "reply_language": detect_language(
+                re.sub(r"\{.*?\}|`[^`]*`", " ", record_answer := ((body.get("assistant") or {}).get("content") if isinstance(body.get("assistant"), dict) else "") or "")
+            ),
+            "empty_reply": not (record_answer or "").strip(),
         }
         results.append(record)
         print(

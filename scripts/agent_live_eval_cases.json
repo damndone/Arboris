@@ -58,5 +58,30 @@
     "id": "missing_code",
     "request": "hours 这一列里 999 表示未回答，请把 999 当作缺失值处理后重新估计",
     "expected": "proposal: model.rerun with labels.user_missing_values {hours: [999]}"
+  },
+  {
+    "id": "recode_age",
+    "request": "把 age 分成三组：18到29岁、30到49岁、50岁及以上，生成一个新变量 age_group",
+    "expected": "operation.multi_step with data.recode ranges; executes to a derived dataset with age_group"
+  },
+  {
+    "id": "freq_region",
+    "request": "看一下 region 各个类别分别有多少人",
+    "expected": "statistical.explore tabulate (or inspection answer) giving counts per region"
+  },
+  {
+    "id": "declare_nominal",
+    "request": "把 region 标记为名义变量（nominal），先不用改模型",
+    "expected": "metadata.edit with measurement_level region nominal; no model change"
+  },
+  {
+    "id": "export_stata",
+    "request": "把原始数据导出成 Stata 的 dta 文件给我",
+    "expected": "export_dataset tool with format dta; reply lists what Stata could not hold"
+  },
+  {
+    "id": "filter_logit",
+    "request": "只看女性样本（female=1），用 logit 分析 union 和 education 的关系",
+    "expected": "multi_step: data.subset female==1 then model.genesis logit union ~ education"
   }
 ]
