@@ -44,7 +44,10 @@ def test_injected_live_declaration_changes_case_inventory_without_test_edits(
         capability_id="pack.injected_for_planner_eval",
         kind="pack",
         summary="A synthetic registered analysis capability.",
-        proposed_by=("data.append",),
+        # data.append is a workflow step (reached through operation.multi_step),
+        # not a direct proposal, since v1.8.9 stopped offering step identities
+        # as unexecutable direct proposals.
+        composable_as=("data.append",),
     )
     monkeypatch.setattr(
         evaluation,

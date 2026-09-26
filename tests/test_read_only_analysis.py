@@ -232,3 +232,33 @@ def test_many_workflows_on_one_run_do_not_break_the_next_one(tmp_path: Path) -> 
         assert receipt["executed"] is True and receipt["operation"]["status"] == "completed", (index, receipt)
     latest = collect_post_estimation_results(fixture.project_root, fixture.run_id, keep_latest=True)
     assert len(latest) == MAX_PROJECTED_POST_ESTIMATION_RESULTS
+
+
+def test_identical_rows_are_kept_as_observations(tmp_path: Path) -> None:
+    """Found live: a women-only subset with three columns had 24 distinct
+    combinations among 176 respondents; the run dropped 152 of them as
+    'duplicates' and refused the logit for too small a sample."""
+
+    import json
+
+    from workbench.orchestrator import run_workflow
+    from workbench.projects import create_project
+
+    rng = np.random.default_rng(9)
+    frame = pd.DataFrame({"union": rng.binomial(1, 0.3, 176), "education": rng.integers(9, 21, 176), "female": 1})
+    source = tmp_path / "women.csv"
+    frame.to_csv(source, index=False)
+    root = create_project(tmp_path, "p").root
+    outcome = run_workflow(root, [source], mode="auto", model_type="logit", y="union", x=["education"])
+    assert outcome["status"] == "completed", outcome
+    run_root = root / "runs" / outcome["run_id"]
+    [result] = [item for item in analysis_ledger_read_models(run_root)]
+    assert result["nobs"] == 176
+    issues = json.loads((run_root / "errors.json").read_text())["issues"]
+    assert any(issue["code"] == "DUPLICATE_ROWS_KEPT" for issue in issues)
+
+
+def analysis_ledger_read_models(run_root: Path) -> list[dict]:
+    from workbench.services.results_service import read_model_results
+
+    return [item for item in read_model_results(run_root) if not str(item.get("model_id", "")).startswith("diagnostics")]

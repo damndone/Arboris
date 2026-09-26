@@ -18,8 +18,9 @@ def test_clean_frame_normalizes_columns_and_records_actions():
     frame = pd.DataFrame({"Firm ID": [1, 1, 2], "Year": ["2020", "2020", "2021"], "Sales": [10.0, 10.0, None]})
     cleaned, actions = clean_frame(frame, date_candidates=["year"])
     assert list(cleaned.columns) == ["firm_id", "year", "sales"]
-    assert len(cleaned) == 2
-    assert any(action["action"] == "drop_duplicate_rows" for action in actions)
+    # Identical rows are distinct observations until the user says otherwise.
+    assert len(cleaned) == 3
+    assert {"action": "duplicate_rows_found", "rows": 1, "kept": True} in actions
 
 
 def test_clean_frame_deduplicates_normalized_column_names_and_empty_fallbacks():

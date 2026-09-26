@@ -93,9 +93,11 @@ def clean_frame(frame: pd.DataFrame, date_candidates: list[str]) -> tuple[pd.Dat
                 actions.append({"action": "parse_date_candidate", "column": column})
 
     _coerce_numeric_like_columns(cleaned, date_candidates, actions)
-    before = len(cleaned)
-    cleaned = cleaned.drop_duplicates()
-    dropped = before - len(cleaned)
-    if dropped:
-        actions.append({"action": "drop_duplicate_rows", "rows_dropped": dropped})
+    # Identical rows are kept: in survey and micro data they are distinct
+    # observations (two respondents with the same answers), and dropping them
+    # silently changed the sample. Removing true duplicates is an explicit
+    # data.dedupe the user chooses, recorded in the analysis ledger.
+    duplicates = int(cleaned.duplicated().sum())
+    if duplicates:
+        actions.append({"action": "duplicate_rows_found", "rows": duplicates, "kept": True})
     return cleaned, actions
