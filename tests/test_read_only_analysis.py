@@ -218,3 +218,17 @@ def test_a_failed_provider_call_leaves_an_explanation_not_an_empty_reply() -> No
 
     assert "没有执行任何操作" in provider_failure_message("zh", "LLMUpstreamError")
     assert "nothing was run" in provider_failure_message("en", "LLMUpstreamError")
+
+
+def test_many_workflows_on_one_run_do_not_break_the_next_one(tmp_path: Path) -> None:
+    """Found live: after 20 post-estimation results had accumulated on a run,
+    every further workflow failed after running, and so did the run detail."""
+
+    from workbench.agent.workflow_runtime import MAX_PROJECTED_POST_ESTIMATION_RESULTS, collect_post_estimation_results
+
+    fixture = _Fixture(tmp_path)
+    for index in range(MAX_PROJECTED_POST_ESTIMATION_RESULTS + 2):
+        receipt = fixture.propose([_t_test(f"t{index}")])
+        assert receipt["executed"] is True and receipt["operation"]["status"] == "completed", (index, receipt)
+    latest = collect_post_estimation_results(fixture.project_root, fixture.run_id, keep_latest=True)
+    assert len(latest) == MAX_PROJECTED_POST_ESTIMATION_RESULTS

@@ -663,13 +663,9 @@ class WorkbenchOrchestrator:
 
         from .workflow_runtime import collect_post_estimation_results
 
-        return [
-            entry
-            for entry in collect_post_estimation_results(
-                Path(project_root), str(draft.target["run_id"])
-            )
-            if entry["workflow_id"] == draft.workflow_id
-        ]
+        return collect_post_estimation_results(
+            Path(project_root), str(draft.target["run_id"]), workflow_id=draft.workflow_id
+        )
 
     def _persist_workflow_step_audit(
         self,

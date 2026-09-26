@@ -130,13 +130,28 @@ def _read_post_estimation_artifact_records(run_dir: Path) -> list[Any]:
     return records
 
 
+def count_post_estimation_results(root: Path, run_id: str) -> int:
+    """How many post-estimation entries belong to ``run_id``, without a limit."""
+
+    return len(collect_post_estimation_results(root, run_id, limit=10**9))
+
+
 def collect_post_estimation_results(
     root: Path,
     run_id: str,
     *,
     limit: int = MAX_PROJECTED_POST_ESTIMATION_RESULTS,
+    workflow_id: str | None = None,
+    keep_latest: bool = False,
 ) -> list[dict[str, Any]]:
     """Project durable workflow-analysis evidence that belongs to one run.
+
+    ``workflow_id`` narrows to one workflow before the limit applies: the run
+    accumulates evidence from every workflow ever run on it, and one
+    workflow's receipt must not fail because earlier ones exist.
+    ``keep_latest`` returns the most recently registered ``limit`` entries
+    instead of refusing when there are more (the run detail view shows the
+    newest and says how many it left out).
 
     A completed workflow is not an answered question: the step writes a
     provenance-carrying artifact, but nothing renders it, so the user who
@@ -182,8 +197,13 @@ def collect_post_estimation_results(
             entry = _read_post_estimation_entry(run_dir, record)
             if entry["run_id"] != run_id and entry["model_run_id"] != run_id:
                 continue
+            if workflow_id is not None and entry.get("workflow_id") != workflow_id:
+                continue
             collected.append(entry)
 
+    if keep_latest and len(collected) > limit:
+        # Index order is registration order: keep the newest.
+        collected = collected[-limit:]
     collected.sort(key=lambda item: (item["run_id"], item["artifact_id"]))
     if len(collected) > limit:
         raise WorkflowExecutionError(
