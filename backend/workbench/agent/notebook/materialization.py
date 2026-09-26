@@ -11,6 +11,7 @@ from uuid import uuid4
 import pandas as pd
 
 from ...canonical import sha256_canonical
+from ...tabular_io import STATISTICAL_FORMATS, read_table
 from ...contracts.agent.notebook_option import (
     NotebookOptionRevisionV11,
     OptionMaterialization,
@@ -908,6 +909,8 @@ class NotebookOptionMaterializer:
                         usecols=columns,
                         nrows=read_limit,
                     )
+            elif suffix in STATISTICAL_FORMATS:
+                frame = read_table(path, suffix=suffix, nrows=read_limit, usecols=columns)
             else:
                 raise ValueError(f"unsupported dataset upload type: {suffix or 'unknown'}")
         except RecipeValidationError:

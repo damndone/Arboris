@@ -222,7 +222,10 @@ class RerunService:
 
         try:
             reject_invalid_rerun_declarations(
-                inputs["form"], request.op_overrides, upload_bytes
+                inputs["form"],
+                request.op_overrides,
+                upload_bytes,
+                str((inputs.get("upload") or {}).get("filename") or ""),
             )
         except RerunDeclarationError as exc:
             raise RerunServiceError(exc.code, str(exc)) from exc

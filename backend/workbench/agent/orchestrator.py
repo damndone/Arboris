@@ -796,6 +796,7 @@ class WorkbenchOrchestrator:
                 inputs["form"],
                 _overrides_from_proposal_changes(dict(arguments.get("changes") or {})),
                 upload_bytes,
+                str((inputs.get("upload") or {}).get("filename") or ""),
             )
         except RerunDeclarationError as exc:
             from .tools import ToolVisibleError

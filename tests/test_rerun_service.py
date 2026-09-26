@@ -534,3 +534,48 @@ def test_a_rerun_declaring_missing_codes_changes_the_estimation_sample(
     )
     assert applied["columns"]["x"]["converted"] == 9
     assert nobs(result.run_id) == nobs(parent_run_id) - 9
+
+
+def test_a_label_edit_keeps_the_parents_other_declarations(tmp_path: Path) -> None:
+    """Relabelling one column must not silently drop declared missing codes.
+
+    The rerun patch replaced the parent's whole `labels` object, so an Agent
+    that only renamed a variable also re-admitted -99 as valid data.
+    """
+
+    project = create_project(tmp_path, "label-merge")
+    parent_run_id = _create_terminal_unadjusted_ols_run(project.root)
+    node_id = _model_node(project.root, parent_run_id)
+
+    def rerun(source_run_id: str, labels: dict) -> str:
+        node = _model_node(project.root, source_run_id)
+        result = RerunService(project.root).submit(
+            RerunSubmissionRequest(
+                source_run_id=source_run_id,
+                from_node=node,
+                op_overrides={"labels": labels},
+                rerun_reason="agent_confirmed",
+                rerun_from={"owner_run_id": source_run_id, "op_node_id": node},
+                workbench_context=_workbench_context(project.root, source_run_id, node),
+            )
+        )
+        assert _wait_terminal(project.root, result.run_id) == "completed"
+        return result.run_id
+
+    first = rerun(
+        parent_run_id,
+        {"user_missing_values": {"x": [{"low": 0, "high": 2.5}]}, "value_labels": {"firm": {"firm-0": "First"}}},
+    )
+    second = rerun(first, {"variable_labels": {"x": "Exposure"}})
+
+    labels = json.loads(
+        (project.root / "runs" / second / "run_inputs.json").read_text()
+    )["form"]["labels"]
+    assert labels["variable_labels"] == {"x": "Exposure"}
+    assert labels["user_missing_values"] == {"x": [{"low": 0, "high": 2.5}]}
+    assert labels["value_labels"] == {"firm": {"firm-0": "First"}}
+    applied = json.loads(
+        (project.root / "runs" / second / "measurement" / "user_missing.json").read_text()
+    )
+    assert applied["columns"]["x"]["converted"] == 9
+    assert node_id

@@ -176,7 +176,12 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
         ) from exc
 
     try:
-        reject_invalid_rerun_declarations(inputs["form"], body.op_overrides, upload_bytes)
+        reject_invalid_rerun_declarations(
+            inputs["form"],
+            body.op_overrides,
+            upload_bytes,
+            str((inputs.get("upload") or {}).get("filename") or ""),
+        )
     except RerunDeclarationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

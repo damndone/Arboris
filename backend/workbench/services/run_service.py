@@ -132,6 +132,72 @@ def _normalize_labels(value: object) -> dict[str, object]:
     return normalized
 
 
+def _upload_header(upload_bytes: bytes, upload_filename: str) -> Any:
+    """Column header of an upload in any supported format."""
+
+    import io
+    import tempfile
+
+    import pandas as pd
+
+    from ..tabular_io import read_table, statistical_format
+
+    if statistical_format(upload_filename or "") is None:
+        return pd.read_csv(io.BytesIO(upload_bytes), nrows=0)
+    with tempfile.TemporaryDirectory(prefix="workbench-header-") as directory:
+        path = Path(directory) / f"upload{Path(upload_filename).suffix.lower()}"
+        path.write_bytes(upload_bytes)
+        return read_table(path, nrows=0)
+
+
+def _statistical_file_labels(upload_bytes: bytes, upload_filename: str) -> dict[str, object]:
+    """Read an SPSS/Stata upload's metadata as run labels; {} for other files."""
+
+    import tempfile
+
+    from ..tabular_io import read_statistical_labels, statistical_format
+
+    fmt = statistical_format(upload_filename or "")
+    if fmt is None:
+        return {}
+    suffix = Path(upload_filename).suffix.lower()
+    with tempfile.TemporaryDirectory(prefix="workbench-labels-") as directory:
+        path = Path(directory) / f"upload{suffix}"
+        path.write_bytes(upload_bytes)
+        return read_statistical_labels(path, fmt)
+
+
+def merge_labels(base: object, patch: object) -> dict[str, object]:
+    """Layer a labels patch over existing labels, column by column.
+
+    A patch changes only what it names: relabelling one variable must not drop
+    the value labels, measurement levels or missing codes already declared --
+    losing a missing code silently re-admits it as a valid value. ``None``
+    removes a field or a column's declaration.
+    """
+
+    merged: dict[str, object] = {
+        key: dict(value) for key, value in (base or {}).items() if isinstance(value, Mapping)
+    } if isinstance(base, Mapping) else {}
+    if not isinstance(patch, Mapping):
+        return merged
+    for field_name, columns in patch.items():
+        if columns is None:
+            merged.pop(field_name, None)
+            continue
+        if not isinstance(columns, Mapping):
+            merged[field_name] = columns  # left for _normalize_labels to reject
+            continue
+        current = dict(merged.get(field_name) or {})
+        for column, value in columns.items():
+            if value is None:
+                current.pop(column, None)
+            else:
+                current[column] = value
+        merged[field_name] = current
+    return {key: value for key, value in merged.items() if value != {}}
+
+
 class LmmExecutionAdmissionError(RuntimeError):
     """Closed pre-fit LMM admission failure with no path or parser detail."""
 
@@ -418,9 +484,11 @@ def merge_form_overrides(
         {
             key: encode_form_override(key, value)
             for key, value in overrides.items()
-            if key not in {"model_options", "model_options_binding"}
+            if key not in {"model_options", "model_options_binding", "labels"}
         }
     )
+    if "labels" in overrides:
+        merged["labels"] = merge_labels(source_form.get("labels"), overrides["labels"])
     return merged
 
 
@@ -484,6 +552,7 @@ def reject_invalid_rerun_declarations(
     source_form: Mapping[str, Any],
     overrides: Mapping[str, object],
     upload_bytes: bytes,
+    upload_filename: str = "",
 ) -> None:
     """Refuse measurement-level declarations that cannot take effect.
 
@@ -509,7 +578,7 @@ def reject_invalid_rerun_declarations(
         return
 
     try:
-        header = pd.read_csv(io.BytesIO(upload_bytes), nrows=0)
+        header = _upload_header(upload_bytes, upload_filename)
     except Exception:
         header = None
     if header is not None:
@@ -597,7 +666,18 @@ def _submit_run(
         if bound_model_options.binding is not None
         else None
     )
-    labels = _normalize_labels(form.get("labels", {}))
+    declared_labels = form.get("labels", {})
+    if rerun_of is None:
+        # An SPSS/Stata upload brings its own variable metadata. It becomes the
+        # run's declared labels, under anything the user declared explicitly.
+        # Reruns inherit the merged labels from their parent instead, so a
+        # label the user removed is not read back from the file.
+        file_labels = _statistical_file_labels(upload_bytes, upload_filename)
+        if file_labels:
+            if isinstance(declared_labels, str) and declared_labels:
+                declared_labels = parse_model_options(declared_labels)
+            declared_labels = merge_labels(file_labels, declared_labels or {})
+    labels = _normalize_labels(declared_labels)
     statistical_tests_request = form.get("statistical_tests") or None
     if form.get("model_type", "auto") == "ols" and model_options:
         from ..contracts.model.ols import effective_ols_covariance

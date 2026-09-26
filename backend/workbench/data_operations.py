@@ -20,6 +20,7 @@ from .artifacts import (
     write_json,
     write_text_durable,
 )
+from .tabular_io import STATISTICAL_FORMATS, read_table
 from .graph_model import BranchRef, Edge, Graph, Node, NodeKind, Stage, Trust
 from .predictive_research.contracts import FeatureRecipeV1
 from .predictive_research.feature_recipe import apply_feature_recipe
@@ -2494,6 +2495,11 @@ def _read_frame(path: Path) -> pd.DataFrame:
         frame = pd.read_parquet(path)
     elif suffix in {".xlsx", ".xls"}:
         frame = pd.read_excel(path)
+    elif suffix in STATISTICAL_FORMATS:
+        # A raw SPSS/Stata snapshot: codes stay raw values here, exactly as
+        # the run's source stage receives them before declared missing codes
+        # are applied.
+        frame = read_table(path)
     else:
         raise DataColumnCastValidationError(
             f"unsupported tabular artifact format: {path.suffix or '<none>'}"

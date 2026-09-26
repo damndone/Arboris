@@ -86,6 +86,15 @@ def _matches(series: pd.Series, code: Code) -> pd.Series:
     return series.astype("string") == str(code)
 
 
+def code_mask(series: pd.Series, codes: list[Code]) -> pd.Series:
+    """True where a value matches any of the declared codes."""
+
+    mask = pd.Series(False, index=series.index)
+    for code in codes:
+        mask |= _matches(series, code)
+    return mask
+
+
 def apply_user_missing(
     frame: pd.DataFrame, declaration: Mapping[str, list[Code]]
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -103,9 +112,7 @@ def apply_user_missing(
     result = frame.copy()
     columns: dict[str, Any] = {}
     for column, codes in declaration.items():
-        mask = pd.Series(False, index=result.index)
-        for code in codes:
-            mask |= _matches(result[column], code)
+        mask = code_mask(result[column], codes)
         converted = int(mask.sum())
         if converted:
             result[column] = result[column].mask(mask)

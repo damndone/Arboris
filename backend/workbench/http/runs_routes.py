@@ -15,7 +15,7 @@ import queue
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -966,6 +966,38 @@ def _included_report_snapshot(
         and not (_figure_ids_for_report_fact(fact) & excluded_figures)
     ]
     return facts, figures
+
+
+class DatasetExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str = Field(min_length=1, max_length=256)
+    format: Literal["sav", "zsav", "dta"]
+
+
+@router.post("/runs/{run_id}/datasets/export")
+def export_dataset_endpoint(
+    run_id: str, project_root: str, request: DatasetExportRequest
+) -> dict[str, Any]:
+    """Write one dataset node as SPSS/Stata with its declared labels.
+
+    Returns the artifact to download and a report of every rename and every
+    label the format could not hold, so nothing is lost without a word.
+    """
+
+    from ..data_operations import DataColumnCastValidationError
+    from ..services.data_export import export_dataset
+    from ..tabular_io import StatisticalFileError
+
+    try:
+        return export_dataset(project_root, run_id, request.node_id, request.format)
+    except (DataColumnCastValidationError, StatisticalFileError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATASET_EXPORT_UNAVAILABLE",
+            message=str(exc),
+            details={"run_id": run_id, "node_id": request.node_id},
+        ) from exc
 
 
 @router.post("/runs/{run_id}/ai-reports")

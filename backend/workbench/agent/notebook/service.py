@@ -27,6 +27,7 @@ from uuid import uuid4
 
 import pandas as pd
 
+from ...tabular_io import STATISTICAL_FORMATS, read_table
 from ...contracts.agent.notebook_option import (
     FeasibilityCandidateDecision,
     FeasibilityDecision,
@@ -901,6 +902,8 @@ class NotebookService:
             with pd.ExcelFile(path) as workbook:
                 sheet = source.sheet_names[0] if source.sheet_names else workbook.sheet_names[0]
                 frame = pd.read_excel(workbook, sheet_name=sheet, nrows=0)
+        elif suffix in STATISTICAL_FORMATS:
+            frame = read_table(path, suffix=suffix, nrows=0)
         else:
             raise ValueError(f"unsupported dataset upload type: {suffix or 'unknown'}")
         return {
