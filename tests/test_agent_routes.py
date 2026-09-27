@@ -2015,3 +2015,31 @@ def test_metadata_for_a_column_outside_the_model_goes_through_metadata_edit(
         )
         assert reconciled.status_code == 200
         assert reconciled.json()["operation"]["status"] == "completed"
+
+
+def test_a_main_session_sees_runs_made_after_it_started(tmp_path) -> None:
+    # The overview was written once at creation, so a run made later (a
+    # metadata edit, a rerun) was invisible and the Agent read the old run.
+    from workbench.agent.context import ContextBuilder
+    from workbench.agent.session import JsonlSessionRepository
+    from workbench.http.agent_routes import _refresh_main_context
+
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("main-1", chain_id="project:p", role="main")
+    first = {"packet_version": "global", "heads": ["run-old"]}
+    _refresh_main_context(repository, "main-1", first)
+    _refresh_main_context(repository, "main-1", first)  # unchanged: nothing appended
+    _refresh_main_context(repository, "main-1", {"packet_version": "global", "heads": ["run-old", "run-new"]})
+    # A new run inside an existing family leaves the declared fingerprint alone.
+    _refresh_main_context(
+        repository, "main-1",
+        {"packet_version": "global", "context_fingerprint": "heads:a", "run_count": 2},
+    )
+    _refresh_main_context(
+        repository, "main-1",
+        {"packet_version": "global", "context_fingerprint": "heads:a", "run_count": 3},
+    )
+
+    contexts = [m for m in ContextBuilder(repository).build("main-1").messages if m.get("name") == "workbench_context"]
+    assert len(contexts) == 4
+    assert '"run_count":3' in contexts[-1]["content"] and "supersedes" in contexts[-1]["content"]

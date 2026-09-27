@@ -595,7 +595,15 @@ export function AgentSurfaceProvider({
       }
       if (controller.signal.aborted) return;
       activeTurnSessionIdRef.current = activeSessionId;
-      const result = await sendAgentTurn(projectRoot, activeSessionId, question, controller.signal);
+      // The project-level Agent gets the current overview with every turn, so
+      // runs made since the session began are visible to it.
+      const result = await sendAgentTurn(
+        projectRoot,
+        activeSessionId,
+        question,
+        controller.signal,
+        isGlobalScope ? (contextPacket as Record<string, unknown>) : undefined,
+      );
       if (activeScopeRef.current !== requestScope) return;
       setMessages(result.session.messages);
       setProposals(result.session.proposals ?? []);

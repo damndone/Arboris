@@ -45,7 +45,9 @@ class AgentRunBudget:
 
     max_steps: int | None = None
     timeout_s: float | None = None
-    max_consecutive_identical_tool_calls: int = 2
+    # The first repeat is answered with "already answered, stop inspecting"; at 2
+    # the loop guard fired on that same call, so the model never saw it.
+    max_consecutive_identical_tool_calls: int = 3
 
     @classmethod
     def from_value(
@@ -75,7 +77,7 @@ class AgentRunBudget:
                 raise AgentCoreBudgetError("timeout_s must be a positive finite number")
 
         max_consecutive_identical_tool_calls = value.get(
-            "max_consecutive_identical_tool_calls", 2
+            "max_consecutive_identical_tool_calls", 3
         )
         if (
             isinstance(max_consecutive_identical_tool_calls, bool)

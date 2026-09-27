@@ -235,13 +235,14 @@ export async function sendAgentTurn(
   sessionId: string,
   question: string,
   signal?: AbortSignal,
+  contextPacket?: Record<string, unknown>,
 ): Promise<{ session: AgentSession; assistant: AgentSession["messages"][number]; status: string }> {
   return request(
     agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}/turns`),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify(contextPacket ? { question, context_packet: contextPacket } : { question }),
       signal,
     },
   );

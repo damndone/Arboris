@@ -230,6 +230,10 @@ class AgentTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
+    # The panel's current project context. A Main session's overview was
+    # written once, at creation, so runs made afterwards (a metadata edit, a
+    # rerun) were invisible and the Agent kept reading the old run.
+    context_packet: dict[str, Any] | None = None
 
 
 class AgentProposalConfirmRequest(BaseModel):
@@ -574,6 +578,44 @@ def _authoritative_active_head(
             message="The durable Chain active head changed before this operation.",
             details={"chain_id": chain_id, "reason": str(exc)},
         ) from exc
+
+
+def _refresh_main_context(
+    repository: JsonlSessionRepository, session_id: str, packet: dict[str, Any]
+) -> None:
+    """Append the current project overview when it differs from the last one.
+
+    Earlier overviews stay in the session log (the record of what the Agent was
+    told when); the newest one is last, and says it supersedes the others.
+    """
+
+    serialized, fingerprint = _context_serialized(packet)
+    # Compare what the Agent was told, not the packet's declared fingerprint:
+    # the panel derives that from family heads only, so a new run inside an
+    # existing family left it unchanged while run_count and the active head moved.
+    latest = None
+    for entry in repository.get_branch(session_id):
+        payload = entry.payload
+        if entry.entry_type == "custom_message" and payload.get("name") == "workbench_context":
+            content = str(payload.get("content") or "")
+            latest = content.split("\n", 1)[1] if "\n" in content else content
+    if latest == serialized:
+        return
+    repository.append(
+        session_id,
+        "custom_message",
+        {
+            "message_type": "agent_context",
+            "audience": "model",
+            "name": "workbench_context",
+            "content": (
+                "Workbench read-only context, refreshed: this supersedes every earlier context "
+                "message; runs listed here are the project's current ones. Do not invent facts "
+                "or execute actions.\n" + serialized
+            ),
+            "metadata": {"context_fingerprint": fingerprint, "refreshed": True},
+        },
+    )
 
 
 def _context_serialized(packet: dict[str, Any]) -> tuple[str, str]:
@@ -2113,6 +2155,8 @@ async def run_agent_turn(
     tool_context: dict[str, Any] | None = None
     if metadata.get("role") == "main":
         _ensure_current_global_protocol(repository, session_id)
+        if body.context_packet:
+            _refresh_main_context(repository, session_id, body.context_packet)
     if metadata.get("role") == "chain":
         # Handoff §7 slice: the ROUTE registers the chain-scoped read-only
         # tools through the existing orchestrator boundary — the model never

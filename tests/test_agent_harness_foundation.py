@@ -584,7 +584,7 @@ def test_agent_core_blocks_consecutive_identical_tool_calls_before_max_steps(
             "This request did not finish: the same tool call repeated"
         )
 
-        assert len(adapter.requests) == 2
+        assert len(adapter.requests) == 3
         assert repository.get_metadata("session-a")["status"] == "blocked"
         branch = repository.get_branch("session-a")
         payload = dict(branch[-1].payload)
@@ -605,7 +605,7 @@ def test_agent_core_blocks_consecutive_identical_tool_calls_before_max_steps(
         assert len(guard_events) == 1
         assert guard_events[0].payload == {
             "tool_id": "inspect_node_context",
-            "repetition_count": 2,
+            "repetition_count": 3,
             "reason": "identical_tool_call",
         }
 
@@ -639,7 +639,7 @@ def test_agent_core_resets_identical_tool_call_counter_when_arguments_change(
             )
         )
         adapter = SequencedToolCallAdapter(
-            ["model:ols_1", "model:ols_2", "model:ols_2"]
+            ["model:ols_1", "model:ols_2", "model:ols_2", "model:ols_2"]
         )
         agent = AgentCore(
             repository,
@@ -654,7 +654,7 @@ def test_agent_core_resets_identical_tool_call_counter_when_arguments_change(
             "This request did not finish"
         )
 
-        assert len(adapter.requests) == 3
+        assert len(adapter.requests) == 4
         # Filter by reason: replaying an already-answered inspection also emits
         # a loop_guard, and that is a different, non-terminal signal.
         guard_events = [
@@ -663,7 +663,7 @@ def test_agent_core_resets_identical_tool_call_counter_when_arguments_change(
             if event.event_type == "loop_guard"
             and event.payload.get("reason") == "identical_tool_call"
         ]
-        assert guard_events[0].payload["repetition_count"] == 2
+        assert guard_events[0].payload["repetition_count"] == 3
         assert guard_events[0].payload["tool_id"] == "inspect_node_context"
 
     asyncio.run(scenario())
