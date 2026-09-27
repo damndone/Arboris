@@ -216,6 +216,40 @@ def inferential_count(entries: Iterable[Mapping[str, Any]], *, session_id: str |
     )
 
 
+def record_agent_action(
+    project_root: Path | str,
+    *,
+    source: str,
+    steps: Iterable[str | LedgerStep],
+    session_id: str | None = None,
+    run_id: str | None = None,
+    node_id: str | None = None,
+    summary: str = "",
+) -> None:
+    """Record something the Agent did at once, without a proposal (an export).
+
+    Like a UI action it has already happened, so a failed write is logged,
+    not raised.
+    """
+
+    entry = LedgerEntry(
+        actor="agent",
+        authorized_by="read_only_policy",
+        source=source,
+        status="completed",
+        steps=tuple(step if isinstance(step, LedgerStep) else LedgerStep.of(step) for step in steps),
+        run_id=run_id,
+        node_id=node_id,
+        summary=summary,
+        session_id=session_id,
+        source_upload_sha256=upload_sha(project_root, run_id) if run_id else None,
+    )
+    try:
+        record(project_root, entry)
+    except Exception:  # noqa: BLE001 -- the export already happened
+        logging.getLogger(__name__).exception("analysis ledger: could not record Agent action %s", source)
+
+
 def record_ui_action(
     project_root: Path | str,
     *,

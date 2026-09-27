@@ -635,6 +635,18 @@ class NodeOperationContextProvider:
                 )
             except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
                 raise ToolVisibleError(f"DATASET_EXPORT_UNAVAILABLE: {exc}") from exc
+            from ..analysis_ledger import record_agent_action
+
+            # The same record a UI export leaves, so the ledger shows every export.
+            record_agent_action(
+                self.project_root,
+                source="agent.export_dataset",
+                steps=["export.dataset"],
+                session_id=context.session_id,
+                run_id=run_id,
+                node_id=_run_local_node_id(str(arguments.get("node_id") or "")),
+                summary=json.dumps(options, ensure_ascii=False, sort_keys=True)[:300],
+            )
             report = exported["report"]
             return {
                 "artifact_id": exported["artifact_id"],

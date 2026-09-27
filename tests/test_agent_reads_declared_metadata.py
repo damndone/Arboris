@@ -114,6 +114,12 @@ def test_the_agent_can_export_a_dataset_with_a_loss_report(labelled_run) -> None
     result = export.handler({"run_id": run_id, "node_id": "stage:raw", "format": "dta"}, context)
     assert result["filename"].endswith(".dta")
     assert any(note["field"] == "user_missing_values" for note in result["notes"])  # -99 has no Stata form
+    # Recorded like a UI export, as the Agent's own action.
+    from workbench import analysis_ledger
+
+    [entry] = [e for e in analysis_ledger.read(root) if e["source"] == "agent.export_dataset"]
+    assert entry["actor"] == "agent" and entry["session_id"] == "s1"
+    assert [step["operation_id"] for step in entry["steps"]] == ["export.dataset"]
     with pytest.raises(ToolVisibleError, match="DATASET_EXPORT_UNAVAILABLE"):
         export.handler({"run_id": run_id, "node_id": "model:ols_1", "format": "sav"}, context)
     with pytest.raises(ToolVisibleError):
