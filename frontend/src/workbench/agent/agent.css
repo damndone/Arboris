@@ -704,6 +704,12 @@
   border-top: 1px solid color-mix(in oklch, var(--separator) 62%, transparent);
 }
 
+.wb-agent-withdrawn-draft {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--warning, #b54708);
+}
+
 .wb-agent-reasoning-content .wb-agent-terminal-line {
   padding: 2px 0;
   color: var(--label-secondary);

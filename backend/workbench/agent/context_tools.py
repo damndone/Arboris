@@ -650,6 +650,7 @@ class NodeOperationContextProvider:
 
         return [
             self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project", "chain")),
+            self.calculate_tool(session_id=session_id, scope_requirements=("project", "chain")),
             ToolDefinition(
                 tool_id="export_dataset",
                 version="v1",
@@ -1244,6 +1245,56 @@ class NodeOperationContextProvider:
             ),
         )
 
+    def calculate_tool(
+        self, *, session_id: str, scope_requirements: tuple[str, ...]
+    ) -> ToolDefinition:
+        """Arithmetic on result values, done in code (agent.numeric_grounding)."""
+
+        def calculate(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered scope")
+            from .numeric_grounding import calculate as run
+
+            return run(arguments.get("calculations") or ())
+
+        return ToolDefinition(
+            tool_id="calculate",
+            version="v1",
+            input_schema={
+                "type": "object",
+                "required": ["calculations"],
+                "properties": {
+                    "calculations": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 20,
+                        "items": {
+                            "type": "object",
+                            "required": ["expression"],
+                            "properties": {
+                                "label": {"type": "string", "maxLength": 120},
+                                "expression": {"type": "string", "minLength": 1, "maxLength": 400},
+                            },
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "additionalProperties": False,
+            },
+            side_effect="none",
+            scope_requirements=scope_requirements,
+            max_output_budget=8192,
+            handler=calculate,
+            description=(
+                "Do arithmetic on numbers from results: differences, ratios, sums, "
+                "percentages, odds ratios (exp), logs, square roots. Write each "
+                "expression with the full values copied from the results, e.g. "
+                "'5.1234 - 4.0221' or 'exp(0.4312)'. Never compute or round a number "
+                "yourself: every number in your answer is checked against the results "
+                "and this tool's values before the user sees it."
+            ),
+        )
+
     def global_tool_definitions(self, *, session_id: str) -> list[ToolDefinition]:
         """Expose bounded project evidence readers to the Main Agent.
 
@@ -1372,6 +1423,7 @@ class NodeOperationContextProvider:
 
         return [
             self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project",)),
+            self.calculate_tool(session_id=session_id, scope_requirements=("project",)),
             ToolDefinition(
                 tool_id="inspect_project_model_coefficients",
                 version="v1",
@@ -4472,7 +4524,28 @@ def _public_operation_artifact_result(
         # A frequency table is an aggregate. Its entries are stored under
         # `rows` for the UI table, a key the projection withholds as raw data.
         result = {**{key: value for key, value in result.items() if key != "rows"}, "frequencies": result["rows"]}
+    if artifact_type == "statistical_exploration":
+        # Grouped statistics sit at groups[i].variables[name].percentiles --
+        # one level deeper than any other result. Lifting each group's
+        # variables into the group, and allowing one more level, keeps every
+        # group's numbers; before, the Agent saw only "[omitted: nesting
+        # limit]" and could not answer "mean wage by sex".
+        if isinstance(result.get("groups"), list):
+            result = {**result, "groups": [_lift_group_variables(group) for group in result["groups"]]}
+        return (
+            _bounded_public_result_value(result, budget=_PublicResultBudget(remaining_items=320), max_depth=5),
+            ["raw_artifact_payloads", "raw_rows"],
+        )
     return _bounded_public_result_value(result), ["raw_artifact_payloads", "raw_rows"]
+
+
+def _lift_group_variables(group: Any) -> Any:
+    if not isinstance(group, dict) or not isinstance(group.get("variables"), dict):
+        return group
+    lifted = {key: value for key, value in group.items() if key not in {"variables", "filters"}}
+    for name, statistics in group["variables"].items():
+        lifted[name if name not in lifted else f"variable:{name}"] = statistics
+    return lifted
 
 
 def _node_public_result_evidence(
@@ -4872,6 +4945,7 @@ def _bounded_public_result_value(
     *,
     depth: int = 0,
     budget: _PublicResultBudget | None = None,
+    max_depth: int = 4,
 ) -> Any:
     """Keep a numerical result compact and reject row-shaped/raw payload fields."""
 
@@ -4893,7 +4967,7 @@ def _bounded_public_result_value(
         if len(value) > limit:
             budget.omitted_items += 1
         return value[:limit]
-    if depth >= 4:
+    if depth >= max_depth:
         budget.omitted_items += 1
         return "[omitted: nesting limit]"
     if isinstance(value, list):
@@ -4904,7 +4978,7 @@ def _bounded_public_result_value(
                 break
             if isinstance(item, (dict, list, str, int, float, bool)) or item is None:
                 bounded_list.append(
-                    _bounded_public_result_value(item, depth=depth + 1, budget=budget)
+                    _bounded_public_result_value(item, depth=depth + 1, budget=budget, max_depth=max_depth)
                 )
         return bounded_list
     if not isinstance(value, dict):
@@ -4934,7 +5008,7 @@ def _bounded_public_result_value(
             budget.omitted_items += 1
             continue
         bounded[bounded_key] = _bounded_public_result_value(
-            value[key], depth=depth + 1, budget=budget
+            value[key], depth=depth + 1, budget=budget, max_depth=max_depth
         )
     omitted_here = budget.omitted_items - omissions_at_entry
     if omitted_here:

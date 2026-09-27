@@ -678,6 +678,8 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
             "stop_reason": entry.payload.get("stop_reason"),
             "error": entry.payload.get("error"),
         }
+        if isinstance(entry.payload.get("numeric_check"), dict):
+            message["numeric_check"] = entry.payload["numeric_check"]
         try:
             message["navigation"] = [
                 link.to_dict()

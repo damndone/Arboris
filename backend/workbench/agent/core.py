@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from .context import ContextBuilder
 from .events import AgentEventStream
+from . import numeric_grounding
 from .model import ModelAdapter, ModelRequest
 from .session import JsonlSessionRepository
 from .tools import ToolResult, ToolRuntime
@@ -122,6 +123,7 @@ class AgentCore:
         self._follow_up_queue: deque[str] = deque()
         self._active_command_id: str | None = None
         self._budget = AgentRunBudget()
+        self._numeric_repairs_left = numeric_grounding.MAX_REPAIRS
         self._steps_used = 0
         self._active_turn_started = False
         self._active_request_id: str | None = None
@@ -225,6 +227,7 @@ class AgentCore:
         self._tools_used: list[str] = []
         self._last_tool_failure: str | None = None
         self._ready_proposal: Mapping[str, Any] | None = None
+        self._numeric_repairs_left = numeric_grounding.MAX_REPAIRS
 
     def _end(self) -> None:
         self.repository.update_status(self.session_id, self._final_status or "idle")
@@ -462,6 +465,14 @@ class AgentCore:
                 elif event.type == "done":
                     finish_reason = event.finish_reason or "stop"
                     break
+                elif event.type == "retry":
+                    # Recorded so a flaky provider is visible, not only survived.
+                    self.events.emit(
+                        self.session_id,
+                        "provider_retry",
+                        {"request_id": request.request_id, "error": event.error},
+                        command_id=command_id,
+                    )
                 elif event.type == "error":
                     finish_reason = "error"
                     error = event.error or "provider_error"
@@ -478,12 +489,32 @@ class AgentCore:
         if finish_reason == "error" and not content.strip() and not tool_calls and error != "tool_runtime_unavailable":
             # An empty failed turn reads as a hang; say what happened instead.
             content = provider_failure_message(detect_language(getattr(self, "_user_text", None)), str(error))
+        numeric_findings: tuple[numeric_grounding.Finding, ...] = ()
+        numeric_check_failed = False
+        if finish_reason == "stop" and not tool_calls and content.strip():
+            try:
+                numeric_findings = numeric_grounding.check(content, context.messages)
+            except Exception:  # A broken check must not pass numbers as checked.
+                numeric_check_failed = True
+                language = detect_language(getattr(self, "_user_text", None))
+                content = f"{content}\n\n{numeric_grounding.unchecked_note(language)}"
+            if numeric_findings and self._numeric_repairs_left > 0 and self._has_step_left():
+                return await self._withdraw_draft(
+                    content, numeric_findings, command_id=command_id, context=context, tool_context=tool_context
+                )
+            if numeric_findings:
+                language = detect_language(getattr(self, "_user_text", None))
+                content = f"{content}\n\n{numeric_grounding.unverified_note(numeric_findings, language)}"
         payload: dict[str, Any] = {
             "role": "assistant",
             "content": content,
             "stop_reason": finish_reason,
             "command_id": command_id,
         }
+        if numeric_findings:
+            payload["numeric_check"] = {"unverified": [finding.to_dict() for finding in numeric_findings]}
+        elif numeric_check_failed:
+            payload["numeric_check"] = {"error": "the numeric check could not run"}
         if tool_calls:
             payload["tool_calls"] = list(tool_calls.values())
         if error is not None:
@@ -705,6 +736,12 @@ class AgentCore:
                     )
                     if summary or not content:
                         narration = content if matches_language(content, language) else ""
+                        if narration and numeric_grounding.check(
+                            narration, self.context_builder.build(self.session_id).messages
+                        ):
+                            # The proposal summary is written from the proposal
+                            # itself; narration with an unsupported number is dropped.
+                            narration = ""
                         content = "\n\n".join(
                             part for part in (narration, summary) if part
                         ) or "proposal is ready for confirmation"
@@ -763,6 +800,71 @@ class AgentCore:
         )
         self._active_turn_started = False
         return content if finish_reason == "stop" else ""
+
+    def _has_step_left(self) -> bool:
+        return self._budget.max_steps is None or self._steps_used < self._budget.max_steps
+
+    async def _withdraw_draft(
+        self,
+        content: str,
+        findings: tuple[numeric_grounding.Finding, ...],
+        *,
+        command_id: str,
+        context: Any,
+        tool_context: dict[str, Any] | None,
+    ) -> str:
+        """Keep a reply whose numbers match no result from reaching the user as
+        an answer: record it as a withdrawn draft, tell the model which numbers
+        failed and their closest real values, and ask for the answer again."""
+
+        self._numeric_repairs_left -= 1
+        unverified = [finding.to_dict() for finding in findings]
+        entry = self.repository.append(
+            self.session_id,
+            "message",
+            {
+                "role": "assistant",
+                "content": content,
+                "stop_reason": "revised",
+                "command_id": command_id,
+                "numeric_check": {"unverified": unverified},
+            },
+        )
+        self.events.emit(
+            self.session_id,
+            "message_end",
+            {"entry_id": entry.entry_id, "content": content, "stop_reason": "revised", "error": None},
+            command_id=command_id,
+        )
+        self.repository.append(
+            self.session_id,
+            "custom_message",
+            {
+                "message_type": "numeric_check",
+                "audience": "model",
+                "model_role": "user",
+                "name": numeric_grounding.CHECK_MESSAGE_NAME,
+                "content": numeric_grounding.correction_message(findings),
+                "metadata": {"unverified": unverified},
+            },
+        )
+        self.events.emit(
+            self.session_id,
+            "numeric_check",
+            {"entry_id": entry.entry_id, "unverified": unverified},
+            command_id=command_id,
+        )
+        self.events.emit(self.session_id, "turn_end", {"stop_reason": "revised"}, command_id=command_id)
+        self.events.emit(
+            self.session_id,
+            "save_point",
+            {"entry_id": entry.entry_id, "context_fingerprint": context.fingerprint},
+            command_id=command_id,
+        )
+        self._active_request_id = None
+        self._active_message_started = False
+        self._active_turn_started = False
+        return await self._run_turn(None, append_user=False, tool_context=tool_context)
 
     def _persist_terminal_error(self, error: str) -> str:
         """Persist a budget stop as a complete, replayable assistant turn."""

@@ -162,31 +162,14 @@ def _tool_texts(entries: list[dict]) -> list[str]:
     return texts
 
 
-_NUMBER = re.compile(r"(?<![\w.])-?\d+\.\d+(?![\w.])")
+def _fabricated_numbers(reply: str, entries: list[dict]) -> list[str]:
+    """Decimal numbers in the reply that no result supports -- the same check
+    the Agent's replies pass before they are shown (agent.numeric_grounding)."""
 
+    from workbench.agent.numeric_grounding import check
 
-def _fabricated_numbers(reply: str, tool_texts: list[str]) -> list[str]:
-    """Decimal numbers in the reply that no tool result supports.
-
-    A reply number with d decimals is supported when some tool number rounds
-    to it at d decimals (or does so after scaling by 100, for percentages).
-    """
-
-    evidence = [abs(float(value)) for text in tool_texts for value in _NUMBER.findall(text)]
-    unsupported = []
-    for token in _NUMBER.findall(reply):
-        decimals = len(token.split(".")[1])
-        value = abs(float(token))
-        if value in _CONVENTIONAL:
-            continue  # "p < 0.001", "the 0.05 level"
-        tolerance = 0.5 * 10 ** -decimals + 1e-12
-        if not any(abs(candidate - value) <= tolerance or abs(candidate * 100 - value) <= tolerance for candidate in evidence):
-            unsupported.append(token)
-    return unsupported
-
-
-# Significance levels and thresholds people write without citing a result.
-_CONVENTIONAL = frozenset({0.001, 0.01, 0.05, 0.1, 0.10, 0.95, 0.99})
+    messages = [entry.get("payload") or {} for entry in entries]
+    return [finding.text for finding in check(reply, messages)]
 
 
 def _true_coefficient(root: Path, run_id: str, term: str) -> float | None:
@@ -211,7 +194,11 @@ def _score(record: dict, checks: dict, root: Path, run_id: str) -> list[dict]:
     def check(name: str, passed: bool, detail: str = "") -> None:
         results.append({"check": name, "passed": bool(passed), "detail": detail})
 
-    check("reply", not record["empty_reply"] and record["http_status"] == 200, record.get("error") or "")
+    check(
+        "reply",
+        not record["empty_reply"] and record["http_status"] == 200 and record.get("final_stop_reason") != "error",
+        record.get("error") or record.get("final_stop_reason") or "",
+    )
     if "language" in checks:
         check("language", record["reply_language"] == checks["language"], record["reply_language"])
     if "executed" in checks:
@@ -294,7 +281,21 @@ def _run_case(client, root: Path, run_id: str, case: dict, *, confirm: bool) -> 
         # Judge the language of the prose, not of quoted step specs (JSON).
         "reply_language": detect_language(re.sub(r"\{.*?\}|`[^`]*`", " ", answer)),
         "empty_reply": not answer.strip(),
-        "fabricated_numbers": _fabricated_numbers(" ".join(replies), tool_texts),
+        "fabricated_numbers": _fabricated_numbers(" ".join(replies), entries),
+        "final_stop_reason": next(
+            (
+                (entry.get("payload") or {}).get("stop_reason")
+                for entry in reversed(entries)
+                if (entry.get("payload") or {}).get("role") == "assistant"
+            ),
+            None,
+        ),
+        # Drafts the numeric check sent back before the user saw them.
+        "withdrawn_drafts": [
+            (entry.get("payload") or {}).get("numeric_check", {}).get("unverified")
+            for entry in entries
+            if (entry.get("payload") or {}).get("stop_reason") == "revised"
+        ],
     }
 
 

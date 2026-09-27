@@ -42,6 +42,7 @@ function formatAgentResultValue(value: unknown): string {
 function observableActivity(eventType: string | null): string {
   if (!eventType) return "Preparing the bounded context";
   const normalized = eventType.toLowerCase();
+  if (normalized === "provider_retry") return "The provider connection dropped; retrying";
   if (normalized.includes("tool")) return "Checking evidence";
   if (normalized.includes("proposal")) return "Preparing a reviewable proposal";
   if (normalized.includes("message") || normalized.includes("response")) return "Drafting the response";
@@ -125,6 +126,18 @@ export function toolStatusLine(content: string, toolName?: string | null): strin
     const error = typeof record.error === "string" ? record.error : "failed";
     return `${toolId} ✗ ${error}`;
   }
+  const calculations = (record.output as { results?: unknown } | undefined)?.results;
+  if (toolId === "calculate" && Array.isArray(calculations)) {
+    // Arithmetic done in code, so the answer can quote it (numeric check).
+    const lines = calculations.map((item) => {
+      const entry = item as { label?: unknown; expression?: unknown; value?: unknown; error?: unknown };
+      const name = typeof entry.label === "string" && entry.label ? `${entry.label}: ` : "";
+      return typeof entry.value === "string"
+        ? `${name}${String(entry.expression)} = ${entry.value}`
+        : `${name}${String(entry.expression)} ✗ ${String(entry.error)}`;
+    });
+    return `calculate ✓ ${lines.join("; ")}`;
+  }
   if (record.output?.executed === true) {
     // Read-only workflows run without a click; say so, and how many tests
     // this session has run -- the count the report discloses.
@@ -166,13 +179,19 @@ function transcriptTurns(messages: AgentMessage[]): TranscriptTurn[] {
       current = { user: null, reasoning: [], responses: [] };
       turns.push(current);
     }
-    if (message.role === "tool" || message.stop_reason === "tool_calls") {
+    if (message.role === "tool" || message.stop_reason === "tool_calls" || message.stop_reason === "revised") {
       current.reasoning.push(message);
     } else {
       current.responses.push(message);
     }
   }
   return turns;
+}
+
+function withdrawnNumbers(message: AgentMessage): string {
+  const unverified = message.numeric_check?.unverified ?? [];
+  const numbers = unverified.map((item) => item.text).filter(Boolean);
+  return numbers.length > 0 ? numbers.join(", ") : "some numbers";
 }
 
 function visibleReasoningEntries(messages: AgentMessage[]): AgentMessage[] {
@@ -287,6 +306,11 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
           </span>
         ) : message.role === "assistant" ? (
           <div className="wb-agent-terminal-content wb-agent-terminal-markdown">
+            {message.stop_reason === "revised" && (
+              <p data-testid="agent-withdrawn-draft" className="wb-agent-withdrawn-draft">
+                Draft withdrawn by the numeric check: {withdrawnNumbers(message)} matched no result. The Agent rewrote the answer.
+              </p>
+            )}
             {renderMarkdown(message.content)}
           </div>
         ) : (

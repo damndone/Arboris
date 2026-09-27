@@ -370,6 +370,35 @@ describe("AgentPanel", () => {
     expect(reasoning).not.toContainElement(screen.getByText("模型结果已核对：系数为正。"));
   });
 
+  it("files a draft withdrawn by the numeric check under reasoning and says why", () => {
+    const withDraft = value({
+      messages: [
+        { entry_id: "u1", role: "user", content: "男女工资有差别吗", stop_reason: null },
+        {
+          entry_id: "a1",
+          role: "assistant",
+          content: "p 值为 0.099。",
+          stop_reason: "revised",
+          numeric_check: { unverified: [{ text: "0.099", closest: ["0.098491234"] }] },
+        },
+        { entry_id: "a2", role: "assistant", content: "p 值为 0.098。", stop_reason: "stop" },
+      ],
+    });
+
+    render(
+      <AgentSurfaceContext.Provider value={withDraft}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const reasoning = screen.getByTestId("agent-reasoning-u1");
+    expect(reasoning).toContainElement(screen.getByTestId("agent-withdrawn-draft"));
+    expect(screen.getByTestId("agent-withdrawn-draft")).toHaveTextContent(
+      "Draft withdrawn by the numeric check: 0.099 matched no result.",
+    );
+    expect(reasoning).not.toContainElement(screen.getByText("p 值为 0.098。"));
+  });
+
   it("leaves hierarchy browsing to AI activity so the terminal owns the panel space", () => {
     const rootRef: AgentNavigationRef = {
       kind: "agent_session",

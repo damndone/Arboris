@@ -7,6 +7,8 @@ export type AgentMessage = {
   /** Tool entries: the executed tool id (used as the typed status label). */
   name?: string | null;
   stop_reason?: string | null;
+  /** Numbers the numeric check could not match to any result. */
+  numeric_check?: { unverified?: Array<{ text: string; closest?: string[] }> } | null;
   error?: string | null;
   navigation?: AgentNavigationRef[];
 };

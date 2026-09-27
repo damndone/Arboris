@@ -227,5 +227,24 @@
       "language": "zh",
       "no_data_change": true
     }
+  },
+  {
+    "id": "wage_gap_arithmetic",
+    "request": "男性和女性的平均工资分别是多少？相差多少？女性比男性低百分之几？",
+    "expected": "runs a read-only comparison; the difference and the percentage come from the calculate tool, not mental arithmetic",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_data_change": true
+    }
+  },
+  {
+    "id": "coef_ratio_arithmetic",
+    "request": "education 的系数是 experience 系数的几倍？两者相差多少？",
+    "expected": "reads both coefficients from the model and gets the ratio and difference from the calculate tool",
+    "checks": {
+      "language": "zh",
+      "no_data_change": true
+    }
   }
 ]

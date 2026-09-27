@@ -897,3 +897,22 @@ def test_step_budget_annotation_is_silent_without_a_budget(tmp_path: Path) -> No
     agent._steps_used = 99
 
     assert agent._annotate_step_budget({"ok": True}) == {"ok": True}
+
+
+class RetryThenAnswerAdapter:
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        yield ModelStreamEvent.retrying(request.request_id, "LLMUpstreamError")
+        yield ModelStreamEvent.text_delta(request.request_id, "answer")
+        yield ModelStreamEvent.done(request.request_id)
+
+
+def test_agent_core_records_a_provider_retry_and_keeps_the_answer(tmp_path: Path) -> None:
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("session-a", chain_id="chain-a", role="chain")
+    events = AgentEventStream(tmp_path / "workbench")
+    agent = AgentCore(repository, events, RetryThenAnswerAdapter(), session_id="session-a")
+
+    assert asyncio.run(agent.prompt("question")) == "answer"
+
+    retries = [event for event in events.replay("session-a") if event.event_type == "provider_retry"]
+    assert [event.payload["error"] for event in retries] == ["LLMUpstreamError"]

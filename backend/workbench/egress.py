@@ -63,6 +63,7 @@ LOCAL_DEFAULT_ALLOW = frozenset(CONTENT_CLASSES)
 TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     # Agent (main and chain sessions)
     "propose_analysis_loop": "workbench_state",
+    "calculate": "workbench_state",
     "propose_operation": "workbench_state",
     "submit_analysis_loop_intent": "workbench_state",
     "inspect_completed_operations": "workbench_state",

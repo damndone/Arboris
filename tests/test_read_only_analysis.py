@@ -9,6 +9,7 @@ ledger, whoever authorized it.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import numpy as np
@@ -262,3 +263,24 @@ def analysis_ledger_read_models(run_root: Path) -> list[dict]:
     from workbench.services.results_service import read_model_results
 
     return [item for item in read_model_results(run_root) if not str(item.get("model_id", "")).startswith("diagnostics")]
+
+
+@pytest.mark.parametrize("operation", ["summarize", "summarize_detail"])
+def test_grouped_statistics_reach_the_agent_for_every_group(tmp_path: Path, operation: str) -> None:
+    # Grouped results used to reach the Agent as "[omitted: nesting limit]",
+    # so "mean wage by group" could not be answered from them.
+    fixture = _Fixture(tmp_path)
+    step = {"step_id": "by_group", "operation_id": "statistical.explore",
+            "spec": {"operation": operation, "selected_columns": ["wage"], "options": {"group_by": "group"}}}
+    receipt = fixture.propose([step])
+
+    assert receipt["executed"] is True, receipt
+    result = receipt["results"][0]["artifacts"][0]["result"]
+    frame = _frame()
+    for group in result["groups"]:
+        expected = frame.loc[frame["group"] == group["value"], "wage"]
+        assert group["wage"]["mean"] == pytest.approx(expected.mean(), rel=1e-12)
+        assert group["wage"]["std_dev"] == pytest.approx(expected.std(), rel=1e-12)
+        if operation == "summarize_detail":
+            assert group["wage"]["percentiles"]["p50"] == pytest.approx(expected.median(), rel=1e-12)
+    assert "nesting limit" not in json.dumps(result)

@@ -17,6 +17,21 @@ describe("toolStatusLine", () => {
     ).toBe("propose_operation ✓ proposal ready p1 — awaiting confirmation (the workflow includes data_change steps)");
   });
 
+  it("shows what the calculate tool computed", () => {
+    const content = JSON.stringify({
+      ok: true,
+      output: {
+        results: [
+          { label: "gap", expression: "5.1234 - 4.0221", value: "1.1013000000000002" },
+          { expression: "1 / 0", error: "division by zero" },
+        ],
+      },
+    });
+    expect(toolStatusLine(content, "calculate")).toBe(
+      "calculate ✓ gap: 5.1234 - 4.0221 = 1.1013000000000002; 1 / 0 ✗ division by zero",
+    );
+  });
+
   it("reports a read-only run that could not start", () => {
     expect(line({ executed: false, error: "stale" })).toBe("propose_operation ✗ read-only analysis could not run");
   });
