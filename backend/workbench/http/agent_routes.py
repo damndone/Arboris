@@ -728,6 +728,9 @@ def _public_proposals(store: ProposalStore, session_id: str) -> list[dict[str, A
     for revision in store.latest_revisions_for_session(session_id):
         proposal = revision.to_dict()
         proposal["status"] = store.latest_status(revision.proposal_id)
+        # The session's list is what the transcript cards show, confirmed and
+        # executed ones included: sentences there too, not raw steps.
+        proposal["readable"] = proposal_lines(proposal, _proposal_labels(store, proposal))
         confirmation = store.latest_confirmation(revision.proposal_id)
         if confirmation is not None:
             proposal["confirmation"] = confirmation.to_dict()

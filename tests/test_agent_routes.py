@@ -1022,7 +1022,9 @@ def test_proposal_is_listed_and_confirmation_is_pending_without_rerun_mutation(
             params={"project_root": str(project_root)},
         )
         assert listed.status_code == 200
-        assert listed.json()["proposals"] == [proposal.to_dict() | {"status": "pending"}]
+        [listed_proposal] = listed.json()["proposals"]
+        assert listed_proposal.pop("readable")  # the card's sentences
+        assert listed_proposal == proposal.to_dict() | {"status": "pending"}
 
         confirmed = client.post(
             f"/agent/sessions/{session_id}/proposals/{proposal.proposal_id}/confirm",

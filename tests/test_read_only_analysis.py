@@ -284,3 +284,17 @@ def test_grouped_statistics_reach_the_agent_for_every_group(tmp_path: Path, oper
         if operation == "summarize_detail":
             assert group["wage"]["percentiles"]["p50"] == pytest.approx(expected.median(), rel=1e-12)
     assert "nesting limit" not in json.dumps(result)
+
+
+def test_an_executed_workflow_reads_as_sentences_in_the_session_list(tmp_path: Path) -> None:
+    # Transcript cards list the session's proposals; an executed read-only
+    # workflow showed its raw steps JSON there instead of sentences.
+    from workbench.http.agent_routes import _public_proposals
+
+    fixture = _Fixture(tmp_path)
+    receipt = fixture.propose([_explore("tab", "region"), _t_test("tt")])
+    assert receipt["executed"] is True
+
+    [proposal] = _public_proposals(fixture.orchestrator.proposal_store, "chain-session")
+    assert len(proposal["readable"]) == 2
+    assert all(line and "{" not in line for line in proposal["readable"])
