@@ -733,6 +733,41 @@ function columnStats(name: string, rows: Record<string, unknown>[]): ColumnPrevi
   };
 }
 
+type DeclaredMissingCode = number | string | { low: number; high: number };
+
+function isDeclaredMissing(value: unknown, codes: DeclaredMissingCode[]): boolean {
+  if (value === null || value === undefined) return false;
+  const numeric = typeof value === "number" ? value : Number(value);
+  return codes.some((code) => {
+    if (code !== null && typeof code === "object") {
+      return Number.isFinite(numeric) && numeric >= code.low && numeric <= code.high;
+    }
+    return typeof code === "number" ? numeric === code : String(value) === code;
+  });
+}
+
+/** Rows with each column's declared missing-value codes (SPSS user-missing,
+ * e.g. -100 "inapplicable") read as missing, so the column cards' mean,
+ * spread and unique count describe answers, not codes. The preview table
+ * keeps the codes as stored. */
+export function withoutDeclaredMissing(
+  rows: Record<string, unknown>[],
+  declared: unknown,
+): Record<string, unknown>[] {
+  if (!declared || typeof declared !== "object") return rows;
+  const entries = Object.entries(declared as Record<string, unknown>).filter(
+    (entry): entry is [string, DeclaredMissingCode[]] => Array.isArray(entry[1]) && entry[1].length > 0,
+  );
+  if (entries.length === 0) return rows;
+  return rows.map((row) => {
+    const next = { ...row };
+    for (const [column, codes] of entries) {
+      if (isDeclaredMissing(next[column], codes)) next[column] = null;
+    }
+    return next;
+  });
+}
+
 const STATISTICAL_FILE_PATTERN = /\.(sav|zsav|dta)$/i;
 
 /** SPSS/Stata files carry metadata the browser cannot parse; the server reads them. */
@@ -769,6 +804,7 @@ export async function previewFile(
   let selectedSheet = "";
   let headerNames: string[];
   let totalRows: number | null = null;
+  let declaredMissing: unknown = null;
   if (isStatisticalFile(file.name)) {
     if (!projectRoot) {
       throw new Error("Previewing an SPSS or Stata file needs an open project.");
@@ -777,6 +813,7 @@ export async function previewFile(
     rows = statistical.rows;
     headerNames = statistical.columns;
     totalRows = statistical.total_rows;
+    declaredMissing = (statistical.labels as { user_missing_values?: unknown } | undefined)?.user_missing_values;
   } else {
     const buffer =
       typeof file.arrayBuffer === "function"
@@ -815,7 +852,8 @@ export async function previewFile(
     rows = transposed;
   }
   const columnNames = rows.length > 0 ? Object.keys(rows[0]) : headerNames;
-  const columns = columnNames.map((name) => columnStats(String(name), rows));
+  const statisticsRows = withoutDeclaredMissing(rows, declaredMissing);
+  const columns = columnNames.map((name) => columnStats(String(name), statisticsRows));
   const suggestedY =
     columns.find((column) => column.suggestedRole === "y" && column.dtype === "numeric")?.name ??
     columns.find(
