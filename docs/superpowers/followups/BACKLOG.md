@@ -50,6 +50,7 @@ Codex 的 v1.8.9 spec 与 11 份计划为“部分采纳”，每份文件顶部
 | V189-LOCAL-MODEL | D | 离线本地模型：作为服务商选项（Ollama/LM Studio），不打包、不分流；上线前用评测脚本测成功率 | 等用户定方向 | 用户 |
 | V189-MODEL-LIST-AUTODETECT | D | 服务商模型列表自动刷新（后端已有 `/llm/providers/{id}/models/refresh`），保留手填；去掉写死的版本名 | 等用户定方向 | 用户 |
 | V189-PROVIDER-FAILOVER | D | 主服务商连续失败时切备用服务商（需用户显式开启：数据会发往另一家） | 等用户定方向 | 新 |
+| V189-DATA-TAB-AGENT-SCOPE | P | Data 页的 Agent 应作用于正在查看的数据集（Chain 作用域），而不是只读的项目级 Agent | 现在从 Data 页提问得到的是不能运行分析的 Main Agent；验收发现 | 验收 |
 | V189-LIVE-EVAL-FULL | 发版前 | 网络正常时全量真机评测（32 条 × 3） | 2026-09-27 实测时 DeepSeek TLS 握手 10–14 s，结果主要反映网络 | 新 |
 | V189-AGENT-TURN-BUDGET | 观察 | Agent 单轮 120 s 上限与慢服务商 + 重试的关系 | 流静默已限 30 s；若仍常超时再调预算 | 新 |
 
