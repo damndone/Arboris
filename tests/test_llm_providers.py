@@ -2076,3 +2076,13 @@ def test_refresh_models_preserves_operator_marked_vision_capability(
     by_id = {m["request_model"]: m for m in refreshed}
     assert by_id["deepseek-chat"]["supports_vision"] is True
     assert by_id["brand-new-model"]["supports_vision"] is False
+
+
+def test_a_silent_stream_is_given_up_after_thirty_seconds_not_the_whole_timeout() -> None:
+    config = LLMConfig(base_url="https://api.example.test", api_key=API_KEY, model="m", timeout_s=60.0)
+    timeout = llm_client._stream_timeout(config)
+    assert timeout.read == 30.0
+    assert timeout.connect == 60.0  # a slow TLS handshake is not a dead stream
+    assert timeout.write == 60.0
+    short = LLMConfig(base_url="https://api.example.test", api_key=API_KEY, model="m", timeout_s=15.0)
+    assert llm_client._stream_timeout(short).read == 15.0

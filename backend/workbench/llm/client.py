@@ -67,6 +67,19 @@ def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
     return {}
 
 
+# A streaming provider sends bytes continuously (tokens, reasoning or
+# keep-alives). Seen live: DeepSeek connections that went silent for the whole
+# 60 s timeout before failing, so each retry cost a minute. Silence this long
+# means the connection is dead; give up and let the adapter retry.
+STREAM_SILENCE_S = 30.0
+
+
+def _stream_timeout(config: LLMConfig) -> httpx.Timeout:
+    # Only silence after the connection is up is shortened: connecting can
+    # legitimately be slow (a TLS handshake took 10-14 s in the same session).
+    return httpx.Timeout(config.timeout_s, read=min(config.timeout_s, STREAM_SILENCE_S))
+
+
 def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
     """GET {base_url}/models and return the provider's model summaries."""
     if not config.is_configured():
@@ -226,7 +239,7 @@ async def async_stream_chat_completion(
                     "Content-Type": "application/json",
                 },
                 json=request_payload,
-                timeout=config.timeout_s,
+                timeout=_stream_timeout(config),
             ) as response:
                 if response.status_code < 200 or response.status_code >= 300:
                     raise LLMUpstreamError(
