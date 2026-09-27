@@ -2599,6 +2599,59 @@ class WorkbenchOrchestrator:
         target["artifact_id"] = str(context["source_artifact_id"])
         return {**arguments, "target": target}
 
+    def _bind_workflow_preconditions(
+        self, arguments: dict[str, Any], *, session_id: str
+    ) -> dict[str, Any]:
+        """Derive a workflow's preconditions from the node it actually targets.
+
+        A workflow runs on a dataset node, but the Agent copies preconditions
+        from whatever node it inspected -- the selected model node, when the
+        user had clicked one. Confirmation re-derives the fingerprint of the
+        target node, so every such proposal was rejected as stale although
+        nothing had changed. The backend derives them here, from the target,
+        as it already does for reruns.
+        """
+
+        inspect = getattr(self.context_provider, "inspect_node_context", None)
+        target = dict(arguments.get("target") or {})
+        preconditions = dict(arguments.get("preconditions") or {})
+        if inspect is None or not target.get("run_id") or not target.get("node_ref"):
+            return arguments
+        from .context_tools import InspectNodeContextRequest
+
+        try:
+            chain_id = self.repository.get_metadata(session_id).get("chain_id")
+        except (KeyError, FileNotFoundError, ValueError):
+            chain_id = None
+        active_head = str(preconditions.get("active_head_run_id") or target["run_id"])
+        if isinstance(chain_id, str) and chain_id:
+            try:
+                active_head = self._resolve_chain_head(chain_id, active_head)
+            except ChainHeadConflict as exc:
+                raise ValueError("active_head_run_id: " + str(exc)) from exc
+        try:
+            snapshot = inspect(
+                InspectNodeContextRequest(
+                    request_id=f"propose:{target['run_id']}",
+                    owner_run_id=str(target["run_id"]),
+                    op_node_id=str(target["node_ref"]),
+                    active_head_run_id=active_head,
+                )
+            )
+        except (KeyError, OSError, ValueError):
+            # An unresolvable target is the typed validator's to report.
+            return arguments
+        fingerprint = snapshot.get("context_fingerprint")
+        if not isinstance(fingerprint, str) or not fingerprint:
+            return arguments
+        preconditions.update(
+            context_version=snapshot["context_version"],
+            context_fingerprint=fingerprint,
+            owner_resolution=snapshot["owner_resolution"],
+            active_head_run_id=snapshot["active_head_run_id"],
+        )
+        return {**arguments, "preconditions": preconditions}
+
     def _create_analysis_loop_proposal_from_agent_arguments(
         self,
         *,
@@ -2781,7 +2834,9 @@ class WorkbenchOrchestrator:
         if operation_id == "data.columns.cast":
             return self._canonicalize_data_columns_cast_arguments(arguments)
         if operation_id == "operation.multi_step":
-            return self._canonicalize_workflow_arguments(arguments)
+            return self._bind_workflow_preconditions(
+                self._canonicalize_workflow_arguments(arguments), session_id=session_id
+            )
         if self.context_provider is None or operation_id not in {*RERUN_OPERATIONS, "graph.fork"}:
             return arguments
         inspect = getattr(self.context_provider, "inspect_node_context", None)
