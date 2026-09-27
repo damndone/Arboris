@@ -15,8 +15,8 @@ alone cannot rule that out, so the rule is enforced here:
   the reply is shown with a visible warning naming the unverified numbers
   (``unverified_note``). Nothing is silently rewritten.
 
-Integers are not checked: counts, years and step numbers are too often
-legitimate prose.
+Whole numbers below 1,000 and years are not checked: counts of tests,
+levels and codes are too often legitimate prose.
 """
 
 from __future__ import annotations
@@ -38,10 +38,14 @@ MAX_REPAIRS = 1
 # ASCII-only boundaries: in Python's Unicode regex a Chinese character is a
 # word character, so "系数为0.099" would otherwise hide the number.
 _REPLY_NUMBER = re.compile(
-    r"(?<![A-Za-z0-9_.])"
-    r"(?P<number>(?:\d{1,3}(?:,\d{3})+|\d+)\.\d+(?:[eE][-+]?\d+)?)"
-    r"(?![A-Za-z0-9_]|\.\d)"
+    r"(?<![A-Za-z0-9_.,])"
+    r"(?P<number>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+(?:[eE][-+]?\d+)?)?)"
+    r"(?![A-Za-z0-9_]|[.,]\d)"
 )
+# Whole numbers are checked from here up: smaller ones are too often prose
+# ("3 tests", "the 5% level", "1 = male"). Years are prose too.
+_MIN_CHECKED_INTEGER = 1000
+_YEARS = range(1900, 2101)
 # Letters on either side mean an identifier or a hash ("run-3e45ab"), not a number.
 _EVIDENCE_NUMBER = re.compile(r"(?<![0-9A-Za-z_.])\d+(?:\.\d+)?(?:[eE][-+]?\d+)?(?![A-Za-z_])")
 
@@ -80,6 +84,10 @@ class Evidence:
 
     def supports(self, value: Decimal) -> bool:
         quantum = Decimal(1).scaleb(value.as_tuple().exponent)
+        if value == value.to_integral_value() and value.as_tuple().exponent >= 0 and value != 0:
+            # 34,000 is written to the thousand: trailing zeros set the precision.
+            digits = str(int(value))
+            quantum = Decimal(1).scaleb(len(digits) - len(digits.rstrip("0")))
         for candidate in self._window(value, quantum):
             if _rounds_to(candidate, quantum, value):
                 return True
@@ -208,6 +216,8 @@ def check(reply: str, messages: Sequence[Mapping[str, Any]]) -> tuple[Finding, .
         if value is None or text in seen:
             continue
         value = abs(value)
+        if "." not in text and (value < _MIN_CHECKED_INTEGER or int(value) in _YEARS):
+            continue
         if _is_threshold(reply, match.start(), match.end(), value) or evidence.supports(value):
             continue
         seen.add(text)
@@ -233,8 +243,8 @@ def correction_message(findings: Sequence[Finding]) -> str:
         "last answer do not match any result you were given, at the digits you wrote them:\n"
         f"{lines}\n"
         "That answer has been withdrawn. Answer the user's question again, in full and in the user's "
-        "language. Round numbers for reading as you normally would (for example 1.2901 or 0.0872), "
-        "but always from the full value in the results: 0.098491 is 0.098 or 0.0985, never 0.099. "
+        "language. Round numbers for reading (about four significant digits), always from the full "
+        "value in the results: 0.098491 is 0.098 or 0.0985, never 0.099; do not paste full precision. "
         "For a number derived from results -- a difference, ratio, percentage, sum or odds ratio -- "
         "call the calculate tool and quote its value. Leave out any number you cannot source. Do not "
         "mention this check."

@@ -39,7 +39,8 @@ RESULT = _tool({"p_value": 0.098491234, "mean_men": 5.1234, "mean_women": 4.0221
         "p 值远低于 0.05",
         "p is well below 0.05",
         "p is less than 0.01",
-        "样本 176 人，3 个检验",  # integers are prose
+        "样本 176 人，3 个检验",  # small integers are prose
+        "GSS 2022 的数据",  # years are prose
     ],
 )
 def test_correctly_copied_or_rounded_numbers_pass(reply: str) -> None:
@@ -199,3 +200,16 @@ def test_a_check_that_cannot_run_says_so_instead_of_passing(tmp_path: Path, monk
     reply = asyncio.run(agent.prompt("p?"))
     assert reply.startswith("p = 0.0985") and "could not check the numbers" in reply
     assert repository.get_branch("s")[-1].payload["numeric_check"] == {"error": "the numeric check could not run"}
+
+
+INCOME = _tool({"male": 33761.832590660866, "female": 23116.92048788945, "n": 4149, "valid": 2344})
+
+
+@pytest.mark.parametrize("reply", ["男性 33,762 美元", "男性 33762", "约 34,000 美元", "4149 行中 2344 行有效", "均值 33,761.83"])
+def test_large_whole_numbers_are_checked_at_the_precision_written(reply: str) -> None:
+    assert grounding.check(reply, [INCOME]) == ()
+
+
+@pytest.mark.parametrize(("reply", "bad"), [("男性 33,700 美元", "33,700"), ("少了 1805 行", "1805"), ("约 35,000", "35,000")])
+def test_wrong_large_whole_numbers_are_found(reply: str, bad: str) -> None:
+    assert [finding.text for finding in grounding.check(reply, [INCOME])] == [bad]
