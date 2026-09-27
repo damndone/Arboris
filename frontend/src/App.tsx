@@ -266,7 +266,7 @@ function AppShell() {
               if (isProjectGraphRoute && projectRoot && !errorMessage) {
                 navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`);
               } else {
-                navigate("/");
+                navigate("/?launcher=1");
               }
             }}
           >
