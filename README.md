@@ -10,6 +10,8 @@ proposals, never for the statistics.
 
 **Current release: v1.8.0** — see [docs/releases/](docs/releases/).
 
+**Manual:** [docs/manual/](docs/manual/README.md) — for people doing analysis and for people extending Arboris.
+
 ---
 
 ## Quick start
