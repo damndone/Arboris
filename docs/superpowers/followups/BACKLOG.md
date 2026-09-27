@@ -42,7 +42,7 @@ Codex 的 v1.8.9 spec 与 11 份计划为“部分采纳”，每份文件顶部
 | V189-PUBLICATION-TABLES | P | 出版级表格 / Custom Tables 式可配置结果表 | 计划 v1.8.10 | Codex P2/P3 |
 | V189-CLASSIFICATION-ML | E | 分类 ML：先 logistic + random forest 两个 adapter，严格 CV、校准、模型比较、调参；再树模型/提升/神经网络、解释性 | 现仅回归预测（固定参数的 Lasso/Ridge/RF 回归）；计划 v1.8.11，按 Codex 计划精简 | Codex P1 Classification |
 | V189-P2-FAMILIES | E | GEE/GLMM → Tobit/AFT/竞争风险 → SEM/CFA → RDD/动态面板 → 贝叶斯/空间回归/状态空间 | 均未实现（代码中已确认）；每个经 MODEL-ACCEPTANCE-KIT | Codex P2 |
-| V189-QUANT | E | 量化研究与策略验证平台（Quant Research Pack，先做 Level 1 因子研究最小闭环） | 路线与前置依赖见 `roadmap/2026-09-27-quant-research-direction.md`；开工前需定市场与数据源 | 用户 |
+| V189-QUANT | E | 量化研究与策略验证平台（Quant Research Pack，先做 Level 1 因子研究最小闭环） | 路线与前置依赖见 `roadmap/2026-09-27-quant-research-direction.md`；已定：个人研究者；数据先用 FRED/ALFRED + Ken French（免费），个股因子再接 EDGAR + 免费行情 | 用户 |
 | V189-HAC | P | Newey–West / HAC 稳健标准误（时间序列回归、因子收益检验） | 未实现；通用计量与 Quant 都需要，建议并入 v1.8.10 | Quant 设计 |
 | V189-GRAPH-SCALE | F | 图的可扩展：集合节点（ExperimentSet/FactorSet/ParameterSweep）、trial 晋升制、有界投影 API（分页、单视图上限、`VIEW_TOO_LARGE`）、折叠与聚焦 | `GET /graph` 现一次返回全项目森林；影响持久化模型，需先于大规模参数搜索 | Quant 设计 |
 | V189-AGENT-COMPILER-IR | E | Plan IR / PortType / 两阶段发现 | 不采纳；仅当组合错误在真机评测中复现时重评 | Codex Agent Compiler |
