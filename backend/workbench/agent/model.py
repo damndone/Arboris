@@ -164,6 +164,12 @@ class ModelStreamEvent:
     def from_error(cls, request_id: str, message: str) -> "ModelStreamEvent":
         return cls(type="error", request_id=request_id, error=message)
 
+    @classmethod
+    def retrying(cls, request_id: str, message: str) -> "ModelStreamEvent":
+        """The provider failed before any output; the adapter tries again."""
+
+        return cls(type="retry", request_id=request_id, error=message)
+
 
 async def _next_stream_item_or_signal(
     stream: AsyncIterator[dict[str, Any]],
@@ -205,6 +211,13 @@ async def _next_stream_item_or_signal(
             await asyncio.gather(abort_waiter, return_exceptions=True)
 
 
+def _error_label(exc: LLMUpstreamError) -> str:
+    label = type(exc).__name__
+    if exc.upstream_status is not None:
+        label += f":upstream_{exc.upstream_status}"
+    return label
+
+
 class ModelAdapter(Protocol):
     """Provider adapter boundary consumed by AgentCore."""
 
@@ -214,6 +227,10 @@ class ModelAdapter(Protocol):
 
 class OpenAICompatibleModelAdapter:
     """Adapt OpenAI-compatible public SSE to the normalized stream contract."""
+
+    # Seconds to wait before each retry of a request that failed before any
+    # output (a dropped connection, a stream cut short, 429/5xx).
+    retry_delays_s: tuple[float, ...] = (1.0, 3.0)
 
     def __init__(self, config: LLMConfig, *, idle_timeout_s: float = 90.0) -> None:
         self.config = config
@@ -256,13 +273,18 @@ class OpenAICompatibleModelAdapter:
             return
         wire_messages = _to_openai_wire_messages(request.messages)
         wire_tools = _to_openai_tool_descriptors(request.tools)
-        # A typed request can create a proposal or another durable side effect
-        # after the provider accepts it but before this process sees public
-        # progress. Replaying it would hide the first-attempt truth and can
-        # duplicate work. Untyped prose retains the existing one bounded retry
-        # before any public progress; Report owns its separate retry policy.
-        attempt_budget = 1 if request.tools or request.response_schema is not None else 2
+        # A provider cannot act: a tool runs only after Workbench receives the
+        # call. So a request that failed before any public output -- no text,
+        # no tool call -- changed nothing and is safe to send again, typed or
+        # not. Each retry is yielded as an event so the failure stays on the
+        # record. After public output began, nothing is replayed.
+        attempt_budget = 1 + len(self.retry_delays_s)
         for attempt in range(attempt_budget):
+            if attempt:
+                await asyncio.sleep(self.retry_delays_s[attempt - 1])
+                if abort_event is not None and abort_event.is_set():
+                    yield ModelStreamEvent.from_error(request.request_id, "aborted")
+                    return
             received_event = False
             public_progress = False
             try:
@@ -348,11 +370,9 @@ class OpenAICompatibleModelAdapter:
                         or exc.upstream_status in _TRANSIENT_UPSTREAM_STATUSES
                     )
                 ):
+                    yield ModelStreamEvent.retrying(request.request_id, _error_label(exc))
                     continue
-                error_label = type(exc).__name__
-                if exc.upstream_status is not None:
-                    error_label += f":upstream_{exc.upstream_status}"
-                yield ModelStreamEvent.from_error(request.request_id, error_label)
+                yield ModelStreamEvent.from_error(request.request_id, _error_label(exc))
                 return
             except Exception as exc:
                 yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)

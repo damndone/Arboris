@@ -1551,19 +1551,18 @@ def test_openai_adapter_does_not_retry_after_partial_tool_call_activity(monkeypa
     assert events[-1].type == "error"
 
 
-def test_openai_adapter_never_retries_a_typed_agent_request(monkeypatch) -> None:
-    """A typed request keeps its first provider failure as immutable evidence."""
+def test_openai_adapter_retries_a_typed_agent_request_that_failed_before_any_output(monkeypatch) -> None:
+    """A provider cannot act -- tools run only after Workbench receives the call --
+    so a typed request that failed before any output is sent again, and each
+    retry stays on the record as an event."""
 
     attempts = 0
 
     async def fake_stream(*_args, **_kwargs):
         nonlocal attempts
         attempts += 1
-        if attempts == 1:
-            raise llm_client.LLMUpstreamError(
-                "temporary outage",
-                upstream_status=503,
-            )
+        if attempts < 3:
+            raise llm_client.LLMUpstreamError("temporary outage", upstream_status=503 if attempts == 1 else None)
         yield {"type": "done", "finish_reason": "stop", "model": "test-model"}
 
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
@@ -1592,9 +1591,56 @@ def test_openai_adapter_never_retries_a_typed_agent_request(monkeypatch) -> None
         ]
 
     events = asyncio.run(scenario())
+    assert attempts == 3
+    assert [(event.type, event.error) for event in events] == [
+        ("retry", "LLMUpstreamError:upstream_503"),
+        ("retry", "LLMUpstreamError"),
+        ("done", None),
+    ]
+
+
+def test_openai_adapter_gives_up_after_two_retries(monkeypatch) -> None:
+    attempts = 0
+
+    async def fake_stream(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise llm_client.LLMUpstreamError("outage")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
+
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(
+            LLMConfig(base_url="https://api.example.test", api_key=API_KEY, model="test-model")
+        )
+        return [event async for event in adapter.stream(ModelRequest(messages=[{"role": "user", "content": "x"}]))]
+
+    events = asyncio.run(scenario())
+    assert attempts == 3
+    assert [event.type for event in events] == ["retry", "retry", "error"]
+
+
+def test_openai_adapter_never_retries_an_authentication_rejection(monkeypatch) -> None:
+    attempts = 0
+
+    async def fake_stream(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise llm_client.LLMUpstreamError("unauthorized", upstream_status=401)
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
+
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(
+            LLMConfig(base_url="https://api.example.test", api_key=API_KEY, model="test-model")
+        )
+        return [event async for event in adapter.stream(ModelRequest(messages=[{"role": "user", "content": "x"}]))]
+
+    events = asyncio.run(scenario())
     assert attempts == 1
-    assert events[-1].type == "error"
-    assert events[-1].error == "LLMUpstreamError:upstream_503"
+    assert events[-1].error == "LLMUpstreamError:upstream_401"
 
 
 def test_openai_adapter_retries_transient_provider_status_before_failing(monkeypatch) -> None:
