@@ -271,6 +271,17 @@ VALUE_LABEL_MODES = ("labels", "strings", "none")
 MISSING_CODE_MODES = ("as_missing", "keep_codes")
 
 
+def _codes_text(codes: list[Any]) -> str:
+    """Declared missing codes as a person writes them: -99, 900 to 999."""
+
+    def one(code: Any) -> str:
+        if isinstance(code, dict):
+            return f"{_number(code['low'])} to {_number(code['high'])}"
+        return str(_number(code)) if isinstance(code, (int, float)) else repr(str(code))
+
+    return ", ".join(one(code) for code in codes)
+
+
 @dataclass
 class PreparedExport:
     """A frame ready to write, the writer's options, and what was not carried."""
@@ -358,7 +369,7 @@ def prepare_export(
             )
             report.note(
                 column, "user_missing_values",
-                f"{count} value(s) matching {codes} kept as ordinary values, as chosen; {where} treats them as valid",
+                f"{count} value(s) matching {_codes_text(codes)} kept as ordinary values, as chosen; {where} treats them as valid",
             )
             continue
         if count:
@@ -368,7 +379,7 @@ def prepare_export(
             "csv": "CSV has no user-missing codes",
             "xlsx": "Excel has no user-missing codes",
         }.get(fmt, "SPSS allows at most three codes, or one range and one code")
-        report.note(column, "user_missing_values", f"{count} value(s) matching {codes} written as missing: {reason}")
+        report.note(column, "user_missing_values", f"{count} value(s) matching {_codes_text(codes)} written as missing: {reason}")
 
     value_labels: dict[str, dict[Any, str]] = {}
     for column, mapping in (labels.get("value_labels") or {}).items():

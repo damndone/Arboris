@@ -144,3 +144,17 @@ def test_the_http_routes_preview_and_export_with_options(labelled) -> None:
     refused = client.post(f"/runs/{run_id}/datasets/export/preview", params=params,
                           json={**body, "columns": ["salary"]})
     assert refused.status_code == 422 and "salary" in refused.json()["error"]["message"]
+
+
+def test_export_notes_write_missing_codes_as_a_person_would() -> None:
+    import pandas as pd
+
+    from workbench.tabular_io import prepare_export
+
+    frame = pd.DataFrame({"age": [30.0, -100.0, -98.0, 45.0], "happy": [1.0, 9.0, 2.0, 1.0]})
+    labels = {"user_missing_values": {"age": [{"low": -100, "high": -10}], "happy": [9]}}
+    notes = [note["message"] for note in prepare_export(frame, labels, "dta").report.notes]
+
+    assert "2 value(s) matching -100 to -10 written as missing: Stata has no user-missing codes" in notes
+    assert "1 value(s) matching 9 written as missing: Stata has no user-missing codes" in notes
+    assert not any("{" in note for note in notes)
