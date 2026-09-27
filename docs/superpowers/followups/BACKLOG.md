@@ -15,6 +15,42 @@
 
 ---
 
+## 0.0 最新：v1.8.9 状态与延后清单（2026-09-27）
+
+> 本节是最新状态，覆盖下方 §0/§0.1 的旧结论（那两节记录到 v1.8.6/v1.8.7，未逐条清理）。
+
+**v1.8.9 = 日常可用（重建版）**，在 `.worktrees/workbench-v1.8.9`（分支 `workbench-v1.8.9`，基线 `f3836408`）。
+立项 `objectives/2026-09-25-v1.8.9-objective.md` 的 8 步全部交付；另做了信任与易用性一轮、数字核对、手册
+（`docs/manual/`）。证据：`evaluations/2026-09-26-v1.8.9-trust-round.md`。**尚未 merge / tag / push**。
+Codex 的 v1.8.9 spec 与 11 份计划为“部分采纳”，每份文件顶部已标注去向。
+
+### 0.2 v1.8.9 延后与未实现
+
+优先级：**F** = 地基（加复杂模型之前先做），**P** = 对标 SPSS/Stata 日常能力，**E** = 扩展能力，**D** = 待用户决定。
+
+| ID | 级别 | 内容 | 为什么延后 / 建议做法 | 来源 |
+|---|---|---|---|---|
+| V189-RESULT-ENVELOPE | F | 所有模型族与统计包统一结果信封：精确结果、诊断、图、警告、不可用原因、血缘绑定；Agent/Report/Table/Notebook 同源读取，漂移测试保证每个已登记能力都有 | 现为 `result_shapes` + `FAMILY_EVIDENCE_PROJECTIONS`，20 族中 17 族 Agent 可读；CS/SA/dCDH 只经诊断卡片；报告仅对 v1.8.6 四族有专门渲染。v1.8.10 首项 | Codex Evidence/Consumer Projection |
+| V189-POSTEST-REGISTRY | F | 按模型族的后估计注册表：GLM 的 Wald χ² / LR 检验、边际效应、lincom；去掉 `workflow_runtime.py` 中的 `"ols_1"` 字面量 | 现在非 OLS 一律 fail-closed 拒绝（正确但能力缺失） | Codex Workflow Truth Task 3 |
+| V189-MODEL-ACCEPTANCE-KIT | F | 新模型准入套件：声明 + R/Stata oracle fixture + 结果信封 + 台账分类 + 一条真机 Agent 评测用例，缺一不能合入 | 让之后每个复杂模型便宜且安全 | 新 |
+| V189-TYPED-STEP-BINDING | F | 工作流步骤输出统一类型化绑定、唯一 runtime admission | 目前只有 `produced_dataset` 与 `model_branches` 可跨恢复消费，已够用；随 RESULT-ENVELOPE 再评估 | Codex Workflow Truth Task 1/2A |
+| V189-BY-GROUP | P | “分组分别执行”（替代 SPSS SPLIT FILE）：检验与模型按组各跑一遍，结果并排对比，检验数计入披露与多重比较 | 不做隐藏的全局模式：SPLIT FILE 忘了关是 SPSS 的经典错误源；改为每个分析显式的“按 X 分组” | objective 第 6 步 |
+| V189-ORDER-BY | P | 依赖行序的操作显式带排序键（去重保留 first/last 加 `order_by`；滞后已由 `data.tsset` 定序）；导出增加“按变量排序” | 统计结果与行序无关，单独的“排序节点”价值低；Data View 已支持浏览排序 | objective 第 6 步 |
+| V189-DATA-UI-GAPS | P | aggregate / lag / tsset 的界面入口；数据集级权重（WEIGHT BY）；批量重编码；面板里分组 summarize detail；Data View 单元格编辑（如做，须生成节点） | 目前这些只能经 Agent 或建模时指定 | Codex Data Consumer |
+| V189-SURVEY-FAMILIES | P | 复杂抽样推广到有序、多项、负二项、Cox、分位数等 | 现仅 OLS/logit/probit/Poisson | v1.8.7 限制 |
+| V189-SCRIPT-EXPORT | P | 可复现脚本导出（由血缘生成可重跑的脚本，对标 do-file / syntax） | 对 Stata 用户比新模型更实际；计划 v1.8.10 | 新 |
+| V189-PUBLICATION-TABLES | P | 出版级表格 / Custom Tables 式可配置结果表 | 计划 v1.8.10 | Codex P2/P3 |
+| V189-CLASSIFICATION-ML | E | 分类 ML：先 logistic + random forest 两个 adapter，严格 CV、校准、模型比较、调参；再树模型/提升/神经网络、解释性 | 现仅回归预测（固定参数的 Lasso/Ridge/RF 回归）；计划 v1.8.11，按 Codex 计划精简 | Codex P1 Classification |
+| V189-P2-FAMILIES | E | GEE/GLMM → Tobit/AFT/竞争风险 → SEM/CFA → RDD/动态面板 → 贝叶斯/空间回归/状态空间 | 均未实现（代码中已确认）；每个经 MODEL-ACCEPTANCE-KIT | Codex P2 |
+| V189-QUANT | E | 量化研究与策略验证方向 | 用户设计在 Obsidian `workbench开发/路线图/Quant设计`，尚未读入（macOS 文稿权限阻挡） | 用户 |
+| V189-AGENT-COMPILER-IR | E | Plan IR / PortType / 两阶段发现 | 不采纳；仅当组合错误在真机评测中复现时重评 | Codex Agent Compiler |
+| V189-AUTO-TESTS-DISCLOSURE | D | 每次 run 自动计算的证据矩阵检验（t、卡方、相关…）目前不计入“分析路径”的检验数 | 要不要计入，是披露口径问题 | 新 |
+| V189-LOCAL-MODEL | D | 离线本地模型：作为服务商选项（Ollama/LM Studio），不打包、不分流；上线前用评测脚本测成功率 | 等用户定方向 | 用户 |
+| V189-MODEL-LIST-AUTODETECT | D | 服务商模型列表自动刷新（后端已有 `/llm/providers/{id}/models/refresh`），保留手填；去掉写死的版本名 | 等用户定方向 | 用户 |
+| V189-PROVIDER-FAILOVER | D | 主服务商连续失败时切备用服务商（需用户显式开启：数据会发往另一家） | 等用户定方向 | 新 |
+| V189-LIVE-EVAL-FULL | 发版前 | 网络正常时全量真机评测（32 条 × 3） | 2026-09-27 实测时 DeepSeek TLS 握手 10–14 s，结果主要反映网络 | 新 |
+| V189-AGENT-TURN-BUDGET | 观察 | Agent 单轮 120 s 上限与慢服务商 + 重试的关系 | 流静默已限 30 s；若仍常超时再调预算 | 新 |
+
 ## 0. 一句话结论
 
 **v1.8.6 已 SHIPPED**（2026-08-04，tag `v1.8.6`，`origin/main`=`9d5e947`）。
