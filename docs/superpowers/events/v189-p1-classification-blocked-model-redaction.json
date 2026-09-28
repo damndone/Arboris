@@ -1,0 +1,26 @@
+{
+  "event_id": "c1d2e3f4-5678-49ab-8cde-0123456789ab",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T18:35:00.000Z",
+  "type": "GAP",
+  "subtype": "classification_blocked_projection_model_metrics",
+  "stage": "review",
+  "incident_id": "7a9b8c6d-5e4f-4321-a098-76543210fedc",
+  "cause": "The blocked consumer projection redacted evaluation, baseline, control, comparison, and explanation sections but still forwarded candidate models containing development metrics and selection scores.",
+  "cause_status": "known",
+  "impact": "A blocked or exploration-only packet could still expose numeric model evidence through the models section, bypassing the intended fail-closed consumer boundary.",
+  "resolution": "resolved",
+  "lesson": "Fail-closed projections must audit every route by which formal numeric evidence can escape, including candidate lists and policy metadata.",
+  "lesson_key": "classification-blocked-projection-total-redaction",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "adversarial_projection_test",
+    "ref": "tests/predictive_research/test_classification_consumers_v189.py::test_classification_projection_keeps_blocked_evidence_unavailable",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T18:35:00.000Z"
+  },
+  "links": [
+    "backend/workbench/predictive_research/consumer_projection.py",
+    "tests/predictive_research/test_classification_consumers_v189.py"
+  ]
+}

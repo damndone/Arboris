@@ -1,0 +1,23 @@
+{
+  "event_id": "f8a4d0ca-3b5d-4a68-a1cc-286373f89df0",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T16:10:00.000Z",
+  "type": "FAILURE",
+  "subtype": "classification_row_index_alignment",
+  "stage": "implementation",
+  "incident_id": "7e6793ed-f73c-4fcb-9daa-8ffcb01d84b2",
+  "cause": "The fold-local preprocessing numeric helper returned a RangeIndex series and pandas aligned it against server row IDs during assignment.",
+  "cause_status": "known",
+  "impact": "A non-default row identity produced silent NaNs in transformed features and blocked protocol execution.",
+  "resolution": "resolved",
+  "lesson": "Information-set row identity must be preserved through every pandas transform; add a non-default-index regression probe.",
+  "lesson_key": "classification-row-identity-survives-transform",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/predictive_research/test_classification_consumers_v189.py::test_fold_preprocessing_preserves_non_default_row_identity",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T16:10:00.000Z"
+  },
+  "links": ["backend/workbench/predictive_research/preprocessing.py", "backend/workbench/predictive_research/classification_protocol.py"]
+}

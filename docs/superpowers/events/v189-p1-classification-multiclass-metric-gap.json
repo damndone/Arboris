@@ -1,0 +1,26 @@
+{
+  "event_id": "f5578f3c-7e2d-4c4b-9aa9-bd0c61dc4f89",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T16:20:00.000Z",
+  "type": "FAILURE",
+  "subtype": "classification_multiclass_metric_averaging",
+  "stage": "implementation",
+  "incident_id": "c5d9dd34-3d2d-4b0c-a6e6-9f77819f093b",
+  "cause": "The first multiclass protocol path called the metric bundle without an explicit macro or weighted averaging policy.",
+  "cause_status": "known",
+  "impact": "The typed metric contract correctly rejected the ambiguous multiclass evaluation instead of silently selecting an averaging convention.",
+  "resolution": "resolved",
+  "lesson": "Multiclass metrics must carry an explicit averaging policy at every fold, OOF, holdout and baseline evaluation.",
+  "lesson_key": "classification-multiclass-averaging-is-explicit",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/predictive_research/test_classification_consumers_v189.py::test_protocol_keeps_multiclass_probability_columns_typed_and_ordered",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T16:20:00.000Z"
+  },
+  "links": [
+    "backend/workbench/predictive_research/classification_metrics.py",
+    "backend/workbench/predictive_research/classification_protocol.py"
+  ]
+}

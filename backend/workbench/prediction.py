@@ -23,6 +23,14 @@ from .predictive_research.graph_persistence import persist_prediction_node_index
 from .predictive_research.identity import build_prediction_identity
 from .predictive_research.prediction_protocol import dataset_snapshot_hash, run_oos_prediction
 from .predictive_research.persistence import PredictionPersistenceAdmission
+from .predictive_research.persistence import persist_classification_evidence_packet
+from .predictive_research.graph_persistence import persist_classification_graph
+from .predictive_research.classification_contracts import (
+    ClassificationDiagnosticsPlanV1,
+    ClassificationTaskSpecV1,
+    DecisionPolicyV1,
+)
+from .predictive_research.classification_protocol import run_classification_protocol
 from .predictive_research.split_kernel import build_split_plan
 from .lineage.hashing import node_hash
 
@@ -255,6 +263,85 @@ def run_prediction_model_v186(
         "prediction_packet": prediction_payload,
         "evaluation_packet": evaluation_payload,
         "control_packet": control_payload,
+    }
+
+
+def run_classification_model_v189(
+    frame: pd.DataFrame,
+    run_root: Path,
+    *,
+    task: ClassificationTaskSpecV1,
+    model_ids: tuple[str, ...] | list[str],
+    decision_policy: DecisionPolicyV1,
+    final_holdout_fraction: float = 0.25,
+    cv_folds: int = 3,
+    feature_available_at: list[Any] | tuple[Any, ...] | None = None,
+    prediction_origins: list[Any] | tuple[Any, ...] | None = None,
+    label_windows: list[tuple[Any, Any]] | tuple[tuple[Any, Any], ...] | None = None,
+    entities: list[str] | tuple[str, ...] | None = None,
+    periods: list[Any] | tuple[Any, ...] | None = None,
+    purge_gap: Any | None = None,
+    embargo: Any | None = None,
+    embargo_basis: str | None = None,
+    model_parameters: dict[str, dict[str, Any]] | None = None,
+    calibration_method: str = "platt",
+    diagnostics_plan: ClassificationDiagnosticsPlanV1 | None = None,
+    inputs: list[str] | None = None,
+) -> dict[str, Any]:
+    """Execute the additive v1.8.9 classification path and persist its proof.
+
+    This entrypoint accepts typed task/policy objects only.  It never accepts
+    a provider callable, estimator object, raw executor reference, or a
+    client-selected filesystem path.  Agent and Notebook cutover can bind to
+    this seam later without changing the classification protocol itself.
+    """
+
+    if not isinstance(task, ClassificationTaskSpecV1) or not isinstance(decision_policy, DecisionPolicyV1):
+        raise ContractError(
+            "CLASSIFICATION_TYPED_REQUEST_REQUIRED",
+            "classification entrypoint requires typed task and decision policy contracts",
+        )
+    artifact_inputs = list(inputs or ["cleaned_dataset"])
+    if any(not isinstance(value, str) or not value.strip() for value in artifact_inputs):
+        raise ContractError("CLASSIFICATION_INPUT_REFS_INVALID", "classification input refs must be non-empty text")
+    packet = run_classification_protocol(
+        frame,
+        task=task,
+        model_ids=tuple(model_ids),
+        decision_policy=decision_policy,
+        final_holdout_fraction=final_holdout_fraction,
+        cv_folds=cv_folds,
+        feature_available_at=feature_available_at,
+        prediction_origins=prediction_origins,
+        label_windows=label_windows,
+        entities=entities,
+        periods=periods,
+        purge_gap=purge_gap,
+        embargo=embargo,
+        embargo_basis=embargo_basis,
+        model_parameters=model_parameters,
+        calibration_method=calibration_method,
+        diagnostics_plan=diagnostics_plan,
+    )
+    artifact_id = packet["packet_id"].replace(":", "_")
+    with PredictionPersistenceAdmission.admit(run_root) as admission:
+        evidence_ref = persist_classification_evidence_packet(
+            admission,
+            artifact_id=artifact_id,
+            packet=packet,
+            inputs=artifact_inputs,
+        )
+        graph_ref = persist_classification_graph(
+            admission,
+            artifact_id=f"{artifact_id}_graph",
+            packet=packet,
+            inputs=[artifact_id],
+        )
+    return {
+        "protocol": "classification_ml_v1",
+        "packet": packet,
+        "evidence_artifact": evidence_ref,
+        "graph_artifact": graph_ref,
     }
 
 

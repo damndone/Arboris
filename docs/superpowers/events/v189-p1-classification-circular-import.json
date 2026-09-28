@@ -1,0 +1,23 @@
+{
+  "event_id": "b8cfecfb-a864-47ef-a8c3-89b0ff4cffbc",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T16:12:00.000Z",
+  "type": "ERROR",
+  "subtype": "classification_eager_import_cycle",
+  "stage": "implementation",
+  "incident_id": "b4f7fe5e-1d2f-4b17-94ad-ea3e9e2b8c10",
+  "cause": "The new package exports eagerly imported artifact-backed consumer helpers while workbench.artifacts was still importing the schema registry.",
+  "cause_status": "known",
+  "impact": "The full predictive-research collection failed for two existing v1.8.6 tests before any test body ran.",
+  "resolution": "resolved",
+  "lesson": "Artifact-backed extensions must be lazy package exports so the existing artifact module remains acyclic.",
+  "lesson_key": "classification-exports-stay-acyclic",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/predictive_research/test_agent_evidence_v186.py tests/predictive_research/test_artifact_schema_integration.py",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T16:12:00.000Z"
+  },
+  "links": ["backend/workbench/predictive_research/__init__.py"]
+}

@@ -1,0 +1,90 @@
+{
+  "provider_id": "classification.ml",
+  "semantic_version": "1.0",
+  "contracts": [
+    {"kind": "capability", "logical_id": "workbench.classification.capability", "semantic_version": "1.0", "contract_digest": "1111111111111111111111111111111111111111111111111111111111111111"},
+    {"kind": "operation", "logical_id": "workbench.classification.fit", "semantic_version": "1.0", "contract_digest": "2222222222222222222222222222222222222222222222222222222222222222"},
+    {"kind": "operation", "logical_id": "workbench.classification.compare", "semantic_version": "1.0", "contract_digest": "3333333333333333333333333333333333333333333333333333333333333333"},
+    {"kind": "operation", "logical_id": "workbench.classification.explain", "semantic_version": "1.0", "contract_digest": "4444444444444444444444444444444444444444444444444444444444444444"},
+    {"kind": "operation", "logical_id": "workbench.classification.decision", "semantic_version": "1.0", "contract_digest": "5555555555555555555555555555555555555555555555555555555555555555"},
+    {"kind": "step", "logical_id": "workbench.classification.step", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"},
+    {"kind": "schema", "logical_id": "workbench.classification.request", "semantic_version": "1.0", "contract_digest": "7777777777777777777777777777777777777777777777777777777777777777"},
+    {"kind": "validator", "logical_id": "workbench.classification.result", "semantic_version": "1.0", "contract_digest": "8888888888888888888888888888888888888888888888888888888888888888"},
+    {"kind": "adapter", "logical_id": "workbench.classification.adapter", "semantic_version": "1.0", "contract_digest": "9999999999999999999999999999999999999999999999999999999999999999"},
+    {"kind": "output", "logical_id": "workbench.classification.output", "semantic_version": "1.0", "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    {"kind": "evidence", "logical_id": "workbench.classification.evidence", "semantic_version": "1.0", "contract_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
+    {"kind": "renderer", "logical_id": "workbench.classification.renderer", "semantic_version": "1.0", "contract_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+    {"kind": "policy", "logical_id": "workbench.classification.policy", "semantic_version": "1.0", "contract_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}
+  ],
+  "exposure_paths": [
+    {
+      "path_id": "workbench.classification.fit-path",
+      "semantic_version": "1.0",
+      "exposure": "composition",
+      "capability_ref": {"kind": "capability", "logical_id": "workbench.classification.capability", "semantic_version": "1.0", "contract_digest": "1111111111111111111111111111111111111111111111111111111111111111"},
+      "operation_ref": {"kind": "operation", "logical_id": "workbench.classification.fit", "semantic_version": "1.0", "contract_digest": "2222222222222222222222222222222222222222222222222222222222222222"},
+      "step_contract_ref": {"kind": "step", "logical_id": "workbench.classification.step", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"},
+      "family_contract_ref": null,
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "workbench.classification.adapter", "semantic_version": "1.0", "contract_digest": "9999999999999999999999999999999999999999999999999999999999999999"},
+      "result_contract_refs": [{"kind": "output", "logical_id": "workbench.classification.output", "semantic_version": "1.0", "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.classification.evidence", "semantic_version": "1.0", "contract_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+      "projection_refs": {"agent": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}, "notebook": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}, "report": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}
+    },
+    {
+      "path_id": "workbench.classification.compare-path",
+      "semantic_version": "1.0",
+      "exposure": "composition",
+      "capability_ref": {"kind": "capability", "logical_id": "workbench.classification.capability", "semantic_version": "1.0", "contract_digest": "1111111111111111111111111111111111111111111111111111111111111111"},
+      "operation_ref": {"kind": "operation", "logical_id": "workbench.classification.compare", "semantic_version": "1.0", "contract_digest": "3333333333333333333333333333333333333333333333333333333333333333"},
+      "step_contract_ref": {"kind": "step", "logical_id": "workbench.classification.step", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"},
+      "family_contract_ref": null,
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "workbench.classification.adapter", "semantic_version": "1.0", "contract_digest": "9999999999999999999999999999999999999999999999999999999999999999"},
+      "result_contract_refs": [{"kind": "output", "logical_id": "workbench.classification.output", "semantic_version": "1.0", "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.classification.evidence", "semantic_version": "1.0", "contract_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+      "projection_refs": {"agent": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}, "notebook": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}, "report": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}
+    },
+    {
+      "path_id": "workbench.classification.explain-path",
+      "semantic_version": "1.0",
+      "exposure": "composition",
+      "capability_ref": {"kind": "capability", "logical_id": "workbench.classification.capability", "semantic_version": "1.0", "contract_digest": "1111111111111111111111111111111111111111111111111111111111111111"},
+      "operation_ref": {"kind": "operation", "logical_id": "workbench.classification.explain", "semantic_version": "1.0", "contract_digest": "4444444444444444444444444444444444444444444444444444444444444444"},
+      "step_contract_ref": {"kind": "step", "logical_id": "workbench.classification.step", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"},
+      "family_contract_ref": null,
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "workbench.classification.adapter", "semantic_version": "1.0", "contract_digest": "9999999999999999999999999999999999999999999999999999999999999999"},
+      "result_contract_refs": [{"kind": "output", "logical_id": "workbench.classification.output", "semantic_version": "1.0", "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.classification.evidence", "semantic_version": "1.0", "contract_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+      "projection_refs": {"agent": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}, "notebook": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}, "report": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}
+    },
+    {
+      "path_id": "workbench.classification.decision-path",
+      "semantic_version": "1.0",
+      "exposure": "composition",
+      "capability_ref": {"kind": "capability", "logical_id": "workbench.classification.capability", "semantic_version": "1.0", "contract_digest": "1111111111111111111111111111111111111111111111111111111111111111"},
+      "operation_ref": {"kind": "operation", "logical_id": "workbench.classification.decision", "semantic_version": "1.0", "contract_digest": "5555555555555555555555555555555555555555555555555555555555555555"},
+      "step_contract_ref": {"kind": "step", "logical_id": "workbench.classification.step", "semantic_version": "1.0", "contract_digest": "6666666666666666666666666666666666666666666666666666666666666666"},
+      "family_contract_ref": null,
+      "execution_adapter_ref": {"kind": "adapter", "logical_id": "workbench.classification.adapter", "semantic_version": "1.0", "contract_digest": "9999999999999999999999999999999999999999999999999999999999999999"},
+      "result_contract_refs": [{"kind": "output", "logical_id": "workbench.classification.output", "semantic_version": "1.0", "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+      "evidence_contract_refs": [{"kind": "evidence", "logical_id": "workbench.classification.evidence", "semantic_version": "1.0", "contract_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+      "projection_refs": {"agent": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}, "notebook": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}, "report": {"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}
+    }
+  ],
+  "adapter_declarations": [
+    {
+      "adapter_id": "workbench.classification.adapter",
+      "semantic_version": "1.0",
+      "request_schema_ref": {"kind": "schema", "logical_id": "workbench.classification.request", "semantic_version": "1.0", "contract_digest": "7777777777777777777777777777777777777777777777777777777777777777"},
+      "executor_ref": "executor:workbench.classification.adapter",
+      "result_validator_ref": {"kind": "validator", "logical_id": "workbench.classification.result", "semantic_version": "1.0", "contract_digest": "8888888888888888888888888888888888888888888888888888888888888888"},
+      "output_refs": [
+        {"kind": "output", "logical_id": "workbench.classification.output", "semantic_version": "1.0", "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        {"kind": "evidence", "logical_id": "workbench.classification.evidence", "semantic_version": "1.0", "contract_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+      ]
+    }
+  ],
+  "projection_refs": [{"kind": "projection", "logical_id": "workbench.classification.projection", "semantic_version": "1.0", "contract_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],
+  "renderer_refs": [{"kind": "renderer", "logical_id": "workbench.classification.renderer", "semantic_version": "1.0", "contract_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}],
+  "policy_refs": [{"kind": "policy", "logical_id": "workbench.classification.policy", "semantic_version": "1.0", "contract_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}]
+}

@@ -1,0 +1,32 @@
+{
+  "event_id": "c4d5e6f7-8091-4a2b-9c3d-4e5f60718293",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T22:30:00.000Z",
+  "type": "REVIEW",
+  "subtype": "classification_diagnostics_release_plan_hardening",
+  "stage": "review",
+  "state_from": "IMPLEMENTING",
+  "state_to": "IMPLEMENTING",
+  "incident_id": "d5e6f7a8-9012-4b3c-8d4e-5f60718293a4",
+  "cause": "The first diagnostics contribution did not expose the declared columns, support threshold, bins, statistics, or plan body as an immutable holdout-release contract.",
+  "cause_status": "known",
+  "impact": "A downstream consumer could not independently explain which subgroup and shift facts were authorized, and a mutable diagnostics plan could change the evidence identity after construction.",
+  "resolution": "resolved",
+  "lesson": "Holdout subgroup and shift evidence must be an exact, immutable, predeclared section with a self-contained plan and descriptive-only statistics.",
+  "lesson_key": "classification-diagnostics-plan-is-immutable-and-self-describing",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "pytest_compile_formal",
+    "ref": "tests/predictive_research/test_classification_contracts_v189.py; tests/predictive_research/test_classification_protocol_v189.py; tests/predictive_research/test_classification_consumers_v189.py; 146 passed; compileall; git diff --check; devline verify",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T22:30:00.000Z"
+  },
+  "links": [
+    "backend/workbench/predictive_research/classification_contracts.py",
+    "backend/workbench/predictive_research/classification_explanations.py",
+    "backend/workbench/predictive_research/classification_protocol.py",
+    "frontend/src/report/ClassificationEvidence.tsx",
+    "tests/predictive_research/test_classification_contracts_v189.py",
+    "tests/predictive_research/test_classification_protocol_v189.py"
+  ]
+}

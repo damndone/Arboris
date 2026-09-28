@@ -1,0 +1,25 @@
+{
+  "event_id": "f3b44f35-7f4f-4c43-8e53-3c0b0d38dd75",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T15:50:00.000Z",
+  "type": "GATE",
+  "subtype": "tdd_red",
+  "stage": "implementation",
+  "state_from": "STARTED",
+  "state_to": "STARTED",
+  "incident_id": "a3188e11-6c33-49b6-93f6-a6b57d44a1fa",
+  "cause": "New classification consumer tests were added before implementation.",
+  "cause_status": "known",
+  "impact": "The focused consumer suite fails at import because the typed classification projection seam is not implemented yet.",
+  "resolution": "open",
+  "lesson": "Keep consumer contracts red before implementation and prove the packet-backed boundary with focused tests.",
+  "lesson_key": "classification-consumer-tdd-red",
+  "preventability": "not_preventable",
+  "evidence": {
+    "kind": "test",
+    "ref": "tests/predictive_research/test_classification_consumers_v189.py",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T15:50:00.000Z"
+  },
+  "links": []
+}

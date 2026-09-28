@@ -1,0 +1,30 @@
+{
+  "event_id": "e7b1c2d3-4f5a-4b6c-8d7e-9012a3b4c5d6",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T20:20:00.000Z",
+  "type": "REVIEW",
+  "subtype": "classification_adversarial_second_pass_hardening",
+  "stage": "review",
+  "incident_id": "f1e2d3c4-b5a6-4789-8abc-def012345678",
+  "cause": "The first adversarial review identified holdout over-release, calibrator reuse, out-of-band temporal/entity keys, weighted-stage gaps, packet hash optionality, and persistence digest/concurrency gaps that focused tests did not cover.",
+  "cause_status": "known",
+  "impact": "P1 could not be considered safe for integration until the evidence boundary and persistence boundary were made fail-closed.",
+  "resolution": "resolved",
+  "lesson": "Correctness review must probe the order and identity of real data consumption, not only the shape of a final packet; remaining browser, provider, and central cutover gates stay separate.",
+  "lesson_key": "classification-second-pass-closes-evidence-and-persistence-boundaries",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "adversarial_regression_suite",
+    "ref": "tests/predictive_research/test_classification_consumers_v189.py",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T20:20:00.000Z"
+  },
+  "links": [
+    "backend/workbench/predictive_research/classification_protocol.py",
+    "backend/workbench/predictive_research/classification_metrics.py",
+    "backend/workbench/predictive_research/persistence.py",
+    "backend/workbench/predictive_research/graph_persistence.py",
+    "backend/workbench/predictive_research/schema.py",
+    "tests/predictive_research/test_classification_consumers_v189.py"
+  ]
+}

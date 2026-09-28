@@ -7,7 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from ..artifacts import read_json, sha256_file
-from .schema import PayloadContractError, default_v1_prediction_registry
+from .schema import (
+    CLASSIFICATION_PACKET_SCHEMA,
+    PayloadContractError,
+    default_v1_prediction_registry,
+    validate_classification_packet,
+)
+from .persistence import PredictionPersistenceAdmission
 
 
 _REQUIRED = {
@@ -18,6 +24,7 @@ _REQUIRED = {
     "workbench.prediction.negative-control-packet",
 }
 _CONSUMERS = frozenset({"agent", "report", "table", "compare"})
+_CLASSIFICATION_CONSUMERS = frozenset({"agent", "notebook", "report", "table", "compare"})
 _LEGACY_MESSAGE = (
     "Legacy evaluation — split protocol was not persisted. The result remains "
     "readable but is not comparable with v1.8.6 predictive-research results."
@@ -202,3 +209,122 @@ def project_prediction_evidence(
         "limits": evaluation.get("limits", []),
         "payload_versions": {schema: payload["schema_version"] for schema, payload in by_schema.items()},
     }
+
+
+def project_classification_evidence(
+    payload: Mapping[str, Any],
+    *,
+    consumer: str,
+) -> dict[str, Any]:
+    """Project one classification packet without recomputing any result.
+
+    This is intentionally a copy-by-reference projection: the packet is the
+    authority, and consumers receive the exact typed metric/calibration/
+    control objects produced by the protocol.  No row data, estimator, or
+    metric implementation is imported here.
+    """
+
+    if consumer not in _CLASSIFICATION_CONSUMERS:
+        raise PayloadContractError("ARTIFACT_CONSUMER_UNSUPPORTED", f"unsupported consumer {consumer!r}")
+    packet = validate_classification_packet(payload)
+    ready = packet["status"] == "validated"
+    # A blocked/unavailable packet may retain diagnostic fields for audit, but
+    # it is not an evidence release.  Do not leak stale numeric sections to a
+    # downstream Agent, Notebook, Report, or table projection.
+    models = packet["models"] if ready else []
+    selected_model = packet.get("selected_model") if ready else None
+    model_id = selected_model.get("model_id") if isinstance(selected_model, Mapping) else None
+    evaluation = packet["evaluation"] if ready else {"status": "unavailable", "metrics": {}}
+    calibration = packet["calibration"] if ready else {"status": "unavailable"}
+    baselines = packet["baselines"] if ready else []
+    controls = packet["controls"] if ready else []
+    comparison = packet["comparison"] if ready else {"status": "unavailable"}
+    explanations = packet["explanations"] if ready else {"status": "unavailable"}
+    decision_policy = packet["decision_policy"] if ready else {"status": "unavailable"}
+    safe_task = packet["task"] if ready else {"status": "unavailable"}
+    safe_split = packet["split"] if ready else {"status": "unavailable"}
+    safe_availability = packet["availability"] if ready else {
+        "status": packet["availability"].get("status", "unknown"),
+    }
+    safe_receipt = packet["evidence_receipt"] if ready else {
+        "status": "unavailable",
+        "validation_level": "blocked",
+    }
+    return {
+        "status": packet["status"],
+        "consumer": consumer,
+        "protocol": "classification_ml_v1",
+        "projection_kind": "typed_classification_evidence",
+        "packet_id": packet["packet_id"],
+        "packet_hash": packet.get("packet_hash"),
+        "model_id": model_id,
+        "task": safe_task,
+        "split": safe_split,
+        "models": models,
+        "selected_model": selected_model,
+        "evaluation": evaluation,
+        "metrics": evaluation.get("metrics", {}),
+        "calibration": calibration,
+        "baselines": baselines,
+        "controls": controls,
+        "comparison": comparison,
+        "explanations": explanations,
+        "decision_policy": decision_policy,
+        "holdout_boundary": packet["holdout_boundary"],
+        "availability": safe_availability,
+        "warnings": packet["warnings"],
+        "blocked_reasons": packet["warnings"] if packet["status"] != "validated" else [],
+        "evidence_receipt": safe_receipt,
+        "artifact_refs": packet["artifact_refs"] if ready else {},
+        "derived_from_raw_rows": False,
+    }
+
+
+def read_classification_evidence_from_run_root(
+    run_root: Path,
+    *,
+    consumer: str,
+) -> dict[str, Any]:
+    """Read exactly one hash-verified classification packet from a run.
+
+    A missing packet becomes an explicit unavailable projection.  A present
+    but tampered packet raises a typed contract error; neither case exposes
+    raw JSON to a consumer as if it were trustworthy evidence.
+    """
+
+    if consumer not in _CLASSIFICATION_CONSUMERS:
+        raise PayloadContractError("ARTIFACT_CONSUMER_UNSUPPORTED", f"unsupported consumer {consumer!r}")
+    with PredictionPersistenceAdmission.admit(Path(run_root)) as admission:
+        index = admission._read_json(("artifacts_index.json",))
+        if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
+            raise PayloadContractError("ARTIFACT_INDEX_INVALID", "artifacts_index.json has no artifact list")
+        records = [
+            record
+            for record in index["artifacts"]
+            if isinstance(record, dict) and record.get("artifact_type") == "classification_evidence_packet"
+        ]
+        if not records:
+            return {
+                "status": "unavailable",
+                "consumer": consumer,
+                "protocol": "classification_ml_v1",
+                "projection_kind": "typed_classification_evidence",
+                "reason": "classification evidence packet is unavailable",
+                "derived_from_raw_rows": False,
+            }
+        if len(records) != 1:
+            raise PayloadContractError(
+                "CLASSIFICATION_PACKET_DUPLICATE",
+                "a run must expose exactly one classification evidence packet",
+            )
+        record = records[0]
+        contract = record.get("payload_contract")
+        if not isinstance(contract, Mapping) or contract.get("payload_schema") != CLASSIFICATION_PACKET_SCHEMA or contract.get("schema_version") != 1:
+            raise PayloadContractError("ARTIFACT_PAYLOAD_CONTRACT_MISMATCH", "classification packet contract is inconsistent")
+        relative_path = Path(str(record.get("path", "")))
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise PayloadContractError("ARTIFACT_PATH_INVALID", "classification evidence path must stay inside run root")
+        payload = admission.read_verified_json(tuple(relative_path.parts), str(record.get("sha256", "")))
+        if not isinstance(payload, Mapping):
+            raise PayloadContractError("CLASSIFICATION_PACKET_INVALID", "classification evidence payload is not an object")
+    return project_classification_evidence(payload, consumer=consumer)

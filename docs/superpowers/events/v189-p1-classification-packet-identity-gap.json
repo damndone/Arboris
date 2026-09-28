@@ -1,0 +1,26 @@
+{
+  "event_id": "d2e3f4a5-6789-4abc-8def-1234567890ab",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T19:05:00.000Z",
+  "type": "GAP",
+  "subtype": "classification_packet_identity_missing_model_policy",
+  "stage": "review",
+  "incident_id": "8b7c6d5e-4f3a-2109-8fed-cba987654321",
+  "cause": "The packet identity initially included dataset, task, and split only, so changing the candidate model or DecisionPolicy could reuse an evidence artifact identity even though the result changed.",
+  "cause_status": "known",
+  "impact": "Artifact caches and downstream lineage could confuse model/policy revisions with the prior classification result.",
+  "resolution": "resolved",
+  "lesson": "Typed evidence identity must bind every decision-relevant input, not only the data and split snapshots.",
+  "lesson_key": "classification-packet-identity-binds-decision-inputs",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "protocol_identity_regression",
+    "ref": "tests/predictive_research/test_classification_consumers_v189.py::test_protocol_packet_identity_binds_model_set_and_decision_policy",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T19:05:00.000Z"
+  },
+  "links": [
+    "backend/workbench/predictive_research/classification_protocol.py",
+    "tests/predictive_research/test_classification_consumers_v189.py"
+  ]
+}

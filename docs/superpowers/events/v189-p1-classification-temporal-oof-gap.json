@@ -1,0 +1,26 @@
+{
+  "event_id": "d1d81ee7-1e3c-4a2e-8b8e-c0f8f37c9e62",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T17:05:00.000Z",
+  "type": "FAILURE",
+  "subtype": "classification_temporal_warmup_oof",
+  "stage": "implementation",
+  "incident_id": "d13d85e7-c5d0-4d5b-a2d7-1fa1cded8a8f",
+  "cause": "The temporal rolling split includes a development warm-up period without a validation fold, but the first protocol treated every development row as an OOF row.",
+  "cause_status": "known",
+  "impact": "Temporal classification runs incorrectly failed as incomplete OOF instead of keeping warm-up rows in development refit only.",
+  "resolution": "resolved",
+  "lesson": "OOF evidence is exactly the development rows assigned to validation folds; warm-up and purged rows must never enter OOF metrics or threshold selection.",
+  "lesson_key": "classification-oof-excludes-warmup",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/predictive_research/test_classification_consumers_v189.py::test_temporal_target_shuffle_control_is_unavailable_without_declared_exchangeability_unit",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T17:05:00.000Z"
+  },
+  "links": [
+    "backend/workbench/predictive_research/classification_protocol.py",
+    "backend/workbench/predictive_research/split_kernel.py"
+  ]
+}

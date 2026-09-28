@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import fcntl
 import hashlib
 import json
 import os
@@ -14,7 +15,12 @@ from uuid import uuid4
 
 from .. import __version__
 from ..domain import ArtifactRecord
-from .schema import PayloadContractError, default_v1_prediction_registry
+from .schema import (
+    CLASSIFICATION_PACKET_SCHEMA,
+    PayloadContractError,
+    default_v1_prediction_registry,
+    validate_classification_packet,
+)
 from .contracts import ContractError
 
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
@@ -44,6 +50,7 @@ class PredictionPersistenceAdmission:
     """A short-lived run-root capability with no raw-path writes."""
 
     _root_fd: int
+    _lock_fd: int = field(default=-1, repr=False)
 
     @classmethod
     def admit(cls, run_root: Path) -> "PredictionPersistenceAdmission":
@@ -61,7 +68,24 @@ class PredictionPersistenceAdmission:
                 "PREDICTION_PERSISTENCE_ADMISSION_REQUIRED",
                 "run root could not be admitted as a pinned directory",
             ) from exc
-        return cls(fd)
+        lock_fd = -1
+        try:
+            lock_fd = os.open(
+                ".workbench-persistence.lock",
+                os.O_RDWR | os.O_CREAT | _O_NOFOLLOW | _O_CLOEXEC,
+                0o600,
+                dir_fd=fd,
+            )
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        except (OSError, ValueError) as exc:
+            if lock_fd >= 0:
+                os.close(lock_fd)
+            os.close(fd)
+            raise ContractError(
+                "PREDICTION_PERSISTENCE_ADMISSION_REQUIRED",
+                "run root could not acquire its persistence lock",
+            ) from exc
+        return cls(fd, lock_fd)
 
     def __enter__(self) -> "PredictionPersistenceAdmission":
         return self
@@ -70,6 +94,12 @@ class PredictionPersistenceAdmission:
         self.close()
 
     def close(self) -> None:
+        lock_fd, self._lock_fd = self._lock_fd, -1
+        if lock_fd >= 0:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
         fd, self._root_fd = self._root_fd, -1
         if fd >= 0:
             os.close(fd)
@@ -160,7 +190,7 @@ class PredictionPersistenceAdmission:
     def write_json(self, relative_parts: Sequence[str], payload: Any) -> str:
         return self._atomic_write(relative_parts, _json_bytes(payload))
 
-    def _read_json(self, relative_parts: Sequence[str]) -> Any:
+    def _read_json(self, relative_parts: Sequence[str], *, allow_missing: bool = False) -> Any:
         checked = tuple(_safe_part(part) for part in relative_parts)
         parent_fd = self._directory(checked[:-1], create=False)
         fd: int | None = None
@@ -175,12 +205,105 @@ class PredictionPersistenceAdmission:
             with os.fdopen(fd, "rb", closefd=True) as handle:
                 fd = None
                 return json.loads(handle.read().decode("utf-8"))
+        except FileNotFoundError as exc:
+            if allow_missing:
+                return None
+            raise ContractError("PREDICTION_PERSISTENCE_INDEX_INVALID", "artifact index is not a valid JSON object") from exc
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
             raise ContractError("PREDICTION_PERSISTENCE_INDEX_INVALID", "artifact index is not a valid JSON object") from exc
         finally:
             if fd is not None:
                 os.close(fd)
             self._close_children(parent_fd)
+
+    def _file_sha256(self, relative_parts: Sequence[str]) -> str:
+        checked = tuple(_safe_part(part) for part in relative_parts)
+        if not checked:
+            raise ContractError("PREDICTION_PERSISTENCE_PATH_INVALID", "persistence path cannot be empty")
+        parent_fd = self._directory(checked[:-1], create=False)
+        fd: int | None = None
+        try:
+            fd = os.open(
+                checked[-1],
+                os.O_RDONLY | _O_NOFOLLOW | _O_CLOEXEC,
+                dir_fd=parent_fd,
+            )
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError
+            digest = hashlib.sha256()
+            while True:
+                chunk = os.read(fd, 1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+            return digest.hexdigest()
+        except FileNotFoundError as exc:
+            raise PayloadContractError(
+                "ARTIFACT_FILE_MISSING",
+                "registered artifact file is missing",
+            ) from exc
+        except (OSError, ValueError) as exc:
+            raise PayloadContractError(
+                "ARTIFACT_FILE_INVALID",
+                "registered artifact file is not a readable regular file",
+            ) from exc
+        finally:
+            if fd is not None:
+                os.close(fd)
+            self._close_children(parent_fd)
+
+    def read_verified_json(self, relative_parts: Sequence[str], expected_sha256: str) -> Any:
+        """Read and hash one artifact through the admitted, pinned directory FD."""
+
+        checked = tuple(_safe_part(part) for part in relative_parts)
+        if not checked or not isinstance(expected_sha256, str):
+            raise PayloadContractError("ARTIFACT_PAYLOAD_HASH_MISMATCH", "artifact path or digest is invalid")
+        parent_fd = self._directory(checked[:-1], create=False)
+        fd: int | None = None
+        try:
+            fd = os.open(
+                checked[-1],
+                os.O_RDONLY | _O_NOFOLLOW | _O_CLOEXEC,
+                dir_fd=parent_fd,
+            )
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError
+            with os.fdopen(fd, "rb", closefd=True) as handle:
+                fd = None
+                content = handle.read()
+            if _sha256(content) != expected_sha256:
+                raise PayloadContractError(
+                    "ARTIFACT_PAYLOAD_HASH_MISMATCH",
+                    "artifact payload hash does not match its index record",
+                )
+            try:
+                return json.loads(content.decode("utf-8"))
+            except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise PayloadContractError(
+                    "ARTIFACT_PAYLOAD_VALIDATION_FAILED",
+                    "artifact payload is not valid JSON",
+                ) from exc
+        except PayloadContractError:
+            raise
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            raise PayloadContractError(
+                "ARTIFACT_PAYLOAD_HASH_MISMATCH",
+                "artifact payload is missing or is not a regular file",
+            ) from exc
+        finally:
+            if fd is not None:
+                os.close(fd)
+            self._close_children(parent_fd)
+
+    def _artifact_records(self, artifact_id: str) -> list[dict[str, Any]]:
+        index = self._read_json(("artifacts_index.json",))
+        if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
+            raise PayloadContractError("ARTIFACT_INDEX_INVALID", "artifacts_index.json has no artifact list")
+        return [
+            record
+            for record in index["artifacts"]
+            if isinstance(record, dict) and record.get("artifact_id") == artifact_id
+        ]
 
     def register_artifact(
         self,
@@ -201,6 +324,12 @@ class PredictionPersistenceAdmission:
             raise PayloadContractError("ARTIFACT_PAYLOAD_CONTRACT_REQUIRED", "payload schema and version are required")
         payload = self._read_json(relative_parts)
         validated = default_v1_prediction_registry().validate(payload)
+        actual_sha256 = self._file_sha256(relative_parts)
+        if actual_sha256 != sha256:
+            raise PayloadContractError(
+                "ARTIFACT_DIGEST_MISMATCH",
+                f"artifact {artifact_id!r} digest does not match the persisted file",
+            )
         if (
             validated.get("payload_schema") != contract["payload_schema"]
             or validated.get("schema_version") != contract["schema_version"]
@@ -219,5 +348,102 @@ class PredictionPersistenceAdmission:
             code_version=__version__,
             payload_contract=contract,
         )
-        index["artifacts"].append(record.to_dict())
+        record_payload = record.to_dict()
+        existing_records = [
+            existing
+            for existing in index["artifacts"]
+            if isinstance(existing, dict) and existing.get("artifact_id") == artifact_id
+        ]
+        if existing_records:
+            if len(existing_records) == 1 and existing_records[0] == record_payload:
+                return
+            raise PayloadContractError(
+                "ARTIFACT_ID_CONFLICT",
+                f"artifact_id {artifact_id!r} is already bound to a different artifact",
+            )
+        index["artifacts"].append(record_payload)
         self._atomic_write(("artifacts_index.json",), _json_bytes(index))
+
+
+def persist_classification_evidence_packet(
+    admission: PredictionPersistenceAdmission,
+    *,
+    artifact_id: str,
+    packet: Mapping[str, Any],
+    inputs: list[str],
+) -> dict[str, Any]:
+    """Persist one validated classification packet through an admitted FD.
+
+    The caller supplies only an artifact identity and typed packet.  The
+    function chooses the bounded relative location and registers the exact
+    payload contract, so a provider or Agent cannot smuggle a filesystem path
+    into the persistence layer.
+    """
+
+    if not isinstance(admission, PredictionPersistenceAdmission):
+        raise ContractError(
+            "PREDICTION_PERSISTENCE_ADMISSION_REQUIRED",
+            "classification evidence requires a PredictionPersistenceAdmission",
+        )
+    if not isinstance(artifact_id, str) or not artifact_id or "/" in artifact_id or "\\" in artifact_id:
+        raise ContractError("PREDICTION_PERSISTENCE_PATH_INVALID", "classification artifact_id is unsafe")
+    validated = validate_classification_packet(packet)
+    relative_parts = ("classification_evidence", f"{artifact_id}.json")
+    candidate_bytes = _json_bytes(validated)
+    candidate_sha256 = _sha256(candidate_bytes)
+    existing_records = admission._artifact_records(artifact_id)
+    if existing_records:
+        if len(existing_records) != 1:
+            raise PayloadContractError("ARTIFACT_ID_CONFLICT", "artifact_id has duplicate index records")
+        existing = existing_records[0]
+        expected = {
+            "artifact_id": artifact_id,
+            "path": "/".join(relative_parts),
+            "artifact_type": "classification_evidence_packet",
+            "sha256": candidate_sha256,
+            "inputs": list(inputs),
+            "payload_contract": {
+                "payload_schema": CLASSIFICATION_PACKET_SCHEMA,
+                "schema_version": 1,
+            },
+        }
+        if all(existing.get(key) == value for key, value in expected.items()):
+            actual_sha256 = admission._file_sha256(relative_parts)
+            if actual_sha256 != existing["sha256"]:
+                raise PayloadContractError(
+                    "ARTIFACT_DIGEST_MISMATCH",
+                    f"artifact {artifact_id!r} index digest does not match the persisted file",
+                )
+            return {
+                "artifact_id": artifact_id,
+                "path": "/".join(relative_parts),
+                "artifact_type": "classification_evidence_packet",
+                "payload_schema": CLASSIFICATION_PACKET_SCHEMA,
+                "schema_version": 1,
+                "sha256": candidate_sha256,
+            }
+        raise PayloadContractError(
+            "ARTIFACT_ID_CONFLICT",
+            f"artifact_id {artifact_id!r} is already bound to a different artifact",
+        )
+    digest = admission.write_json(relative_parts, validated)
+    admission.register_artifact(
+        artifact_id=artifact_id,
+        relative_parts=relative_parts,
+        artifact_type="classification_evidence_packet",
+        step="classification",
+        inputs=list(inputs),
+        sha256=digest,
+        payload_contract={
+            "payload_schema": CLASSIFICATION_PACKET_SCHEMA,
+            "schema_version": 1,
+        },
+    )
+    return {
+        "artifact_id": artifact_id,
+        "path": "/".join(relative_parts),
+        "artifact_type": "classification_evidence_packet",
+        "payload_schema": CLASSIFICATION_PACKET_SCHEMA,
+        "schema_version": 1,
+        "sha256": digest,
+    }

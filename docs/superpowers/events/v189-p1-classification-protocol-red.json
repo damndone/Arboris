@@ -1,0 +1,23 @@
+{
+  "event_id": "65a63d9e-3a28-4800-a2da-8a7e6f12fef5",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T16:02:00.000Z",
+  "type": "FAILURE",
+  "subtype": "classification_protocol_tdd_red",
+  "stage": "implementation",
+  "incident_id": "2e921a9f-d6e6-4f21-9ba1-3eab53985f7b",
+  "cause": "The protocol boundary tests were added before the sealed-holdout orchestration module existed.",
+  "cause_status": "known",
+  "impact": "The classification consumer suite fails during collection with a missing classification_protocol module.",
+  "resolution": "open",
+  "lesson": "Define the holdout seal and protocol orchestration as a typed seam before exposing the result to consumers.",
+  "lesson_key": "classification-protocol-seam-first",
+  "preventability": "not_preventable",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/predictive_research/test_classification_consumers_v189.py",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T16:02:00.000Z"
+  },
+  "links": []
+}

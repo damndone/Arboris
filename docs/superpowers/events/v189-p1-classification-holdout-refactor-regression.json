@@ -1,0 +1,26 @@
+{
+  "event_id": "b4a9ad2e-3c3f-4d8e-9c8a-2c1f4c6e7b90",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T18:10:00.000Z",
+  "type": "ERROR",
+  "subtype": "classification_holdout_refactor_baseline_scope",
+  "stage": "implementation",
+  "incident_id": "f6a0d4c0-6c0c-4f8b-8a8a-9ce9d8b9b3d1",
+  "cause": "Moving baseline computation into the one-shot holdout release callback left packet assembly reading majority_label and baseline_probability_matrix from the old outer scope.",
+  "cause_status": "known",
+  "impact": "All protocol consumers failed after the holdout seal refactor with NameError before producing a classification packet.",
+  "resolution": "resolved",
+  "lesson": "When evidence is moved behind a release capability, every downstream field must consume the released typed bundle rather than the pre-refactor lexical scope.",
+  "lesson_key": "classification-release-bundle-consumer-scope",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "focused_pytest",
+    "ref": "tests/predictive_research/test_classification_consumers_v189.py",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T18:10:00.000Z"
+  },
+  "links": [
+    "backend/workbench/predictive_research/classification_protocol.py",
+    "tests/predictive_research/test_classification_consumers_v189.py"
+  ]
+}

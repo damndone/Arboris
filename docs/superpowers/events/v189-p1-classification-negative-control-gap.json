@@ -1,0 +1,23 @@
+{
+  "event_id": "bd5d5f2e-5c41-47a2-839c-9b91788a26f7",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T16:50:00.000Z",
+  "type": "GAP",
+  "subtype": "classification_negative_control_receipt_only",
+  "stage": "implementation",
+  "incident_id": "75a8fdbc-44e7-4f2b-a6e4-1a4b5cb5a68e",
+  "cause": "The first protocol packet declared a shuffle-target control but did not execute a target permutation through the shared fold-local adapter path.",
+  "cause_status": "known",
+  "impact": "Consumers could not distinguish an executed negative control from a metadata receipt, weakening the model-evidence boundary.",
+  "resolution": "resolved",
+  "lesson": "A control is evidence only when it runs on the declared exchangeability unit, split manifest and development-only scope; unsupported temporal/panel units must be unavailable rather than row-shuffled.",
+  "lesson_key": "classification-controls-are-executed-or-unavailable",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/predictive_research/test_classification_consumers_v189.py::test_protocol_runs_two_model_families_through_one_sealed_holdout_boundary",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T16:50:00.000Z"
+  },
+  "links": ["backend/workbench/predictive_research/classification_protocol.py"]
+}

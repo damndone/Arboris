@@ -1,0 +1,23 @@
+{
+  "event_id": "d3f01a29-9e2c-4cd9-86bf-6b9706f8bb63",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T16:40:00.000Z",
+  "type": "FAILURE",
+  "subtype": "classification_unknown_cost_scenario_regression",
+  "stage": "implementation",
+  "incident_id": "2b8ce52a-15b4-43fe-aa3a-a24eecddc8a0",
+  "cause": "The new expected-utility validation applied required cost keys to an empty cost mapping, although an empty mapping is the existing typed representation for unknown costs.",
+  "cause_status": "known",
+  "impact": "An unknown-cost policy was rejected instead of remaining available as scenarios-only evidence.",
+  "resolution": "resolved",
+  "lesson": "Unknown policy inputs must retain their explicit scenarios-only state; only non-empty malformed declarations should fail closed.",
+  "lesson_key": "classification-unknown-policy-stays-scenarios",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/predictive_research/test_classification_contracts_v189.py::test_empty_decision_costs_are_unknown_scenarios_not_a_selected_policy",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T16:40:00.000Z"
+  },
+  "links": ["backend/workbench/predictive_research/classification_contracts.py"]
+}

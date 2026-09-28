@@ -1,0 +1,28 @@
+{
+  "event_id": "4c88d7d2-cd42-47db-b76b-6e05cb96c95b",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T17:20:00.000Z",
+  "type": "GATE",
+  "subtype": "frontend_renderer_dependencies_unavailable",
+  "stage": "gate",
+  "state_from": "IMPLEMENTING",
+  "state_to": "IMPLEMENTING",
+  "incident_id": "0a62d65f-7fda-47ed-b55e-7c772b9b5c39",
+  "cause": "The P1 worktree has no frontend node_modules and the root Vitest configuration resolves its setup file and cache outside the writable worktree; the renderer test could not be executed in the isolated worktree.",
+  "cause_status": "known",
+  "impact": "TypeScript/Vitest renderer acceptance remains NOT VERIFIED; the component and test only passed esbuild syntax bundling.",
+  "resolution": "open",
+  "lesson": "Frontend package dependencies and an isolated test cache must be provisioned before claiming renderer or browser acceptance.",
+  "lesson_key": "classification-renderer-needs-isolated-frontend-gate",
+  "preventability": "not_preventable",
+  "evidence": {
+    "kind": "vitest",
+    "ref": "frontend/src/report/ClassificationEvidence.test.tsx",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T17:20:00.000Z"
+  },
+  "links": [
+    "frontend/src/report/ClassificationEvidence.tsx",
+    "frontend/src/report/ClassificationEvidence.test.tsx"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "event_id": "e6f7a8b9-0123-4c5d-9e6f-708192a3b4c5",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T22:45:00.000Z",
+  "type": "GATE",
+  "subtype": "classification_package_local_completion",
+  "stage": "gate",
+  "state_from": "IMPLEMENTING",
+  "state_to": "IMPLEMENTING",
+  "incident_id": "f7a8b9c0-1234-4d6e-8f70-8192a3b4c5d6",
+  "cause": "The package-local P1 classification capability reached its declared backend, persistence, provider contribution, renderer contribution, and process-control verification boundary.",
+  "cause_status": "not_applicable",
+  "impact": "The classification ML package can be handed to the later single-writer integration line with exact deferred boundaries instead of an unqualified release claim.",
+  "resolution": "accepted",
+  "lesson": "Record package-local correctness and UI contribution gates separately from central Agent/Notebook cutover, browser acceptance, external providers and release integration.",
+  "lesson_key": "classification-package-local-gate-separate-from-cutover",
+  "preventability": "unknown",
+  "evidence": {
+    "kind": "pytest_vitest_typecheck_compile_formal",
+    "ref": "focused backend=146 passed; broader backend=222 passed, 2 skipped, 3 warnings; renderer=4 passed; typecheck; compileall; git diff --check; formal verify; generated retrospective",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T22:45:00.000Z"
+  },
+  "links": [
+    "docs/superpowers/handoff/2026-08-16-v1.8.9-p1-classification-ml-core-handoff.md",
+    "backend/workbench/predictive_research/classification_protocol.py",
+    "backend/workbench/predictive_research/persistence.py",
+    "frontend/src/report/ClassificationEvidence.tsx"
+  ]
+}

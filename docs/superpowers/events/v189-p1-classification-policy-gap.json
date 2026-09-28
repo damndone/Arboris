@@ -1,0 +1,27 @@
+{
+  "event_id": "b4d3c218-4414-41a3-b4e0-cd1c7d6de1c5",
+  "schema_version": 1,
+  "timestamp": "2026-08-16T16:35:00.000Z",
+  "type": "GAP",
+  "subtype": "classification_policy_cost_capacity_unused",
+  "stage": "implementation",
+  "incident_id": "e1c35a26-8f31-4b38-a08c-6a4f8e6e45a5",
+  "cause": "The first protocol version treated a non-empty cost matrix and capacity as sufficient for threshold selection but delegated selection to max_f1 without applying the declared policy semantics.",
+  "cause_status": "known",
+  "impact": "A selected threshold could be reported even when cost and capacity were not used, weakening decision correctness and evidence trust.",
+  "resolution": "resolved",
+  "lesson": "Decision policy fields must either affect the typed selection algorithm or fail closed; cost/utility and capacity semantics must be recorded in the threshold receipt.",
+  "lesson_key": "classification-policy-fields-are-executable",
+  "preventability": "preventable",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/predictive_research/test_classification_protocol_v189.py::test_expected_utility_threshold_applies_declared_costs_and_rate_capacity",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "observed_at": "2026-08-16T16:35:00.000Z"
+  },
+  "links": [
+    "backend/workbench/predictive_research/classification_contracts.py",
+    "backend/workbench/predictive_research/classification_metrics.py",
+    "backend/workbench/predictive_research/classification_protocol.py"
+  ]
+}
