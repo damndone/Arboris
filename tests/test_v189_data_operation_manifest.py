@@ -512,6 +512,71 @@ def test_package_runtime_adapter_joins_live_catalog_and_exposes_record_evidence_
     assert callable(adapter.adapt_operation_record)
 
 
+def test_package_runtime_contribution_joins_live_declaration_and_fails_closed_without_host_input() -> None:
+    from workbench.agent.trusted_executor_registry import (
+        ProviderRuntimeContextV1,
+        ProviderRuntimeContributionV1,
+    )
+    from workbench.data_operation_manifest import (
+        build_data_consumer_runtime_adapter,
+        build_data_consumer_runtime_contribution,
+    )
+
+    catalog = load_builtin_catalog()
+    provider = next(item for item in catalog.providers if item.provider_id == "workbench.data_consumer")
+    declaration = next(
+        item
+        for item in provider.adapter_declarations
+        if item.adapter_id == "workbench.data_consumer.adapter"
+    )
+    adapter = build_data_consumer_runtime_adapter()
+
+    contribution = build_data_consumer_runtime_contribution(catalog)
+
+    assert type(contribution) is ProviderRuntimeContributionV1
+    assert contribution.provider_id == provider.provider_id
+    assert contribution.adapter_id == declaration.adapter_id
+    assert contribution.executor_ref == declaration.executor_ref
+    assert contribution.request_contract_ref == declaration.request_schema_ref
+    assert contribution.result_contract_refs == declaration.output_refs
+    assert contribution.metadata["output_ports"] == list(adapter.output_ports)
+    assert contribution.metadata["typed_authority"] == "DataConsumerOutputPortsV1"
+
+    context = ProviderRuntimeContextV1(
+        compilation_record_id="compile:data-consumer-test",
+        execution_instance_hash="exec:data-consumer-test",
+        actor_ref="principal:data-consumer-test",
+        session_ref="session:data-consumer-test",
+        project_ref="project:data-consumer-test",
+        effect="read_only",
+    )
+    result = contribution.executor(
+        context,
+        {
+            "operation_id": "data.sort",
+            "source_run_id": "run:data-consumer-test",
+            "source_node_id": "node:data-consumer-test",
+            "source_artifact_id": "artifact:data-consumer-test",
+            "operation": "sort",
+        },
+    )
+
+    assert result["status"] == "unavailable"
+    assert result["reason_code"] == "DATA_CONSUMER_HOST_DATA_STORE_UNAVAILABLE"
+    assert result["operation_id"] == "data.sort"
+    assert "rows" not in result
+    assert "path" not in result
+    assert "evidence" not in result
+    with pytest.raises((TypeError, ValueError), match="completed|typed|output|OperationRecord"):
+        contribution.result_validator(
+            {
+                "status": "completed",
+                "operation_id": "data.sort",
+                "rows": [{"caller": "fake-success"}],
+            }
+        )
+
+
 def test_package_runtime_adapter_rejects_caller_authored_operation_record_mapping() -> None:
     from workbench.data_operation_manifest import build_data_consumer_runtime_adapter
 

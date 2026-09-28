@@ -65,6 +65,30 @@ _DERIVED_IDENTITY_FIELDS = (
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _SERVER_OWNED_CAPABILITY = object()
 _SERVER_OWNED_ISSUER = object()
+_DATA_CONSUMER_PROVIDER_ID = "workbench.data_consumer"
+_DATA_CONSUMER_ADAPTER_ID = "workbench.data_consumer.adapter"
+_DATA_CONSUMER_EXECUTOR_REF = "executor:workbench.data_consumer.adapter"
+_DATA_CONSUMER_RUNTIME_REASON = "DATA_CONSUMER_HOST_DATA_STORE_UNAVAILABLE"
+_UNSAFE_RUNTIME_REQUEST_KEYS = frozenset(
+    {
+        "callback",
+        "callable",
+        "data",
+        "dataframe",
+        "evidence",
+        "evidence_ref",
+        "frame",
+        "operation_record",
+        "output_ports",
+        "outputs",
+        "path",
+        "paths",
+        "raw_data",
+        "raw_rows",
+        "record",
+        "rows",
+    }
+)
 
 
 def _registered_data_consumer_executor(
@@ -1046,12 +1070,9 @@ class DataConsumerRuntimeAdapterV1:
         return outputs
 
 
-def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
-    """Join the package executor with the server-loaded provider catalog."""
+def _data_consumer_catalog_join(catalog: object) -> tuple[object, ProviderContributionV1, AdapterDeclarationV1]:
+    from workbench.providers.catalog import ProviderCatalogV1
 
-    from workbench.providers.catalog import ProviderCatalogV1, load_builtin_catalog
-
-    catalog = load_builtin_catalog()
     if type(catalog) is not ProviderCatalogV1:
         raise TypeError("runtime adapter requires the server-owned typed provider catalog")
     if catalog.catalog_digest != sha256_canonical(catalog.digest_payload()):
@@ -1069,15 +1090,20 @@ def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
         item
         for item in provider.adapter_declarations
         if type(item) is AdapterDeclarationV1
-        and item.adapter_id == "workbench.data_consumer.adapter"
+        and item.adapter_id == _DATA_CONSUMER_ADAPTER_ID
     ]
     if len(declarations) != 1:
-        raise RuntimeError("workbench.data_consumer is absent from the live provider catalog")
+        raise RuntimeError("workbench.data_consumer adapter is absent or duplicated in the live provider catalog")
     declaration = declarations[0]
-    if declaration.executor_ref != "executor:workbench.data_consumer.adapter":
+    if declaration.executor_ref != _DATA_CONSUMER_EXECUTOR_REF:
         raise ValueError("live provider catalog points at an invalid data-consumer executor")
     if _SERVER_OWNED_EXECUTOR_REGISTRY.get(declaration.executor_ref) is not _registered_data_consumer_executor:
         raise RuntimeError("live data-consumer executor is not registered")
+    return catalog, provider, declaration
+
+
+def _build_data_consumer_runtime_adapter(catalog: object) -> DataConsumerRuntimeAdapterV1:
+    catalog, provider, declaration = _data_consumer_catalog_join(catalog)
     manifest = build_data_operation_manifest()
     return DataConsumerRuntimeAdapterV1(
         provider_id=provider.provider_id,
@@ -1088,6 +1114,206 @@ def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
         output_ports=("derived", "operation_record", "evidence"),
         operation_ids=tuple(item.operation_id for item in manifest.operations),
         _capability=_SERVER_OWNED_CAPABILITY,
+    )
+
+
+def build_data_consumer_runtime_adapter() -> DataConsumerRuntimeAdapterV1:
+    """Join the package executor with the server-loaded provider catalog."""
+
+    from workbench.providers.catalog import load_builtin_catalog
+
+    return _build_data_consumer_runtime_adapter(load_builtin_catalog())
+
+
+def _reject_unsafe_runtime_request(value: object, *, location: str = "request") -> None:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if type(key) is not str:
+                raise ValueError(f"unsafe runtime request key at {location}")
+            normalized = key.casefold()
+            if normalized in _UNSAFE_RUNTIME_REQUEST_KEYS or normalized.endswith("_path"):
+                raise ValueError(f"unsafe runtime request field at {location}.{key}")
+            _reject_unsafe_runtime_request(child, location=f"{location}.{key}")
+        return
+    if type(value) in {list, tuple}:
+        for index, child in enumerate(value):
+            _reject_unsafe_runtime_request(child, location=f"{location}[{index}]")
+        return
+    if callable(value) or type(value) not in {str, bool, int, float} and value is not None:
+        raise ValueError(f"unsafe runtime request value at {location}")
+    if isinstance(value, str) and (
+        value.startswith(("/", "\\", "~"))
+        or "://" in value
+        or any(part == ".." for part in value.replace("\\", "/").split("/"))
+    ):
+        raise ValueError(f"path-like runtime request value at {location}")
+
+
+def _runtime_request_error(message: str) -> Exception:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+    return TrustedExecutorRegistryError("RUNTIME_REQUEST_INVALID", message)
+
+
+def _runtime_result_error(message: str) -> Exception:
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+
+    return TrustedExecutorRegistryError("RUNTIME_RESULT_INVALID", message)
+
+
+@dataclass(frozen=True)
+class DataConsumerRuntimeUnavailableV1:
+    """Typed runtime result used until a host-owned data store is injected."""
+
+    provider_id: str
+    adapter_id: str
+    executor_ref: str
+    catalog_digest: str
+    operation_id: str
+    operation_version: str
+    execution_instance_hash: str
+    reason_code: str = _DATA_CONSUMER_RUNTIME_REASON
+    message: str = (
+        "The cutover request has no server-owned data-store input; "
+        "execution requires the host data-operation service."
+    )
+    typed_authority: str = "DataConsumerOutputPortsV1"
+    status: str = "unavailable"
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "provider_id": self.provider_id,
+            "adapter_id": self.adapter_id,
+            "executor_ref": self.executor_ref,
+            "catalog_digest": self.catalog_digest,
+            "operation_id": self.operation_id,
+            "operation_version": self.operation_version,
+            "execution_instance_hash": self.execution_instance_hash,
+            "status": self.status,
+            "reason_code": self.reason_code,
+            "message": self.message,
+            "typed_authority": self.typed_authority,
+        }
+
+
+def build_data_consumer_runtime_contribution(catalog: object) -> object:
+    """Build the package-owned runtime contribution for a live declaration.
+
+    The current cutover request carries no host-owned data-store handle.  The
+    contribution therefore exposes a typed unavailable result and never
+    fabricates an OperationRecord, output ports, rows, paths, or evidence.
+    """
+
+    from workbench.agent.trusted_executor_registry import (
+        ProviderRuntimeContextV1,
+        ProviderRuntimeContributionV1,
+    )
+
+    catalog, provider, declaration = _data_consumer_catalog_join(catalog)
+    adapter = _build_data_consumer_runtime_adapter(catalog)
+    descriptors = {
+        item.operation_id: item for item in build_data_operation_manifest().operations
+    }
+
+    def validate_request(request: Mapping[str, Any]) -> Mapping[str, Any]:
+        if not isinstance(request, Mapping):
+            raise _runtime_request_error("data-consumer runtime request must be a mapping")
+        try:
+            _reject_unsafe_runtime_request(request)
+        except ValueError as exc:
+            raise _runtime_request_error(str(exc)) from exc
+        operation_id = request.get("operation_id")
+        if type(operation_id) is not str or operation_id not in adapter.operation_ids:
+            raise _runtime_request_error("data-consumer runtime request operation is not live")
+        descriptor = descriptors[operation_id]
+        properties = descriptor.request_schema.get("properties", {})
+        unknown = set(request) - (set(properties) | {"operation_id"})
+        if unknown:
+            raise _runtime_request_error(
+                "data-consumer runtime request contains undeclared fields: "
+                + ", ".join(sorted(str(item) for item in unknown))
+            )
+        missing = [field for field in descriptor.request_schema.get("required", ()) if field not in request]
+        if missing:
+            raise _runtime_request_error(
+                "data-consumer runtime request is missing: " + ", ".join(missing)
+            )
+        for field in descriptor.request_schema.get("required", ()):
+            value = request[field]
+            if properties.get(field, {}).get("type") == "string" and (
+                type(value) is not str or not value.strip()
+            ):
+                raise _runtime_request_error(f"data-consumer runtime request field {field} is invalid")
+        expected_operation = operation_id.removeprefix("data.")
+        if "operation" in properties and request.get("operation") != expected_operation:
+            raise _runtime_request_error("data-consumer runtime request operation field is invalid")
+        return dict(request)
+
+    def execute(
+        context: ProviderRuntimeContextV1,
+        request: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        if type(context) is not ProviderRuntimeContextV1:
+            raise TypeError("server-owned ProviderRuntimeContextV1 is required")
+        normalized = validate_request(request)
+        operation_id = str(normalized["operation_id"])
+        descriptor = descriptors[operation_id]
+        return DataConsumerRuntimeUnavailableV1(
+            provider_id=provider.provider_id,
+            adapter_id=declaration.adapter_id,
+            executor_ref=declaration.executor_ref,
+            catalog_digest=str(catalog.catalog_digest),
+            operation_id=operation_id,
+            operation_version=descriptor.operation_version,
+            execution_instance_hash=context.execution_instance_hash,
+        ).to_dict()
+
+    def validate_result(result: Mapping[str, Any]) -> None:
+        if not isinstance(result, Mapping):
+            raise _runtime_result_error("data-consumer runtime result must be a mapping")
+        if result.get("status") != "unavailable":
+            raise _runtime_result_error(
+                "data-consumer runtime cannot claim completed without typed OperationRecord/output ports"
+            )
+        expected_fields = set(DataConsumerRuntimeUnavailableV1.__dataclass_fields__)
+        if set(result) != expected_fields:
+            raise _runtime_result_error("data-consumer unavailable result fields are not exact")
+        operation_id = result.get("operation_id")
+        if operation_id not in adapter.operation_ids or operation_id not in descriptors:
+            raise _runtime_result_error("data-consumer unavailable result operation is not live")
+        expected = DataConsumerRuntimeUnavailableV1(
+            provider_id=provider.provider_id,
+            adapter_id=declaration.adapter_id,
+            executor_ref=declaration.executor_ref,
+            catalog_digest=str(catalog.catalog_digest),
+            operation_id=str(operation_id),
+            operation_version=descriptors[str(operation_id)].operation_version,
+            execution_instance_hash=str(result.get("execution_instance_hash")),
+        ).to_dict()
+        if dict(result) != expected:
+            raise _runtime_result_error("data-consumer unavailable result identity is inconsistent")
+
+    return ProviderRuntimeContributionV1(
+        provider_id=provider.provider_id,
+        adapter_id=declaration.adapter_id,
+        executor_ref=declaration.executor_ref,
+        owner="workbench.server.data_consumer",
+        signature="workbench.data_consumer.runtime.v1",
+        effect="read_only",
+        request_contract_ref=declaration.request_schema_ref,
+        result_contract_refs=declaration.output_refs,
+        executor=execute,
+        request_validator=validate_request,
+        result_validator=validate_result,
+        metadata={
+            "status": "unavailable",
+            "reason_code": _DATA_CONSUMER_RUNTIME_REASON,
+            "provider_id": provider.provider_id,
+            "adapter_id": declaration.adapter_id,
+            "output_ports": list(adapter.output_ports),
+            "typed_authority": "DataConsumerOutputPortsV1",
+            "operation_record_authority": "OperationRecord",
+        },
     )
 
 
