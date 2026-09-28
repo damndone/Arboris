@@ -1,0 +1,43 @@
+<h2>统一的 Report 页</h2>
+<p class="subtitle">不新增 Run 导出页，也不新增数据导出页：报告工作集中在 Report 页；数据节点只保留一个上下文动作。</p>
+
+<div class="mockup">
+  <div class="mockup-header">Workbench · Report · active run</div>
+  <div class="mockup-body" style="padding:0;background:#f7f8fa;color:#172033;font-family:Inter,system-ui,sans-serif">
+    <div style="height:44px;background:#fff;border-bottom:1px solid #e4e8ef;display:flex;align-items:center;gap:20px;padding:0 16px;font-size:12px">
+      <strong>workbench-v186-browser2</strong><span style="color:#778196">Notebook</span><span style="color:#778196">Graph</span><span style="color:#778196">Table</span><span style="color:#1463ff;border-bottom:2px solid #1463ff;height:44px;display:flex;align-items:center">Report</span><span style="margin-left:auto;color:#778196">run · bcce101a</span>
+    </div>
+    <div style="padding:14px 16px 10px;background:#f7f8fa;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+      <div><div style="font-size:17px;font-weight:700">实证分析报告</div><div style="font-size:11px;color:#778196;margin-top:4px">当前 run 的 lineage、模型结果、诊断和图表</div></div>
+      <div style="display:flex;gap:8px"><button class="mock-button">新建报告</button><button class="mock-button" style="background:#1463ff;color:#fff;border-color:#1463ff">导出报告 ▾</button></div>
+    </div>
+    <div style="display:grid;grid-template-columns:235px 1fr;gap:12px;padding:0 16px 16px">
+      <div style="background:#fff;border:1px solid #e0e5ed;border-radius:10px;padding:13px">
+        <div style="font-size:11px;color:#778196;text-transform:uppercase;letter-spacing:.06em">报告要求</div>
+        <div style="margin-top:10px;border:1px solid #d8deea;border-radius:8px;padding:9px;font-size:11px;line-height:1.45;color:#465267">按期刊通用结构撰写：研究问题、数据与样本、方法与识别假设、主结果、模型诊断、稳健性、局限与结论。不要把相关性写成因果性。</div>
+        <button class="mock-button" style="margin-top:10px;width:100%;background:#1463ff;color:#fff;border-color:#1463ff">Generate report</button>
+        <div style="margin-top:15px;font-size:11px;color:#778196">证据范围</div>
+        <div style="margin-top:7px;font-size:12px"><span style="color:#16a05d">✓</span> 当前 run lineage</div><div style="margin-top:6px;font-size:12px"><span style="color:#16a05d">✓</span> 已记录的 figures</div><div style="margin-top:6px;font-size:12px"><span style="color:#16a05d">✓</span> citation chips</div>
+      </div>
+      <div style="background:#fff;border:1px solid #e0e5ed;border-radius:10px;min-height:310px">
+        <div style="padding:12px 14px;border-bottom:1px solid #e8ebf0;display:flex;align-items:center;justify-content:space-between"><strong style="font-size:13px">报告预览</strong><span style="font-size:11px;color:#778196">AI draft · evidence-bound</span></div>
+        <div style="padding:16px 20px;font-size:12px;line-height:1.65"><h3 style="margin:0 0 10px;font-size:17px">研究问题与数据</h3><p style="margin:0;color:#465267">本报告说明当前分析所回答的问题、样本范围、变量角色和数据处理链路。每个数值后显示来源标记。</p><h3 style="margin:17px 0 8px;font-size:15px">方法与识别边界</h3><p style="margin:0;color:#465267">报告明确估计模型、标准误、诊断和不能从当前设计推出的因果结论。</p><h3 style="margin:17px 0 8px;font-size:15px">主结果、诊断与稳健性</h3><div style="height:8px;width:92%;background:#e9edf3;border-radius:4px"></div><div style="height:8px;width:80%;background:#e9edf3;border-radius:4px;margin-top:8px"></div><div style="height:8px;width:86%;background:#e9edf3;border-radius:4px;margin-top:8px"></div><p style="margin:14px 0 0;color:#778196;font-size:11px">缺失的证据必须进入局限，不允许由模型补猜。</p></div>
+      </div>
+    </div>
+    <div style="margin:0 16px 16px;background:#eef5ff;border:1px solid #cbdcff;border-radius:9px;padding:10px 12px;font-size:11px;color:#31558f"><strong>数据导出不做成新页面：</strong>在 Graph 中打开任意数据节点的既有详情抽屉时，提供“导出此节点数据”上下文动作；Report 页只导出报告和用户明确勾选的结果表。</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>统一 Report 页中的导出菜单</h3>
+  <div class="options">
+    <div class="option" data-choice="report-only-context-data" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content"><h3>报告与数据分责（推荐）</h3><p>Report 页：PDF / HTML / Word / LaTeX，以及用户主动勾选的结果表 XLSX。数据节点详情抽屉：导出该节点的 CSV/XLSX。没有新增页面。</p></div>
+    </div>
+    <div class="option" data-choice="all-export-in-report" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content"><h3>所有导出都集中到 Report 页</h3><p>Report 页同时选择报告、结果表和数据节点，再导出。页面更集中，但需要在 Report 页重新理解数据节点和 lineage。</p></div>
+    </div>
+  </div>
+</div>

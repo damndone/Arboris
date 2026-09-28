@@ -1,0 +1,101 @@
+<style>
+  .rr-intro { max-width: 1100px; margin-bottom: 22px; }
+  .rr-note { color: var(--muted, #8b93a5); font-size: 13px; }
+  .rr-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .rr-card { min-height: 620px; }
+  .rr-card .mockup { height: 420px; overflow: hidden; }
+  .rr-chrome { background: #151a24; color: #f7f8fb; font: 11px/1.35 ui-sans-serif, system-ui; height: 100%; }
+  .rr-top { height: 30px; display:flex; align-items:center; gap:7px; padding:0 10px; background:#222938; color:#aeb8cb; }
+  .rr-dot { width:6px; height:6px; border-radius:50%; background:#657089; }
+  .rr-tabs { display:flex; gap:3px; padding:7px 8px 0; background:#1b2130; }
+  .rr-tab { padding:6px 8px; border-radius:6px 6px 0 0; background:#273044; color:#abb6c9; }
+  .rr-tab.active { background:#f7f8fb; color:#1a202c; font-weight:700; }
+  .rr-main { display:grid; grid-template-columns: 35% 65%; height: 350px; background:#f7f8fb; color:#1c2431; }
+  .rr-main.single { display:block; }
+  .rr-node { background:#eef1f6; padding:13px; color:#657089; }
+  .rr-node strong { display:block; color:#2d3748; margin-bottom:8px; }
+  .rr-review { padding:14px; overflow:hidden; }
+  .rr-review h4 { margin:0 0 8px; font-size:14px; }
+  .rr-status { display:inline-block; padding:3px 6px; background:#e2f6ed; color:#18774b; border-radius:999px; font-size:10px; }
+  .rr-toolbar { display:flex; gap:5px; margin:12px 0; }
+  .rr-button { border:1px solid #d5dbe5; background:white; color:#354052; border-radius:5px; padding:5px 7px; font-size:10px; }
+  .rr-button.primary { background:#1c6ef2; border-color:#1c6ef2; color:white; }
+  .rr-lines { display:grid; gap:7px; }
+  .rr-line { height:7px; border-radius:5px; background:#dce2ec; }
+  .rr-line.long { width:92%; }
+  .rr-line.mid { width:68%; }
+  .rr-float { position:relative; margin: -145px 13px 0 auto; width: 78%; background:#fff; color:#1c2431; border:1px solid #bac5d6; border-radius:9px; box-shadow:0 12px 30px rgba(0,0,0,.32); padding:10px; }
+  .rr-float .handle { color:#8994a6; letter-spacing:3px; float:right; }
+  .rr-empty { display:flex; align-items:center; justify-content:center; height:100%; color:#778297; text-align:center; padding:28px; }
+  .rr-card h3 { margin-bottom:7px; }
+  .rr-card p { font-size:13px; }
+  .rr-reco { border-color:#4385f5; box-shadow:0 0 0 2px rgba(67,133,245,.15); }
+  @media (max-width: 950px) { .rr-grid { grid-template-columns:1fr; } .rr-card { min-height:auto; } }
+</style>
+
+<div class="rr-intro">
+  <h2>Report review 的标签层级</h2>
+  <p class="subtitle">选择 Report review 与节点标签的共存方式，以及 Float 是否成为跨页面的工作区级面板。</p>
+  <p class="rr-note">推荐方向：A。它把“正在看的节点”和“正在审阅的报告”分开，不会让报告误绑定到某一个节点；Float / Pin / Collapse 也最容易保持一致。</p>
+</div>
+
+<div class="rr-grid">
+  <div class="card option rr-card rr-reco" data-choice="A" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>平行工作区标签（推荐）</h3>
+      <p>Report review 与节点标签同级共存；没有报告显示空状态，有报告直接显示正文。Float 后跨 Notebook / Graph / Table 继续悬浮。</p>
+      <div class="mockup">
+        <div class="rr-chrome">
+          <div class="rr-top"><span class="rr-dot"></span><span>Workbench · Report view</span></div>
+          <div class="rr-tabs"><div class="rr-tab">ols_robust</div><div class="rr-tab active">Report review</div></div>
+          <div class="rr-main">
+            <div class="rr-node"><strong>Report review</strong>run · exportable<br><br>Full provenance<br>13 writer facts<br>1 writer figure</div>
+            <div class="rr-review"><h4>Empirical analysis report <span class="rr-status">exportable</span></h4><div class="rr-toolbar"><span class="rr-button primary">New</span><span class="rr-button">Edit</span><span class="rr-button">Export</span><span class="rr-button">More formats</span></div><div class="rr-lines"><div class="rr-line long"></div><div class="rr-line long"></div><div class="rr-line mid"></div><div class="rr-line long"></div><div class="rr-line mid"></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card option rr-card" data-choice="B" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>右侧抽屉内标签</h3>
+      <p>节点标签与 Report review 都放在右侧抽屉顶部。结构直观，但报告会更容易被理解成“当前节点的详情”。</p>
+      <div class="mockup">
+        <div class="rr-chrome">
+          <div class="rr-top"><span class="rr-dot"></span><span>Workbench · Graph</span></div>
+          <div class="rr-main single"><div class="rr-review"><div class="rr-tabs" style="margin:-14px -14px 14px"><div class="rr-tab">ols_robust</div><div class="rr-tab active">Report review</div></div><h4>Report review</h4><div class="rr-toolbar"><span class="rr-button">New</span><span class="rr-button">Edit</span><span class="rr-button">Export</span></div><div class="rr-lines"><div class="rr-line long"></div><div class="rr-line mid"></div><div class="rr-line long"></div></div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card option rr-card" data-choice="C" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>固定侧边 Report sheet</h3>
+      <p>Report review 永远占据右侧一列，节点标签留在左侧。审阅连续性最好，但会压缩 Graph / Table 可用空间。</p>
+      <div class="mockup">
+        <div class="rr-chrome">
+          <div class="rr-top"><span class="rr-dot"></span><span>Workbench · Table</span></div>
+          <div class="rr-main">
+            <div class="rr-node"><strong>Table</strong>data grid<br><br>columns<br>rows<br>filters</div>
+            <div class="rr-review"><h4>Report review</h4><span class="rr-status">pinned</span><div class="rr-toolbar"><span class="rr-button">Collapse</span><span class="rr-button">Edit</span></div><div class="rr-lines"><div class="rr-line long"></div><div class="rr-line long"></div><div class="rr-line mid"></div><div class="rr-line long"></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:22px">
+  <h3>按钮建议</h3>
+  <p><strong>New</strong> 新建报告；<strong>Edit</strong> 修改写作指令或进入可编辑草稿；<strong>Export</strong> 导出当前报告；<strong>More formats</strong> 打开 PDF / HTML / DOCX / TeX / 结果表等导出格式，不把格式选项全部铺在顶部。</p>
+</div>
+
+<div class="section" style="margin-top:22px; border-color:#4385f5">
+  <h3>已确认的 A 方案行为</h3>
+  <p><strong>Report review</strong> 是永久的工作区标签，不关闭；点击 <strong>Collapse</strong> 会把整个右侧面板收成窄把手，让 Report / Graph / Table 释放宽度，点击把手即可恢复。Float 模式仍保留标题栏和底部 revision 输入框，并跨页面置于 Workbench 最上层。</p>
+</div>

@@ -1,0 +1,68 @@
+<h2>Workbench 的报告与导出入口</h2>
+<p class="subtitle">先看信息架构：报告属于报告，数据导出属于数据节点；Run 默认只保留 tracking 证据。</p>
+
+<div class="section">
+  <div class="label">推荐方案 · 按上下文放置</div>
+  <div class="mockup">
+    <div class="mockup-header">Run 结果 · completed</div>
+    <div class="mockup-body" style="padding:0;background:#f7f8fa;color:#172033;font-family:Inter,system-ui,sans-serif">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:#fff;border-bottom:1px solid #e6e8ed">
+        <div><strong>OLS · run_20260803_181450</strong><div style="font-size:11px;color:#778196;margin-top:4px">HTML report · JSON evidence · model artifacts · diagnostics</div></div>
+        <div style="display:flex;gap:8px"><button class="mock-button">查看 Report</button><button class="mock-button" style="background:#1463ff;color:#fff;border-color:#1463ff">导出报告 ▾</button></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:14px 16px">
+        <div style="background:#fff;border:1px solid #e3e7ef;border-radius:10px;padding:12px"><div style="font-size:11px;color:#778196">Tracking evidence</div><strong style="display:block;margin-top:7px;font-size:13px">已自动保存</strong><div style="font-size:11px;color:#778196;margin-top:6px">不生成 XLSX</div></div>
+        <div style="background:#fff;border:1px solid #e3e7ef;border-radius:10px;padding:12px"><div style="font-size:11px;color:#778196">报告导出</div><strong style="display:block;margin-top:7px;font-size:13px">PDF / HTML / Word</strong><div style="font-size:11px;color:#778196;margin-top:6px">用户主动触发</div></div>
+        <div style="background:#fff;border:1px solid #e3e7ef;border-radius:10px;padding:12px"><div style="font-size:11px;color:#778196">数据导出</div><strong style="display:block;margin-top:7px;font-size:13px">去数据节点</strong><div style="font-size:11px;color:#778196;margin-top:6px">清洗 / 变换结果</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Report 页</div>
+  <div class="mockup">
+    <div class="mockup-header">Report · active run</div>
+    <div class="mockup-body" style="padding:0;background:#fff;color:#172033;font-family:Inter,system-ui,sans-serif">
+      <div style="padding:12px 16px;border-bottom:1px solid #e6e8ed;display:flex;gap:9px;align-items:flex-start">
+        <div style="flex:1;border:1px solid #d9deea;border-radius:8px;padding:9px 10px;color:#4b5568;font-size:12px">写一份期刊式实证报告：研究问题、数据与样本、识别/模型方法、主结果、诊断、稳健性、局限与结论。</div>
+        <button class="mock-button" style="background:#1463ff;color:#fff;border-color:#1463ff">Generate report</button>
+        <button class="mock-button">导出当前报告 ▾</button>
+      </div>
+      <div style="display:grid;grid-template-columns:180px 1fr;min-height:150px">
+        <div style="background:#f7f8fa;border-right:1px solid #e6e8ed;padding:12px;font-size:11px;color:#778196"><strong style="color:#172033">报告结构</strong><div style="margin-top:10px">研究问题</div><div>数据与样本</div><div>方法与假设</div><div>结果与诊断</div><div>稳健性</div><div>局限与结论</div></div>
+        <div style="padding:14px 16px"><div style="height:10px;width:42%;background:#e7ebf2;border-radius:4px"></div><div style="height:8px;width:86%;background:#eef1f5;border-radius:4px;margin-top:13px"></div><div style="height:8px;width:73%;background:#eef1f5;border-radius:4px;margin-top:8px"></div><div style="height:8px;width:78%;background:#eef1f5;border-radius:4px;margin-top:8px"></div><div style="margin-top:18px;font-size:11px;color:#778196">每个数字显示来源 chip；报告只读取当前 run 的事实包。</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">数据节点</div>
+  <div class="mockup">
+    <div class="mockup-header">Data node · cleaned_dataset</div>
+    <div class="mockup-body" style="padding:0;background:#fff;color:#172033;font-family:Inter,system-ui,sans-serif">
+      <div style="padding:12px 16px;border-bottom:1px solid #e6e8ed;display:flex;align-items:center;justify-content:space-between"><div><strong>清洗后数据</strong><div style="font-size:11px;color:#778196;margin-top:4px">240 rows · 4 columns · lineage preserved</div></div><button class="mock-button" style="background:#1463ff;color:#fff;border-color:#1463ff">导出数据 ▾</button></div>
+      <div style="padding:12px 16px;display:flex;gap:8px;flex-wrap:wrap"><span style="border:1px solid #dfe4ed;border-radius:999px;padding:6px 9px;font-size:11px">CSV</span><span style="border:1px solid #dfe4ed;border-radius:999px;padding:6px 9px;font-size:11px">XLSX</span><span style="border:1px solid #dfe4ed;border-radius:999px;padding:6px 9px;font-size:11px">复制文件路径</span><span style="border:1px solid #dfe4ed;border-radius:999px;padding:6px 9px;font-size:11px">查看变换记录</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>两种入口组织方式</h3>
+  <div class="options">
+    <div class="option" data-choice="contextual" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content"><h3>按上下文放置（推荐）</h3><p>Run 只负责报告导出；Report 页负责当前报告导出；数据节点负责清洗/变换数据导出。用户在当前任务旁边找到动作。</p></div>
+    </div>
+    <div class="option" data-choice="export-center" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content"><h3>统一 Export Center</h3><p>所有 PDF、XLSX、CSV 都集中到一个全局导出中心。入口统一，但用户需要先理解“导出对象”与当前页面的关系。</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros"><h4>推荐方案的好处</h4><ul><li>不会再默认生成无用 XLSX</li><li>报告与数据的责任边界清楚</li><li>导出动作跟当前 artifact / node 绑定</li></ul></div>
+  <div class="cons"><h4>需要补齐的规则</h4><ul><li>报告要有期刊式结构和最低覆盖要求</li><li>PDF/Word/HTML 要共享同一份报告内容</li><li>导出菜单要显示格式与用途</li></ul></div>
+</div>
