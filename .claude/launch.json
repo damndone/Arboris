@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.5.0.1/frontend/node_modules/.bin/vite",
+      "runtimeArgs": ["--host", "127.0.0.1", "--port", "5173"],
+      "cwd": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.5.0.1/frontend",
+      "port": 5173
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.5.0/.venv/bin/uvicorn",
+      "runtimeArgs": ["workbench.api:app", "--port", "8000", "--app-dir", "backend"],
+      "port": 8000
+    }
+  ]
+}
