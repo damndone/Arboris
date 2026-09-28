@@ -1,0 +1,41 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend-v1611",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/jiayuanren/项目规划/.worktrees/workbench-v1.6.11/backend && set -a && source ~/.config/econometrics-workbench/llm.env && set +a && exec ../.venv/bin/python -m uvicorn workbench.api:app --port 8010"
+      ],
+      "port": 8010
+    },
+    {
+      "name": "frontend-v1611",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/jiayuanren/项目规划/.worktrees/workbench-v1.6.11/frontend && exec env VITE_WORKBENCH_ASK_AI=1 npx vite --host 127.0.0.1 --port 5173"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "backend-v1611-c2",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/jiayuanren/项目规划/.worktrees/workbench-v1.6.11/backend && set -a && source ~/.config/econometrics-workbench/llm.env && set +a && exec ../.venv/bin/python -m uvicorn workbench.api:app --port 8014"
+      ],
+      "port": 8014
+    },
+    {
+      "name": "frontend-v1611-c2",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/jiayuanren/项目规划/.worktrees/workbench-v1.6.11/frontend && exec env VITE_WORKBENCH_ASK_AI=1 VITE_API_PROXY_TARGET=http://127.0.0.1:8014 npx vite --host 127.0.0.1 --port 5176"
+      ],
+      "port": 5176
+    }
+  ]
+}
