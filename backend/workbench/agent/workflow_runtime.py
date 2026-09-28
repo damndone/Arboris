@@ -2501,7 +2501,8 @@ def _persist_model_post_estimation_result(
     run_root = root / "runs" / str(draft.target["run_id"])
     token = str(step.fingerprint).removeprefix("sha256:")[:24]
     operation_token = str(step.operation_id).replace(".", "_")
-    artifact_id = f"workflow_{operation_token}_{token}"
+    workflow_token = hashlib.sha256(draft.workflow_id.encode("utf-8")).hexdigest()[:16]
+    artifact_id = f"workflow_{operation_token}_{workflow_token}_{token}"
     artifact_path = run_root / "artifacts" / artifact_type / f"{artifact_id}.json"
     payload = {
         "schema_version": "workbench.workflow.post-estimation/v1",
@@ -2659,7 +2660,10 @@ def _persist_workflow_capability_result(
     request_fingerprint = _workflow_request_fingerprint(request)
     result_payload = dict(execution.payload)
     if execution.output_frame is None:
-        artifact_id = f"workflow_capability_{operation_token}_{token}"
+        # One artifact per workflow: the same step asked for again (a second
+        # conversation, a repeated question) is a new run with its own record.
+        workflow_token = hashlib.sha256(draft.workflow_id.encode("utf-8")).hexdigest()[:16]
+        artifact_id = f"workflow_capability_{operation_token}_{workflow_token}_{token}"
         artifact_path = run_root / "artifacts" / "workflow_capability" / f"{artifact_id}.json"
         result_digest = hashlib.sha256(
             json.dumps(result_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")

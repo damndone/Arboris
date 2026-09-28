@@ -302,3 +302,20 @@ def test_an_executed_workflow_reads_as_sentences_in_the_session_list(tmp_path: P
     [proposal] = _public_proposals(fixture.orchestrator.proposal_store, "chain-session")
     assert len(proposal["readable"]) == 2
     assert all(line and "{" not in line for line in proposal["readable"])
+
+
+def test_asking_the_same_test_again_runs_it_again(tmp_path: Path) -> None:
+    """Found by the adversarial evaluation: a second conversation that asked
+    the same question composed the same step, whose artifact id depended on
+    the step alone, so the path already held the first workflow's record and
+    the run failed with "artifact path is occupied"."""
+
+    fixture = _Fixture(tmp_path)
+    first = fixture.propose([_t_test("wage_by_group")])
+    second = fixture.propose([_t_test("wage_by_group")])
+
+    assert first["operation"]["status"] == "completed", first
+    assert second["operation"]["status"] == "completed", second
+    first_ids = {artifact["artifact_id"] for result in first["results"] for artifact in result["artifacts"]}
+    second_ids = {artifact["artifact_id"] for result in second["results"] for artifact in result["artifacts"]}
+    assert first_ids and second_ids and first_ids.isdisjoint(second_ids)
