@@ -9,11 +9,13 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.111",
   "filelock>=3.13",
+  "httpx>=0.27",
   "uvicorn[standard]>=0.30",
   "python-multipart>=0.0.9",
   "pandas>=2.2",
   "openpyxl>=3.1",
   "pyarrow>=16.0",
+  "pyreadstat>=1.2",
   "statsmodels>=0.14",
   "arch==8.0.0",
   "scipy>=1.13",
