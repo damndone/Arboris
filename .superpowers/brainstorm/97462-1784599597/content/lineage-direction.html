@@ -1,0 +1,53 @@
+<h2>时间序列「全部在 graph 里操作」——你要哪种模型？</h2>
+<p class="subtitle">上面是我在真机里看到的当前谱系图；下面三种是把「每步都能在图里操作」落地的方向。也请顺便告诉我：当前这条链你觉得哪里「逻辑不对」。</p>
+
+<div class="mockup">
+  <div class="mockup-header">当前谱系图（真机观察 · auto run 一次性跑完所有阶段）</div>
+  <div class="mockup-body" style="overflow-x:auto">
+    <div style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap;padding:8px 0">
+      <div class="placeholder" style="padding:8px">raw data</div>
+      <span>→</span>
+      <div class="placeholder" style="padding:8px">analysis view</div>
+      <span>→</span>
+      <div class="placeholder" style="padding:8px">train/val split</div>
+      <span>→</span>
+      <div class="placeholder" style="padding:8px">ARMA 选型</div>
+      <span>→</span>
+      <div class="placeholder" style="padding:8px">ARCH/GARCH 选型</div>
+      <span>→</span>
+      <div class="placeholder" style="padding:8px">滚动验证</div>
+      <span>→</span>
+      <div class="placeholder" style="padding:8px">全样本 child</div>
+      <span>→</span>
+      <div class="placeholder" style="padding:8px;border:2px solid #4a90d9">model（主）</div>
+      <span>→</span>
+      <div class="placeholder" style="padding:8px">HTML 报告</div>
+    </div>
+    <p class="label" style="margin-top:10px">观察到的问题：结果卡（9 胶囊）只在被废弃的 Overview 页出现，不在图里；Table 显示的是通用 EDA 图（直方图/箱线）不是时序视图；节点点开只有 Ask AI / Compare，没有"改 transform / 改阶数"这类时序操作。</p>
+  </div>
+</div>
+
+<h3>方向选择</h3>
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>交互式建图（每步一个可操作节点）</h3>
+      <p>列映射 / 时间审计 / 变换确认 / 切分 / 搜索配置都是画布上的节点，你在节点上确认或改参数、逐步推进，<b>取代 run 前的五步表单向导</b>。最贴近"所有步骤都在图里操作"，但改动最大。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>表单启动 + 图内结果与 rerun</h3>
+      <p>保留 run 前的配置表单；图负责<b>展示每个阶段的结果</b>，并支持从任一节点 <b>rerun / fork</b>（改 transform、阶数、分布、validation_n 等）。结果卡搬进节点抽屉。改动中等。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>混合：轻量启动 + 图内全操作</h3>
+      <p>首次只选"时间列 + 数值列"这一步轻量启动，其余全部确认与修改（变换/时间语义/切分/阶数/分布/对比）都在图内节点上做。介于 A、B 之间。</p>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,6 @@
+{"type":"server-started","port":56920,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:56920","screen_dir":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8/.superpowers/brainstorm/97462-1784599597/content","state_dir":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8/.superpowers/brainstorm/97462-1784599597/state"}
+{"type":"screen-added","file":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8/.superpowers/brainstorm/97462-1784599597/content/lineage-direction.html"}
+{"type":"screen-added","file":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8/.superpowers/brainstorm/97462-1784599597/content/vix-graph-design.html"}
+{"type":"screen-added","file":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8/.superpowers/brainstorm/97462-1784599597/content/graph-topology-v2.html"}
+{"type":"screen-added","file":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8/.superpowers/brainstorm/97462-1784599597/content/waiting.html"}
+{"type":"server-stopped","reason":"idle timeout"}

@@ -1,0 +1,94 @@
+<style>
+  .vw2{ --ink:#1b2330; --sub:#6b7688; --line:#e6e9ef; --bg:#fbfcfe; --card:#fff;
+        --accent:#3f6bd6; --accent2:#14a08a; --fork:#8a5cd0; --mono:"SF Mono",ui-monospace,Menlo,monospace;
+        color:var(--ink); font-family:-apple-system,system-ui,"Segoe UI",sans-serif; line-height:1.45; }
+  @media (prefers-color-scheme: dark){ .vw2{ --ink:#e8ecf3; --sub:#9aa6b8; --line:#2a3342; --bg:#141a24; --card:#1b222e; } }
+  .vw2 h2{ font-size:20px; margin:0 0 2px; letter-spacing:-.01em; }
+  .vw2 .lead{ color:var(--sub); font-size:13px; margin:0 0 16px; }
+  .vw2 .lab{ font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--sub); font-weight:600; }
+  .vw2 .band{ background:var(--bg); border:1px solid var(--line); border-radius:14px; padding:16px 18px; margin-bottom:14px; }
+  .vw2 .num{ font-family:var(--mono); }
+  .vw2 .legend{ display:flex; gap:16px; flex-wrap:wrap; font-size:11px; color:var(--sub); margin-top:10px; }
+  .vw2 .legend span{ display:flex; gap:6px; align-items:center; }
+  .vw2 .sw{ width:11px; height:11px; border-radius:3px; display:inline-block; }
+  .vw2 .k1{ font-size:12px; } .vw2 b{ font-weight:650; }
+  .vw2 ul{ margin:6px 0 0; padding-left:18px; font-size:12px; } .vw2 li{ margin:3px 0; }
+</style>
+
+<div class="vw2">
+  <h2>谱系图拓扑（改正）：链式主干 → fork 出多个模型节点 → 对比节点</h2>
+  <p class="lead">不同模型 = 不同节点（从"ARMA 均值选型"之后 fork）。对比不是主链里的固定步骤，而是把<b>两个模型节点接进一个对比节点</b>。首跑只落一个被选中的模型节点，其余是你显式 fork 出来的分支。</p>
+
+  <div class="band">
+    <svg viewBox="0 0 920 340" style="width:100%;height:auto;font-family:inherit">
+      <defs>
+        <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="#9aa6b8"/>
+        </marker>
+      </defs>
+
+      <!-- backbone connectors -->
+      <g stroke="#9aa6b8" stroke-width="1.4" fill="none" marker-end="url(#arr)">
+        <line x1="118" y1="60" x2="150" y2="60"/>
+        <line x1="240" y1="60" x2="272" y2="60"/>
+        <line x1="362" y1="60" x2="394" y2="60"/>
+        <line x1="484" y1="60" x2="516" y2="60"/>
+      </g>
+
+      <!-- backbone nodes -->
+      <g font-size="11">
+        <g><rect x="30" y="44" width="88" height="32" rx="8" fill="#fff" stroke="#e6e9ef"/><text x="74" y="64" text-anchor="middle" fill="#1b2330">VIXCLS 数据</text></g>
+        <g><rect x="150" y="44" width="90" height="32" rx="8" fill="#fff" stroke="#e6e9ef"/><text x="195" y="60" text-anchor="middle" fill="#1b2330">时间&amp;索引</text><text x="195" y="71" text-anchor="middle" fill="#6b7688" font-size="8.5">t=_n 交易日</text></g>
+        <g><rect x="272" y="44" width="90" height="32" rx="8" fill="#fff" stroke="#e6e9ef"/><text x="317" y="60" text-anchor="middle" fill="#1b2330">变换</text><text x="317" y="71" text-anchor="middle" fill="#6b7688" font-size="8.5">100·Δln</text></g>
+        <g><rect x="394" y="44" width="90" height="32" rx="8" fill="#fff" stroke="#e6e9ef"/><text x="439" y="60" text-anchor="middle" fill="#1b2330">训练/验证切分</text><text x="439" y="71" text-anchor="middle" fill="#6b7688" font-size="8.5">冻结</text></g>
+        <g><rect x="516" y="42" width="96" height="36" rx="8" fill="#fff" stroke="#3f6bd6" stroke-width="1.6"/><text x="564" y="59" text-anchor="middle" fill="#1b2330">ARMA 均值选型</text><text x="564" y="71" text-anchor="middle" fill="#6b7688" font-size="8.5">ARMA(1,1) no-const</text></g>
+      </g>
+
+      <!-- fork connectors from ARMA mean to model nodes -->
+      <g stroke="#8a5cd0" stroke-width="1.4" fill="none" marker-end="url(#arr)" stroke-dasharray="4 3">
+        <path d="M612,54 C660,54 650,24 700,24"/>
+        <path d="M612,60 C660,60 656,96 700,96"/>
+        <path d="M612,66 C660,66 650,168 700,168"/>
+      </g>
+
+      <!-- model nodes (forks) -->
+      <g font-size="11">
+        <g><rect x="700" y="8" width="132" height="34" rx="9" fill="#fff" stroke="#8a5cd0"/><text x="766" y="24" text-anchor="middle" fill="#1b2330">模型 · ARMA-only</text><text x="766" y="35" text-anchor="middle" fill="#8a5cd0" font-size="8.5">fork · 常方差</text></g>
+        <g><rect x="700" y="80" width="132" height="34" rx="9" fill="#eef3fd" stroke="#3f6bd6" stroke-width="1.6"/><text x="766" y="96" text-anchor="middle" fill="#1b2330">模型 · ARMA-GARCH</text><text x="766" y="107" text-anchor="middle" fill="#3f6bd6" font-size="8.5">首选 · Normal</text></g>
+        <g><rect x="700" y="152" width="132" height="34" rx="9" fill="#fff" stroke="#8a5cd0"/><text x="766" y="168" text-anchor="middle" fill="#1b2330">模型 · GARCH-t</text><text x="766" y="179" text-anchor="middle" fill="#8a5cd0" font-size="8.5">fork · Student-t</text></g>
+      </g>
+
+      <!-- compare node: joins ARMA-only + ARMA-GARCH -->
+      <g stroke="#14a08a" stroke-width="1.4" fill="none" marker-end="url(#arr)">
+        <path d="M832,25 C868,25 858,250 700,255"/>
+        <path d="M832,97 C900,97 900,255 700,258"/>
+      </g>
+      <g font-size="11">
+        <rect x="556" y="238" width="144" height="40" rx="10" fill="#eafaf6" stroke="#14a08a" stroke-width="1.6"/>
+        <text x="628" y="256" text-anchor="middle" fill="#1b2330" font-weight="650">对比节点</text>
+        <text x="628" y="269" text-anchor="middle" fill="#14a08a" font-size="8.5">宽度差·覆盖·pinball·PI 面板</text>
+      </g>
+
+      <!-- forecast/report off the selected model -->
+      <g stroke="#9aa6b8" stroke-width="1.4" fill="none" marker-end="url(#arr)"><line x1="832" y1="97" x2="864" y2="97"/></g>
+      <g font-size="10"><rect x="864" y="82" width="52" height="30" rx="8" fill="#fff" stroke="#e6e9ef"/><text x="890" y="96" text-anchor="middle" fill="#1b2330">预测</text><text x="890" y="107" text-anchor="middle" fill="#6b7688" font-size="8">/报告</text></g>
+    </svg>
+
+    <div class="legend">
+      <span><span class="sw" style="background:#3f6bd6"></span>主干 & 首选模型（首跑落地）</span>
+      <span><span class="sw" style="background:#8a5cd0"></span>fork 出的备选模型节点（显式创建）</span>
+      <span><span class="sw" style="background:#14a08a"></span>对比节点（接入 ≥2 个模型节点）</span>
+    </div>
+  </div>
+
+  <div class="band">
+    <div class="lab" style="margin-bottom:8px">这样一来</div>
+    <ul class="k1">
+      <li><b>每个模型节点自带完整结果</b>：最终拟合 + 条件序列(mu/h/sd/z) + 滚动验证 + n+1 预测 + 该模型的诊断，全在它的抽屉 dashboard 里（就是上一屏那套一屏式布局）。</li>
+      <li><b>换模型 = fork 新节点</b>：改变换/阶数/分布/strategy 都 `model.rerun`/`graph.fork` 出<b>新节点</b>，不覆盖原节点——链式血缘清晰。</li>
+      <li><b>对比 = 连接生成</b>：在画布上选两个模型节点 → 生成<b>对比节点</b>，抽屉是四层对比（数据/参数/指标/诊断/结论 + PI 面板 + 宽度差/覆盖/pinball）。复用现有 CompareNodes。</li>
+      <li><b>"滚动验证 / 预测 / 诊断" 不再是主链里的独立横条</b>，而是每个模型节点结果的一部分——因为它们本就依附于"某一个具体模型"。</li>
+      <li>主链只到 <b>ARMA 均值选型</b>为止是共享的；<b>方差模型的选择就是分叉点</b>（ARMA-only 也只是"方差=常数"的一个分支）。</li>
+    </ul>
+  </div>
+</div>

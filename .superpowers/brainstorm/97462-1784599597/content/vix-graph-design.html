@@ -1,0 +1,228 @@
+<style>
+  .vw { --ink:#1b2330; --sub:#6b7688; --line:#e6e9ef; --bg:#fbfcfe; --card:#fff;
+        --accent:#3f6bd6; --accent2:#14a08a; --warn:#c9820a; --bad:#c0473f;
+        --mono:"SF Mono",ui-monospace,Menlo,monospace; color:var(--ink);
+        font-family:-apple-system,system-ui,"Segoe UI",sans-serif; line-height:1.45; }
+  @media (prefers-color-scheme: dark){ .vw{ --ink:#e8ecf3; --sub:#9aa6b8; --line:#2a3342;
+        --bg:#141a24; --card:#1b222e; } }
+  .vw *{ box-sizing:border-box; }
+  .vw h2{ font-size:20px; margin:0 0 2px; letter-spacing:-.01em; }
+  .vw .lead{ color:var(--sub); font-size:13px; margin:0 0 18px; }
+  .vw .lab{ font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--sub); font-weight:600; }
+  .vw .num{ font-family:var(--mono); }
+  .vw .band{ background:var(--bg); border:1px solid var(--line); border-radius:14px; padding:16px 18px; margin-bottom:16px; }
+
+  /* graph rail */
+  .rail{ display:flex; align-items:stretch; gap:0; overflow-x:auto; padding:4px 2px 8px; }
+  .gn{ position:relative; min-width:104px; flex:1; background:var(--card); border:1px solid var(--line);
+       border-radius:11px; padding:9px 10px; margin-right:16px; }
+  .gn:last-child{ margin-right:0; }
+  .gn::after{ content:"›"; position:absolute; right:-13px; top:50%; transform:translateY(-50%); color:var(--sub); font-size:15px; }
+  .gn:last-child::after{ content:""; }
+  .gn.sel{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(63,107,214,.13); }
+  .gn .t{ font-size:11.5px; font-weight:650; }
+  .gn .op{ display:inline-block; margin-top:5px; font-size:9.5px; color:var(--accent2); border:1px solid var(--accent2);
+           border-radius:5px; padding:1px 5px; }
+  .gn .op.view{ color:var(--sub); border-color:var(--line); }
+
+  /* drawer */
+  .drawer{ background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  .dhead{ padding:15px 18px; border-bottom:1px solid var(--line); }
+  .dhead .title{ font-size:16px; font-weight:680; letter-spacing:-.01em; }
+  .dhead .meta{ color:var(--sub); font-size:12px; margin-top:2px; }
+  .chips{ display:flex; flex-wrap:wrap; gap:6px; margin-top:11px; }
+  .chip{ font-size:10.5px; padding:3px 9px; border-radius:999px; border:1px solid var(--line); display:flex; gap:5px; align-items:center; }
+  .chip b{ font-weight:640; }
+  .dot{ width:6px; height:6px; border-radius:50%; display:inline-block; }
+  .ok{ background:var(--accent2); } .warn{ background:var(--warn); } .bad{ background:var(--bad); } .neu{ background:var(--sub); }
+  .chip.ok{ border-color:rgba(20,160,138,.4);} .chip.warn{ border-color:rgba(201,130,10,.4);} .chip.bad{ border-color:rgba(192,71,63,.4);}
+
+  .dbody{ padding:16px 18px; }
+  .tiles{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:16px; }
+  .tile{ border:1px solid var(--line); border-radius:10px; padding:10px 11px; }
+  .tile .v{ font-family:var(--mono); font-size:18px; font-weight:600; letter-spacing:-.02em; }
+  .tile .k{ font-size:10px; color:var(--sub); margin-top:2px; }
+  .tile .sub{ font-size:9.5px; color:var(--sub); }
+
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .panel{ border:1px solid var(--line); border-radius:10px; padding:11px 12px; }
+  .panel h4{ margin:0 0 8px; font-size:11.5px; font-weight:650; display:flex; justify-content:space-between; align-items:center; }
+  .panel h4 span{ font-size:10px; color:var(--sub); font-weight:500; }
+  svg{ display:block; width:100%; height:auto; }
+
+  table.cand{ width:100%; border-collapse:collapse; font-size:11px; }
+  table.cand th{ text-align:left; color:var(--sub); font-weight:600; font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; padding:4px 6px; border-bottom:1px solid var(--line); }
+  table.cand td{ padding:5px 6px; border-bottom:1px solid var(--line); font-family:var(--mono); }
+  table.cand tr.win td{ background:rgba(63,107,214,.07); }
+  table.cand td.name{ font-family:inherit; }
+  .icbar{ height:5px; border-radius:3px; background:var(--accent); opacity:.85; }
+
+  .opform{ border:1px dashed var(--line); border-radius:10px; padding:12px 13px; margin-top:14px; background:var(--bg); }
+  .opform .row{ display:flex; flex-wrap:wrap; gap:8px; margin-top:9px; }
+  .field{ font-size:11px; }
+  .field .k{ font-size:9.5px; color:var(--sub); display:block; margin-bottom:3px; }
+  .pill{ border:1px solid var(--line); background:var(--card); border-radius:7px; padding:4px 9px; font-size:11px; display:inline-block; }
+  .pill.on{ border-color:var(--accent); color:var(--accent); font-weight:600; }
+  .btnrow{ display:flex; gap:8px; margin-top:12px; }
+  .btn{ border-radius:8px; padding:6px 13px; font-size:11.5px; font-weight:600; border:1px solid var(--accent); color:#fff; background:var(--accent); }
+  .btn.ghost{ background:transparent; color:var(--accent); }
+
+  .map{ columns:2; column-gap:26px; font-size:11.5px; }
+  .map .mi{ break-inside:avoid; padding:5px 0; border-bottom:1px solid var(--line); display:flex; gap:8px; }
+  .map .mi .do{ color:var(--sub); font-family:var(--mono); font-size:10.5px; min-width:96px; }
+  .map .mi .to{ font-weight:600; }
+  @media (max-width:720px){ .tiles{ grid-template-columns:repeat(2,1fr);} .grid2{ grid-template-columns:1fr;} .map{ columns:1; } }
+</style>
+
+<div class="vw">
+  <h2>时间序列 · 图内工作台设计（以 VIXCLS Do-file 为基准）</h2>
+  <p class="lead">三件事：① 谱系图 = Do-file 每一步都是<b>可操作节点</b>；② 节点抽屉 = <b>结果 + 操作一屏看全</b>（取代 9 胶囊）；③ 覆盖表证明 Do-file 的能力一条不落。删掉旧 Overview。</p>
+
+  <!-- 1. GRAPH -->
+  <div class="band">
+    <div class="lab" style="margin-bottom:10px">① 谱系图：每个节点可查看结果、也可就地改参数 rerun / fork</div>
+    <div class="rail">
+      <div class="gn"><div class="t">VIXCLS 数据</div><span class="op view">只读 · 源不改</span></div>
+      <div class="gn"><div class="t">时间 & 交易日索引</div><span class="op">确认语义</span></div>
+      <div class="gn"><div class="t">变换</div><span class="op">选 / 确认</span></div>
+      <div class="gn"><div class="t">训练 / 验证切分</div><span class="op">改 n · refit</span></div>
+      <div class="gn"><div class="t">ARMA 选型</div><span class="op">auto / 手改 p,q</span></div>
+      <div class="gn sel"><div class="t">波动率选型</div><span class="op">arch/garch · 分布</span></div>
+      <div class="gn"><div class="t">最终模型 · 条件序列</div><span class="op view">查看</span></div>
+      <div class="gn"><div class="t">滚动验证</div><span class="op">改窗口</span></div>
+      <div class="gn"><div class="t">ARMA vs GARCH</div><span class="op view">对比</span></div>
+      <div class="gn"><div class="t">预测 n+1</div><span class="op view">查看</span></div>
+      <div class="gn"><div class="t">报告</div><span class="op view">answer-first</span></div>
+    </div>
+    <p class="lead" style="margin:8px 0 0">交易日索引（<span class="num">t=_n</span>，observation_order）随节点携带：持续性/半衰期单位显示「交易日」，不擅自换算日历天——正是 Do-file 里 <span class="num">gen t=_n / tsset t</span> 的语义。</p>
+  </div>
+
+  <!-- 2. DRAWER -->
+  <div class="lab" style="margin:2px 0 8px">② 选中「波动率选型 / 最终模型」节点 → 抽屉（结果 + 操作，一屏，可滚动）</div>
+  <div class="drawer">
+    <div class="dhead">
+      <div class="title">ARMA(1,1) – GARCH(1,1)</div>
+      <div class="meta">Sequential 两阶段 · 创新分布 Normal · 变换 100·Δln(VIX) · 交易日索引 · <b>参照 Do-file：joint MLE → 仅方向/流程一致，非逐参相等</b></div>
+      <div class="chips">
+        <span class="chip ok"><span class="dot ok"></span>数据就绪</span>
+        <span class="chip ok"><span class="dot ok"></span>均值充分</span>
+        <span class="chip ok"><span class="dot ok"></span>波动充分</span>
+        <span class="chip warn"><span class="dot warn"></span>分布 尾部偏重</span>
+        <span class="chip ok"><span class="dot ok"></span>预测验证</span>
+        <span class="chip ok"><span class="dot ok"></span>GARCH 有增益</span>
+      </div>
+    </div>
+    <div class="dbody">
+      <div class="tiles">
+        <div class="tile"><div class="v">0.981</div><div class="k">持续性 α+β</div><div class="sub num">α .11 · β .87</div></div>
+        <div class="tile"><div class="v">36</div><div class="k">半衰期</div><div class="sub">交易日 · 高持续</div></div>
+        <div class="tile"><div class="v">94.6%</div><div class="k">95% 区间覆盖</div><div class="sub num">n=250</div></div>
+        <div class="tile"><div class="v">0.038</div><div class="k">5% pinball</div><div class="sub">vs ARMA 0.048</div></div>
+        <div class="tile"><div class="v">−0.9%</div><div class="k">下一条件均值</div><div class="sub num">σ 5.83</div></div>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <h4>条件波动率 sd_t <span>√h · 聚集</span></h4>
+          <svg viewBox="0 0 300 92" preserveAspectRatio="none">
+            <polyline fill="none" stroke="#3f6bd6" stroke-width="1.6"
+              points="0,70 14,66 28,72 42,60 56,63 70,40 84,22 98,44 112,55 126,58 140,52 154,68 168,64 182,46 196,30 210,49 224,58 238,62 252,55 266,66 280,70 300,68"/>
+            <line x1="70" y1="8" x2="70" y2="84" stroke="#c9820a" stroke-width="0.6" stroke-dasharray="2 2"/>
+            <text x="72" y="16" font-size="7" fill="#c9820a">波动爆发</text>
+          </svg>
+        </div>
+        <div class="panel">
+          <h4>滚动 1 步 95% 预测带 <span>y_t · 例外标红</span></h4>
+          <svg viewBox="0 0 300 92" preserveAspectRatio="none">
+            <polygon fill="rgba(63,107,214,.14)" stroke="none"
+              points="0,34 300,26 300,66 0,74"/>
+            <polyline fill="none" stroke="#1b2330" stroke-width="1.2"
+              points="0,54 20,48 40,60 60,45 80,66 100,52 120,58 140,50 160,63 180,44 200,57 220,52 240,60 260,48 280,70 300,55"/>
+            <circle cx="80" cy="66" r="2.4" fill="#c0473f"/>
+            <circle cx="280" cy="70" r="2.4" fill="#c0473f"/>
+          </svg>
+        </div>
+        <div class="panel">
+          <h4>标准化残差² ACF <span>ARCH 已消解</span></h4>
+          <svg viewBox="0 0 300 92">
+            <line x1="0" y1="46" x2="300" y2="46" stroke="#e6e9ef"/>
+            <rect x="0" y="14" width="300" height="64" fill="rgba(20,160,138,.06)"/>
+            <g fill="#14a08a">
+              <rect x="12" y="40" width="4" height="6"/><rect x="34" y="42" width="4" height="4"/>
+              <rect x="56" y="38" width="4" height="8"/><rect x="78" y="43" width="4" height="3"/>
+              <rect x="100" y="41" width="4" height="5"/><rect x="122" y="44" width="4" height="2"/>
+              <rect x="144" y="39" width="4" height="7"/><rect x="166" y="43" width="4" height="3"/>
+              <rect x="188" y="42" width="4" height="4"/><rect x="210" y="44" width="4" height="2"/>
+              <rect x="232" y="41" width="4" height="5"/><rect x="254" y="43" width="4" height="3"/>
+            </g>
+            <text x="4" y="11" font-size="7" fill="#6b7688">±1.96/√n</text>
+          </svg>
+        </div>
+        <div class="panel">
+          <h4>标准化残差 QQ <span>尾部偏离 → 建议 Student-t</span></h4>
+          <svg viewBox="0 0 300 92">
+            <line x1="20" y1="80" x2="280" y2="12" stroke="#6b7688" stroke-width="0.8" stroke-dasharray="3 3"/>
+            <g fill="#3f6bd6">
+              <circle cx="40" cy="74" r="1.8"/><circle cx="70" cy="66" r="1.8"/><circle cx="100" cy="58" r="1.8"/>
+              <circle cx="130" cy="50" r="1.8"/><circle cx="160" cy="44" r="1.8"/><circle cx="190" cy="37" r="1.8"/>
+              <circle cx="220" cy="28" r="1.8"/><circle cx="250" cy="16" r="1.8"/>
+            </g>
+            <circle cx="34" cy="82" r="2.2" fill="#c9820a"/><circle cx="262" cy="6" r="2.2" fill="#c9820a"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px">
+        <h4>波动率候选 · 信息准则 <span>固定均值 ARMA(1,1) · 按 AICc 排序 · 含 ARCH(0)=常方差</span></h4>
+        <table class="cand">
+          <tr><th>模型</th><th>k</th><th>logL</th><th>AIC</th><th>AICc</th><th>BIC</th><th style="width:34%">AICc</th><th>状态</th></tr>
+          <tr class="win"><td class="name">GARCH(1,1) ★</td><td>5</td><td>−1712</td><td>3434</td><td>3434</td><td>3457</td><td><div class="icbar" style="width:42%"></div></td><td>选中</td></tr>
+          <tr><td class="name">ARCH(5)</td><td>8</td><td>−1719</td><td>3454</td><td>3454</td><td>3491</td><td><div class="icbar" style="width:55%"></div></td><td>收敛</td></tr>
+          <tr><td class="name">ARCH(1)</td><td>4</td><td>−1751</td><td>3510</td><td>3510</td><td>3528</td><td><div class="icbar" style="width:78%"></div></td><td>收敛</td></tr>
+          <tr><td class="name">ARCH(0) 常方差</td><td>3</td><td>−1806</td><td>3618</td><td>3618</td><td>3632</td><td><div class="icbar" style="width:100%;opacity:.4"></div></td><td>基线</td></tr>
+        </table>
+      </div>
+
+      <div class="opform">
+        <div class="lab">节点操作 · model.rerun / graph.fork（就地创建 child，不覆盖当前）</div>
+        <div class="row">
+          <div class="field"><span class="k">变换</span><span class="pill on">log_return%</span> <span class="pill">log</span> <span class="pill">diff</span></div>
+          <div class="field"><span class="k">ARMA p,q</span><span class="pill on">1,1</span> <span class="pill">auto</span></div>
+          <div class="field"><span class="k">方差</span><span class="pill on">GARCH 1,1</span> <span class="pill">ARCH q</span></div>
+          <div class="field"><span class="k">分布</span><span class="pill on">Normal</span> <span class="pill">Student-t</span></div>
+          <div class="field"><span class="k">验证 n · refit</span><span class="pill on">250 · 1</span></div>
+        </div>
+        <div class="btnrow">
+          <span class="btn">运行 child</span>
+          <span class="btn ghost">建 ARMA-only 对比分支</span>
+          <span class="btn ghost">Ask AI 解释本节点</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. COVERAGE -->
+  <div class="band" style="margin-top:16px">
+    <div class="lab" style="margin-bottom:10px">③ Do-file 能力 → 图内落点（一条不落）</div>
+    <div class="map">
+      <div class="mi"><span class="do">gen t=_n</span><span class="to">时间&索引节点 · observation_order 语义</span></div>
+      <div class="mi"><span class="do">drop 非交易日</span><span class="to">时间审计 · 缺口/重复为 blocking，不插值</span></div>
+      <div class="mi"><span class="do">ln/D/dlvix100</span><span class="to">变换节点 · 4 种 transform + ADF/ACF 证据</span></div>
+      <div class="mi"><span class="do">dfuller / corrgram</span><span class="to">变换 & 诊断卡 · ADF/ACF/PACF</span></div>
+      <div class="mi"><span class="do">holdout=_N</span><span class="to">切分节点 · 冻结先于选型 · split hash</span></div>
+      <div class="mi"><span class="do">8×arima+IC</span><span class="to">ARMA 选型 · AIC/AICc/BIC 候选表</span></div>
+      <div class="mi"><span class="do">wntestq e/e²</span><span class="to">均值诊断 · Ljung-Box + 残差²</span></div>
+      <div class="mi"><span class="do">ARCH-LM q=10</span><span class="to">诊断卡 · F 与 LM=N·R² 两法</span></div>
+      <div class="mi"><span class="do">arch(0..10)+g11</span><span class="to">波动率选型 · 含常方差基线</span></div>
+      <div class="mi"><span class="do">predict h/z/z²</span><span class="to">条件序列 · mu/h/sd/z 全留痕</span></div>
+      <div class="mi"><span class="do">n+1 PI · fail1</span><span class="to">预测节点 · 95% 区间 + 覆盖</span></div>
+      <div class="mi"><span class="do">rolling 20%</span><span class="to">滚动验证 · 冻结规格不重搜</span></div>
+      <div class="mi"><span class="do">invnormal(.05)</span><span class="to">预测 · 5% 条件分位（默认不叫 VaR）</span></div>
+      <div class="mi"><span class="do">α+β · halflife</span><span class="to">最终模型 · 持续性/半衰期(交易日)</span></div>
+      <div class="mi"><span class="do">ARMA vs GARCH</span><span class="to">对比节点 · 宽度差/覆盖/pinball/PI 面板</span></div>
+      <div class="mi"><span class="do">qnorm/sktest</span><span class="to">诊断卡 · QQ + 正态检验 → 建议 Student-t</span></div>
+      <div class="mi"><span class="do">graph export</span><span class="to">每图=结构化 artifact，可回溯 run/node/hash</span></div>
+      <div class="mi"><span class="do">Overview 页</span><span class="to">删除 · 全部并入节点抽屉</span></div>
+    </div>
+  </div>
+</div>
