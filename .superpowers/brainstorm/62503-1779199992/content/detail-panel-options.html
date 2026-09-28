@@ -1,0 +1,179 @@
+<h2>节点详情面板 · 三种密度方案对比</h2>
+<p class="subtitle">同一个节点（model:ols_1，含 2 个 DecisionPoint）在三种面板设计下的展示。点击你倾向的方案。</p>
+
+<style>
+  .panel-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin: 24px 0;
+  }
+  .panel {
+    border: 2px solid #444;
+    border-radius: 8px;
+    padding: 14px;
+    background: #1e1e1e;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    cursor: pointer;
+    transition: border-color .15s, transform .15s;
+  }
+  .panel:hover { border-color: #6cf; transform: translateY(-2px); }
+  .panel.selected { border-color: #4af; box-shadow: 0 0 0 3px #4af3; }
+  .panel-label {
+    display: inline-block;
+    background: #4af;
+    color: #000;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+  .panel h4 { margin: 0 0 4px; font-size: 14px; color: #fff; }
+  .panel .meta { color: #888; font-size: 11px; margin-bottom: 12px; }
+  .panel hr { border: 0; border-top: 1px solid #333; margin: 10px 0; }
+  .badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .badge-caution { background: #c80; color: #000; }
+  .badge-needed { background: #557; color: #cde; }
+  .badge-source-dd { background: #275; color: #afa; }
+  .badge-source-sys { background: #345; color: #ccd; }
+  .dp-block {
+    background: #2a2a2a;
+    border-left: 3px solid #6cf;
+    padding: 8px 10px;
+    margin: 8px 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .dp-title { color: #6cf; font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+  .dp-selected { font-size: 13px; }
+  .dp-selected strong { color: #fff; }
+  .collapsed-hint {
+    color: #888;
+    font-size: 11px;
+    margin-top: 6px;
+    font-style: italic;
+  }
+  .copy-btn {
+    background: #245;
+    color: #cde;
+    border: 1px solid #467;
+    padding: 8px 12px;
+    border-radius: 4px;
+    width: 100%;
+    margin-top: 12px;
+    font-size: 12px;
+    text-align: center;
+  }
+  .candidates-row { font-size: 11px; color: #aaa; margin-top: 4px; }
+  .checks-row { font-size: 11px; color: #c95; margin-top: 4px; }
+  .why-row { font-size: 11px; color: #aac; margin-top: 4px; font-style: italic; }
+  .summary-line { color: #fb6; font-weight: 600; margin: 8px 0; }
+</style>
+
+<div class="panel-grid">
+
+  <!-- ============ Option A: 信息密集 ============ -->
+  <div class="panel" data-choice="a" onclick="toggleSelect(this)">
+    <span class="panel-label">A · 全展开</span>
+    <h4>▣ Primary OLS</h4>
+    <div class="meta">MODEL · model:ols_1</div>
+    <div class="summary-line">📋 OLS (HC1, n=32)</div>
+    <span class="badge badge-caution">⚠ caution</span>
+    <div style="color:#caa;font-size:11px;margin-top:2px;">HC1 default not data-driven</div>
+    <hr>
+
+    <div class="dp-block">
+      <div class="dp-title">ⓘ model_type_auto_select</div>
+      <div class="dp-selected">selected: <strong>continuous</strong></div>
+      <div><span class="badge badge-source-dd">data_driven_default</span><span class="badge badge-needed">review: needed</span></div>
+      <div class="candidates-row">candidates: ols, logit, poisson</div>
+      <div class="why-row">💬 y has 32 unique values; selected 'continuous'.</div>
+      <div class="checks-row">⚠ checks needed: variable_role_inference</div>
+    </div>
+
+    <div class="dp-block">
+      <div class="dp-title">ⓘ ols_default_robust_se</div>
+      <div class="dp-selected">selected: <strong>HC1</strong></div>
+      <div><span class="badge badge-source-sys">system_default</span><span class="badge badge-needed">review: needed</span></div>
+      <div class="candidates-row">candidates: (none)</div>
+      <div class="why-row">💬 OLS pipeline always applies HC1; not data-driven.</div>
+      <div class="checks-row">⚠ checks needed: breusch_pagan, white_test</div>
+    </div>
+
+    <hr>
+    <div style="color:#888;font-size:11px;">📎 model_results/ols_1.json</div>
+    <div style="color:#888;font-size:11px;">🕐 2026-05-19T10:23:45Z</div>
+    <button class="copy-btn">📋 Copy as branch path</button>
+  </div>
+
+  <!-- ============ Option B: 渐进式披露 ============ -->
+  <div class="panel" data-choice="b" onclick="toggleSelect(this)">
+    <span class="panel-label">B · 渐进式</span>
+    <h4>▣ Primary OLS</h4>
+    <div class="meta">MODEL · model:ols_1</div>
+    <div class="summary-line">📋 OLS (HC1, n=32)</div>
+    <span class="badge badge-caution">⚠ caution</span>
+    <hr>
+
+    <div class="dp-block">
+      <div class="dp-title">ⓘ model_type_auto_select</div>
+      <div class="dp-selected">selected: <strong>continuous</strong></div>
+      <div><span class="badge badge-source-dd">data_driven_default</span><span class="badge badge-needed">review: needed</span></div>
+      <div class="collapsed-hint">▸ candidates · explanation · checks (click to expand)</div>
+    </div>
+
+    <div class="dp-block">
+      <div class="dp-title">ⓘ ols_default_robust_se</div>
+      <div class="dp-selected">selected: <strong>HC1</strong></div>
+      <div><span class="badge badge-source-sys">system_default</span><span class="badge badge-needed">review: needed</span></div>
+      <div class="collapsed-hint">▸ candidates · explanation · checks (click to expand)</div>
+    </div>
+
+    <hr>
+    <div class="collapsed-hint">▸ Payload · timestamp · raw JSON (click to expand)</div>
+    <button class="copy-btn">📋 Copy as branch path</button>
+  </div>
+
+  <!-- ============ Option C: 极简卡片 ============ -->
+  <div class="panel" data-choice="c" onclick="toggleSelect(this)">
+    <span class="panel-label">C · 极简</span>
+    <h4>▣ Primary OLS</h4>
+    <div class="meta">MODEL · model:ols_1 · ⚠ caution</div>
+    <div class="summary-line">📋 OLS (HC1, n=32)</div>
+    <hr>
+
+    <div class="dp-block" style="padding:6px 10px;">
+      <div class="dp-title">model_type_auto_select → <strong>continuous</strong></div>
+      <div style="color:#a99;font-size:11px;">⚠ 1 check needed</div>
+    </div>
+
+    <div class="dp-block" style="padding:6px 10px;">
+      <div class="dp-title">ols_default_robust_se → <strong>HC1</strong></div>
+      <div style="color:#a99;font-size:11px;">⚠ 2 checks needed</div>
+    </div>
+
+    <hr>
+    <div class="collapsed-hint" style="text-align:center;">▸ Show full details</div>
+    <button class="copy-btn">📋 Copy as branch path</button>
+  </div>
+
+</div>
+
+<div style="margin-top:24px;padding:14px;background:#222;border-radius:6px;color:#bbb;font-size:13px;">
+  <strong>对比要点：</strong>
+  <ul style="margin:6px 0 0 18px;line-height:1.7;">
+    <li><strong>A · 全展开</strong>：所有 DP 字段一目了然。审计深查最快，但单节点高度大、滚动多。Multi-DP（3+ 个）会很高。</li>
+    <li><strong>B · 渐进式</strong>：默认看 DP 标题 + selected + 来源 + review 状态，其余点击展开。日常使用最舒适，Multi-DP 扩展时面板高度仍可控。</li>
+    <li><strong>C · 极简</strong>：每个 DP 浓缩为一行。横向扫描快、跨节点比较高效，但单节点深查要再点一次。</li>
+  </ul>
+</div>

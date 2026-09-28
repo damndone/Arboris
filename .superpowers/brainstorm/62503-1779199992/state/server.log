@@ -1,0 +1,9 @@
+{"type":"server-started","port":58240,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:58240","screen_dir":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.4/.superpowers/brainstorm/62503-1779199992/content","state_dir":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.4/.superpowers/brainstorm/62503-1779199992/state"}
+{"type":"screen-added","file":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.4/.superpowers/brainstorm/62503-1779199992/content/detail-panel-options.html"}
+{"type":"screen-added","file":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.4/.superpowers/brainstorm/62503-1779199992/content/detail-panel-b-refined.html"}
+{"type":"screen-added","file":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.4/.superpowers/brainstorm/62503-1779199992/content/two-layer-v3.html"}
+{"type":"screen-added","file":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.4/.superpowers/brainstorm/62503-1779199992/content/two-layer-v4.html"}
+{"type":"screen-added","file":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.4/.superpowers/brainstorm/62503-1779199992/content/decision-review-v5.html"}
+{"source":"user-event","type":"click","text":"✓\n    \n      就这样定 — 写入 V1.4.1 design spec\n      iOS 风格 · 决策审查面板 · dpRegistry.ts 前端文案层","choice":"approve","id":null,"timestamp":1779202764171}
+{"type":"screen-added","file":"/Users/jiayuanren/项目规划/.worktrees/workbench-v1.4/.superpowers/brainstorm/62503-1779199992/content/waiting.html"}
+{"type":"server-stopped","reason":"idle timeout"}

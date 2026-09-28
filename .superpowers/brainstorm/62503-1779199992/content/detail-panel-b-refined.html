@@ -1,0 +1,254 @@
+<h2>方案 B 精修版 · 节点详情面板</h2>
+<p class="subtitle">"渐进式披露 + warnings 始终可见 + 强化 Copy 按钮"。同一节点（model:ols_1，含 2 个 DP）。</p>
+
+<style>
+  .preview-wrap {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 24px;
+    margin: 24px 0;
+    align-items: start;
+  }
+  .panel {
+    border: 2px solid #4af;
+    border-radius: 8px;
+    padding: 16px;
+    background: #1a1d24;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    box-shadow: 0 0 0 3px #4af2;
+  }
+  .panel h4 { margin: 0 0 2px; font-size: 15px; color: #fff; font-weight: 600; }
+  .panel .meta { color: #888; font-size: 11px; margin-bottom: 12px; }
+  .panel hr { border: 0; border-top: 1px solid #2a2e36; margin: 12px 0; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 5px;
+    vertical-align: middle;
+  }
+  .badge-caution { background: #c80; color: #000; }
+  .badge-warning { background: #c44; color: #fff; }
+  .badge-needed { background: #4d556e; color: #c5cde0; }
+  .badge-passed { background: #2d6a4f; color: #d8f3dc; }
+  .badge-source-dd { background: #1e5c44; color: #95e2bf; }
+  .badge-source-sys { background: #3a4d66; color: #bcc8da; }
+  .badge-source-user { background: #5e3a78; color: #d4b8e8; }
+
+  .summary-line {
+    color: #fb6;
+    font-weight: 600;
+    margin: 8px 0;
+    font-size: 14px;
+  }
+  .trust-row { margin: 6px 0; }
+  .trust-reason { color: #d4a070; font-size: 11px; margin-top: 3px; }
+
+  .dp-block {
+    background: #232830;
+    border-left: 3px solid #6cf;
+    padding: 10px 12px;
+    margin: 10px 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .dp-title {
+    color: #6cf;
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 5px;
+    letter-spacing: 0.2px;
+  }
+  .dp-selected {
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .dp-selected strong { color: #fff; font-weight: 700; }
+  .dp-meta { margin-bottom: 6px; }
+
+  .dp-warning {
+    color: #fb6;
+    font-size: 11.5px;
+    margin: 6px 0 4px;
+    padding: 6px 8px;
+    background: #2a2418;
+    border-left: 2px solid #fb6;
+    border-radius: 0 3px 3px 0;
+    line-height: 1.4;
+  }
+
+  .expand-toggle {
+    color: #7a8595;
+    font-size: 11px;
+    margin-top: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .expand-toggle:hover { color: #aab5c5; }
+
+  .copy-btn-primary {
+    background: linear-gradient(180deg, #3a8fff 0%, #2779ee 100%);
+    color: #fff;
+    border: 0;
+    padding: 11px 14px;
+    border-radius: 5px;
+    width: 100%;
+    margin-top: 14px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: 0 2px 6px #2779ee44;
+  }
+  .copy-btn-primary:hover { background: linear-gradient(180deg, #4a9fff 0%, #3789ff 100%); }
+
+  .footer-meta { color: #6a737d; font-size: 11px; margin-top: 4px; }
+
+  .callout {
+    background: #1d2228;
+    border-radius: 6px;
+    padding: 14px 16px;
+    color: #c5cdd8;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .callout h3 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: #6cf;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+  }
+  .callout strong { color: #fff; }
+  .callout ul { margin: 4px 0 0 18px; padding: 0; }
+  .callout li { margin: 4px 0; }
+
+  .always-visible { color: #8fbf6f; }
+  .collapsed { color: #888; }
+  .warning-emph { color: #fb6; }
+
+  .options { margin-top: 24px; }
+</style>
+
+<div class="preview-wrap">
+
+  <!-- 左：精修后的面板 mockup -->
+  <div class="panel">
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span style="font-size:16px;">▣</span>
+      <h4>Primary OLS</h4>
+    </div>
+    <div class="meta">MODEL · model:ols_1</div>
+
+    <div class="summary-line">📋 OLS (HC1, n=32)</div>
+
+    <div class="trust-row">
+      <span class="badge badge-caution">⚠ caution</span>
+      <div class="trust-reason">HC1 default not data-driven</div>
+    </div>
+
+    <hr>
+
+    <div style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Decisions (2)</div>
+
+    <!-- DP #1 -->
+    <div class="dp-block">
+      <div class="dp-title">ⓘ model_type_auto_select</div>
+      <div class="dp-selected">selected: <strong>continuous</strong></div>
+      <div class="dp-meta">
+        <span class="badge badge-source-dd">data_driven_default</span>
+        <span class="badge badge-needed">review: needed</span>
+      </div>
+      <div class="dp-warning">⚠ Auto-selected based on y dtype and unique-value count; verify domain fit.</div>
+      <div class="expand-toggle">▸ candidates · explanation · checks (3 items)</div>
+    </div>
+
+    <!-- DP #2 -->
+    <div class="dp-block">
+      <div class="dp-title">ⓘ ols_default_robust_se</div>
+      <div class="dp-selected">selected: <strong>HC1</strong></div>
+      <div class="dp-meta">
+        <span class="badge badge-source-sys">system_default</span>
+        <span class="badge badge-needed">review: needed</span>
+      </div>
+      <div class="dp-warning">⚠ Robust SE is hardcoded default. Confirm heteroskedasticity or revisit.</div>
+      <div class="expand-toggle">▸ explanation · checks (2 items)</div>
+    </div>
+
+    <hr>
+
+    <button class="copy-btn-primary">📋 Copy as branch path</button>
+
+    <div class="footer-meta" style="margin-top:10px;">
+      📎 model_results/ols_1.json
+    </div>
+    <div class="footer-meta">🕐 2026-05-19T10:23:45Z</div>
+    <div class="expand-toggle" style="margin-top:8px;">▸ Raw JSON</div>
+  </div>
+
+  <!-- 右：设计说明 -->
+  <div class="callout">
+    <h3>Always-visible（始终展示）</h3>
+    <ul>
+      <li><span class="always-visible">●</span> node kind icon · display_label · node_id</li>
+      <li><span class="always-visible">●</span> summary（来自后端 §4 契约）</li>
+      <li><span class="always-visible">●</span> trust badge（仅非 OK 时） + trust_reason</li>
+      <li><span class="always-visible">●</span> 每个 DP 的 decision_id + selected + source + review_status</li>
+      <li><span class="warning-emph">●</span> <strong>每个 DP 的 contestability.warnings（强制可见 ← 改动点）</strong></li>
+      <li><span class="always-visible">●</span> "Copy as branch path" 主按钮（蓝色实心 ← 改动点）</li>
+    </ul>
+
+    <h3 style="margin-top:14px;">Collapsed（点击展开）</h3>
+    <ul>
+      <li><span class="collapsed">●</span> candidates 列表（DP #1 有 3 项，handle_missing_values 那种有 18 项）</li>
+      <li><span class="collapsed">●</span> reason.explanation 全文</li>
+      <li><span class="collapsed">●</span> contestability.assumption_checks_needed 详细列表</li>
+      <li><span class="collapsed">●</span> chosen_params 参数表</li>
+      <li><span class="collapsed">●</span> 原始 JSON（power user / 调试用）</li>
+    </ul>
+
+    <h3 style="margin-top:14px;">Not Shown（永远不展示）</h3>
+    <ul>
+      <li><span class="collapsed">●</span> trust = OK 时不显示 trust badge</li>
+      <li><span class="collapsed">●</span> annotations 字段（V1.6 AI 预留）</li>
+      <li><span class="collapsed">●</span> branch_id、archived（仅 multi-branch 视图用，V1.5.0+）</li>
+    </ul>
+
+    <h3 style="margin-top:14px;">Multi-DP 表现</h3>
+    <ul>
+      <li>3 个 DP 时面板总高度约 ~520px，仍在主流屏一屏内</li>
+      <li>每个 DP 独立可展开/折叠，互不影响</li>
+      <li>headers Decisions (N) 体现 DP 数量</li>
+    </ul>
+  </div>
+
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>就这样定 — 写入 design spec</h3>
+      <p>这个面板设计加入 V1.4.1 spec，进入下一步</p>
+    </div>
+  </div>
+  <div class="option" data-choice="tweak" onclick="toggleSelect(this)">
+    <div class="letter">~</div>
+    <div class="content">
+      <h3>大方向 OK，但还有微调</h3>
+      <p>terminal 告诉我具体哪里调（颜色、布局、字段优先级…）</p>
+    </div>
+  </div>
+  <div class="option" data-choice="redo" onclick="toggleSelect(this)">
+    <div class="letter">✗</div>
+    <div class="content">
+      <h3>方向不对 — 想要别的</h3>
+      <p>说说你想要的方向</p>
+    </div>
+  </div>
+</div>

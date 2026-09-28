@@ -1,0 +1,409 @@
+<h2>双层模型 · 节点扫读 + Inspector 深查</h2>
+<p class="subtitle">Graph 节点保持极简，所有细节进右侧 Inspector。基于你的反馈重做。</p>
+
+<style>
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 24px 0;
+    align-items: start;
+  }
+  .section-title {
+    color: #6cf;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+
+  /* ========== Graph 节点（紧凑） ========== */
+  .graph-stage {
+    background: #15181d;
+    border: 1px dashed #2a2e36;
+    border-radius: 8px;
+    padding: 24px 16px;
+    min-height: 380px;
+    position: relative;
+  }
+  .node-card {
+    background: #1e232b;
+    border: 1.5px solid #3a4150;
+    border-radius: 6px;
+    padding: 9px 12px;
+    width: 200px;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    color: #e0e0e0;
+    position: relative;
+  }
+  .node-card.selected {
+    border-color: #4af;
+    box-shadow: 0 0 0 3px #4af3;
+  }
+  .node-card .nc-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+  }
+  .node-card .nc-summary {
+    color: #8a96a8;
+    font-size: 11px;
+    margin-top: 2px;
+  }
+  .node-card .nc-badges {
+    margin-top: 6px;
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .chip-caution { background: #c80; color: #000; }
+  .chip-warn-count { background: #2a2418; color: #fb6; border: 1px solid #5a4a20; }
+
+  /* tooltip preview */
+  .tooltip {
+    position: absolute;
+    left: 220px;
+    top: 0;
+    background: #0d0f13;
+    border: 1px solid #4af;
+    border-radius: 6px;
+    padding: 10px 12px;
+    width: 240px;
+    font-size: 11.5px;
+    color: #cdd5e0;
+    box-shadow: 0 4px 12px #0009;
+    z-index: 5;
+  }
+  .tooltip::before {
+    content: '';
+    position: absolute;
+    left: -7px; top: 14px;
+    width: 0; height: 0;
+    border: 7px solid transparent;
+    border-right-color: #4af;
+  }
+  .tooltip .tt-warn { color: #fb6; margin-top: 6px; line-height: 1.4; }
+  .tooltip .tt-cta { color: #7a8595; margin-top: 8px; font-style: italic; font-size: 10.5px; }
+
+  /* arrows between nodes */
+  .arrow {
+    color: #555;
+    text-align: center;
+    margin: 4px 0;
+    font-size: 16px;
+  }
+
+  /* ========== Inspector ========== */
+  .inspector {
+    background: #1a1d24;
+    border: 2px solid #4af;
+    border-radius: 8px;
+    padding: 16px;
+    color: #e0e0e0;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    font-size: 13px;
+    line-height: 1.55;
+    box-shadow: 0 0 0 3px #4af2;
+  }
+  .insp-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .insp-head h4 {
+    margin: 0 0 2px;
+    font-size: 15px;
+    color: #fff;
+    font-weight: 600;
+  }
+  .insp-head .insp-close {
+    color: #7a8595;
+    cursor: pointer;
+    font-size: 16px;
+    margin-left: 8px;
+  }
+  .insp-meta { color: #888; font-size: 11px; margin-bottom: 12px; }
+  .insp-summary { color: #fb6; font-weight: 600; margin: 8px 0; font-size: 14px; }
+  .insp-trust { margin: 6px 0 10px; }
+  .insp-trust-reason { color: #d4a070; font-size: 11px; margin-top: 3px; }
+  .insp-divider { border-top: 1px solid #2a2e36; margin: 12px 0; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 5px;
+  }
+  .badge-caution { background: #c80; color: #000; }
+  .badge-needed { background: #4d556e; color: #c5cde0; }
+  .badge-source-dd { background: #1e5c44; color: #95e2bf; }
+  .badge-source-sys { background: #3a4d66; color: #bcc8da; }
+
+  .dp-block {
+    background: #232830;
+    border-left: 3px solid #6cf;
+    padding: 11px 13px;
+    margin: 10px 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .dp-friendly {
+    color: #fff;
+    font-weight: 600;
+    font-size: 13.5px;
+    margin-bottom: 2px;
+  }
+  .dp-id {
+    color: #6a7686;
+    font-size: 10.5px;
+    font-family: ui-monospace, monospace;
+    margin-bottom: 7px;
+  }
+  .dp-selected {
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .dp-selected strong { color: #fff; font-weight: 700; }
+  .dp-selected .arrow-tok { color: #6cf; font-weight: 700; margin-right: 4px; }
+  .dp-meta { margin-bottom: 6px; }
+  .dp-warning {
+    color: #fb6;
+    font-size: 11.5px;
+    margin: 6px 0 4px;
+    padding: 7px 9px;
+    background: #2a2418;
+    border-left: 2px solid #fb6;
+    border-radius: 0 3px 3px 0;
+    line-height: 1.45;
+  }
+  .expand-toggle {
+    color: #7a8595;
+    font-size: 11px;
+    margin-top: 7px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .expand-toggle:hover { color: #aab5c5; }
+
+  .insp-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid #2a2e36;
+  }
+  .footer-meta-stack { color: #6a737d; font-size: 11px; line-height: 1.5; }
+  .icon-btn {
+    background: #2a3340;
+    color: #cdd5e0;
+    border: 1px solid #455066;
+    width: 32px;
+    height: 32px;
+    border-radius: 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    position: relative;
+  }
+  .icon-btn:hover {
+    background: #34404f;
+    border-color: #5a6884;
+  }
+  .icon-btn-tip {
+    position: absolute;
+    bottom: 38px;
+    right: 0;
+    background: #0d0f13;
+    border: 1px solid #455066;
+    color: #cdd5e0;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    box-shadow: 0 2px 6px #0009;
+  }
+</style>
+
+<div class="layout">
+
+  <!-- 左：Graph 上的节点 -->
+  <div>
+    <div class="section-title">① Graph 节点（极简，仅扫读）</div>
+    <div class="graph-stage">
+
+      <!-- node 1: cleaned stage -->
+      <div class="node-card" style="margin-left:30px;">
+        <div class="nc-title"><span>▤</span><span>Cleaned data</span></div>
+        <div class="nc-summary">32 rows × 3 cols (3 dropped)</div>
+      </div>
+
+      <div class="arrow" style="margin-left:120px;">↓</div>
+
+      <!-- node 2: Variables (group) -->
+      <div class="node-card" style="margin-left:30px;">
+        <div class="nc-title"><span>▦</span><span>Variables (5)</span></div>
+        <div class="nc-summary">click to expand</div>
+      </div>
+
+      <div class="arrow" style="margin-left:120px;">↓</div>
+
+      <!-- node 3: model, SELECTED + tooltip preview -->
+      <div class="node-card selected" style="margin-left:30px;">
+        <div class="nc-title"><span>▣</span><span>Primary OLS</span></div>
+        <div class="nc-summary">OLS (HC1, n=32)</div>
+        <div class="nc-badges">
+          <span class="chip chip-caution">⚠ caution</span>
+          <span class="chip chip-warn-count">⚠ 2</span>
+        </div>
+
+        <!-- hover preview (always shown here for demo) -->
+        <div class="tooltip">
+          <div style="color:#fff;font-weight:600;">Primary OLS</div>
+          <div style="color:#8a96a8;margin-top:2px;">OLS (HC1, n=32)</div>
+          <div class="tt-warn">⚠ Auto-selected based on y dtype and unique-value count</div>
+          <div class="tt-warn">⚠ Robust SE is hardcoded default; verify heteroskedasticity</div>
+          <div class="tt-cta">Click to inspect</div>
+        </div>
+      </div>
+
+      <div class="arrow" style="margin-left:120px;">↓</div>
+
+      <!-- node 4: report -->
+      <div class="node-card" style="margin-left:30px;">
+        <div class="nc-title"><span>📄</span><span>HTML report</span></div>
+        <div class="nc-summary">reports/report.html</div>
+      </div>
+
+      <div style="position:absolute;bottom:8px;right:12px;color:#555;font-size:10px;">
+        ← 鼠标悬浮节点 = tooltip preview<br>
+        ← 点击节点 = Inspector 打开
+      </div>
+    </div>
+    <div style="color:#7a8595;font-size:11.5px;margin-top:10px;line-height:1.6;">
+      <strong style="color:#cdd5e0;">节点上只有：</strong>
+      icon + display_label + summary + trust chip（仅非 OK）+ <strong>warning count chip</strong>。
+      <br><strong style="color:#cdd5e0;">悬浮 tooltip：</strong>
+      summary + top-N warning 文本 + "Click to inspect" CTA。
+    </div>
+  </div>
+
+  <!-- 右：Inspector -->
+  <div>
+    <div class="section-title">② Inspector（点击节点后打开）</div>
+    <div class="inspector">
+      <div class="insp-head">
+        <div>
+          <h4>▣ Primary OLS</h4>
+          <div class="insp-meta">MODEL · model:ols_1</div>
+        </div>
+        <span class="insp-close">✕</span>
+      </div>
+      <div class="insp-summary">📋 OLS (HC1, n=32)</div>
+      <div class="insp-trust">
+        <span class="badge badge-caution">⚠ caution</span>
+        <div class="insp-trust-reason">HC1 default not data-driven</div>
+      </div>
+
+      <div class="insp-divider"></div>
+
+      <div style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Decisions (2)</div>
+
+      <!-- DP #1 -->
+      <div class="dp-block">
+        <div class="dp-friendly">Auto-selected model type</div>
+        <div class="dp-id">model_type_auto_select</div>
+        <div class="dp-selected"><span class="arrow-tok">→</span><strong>continuous</strong></div>
+        <div class="dp-meta">
+          <span class="badge badge-source-dd">data-driven</span>
+          <span class="badge badge-needed">needs review</span>
+        </div>
+        <div class="dp-warning">⚠ Auto-selected based on y dtype and unique-value count; verify domain fit.</div>
+        <div class="expand-toggle">▸ Candidates · Why? · Checks (3 items)</div>
+      </div>
+
+      <!-- DP #2 -->
+      <div class="dp-block">
+        <div class="dp-friendly">Robust standard errors</div>
+        <div class="dp-id">ols_default_robust_se</div>
+        <div class="dp-selected"><span class="arrow-tok">→</span><strong>HC1</strong></div>
+        <div class="dp-meta">
+          <span class="badge badge-source-sys">system default</span>
+          <span class="badge badge-needed">needs review</span>
+        </div>
+        <div class="dp-warning">⚠ Robust SE is hardcoded default. Confirm heteroskedasticity or revisit.</div>
+        <div class="expand-toggle">▸ Why? · Checks (2 items)</div>
+      </div>
+
+      <div class="insp-footer">
+        <div class="footer-meta-stack">
+          📎 model_results/ols_1.json<br>
+          🕐 2026-05-19 10:23:45
+        </div>
+        <div class="icon-btn">
+          📋
+          <div class="icon-btn-tip">Copy decision chain</div>
+        </div>
+      </div>
+    </div>
+    <div style="color:#7a8595;font-size:11.5px;margin-top:10px;line-height:1.6;">
+      <strong style="color:#cdd5e0;">Inspector 改动：</strong><br>
+      • DP 标题用<strong style="color:#fff;">用户友好名</strong>（frontend 维护一份 mapping）<br>
+      • <code style="color:#888;font-size:10.5px;">decision_id</code> 作为小灰字 subtitle<br>
+      • Copy 按钮缩成右下角 32×32 icon，hover 显示 tooltip<br>
+      • Raw JSON 不再常驻 —— 改为 <code style="color:#888;font-size:10.5px;">Cmd+J</code> 快捷键切换（隐藏）
+    </div>
+  </div>
+
+</div>
+
+<div style="background:#1d2228;border-radius:6px;padding:14px 16px;color:#c5cdd8;font-size:13px;line-height:1.7;margin-top:18px;">
+  <h3 style="margin:0 0 8px;font-size:13px;color:#6cf;letter-spacing:.3px;text-transform:uppercase;">用户友好名 mapping（前端维护，V1.4.1 引入）</h3>
+  <div style="font-family:ui-monospace,monospace;font-size:11.5px;background:#0d0f13;padding:8px 10px;border-radius:4px;margin-top:6px;">
+    <span style="color:#888;">// frontend/src/lineage/dpLabels.ts</span><br>
+    <span style="color:#c794ee;">const</span> DP_LABELS = {<br>
+    &nbsp;&nbsp;<span style="color:#a3d8a0;">'model_type_auto_select'</span>: <span style="color:#fb9;">'Auto-selected model type'</span>,<br>
+    &nbsp;&nbsp;<span style="color:#a3d8a0;">'ols_default_robust_se'</span>: <span style="color:#fb9;">'Robust standard errors'</span>,<br>
+    &nbsp;&nbsp;<span style="color:#a3d8a0;">'categorical_auto_dummy'</span>: <span style="color:#fb9;">'Categorical dummy-encoding'</span>,<br>
+    &nbsp;&nbsp;<span style="color:#a3d8a0;">'auto_coerce_to_numeric'</span>: <span style="color:#fb9;">'Auto-coerce to numeric'</span>,<br>
+    &nbsp;&nbsp;<span style="color:#a3d8a0;">'handle_missing_values'</span>: <span style="color:#fb9;">'Handle missing values'</span>,<br>
+    &nbsp;&nbsp;<span style="color:#a3d8a0;">'variable_silently_dropped'</span>: <span style="color:#fb9;">'Variable dropped'</span>,<br>
+    };
+  </div>
+  <div style="margin-top:8px;color:#8a96a8;font-size:12px;">
+    后端 schema 不变，文案完全前端控制。后续国际化 / 文案优化都不用动后端。
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>就这样定 — 写入 design spec</h3>
+      <p>两层结构 + tooltip preview + 友好名 mapping + Cmd+J 调试入口</p>
+    </div>
+  </div>
+  <div class="option" data-choice="tweak" onclick="toggleSelect(this)">
+    <div class="letter">~</div>
+    <div class="content">
+      <h3>大方向 OK，还有微调</h3>
+      <p>terminal 告诉我具体调整</p>
+    </div>
+  </div>
+</div>

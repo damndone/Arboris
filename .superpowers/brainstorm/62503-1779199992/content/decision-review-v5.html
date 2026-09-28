@@ -1,0 +1,637 @@
+<h2>v5 · 决策审查面板 · iOS 风格</h2>
+<p class="subtitle">从「这里是什么」转向「你需要确认什么」。Conclusion → Review tasks → Evidence。</p>
+
+<style>
+  /* ============ iOS-ish dark palette ============ */
+  :root {
+    --bg-canvas: #0e0f12;
+    --bg-card: #1c1c1e;
+    --bg-card-2: #2c2c2e;
+    --bg-elev: #3a3a3c;
+    --separator: #2e2e30;
+    --separator-faint: #232325;
+    --label: #ffffff;
+    --label-secondary: #ebebf599;
+    --label-tertiary: #ebebf566;
+    --label-quaternary: #ebebf52e;
+    --tint: #0a84ff;
+    --tint-hover: #409cff;
+    --orange: #ff9f0a;
+    --orange-bg: #ff9f0a1a;
+    --red: #ff453a;
+    --green: #30d158;
+  }
+
+  .v5-root {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    font-feature-settings: "tnum";
+    -webkit-font-smoothing: antialiased;
+  }
+  .v5-root * { box-sizing: border-box; }
+
+  .v5-layout {
+    display: grid;
+    grid-template-columns: 290px 1fr;
+    gap: 28px;
+    margin: 28px 0;
+    align-items: start;
+  }
+  .v5-section-label {
+    color: var(--tint);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+
+  /* ============ Graph nodes ============ */
+  .graph-canvas {
+    background: var(--bg-canvas);
+    border-radius: 14px;
+    padding: 22px 18px;
+    min-height: 440px;
+    position: relative;
+  }
+  .node {
+    background: var(--bg-card);
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    padding: 12px 14px;
+    width: 240px;
+    color: var(--label);
+    position: relative;
+    transition: border-color .15s, transform .15s;
+  }
+  .node:not(.node-selected):hover {
+    border-color: var(--bg-elev);
+    transform: translateY(-1px);
+  }
+  .node-selected {
+    border-color: var(--tint);
+    box-shadow: 0 0 0 4px #0a84ff22;
+  }
+  .node-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--label);
+    line-height: 1.3;
+  }
+  .node-sub {
+    color: var(--label-secondary);
+    font-size: 12px;
+    margin-top: 3px;
+    line-height: 1.4;
+  }
+  .node-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 10px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 500;
+    background: var(--orange-bg);
+    color: var(--orange);
+    line-height: 1.6;
+  }
+
+  .arrow-vertical {
+    margin: 6px auto;
+    width: 2px;
+    height: 22px;
+    background: var(--separator);
+    margin-left: 138px;
+  }
+
+  /* tiny tooltip — only unselected hover */
+  .v5-tooltip {
+    position: absolute;
+    left: 260px;
+    top: -4px;
+    background: var(--bg-card-2);
+    border-radius: 10px;
+    padding: 12px 14px;
+    width: 200px;
+    color: var(--label);
+    box-shadow: 0 8px 24px #000a, 0 0 0 1px var(--separator);
+    font-size: 12.5px;
+    line-height: 1.5;
+    z-index: 5;
+  }
+  .v5-tooltip .tt-name { font-weight: 600; }
+  .v5-tooltip .tt-sub { color: var(--label-secondary); margin-top: 2px; font-size: 11.5px; }
+  .v5-tooltip .tt-status { color: var(--orange); margin-top: 8px; font-size: 11.5px; }
+  .v5-tooltip .tt-cta { color: var(--label-tertiary); margin-top: 8px; font-size: 11px; }
+
+  /* ============ Inspector ============ */
+  .inspector {
+    background: var(--bg-card);
+    border-radius: 14px;
+    color: var(--label);
+    overflow: hidden;
+    box-shadow: 0 12px 36px #0008, 0 0 0 1px var(--separator);
+  }
+
+  .insp-head {
+    padding: 20px 22px 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .insp-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    line-height: 1.2;
+  }
+  .insp-eyebrow {
+    color: var(--label-tertiary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+  }
+  .insp-close {
+    color: var(--label-tertiary);
+    cursor: pointer;
+    font-size: 16px;
+    width: 28px;
+    height: 28px;
+    border-radius: 14px;
+    background: var(--bg-card-2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .insp-close:hover { color: var(--label); background: var(--bg-elev); }
+
+  /* About */
+  .about-block {
+    padding: 0 22px 16px;
+  }
+  .about-prose {
+    color: var(--label);
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  .about-meta {
+    color: var(--label-secondary);
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  /* Status callout */
+  .status-block {
+    margin: 0 22px;
+    padding: 14px 16px;
+    background: var(--orange-bg);
+    border-radius: 10px;
+    margin-bottom: 16px;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--orange);
+    font-weight: 600;
+    font-size: 14px;
+  }
+  .status-body {
+    color: var(--label);
+    font-size: 13.5px;
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+
+  .status-clean {
+    background: #30d15822;
+  }
+  .status-clean .status-row { color: var(--green); }
+
+  /* Action bar */
+  .action-bar {
+    padding: 0 22px 18px;
+    display: flex;
+    gap: 8px;
+    position: relative;
+  }
+  .btn-primary {
+    background: var(--tint);
+    color: #fff;
+    border: 0;
+    padding: 9px 16px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-primary:hover { background: var(--tint-hover); }
+  .btn-secondary {
+    background: var(--bg-card-2);
+    color: var(--label);
+    border: 0;
+    padding: 9px 14px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .btn-secondary:hover { background: var(--bg-elev); }
+
+  /* More popover */
+  .more-popover {
+    position: absolute;
+    top: 42px;
+    left: 100px;
+    background: var(--bg-card-2);
+    border-radius: 12px;
+    padding: 6px;
+    min-width: 220px;
+    box-shadow: 0 16px 40px #000c, 0 0 0 1px var(--separator);
+    z-index: 10;
+  }
+  .more-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    cursor: pointer;
+    color: var(--label);
+  }
+  .more-item:hover { background: var(--bg-elev); }
+  .more-shortcut {
+    color: var(--label-tertiary);
+    font-size: 12px;
+    font-family: ui-monospace, "SF Mono", monospace;
+  }
+
+  /* Decisions section */
+  .decisions-section {
+    border-top: 0.5px solid var(--separator);
+    padding: 18px 22px 22px;
+  }
+  .decisions-title {
+    color: var(--label-secondary);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+
+  .dp-card {
+    background: var(--bg-card-2);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: background .12s;
+    position: relative;
+  }
+  .dp-card:hover { background: var(--bg-elev); }
+  .dp-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .dp-card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--label);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dp-card-icon {
+    color: var(--orange);
+    font-size: 13px;
+  }
+  .dp-chevron {
+    color: var(--label-tertiary);
+    font-size: 16px;
+    margin-top: 1px;
+    transition: transform .15s;
+  }
+  .dp-card.expanded .dp-chevron { transform: rotate(90deg); }
+  .dp-card-body {
+    margin-top: 8px;
+    color: var(--label-secondary);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .dp-card-body .dp-line {
+    display: flex;
+    gap: 6px;
+    margin-top: 3px;
+  }
+  .dp-card-body .dp-label {
+    color: var(--label-tertiary);
+    min-width: 84px;
+  }
+  .dp-card-body .dp-value {
+    color: var(--label);
+    flex: 1;
+  }
+
+  /* DP expanded */
+  .dp-expanded {
+    background: var(--bg-card-2);
+    border-radius: 12px;
+    padding: 18px 18px;
+    margin-bottom: 10px;
+    margin-top: -10px;
+  }
+  .dp-exp-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--label);
+    margin-bottom: 14px;
+  }
+  .dp-exp-section { margin-top: 16px; }
+  .dp-exp-section:first-of-type { margin-top: 0; }
+  .dp-exp-label {
+    color: var(--label-tertiary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .dp-exp-value {
+    color: var(--label);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .dp-exp-value.large {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .dp-exp-value.muted {
+    color: var(--label-secondary);
+    font-size: 13px;
+  }
+  .dp-exp-value ul { margin: 4px 0 0 0; padding-left: 18px; }
+  .dp-exp-value li { margin: 2px 0; }
+  .dp-tech-id {
+    font-family: ui-monospace, "SF Mono", monospace;
+    color: var(--label-secondary);
+    font-size: 12.5px;
+  }
+  .dp-confirm-prompt {
+    color: var(--orange);
+  }
+
+  /* Footer */
+  .insp-footer {
+    border-top: 0.5px solid var(--separator);
+    padding: 12px 22px 18px;
+    color: var(--label-tertiary);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  /* Notes column */
+  .notes {
+    color: var(--label-secondary);
+    font-size: 12px;
+    line-height: 1.7;
+    margin-top: 12px;
+  }
+  .notes strong { color: var(--label); font-weight: 500; }
+
+  .options { margin-top: 28px; }
+</style>
+
+<div class="v5-root">
+<div class="v5-layout">
+
+  <!-- ========== LEFT: graph ========== -->
+  <div>
+    <div class="v5-section-label">Graph</div>
+    <div class="graph-canvas">
+
+      <div class="node" style="margin-left:30px;">
+        <div class="node-title">Cleaned data</div>
+        <div class="node-sub">32 rows · 3 cols · 3 dropped</div>
+        <span class="node-status">⚠ Review · 1</span>
+      </div>
+
+      <div class="arrow-vertical"></div>
+
+      <div class="node" style="margin-left:30px;">
+        <div class="node-title">Variables (5)</div>
+        <div class="node-sub">Tap to expand</div>
+
+        <div class="v5-tooltip">
+          <div class="tt-name">Variables (5)</div>
+          <div class="tt-sub">Tap to expand</div>
+          <div class="tt-status">1 choice needs review</div>
+          <div class="tt-cta">Tap to inspect</div>
+        </div>
+      </div>
+
+      <div class="arrow-vertical"></div>
+
+      <div class="node node-selected" style="margin-left:30px;">
+        <div class="node-title">Primary OLS</div>
+        <div class="node-sub">OLS · HC1 · n = 32</div>
+        <span class="node-status">⚠ Review · 2</span>
+      </div>
+
+      <div class="arrow-vertical"></div>
+
+      <div class="node" style="margin-left:30px;">
+        <div class="node-title">HTML report</div>
+        <div class="node-sub">reports/report.html</div>
+      </div>
+
+    </div>
+    <div class="notes">
+      <strong>Graph 节点</strong>只剩 title · sub · 一个 pill 状态 chip。<br>
+      <strong>Tooltip</strong> 仅未选中态出现，仅一句状态 + Tap to inspect。<br>
+      <strong>选中态</strong>无 tooltip（Inspector 已经打开）。
+    </div>
+  </div>
+
+  <!-- ========== RIGHT: inspector ========== -->
+  <div>
+    <div class="v5-section-label">Inspector · Decision Review</div>
+    <div class="inspector">
+
+      <!-- Header -->
+      <div class="insp-head">
+        <div>
+          <div class="insp-eyebrow">Model · model:ols_1</div>
+          <div class="insp-title">Primary OLS</div>
+        </div>
+        <span class="insp-close">✕</span>
+      </div>
+
+      <!-- About -->
+      <div class="about-block">
+        <div class="about-prose">OLS model with HC1 robust standard errors.</div>
+        <div class="about-meta">n = 32</div>
+      </div>
+
+      <!-- Status -->
+      <div class="status-block">
+        <div class="status-row">⚠ Review required</div>
+        <div class="status-body">2 choices need confirmation: model type and standard errors.</div>
+      </div>
+
+      <!-- Actions -->
+      <div class="action-bar">
+        <button class="btn-primary">Copy path</button>
+        <button class="btn-secondary">More <span style="font-size:10px;margin-top:1px;">⌄</span></button>
+
+        <!-- More popover (showing it open for demo) -->
+        <div class="more-popover">
+          <div class="more-item">View raw JSON <span class="more-shortcut">⌘J</span></div>
+          <div class="more-item">Copy node ID</div>
+          <div class="more-item">Copy as JSON</div>
+        </div>
+      </div>
+
+      <!-- Decisions section -->
+      <div class="decisions-section">
+        <div class="decisions-title">Decisions to review · 2</div>
+
+        <!-- DP #1 EXPANDED (showing what the deep-dive looks like) -->
+        <div class="dp-expanded">
+          <div class="dp-exp-title">Model type</div>
+
+          <div class="dp-exp-section">
+            <div class="dp-exp-label">Selected choice</div>
+            <div class="dp-exp-value large">OLS</div>
+          </div>
+
+          <div class="dp-exp-section">
+            <div class="dp-exp-label">Why this was chosen</div>
+            <div class="dp-exp-value">y has 32 unique values, so the system treated it as continuous.</div>
+          </div>
+
+          <div class="dp-exp-section">
+            <div class="dp-exp-label">What to confirm</div>
+            <div class="dp-exp-value dp-confirm-prompt">Confirm that y should be modeled as a continuous outcome.</div>
+          </div>
+
+          <div class="dp-exp-section">
+            <div class="dp-exp-label">Alternatives</div>
+            <div class="dp-exp-value muted">OLS &nbsp;·&nbsp; Logit &nbsp;·&nbsp; Poisson</div>
+          </div>
+
+          <div class="dp-exp-section">
+            <div class="dp-exp-label">Evidence</div>
+            <div class="dp-exp-value muted">
+              <ul>
+                <li>32 unique y values</li>
+                <li>y dtype: float64</li>
+                <li>variable role inference passed</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="dp-exp-section">
+            <div class="dp-exp-label">Technical</div>
+            <div class="dp-exp-value"><span class="dp-tech-id">model_type_auto_select</span></div>
+          </div>
+        </div>
+
+        <!-- DP #2 COLLAPSED (compact card) -->
+        <div class="dp-card">
+          <div class="dp-card-head">
+            <div class="dp-card-title">
+              <span class="dp-card-icon">⚠</span>
+              Standard errors
+            </div>
+            <span class="dp-chevron">›</span>
+          </div>
+          <div class="dp-card-body">
+            <div class="dp-line"><span class="dp-label">Selected</span><span class="dp-value">HC1</span></div>
+            <div class="dp-line"><span class="dp-label">Why</span><span class="dp-value">System default</span></div>
+            <div class="dp-line"><span class="dp-label">Alternatives</span><span class="dp-value">non-robust &nbsp;·&nbsp; clustered</span></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Footer (minimal) -->
+      <div class="insp-footer">
+        📎 model_results/ols_1.json · 🕐 2026-05-19 10:23:45
+      </div>
+
+    </div>
+
+    <div class="notes">
+      <strong>About</strong> — 一句人话告诉你这个节点是什么。<br>
+      <strong>Status</strong> — 桔色 callout 告诉你"要做什么"。<br>
+      <strong>Actions</strong> — Copy path 主操作；More 下拉装 View JSON / Copy node ID / Copy as JSON。<br>
+      <strong>Decisions to review</strong> — 默认 compact card（DP #2 那种），title + Selected/Why/Alternatives 三行。<br>
+      <strong>展开后 (DP #1)</strong> — Selected choice · Why · What to confirm · Alternatives · Evidence · Technical 六段语义结构。<br>
+      <strong>Warning 文案改用审查任务语气</strong>：原 "Auto-selected based on y dtype" → 现 "Confirm that y should be modeled as a continuous outcome"。
+    </div>
+  </div>
+
+</div>
+
+<!-- DP labels mapping summary -->
+<div style="background:var(--bg-card);border-radius:14px;padding:18px 22px;color:var(--label-secondary);font-size:13px;line-height:1.7;margin-top:24px;border:0.5px solid var(--separator);">
+  <div class="v5-section-label" style="margin-bottom:8px;">前端 dpRegistry.ts · 决策呈现层</div>
+  <p style="margin:0 0 10px;color:var(--label);">
+    每个 decision_id 在前端有一份呈现元数据——把 snake_case + 工程语气翻译成审查任务语言。后端 schema 不动。
+  </p>
+  <div style="font-family:ui-monospace,'SF Mono',monospace;font-size:11.5px;background:var(--bg-canvas);padding:14px 16px;border-radius:8px;line-height:1.6;">
+<span style="color:var(--label-tertiary);">// frontend/src/lineage/dpRegistry.ts</span><br>
+<span style="color:#c8a8ee;">export const</span> DP_REGISTRY: Record&lt;string, DPDisplay&gt; = {<br>
+&nbsp;&nbsp;model_type_auto_select: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;title: <span style="color:#7dd3fc;">'Model type'</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--label-tertiary);">// selected="continuous" → "OLS" 用户视角</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;displaySelected: (s) =&gt; ({ continuous: <span style="color:#7dd3fc;">'OLS'</span>, binary: <span style="color:#7dd3fc;">'Logit'</span>, count: <span style="color:#7dd3fc;">'Poisson'</span> }[s] ?? s),<br>
+&nbsp;&nbsp;&nbsp;&nbsp;displayAlternatives: () =&gt; [<span style="color:#7dd3fc;">'OLS'</span>, <span style="color:#7dd3fc;">'Logit'</span>, <span style="color:#7dd3fc;">'Poisson'</span>],<br>
+&nbsp;&nbsp;&nbsp;&nbsp;whyShort: (p) =&gt; <span style="color:#7dd3fc;">'y appears continuous'</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;whyLong: (p) =&gt; <span style="color:#7dd3fc;">`y has ${p.y_unique} unique values, so the system treated it as continuous.`</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;confirmPrompt: <span style="color:#7dd3fc;">'Confirm that y should be modeled as a continuous outcome.'</span>,<br>
+&nbsp;&nbsp;},<br>
+&nbsp;&nbsp;ols_default_robust_se: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;title: <span style="color:#7dd3fc;">'Standard errors'</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;displaySelected: (s) =&gt; s, <span style="color:var(--label-tertiary);">// HC1 stays HC1</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;displayAlternatives: () =&gt; [<span style="color:#7dd3fc;">'non-robust'</span>, <span style="color:#7dd3fc;">'clustered'</span>],<br>
+&nbsp;&nbsp;&nbsp;&nbsp;whyShort: () =&gt; <span style="color:#7dd3fc;">'System default'</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;whyLong: () =&gt; <span style="color:#7dd3fc;">'HC1 robust standard errors are applied by default to OLS regressions.'</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;confirmPrompt: <span style="color:#7dd3fc;">'Confirm HC1 is appropriate; revisit if heteroskedasticity assumption is uncertain.'</span>,<br>
+&nbsp;&nbsp;},<br>
+&nbsp;&nbsp;<span style="color:var(--label-tertiary);">// ... 4 more for V1.4.0 DPs</span><br>
+};
+  </div>
+  <p style="margin:10px 0 0;color:var(--label-tertiary);font-size:11.5px;">
+    后续国际化、文案优化、新增 decision_id 都在这一份文件里改 —— 后端无感。
+  </p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>就这样定 — 写入 V1.4.1 design spec</h3>
+      <p>iOS 风格 · 决策审查面板 · dpRegistry.ts 前端文案层</p>
+    </div>
+  </div>
+  <div class="option" data-choice="tweak" onclick="toggleSelect(this)">
+    <div class="letter">~</div>
+    <div class="content">
+      <h3>大方向 OK，还有细节</h3>
+      <p>terminal 告诉我哪里再调</p>
+    </div>
+  </div>
+</div>
+</div>
