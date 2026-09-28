@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "event_id": "fd4a5eea-4d79-4e5d-b570-223a8e064d94",
+  "timestamp": "2026-08-01T17:57:01.000Z",
+  "type": "REVIEW",
+  "stage": "review",
+  "subtype": "forest_presentation_latest_metadata_verified",
+  "incident_id": "b54bd2bb-03ce-41f0-a0e9-c01b4abe0d58",
+  "cause": "Both the family Headset and the project Forest retained the first merged node presentation, so an old cached OLS label masked a newer ETS label for the same node hash.",
+  "cause_status": "known",
+  "impact": "The Graph now displays time_series.ets (primary) and time_series.ets (n=30) for the executed ETS result while retaining the original result node and historical graphs unchanged.",
+  "lesson": "Immutable node identity and human-facing presentation have different merge rules: preserve the result identity, but project the newest label and summary deterministically.",
+  "lesson_key": "forest-presentation-must-not-mask-corrected-result-type",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "evidence": {
+    "kind": "pytest_and_browser",
+    "observed_at": "2026-08-01T17:57:01.000Z",
+    "ref": "Both new Forest regression tests passed; after backend refresh, the in-app Graph node visibly read time_series.ets (primary) and source time_series.ets (n=30).",
+    "sha256": "b819d655402f6f2146cf7ad0aecc25a09996fd26ced954184278c1ca199c2022"
+  },
+  "links": [
+    "backend/workbench/lineage/headset.py",
+    "backend/workbench/lineage/project_forest.py",
+    "tests/test_graph_headset.py",
+    "tests/test_project_forest_api.py"
+  ]
+}

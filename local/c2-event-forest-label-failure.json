@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "event_id": "3cf849b0-6178-426e-87fa-a7ad81f38eae",
+  "timestamp": "2026-08-01T17:57:00.000Z",
+  "type": "FAILURE",
+  "stage": "integration",
+  "subtype": "forest_first_presentation_masks_corrected_model_label",
+  "incident_id": "b54bd2bb-03ce-41f0-a0e9-c01b4abe0d58",
+  "cause": "Both the family Headset and the project Forest retained the first merged node presentation, so an old cached OLS label masked a newer ETS label for the same node hash.",
+  "cause_status": "known",
+  "impact": "After the RecordingStage envelope fix, the Graph canvas could still display ols (primary) for an ETS result because the project-level union reapplied a first-family-wins rule.",
+  "lesson": "Immutable node identity and human-facing presentation have different merge rules: preserve the result identity, but project the newest label and summary deterministically.",
+  "lesson_key": "forest-presentation-must-not-mask-corrected-result-type",
+  "preventability": "preventable",
+  "resolution": "open",
+  "evidence": {
+    "kind": "pytest_and_browser",
+    "observed_at": "2026-08-01T17:57:00.000Z",
+    "ref": "The Headset and project Forest presentation tests each failed with legacy presentation, while the refreshed C2 Graph still showed ols (primary) for the shared ETS model node.",
+    "sha256": "b819d655402f6f2146cf7ad0aecc25a09996fd26ced954184278c1ca199c2022"
+  },
+  "links": [
+    "backend/workbench/lineage/headset.py",
+    "backend/workbench/lineage/project_forest.py",
+    "tests/test_graph_headset.py",
+    "tests/test_project_forest_api.py"
+  ]
+}

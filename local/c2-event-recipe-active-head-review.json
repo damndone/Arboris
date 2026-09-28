@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "a2bc914e-584a-4b92-a099-352c7df7c7b3",
+  "timestamp": "2026-08-01T17:56:41.000Z",
+  "type": "REVIEW",
+  "stage": "review",
+  "subtype": "dataset_recipe_genesis_active_head_verified",
+  "incident_id": "b2b61793-3c19-47aa-b9f9-336a5ab224ae",
+  "cause": "The Notebook planner treated every proposal with an active result head as a rerun, even when the selected time-series Recipe was explicitly dataset-rooted model.genesis.",
+  "cause_status": "known",
+  "impact": "A selected ETS Recipe now retains its dataset-rooted model.genesis execution pins after an earlier result exists; the live browser flow materialized and executed run 20260801_174419_531437_2383ce36.",
+  "lesson": "Dataset-rooted RecipeContracts remain model.genesis regardless of a visible active result head; only run-rooted proposals require rerun pins.",
+  "lesson_key": "dataset-recipe-genesis-must-not-become-rerun",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "evidence": {
+    "kind": "pytest_and_browser",
+    "observed_at": "2026-08-01T17:56:41.000Z",
+    "ref": "The parametrized planner test passed for active_head_run_id=run_001, and a real Notebook ETS option was confirmed, materialized, and executed as run 20260801_174419_531437_2383ce36.",
+    "sha256": "019e02345c50f32632328442b7f2e2ee1bb201f7323df697164b9639253ddd51"
+  },
+  "links": [
+    "backend/workbench/agent/notebook/planning_agent.py",
+    "tests/test_notebook_planning_agent.py"
+  ]
+}

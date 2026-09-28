@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "24eb3adf-86e1-48b5-bd10-449069e03e8d",
+  "timestamp": "2026-08-01T17:24:00.000Z",
+  "type": "REVIEW",
+  "subtype": "server_recommendation_validation_correction_verified",
+  "stage": "review",
+  "cause_status": "known",
+  "cause": "A server recommendation validation error after a typed Notebook submission escaped the Agent correction loop as a generic NOTEBOOK_REQUEST_INVALID route error.",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/test_notebook_planning_agent.py::test_provider_corrects_a_server_recommendation_validation_error passed after a first server rejection issued one bounded correction and the next typed submission was accepted; the subsequent real Notebook retry proposed 7 options.",
+    "sha256": "c2e96e159d4189173772d8842ade58fde66b677a23f1babfc64e1727eb4ec95d",
+    "observed_at": "2026-08-01T17:06:00.000Z"
+  },
+  "impact": "Server recommendation validation now participates in the bounded correction loop, and the real C2 retry returned a persisted option batch rather than a generic request error.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Server-side option and recommendation validation must re-enter the same bounded correction policy as a typed provider submission instead of being relabeled as a route request error.",
+  "incident_id": "c5cf02da-3ec3-4554-9e5d-914030370cd9",
+  "lesson_key": "server-recommendation-validation-needs-bounded-correction",
+  "links": [
+    "backend/workbench/agent/notebook/planning_agent.py",
+    "tests/test_notebook_planning_agent.py"
+  ]
+}
