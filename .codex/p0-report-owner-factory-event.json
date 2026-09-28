@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "b1e4d7a2-5c90-4f38-8a16-2d7b9c4e6f01",
+  "type": "FAILURE",
+  "subtype": "stale_catalog_red",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The stale-catalog consumer regression first returned a generic persistence-capability code instead of the required owner-context conflict, showing the stale entry had been filtered before fallback resolution.",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/test_v189_report_owner_factory.py::test_stale_catalog_owner_does_not_fallback_to_global_consumer_owner",
+    "sha256": "705ac4385a596c3dc499f93aaa1d0a40ef67487e52274ebaf10045409b6c2956",
+    "observed_at": "2026-08-21T17:30:00.000Z"
+  },
+  "impact": {
+    "before_fix": "stale owner was filtered before run-level conflict classification",
+    "safety": "no evidence facts leaked; failure remained unavailable",
+    "required_fix": "preserve run-level catalog authority before liveness filtering"
+  },
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Treat a run-level owner entry as authoritative before liveness or root filtering so stale entries cannot create a compatibility fallback path.",
+  "incident_id": "d2a6f9c3-7b14-4e80-9f25-1c6d8a3b5e70",
+  "lesson_key": "stale-owner-fail-closed",
+  "links": [
+    "backend/workbench/services/results_service.py",
+    "tests/test_v189_report_owner_factory.py"
+  ]
+}

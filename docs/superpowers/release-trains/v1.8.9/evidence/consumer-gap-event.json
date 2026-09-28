@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "5f1b5e85-2af2-4bf1-9e90-34e49b49d101",
+  "type": "GAP",
+  "subtype": "provider_consumer_declaration_schema",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The current fixed provider catalog schema cannot express fact kinds, sensitivity/redaction budgets, ordering, renderer version, or unreachable/exempt ownership metadata required for declaration-derived consumer coverage.",
+  "evidence": {
+    "kind": "review",
+    "ref": "docs/superpowers/release-trains/v1.8.9/work-orders/wo-consumer-projection-core.md",
+    "sha256": "5d61197c55cdf33ca7c090613909f7604908e4ee092d58d4d325bfbc78ed6b5f",
+    "observed_at": "2026-08-20T07:15:00.000Z"
+  },
+  "impact": {
+    "status": "BLOCKED",
+    "boundary": "full provider declaration semantics require a contract/catalog change"
+  },
+  "preventability": "unknown",
+  "resolution": "open",
+  "lesson": "Do not encode missing provider declaration semantics as consumer-side hardcoded defaults",
+  "incident_id": "07fdfb98-3f23-4d1a-a93e-0f5d0d845c7d",
+  "lesson_key": "consumer-provider-schema-gap",
+  "links": [
+    "docs/superpowers/objectives/2026-08-20-v1.8.9-consumer-projection-core-objective.md",
+    "backend/workbench/providers/catalog.py",
+    "backend/workbench/evidence/consumer_adapters.py"
+  ]
+}
