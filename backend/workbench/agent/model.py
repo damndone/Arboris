@@ -339,6 +339,11 @@ class OpenAICompatibleModelAdapter:
                         if item.get("public") is True:
                             public_progress = True
                     elif event_type == "done":
+                        # Close the provider stream here, in this task: left
+                        # suspended inside ``client.stream(...)`` it holds the
+                        # connection until garbage collection closes it from
+                        # another task.
+                        await stream.aclose()
                         finish_reason = item.get("finish_reason")
                         yield ModelStreamEvent(
                             type="done",

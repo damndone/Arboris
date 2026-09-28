@@ -2086,3 +2086,36 @@ def test_a_silent_stream_is_given_up_after_thirty_seconds_not_the_whole_timeout(
     assert timeout.write == 60.0
     short = LLMConfig(base_url="https://api.example.test", api_key=API_KEY, model="m", timeout_s=15.0)
     assert llm_client._stream_timeout(short).read == 15.0
+
+
+def test_the_provider_connection_is_closed_when_the_answer_completes(monkeypatch) -> None:
+    """Found by the chaos evaluation: the stream generator stopped at its
+    ``done`` event inside ``client.stream(...)``, so the response and client
+    were closed only when garbage collection finalized it -- in another task,
+    raising "generator didn't stop after athrow()" -- one connection held per
+    turn until then."""
+
+    closed: list[bool] = []
+
+    class TrackedStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"answer"},"finish_reason":null}]}\n\n'
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    _install_async_upstream(monkeypatch, lambda request: httpx.Response(200, stream=TrackedStream()))
+
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(
+            LLMConfig(base_url="https://api.example.com/v1", api_key=API_KEY, model="test-model")
+        )
+        # Consume as AgentCore does: stop reading at ``done``.
+        async for event in adapter.stream(ModelRequest(messages=[{"role": "user", "content": "q"}])):
+            if event.type == "done":
+                break
+        return list(closed)
+
+    assert asyncio.run(scenario()) == [True]
