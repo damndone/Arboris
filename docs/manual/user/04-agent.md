@@ -66,8 +66,9 @@ therefore not allowed to do either:
   (33,762; t = 8.03; p < 0.001) — and before a reply is shown, Arboris checks
   every one against the results, including that it is rounded correctly:
   0.098491 may be written 0.098 or 0.0985, never 0.099; 33,761.8 may be 33,762
-  or 34,000, never 33,700. Whole numbers below 1,000 and years are not checked
-  (they are mostly counts and codes in prose).
+  or 34,000, never 33,700. Scientific notation (1.98×10⁻³⁸, 1.98e-38) is read
+  as one number and checked the same way. Whole numbers below 1,000 and years
+  are not checked (they are mostly counts and codes in prose).
 - A reply that fails is withdrawn and the Agent writes it again. The withdrawn
   draft stays under **Reasoning**, marked *Draft withdrawn by the numeric
   check*, so you can see what happened.

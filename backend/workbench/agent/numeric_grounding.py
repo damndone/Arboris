@@ -37,11 +37,18 @@ MAX_REPAIRS = 1
 
 # ASCII-only boundaries: in Python's Unicode regex a Chinese character is a
 # word character, so "系数为0.099" would otherwise hide the number.
+# A number may be written in scientific notation as a statistician would:
+# 1.984×10⁻³⁸, 1.98 × 10^-38, 3.3*10**-38 -- one number, not "1.984".
 _REPLY_NUMBER = re.compile(
     r"(?<![A-Za-z0-9_.,])"
-    r"(?P<number>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+(?:[eE][-+]?\d+)?)?)"
+    r"(?P<number>(?P<mantissa>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+(?:[eE][-+]?\d+)?)?)"
+    r"(?:\s*[×xX*·]\s*10\s*(?:"
+    r"(?P<superscript>[⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+)"
+    r"|(?:\^|\*\*)\s*\(?\s*(?P<exponent>[-+−]?\d+)\s*\)?"
+    r"))?)"
     r"(?![A-Za-z0-9_]|[.,]\d)"
 )
+_SUPERSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺−", "0123456789-+-")
 # Whole numbers are checked from here up: smaller ones are too often prose
 # ("3 tests", "the 5% level", "1 = male"). Years are prose too.
 _MIN_CHECKED_INTEGER = 1000
@@ -195,6 +202,21 @@ def _calculation_records(text: str) -> list[Mapping[str, Any]]:
     return [item for item in results or () if isinstance(item, Mapping)]
 
 
+def _reply_value(match: re.Match[str]) -> Decimal | None:
+    mantissa = _decimal(match.group("mantissa"))
+    power = match.group("superscript") or match.group("exponent")
+    if mantissa is None or not power:
+        return mantissa
+    try:
+        exponent = int(power.translate(_SUPERSCRIPT).replace(" ", ""))
+    except ValueError:
+        return None
+    if abs(exponent) > 400:
+        return None
+    # scaleb keeps the written digits: 1.984×10⁻³⁸ is checked to 1e-41.
+    return mantissa.scaleb(exponent)
+
+
 def _is_threshold(text: str, start: int, end: int, value: Decimal) -> bool:
     if value not in _CONVENTIONAL:
         return False
@@ -212,11 +234,12 @@ def check(reply: str, messages: Sequence[Mapping[str, Any]]) -> tuple[Finding, .
     seen: set[str] = set()
     for match in tokens:
         text = match.group("number")
-        value = _decimal(text)
+        value = _reply_value(match)
         if value is None or text in seen:
             continue
         value = abs(value)
-        if "." not in text and (value < _MIN_CHECKED_INTEGER or int(value) in _YEARS):
+        scientific = bool(match.group("superscript") or match.group("exponent"))
+        if not scientific and "." not in text and (value < _MIN_CHECKED_INTEGER or int(value) in _YEARS):
             continue
         if _is_threshold(reply, match.start(), match.end(), value) or evidence.supports(value):
             continue

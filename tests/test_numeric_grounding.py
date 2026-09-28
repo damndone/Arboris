@@ -213,3 +213,37 @@ def test_large_whole_numbers_are_checked_at_the_precision_written(reply: str) ->
 @pytest.mark.parametrize(("reply", "bad"), [("男性 33,700 美元", "33,700"), ("少了 1805 行", "1805"), ("约 35,000", "35,000")])
 def test_wrong_large_whole_numbers_are_found(reply: str, bad: str) -> None:
     assert [finding.text for finding in grounding.check(reply, [INCOME])] == [bad]
+
+
+TINY_P = _tool({"p_value": 1.983823e-38, "p_adjusted": 3.307411e-38})
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "p ≈ 1.984×10⁻³⁸",
+        "p ≈ 1.98 × 10^-38",
+        "p = 1.984x10^(-38)",
+        "p = 2.0e-38",
+        "p = 1.98E-38",
+        "校正后 ≈ 3.3×10⁻³⁸",
+        "adjusted p = 3.307 * 10**-38",
+    ],
+)
+def test_scientific_notation_is_read_as_one_number(reply: str) -> None:
+    """Found by the adversarial evaluation: "1.984×10⁻³⁸" was read as 1.984,
+    so a correct p-value was shown with a warning not to rely on it."""
+
+    assert grounding.check(reply, [TINY_P]) == ()
+
+
+@pytest.mark.parametrize(
+    ("reply", "bad"),
+    [
+        ("p ≈ 1.985×10⁻³⁸", "1.985×10⁻³⁸"),
+        ("p ≈ 1.984×10⁻³⁷", "1.984×10⁻³⁷"),
+        ("p = 3.4 × 10^-38", "3.4 × 10^-38"),
+    ],
+)
+def test_a_wrong_mantissa_or_exponent_is_still_found(reply: str, bad: str) -> None:
+    assert [finding.text for finding in grounding.check(reply, [TINY_P])] == [bad]
