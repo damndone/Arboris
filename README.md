@@ -1,20 +1,102 @@
 # Arboris
 
-A local statistics workbench. You point it at a dataset, choose a model, and
-it produces a run: every decision recorded, every artifact addressed, and a
-lineage graph you can edit and re-execute node by node.
+**An AI-native statistics workbench that runs on your machine.** Open an SPSS,
+Stata, Excel or CSV file, ask questions in plain language (Chinese or English),
+and get answers computed by a deterministic statistics engine — with every
+number traceable to the result it came from and every step recorded.
 
-Everything runs on your machine. Nothing is uploaded, and the only network call
-is to an LLM provider you configure yourself — for prose and for typed change
-proposals, never for the statistics.
+Arboris is meant to cover the everyday work people do in Stata or SPSS, across
+disciplines, while being easier to start with: you can drive it from the menus,
+from a lineage graph, or by talking to the Agent.
 
-**Current release: v1.8.9** — see [docs/releases/](docs/releases/).
-
-**Manual:** [docs/manual/](docs/manual/README.md) — for people doing analysis and for people extending Arboris.
+**Current release: v1.8.9** (2026-09-28) — [release notes](docs/releases/v1.8.9-release-notes.md) ·
+[all releases](docs/releases/) · [manual](docs/manual/README.md)
 
 ---
 
+## Why it is different
+
+- **The AI never computes the statistics.** The language model understands the
+  question, picks the analysis and explains the result; the numbers come from
+  the engine. Before a reply is shown, every number in it is checked against
+  the results — including that it is rounded correctly. Derived numbers
+  (differences, ratios, percentages) must come from a `calculate` tool, not the
+  model's head. A reply that fails is withdrawn and rewritten.
+- **Nothing changes without your confirmation.** Descriptive statistics and
+  tests run at once; filtering, recoding, merging, changing a model or writing
+  a report is a proposal you confirm. A confirmed change never overwrites
+  anything — it adds a node to the lineage graph.
+- **It will not chase significance.** Dropping observations, redefining a
+  variable or picking a specification *in order to* make a result significant
+  is refused — for the user and the Agent alike. Every test and data change is
+  recorded in an analysis ledger, and reports disclose the full analysis path.
+- **Your data stays local.** The only network call is to the LLM provider you
+  configure. By default it receives column names, labels, summaries and results
+  — not your rows — and every outgoing request is audited.
+
+## What you can do
+
+**Data.** Read and write `.sav` / `.zsav` (SPSS), `.dta` (Stata), `.xlsx`,
+`.csv` and `.parquet`, keeping variable labels, value labels, measurement
+levels and user-missing codes. A data view and variable view; filter, recode
+(SPSS `RECODE INTO`), merge, append, reshape, aggregate, deduplicate, rename,
+fill missing values, lags and time/panel declarations — each recorded as a
+node. Export with a chosen format, Stata version, variables, rows and label
+handling, with a report of anything a format cannot carry.
+
+**Descriptive statistics.** `summarize` / `summarize, detail` (Stata's
+percentile definition), frequencies with value labels, missing-value tables,
+correlations, grouped summaries, scatter plots.
+
+**Tests.** t-tests, ANOVA with post-hoc comparisons (Tukey, Bonferroni,
+Scheffé, Games–Howell), chi-square and Fisher exact, Pearson / Spearman /
+Kendall, Mann–Whitney, Kruskal–Wallis, Wilcoxon, Friedman, McNemar,
+Cramér's V, effect sizes, assumption checks, power analysis, bootstrap and
+permutation inference, multiple-comparison adjustment.
+
+**Models.** OLS, logit, probit, Poisson, negative binomial, GLM families,
+ordinal and multinomial logit, quantile regression, zero-inflated and hurdle
+models, beta regression, panel fixed/random effects, linear mixed effects,
+IV/2SLS and GMM with weak-instrument diagnostics, Cox proportional hazards,
+ANOVA/ANCOVA, MANOVA and repeated-measures ANOVA — with robust, clustered and
+survey-design standard errors, weights, and multiple imputation (MICE with
+Rubin pooling).
+
+**Causal inference.** Difference-in-differences from TWFE with event studies
+and Goodman-Bacon decomposition to Callaway–Sant'Anna, Sun–Abraham and
+de Chaisemartin–D'Haultfœuille, with Honest-DiD sensitivity analysis; matching
+with balance diagnostics; synthetic control with placebo inference.
+
+**Time series.** ARIMA/SARIMA, ETS, ARMA–GARCH, ADF and KPSS, cointegration,
+VAR/VECM, Granger causality, impulse responses, ACF/PACF.
+
+**Multivariate and more.** PCA, exploratory factor analysis, Cronbach's alpha,
+clustering, discriminant analysis, correspondence analysis / MCA, survival
+curves (Kaplan–Meier, log-rank, RMST), meta-analysis, ROC and calibration,
+spatial autocorrelation (Moran's I, Geary's C, Getis–Ord G), out-of-sample
+prediction (lasso, ridge, random forest).
+
+**Reports.** Drafted from a run's evidence, every number cited to its source,
+exported as HTML, Word or LaTeX, with the analysis path appended.
+
+The complete, generated list is in the
+[capability reference](docs/manual/reference/capabilities.md).
+
+## How results are validated
+
+Estimators are checked against reference implementations, not only against
+themselves: Stata 18 for descriptive statistics and Stata file interchange,
+R (`foreign`, `haven`, `fixest`, `did`, `HonestDiD`, `DIDmultiplegtDYN`,
+`survey`, …) for SPSS files and estimators, typically to 1e-10 or better.
+Each release passes a full gate — about 5,800 backend tests, golden and
+invariant snapshots, 1,700 frontend tests and a type check — plus live
+evaluations of the Agent against a real provider, including injected network
+faults and adversarial requests. Evidence for each release is in
+[`docs/superpowers/evaluations/`](docs/superpowers/evaluations/).
+
 ## Quick start
+
+Requires Python 3.11+ and Node.js 18+.
 
 ```bash
 python3 -m pip install -e ".[dev]"
@@ -25,68 +107,41 @@ uvicorn workbench.api:app --reload
 cd frontend && npm install && npm run dev
 ```
 
-Or from the command line, without the UI:
+Open the address Vite prints, create a project and upload a data file. To use
+the Agent, add an LLM provider under **Settings** (any OpenAI-compatible API;
+DeepSeek is the one the live evaluations use).
+
+From the command line, without the UI:
 
 ```bash
 workbench create /tmp workbench-demo
 workbench run /tmp/workbench-demo examples/datasets/cross_section.csv wage --x education
 ```
 
-A run writes into `project/runs/{run_id}/`: `run_manifest.json`,
-`environment.json`, `decisions.json`, `errors.json`, `artifacts_index.json`,
-plus reports, figures, tables and processed data.
-
-## What it does
-
-**Models.** OLS, Logit, Probit, Poisson, Negative Binomial, GLM families,
-Panel OLS, Linear Mixed Effects, IV/2SLS.
-
-**Difference-in-differences**, the full modern kit: classic TWFE with event
-study and parallel-trends checks, Goodman-Bacon decomposition, Callaway–Sant'Anna,
-Sun–Abraham, and de Chaisemartin–D'Haultfœuille for non-absorbing treatment.
-Honest-DiD sensitivity analysis (ΔRM and ΔSD) runs on top of any of them. Each
-estimator was validated element-wise against its R reference implementation.
-
-**Time series** (v1.8): an ARMA–GARCH volatility workbench over any time and
-value column — explicit transform confirmation, manual orders or bounded
-automatic search, training-only selection, independent rolling evaluation.
-
-**A lineage graph** as the working surface. Every stage of a run is a node.
-Edit a node's parameters and re-execute from there; the original is never
-mutated, and the child records what changed and why. Nodes are content-addressed,
-so two runs that share a stage share the node.
-
-**An Agent** that reads a run and proposes typed changes. It cannot execute
-anything on its own: it produces a proposal against a published option
-vocabulary, you confirm it, and the result is an auditable child run. The whole
-session exports as JSON, Markdown or HTML.
-
-## What it refuses to do
-
-The workbench is built to be boring about claims, which is most of what makes
-it useful:
-
-- **It will not present a number it cannot support.** Sequential ARMA-then-GARCH
-  estimation never reports a composite information criterion, because there is
-  no joint likelihood behind it.
-- **It will not relabel a quantity into a stronger one.** A lower conditional
-  quantile is never called value-at-risk.
-- **It records what it did not do.** Acceptance warnings — residual
-  autocorrelation, rejected normality — stay visible in the report rather than
-  being smoothed away.
-- **It does not silently repair your data.** Missing values are excluded only
-  after you confirm the policy, and the source file is never modified.
-
-## Optional extras
+Optional extras:
 
 ```bash
-pip install -e ".[panel]"       # linearmodels, for panel_ols
-pip install -e ".[ml]"          # scikit-learn, for prediction_lasso/ridge/random_forest
-pip install -e ".[imbalanced]"  # imbalanced-learn, for smote/oversample/undersample
+pip install -e ".[panel]"       # linearmodels, for panel models
+pip install -e ".[ml]"          # scikit-learn, for prediction models
+pip install -e ".[imbalanced]"  # imbalanced-learn, for SMOTE and resampling
 ```
 
-Prediction-only mode (`prediction_enabled: true` in `config.yml`) writes into
-`prediction_results/` and is never treated as causal inference.
+## Documentation
+
+- [User manual](docs/manual/README.md) — getting started, working with data,
+  analysis, the Agent, trust and records, SPSS/Stata equivalents.
+- [Developer handbook](docs/manual/README.md#for-people-extending-arboris) — architecture,
+  adding a capability, testing and releasing.
+- [Release notes](docs/releases/) — one per version.
+
+## Where it is going
+
+Next (v1.8.10): a unified result envelope, per-family post-estimation,
+heteroskedasticity-and-autocorrelation-consistent (Newey–West) errors and
+analyses run separately by group. After that: classification and time-aware
+machine learning, then a research pack for quantitative finance — factor
+research and strategy validation that shows why a backtest can be trusted and
+where it cannot. See [the roadmap notes](docs/superpowers/roadmap/).
 
 ## Deployment contract
 
@@ -99,17 +154,13 @@ persisted:
 ```
 
 The launcher runs a native macOS sandbox canary before accepting the server.
-When ready, `GET /health` reports `execution_profile: local_contained`,
-`lmm_admitted: true`, `high_risk_code_admitted: true`, `canary_status: passed`.
-This profile runs reviewed Workbench code only; it is not hostile-plugin or
+When ready, `GET /health` reports `execution_profile: local_contained`. This
+profile runs reviewed Workbench code only; it is not hostile-plugin or
 public-deployment certification.
 
-Agent-confirmed operation state uses a project-local JSONL and file-lock control
-plane, so the deployment contract is **single worker**. The backend rejects
-`WORKBENCH_WORKERS` or `WEB_CONCURRENCY` other than `1` at startup, and
-`/health` reports `control_plane_mode: single_worker`. Multiple workers would
-need a transactional store with compare-and-swap semantics; the current local
-deployment does not imply it.
+Agent state uses a project-local JSONL and file-lock control plane, so the
+deployment contract is **single worker**: the backend rejects
+`WORKBENCH_WORKERS` or `WEB_CONCURRENCY` other than `1` at startup.
 
 ## Development
 
@@ -118,30 +169,24 @@ pytest                      # backend
 bash scripts/gate.sh --full # the full release gate
 ```
 
-The gate is the checkpoint before any handoff, merge or release: backend suite,
-golden and invariant snapshots at zero drift, frontend tests, and a TypeScript
-check. It refuses to start alongside a dev server or another gate, and refuses a
-worktree that installed its own dependencies instead of sharing the main
-checkout's.
-
-Working in a worktree? Link the shared dependencies first — never `npm install`
-inside one:
+The gate is the checkpoint before any merge or release: backend suite, golden
+and invariant snapshots at zero drift, frontend tests and a TypeScript check.
+It refuses to start alongside a dev server or another gate. Working in a
+worktree? Link the shared dependencies first — never `npm install` inside one:
 
 ```bash
 bash scripts/link-shared-deps.sh <worktree-path>
 ```
 
-## Repository layout
-
 | Path | Contents |
 |---|---|
 | `backend/workbench/` | Engine, model packs, contracts, HTTP layer, Agent |
-| `frontend/src/` | React UI: run form, lineage graph, result views, Agent panel |
-| `tests/` | Backend suite, including golden and invariant snapshots |
-| `examples/datasets/` | Known-truth datasets used by acceptance runs |
+| `frontend/src/` | React UI: data editor, lineage graph, result views, Agent panel, reports |
+| `tests/` | Backend suite, oracles, golden and invariant snapshots |
+| `docs/manual/` | User manual and developer handbook |
 | `docs/releases/` | Release notes, one per version |
-| `docs/superpowers/` | Working documents — see its README for the lifecycle rules |
-| `scripts/` | Gate, shared-dependency linking, contained launcher |
+| `docs/superpowers/` | Working documents: objectives, evaluations, roadmap, backlog |
+| `scripts/` | Gate, live Agent evaluations, shared-dependency linking, contained launcher |
 
-Branches are deleted after they merge. Every deleted branch tip is preserved
-under an `archive/branch-tip/*` tag, so an old branch is still reachable by name.
+Branches are deleted after they merge; every deleted branch tip is preserved
+under an `archive/branch-tip/*` tag.
