@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/jiayuanren/项目规划/.worktrees/workbench-frontend-api-enhancements/frontend/**)",
+      "Read(//Users/jiayuanren/项目规划/.worktrees/workbench-frontend-api-enhancements/**)",
+      "Bash(.venv/bin/pytest tests/test_orchestrator_e2e.py::test_manifest_contains_started_at_y_and_x -v)",
+      "Bash(.venv/bin/pytest tests/test_api_errors.py -v)",
+      "Bash(.venv/bin/pytest tests/test_api.py -v -k \"list_runs or run_detail or path_escape\")",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(.venv/bin/pytest -q)",
+      "Bash(.venv/bin/pytest tests/test_api.py -v -k \"list_runs or run_detail or path_escape or rejects_path_escape\")",
+      "Bash(.venv/bin/pytest --tb=short)",
+      "Bash(.venv/bin/pytest tests/test_api.py -v -k \"list_artifacts or download_artifact\")",
+      "Bash(.venv/bin/pytest tests/test_api.py -v -k \"get_report\")",
+      "Bash(.venv/bin/pytest tests/test_api.py -v -k \"report\")",
+      "Bash(npm test *)"
+    ]
+  }
+}
