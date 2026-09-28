@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "cd '/Users/jiayuanren/项目规划/.worktrees/workbench-v1.6.6' && exec .venv/bin/uvicorn workbench.api:app --app-dir backend --port 8010"],
+      "port": 8010
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "cd '/Users/jiayuanren/项目规划/.worktrees/workbench-v1.6.6/frontend' && exec npm run dev"],
+      "port": 5173
+    }
+  ]
+}
