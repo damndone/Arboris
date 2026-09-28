@@ -1,0 +1,53 @@
+<h2>Variables 选择方式</h2>
+<p class="subtitle">选择一种更适合 18 个变量、并且不破坏多选语义的界面</p>
+
+<div class="split">
+  <div class="card" data-choice="compact-popover" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <h3>A · Compact popover</h3>
+      <p>默认收起；点击后在原地展开搜索、全选、清空和变量列表。</p>
+      <div class="mockup">
+        <div class="mockup-header">Statistical exploration</div>
+        <div class="mockup-body">
+          <div class="label">Variables</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:1px solid #3d4b63;border-radius:8px;background:#151c28">
+            <span style="color:#edf2f7">18 variables selected</span>
+            <span style="color:#9db6d5">⌄</span>
+          </div>
+          <div style="margin-top:6px;padding:10px;border:1px solid #3d4b63;border-radius:8px;background:#111722">
+            <input class="mock-input" value="" placeholder="Search variables…" />
+            <div style="display:flex;gap:6px;margin:8px 0;font-size:11px;color:#9db6d5"><span>All</span><span>Clear</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11px;color:#d9e2ef">
+              <span>☑ bdsnew</span><span>☑ year</span><span>☑ middle</span><span>☑ zmath</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="token-summary" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <h3>B · Token summary</h3>
+      <p>直接显示已选变量为标签；变量多时折叠为 “+14 more”，用 Edit 打开选择器。</p>
+      <div class="mockup">
+        <div class="mockup-header">Statistical exploration</div>
+        <div class="mockup-body">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div class="label">Variables</div>
+            <button class="mock-button">Edit</button>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px">
+            <span style="padding:4px 7px;border-radius:999px;background:#263b57;color:#dcecff;font-size:11px">bdsnew ×</span>
+            <span style="padding:4px 7px;border-radius:999px;background:#263b57;color:#dcecff;font-size:11px">year ×</span>
+            <span style="padding:4px 7px;border-radius:999px;background:#263b57;color:#dcecff;font-size:11px">middle ×</span>
+            <span style="padding:4px 7px;border-radius:999px;background:#1d2735;color:#9db6d5;font-size:11px">+15 more</span>
+          </div>
+          <div style="margin-top:10px;color:#8999ad;font-size:11px">Readable at a glance; one extra click to change selection.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:18px">推荐 A：变量多时最节省垂直空间，同时保留搜索和批量操作。</p>

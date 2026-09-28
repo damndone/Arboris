@@ -1,0 +1,66 @@
+<h2>Artifact 面板怎么收敛？</h2>
+<p class="subtitle">目标：保留 AI 上下文透明度，但不让 17 个产物占满 Raw 节点侧栏。</p>
+
+<div class="cards" style="grid-template-columns:repeat(3,minmax(0,1fr));align-items:start">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <h3>A · 单行折叠</h3>
+      <div class="mockup" style="margin-top:12px;padding:0;background:#f8f5ee">
+        <div class="mockup-header">Ask AI</div>
+        <div class="mockup-body" style="font-size:12px">
+          <div style="color:#777;margin-bottom:10px">Context includes verified node context</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border:1px solid #d8d0c2;border-radius:8px;background:#fffdf8">
+            <span>Attached artifacts</span><strong>17</strong>
+          </div>
+          <div style="margin-top:8px;color:#777">Click to expand the full list</div>
+        </div>
+      </div>
+      <p>最干净；但用户看不到 artifact 类型和重点产物。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)" style="border-color:#9b6b35">
+    <div class="card-body">
+      <h3>B · 分类摘要 + 展开（推荐）</h3>
+      <div class="mockup" style="margin-top:12px;padding:0;background:#f8f5ee">
+        <div class="mockup-header">Ask AI</div>
+        <div class="mockup-body" style="font-size:12px">
+          <div style="display:flex;justify-content:space-between;color:#777;margin-bottom:8px"><span>Attached artifacts</span><span>17 total</span></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+            <span style="padding:4px 7px;border-radius:999px;background:#e7efe6">1 data</span>
+            <span style="padding:4px 7px;border-radius:999px;background:#eee8f4">2 tables</span>
+            <span style="padding:4px 7px;border-radius:999px;background:#f2e8dc">14 analysis</span>
+          </div>
+          <div style="border-top:1px solid #ddd4c7;padding-top:8px">data_profile.json <button class="mock-button" style="float:right;padding:3px 7px;font-size:11px">Explain</button></div>
+          <div style="padding-top:7px;color:#777">+ 16 more artifacts</div>
+        </div>
+      </div>
+      <p>一眼知道规模和类型；完整清单仍可展开，适合长期使用。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <h3>C · 重点产物优先</h3>
+      <div class="mockup" style="margin-top:12px;padding:0;background:#f8f5ee">
+        <div class="mockup-header">Ask AI</div>
+        <div class="mockup-body" style="font-size:12px">
+          <div style="color:#777;margin-bottom:8px">Key artifacts</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <span style="padding:5px 7px;border:1px solid #d8d0c2;border-radius:6px;background:#fffdf8">data_profile.json</span>
+            <span style="padding:5px 7px;border:1px solid #d8d0c2;border-radius:6px;background:#fffdf8">statistical_exploration…</span>
+          </div>
+          <button class="mock-button" style="margin-top:10px">View all 17</button>
+        </div>
+      </div>
+      <p>最强调重点；但“哪些是重点”需要稳定的分类规则。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:20px">
+  <div class="pros-cons">
+    <div class="pros"><h4>共同保留</h4><ul><li>Explain 动作仍然可用</li><li>不改变 AI 实际上下文</li><li>完整列表不丢失</li></ul></div>
+    <div class="cons"><h4>需要你定</h4><ul><li>默认是否展示分类摘要</li><li>完整列表放在折叠区还是弹层</li></ul></div>
+  </div>
+</div>
