@@ -2797,13 +2797,97 @@ def _parse_planning_refusal(
     )
 
 
+@dataclass(frozen=True)
+class NotebookAnalysisRecipeV1:
+    """Durable Notebook projection over the shared Agent compiler."""
+
+    intent: Any
+    compilation_record_id: str | None = None
+    semantic_plan_hash: str | None = None
+    plan_diff: Mapping[str, Any] = field(default_factory=dict)
+    confirmation_id: str | None = None
+    operation_id: str | None = None
+    artifact_refs: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    rerun_prerequisites: Mapping[str, Any] = field(default_factory=dict)
+    invalidation_reason: str | None = None
+
+    @classmethod
+    def from_intent(cls, intent: Any) -> "NotebookAnalysisRecipeV1":
+        from ..workflow_contracts import AnalysisIntentV1
+
+        if type(intent) is not AnalysisIntentV1:
+            raise NotebookPlanningContractError("Notebook recipe requires AnalysisIntentV1")
+        return cls(
+            intent=intent,
+            rerun_prerequisites={
+                "data_snapshot_ref": intent.data_snapshot_ref,
+                "data_snapshot_digest": intent.data_snapshot_digest,
+                "provider_capability_id": intent.capability_id,
+                "project_ref": intent.project_ref,
+            },
+        )
+
+    def bind_compilation(self, preview: Any) -> "NotebookAnalysisRecipeV1":
+        if self.invalidation_reason is not None:
+            raise NotebookPlanningContractError("invalidated Notebook recipe must be rebuilt")
+        return replace(
+            self,
+            compilation_record_id=preview.compilation_record_id,
+            semantic_plan_hash=preview.semantic_plan_hash,
+            plan_diff=dict(preview.plan_diff),
+            operation_id=preview.operation_id,
+        )
+
+    def invalidate(self, reason: str) -> "NotebookAnalysisRecipeV1":
+        if type(reason) is not str or not reason.strip():
+            raise NotebookPlanningContractError("recipe invalidation reason is required")
+        return replace(
+            self,
+            compilation_record_id=None,
+            semantic_plan_hash=None,
+            confirmation_id=None,
+            operation_id=None,
+            invalidation_reason=reason,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": "notebook-analysis-recipe.v1",
+            "intent": self.intent.to_dict(),
+            "compilation_record_id": self.compilation_record_id,
+            "semantic_plan_hash": self.semantic_plan_hash,
+            "plan_diff": dict(self.plan_diff),
+            "confirmation_id": self.confirmation_id,
+            "operation_id": self.operation_id,
+            "artifact_refs": list(self.artifact_refs),
+            "evidence_refs": list(self.evidence_refs),
+            "rerun_prerequisites": dict(self.rerun_prerequisites),
+            "invalidation_reason": self.invalidation_reason,
+        }
+
+
+class NotebookSharedPlannerV1:
+    """Thin Notebook adapter; capability resolution remains server-owned."""
+
+    @staticmethod
+    def capability_source() -> str:
+        return "AgentNotebookCompilerV1"
+
+    @staticmethod
+    def compile(compiler: Any, intent: Any) -> Any:
+        return compiler.compile(intent, entrypoint="notebook")
+
+
 __all__ = [
     "AgentOptionSubmission",
     "NOTEBOOK_TOOLS",
+    "NotebookAnalysisRecipeV1",
     "NotebookPlanningAgent",
     "NotebookPlanningContractError",
     "NotebookNoEligibleCapability",
     "NotebookPlanningUnavailable",
+    "NotebookSharedPlannerV1",
     "PlanningRefusal",
     "PlanningResult",
 ]

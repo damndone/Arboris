@@ -4321,3 +4321,38 @@ def test_provider_correction_falls_back_to_genesis_when_no_rerun_target_exists(
 
     assert "model.genesis" in message
     assert "no eligible" in message.lower()
+
+
+# Wave C cutover coverage
+
+from workbench.agent.notebook.planning_agent import (
+    NotebookAnalysisRecipeV1,
+    NotebookSharedPlannerV1,
+)
+from workbench.agent.workflow_contracts import AnalysisIntentV1
+
+def test_notebook_recipe_uses_shared_compiler_and_persists_rerun_prerequisites() -> None:
+    intent = AnalysisIntentV1.from_fields(
+        actor_ref="principal:user:1",
+        session_ref="session:notebook:1",
+        project_ref="project:1",
+        capability_id="fixture.contracts.capability",
+        target_ref="dataset:fixture:1",
+        data_snapshot_ref="dataset:snapshot:1",
+        data_snapshot_digest="a" * 64,
+        requested_effect="read",
+        sensitivity="public",
+        analysis_mode="descriptive",
+        resource_budget={"cpu_ms": 100, "memory_mb": 64},
+        options={"seed": 7},
+        source_text="检查数据",
+    )
+    recipe = NotebookAnalysisRecipeV1.from_intent(intent)
+    payload = recipe.to_dict()
+    assert payload["intent"]["capability_id"] == "fixture.contracts.capability"
+    assert payload["rerun_prerequisites"]["data_snapshot_digest"] == "a" * 64
+    assert "prompt" not in str(payload).lower()
+
+
+def test_notebook_shared_planner_delegates_without_second_capability_table() -> None:
+    assert NotebookSharedPlannerV1.capability_source() == "AgentNotebookCompilerV1"

@@ -101,6 +101,8 @@ def test_feature_recipe_routes_preview_confirm_and_expose_typed_child(tmp_path: 
     assert confirm_response.status_code == 200
     effect = confirm_response.json()["effect"]
     assert effect["child_node_id"].startswith("feature-recipe:")
+    assert confirm_response.json()["confirmation"]["status"] == "confirmed"
+    assert confirm_response.json()["proposal"]["operation_id"] == "data.feature_recipe"
 
 
 def test_data_transform_routes_preview_confirm_subset(tmp_path: Path) -> None:
@@ -131,6 +133,26 @@ def test_data_transform_routes_preview_confirm_subset(tmp_path: Path) -> None:
         )
     assert confirm_response.status_code == 200
     assert confirm_response.json()["effect"]["child_node_id"].startswith("data-subset:")
+    assert confirm_response.json()["confirmation"]["status"] == "confirmed"
+    assert confirm_response.json()["proposal"]["operation_id"] == "data.subset"
+
+
+def test_data_operation_routes_require_a_project_runs_root(tmp_path: Path) -> None:
+    project_without_runs = tmp_path / "not-a-workbench-project"
+    project_without_runs.mkdir()
+
+    response = TestClient(app).get(
+        "/data-operations/profile",
+        params={
+            "project_root": str(project_without_runs),
+            "source_run_id": "run-1",
+            "source_node_id": "stage:source",
+            "source_artifact_id": "artifact-1",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "PROJECT_NOT_FOUND"
 
 
 def test_column_cast_context_resolves_existing_columns_from_dataset_node(tmp_path: Path) -> None:
@@ -374,3 +396,70 @@ def test_columns_cast_rejects_duplicate_column(tmp_path: Path) -> None:
         json=_batch_request(run_id, artifact_id, [("age", "numeric"), ("age", "string")]),
     )
     assert resp.status_code == 422
+
+
+def test_data_operation_manifest_is_read_only_and_exposes_closed_descriptors() -> None:
+    response = TestClient(app).get("/data-operations/manifest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "data-operation-manifest.v1"
+    operation_ids = {item["operation_id"] for item in payload["operations"]}
+    assert {
+        "data.column.cast",
+        "data.columns.cast",
+        "data.feature_recipe",
+        "data.merge",
+        "data.append",
+        "data.reshape",
+        "data.subset",
+    } <= operation_ids
+    assert all(item["preview_ref"].endswith("/preview") for item in payload["operations"])
+    assert all(item["confirm_ref"].endswith("/confirm") for item in payload["operations"])
+    assert all(item["confirm_requires"] == ["preview_fingerprint"] for item in payload["operations"])
+
+
+def test_data_operation_profile_is_bounded_and_keeps_dataset_identity(tmp_path: Path) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame({"customer_id": ["a", "b"], "score": [1.0, None]}),
+    )
+
+    response = TestClient(app).get(
+        "/data-operations/profile",
+        params={
+            "project_root": str(project),
+            "source_run_id": run_id,
+            "source_node_id": "stage:source",
+            "source_artifact_id": artifact_id,
+        },
+    )
+
+    assert response.status_code == 200
+    profile = response.json()["profile"]
+    assert profile["dataset_ref"]["run_id"] == run_id
+    assert profile["dataset_ref"]["node_id"] == "stage:source"
+    assert profile["dataset_ref"]["artifact_id"] == artifact_id
+    assert {column["name"] for column in profile["columns"]} == {"customer_id", "score"}
+    assert all(column["inferred"]["confirmed"] is False for column in profile["columns"])
+
+
+def test_metadata_loss_preview_is_explicit_and_read_only() -> None:
+    response = TestClient(app).post(
+        "/data-operations/metadata-loss/preview",
+        json={
+            "source_format": "workbench-json",
+            "target_format": "csv",
+            "metadata": {
+                "score": {
+                    "dtype": "float64",
+                    "variable_label": "Outcome",
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    manifest = response.json()["manifest"]
+    assert manifest["has_loss"] is True
+    assert {item["status"] for item in manifest["items"]} == {"converted", "dropped"}

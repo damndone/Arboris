@@ -4390,3 +4390,277 @@ __all__ = [
     "workflow_step_vocabulary",
     "workflow_dispatcher_key",
 ]
+
+
+# ── shared Agent / Notebook intent boundary ─────────────────────────────
+#
+# The existing workflow contract above is intentionally kept compatible with
+# the older multi-step operation.  These small value objects are the cutover
+# facade: an LLM may propose them, but the server validates and canonicalizes
+# them before a DraftAgentPlanV1 is created.  Raw prompt text is represented by
+# a digest only; it never becomes durable plan/config content.
+
+_ANALYSIS_INTENT_DIGEST = re.compile(r"[0-9a-f]{64}")
+_ANALYSIS_EFFECTS = frozenset({"none", "read", "write", "model_fit", "model_predict", "report"})
+_ANALYSIS_SENSITIVITIES = frozenset({"public", "internal", "sensitive", "unknown"})
+_ANALYSIS_MODES = frozenset({"classification", "descriptive", "diagnostic", "inference", "predictive", "regression"})
+_CLARIFICATION_CODES = frozenset(
+    {
+        "missing_required_information",
+        "ambiguous_request",
+        "unsafe_instruction",
+        "no_eligible_capability",
+        "stale_source",
+    }
+)
+
+
+def _intent_text(value: object, name: str) -> str:
+    if type(value) is not str or not value or value != value.strip() or "\x00" in value:
+        raise OperationValidationError(f"{name} must be a non-empty exact string")
+    return value
+
+
+def _intent_digest(value: object, name: str) -> str:
+    if type(value) is not str or _ANALYSIS_INTENT_DIGEST.fullmatch(value) is None:
+        raise OperationValidationError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _intent_json(value: object, *, path: str = "intent", depth: int = 0) -> None:
+    if depth > 6:
+        raise OperationValidationError(f"{path} is nested too deeply")
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if type(key) is not str or not key or key.casefold() in {
+                "prompt", "raw_prompt", "secret", "password", "api_key", "token", "code", "path",
+            }:
+                raise OperationValidationError(f"{path} contains an unsafe key")
+            _intent_json(child, path=f"{path}.{key}", depth=depth + 1)
+        return
+    if isinstance(value, (list, tuple)):
+        for index, child in enumerate(value):
+            _intent_json(child, path=f"{path}[{index}]", depth=depth + 1)
+        return
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float) and math.isfinite(value):
+        return
+    raise OperationValidationError(f"{path} contains an unsupported value")
+
+
+@dataclass(frozen=True)
+class AnalysisClarificationV1:
+    code: str
+    field: str
+    message: str
+    allowed_values: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.code not in _CLARIFICATION_CODES:
+            raise OperationValidationError(f"unknown clarification code: {self.code}")
+        _intent_text(self.field, "clarification.field")
+        _intent_text(self.message, "clarification.message")
+        if type(self.allowed_values) is not tuple or any(
+            type(item) is not str or not item for item in self.allowed_values
+        ):
+            raise OperationValidationError("clarification.allowed_values must be a tuple of strings")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "field": self.field,
+            "message": self.message,
+            "allowed_values": list(self.allowed_values),
+        }
+
+
+@dataclass(frozen=True)
+class AnalysisIntentV1:
+    """The only semantic input accepted from Agent or Notebook cutover."""
+
+    intent_ref: str
+    actor_ref: str
+    session_ref: str
+    project_ref: str
+    source_text_digest: str
+    capability_id: str | None = None
+    target_ref: str | None = None
+    data_snapshot_ref: str | None = None
+    data_snapshot_digest: str | None = None
+    requested_effect: str | None = None
+    sensitivity: str | None = None
+    analysis_mode: str | None = None
+    structure: str | None = None
+    time_scope: str | None = None
+    entity_scope: str | None = None
+    positive_class: str | None = None
+    metric: str | None = None
+    decision_cost: Mapping[str, Any] = field(default_factory=dict)
+    resource_budget: Mapping[str, int | float] = field(
+        default_factory=lambda: {"cpu_ms": 1000, "memory_mb": 128}
+    )
+    options: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.intent_ref.startswith("intent:"):
+            raise OperationValidationError("intent_ref must be server-neutral intent:<id>")
+        for name in ("actor_ref", "session_ref", "project_ref", "source_text_digest"):
+            _intent_text(getattr(self, name), name)
+        _intent_digest(self.source_text_digest, "source_text_digest")
+        for name in (
+            "capability_id",
+            "target_ref",
+            "data_snapshot_ref",
+            "requested_effect",
+            "sensitivity",
+            "analysis_mode",
+            "structure",
+            "time_scope",
+            "entity_scope",
+            "positive_class",
+            "metric",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                _intent_text(value, name)
+        if self.requested_effect is not None and self.requested_effect not in _ANALYSIS_EFFECTS:
+            raise OperationValidationError("requested_effect is not in the closed intent vocabulary")
+        if self.sensitivity is not None and self.sensitivity not in _ANALYSIS_SENSITIVITIES:
+            raise OperationValidationError("sensitivity is not in the closed intent vocabulary")
+        if self.analysis_mode is not None and self.analysis_mode not in _ANALYSIS_MODES:
+            raise OperationValidationError("analysis_mode is not in the closed intent vocabulary")
+        if self.data_snapshot_digest is not None:
+            _intent_digest(self.data_snapshot_digest, "data_snapshot_digest")
+        if not isinstance(self.decision_cost, Mapping) or not isinstance(self.resource_budget, Mapping):
+            raise OperationValidationError("decision_cost and resource_budget must be mappings")
+        _intent_json(self.decision_cost, path="decision_cost")
+        _intent_json(self.resource_budget, path="resource_budget")
+        _intent_json(self.options, path="options")
+        for key, value in self.resource_budget.items():
+            if type(key) is not str or type(value) not in {int, float} or isinstance(value, bool) or value < 0:
+                raise OperationValidationError("resource_budget values must be finite non-negative numbers")
+            if isinstance(value, float) and not math.isfinite(value):
+                raise OperationValidationError("resource_budget values must be finite")
+
+    @classmethod
+    def from_fields(
+        cls,
+        *,
+        actor_ref: str,
+        session_ref: str,
+        project_ref: str,
+        source_text: str | None = None,
+        source_text_digest: str | None = None,
+        **fields: Any,
+    ) -> "AnalysisIntentV1":
+        from workbench.canonical import sha256_canonical
+
+        allowed_fields = frozenset(
+            {
+                "capability_id",
+                "target_ref",
+                "data_snapshot_ref",
+                "data_snapshot_digest",
+                "requested_effect",
+                "sensitivity",
+                "analysis_mode",
+                "structure",
+                "time_scope",
+                "entity_scope",
+                "positive_class",
+                "metric",
+                "decision_cost",
+                "resource_budget",
+                "options",
+            }
+        )
+        unknown_fields = sorted(set(fields) - allowed_fields)
+        if unknown_fields:
+            raise OperationValidationError(
+                "unsupported analysis intent field(s): " + ", ".join(unknown_fields)
+            )
+        if source_text_digest is None:
+            source_text_digest = sha256_canonical({"text": source_text or ""})
+        semantic_fields = {
+            "capability_id": fields.get("capability_id"),
+            "target_ref": fields.get("target_ref"),
+            "data_snapshot_ref": fields.get("data_snapshot_ref"),
+            "data_snapshot_digest": fields.get("data_snapshot_digest"),
+            "requested_effect": fields.get("requested_effect"),
+            "sensitivity": fields.get("sensitivity"),
+            "analysis_mode": fields.get("analysis_mode"),
+            "structure": fields.get("structure"),
+            "time_scope": fields.get("time_scope"),
+            "entity_scope": fields.get("entity_scope"),
+            "positive_class": fields.get("positive_class"),
+            "metric": fields.get("metric"),
+            "decision_cost": fields.get("decision_cost", {}),
+            "resource_budget": fields.get("resource_budget", {"cpu_ms": 1000, "memory_mb": 128}),
+            "options": fields.get("options", {}),
+        }
+        _intent_json(semantic_fields, path="intent_fields")
+        intent_ref = "intent:analysis:" + sha256_canonical(
+            {"source_text_digest": source_text_digest, "semantic_fields": semantic_fields}
+        )[:32]
+        return cls(
+            intent_ref=intent_ref,
+            actor_ref=actor_ref,
+            session_ref=session_ref,
+            project_ref=project_ref,
+            source_text_digest=source_text_digest,
+            **semantic_fields,
+        )
+
+    @property
+    def semantic_digest(self) -> str:
+        from workbench.canonical import sha256_canonical
+
+        return sha256_canonical(
+            {
+                "intent_ref": self.intent_ref,
+                "capability_id": self.capability_id,
+                "target_ref": self.target_ref,
+                "data_snapshot_ref": self.data_snapshot_ref,
+                "data_snapshot_digest": self.data_snapshot_digest,
+                "requested_effect": self.requested_effect,
+                "sensitivity": self.sensitivity,
+                "analysis_mode": self.analysis_mode,
+                "structure": self.structure,
+                "time_scope": self.time_scope,
+                "entity_scope": self.entity_scope,
+                "positive_class": self.positive_class,
+                "metric": self.metric,
+                "decision_cost": dict(self.decision_cost),
+                "resource_budget": dict(self.resource_budget),
+                "options": dict(self.options),
+            }
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": "analysis-intent.v1",
+            "intent_ref": self.intent_ref,
+            "actor_ref": self.actor_ref,
+            "session_ref": self.session_ref,
+            "project_ref": self.project_ref,
+            "source_text_digest": self.source_text_digest,
+            "capability_id": self.capability_id,
+            "target_ref": self.target_ref,
+            "data_snapshot_ref": self.data_snapshot_ref,
+            "data_snapshot_digest": self.data_snapshot_digest,
+            "requested_effect": self.requested_effect,
+            "sensitivity": self.sensitivity,
+            "analysis_mode": self.analysis_mode,
+            "structure": self.structure,
+            "time_scope": self.time_scope,
+            "entity_scope": self.entity_scope,
+            "positive_class": self.positive_class,
+            "metric": self.metric,
+            "decision_cost": dict(self.decision_cost),
+            "resource_budget": dict(self.resource_budget),
+            "options": dict(self.options),
+        }
+
+
+__all__ += ["AnalysisClarificationV1", "AnalysisIntentV1"]

@@ -3891,15 +3891,16 @@ def test_task5_injected_family_is_visible_then_denominator_recovers(
     exposure: str,
     variant: int,
 ) -> None:
-    import workbench.providers.catalog as catalog_module
-
     load_catalog_from_root = _private_provider_catalog_loader()
     base = _provider_fixture_payload()
-    baseline = catalog_module.load_builtin_catalog()
     from workbench.agent.workflow_capability_registry import workflow_capability_registry
 
     operations_before = workflow_capability_registry().operation_ids()
     _write_provider_manifest(tmp_path, "contract_fixture.json", base)
+    # The denominator is the fixture root under test.  Comparing with the
+    # repository builtin catalog would make this regression test fail whenever
+    # a legitimate new builtin provider is added by another development line.
+    baseline = load_catalog_from_root(tmp_path)
     injected = _new_family_provider_payload(
         base, provider_id=provider_id, exposure=exposure, variant=variant
     )

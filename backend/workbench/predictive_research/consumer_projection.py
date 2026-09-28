@@ -8,6 +8,7 @@ from typing import Any
 
 from ..artifacts import read_json, sha256_file
 from .schema import PayloadContractError, default_v1_prediction_registry
+from .contracts import ContractError
 
 
 _REQUIRED = {
@@ -201,4 +202,56 @@ def project_prediction_evidence(
         "controls": controls.get("controls", []),
         "limits": evaluation.get("limits", []),
         "payload_versions": {schema: payload["schema_version"] for schema, payload in by_schema.items()},
+    }
+
+
+_CLASSIFICATION_REQUIRED = frozenset(
+    {
+        "task",
+        "split",
+        "metrics",
+        "calibration",
+        "baselines",
+        "controls",
+        "comparison",
+        "explanations",
+        "stability",
+        "shift",
+        "decision_policy",
+        "blocked_reasons",
+        "evidence_refs",
+    }
+)
+
+
+def project_classification_evidence(payload: Mapping[str, Any], *, consumer: str) -> dict[str, Any]:
+    """Project a classification packet without recomputing or inventing facts."""
+
+    if consumer not in _CONSUMERS:
+        raise ContractError("CLASSIFICATION_CONSUMER_UNSUPPORTED", f"unsupported consumer {consumer!r}")
+    if not isinstance(payload, Mapping) or payload.get("payload_schema") != "workbench.prediction.classification-evidence" or payload.get("schema_version") != 1:
+        raise ContractError("CLASSIFICATION_EVIDENCE_CONTRACT_INVALID", "classification evidence contract is invalid")
+    missing = _CLASSIFICATION_REQUIRED - set(payload)
+    if missing:
+        raise ContractError("CLASSIFICATION_EVIDENCE_INCOMPLETE", f"missing classification evidence: {sorted(missing)}")
+    if not isinstance(payload["blocked_reasons"], list):
+        raise ContractError("CLASSIFICATION_EVIDENCE_CONTRACT_INVALID", "blocked_reasons must be a list")
+    if not isinstance(payload["metrics"], Mapping) and not payload["blocked_reasons"]:
+        raise ContractError("CLASSIFICATION_EVIDENCE_INCOMPLETE", "metrics must be present unless the packet is blocked")
+    return {
+        "status": "blocked" if payload["blocked_reasons"] else "validated",
+        "consumer": consumer,
+        "task": dict(payload["task"]) if isinstance(payload["task"], Mapping) else payload["task"],
+        "split": dict(payload["split"]) if isinstance(payload["split"], Mapping) else payload["split"],
+        "metrics": dict(payload["metrics"]) if isinstance(payload["metrics"], Mapping) else payload["metrics"],
+        "calibration": payload["calibration"],
+        "baselines": payload["baselines"],
+        "controls": payload["controls"],
+        "comparison": payload["comparison"],
+        "explanations": payload["explanations"],
+        "stability": payload["stability"],
+        "shift": payload["shift"],
+        "decision_policy": payload["decision_policy"],
+        "blocked_reasons": list(payload["blocked_reasons"]),
+        "evidence_refs": dict(payload["evidence_refs"]) if isinstance(payload["evidence_refs"], Mapping) else payload["evidence_refs"],
     }

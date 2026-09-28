@@ -675,3 +675,41 @@ def test_shared_lifecycle_rejects_two_different_proposals_on_one_chain(
     assert isinstance(conflict, OperationClaimConflict)
     assert first_handler.effects == 1
     assert second_handler.effects == 0
+
+
+# Wave C cutover coverage
+
+from workbench.agent.operations import (
+    CutoverOperationLifecycleError,
+    CutoverOperationStoreV1,
+)
+
+def test_cutover_operation_lifecycle_is_monotonic_and_typed() -> None:
+    store = CutoverOperationStoreV1()
+    record = store.create(
+        operation_id="cutover-operation:1",
+        entrypoint="agent",
+        semantic_plan_hash="a" * 64,
+    )
+    assert record.state == "compiled"
+    store.transition(record.operation_id, expected="compiled", state="confirmed", confirmation_id="confirm:1")
+    store.transition(record.operation_id, expected="confirmed", state="admitted", execution_instance_hash="b" * 64)
+    store.transition(record.operation_id, expected="admitted", state="executing")
+    store.transition(record.operation_id, expected="executing", state="completed", evidence_refs=("evidence:1",))
+    assert store.require(record.operation_id).state == "completed"
+
+    with pytest.raises(CutoverOperationLifecycleError, match="terminal"):
+        store.transition(record.operation_id, expected="completed", state="executing")
+
+
+def test_cutover_operation_rejects_race_and_cross_entrypoint_mutation() -> None:
+    store = CutoverOperationStoreV1()
+    record = store.create(
+        operation_id="cutover-operation:2",
+        entrypoint="notebook",
+        semantic_plan_hash="c" * 64,
+    )
+    with pytest.raises(CutoverOperationLifecycleError, match="expected state"):
+        store.transition(record.operation_id, expected="confirmed", state="admitted")
+    with pytest.raises(CutoverOperationLifecycleError, match="entrypoint"):
+        store.require(record.operation_id, entrypoint="agent")

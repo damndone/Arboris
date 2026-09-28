@@ -5030,3 +5030,34 @@ def _bounded_average_marginal_effects(
             )
         return rows
     return []
+
+
+def project_persisted_evidence_for_agent(
+    record: object,
+    *,
+    destination: str = "local",
+    requested_fact_ids: tuple[str, ...] | None = None,
+    registry: object | None = None,
+    gateway: object | None = None,
+    receipt: object | None = None,
+    issuer: object | None = None,
+) -> dict[str, object]:
+    """Bounded Agent contribution over the shared persisted-evidence port."""
+
+    from ..evidence.consumer_adapters import (
+        ConsumerProjectionRegistryV1,
+        default_projection_registry,
+    )
+
+    active_registry = default_projection_registry() if registry is None else registry
+    if type(active_registry) is not ConsumerProjectionRegistryV1:
+        raise TypeError("registry must be ConsumerProjectionRegistryV1")
+    return active_registry.project(
+        record,  # type: ignore[arg-type]
+        consumer_id="agent",
+        destination=destination,
+        requested_fact_ids=requested_fact_ids,
+        gateway=gateway,  # type: ignore[arg-type]
+        receipt=receipt,  # type: ignore[arg-type]
+        issuer=issuer,  # type: ignore[arg-type]
+    ).to_dict()

@@ -25,7 +25,7 @@
 // The old import path (lineage/detail/sections/sectionRegistry) still
 // works via a thin re-export so consumers don't churn in this PR.
 
-import type { FC } from "react";
+import { createElement, type FC } from "react";
 import type { GraphViewNode } from "../../lineage/api/graphViewTypes";
 import { TrustBanner } from "../../lineage/detail/sections/TrustBanner";
 import { LineageChainSection } from "../../lineage/detail/sections/LineageChainSection";
@@ -66,6 +66,70 @@ export type SectionEntry = RegistryEntry<GraphViewNode> & {
 
 /** @deprecated use SectionEntry; alias preserved for V1.5.0 callers. */
 export type SectionSpec = SectionEntry;
+
+/** Renderer identities are declaration-facing keys, not component imports
+ * exposed to Agent/Notebook input.  The server may add a provider renderer
+ * only after the corresponding typed contract and evidence packet are joined.
+ */
+export const V189_DECLARATION_RENDERER_KEYS = Object.freeze({
+  dataConsumer: "renderer:data-consumer-evidence.v1",
+  classificationEvidence: "renderer:classification-evidence.v1",
+} as const);
+
+type DataConsumerProjection = {
+  status?: unknown;
+  evidence_grade?: unknown;
+  lineage_ref?: unknown;
+  blocked_reason?: unknown;
+};
+
+function asDataConsumerProjection(node: GraphViewNode): DataConsumerProjection | null {
+  const candidate = (node as GraphViewNode & { dataConsumerProjection?: unknown }).dataConsumerProjection;
+  if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  return candidate as DataConsumerProjection;
+}
+
+/**
+ * Declaration-derived, read-only consumer evidence mount. Unknown shapes are
+ * disclosed as unavailable; they are never dumped as arbitrary JSON.
+ */
+export const DataConsumerEvidenceSection: FC<{ node: GraphViewNode }> = ({ node }) => {
+  const projection = asDataConsumerProjection(node);
+  if (!projection) {
+    return createElement(
+      "section",
+      { "aria-label": "Data consumer evidence", "data-testid": "data-consumer-evidence" },
+      createElement("div", { className: "ln-section-label" }, "Data consumer evidence"),
+      createElement(
+        "p",
+        { style: { fontSize: 12, color: "var(--label-tertiary)", margin: 0 } },
+        "UNAVAILABLE: no typed consumer projection was supplied.",
+      ),
+    );
+  }
+  const value = (field: keyof DataConsumerProjection, fallback: string) => {
+    const candidate = projection[field];
+    return typeof candidate === "string" && candidate.trim() ? candidate : fallback;
+  };
+  return createElement(
+    "section",
+    { "aria-label": "Data consumer evidence", "data-testid": "data-consumer-evidence" },
+    createElement("div", { className: "ln-section-label" }, "Data consumer evidence"),
+    createElement(
+      "dl",
+      { style: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", margin: 0, fontSize: 12 } },
+      createElement("dt", null, "Status"),
+      createElement("dd", { style: { margin: 0 } }, value("status", "UNAVAILABLE")),
+      createElement("dt", null, "Evidence grade"),
+      createElement("dd", { style: { margin: 0 } }, value("evidence_grade", "UNAVAILABLE")),
+      createElement("dt", null, "Lineage"),
+      createElement("dd", { style: { margin: 0 } }, value("lineage_ref", "UNAVAILABLE")),
+    ),
+    typeof projection.blocked_reason === "string" && projection.blocked_reason.trim()
+      ? createElement("p", { style: { fontSize: 12, color: "var(--label-tertiary)", margin: "6px 0 0" } }, `Blocked: ${projection.blocked_reason}`)
+      : null,
+  );
+};
 
 /**
  * Trust banner shows whenever the node is not trusted OR any decision
@@ -134,6 +198,15 @@ export const sectionRegistry: SectionEntry[] = [
     shouldRender: (n) =>
       n.kind === "dataset_stage" && !n.isDraft && !isGeneratedArmaGarchStage(n),
     Component: CodeExecuteSection,
+  },
+  {
+    // v1.8.9 Wave C — the consumer surface is a declaration-derived typed
+    // projection. It does not recompute filters, aggregates or evidence.
+    id: "dataConsumerEvidence",
+    order: 29.25,
+    shouldRender: (n) =>
+      n.kind === "dataset_stage" && !n.isDraft && !isGeneratedArmaGarchStage(n),
+    Component: DataConsumerEvidenceSection,
   },
   {
     id: "statisticalExploration",

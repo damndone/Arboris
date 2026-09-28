@@ -39,6 +39,38 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def classification_artifact_id(**identity_parts: str) -> str:
+    """Return a content identity bound to every classification artifact input."""
+
+    if not identity_parts or any(not isinstance(key, str) or not key for key in identity_parts):
+        raise ContractError("CLASSIFICATION_ARTIFACT_ID_INVALID", "artifact identity parts are required")
+    if any(not isinstance(value, str) or not value for value in identity_parts.values()):
+        raise ContractError("CLASSIFICATION_ARTIFACT_ID_INVALID", "artifact identity values must be non-empty strings")
+    payload = {"schema": "classification-artifact-identity.v1", "parts": dict(sorted(identity_parts.items()))}
+    return "sha256:" + _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+
+
+def persist_classification_artifacts(run_root: Path, artifacts: Mapping[str, Any]) -> dict[str, Any]:
+    """Persist one classification packet through the existing FD-only admission."""
+
+    if not isinstance(artifacts, Mapping) or not artifacts:
+        raise ContractError("CLASSIFICATION_ARTIFACTS_INVALID", "classification artifacts must be a non-empty object")
+    payload = dict(artifacts)
+    declared_schema = payload.get("payload_schema", "workbench.prediction.classification-artifacts")
+    declared_version = payload.get("schema_version", 1)
+    if declared_schema != "workbench.prediction.classification-artifacts" or declared_version != 1:
+        raise ContractError(
+            "CLASSIFICATION_ARTIFACT_CONTRACT_INVALID",
+            "classification artifacts must use payload schema version 1",
+        )
+    payload["payload_schema"] = declared_schema
+    payload["schema_version"] = declared_version
+    content = _json_bytes(payload)
+    with PredictionPersistenceAdmission.admit(Path(run_root)) as admission:
+        digest = admission.write_json(("classification_artifacts.json",), payload)
+    return {"status": "persisted", "path": "classification_artifacts.json", "sha256": digest, "content_size": len(content)}
+
+
 @dataclass
 class PredictionPersistenceAdmission:
     """A short-lived run-root capability with no raw-path writes."""

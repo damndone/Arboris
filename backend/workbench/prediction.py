@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import pandas as pd
 
 from .artifacts import register_artifact, write_json
+from .canonical import sha256_canonical
 from .econometrics.optional_deps import require_optional_dependency
 from .predictive_research.contracts import (
     AvailabilitySpecV1,
@@ -17,12 +18,18 @@ from .predictive_research.contracts import (
     SplitPlanV1,
     StructureSpecV1,
 )
+from .predictive_research.classification_contracts import ClassificationTaskSpecV1, DecisionPolicyV1
+from .predictive_research.classification_protocol import run_classification_protocol
+from .predictive_research.persistence import (
+    PredictionPersistenceAdmission,
+    classification_artifact_id,
+    persist_classification_artifacts,
+)
 from .predictive_research.feature_recipe import apply_feature_recipe
 from .predictive_research.cache import PredictionIdentityCache
 from .predictive_research.graph_persistence import persist_prediction_node_index
 from .predictive_research.identity import build_prediction_identity
 from .predictive_research.prediction_protocol import dataset_snapshot_hash, run_oos_prediction
-from .predictive_research.persistence import PredictionPersistenceAdmission
 from .predictive_research.split_kernel import build_split_plan
 from .lineage.hashing import node_hash
 
@@ -39,6 +46,154 @@ def _prediction_project_root(run_root: Path) -> Path:
     if run_root.parent.name == "runs":
         return run_root.parent.parent
     return run_root.parent
+
+
+def run_classification_model_v189(
+    frame: pd.DataFrame,
+    run_root: Path,
+    *,
+    task: ClassificationTaskSpecV1,
+    row_refs: Sequence[str],
+    model_ids: Sequence[str] = ("logistic_regression", "random_forest"),
+    final_holdout_fraction: float = 0.2,
+    cv_folds: int = 3,
+    random_seed: int | None = None,
+    decision_policy: DecisionPolicyV1 | None = None,
+) -> dict[str, Any]:
+    """Run the additive v1.8.9 classification protocol from typed contracts.
+
+    This entrypoint deliberately does not alter the v1.8.6 regression
+    entrypoints.  Column names and availability are supplied by the typed
+    task; adapters are selected by their package-local registry, never by a
+    provider raw dictionary.
+    """
+
+    if not isinstance(task, ClassificationTaskSpecV1):
+        raise ContractError("CLASSIFICATION_TASK_REQUIRED", "classification entrypoint requires ClassificationTaskSpecV1")
+    task.validate()
+    if not isinstance(frame, pd.DataFrame):
+        raise ContractError("CLASSIFICATION_FRAME_INVALID", "classification entrypoint requires a DataFrame")
+    missing_columns = [
+        column for column in (task.target_column, *task.feature_columns)
+        if column not in frame.columns
+    ]
+    if missing_columns:
+        raise ContractError("CLASSIFICATION_COLUMN_REF_MISSING", f"server-bound columns are missing: {missing_columns}")
+    refs = tuple(row_refs)
+    if len(refs) != len(frame) or len(set(refs)) != len(refs) or any(not isinstance(ref, str) or not ref for ref in refs):
+        raise ContractError("CLASSIFICATION_ROW_IDENTITY_INVALID", "row_refs must be unique non-empty strings aligned to frame")
+    if task.weights is not None:
+        raise ContractError(
+            "CLASSIFICATION_WEIGHT_UNSUPPORTED",
+            "the additive protocol has no declared weight column consumer",
+        )
+    if decision_policy is not None:
+        if not isinstance(decision_policy, DecisionPolicyV1):
+            raise ContractError("CLASSIFICATION_POLICY_INVALID", "decision_policy must be DecisionPolicyV1")
+        decision_policy.validate()
+    target = frame.loc[:, task.target_column]
+    if target.isna().any():
+        raise ContractError("CLASSIFICATION_TARGET_MISSING", "classification target contains missing values")
+    seed = task.seed if random_seed is None else random_seed
+    raw_positive_class = next(
+        raw_value for raw_value, label in task.class_mapping.items() if label == task.positive_class
+    )
+    protocol = run_classification_protocol(
+        frame.loc[:, list(task.feature_columns)].copy(),
+        target,
+        row_refs=refs,
+        model_ids=tuple(model_ids),
+        final_holdout_fraction=final_holdout_fraction,
+        cv_folds=cv_folds,
+        seed=seed,
+        positive_class=raw_positive_class,
+    )
+    class_support: dict[str, int] = {}
+    for raw_value in target.tolist():
+        label = task.class_mapping.get(raw_value, str(raw_value))
+        class_support[str(label)] = class_support.get(str(label), 0) + 1
+    split_hash = protocol["comparison"]["split_hash"]
+    selected_model = protocol["comparison"]["selected_model"]
+    model_metrics = {selected_model: protocol["models"][selected_model]["holdout"]["metrics"]}
+    policy_payload = (
+        decision_policy.to_dict()
+        if decision_policy is not None
+        else {
+            "selection_status": "SCENARIOS_ONLY",
+            "threshold_scope": "development_oof",
+            "holdout": "sealed",
+            "status": "not_available",
+            "reason": "cost and capacity policy were not supplied",
+        }
+    )
+    evidence = {
+        "payload_schema": "workbench.prediction.classification-evidence",
+        "schema_version": 1,
+        "status": "degraded",
+        "task": {
+            "task_type": task.task_type,
+            "positive_class": task.positive_class,
+            "class_support": class_support,
+            "task_hash": task.content_hash,
+        },
+        "split": {"profile": task.split_profile, "split_hash": split_hash},
+        "metrics": model_metrics,
+        "calibration": {"status": "not_available", "reason": "raw calibration receipt is not emitted by this entrypoint slice"},
+        "baselines": protocol["baselines"],
+        "controls": [{"control": "permuted_target", "status": "not_available", "reason": "control execution is outside this additive entrypoint slice"}],
+        "comparison": protocol["comparison"],
+        "explanations": {"status": "not_available", "reason": "explanation receipt is not emitted by this entrypoint slice"},
+        "stability": {"status": "not_available", "reason": "fold stability receipt is not emitted by this entrypoint slice"},
+        "shift": {"status": "not_available", "reason": "shift diagnostics are not part of the sealed release plan"},
+        "decision_policy": policy_payload,
+        "blocked_reasons": [],
+        "evidence_refs": {"split": f"classification-split:{split_hash}", "holdout": f"classification-holdout:{split_hash}"},
+    }
+    identity = classification_artifact_id(
+        task_hash=task.content_hash,
+        split_hash=split_hash,
+        preprocessing_hash=sha256_canonical({"status": "not_declared"}),
+        model_hash=sha256_canonical(protocol["models"]),
+        prediction_hash=sha256_canonical(model_metrics),
+        evaluation_hash=sha256_canonical(protocol["holdout"]),
+        control_hash=sha256_canonical(evidence["controls"]),
+        comparison_hash=sha256_canonical(protocol["comparison"]),
+        explanation_hash=sha256_canonical(evidence["explanations"]),
+        policy_hash=sha256_canonical(policy_payload),
+    )
+    artifact = persist_classification_artifacts(
+        Path(run_root),
+        {"artifact_id": identity, "task": {**task.to_dict(), "task_hash": task.content_hash}, "evidence": evidence},
+    )
+    artifact_sha256 = artifact.get("sha256")
+    if type(artifact_sha256) is not str or len(artifact_sha256) != 64:
+        raise ContractError(
+            "CLASSIFICATION_ARTIFACT_DIGEST_INVALID",
+            "persisted classification artifact did not return a SHA-256 digest",
+        )
+    # The packet is not consumable merely because it exists on disk. Register
+    # the exact path, digest and payload contract in the run index through the
+    # same FD-admitted persistence boundary used to write it.
+    with PredictionPersistenceAdmission.admit(Path(run_root)) as persistence:
+        persistence.register_artifact(
+            artifact_id=identity,
+            relative_parts=("classification_artifacts.json",),
+            artifact_type="classification_artifacts",
+            step="classification",
+            inputs=[task.content_hash, split_hash],
+            sha256=artifact_sha256,
+            payload_contract={
+                "payload_schema": "workbench.prediction.classification-artifacts",
+                "schema_version": 1,
+            },
+        )
+    return {
+        **protocol,
+        "status": "validated",
+        "task": {**task.to_dict(), "task_hash": task.content_hash},
+        "evidence": evidence,
+        "artifact": {**artifact, "artifact_id": identity},
+    }
 
 
 def run_prediction_model_v186(

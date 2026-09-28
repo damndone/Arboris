@@ -1,4 +1,5 @@
 import type { ModelResult } from "../api";
+import type { EvidenceViewModel } from "./reportEvidence";
 
 type EvidenceRecord = Record<string, unknown>;
 
@@ -408,6 +409,48 @@ function FamilyEvidenceCard({
   );
 }
 
+function TypedEvidenceProjection({ evidence }: { evidence: EvidenceViewModel }) {
+  return (
+    <section
+      aria-label={`${evidence.consumerId} persisted evidence`}
+      data-testid={`typed-evidence-${evidence.projectionId}`}
+      style={{ marginBottom: 16 }}
+    >
+      <div className="ln-section-label" style={{ marginBottom: 6 }}>
+        Persisted evidence <span>{evidence.status.toUpperCase()}</span>
+      </div>
+      <dl style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", margin: "0 0 8px", fontSize: 12 }}>
+        <dt>Artifact</dt><dd style={{ margin: 0 }}>{evidence.artifactRef}</dd>
+        <dt>Envelope</dt><dd style={{ margin: 0 }}>{evidence.envelopeRef}</dd>
+        <dt>Availability</dt><dd style={{ margin: 0 }}>{evidence.availability.toUpperCase()}</dd>
+        <dt>Completeness</dt><dd style={{ margin: 0 }}>{evidence.completenessStatus.toUpperCase()}</dd>
+      </dl>
+      {evidence.facts.length === 0 ? (
+        <p style={{ fontSize: 12, color: "var(--label-tertiary)", margin: 0 }}>
+          UNAVAILABLE: no persisted facts were supplied by this projection.
+        </p>
+      ) : (
+        <table style={tableStyle}>
+          <thead><tr><th style={cellStyle}>Fact</th><th style={cellStyle}>Statistic</th><th style={cellStyle}>Value</th><th style={cellStyle}>Unit</th></tr></thead>
+          <tbody>{evidence.facts.map((fact) => (
+            <tr key={fact.factId}>
+              <td style={cellStyle}>{fact.factId}</td>
+              <td style={cellStyle}>{fact.statisticId}</td>
+              <td style={cellStyle}>{fact.value}</td>
+              <td style={cellStyle}>{fact.unit ?? "UNAVAILABLE"}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+      {evidence.sections.map((section) => (
+        <p key={section.key} style={{ fontSize: 12, color: "var(--label-tertiary)", margin: "6px 0 0" }}>
+          {section.label}: {section.status.toUpperCase()}
+        </p>
+      ))}
+    </section>
+  );
+}
+
 const SUPPORTED_FAMILIES = new Set([
   "ordinal_logit",
   "multinomial_logit",
@@ -418,20 +461,27 @@ const SUPPORTED_FAMILIES = new Set([
 export function FamilyEvidence({
   modelResults,
   artifacts = {},
+  evidence,
 }: {
   modelResults: readonly FamilyModelResult[];
   artifacts?: FamilyEvidenceArtifacts;
+  evidence?: EvidenceViewModel;
 }) {
   const familyModels = modelResults.filter((model) => SUPPORTED_FAMILIES.has(String(model.model_type)));
-  if (familyModels.length === 0) return null;
+  if (familyModels.length === 0 && !evidence) return null;
   return (
-    <section aria-label="Model family evidence" data-testid="model-family-evidence">
-      <div className="ln-section-label" style={{ marginBottom: 6 }}>
-        Model family evidence
-      </div>
-      {familyModels.map((model) => (
-        <FamilyEvidenceCard key={model.model_id} model={model} artifacts={artifacts} />
-      ))}
-    </section>
+    <>
+      {evidence && <TypedEvidenceProjection evidence={evidence} />}
+      {familyModels.length > 0 && (
+        <section aria-label="Model family evidence" data-testid="model-family-evidence">
+          <div className="ln-section-label" style={{ marginBottom: 6 }}>
+            Model family evidence
+          </div>
+          {familyModels.map((model) => (
+            <FamilyEvidenceCard key={model.model_id} model={model} artifacts={artifacts} />
+          ))}
+        </section>
+      )}
+    </>
   );
 }

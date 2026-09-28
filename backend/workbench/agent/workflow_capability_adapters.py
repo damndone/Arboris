@@ -1092,3 +1092,45 @@ __all__ = [
     "get_workflow_capability_adapter",
     "workflow_capability_request_schema",
 ]
+
+
+def dispatch_registered_provider(
+    catalog: object,
+    runtime_registry: object,
+    capability_id: str,
+    context: object,
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Dispatch only through the declaration-derived trusted runtime join.
+
+    This is intentionally generic.  It does not inspect family prefixes or
+    model names; adding a provider changes declarations and composition, not
+    this facade.
+    """
+
+    from .trusted_executor_registry import (
+        ProviderRuntimeContextV1,
+        TrustedExecutorRegistry,
+        TrustedExecutorRegistryError,
+    )
+    from .workflow_capability_registry import CutoverCapabilityCatalogV1
+
+    if type(catalog) is not CutoverCapabilityCatalogV1:
+        raise WorkflowCapabilityAdapterError("cutover capability catalog is required")
+    if type(runtime_registry) is not TrustedExecutorRegistry:
+        raise WorkflowCapabilityAdapterError("trusted executor registry is required")
+    if type(context) is not ProviderRuntimeContextV1:
+        raise WorkflowCapabilityAdapterError("server runtime context is required")
+    try:
+        descriptor = catalog.require(capability_id)
+        return runtime_registry.dispatch(
+            descriptor.executor_ref,
+            context,
+            request,
+            catalog_digest=catalog.provider_catalog_digest,
+        )
+    except TrustedExecutorRegistryError as exc:
+        raise WorkflowCapabilityAdapterError(str(exc)) from exc
+
+
+__all__ += ["dispatch_registered_provider"]

@@ -46,6 +46,27 @@ class AdmissionEffectV1(str, Enum):
     PROVIDER_EGRESS = "provider_egress"
 
 
+# The planning contract and the admission contract intentionally use different
+# vocabularies: planning describes the requested operation, while admission
+# describes the runtime side-effect class.  Keep the bridge explicit at this
+# boundary instead of comparing enum strings that can never be equal (for
+# example, ``read`` versus ``read_only``).
+_ADMISSION_TO_PLAN_EFFECTS: dict[AdmissionEffectV1, frozenset[str]] = {
+    AdmissionEffectV1.READ_ONLY: frozenset({"none", "read"}),
+    AdmissionEffectV1.DATASET_MUTATION: frozenset({"write"}),
+    AdmissionEffectV1.MODEL_FIT: frozenset({"model_evaluate", "model_fit", "model_predict"}),
+    AdmissionEffectV1.REPORT_MUTATION: frozenset({"report"}),
+    AdmissionEffectV1.PROVIDER_EGRESS: frozenset({"provider_egress"}),
+}
+
+
+def _effects_compatible(requested: AdmissionEffectV1, compiled: object) -> bool:
+    """Return whether runtime admission and planning effects are compatible."""
+
+    compiled_value = getattr(compiled, "value", compiled)
+    return type(compiled_value) is str and compiled_value in _ADMISSION_TO_PLAN_EFFECTS[requested]
+
+
 def _error(code: str, message: str) -> AdmissionContractError:
     return AdmissionContractError(code, message)
 
@@ -504,7 +525,7 @@ class ExecutionAdmissionGateV1:
             raise _error("ADMISSION_CATALOG_CHANGED", "catalog snapshot changed after compilation")
         if request.contract_snapshot_refs != record.contract_snapshot_refs:
             raise _error("ADMISSION_CONTRACT_CHANGED", "contract snapshot changed after compilation")
-        if request.effect.value != record.compiled_workflow.effect.value:
+        if not _effects_compatible(request.effect, record.compiled_workflow.effect):
             raise _error("ADMISSION_EFFECT_MISMATCH", "requested effect mismatches compiled effect")
         if not _budget_within(request.resource_budget, record.compiled_workflow.resource_budget):
             raise _error("ADMISSION_BUDGET_EXCEEDED", "requested resource budget exceeds compiled budget")
