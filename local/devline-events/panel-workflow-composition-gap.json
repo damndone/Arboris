@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "event_id": "d13f947f-9a3d-45f3-8e77-9815d3dbcc6c",
+  "timestamp": "2026-07-30T12:12:00.000Z",
+  "type": "GAP",
+  "subtype": "panel_workflow_model_composition",
+  "stage": "integration",
+  "cause_status": "known",
+  "cause": "The registered Panel OLS capability is executable from the manual run form, but model.genesis validation and its workflow executor treat every branch as OLS. A composed option also derives expected artifacts from one outer capability instead of the model family declared by each model step.",
+  "evidence": {
+    "kind": "browser_ui_and_source_trace",
+    "observed_at": "2026-07-30T12:12:00.000Z",
+    "ref": "CE5 UI completed a manual Panel OLS run, while backend/workbench/agent/workflow_runtime.py dispatches workbench.services.genesis to _execute_ols_branches and backend/workbench/agent/notebook/planning_agent.py derives multi-step artifacts from one capability_id.",
+    "sha256": "d3fd7e36dcecf2d416a4038f15726163342490ea498063ee3e1ea1ae035f41a0"
+  },
+  "impact": "Notebook cannot safely propose, confirm, execute, and answer a general fixed-effects panel specification or a legitimate comparison between panel and dummy-fixed-effect estimators, despite both being server-registered capabilities.",
+  "preventability": "preventable",
+  "resolution": "open",
+  "lesson": "A model capability is not Agent-available merely because the manual form can run it. Every model family must have an explicit workflow semantic contract, matching runtime materialization, result evidence, and per-step artifact admission.",
+  "incident_id": "ac7b9d42-0f8d-4bf4-9cb5-dd3b4f39f023",
+  "lesson_key": "panel-workflow-model-composition",
+  "links": [
+    "backend/workbench/agent/workflow_contracts.py",
+    "backend/workbench/agent/workflow_runtime.py",
+    "backend/workbench/agent/notebook/planning_agent.py",
+    "backend/workbench/econometrics/runner.py",
+    "tests/test_workflow_runtime.py",
+    "tests/test_panel_covariance.py"
+  ]
+}

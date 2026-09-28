@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "1a9c7278-ea97-49e5-b836-e8165c9e3eb9",
+  "incident_id": "2c20a717-147f-4c09-9b91-df8a0037ab5e",
+  "timestamp": "2026-07-30T08:31:00.000Z",
+  "type": "GAP",
+  "stage": "integration",
+  "subtype": "covariance_comparison_interpretation_boundary",
+  "cause": "The Global Agent protocol allowed a descriptive comparison of robust and nonrobust inference but did not explicitly forbid attributing one coefficient's changing significance label to heteroskedasticity.",
+  "cause_status": "known",
+  "impact": "An evidence-grounded answer could still overstate what a covariance comparison proves about a particular coefficient's nonrobust inference.",
+  "preventability": "preventable",
+  "lesson": "A robust-versus-nonrobust comparison supports reporting changed standard errors, intervals, and significance labels. It does not by itself identify a false result or establish the mechanism behind one coefficient's change.",
+  "lesson_key": "covariance-comparison-interpretation-boundary",
+  "resolution": "open",
+  "evidence": {
+    "kind": "browser_agent_transcript_and_red_test",
+    "observed_at": "2026-07-30T08:31:00.000Z",
+    "ref": "CE4 Agent answer labeled a nonrobust significance result likely false after a robust-SE comparison; protocol test initially lacked an explicit guardrail",
+    "sha256": "7f026232e8604127346096a38bc01001d5cc65139e1b535f1c5b69a775f4826a"
+  },
+  "links": [
+    "backend/workbench/http/agent_routes.py",
+    "tests/test_agent_routes.py"
+  ]
+}

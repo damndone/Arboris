@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "36691879-8e78-4e66-ade6-9a5bbb07e396",
+  "incident_id": "53f8b6a2-d36e-4480-967e-ad3ddb51b12a",
+  "timestamp": "2026-07-30T11:56:59.000Z",
+  "type": "GAP",
+  "subtype": "notebook_workflow_dependency_shape_correction",
+  "stage": "implementation",
+  "cause": "The Notebook planning prompt and correction loop omitted the exact JSON array shape required for workflow depends_on declarations.",
+  "cause_status": "known",
+  "impact": "A provider could emit an otherwise valid workflow with a string dependency, and the Notebook correctly failed closed before proposal or execution.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "For typed workflow envelopes, publish omission semantics, exact JSON shape, and a concrete valid example in both initial instructions and corrective feedback.",
+  "lesson_key": "notebook-workflow-dependency-shape-correction",
+  "links": [
+    "backend/workbench/agent/notebook/planning_agent.py",
+    "tests/test_notebook_planning_agent.py"
+  ],
+  "evidence": {
+    "kind": "focused_test",
+    "observed_at": "2026-07-30T11:56:59.000Z",
+    "ref": "tests/test_notebook_planning_agent.py::test_workflow_dependency_shape_error_gets_a_machine_actionable_correction and focused CE5 workflow regression suite",
+    "sha256": "fc6b9915b616f5ad3edef008b45ceb47ec9556ef12e39eb76fd5d86ae6351a04"
+  }
+}

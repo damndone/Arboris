@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "event_id": "eb85f2f4-2a0c-4d0e-ad97-a57eefc9c972",
+  "timestamp": "2026-07-30T08:05:00.000Z",
+  "type": "GAP",
+  "subtype": "global_agent_workflow_answer_path",
+  "stage": "integration",
+  "cause_status": "known",
+  "cause": "The Global Agent protocol did not make the receipt-to-branch-evidence path sufficiently direct, while the receipt reader rejected a visible project overview containing more than four candidate runs.",
+  "evidence": {
+    "kind": "browser_transcript",
+    "observed_at": "2026-07-30T08:05:00.000Z",
+    "ref": "CE4 Global Agent turn ended max_steps_exceeded after repeated schema and coefficient inspections",
+    "sha256": "dc7096e37948d10cfbcdba96e389fb8eebca4ffd511376922eac92e7e23a9d03"
+  },
+  "impact": "A user can complete a typed multi-branch workflow yet receive no answer from the advisory Agent despite the required stored evidence being present.",
+  "preventability": "preventable",
+  "resolution": "open",
+  "lesson": "Bounded evidence tools and their protocol must provide one explicit low-step path from visible candidate runs to a completed workflow receipt, branch evidence, and a direct answer.",
+  "incident_id": "33c552d6-6d98-4cec-b651-5bb71a4f91c9",
+  "lesson_key": "global-agent-workflow-answer-path",
+  "links": [
+    "backend/workbench/http/agent_routes.py",
+    "backend/workbench/agent/context_tools.py",
+    "tests/test_agent_routes.py"
+  ]
+}

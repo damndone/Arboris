@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "ab7ed79f-31dc-48b3-b6ca-c84c268bc6ef",
+  "timestamp": "2026-07-30T08:14:00.000Z",
+  "type": "GAP",
+  "stage": "integration",
+  "subtype": "predictor_residual_diagnostic_evidence",
+  "incident_id": "64ec6d96-b9bb-4e36-ac51-a6a312a9d5c8",
+  "cause": "The Notebook planner was unaware that model.genesis already persists residual-versus-predictor figures, and the Global Agent context adapter could only derive numeric evidence for residuals versus fitted values.",
+  "cause_status": "known",
+  "impact": "A valid typed OLS workflow could omit or disclaim a requested residual-versus-predictor diagnostic even though Workbench creates the durable figure for every declared predictor.",
+  "preventability": "preventable",
+  "lesson": "Model diagnostic artifacts and their bounded Agent evidence must be published as one generic capability. A planner must describe automatic artifacts instead of requiring an invented plotting step, and an Agent must receive only aggregate bins rather than row-level chart inputs.",
+  "lesson_key": "predictor-residual-diagnostic-evidence",
+  "resolution": "open",
+  "evidence": {
+    "kind": "browser_plan_and_red_test",
+    "observed_at": "2026-07-30T08:14:00.000Z",
+    "ref": "CE4 Notebook plan stated residuals versus total enrollment was unavailable; focused TDD reproduced absent bounded predictor-residual evidence",
+    "sha256": "1aa26be41cc00c58bcf3b58c94f55529f8588a89deef63cb81d369fd06a2e1d8"
+  },
+  "links": [
+    "backend/workbench/agent/notebook/planning_agent.py",
+    "backend/workbench/agent/context_tools.py",
+    "backend/workbench/figure_context.py",
+    "tests/test_notebook_planning_agent.py",
+    "tests/test_agent_context_tools.py"
+  ]
+}

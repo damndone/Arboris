@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "event_id": "e7a1398e-74a0-4428-b328-b58571f32671",
+  "incident_id": "be17481f-6a61-4562-a792-586199772d66",
+  "timestamp": "2026-07-30T12:19:34.000Z",
+  "type": "GAP",
+  "subtype": "agent_model_specification_evidence_projection",
+  "stage": "implementation",
+  "cause": "The bounded coefficient reader exposed coefficient statistics but omitted persisted outcome, panel identifiers, degrees of freedom, and cluster metadata. The Agent consequently inferred unavailable specification facts and overinterpreted a covariance comparison.",
+  "cause_status": "known",
+  "impact": "A user-facing model comparison could contain unsupported inference even though the Workbench had already persisted the necessary non-row metadata.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "Project model specification and inference metadata through the same bounded evidence reader as coefficients, and explicitly prohibit diagnostic or causal claims that a covariance comparison alone cannot establish.",
+  "lesson_key": "bounded-model-specification-evidence",
+  "links": [
+    "backend/workbench/econometrics/runner.py",
+    "backend/workbench/agent/context_tools.py",
+    "backend/workbench/http/agent_routes.py",
+    "tests/test_panel_covariance.py",
+    "tests/test_agent_context_tools.py",
+    "tests/test_agent_routes.py"
+  ],
+  "evidence": {
+    "kind": "browser_agent_transcript_and_focused_tests",
+    "observed_at": "2026-07-30T12:19:34.000Z",
+    "ref": "CE5 Agent transcript plus 178 focused agent/workflow/panel tests",
+    "sha256": "305a218a4fd27e5909edebb57b80a0393bedc8d5fa7e6acb6adfab8119f667e4"
+  }
+}

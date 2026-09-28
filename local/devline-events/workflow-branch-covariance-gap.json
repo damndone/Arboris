@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "e931369d-e935-493a-9c3d-ded7ac8b0e15",
+  "timestamp": "2026-07-30T08:04:00.000Z",
+  "type": "GAP",
+  "subtype": "workflow_branch_covariance_preservation",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The multi-branch OLS runtime wrote an unadjusted covariance into every generated Draft instead of carrying each branch's validated covariance declaration.",
+  "evidence": {
+    "kind": "browser_and_red_test",
+    "observed_at": "2026-07-30T08:04:00.000Z",
+    "ref": "CE4 committed workflow plus tests/test_workflow_runtime.py::test_ols_step_preserves_each_declared_branch_covariance",
+    "sha256": "75a0c954f1cc9d09aa9600ab28454216dc63701bda63f1a60e65b0e772d64530"
+  },
+  "impact": "A Notebook workflow could label sibling OLS branches as robust and unadjusted while persisting unadjusted covariance for both, invalidating the intended standard-error comparison.",
+  "preventability": "preventable",
+  "resolution": "open",
+  "lesson": "A branch-level inference setting must travel unchanged through runtime context, Draft model parameters, and persisted model evidence; labels cannot be treated as execution proof.",
+  "incident_id": "ce5dd8d2-c30e-4a80-9c3a-03fe7b9cd5e8",
+  "lesson_key": "workflow-branch-covariance-preservation",
+  "links": [
+    "backend/workbench/agent/workflow_runtime.py",
+    "tests/test_workflow_runtime.py"
+  ]
+}

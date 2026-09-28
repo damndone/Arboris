@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "f635df6b-f6fc-4fa1-a1bf-cc6734ba5534",
+  "incident_id": "6d60e8d0-7eb2-47f8-a7a0-6cad7852dd5d",
+  "timestamp": "2026-07-30T08:35:22.000Z",
+  "type": "GAP",
+  "stage": "integration",
+  "subtype": "global_agent_numeric_evidence_transcription",
+  "cause": "The Global Agent had an exact-value evidence rule, but its final prose transcribed a positive persisted confidence-interval endpoint with a negative sign.",
+  "cause_status": "known",
+  "impact": "A user-facing statistical answer could conflict with the agent's own bounded evidence despite the stored model result being correct.",
+  "preventability": "preventable",
+  "lesson": "A numerical-answer protocol must require mechanical copying and an internal consistency check over returned estimate, standard error, p value, and interval fields; prose is not an independent numerical source.",
+  "lesson_key": "global-agent-numeric-evidence-transcription",
+  "resolution": "resolved",
+  "evidence": {
+    "kind": "browser_agent_transcript_and_red_green_test",
+    "observed_at": "2026-07-30T08:35:22.000Z",
+    "ref": "CE4 Agent evidence re-read returned ci_lower=+0.11858646677466389 after prior prose displayed -0.119; protocol regression test failed before and passed after the mechanical-copy and consistency-check guardrail.",
+    "sha256": "28e61c9089a4239a1a8b0c25f95153ee6f2cf290e714d6d350a4ea27fd472423"
+  },
+  "links": [
+    "backend/workbench/http/agent_routes.py",
+    "tests/test_agent_routes.py"
+  ]
+}

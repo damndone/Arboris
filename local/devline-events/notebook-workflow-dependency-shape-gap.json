@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "62a9f8d7-31be-46be-a0cc-63937f5f0d49",
+  "timestamp": "2026-07-30T12:26:00.000Z",
+  "type": "GAP",
+  "subtype": "notebook_workflow_dependency_shape_correction",
+  "stage": "integration",
+  "cause_status": "known",
+  "cause": "The Notebook planning prompt described depends_on as optional but did not state its JSON array shape with enough specificity. The provider emitted a string dependency, which the server correctly rejected before execution.",
+  "evidence": {
+    "kind": "browser_ui",
+    "observed_at": "2026-07-30T12:26:00.000Z",
+    "ref": "CE5 Notebook showed NOTEBOOK_PLANNING_CONTRACT_INVALID: workflow step panel_models depends_on must be step ids.",
+    "sha256": "e7c1c9f74fd63ca03d2df7f69e6115e6f5fd3c3ddb12efbd830093c0244cc1f3"
+  },
+  "impact": "A valid server capability can remain unavailable in the Notebook when the provider emits a structurally malformed dependency declaration; no proposal or execution occurs.",
+  "preventability": "preventable",
+  "resolution": "open",
+  "lesson": "For any typed workflow field with a non-obvious JSON shape, publish both the exact shape and a corrective response that mechanically distinguishes omission from an empty or malformed value.",
+  "incident_id": "11a22915-b003-4bf7-90c8-dff34cf0643a",
+  "lesson_key": "notebook-workflow-dependency-shape-correction",
+  "links": [
+    "backend/workbench/agent/notebook/planning_agent.py",
+    "tests/test_notebook_planning_agent.py"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "type": "GAP",
+  "subtype": "white_test_auxiliary_rank_stability",
+  "stage": "implementation",
+  "timestamp": "2026-07-30T07:48:00.000Z",
+  "event_id": "69664f7d-5357-497d-af5b-2c2c6238b3e1",
+  "incident_id": "0aee4fda-c3c8-4fb0-8568-7c1d1a210fd8",
+  "cause_status": "known",
+  "cause": "The runtime delegated White's auxiliary regression to statsmodels. With a valid high-scale polynomial and categorical design, statsmodels used two different rank tolerances internally and raised a bare AssertionError instead of returning a test result or a typed diagnostic.",
+  "impact": "A normal user-approved multi-branch OLS workflow completed both model branches but failed its declared White test, blocking the report and preventing the Notebook from advancing.",
+  "preventability": "preventable",
+  "resolution": "open",
+  "lesson_key": "white-test-own-rank-policy",
+  "lesson": "Post-estimation statistics must own one explicit, scale-stable auxiliary-design rank policy and turn non-identifiable designs into descriptive typed failures; never propagate a library assertion into workflow state.",
+  "evidence": {
+    "kind": "browser_code_reproduction",
+    "observed_at": "2026-07-30T07:48:00.000Z",
+    "ref": "CE4 Notebook workflow_00563b1081632462057528c9 plus generic high-scale categorical polynomial reproduction",
+    "sha256": "e862718c57320a0babb40fc1615f43a9f4364ad3dbb549055bd06d3ed12a80a3"
+  },
+  "links": [
+    "backend/workbench/agent/workflow_runtime.py",
+    "tests/test_workflow_runtime.py"
+  ]
+}

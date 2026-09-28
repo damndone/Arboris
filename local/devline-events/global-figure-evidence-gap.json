@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "event_id": "79e74f99-1241-4c84-adca-8825f225e45f",
+  "incident_id": "8ff5b466-6718-4b26-afcd-e4d4cc238452",
+  "timestamp": "2026-07-30T08:26:00.000Z",
+  "type": "GAP",
+  "stage": "integration",
+  "subtype": "global_agent_model_figure_evidence",
+  "cause": "Bounded residual-versus-predictor figure evidence existed at the node context layer but was not exposed through the Global Agent's project-scoped read-only tool registry.",
+  "cause_status": "known",
+  "impact": "The Global Agent correctly refused to invent a graph interpretation, but could not answer a user request for persisted predictor-residual bin facts after a successful Notebook workflow.",
+  "preventability": "preventable",
+  "lesson": "Every durable public evidence projection needed by a project-level answer requires an explicit, bounded Global Agent reader; node-scoped availability alone is not an Agent integration boundary.",
+  "lesson_key": "global-agent-model-figure-evidence",
+  "resolution": "open",
+  "evidence": {
+    "kind": "browser_agent_transcript_and_red_test",
+    "observed_at": "2026-07-30T08:26:00.000Z",
+    "ref": "CE4 Global Agent cited no predictor-residual numeric tool after a completed workflow; focused tests reproduced absent project-scoped reader",
+    "sha256": "4955298182394d25defd8bcd54a5070d737d47d0663bb603060e87ec8f1b15e2"
+  },
+  "links": [
+    "backend/workbench/agent/context_tools.py",
+    "backend/workbench/http/agent_routes.py",
+    "tests/test_agent_context_tools.py",
+    "tests/test_agent_routes.py"
+  ]
+}

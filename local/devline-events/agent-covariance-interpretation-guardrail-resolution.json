@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "90ef8ec6-648f-43f2-8fdf-31de1f45b3ba",
+  "incident_id": "fb9a7d76-070b-4557-95ef-6411a7b3aa5d",
+  "timestamp": "2026-07-30T12:31:12.000Z",
+  "type": "GAP",
+  "subtype": "agent_covariance_interpretation_guardrail",
+  "stage": "implementation",
+  "cause": "The Global Agent described a standard-error comparison as suggesting within-entity residual correlation and treated schema unique counts as proof of within-entity invariance.",
+  "cause_status": "known",
+  "impact": "A user-facing answer could overstate diagnostics or variable properties unsupported by bounded evidence.",
+  "preventability": "preventable",
+  "resolution": "resolved",
+  "lesson": "A global evidence protocol must forbid turning covariance-output differences or schema cardinality into diagnostic or longitudinal claims and require conditional wording when the user supplies a design premise.",
+  "lesson_key": "agent-covariance-interpretation-guardrail",
+  "links": [
+    "backend/workbench/http/agent_routes.py",
+    "tests/test_agent_routes.py"
+  ],
+  "evidence": {
+    "kind": "browser_agent_transcript_and_focused_test",
+    "observed_at": "2026-07-30T12:31:12.000Z",
+    "ref": "CE5 Notebook browser transcript plus tests/test_agent_routes.py::test_main_role_turn_exposes_only_read_only_project_evidence_tool",
+    "sha256": "e49686790096fc5598a9adfd8da62295c77a04f29ed0eb8718ee94b184bf7bc9"
+  }
+}
