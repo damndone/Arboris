@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(../.venv/bin/python -m pytest ../tests/test_api.py -v)",
+      "Bash(../.venv/bin/python *)",
+      "Bash(../workbench-v1.2.1-browsing/.venv/bin/python *)",
+      "Bash(/Users/jiayuanren/项目规划/.worktrees/workbench-v1.2.1-browsing/.venv/bin/python *)",
+      "Bash(.venv/bin/pytest tests/test_econometrics_engine.py -v)",
+      "Bash(.venv/bin/python -m pytest tests/ -q --ignore=tests/test_acceptance_templates.py)",
+      "Bash(.venv/bin/pytest tests/test_orchestrator_e2e.py -v)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python -m pytest tests/ -q --ignore=tests/test_acceptance_templates.py -x)",
+      "Bash(.venv/bin/python -m pytest tests/ -v)",
+      "Bash(.venv/bin/pytest tests/test_econometrics_engine.py tests/test_analysis_router.py -v)",
+      "Bash(.venv/bin/python -m pytest tests/test_econometrics_engine.py -v)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
+    ]
+  }
+}
