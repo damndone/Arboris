@@ -53,11 +53,12 @@ def test_cleaned_stage_summary_with_no_drops(tmp_path: Path):
     assert graph.nodes["stage:cleaned"].summary == "Cleaned: 35 rows"
 
 
-def test_cleaned_stage_summary_with_drops(tmp_path: Path):
+def test_cleaned_stage_keeps_identical_rows(tmp_path: Path):
+    # Identical rows are distinct observations; cleaning keeps them (v1.8.9).
     rows = [{"y": i, "x": i} for i in range(33)]
     frame = pd.DataFrame([*rows, rows[0], rows[1]])
     graph = _run_graph(tmp_path, frame)
-    assert graph.nodes["stage:cleaned"].summary == "Cleaned: 33 rows (2 dropped)"
+    assert graph.nodes["stage:cleaned"].summary == "Cleaned: 35 rows"
 
 
 def test_variable_kept_numeric_summary(tmp_path: Path):

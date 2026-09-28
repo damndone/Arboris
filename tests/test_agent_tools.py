@@ -370,14 +370,20 @@ def test_proposal_ready_is_a_successful_terminal_state_even_at_step_budget(
             tool_runtime=tools,
         )
 
-        assert await agent.prompt(
+        reply = await agent.prompt(
             "prepare a proposal",
             budget=AgentRunBudget(max_steps=1),
-        ) == "proposal prepared"
+        )
+        # Narration in the question's language is kept; the server adds what the
+        # persisted proposal will do.
+        assert reply.startswith("proposal prepared\n\nA proposal (operation) is ready and has not run yet")
         assert len(adapter.requests) == 1
         assert repository.get_metadata("session-a")["status"] == "idle"
         branch = repository.get_branch("session-a")
-        assert [entry.payload["role"] for entry in branch] == ["user", "assistant", "tool"]
+        # The closing reply is persisted as the last assistant message, after
+        # the proposal tool result, so every consumer reads the same text.
+        assert [entry.payload["role"] for entry in branch] == ["user", "assistant", "tool", "assistant"]
+        assert branch[-1].payload["content"] == reply
         assert not any(
             entry.payload.get("error") == "max_steps_exceeded"
             for entry in branch

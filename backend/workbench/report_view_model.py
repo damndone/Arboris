@@ -21,6 +21,7 @@ def build_regression_table(
     *,
     variable_labels: Mapping[str, Any] | None = None,
     significance_levels: Mapping[str, float] | None = None,
+    value_labels: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Project multiple model packets into a side-by-side report table.
 
@@ -29,7 +30,9 @@ def build_regression_table(
     p-value using the explicitly supplied (or default) cutoffs.
     """
 
-    labels = variable_labels or {}
+    from .term_labels import TermLabeler
+
+    labeler = TermLabeler(variable_labels=variable_labels, value_labels=value_labels)
     cutoffs = dict(significance_levels or _DEFAULT_SIGNIFICANCE_LEVELS)
     ordered_cutoffs = sorted(
         ((str(marker), float(cutoff)) for marker, cutoff in cutoffs.items()),
@@ -69,7 +72,7 @@ def build_regression_table(
                 term_key,
                 {
                     "term": term_key,
-                    "label": labels.get(term_key, term_key),
+                    "label": labeler.label(term_key),
                     "models": {},
                 },
             )

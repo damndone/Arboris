@@ -132,9 +132,24 @@ class ReportStage:
             for row in descriptive_stats
             if isinstance(row, dict) and row.get("column") is not None
         }
+        value_labels = {
+            str(row["column"]): row["value_labels"]
+            for row in descriptive_stats
+            if isinstance(row, dict)
+            and row.get("column") is not None
+            and isinstance(row.get("value_labels"), dict)
+        }
+        value_labels.update(
+            {
+                str(column): mapping
+                for column, mapping in (cleaned.attrs.get("value_labels") or {}).items()
+                if isinstance(mapping, dict) and str(column) not in value_labels
+            }
+        )
         regression_table = build_regression_table(
             model_results,
             variable_labels=variable_labels,
+            value_labels=value_labels,
         )
         model_family_display = {
             "ols": "OLS",

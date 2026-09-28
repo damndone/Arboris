@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from ..analysis_ledger import record_ui_action
 from ..artifacts import read_json, write_json
 from ..events import get_event_manager
 from ..graph_store import GraphStore
@@ -22,7 +23,12 @@ from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import verify_upload
 from ..model_options import ModelOptionsError
 from ..repository.run_repository import _read_manifest, _resolve_project_runs_dir, _resolve_run_root
-from ..services.run_service import _submit_run, merge_form_overrides
+from ..services.run_service import (
+    RerunDeclarationError,
+    _submit_run,
+    merge_form_overrides,
+    reject_invalid_rerun_declarations,
+)
 from ._deps import _TERMINAL_RUN_STATUSES, _backfill_schema_values
 
 router = APIRouter()
@@ -50,6 +56,19 @@ class RerunRequest(BaseModel):
 
 @router.post("/runs/{run_id}/rerun")
 def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[str, Any]:
+    response = _submit_rerun(run_id, project_root, body)
+    rerun_from = response.get("rerun_from") or {}
+    record_ui_action(
+        project_root, source="POST /runs/{run_id}/rerun", steps=["run.rerun"],
+        run_id=str(rerun_from.get("owner_run_id") or run_id),
+        node_id=rerun_from.get("op_node_id"),
+        produced_run_id=response.get("run_id"),
+        summary=json.dumps(body.op_overrides or body.manual_patch or {}, ensure_ascii=False, sort_keys=True, default=str)[:500],
+    )
+    return response
+
+
+def _submit_rerun(run_id: str, project_root: str, body: RerunRequest) -> dict[str, Any]:
     """Create a new immutable run from a parent run's editable node, applying
     structurally-validated overrides. Full-pipeline re-execution; lineage preserved."""
     root = Path(project_root)
@@ -170,7 +189,15 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
             status_code=422, detail=f"Parent upload unusable: {exc}"
         ) from exc
 
-    _reject_declarations_for_absent_columns(body.op_overrides, upload_bytes)
+    try:
+        reject_invalid_rerun_declarations(
+            inputs["form"],
+            body.op_overrides,
+            upload_bytes,
+            str((inputs.get("upload") or {}).get("filename") or ""),
+        )
+    except RerunDeclarationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     try:
         merged_form = merge_form_overrides(inputs["form"], body.op_overrides)
@@ -346,46 +373,3 @@ def _record_manual_patch_idempotency(
         "response": response,
     }
     write_json(path, {"patches": patches})
-
-
-def _reject_declarations_for_absent_columns(
-    op_overrides: dict, upload_bytes: bytes
-) -> None:
-    """A measurement level may only be declared for a column that exists.
-
-    v1.8.7 A2-6. An Agent that invents a column name must not be accepted: the
-    run would complete, the declaration would apply to nothing, and the user
-    would believe a variable was declared that never was. Checked here because
-    this is the first point holding both the patch and the data.
-    """
-    import io
-
-    import pandas as pd
-
-    from ..cleaning import normalize_column_name
-
-    labels = op_overrides.get("labels")
-    if not isinstance(labels, dict):
-        return
-    levels = labels.get("measurement_level")
-    if not isinstance(levels, dict) or not levels:
-        return
-
-    try:
-        header = pd.read_csv(io.BytesIO(upload_bytes), nrows=0)
-    except Exception:
-        # Not a CSV we can cheaply inspect (xlsx, or an unreadable encoding).
-        # Refusing here would break rerun for formats this guard cannot read.
-        return
-
-    known = {str(name) for name in header.columns}
-    known |= {normalize_column_name(str(name)) for name in header.columns}
-    missing = sorted(str(column) for column in levels if str(column) not in known)
-    if missing:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "measurement_level names column(s) not present in the dataset: "
-                + ", ".join(missing)
-            ),
-        )

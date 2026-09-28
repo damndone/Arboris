@@ -5,10 +5,12 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from shutil import copytree
 
+import pytest
 from fastapi.testclient import TestClient
 
 from workbench.agent.model import ModelRequest, ModelStreamEvent
 from workbench.agent.proposals import ProposalStore
+from workbench.agent.session import JsonlSessionRepository
 from workbench.app import app
 from workbench.llm.config import LLMConfig
 from workbench.lineage.node_write_validation import build_rerun_operation_context
@@ -939,7 +941,8 @@ def test_chain_turn_persists_structured_proposal_from_tool_call(
         assert proposal["changes"] == {
             "covariance": {"old": "robust", "new": "unadjusted"}
         }
-        assert payload["assistant"]["content"] == "proposal is ready for confirmation"
+        assert payload["assistant"]["content"].startswith("已生成待确认的提案（model.rerun）")
+        assert "Change covariance from robust to unadjusted" in payload["assistant"]["content"]
 
     assert not list((project_root / "runs").glob("run-b"))
 
@@ -1019,7 +1022,9 @@ def test_proposal_is_listed_and_confirmation_is_pending_without_rerun_mutation(
             params={"project_root": str(project_root)},
         )
         assert listed.status_code == 200
-        assert listed.json()["proposals"] == [proposal.to_dict() | {"status": "pending"}]
+        [listed_proposal] = listed.json()["proposals"]
+        assert listed_proposal.pop("readable")  # the card's sentences
+        assert listed_proposal == proposal.to_dict() | {"status": "pending"}
 
         confirmed = client.post(
             f"/agent/sessions/{session_id}/proposals/{proposal.proposal_id}/confirm",
@@ -1387,6 +1392,10 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
         tool["tool_id"] for tool in FakeAgentAdapter.instances[-1].requests[0].tools
     }
     assert tool_ids == {
+        # Rows go to the user's screen; the provider sees them only if the
+        # project's sharing policy allows rows (workbench.egress).
+        "show_dataset_rows",
+        "calculate",
         "inspect_project_model_coefficients",
         "inspect_project_coefficient_transforms",
         "inspect_project_dataset_schema",
@@ -1898,3 +1907,197 @@ def test_proposal_canonicalizes_model_supplied_target_references(
         assert proposal["target"]["node_hash"] == node_hash
         assert proposal["preconditions"]["context_fingerprint"].startswith("nocv1:")
         assert proposal["preconditions"]["owner_resolution"] == "active_head_contains_node"
+
+
+@pytest.mark.parametrize("operation_id", ["metadata.edit", "model.rerun"])
+def test_metadata_for_a_column_outside_the_model_goes_through_metadata_edit(
+    tmp_path: Path,
+    monkeypatch,
+    operation_id: str,
+) -> None:
+    """Declaring `region` nominal is legitimate metadata even though region is
+    not in the model. model.rerun still refuses it (the D1 guard against
+    implying region joins the model) and names metadata.edit; metadata.edit
+    records it through the same confirmation, rerun and reconciliation."""
+    import io
+    import time
+
+    from workbench.http import agent_routes
+    from workbench.lineage.node_write_validation import (
+        NodeWriteOperationRequestV1,
+        compute_context_fingerprint,
+    )
+    from workbench.projects import create_project
+
+    ProposingAdapter.instances.clear()
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+
+    with TestClient(app) as client:
+        project = create_project(tmp_path, "metadata")
+        rows = "\n".join(f"{1 + 2 * i + (i % 3)},{i},{['n', 's', 'w'][i % 3]}" for i in range(40))
+        created_run = client.post(
+            "/runs",
+            data={"project_root": str(project.root), "mode": "auto", "model_type": "ols", "y": "y", "x": "x1"},
+            files={"file": ("d.csv", io.BytesIO(("y,x1,region\n" + rows + "\n").encode()), "text/csv")},
+        )
+        parent_run_id = created_run.json()["run_id"]
+        for _ in range(150):
+            status = client.get(f"/runs/{parent_run_id}", params={"project_root": str(project.root)}).json().get("status")
+            if status in {"completed", "failed"}:
+                break
+            time.sleep(0.1)
+        assert status == "completed"
+        node_index = json.loads((project.root / "runs" / parent_run_id / "node_index.json").read_text())
+        model_node_id = next(k for k in node_index if k.startswith("model:"))
+        node_hash = node_index[model_node_id]["node_hash"]
+        fingerprint = compute_context_fingerprint(
+            project.root / "runs",
+            NodeWriteOperationRequestV1(
+                request_id="test-metadata", operation="rerun", context_version="node-operation-context/v1",
+                context_fingerprint="pending", owner_run_id=parent_run_id, op_node_id=model_node_id,
+                node_hash=node_hash, forest_node_key=node_hash,
+                owner_resolution="active_head_contains_node", active_head_run_id=parent_run_id,
+            ),
+        )
+        ProposingAdapter.proposal_arguments = {
+            "operation_id": operation_id,
+            "target": {"run_id": parent_run_id, "node_ref": model_node_id, "node_hash": node_hash, "forest_node_key": node_hash},
+            "preconditions": {
+                "context_version": "node-operation-context/v1", "context_fingerprint": fingerprint,
+                "active_head_run_id": parent_run_id, "owner_resolution": "active_head_contains_node",
+            },
+            "changes": {"labels": {"measurement_level": {"region": "nominal"}}},
+            "evidence_refs": ["schema:region"],
+            "expected_effect": ["region is declared nominal"],
+            "risks": ["re-estimates the run"],
+        }
+        session_id = client.post(
+            "/agent/sessions", params={"project_root": str(project.root)},
+            json={"role": "chain", "chain_id": "chain-a", "run_id": parent_run_id, "context_packet": _context_packet()},
+        ).json()["session_id"]
+        turn = client.post(
+            f"/agent/sessions/{session_id}/turns", params={"project_root": str(project.root)},
+            json={"question": "把 region 标记为名义变量"},
+        )
+        assert turn.status_code == 200
+        proposals = turn.json()["session"]["proposals"]
+
+        if operation_id == "model.rerun":
+            assert proposals == []
+            transcript = json.dumps(
+                [entry.payload for entry in JsonlSessionRepository(project.root / "workbench").get_branch(session_id)],
+                ensure_ascii=False,
+            )
+            assert "RERUN_HAS_NO_MODEL_EFFECT" in transcript and "metadata.edit" in transcript
+            return
+
+        proposal = proposals[0]
+        confirmed = client.post(
+            f"/agent/sessions/{session_id}/proposals/{proposal['proposal_id']}/confirm",
+            params={"project_root": str(project.root)},
+            json={"revision": proposal["revision"], "fingerprint": proposal["fingerprint"], "active_head_run_id": parent_run_id},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        operation = confirmed.json()["operation"]
+        child_run_id = operation["outputs"]["target_run_id"]
+        child_form = json.loads((project.root / "runs" / child_run_id / "run_inputs.json").read_text())["form"]
+        assert child_form["labels"]["measurement_level"] == {"region": "nominal"}
+        for _ in range(150):
+            status = client.get(f"/runs/{child_run_id}", params={"project_root": str(project.root)}).json().get("status")
+            if status in {"completed", "failed"}:
+                break
+            time.sleep(0.1)
+        assert status == "completed"
+        reconciled = client.post(
+            f"/agent/sessions/{session_id}/operations/{operation['record_id']}/reconcile",
+            params={"project_root": str(project.root)},
+        )
+        assert reconciled.status_code == 200
+        assert reconciled.json()["operation"]["status"] == "completed"
+
+
+def test_a_main_session_sees_runs_made_after_it_started(tmp_path) -> None:
+    # The overview was written once at creation, so a run made later (a
+    # metadata edit, a rerun) was invisible and the Agent read the old run.
+    from workbench.agent.context import ContextBuilder
+    from workbench.agent.session import JsonlSessionRepository
+    from workbench.http.agent_routes import _refresh_main_context
+
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("main-1", chain_id="project:p", role="main")
+    first = {"packet_version": "global", "heads": ["run-old"]}
+    _refresh_main_context(repository, "main-1", first)
+    _refresh_main_context(repository, "main-1", first)  # unchanged: nothing appended
+    _refresh_main_context(repository, "main-1", {"packet_version": "global", "heads": ["run-old", "run-new"]})
+    # A new run inside an existing family leaves the declared fingerprint alone.
+    _refresh_main_context(
+        repository, "main-1",
+        {"packet_version": "global", "context_fingerprint": "heads:a", "run_count": 2},
+    )
+    _refresh_main_context(
+        repository, "main-1",
+        {"packet_version": "global", "context_fingerprint": "heads:a", "run_count": 3},
+    )
+
+    contexts = [m for m in ContextBuilder(repository).build("main-1").messages if m.get("name") == "workbench_context"]
+    assert len(contexts) == 4
+    assert '"run_count":3' in contexts[-1]["content"] and "supersedes" in contexts[-1]["content"]
+
+
+def test_two_turns_sent_at_once_to_one_session_run_one_and_refuse_the_other(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Found by the chaos evaluation: the in-progress check and the
+    registration of the running turn were separate steps, so two turns sent
+    together both passed the check and wrote one session concurrently."""
+
+    import time
+    from threading import Barrier, Thread
+
+    from workbench.http import agent_routes
+
+    def slow_config() -> LLMConfig:
+        time.sleep(0.3)  # widen the window between the check and the start
+        return _config()
+
+    monkeypatch.setattr(agent_routes, "load_llm_config", slow_config)
+    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    # Without the context manager every request gets its own event loop and
+    # thread, so the two turns really overlap.
+    client = TestClient(app)
+    created = client.post(
+        "/agent/sessions",
+        params={"project_root": str(project_root)},
+        json={"role": "chain", "chain_id": "chain-a", "run_id": "run-a", "context_packet": _context_packet()},
+    )
+    session_id = created.json()["session_id"]
+    barrier = Barrier(2)
+    statuses: list[int] = []
+
+    def send() -> None:
+        barrier.wait()
+        response = client.post(
+            f"/agent/sessions/{session_id}/turns",
+            params={"project_root": str(project_root)},
+            json={"question": "看一下模型"},
+        )
+        statuses.append(response.status_code)
+
+    threads = [Thread(target=send) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    after = client.post(
+        f"/agent/sessions/{session_id}/turns",
+        params={"project_root": str(project_root)},
+        json={"question": "再看一下"},
+    )
+
+    assert sorted(statuses) == [200, 409]
+    assert after.status_code == 200

@@ -1588,9 +1588,18 @@ def test_the_lineage_case_registry_covers_every_consuming_operation() -> None:
     )
     assert generic_consumers
 
+    # Operations declared in the data-operation registry run through the same
+    # persistence path; test_data_operation_registry applies this guard's
+    # derived-source lineage check to every declaration.
+    from workbench.data_operation_registry import data_operation_declarations
+
+    declared_data_operations = {
+        declaration.workflow_operation_id for declaration in data_operation_declarations()
+    }
     covered = (
         set(_LINEAGE_META_STEPS)
         | set(_LINEAGE_META_UNRECORDED)
+        | declared_data_operations
         | (set(p7_pack_registry.operation_ids()) & set(workflow_contracts.STEP_CONSUMES_INPUT_FRAME))
         | generic_consumers
     )
@@ -1819,7 +1828,22 @@ def test_a_state_record_without_a_binding_still_loads(tmp_path: Path) -> None:
     )
 
     assert legacy.produced_dataset is None
+    assert legacy.model_branches is None
     assert legacy.status == "completed"
+
+
+def test_non_list_persisted_model_branches_are_refused_rather_than_read() -> None:
+    """A corrupt branch record must not be rebound to post-estimation."""
+
+    with pytest.raises(WorkflowExecutionError, match=r"model_branches.*list of objects"):
+        WorkflowStepState.from_dict(
+            {
+                "step_id": "estimate",
+                "fingerprint": "sha256:legacy",
+                "status": "completed",
+                "model_branches": {"branch_id": "curved"},
+            }
+        )
 
 
 def test_a_non_object_persisted_binding_is_refused_rather_than_read(tmp_path: Path) -> None:

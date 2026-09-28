@@ -15,18 +15,20 @@ import queue
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from .. import analysis_disclosure
+from ..analysis_ledger import record_ui_action, upload_sha
 from ..api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
     ERROR_REPORT_NOT_FOUND,
     WorkbenchAPIError,
 )
-from ..agent.workflow_runtime import collect_post_estimation_results
+from ..agent.workflow_runtime import collect_post_estimation_results, count_post_estimation_results
 from ..artifacts import read_json
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
@@ -362,6 +364,13 @@ async def run_endpoint(
         except ValueError as exc:  # bad imputation / iv request — no run created yet
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         run_id_for_cleanup = result["run_id"]
+        record_ui_action(
+            root, source="POST /runs", steps=["run.submit"], produced_run_id=str(result["run_id"]),
+            summary=json.dumps(
+                {key: form.get(key) for key in ("model_type", "y", "x") if form.get(key)},
+                ensure_ascii=False, sort_keys=True, default=str,
+            )[:500],
+        )
         return result
     except Exception:
         events.release_slot(run_id_for_cleanup)
@@ -434,7 +443,7 @@ async def batch_run_endpoint(
         upload_name = Path(file.filename or "upload.csv").name
         saved_path = uploads_dir / f"{timestamp}_{upload_name}"
         await _write_upload(file, saved_path, max_upload_bytes)
-        return run_batch_y_workflow(
+        batch = run_batch_y_workflow(
             root,
             [saved_path],
             mode=mode,
@@ -452,6 +461,11 @@ async def batch_run_endpoint(
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
         )
+        record_ui_action(
+            root, source="POST /runs/batch", steps=["run.submit"],
+            summary=json.dumps({"y": y_columns, "x": x_columns}, ensure_ascii=False, default=str)[:500],
+        )
+        return batch
     finally:
         events.release_slot(None)
         await file.close()
@@ -552,14 +566,19 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
         "table_1": diagnostic_summary.get("table_1", []),
         "statistical_evidence": diagnostic_summary.get("statistical_evidence"),
         "labels": diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
+        "term_labels": _term_labels(
+            model_results,
+            diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
+        ),
         "model_family_evidence": model_family_evidence,
         "prediction_evidence": prediction_evidence,
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the
         # run surface show that answer instead of leaving it in an artifact.
         "post_estimation_results": collect_post_estimation_results(
-            run_root.parent.parent, run_id
+            run_root.parent.parent, run_id, keep_latest=True
         ),
+        "post_estimation_results_total": count_post_estimation_results(run_root.parent.parent, run_id),
     }
 
 
@@ -580,6 +599,9 @@ def confirm_run_deletion(
     """Permanently remove a previously previewed terminal leaf run."""
 
     service = RunDeletionService(project_root)
+    # Resolved before the run's files are gone, so the deletion stays
+    # attributable to its data in the report's disclosure.
+    deleted_run_upload = upload_sha(project_root, run_id)
     try:
         receipt = service.delete(
             run_id,
@@ -593,6 +615,10 @@ def confirm_run_deletion(
             message=str(exc),
             details={"run_id": run_id},
         ) from exc
+    record_ui_action(
+        project_root, source="POST /runs/{run_id}/deletion-confirmation", steps=["run.delete"], run_id=run_id,
+        source_upload_sha256=deleted_run_upload,
+    )
     return {"deletion": receipt.to_dict()}
 
 
@@ -704,6 +730,12 @@ def export_report_endpoint(
             )
         markdown = str(stored["text"])
         figures = list(included_figures)
+    settings = analysis_disclosure.read_settings(project_root)
+    if settings["include_in_exports"]:
+        # Deterministic, written by Workbench from the ledger -- not by the
+        # language model and not subject to the writer's evidence contract.
+        disclosed = analysis_disclosure.disclosure(project_root, run_id)
+        markdown = markdown.rstrip() + "\n\n" + analysis_disclosure.markdown(disclosed, detail=settings["detail"])
     try:
         payload, media_type, filename = export_report(
             run_root,
@@ -793,9 +825,11 @@ def export_result_table_endpoint(
     ]
     tables: dict[str, list[dict[str, Any]]] = {}
     if "regression_table" in sections:
+        value_labels = labels.get("value_labels", {}) if isinstance(labels, dict) else {}
         regression_table = build_regression_table(
             model_pairs,
             variable_labels=variable_labels if isinstance(variable_labels, dict) else {},
+            value_labels=value_labels if isinstance(value_labels, dict) else {},
         )
         tables["regression_table"] = _scalarize_result_rows(
             regression_table_export_rows(regression_table)
@@ -853,6 +887,36 @@ def export_result_table_endpoint(
 
 def _list_value(value: Any) -> list[dict[str, Any]]:
     return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
+
+
+def _term_labels(model_results: list[Any], labels: object) -> dict[str, str]:
+    """Display text for every coefficient term, from the run's declared labels.
+
+    Served beside the raw results so every surface shows the same text for a
+    term; the term itself stays the identifier.
+    """
+
+    from ..term_labels import TermLabeler
+
+    labels = labels if isinstance(labels, dict) else {}
+    labeler = TermLabeler(
+        variable_labels=labels.get("variable_labels") if isinstance(labels.get("variable_labels"), dict) else {},
+        value_labels=labels.get("value_labels") if isinstance(labels.get("value_labels"), dict) else {},
+    )
+    out: dict[str, str] = {}
+    for result in model_results:
+        coefficients = result.get("coefficients") if isinstance(result, dict) else None
+        terms = (
+            coefficients.keys()
+            if isinstance(coefficients, dict)
+            else [item.get("term") for item in coefficients or [] if isinstance(item, dict)]
+        )
+        for term in terms:
+            if isinstance(term, str) and term not in out:
+                label = labeler.label(term)
+                if label != term:
+                    out[term] = label
+    return out
 
 
 def _coefficient_export_rows(model_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -930,6 +994,74 @@ def _included_report_snapshot(
         and not (_figure_ids_for_report_fact(fact) & excluded_figures)
     ]
     return facts, figures
+
+
+class DatasetExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str = Field(min_length=1, max_length=300)
+    format: Literal["sav", "zsav", "dta", "csv", "xlsx"]
+    columns: list[str] | None = Field(default=None, max_length=5000)
+    filters: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    dta_version: Literal[13, 14, 15] = 14
+    value_labels: Literal["labels", "strings", "none"] = "labels"
+    missing_codes: Literal["as_missing", "keep_codes"] = "as_missing"
+    filename: str | None = Field(default=None, max_length=120)
+
+    def options(self) -> dict[str, Any]:
+        return self.model_dump(exclude={"node_id"})
+
+
+@router.post("/runs/{run_id}/datasets/export/preview")
+def preview_dataset_export_endpoint(
+    run_id: str, project_root: str, request: DatasetExportRequest
+) -> dict[str, Any]:
+    """What the export will contain -- counts, renames, losses, a few rows."""
+
+    from ..data_operations import DataColumnCastValidationError
+    from ..services.data_export import preview_export
+    from ..tabular_io import StatisticalFileError
+
+    try:
+        return preview_export(project_root, run_id, request.node_id, request.options())
+    except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATASET_EXPORT_UNAVAILABLE",
+            message=str(exc),
+            details={"run_id": run_id, "node_id": request.node_id},
+        ) from exc
+
+
+@router.post("/runs/{run_id}/datasets/export")
+def export_dataset_endpoint(
+    run_id: str, project_root: str, request: DatasetExportRequest
+) -> dict[str, Any]:
+    """Write one dataset node as SPSS/Stata with its declared labels.
+
+    Returns the artifact to download and a report of every rename and every
+    label the format could not hold, so nothing is lost without a word.
+    """
+
+    from ..data_operations import DataColumnCastValidationError
+    from ..services.data_export import export_dataset
+    from ..tabular_io import StatisticalFileError
+
+    try:
+        exported = export_dataset(project_root, run_id, request.node_id, request.options())
+    except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATASET_EXPORT_UNAVAILABLE",
+            message=str(exc),
+            details={"run_id": run_id, "node_id": request.node_id},
+        ) from exc
+    record_ui_action(
+        project_root, source="POST /runs/{run_id}/datasets/export", steps=["export.dataset"],
+        run_id=run_id, node_id=request.node_id,
+        summary=json.dumps(request.options(), ensure_ascii=False, sort_keys=True, default=str)[:500],
+    )
+    return exported
 
 
 @router.post("/runs/{run_id}/ai-reports")

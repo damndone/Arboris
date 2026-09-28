@@ -10,6 +10,7 @@ import {
   REPORT_PROMPT_PLACEHOLDER,
 } from "./reportClient";
 import { ReportFigureSelection } from "./ReportFigureSelection";
+import { AnalysisDisclosure } from "./AnalysisDisclosure";
 import { ReportComposer } from "./ReportComposer";
 import { PredictionResearchReportSections } from "./PredictionResearchReportSections";
 import {
@@ -197,6 +198,8 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
           )}
         </div>
       </section>
+
+      <AnalysisDisclosure projectRoot={workspace.projectRoot} runId={activeRunId} />
 
       <div data-testid="report-scope-divider" className="report-scope-divider">
         <span className="report-scope-divider__title">Regression evidence</span>

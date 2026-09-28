@@ -276,6 +276,41 @@ def test_a_workflow_proposal_binds_the_real_source_artifact_id(
     assert canonical["target"]["artifact_id"] == artifact_id
 
 
+def test_a_workflow_proposal_carries_the_target_nodes_preconditions(tmp_path: Path) -> None:
+    """Acceptance found every workflow proposal made with a model node selected
+    rejected as stale at confirmation: the Agent copied the model node's
+    context fingerprint, confirmation re-derives the dataset node's."""
+
+    from workbench.agent.context_tools import InspectNodeContextRequest
+
+    project, run_id, _artifact_id = _source_project(
+        tmp_path, pd.DataFrame({"outcome": [1.0, 2.0, 3.0], "rate": [1.0, 0.0, 1.0]})
+    )
+    _seed_node_index(project, run_id)
+    orchestrator = _orchestrator(project)
+    canonical = orchestrator._canonicalize_proposal_arguments(
+        "operation.multi_step",
+        {
+            "operation_id": "operation.multi_step",
+            "target": {"run_id": run_id, "node_ref": "stage:source"},
+            "preconditions": {
+                "active_head_run_id": run_id,
+                "context_fingerprint": "nocv1:of-another-node",
+                "context_version": "node-operation-context/v1",
+                "owner_resolution": "active_head_contains_node",
+            },
+            "changes": {"steps": [{"step_id": "d", "operation_id": "statistical.explore",
+                                   "spec": {"operation": "summarize", "selected_columns": ["outcome"]}}]},
+        },
+        session_id="s1",
+    )
+    expected = orchestrator.context_provider.inspect_node_context(
+        InspectNodeContextRequest(request_id="t", owner_run_id=run_id, op_node_id="stage:source", active_head_run_id=run_id)
+    )
+    assert canonical["preconditions"]["context_fingerprint"] == expected["context_fingerprint"]
+    assert canonical["preconditions"]["context_fingerprint"] != "nocv1:of-another-node"
+
+
 def test_the_canonical_proposal_passes_the_operation_validator(tmp_path: Path) -> None:
     """The whole point: intent in, executable typed proposal out."""
 

@@ -14,9 +14,18 @@ from uuid import uuid4
 
 from .context import ContextBuilder
 from .events import AgentEventStream
+from . import numeric_grounding
 from .model import ModelAdapter, ModelRequest
 from .session import JsonlSessionRepository
 from .tools import ToolResult, ToolRuntime
+from .turn_messages import (
+    budget_exhausted_message,
+    detect_language,
+    interrupted_reply_note,
+    matches_language,
+    proposal_summary,
+    provider_failure_message,
+)
 
 
 class AgentCoreBusyError(RuntimeError):
@@ -37,7 +46,9 @@ class AgentRunBudget:
 
     max_steps: int | None = None
     timeout_s: float | None = None
-    max_consecutive_identical_tool_calls: int = 2
+    # The first repeat is answered with "already answered, stop inspecting"; at 2
+    # the loop guard fired on that same call, so the model never saw it.
+    max_consecutive_identical_tool_calls: int = 3
 
     @classmethod
     def from_value(
@@ -67,7 +78,7 @@ class AgentRunBudget:
                 raise AgentCoreBudgetError("timeout_s must be a positive finite number")
 
         max_consecutive_identical_tool_calls = value.get(
-            "max_consecutive_identical_tool_calls", 2
+            "max_consecutive_identical_tool_calls", 3
         )
         if (
             isinstance(max_consecutive_identical_tool_calls, bool)
@@ -115,6 +126,7 @@ class AgentCore:
         self._follow_up_queue: deque[str] = deque()
         self._active_command_id: str | None = None
         self._budget = AgentRunBudget()
+        self._numeric_repairs_left = numeric_grounding.MAX_REPAIRS
         self._steps_used = 0
         self._active_turn_started = False
         self._active_request_id: str | None = None
@@ -146,6 +158,7 @@ class AgentCore:
     ) -> str:
         normalized_budget = AgentRunBudget.from_value(budget)
         self._begin(normalized_budget)
+        self._user_text = text
         try:
             return await self._run_with_budget(
                 text,
@@ -213,6 +226,11 @@ class AgentCore:
         self._last_tool_call_fingerprint = None
         self._consecutive_identical_tool_calls = 0
         self._answered_tool_calls = {}
+        # Facts for the server-written closing message (see turn_messages).
+        self._tools_used: list[str] = []
+        self._last_tool_failure: str | None = None
+        self._ready_proposal: Mapping[str, Any] | None = None
+        self._numeric_repairs_left = numeric_grounding.MAX_REPAIRS
 
     def _end(self) -> None:
         self.repository.update_status(self.session_id, self._final_status or "idle")
@@ -450,6 +468,14 @@ class AgentCore:
                 elif event.type == "done":
                     finish_reason = event.finish_reason or "stop"
                     break
+                elif event.type == "retry":
+                    # Recorded so a flaky provider is visible, not only survived.
+                    self.events.emit(
+                        self.session_id,
+                        "provider_retry",
+                        {"request_id": request.request_id, "error": event.error},
+                        command_id=command_id,
+                    )
                 elif event.type == "error":
                     finish_reason = "error"
                     error = event.error or "provider_error"
@@ -463,12 +489,37 @@ class AgentCore:
             error = "tool_runtime_unavailable"
 
         content = "".join(chunks)
+        if finish_reason == "error" and not content.strip() and not tool_calls and error != "tool_runtime_unavailable":
+            # An empty failed turn reads as a hang; say what happened instead.
+            content = provider_failure_message(detect_language(getattr(self, "_user_text", None)), str(error))
+        elif finish_reason == "error" and content.strip() and error not in {"aborted", "tool_runtime_unavailable"}:
+            content = f"{content}\n\n{interrupted_reply_note(detect_language(getattr(self, '_user_text', None)))}"
+        numeric_findings: tuple[numeric_grounding.Finding, ...] = ()
+        numeric_check_failed = False
+        if finish_reason == "stop" and not tool_calls and content.strip():
+            try:
+                numeric_findings = numeric_grounding.check(content, context.messages)
+            except Exception:  # A broken check must not pass numbers as checked.
+                numeric_check_failed = True
+                language = detect_language(getattr(self, "_user_text", None))
+                content = f"{content}\n\n{numeric_grounding.unchecked_note(language)}"
+            if numeric_findings and self._numeric_repairs_left > 0 and self._has_step_left():
+                return await self._withdraw_draft(
+                    content, numeric_findings, command_id=command_id, context=context, tool_context=tool_context
+                )
+            if numeric_findings:
+                language = detect_language(getattr(self, "_user_text", None))
+                content = f"{content}\n\n{numeric_grounding.unverified_note(numeric_findings, language)}"
         payload: dict[str, Any] = {
             "role": "assistant",
             "content": content,
             "stop_reason": finish_reason,
             "command_id": command_id,
         }
+        if numeric_findings:
+            payload["numeric_check"] = {"unverified": [finding.to_dict() for finding in numeric_findings]}
+        elif numeric_check_failed:
+            payload["numeric_check"] = {"error": "the numeric check could not run"}
         if tool_calls:
             payload["tool_calls"] = list(tool_calls.values())
         if error is not None:
@@ -648,6 +699,15 @@ class AgentCore:
                         return self._persist_terminal_error(
                             "repeated_tool_call_limit"
                         )
+                    self._tools_used.append(result.tool_id)
+                    if not result.ok:
+                        details = result.error_details or []
+                        first = details[0] if details and isinstance(details[0], Mapping) else {}
+                        self._last_tool_failure = str(first.get("message") or result.error or "")[:300]
+                    if self._is_confirmation_ready(result):
+                        proposal = result.output.get("proposal")
+                        if isinstance(proposal, Mapping):
+                            self._ready_proposal = proposal
                     confirmation_ready = confirmation_ready or self._is_confirmation_ready(result)
                 self.events.emit(
                     self.session_id,
@@ -670,8 +730,26 @@ class AgentCore:
                     # explicit user confirmation. Requiring a further provider
                     # completion turn can only waste budget and turn a usable
                     # proposal into a misleading max-steps failure.
-                    if not content:
-                        content = "proposal is ready for confirmation"
+                    # The model's pre-tool narration is often in another
+                    # language than the question; the reply the user reads is
+                    # written from the persisted proposal instead.
+                    language = detect_language(getattr(self, "_user_text", None))
+                    summary = (
+                        proposal_summary(self._ready_proposal, language)
+                        if self._ready_proposal is not None
+                        else ""
+                    )
+                    if summary or not content:
+                        narration = content if matches_language(content, language) else ""
+                        if narration and numeric_grounding.check(
+                            narration, self.context_builder.build(self.session_id).messages
+                        ):
+                            # The proposal summary is written from the proposal
+                            # itself; narration with an unsupported number is dropped.
+                            narration = ""
+                        content = "\n\n".join(
+                            part for part in (narration, summary) if part
+                        ) or "proposal is ready for confirmation"
                         summary_entry = self.repository.append(
                             self.session_id,
                             "message",
@@ -728,6 +806,71 @@ class AgentCore:
         self._active_turn_started = False
         return content if finish_reason == "stop" else ""
 
+    def _has_step_left(self) -> bool:
+        return self._budget.max_steps is None or self._steps_used < self._budget.max_steps
+
+    async def _withdraw_draft(
+        self,
+        content: str,
+        findings: tuple[numeric_grounding.Finding, ...],
+        *,
+        command_id: str,
+        context: Any,
+        tool_context: dict[str, Any] | None,
+    ) -> str:
+        """Keep a reply whose numbers match no result from reaching the user as
+        an answer: record it as a withdrawn draft, tell the model which numbers
+        failed and their closest real values, and ask for the answer again."""
+
+        self._numeric_repairs_left -= 1
+        unverified = [finding.to_dict() for finding in findings]
+        entry = self.repository.append(
+            self.session_id,
+            "message",
+            {
+                "role": "assistant",
+                "content": content,
+                "stop_reason": "revised",
+                "command_id": command_id,
+                "numeric_check": {"unverified": unverified},
+            },
+        )
+        self.events.emit(
+            self.session_id,
+            "message_end",
+            {"entry_id": entry.entry_id, "content": content, "stop_reason": "revised", "error": None},
+            command_id=command_id,
+        )
+        self.repository.append(
+            self.session_id,
+            "custom_message",
+            {
+                "message_type": "numeric_check",
+                "audience": "model",
+                "model_role": "user",
+                "name": numeric_grounding.CHECK_MESSAGE_NAME,
+                "content": numeric_grounding.correction_message(findings),
+                "metadata": {"unverified": unverified},
+            },
+        )
+        self.events.emit(
+            self.session_id,
+            "numeric_check",
+            {"entry_id": entry.entry_id, "unverified": unverified},
+            command_id=command_id,
+        )
+        self.events.emit(self.session_id, "turn_end", {"stop_reason": "revised"}, command_id=command_id)
+        self.events.emit(
+            self.session_id,
+            "save_point",
+            {"entry_id": entry.entry_id, "context_fingerprint": context.fingerprint},
+            command_id=command_id,
+        )
+        self._active_request_id = None
+        self._active_message_started = False
+        self._active_turn_started = False
+        return await self._run_turn(None, append_user=False, tool_context=tool_context)
+
     def _persist_terminal_error(self, error: str) -> str:
         """Persist a budget stop as a complete, replayable assistant turn."""
 
@@ -763,12 +906,24 @@ class AgentCore:
             )
             self._active_message_started = True
 
+        # A budget stop still owes the user an explanation; other errors keep
+        # the empty content their callers already handle.
+        content = (
+            budget_exhausted_message(
+                detect_language(getattr(self, "_user_text", None)),
+                error,
+                getattr(self, "_tools_used", []),
+                getattr(self, "_last_tool_failure", None),
+            )
+            if error in {"max_steps_exceeded", "repeated_tool_call_limit"}
+            else ""
+        )
         entry = self.repository.append(
             self.session_id,
             "message",
             {
                 "role": "assistant",
-                "content": "",
+                "content": content,
                 "stop_reason": "error",
                 "error": error,
             },
@@ -791,7 +946,7 @@ class AgentCore:
             "message_end",
             {
                 "entry_id": entry.entry_id,
-                "content": "",
+                "content": content,
                 "stop_reason": "error",
                 "error": error,
             },
@@ -821,7 +976,7 @@ class AgentCore:
         self._active_request_id = None
         self._active_message_started = False
         self._active_turn_started = False
-        return ""
+        return content
 
     def _mark_timeout(self) -> None:
         self._timeout_requested = True

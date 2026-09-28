@@ -198,6 +198,12 @@ function AppShell() {
     }
   }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // An error about the project just left (e.g. "Project not found") does
+  // not belong on the launcher, which is where the user goes to fix it.
+  useEffect(() => {
+    if (location.pathname === "/") setErrorMessage(null);
+  }, [location.pathname]);
+
   const setProjectRoot = useCallback((root: string) => {
     setProjectRootState(root);
     try {
@@ -266,7 +272,7 @@ function AppShell() {
               if (isProjectGraphRoute && projectRoot && !errorMessage) {
                 navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`);
               } else {
-                navigate("/");
+                navigate("/?launcher=1");
               }
             }}
           >

@@ -75,7 +75,12 @@ class ContextBuilder:
                     continue
                 content = payload.get("content")
                 if isinstance(content, str):
-                    messages.append({"role": "system", "content": content, "name": payload.get("name", "workbench")})
+                    # A server message that asks the model to act now (e.g. the
+                    # numeric check's rewrite request) opens a new turn as a user
+                    # message: providers with private reasoning refuse a second
+                    # answer inside a turn that already used tools.
+                    role = "user" if payload.get("model_role") == "user" else "system"
+                    messages.append({"role": role, "content": content, "name": payload.get("name", "workbench")})
                     source_entry_ids.append(entry.entry_id)
             elif entry.entry_type == "compaction":
                 summary = payload.get("summary")

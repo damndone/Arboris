@@ -1834,6 +1834,8 @@ class NotebookPlanningAgent:
         events: list[ModelStreamEvent] = []
         try:
             async for event in self.adapter.stream(request):
+                if event.type == "retry":
+                    continue
                 if event.type == "error":
                     if event.error == "provider_tool_arguments_invalid":
                         raise NotebookPlanningContractError(

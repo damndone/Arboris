@@ -111,7 +111,7 @@ def test_dispatch_executes_proposal_tool_without_workbench_mutation(
 
     result = asyncio.run(orchestrator.execute(command.command_id))
 
-    assert result == "proposal is ready for confirmation"
+    assert result.startswith("已生成待确认的提案（model.rerun）")
     # A proposal-ready tool result terminates the turn at the user-owned
     # confirmation boundary instead of spending another provider request.
     assert len(adapter.requests) == 1

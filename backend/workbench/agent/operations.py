@@ -86,6 +86,29 @@ class OperationDefinition:
             self.validator(target, preconditions, changes)
 
 
+WORKFLOW_STEP_DISPATCHER_PREFIX = "workbench.agent.workflow_runtime."
+
+# Operations executed as a rerun of the target run: they share the rerun
+# executor, reconciliation and child-run binding.
+RERUN_OPERATIONS = frozenset({"model.rerun", "metadata.edit"})
+
+
+def is_rerun_operation(operation_id: object) -> bool:
+    return operation_id in RERUN_OPERATIONS
+
+
+def is_workflow_step_only(definition: OperationDefinition) -> bool:
+    """A step identity that only a composed workflow can execute.
+
+    Such definitions carry a workflow-step dispatcher and require a workflow
+    and step id; proposed on their own they failed validation or, after the
+    user confirmed, execution. The Agent reaches them through
+    operation.multi_step (a plan may have one step), which is the one path.
+    """
+
+    return str(definition.executor_key).startswith(WORKFLOW_STEP_DISPATCHER_PREFIX)
+
+
 class OperationRegistry:
     """Explicit registry for agent-facing operation identities."""
 
@@ -122,6 +145,40 @@ class OperationRegistry:
                 ),
                 natural_language_enabled=True,
                 validator=_validate_model_rerun,
+            )
+        )
+        self.register(
+            OperationDefinition(
+                operation_id="metadata.edit",
+                operation_version="v1",
+                effect_level="mutation",
+                scope_requirements=("chain", "active_head"),
+                scope="run variable metadata",
+                risk_level="mutating",
+                confirmation_policy="required",
+                proposal_schema=_metadata_edit_proposal_schema(),
+                editable_schema={
+                    "type": "object",
+                    "properties": {"labels": _model_rerun_change_branch()["properties"]["labels"]},
+                    "required": ["labels"],
+                    "additionalProperties": False,
+                },
+                executor_key="model.rerun",
+                reconciler_key="model.rerun",
+                diff_builder_key="rerun.diff.v1",
+                verification_builder_key="rerun.verification.v1",
+                ui_description=(
+                    "Declare or change variable labels, value labels, measurement "
+                    "levels or missing-value codes for any column. Never changes "
+                    "which variables are in the model; the run is re-estimated "
+                    "with the new metadata (missing codes change the sample)."
+                ),
+                example_prompts=(
+                    "把 region 的取值标上标签：1 是北方，2 是南方",
+                    "hours 里的 999 表示未回答，当作缺失值",
+                ),
+                natural_language_enabled=True,
+                validator=_validate_metadata_edit,
             )
         )
         self.register(
@@ -425,6 +482,7 @@ class OperationRegistry:
             for definition in self._definitions.values()
             if definition.natural_language_enabled
             and required.issubset(set(definition.scope_requirements))
+            and not is_workflow_step_only(definition)
         )
 
     def requires_risk_authorization(
@@ -752,9 +810,17 @@ def _model_rerun_change_branch() -> dict[str, Any]:
             "type": "object",
             "description": (
                 "Column metadata. `measurement_level` maps column names to one of "
-                "nominal / ordinal / scale / count and decides how each is modelled; "
-                "declare every column in one proposal rather than one at a time. "
-                "Only columns present in the data may be named."
+                "nominal / ordinal / scale / count and changes how a column that is "
+                "already in the model is treated (for example an ordinal outcome "
+                "routes to ordinal logit). It never adds a column to the model: to "
+                "add a regressor, propose model.genesis with it in predictors or "
+                "categorical. `variable_labels` and `value_labels` change how "
+                "columns and their values are displayed in tables and answers. "
+                "`user_missing_values` declares codes (e.g. -99, or a {low, high} "
+                "range) that mean no valid answer; they become missing before any "
+                "model runs, which changes the estimation sample. Declare every "
+                "column in one proposal rather than one at a time. Only columns "
+                "present in the data may be named."
             ),
             "properties": {
                 "measurement_level": {
@@ -762,6 +828,38 @@ def _model_rerun_change_branch() -> dict[str, Any]:
                     "additionalProperties": {
                         "type": "string",
                         "enum": ["nominal", "ordinal", "scale", "count", "unspecified"],
+                    },
+                },
+                "variable_labels": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string", "minLength": 1},
+                },
+                "value_labels": {
+                    "type": "object",
+                    "description": "Column -> {stored value as string -> label}.",
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string", "minLength": 1},
+                    },
+                },
+                "user_missing_values": {
+                    "type": "object",
+                    "description": "Column -> list of codes; a code is a number, a string, or {low, high}.",
+                    "additionalProperties": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "anyOf": [
+                                {"type": "number"},
+                                {"type": "string", "minLength": 1},
+                                {
+                                    "type": "object",
+                                    "required": ["low", "high"],
+                                    "properties": {"low": {"type": "number"}, "high": {"type": "number"}},
+                                    "additionalProperties": False,
+                                },
+                            ]
+                        },
                     },
                 },
             },
@@ -831,6 +929,34 @@ def _model_rerun_proposal_schema() -> dict[str, Any]:
             ],
         },
     )
+
+
+def _metadata_edit_proposal_schema() -> dict[str, Any]:
+    labels = deepcopy(_model_rerun_change_branch()["properties"]["labels"])
+    labels["minProperties"] = 1
+    return _proposal_schema(
+        target_required=["run_id", "node_ref", "node_hash", "forest_node_key"],
+        changes={
+            "type": "object",
+            "description": (
+                "Only `labels`: declare metadata for any column (inside or outside "
+                "the model). To add or remove model variables use model.genesis."
+            ),
+            "required": ["labels"],
+            "properties": {"labels": labels},
+            "additionalProperties": False,
+        },
+    )
+
+
+def _validate_metadata_edit(
+    target: dict[str, Any],
+    preconditions: dict[str, Any],
+    changes: dict[str, Any],
+) -> None:
+    if set(changes) != {"labels"} or not isinstance(changes.get("labels"), dict) or not changes["labels"]:
+        raise OperationValidationError("metadata.edit changes must be exactly a non-empty labels object")
+    _validate_model_rerun(target, preconditions, changes)
 
 
 def _model_genesis_proposal_schema() -> dict[str, Any]:

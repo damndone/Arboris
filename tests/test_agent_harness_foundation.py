@@ -523,13 +523,15 @@ def test_agent_core_enforces_max_steps_before_a_queued_follow_up_call(
             await asyncio.sleep(0)
         await agent.steer("queued follow-up")
 
-        assert await running == ""
+        # A budget stop now explains itself instead of returning nothing.
+        assert (await running).startswith("This request did not finish: the step budget ran out")
         assert len(adapter.requests) == 1
         assert repository.get_metadata("session-a")["status"] == "blocked"
         branch = repository.get_branch("session-a")
-        assert branch[-1].payload == {
+        payload = dict(branch[-1].payload)
+        assert payload.pop("content").startswith("This request did not finish")
+        assert payload == {
             "role": "assistant",
-            "content": "",
             "stop_reason": "error",
             "error": "max_steps_exceeded",
         }
@@ -578,14 +580,17 @@ def test_agent_core_blocks_consecutive_identical_tool_calls_before_max_steps(
             tool_runtime=tools,
         )
 
-        assert await agent.prompt("inspect the same node", budget={"max_steps": 6}) == ""
+        assert (await agent.prompt("inspect the same node", budget={"max_steps": 6})).startswith(
+            "This request did not finish: the same tool call repeated"
+        )
 
-        assert len(adapter.requests) == 2
+        assert len(adapter.requests) == 3
         assert repository.get_metadata("session-a")["status"] == "blocked"
         branch = repository.get_branch("session-a")
-        assert branch[-1].payload == {
+        payload = dict(branch[-1].payload)
+        assert payload.pop("content").startswith("This request did not finish")
+        assert payload == {
             "role": "assistant",
-            "content": "",
             "stop_reason": "error",
             "error": "repeated_tool_call_limit",
         }
@@ -600,7 +605,7 @@ def test_agent_core_blocks_consecutive_identical_tool_calls_before_max_steps(
         assert len(guard_events) == 1
         assert guard_events[0].payload == {
             "tool_id": "inspect_node_context",
-            "repetition_count": 2,
+            "repetition_count": 3,
             "reason": "identical_tool_call",
         }
 
@@ -634,7 +639,7 @@ def test_agent_core_resets_identical_tool_call_counter_when_arguments_change(
             )
         )
         adapter = SequencedToolCallAdapter(
-            ["model:ols_1", "model:ols_2", "model:ols_2"]
+            ["model:ols_1", "model:ols_2", "model:ols_2", "model:ols_2"]
         )
         agent = AgentCore(
             repository,
@@ -645,9 +650,11 @@ def test_agent_core_resets_identical_tool_call_counter_when_arguments_change(
             tool_runtime=tools,
         )
 
-        assert await agent.prompt("inspect the requested nodes", budget={"max_steps": 6}) == ""
+        assert (await agent.prompt("inspect the requested nodes", budget={"max_steps": 6})).startswith(
+            "This request did not finish"
+        )
 
-        assert len(adapter.requests) == 3
+        assert len(adapter.requests) == 4
         # Filter by reason: replaying an already-answered inspection also emits
         # a loop_guard, and that is a different, non-terminal signal.
         guard_events = [
@@ -656,7 +663,7 @@ def test_agent_core_resets_identical_tool_call_counter_when_arguments_change(
             if event.event_type == "loop_guard"
             and event.payload.get("reason") == "identical_tool_call"
         ]
-        assert guard_events[0].payload["repetition_count"] == 2
+        assert guard_events[0].payload["repetition_count"] == 3
         assert guard_events[0].payload["tool_id"] == "inspect_node_context"
 
     asyncio.run(scenario())
@@ -890,3 +897,83 @@ def test_step_budget_annotation_is_silent_without_a_budget(tmp_path: Path) -> No
     agent._steps_used = 99
 
     assert agent._annotate_step_budget({"ok": True}) == {"ok": True}
+
+
+class RetryThenAnswerAdapter:
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        yield ModelStreamEvent.retrying(request.request_id, "LLMUpstreamError")
+        yield ModelStreamEvent.text_delta(request.request_id, "answer")
+        yield ModelStreamEvent.done(request.request_id)
+
+
+def test_agent_core_records_a_provider_retry_and_keeps_the_answer(tmp_path: Path) -> None:
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("session-a", chain_id="chain-a", role="chain")
+    events = AgentEventStream(tmp_path / "workbench")
+    agent = AgentCore(repository, events, RetryThenAnswerAdapter(), session_id="session-a")
+
+    assert asyncio.run(agent.prompt("question")) == "answer"
+
+    retries = [event for event in events.replay("session-a") if event.event_type == "provider_retry"]
+    assert [event.payload["error"] for event in retries] == ["LLMUpstreamError"]
+
+
+class CutMidAnswerAdapter:
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        yield ModelStreamEvent.text_delta(request.request_id, "The mean wage gap is 1,234.5, and")
+        yield ModelStreamEvent.from_error(request.request_id, "LLMUpstreamError")
+
+
+def test_a_reply_cut_off_by_the_provider_says_so_and_that_its_numbers_were_not_checked(tmp_path: Path) -> None:
+    """Found by the chaos evaluation: a stream dropped halfway through the
+    answer left the partial text standing as if it were the reply, and the
+    numeric check -- which runs only on a finished reply -- never saw it."""
+
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("session-a", chain_id="chain-a", role="chain")
+    events = AgentEventStream(tmp_path / "workbench")
+    agent = AgentCore(repository, events, CutMidAnswerAdapter(), session_id="session-a")
+
+    asyncio.run(agent.prompt("What is the wage gap?"))
+
+    reply = [
+        entry.payload for entry in repository.get_branch("session-a")
+        if entry.payload.get("role") == "assistant"
+    ][-1]
+    assert reply["stop_reason"] == "error"
+    assert reply["content"].startswith("The mean wage gap is 1,234.5, and")
+    assert "cut off" in reply["content"] and "not checked" in reply["content"]
+
+
+def test_concurrent_writers_to_one_session_lose_nothing(tmp_path: Path) -> None:
+    """Found by the chaos evaluation: two requests on one session each build
+    their own repository, so the per-instance lock did not serialize their
+    read-then-replace appends; one request's entries vanished and the other's
+    next read failed with "unknown session entry"."""
+
+    from threading import Barrier, Thread
+
+    root = tmp_path / "workbench"
+    JsonlSessionRepository(root).create_session("session-a", chain_id="chain-a", role="chain")
+    writers, per_writer = 6, 15
+    barrier = Barrier(writers)
+
+    def write(index: int) -> None:
+        repository = JsonlSessionRepository(root)
+        events = AgentEventStream(root)
+        barrier.wait()
+        for step in range(per_writer):
+            repository.append("session-a", "message", {"role": "user", "content": f"{index}-{step}"})
+            events.emit("session-a", "message_update", {"delta": f"{index}-{step}"})
+
+    threads = [Thread(target=write, args=(index,)) for index in range(writers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    branch = JsonlSessionRepository(root).get_branch("session-a")
+    assert len(branch) == writers * per_writer
+    replayed = AgentEventStream(root).replay("session-a")
+    assert len(replayed) == writers * per_writer
+    assert [event.seq for event in replayed] == list(range(1, writers * per_writer + 1))

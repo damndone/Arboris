@@ -7,6 +7,7 @@ import pandas as pd
 
 from .artifacts import register_artifact
 from .config import WorkbenchConfig
+from .tabular_io import STATISTICAL_FORMATS, read_table
 
 
 def _ensure_unique_basenames(paths: list[Path]) -> None:
@@ -90,6 +91,11 @@ def read_frame_bounded(
                 raise ValueError(f"excel sheet count exceeds limit: {path.name}")
             target_sheet = sheet_name if sheet_name else excel.sheet_names[0]
             frame = pd.read_excel(excel, sheet_name=target_sheet, nrows=max_rows + 1)
+        _coerce_datetime_to_numeric(frame)
+    elif suffix in STATISTICAL_FORMATS:
+        # Labels are not read here: they already travel with the run as
+        # declared labels (see run_service._statistical_file_labels).
+        frame = read_table(path, suffix=suffix, nrows=max_rows + 1)
         _coerce_datetime_to_numeric(frame)
     else:
         raise ValueError(f"unsupported file type: {path.suffix}")

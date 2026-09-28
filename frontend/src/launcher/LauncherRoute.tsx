@@ -23,8 +23,10 @@ export function LauncherRoute() {
   // v1.6.12 (V10): `/` jumps straight into the last project and `?home=1`
   // aliases the in-workbench Home view. Fresh users (no recents) still land
   // on the launcher so they can create their first project.
+  // `?launcher=1` stays here: the way out of a project that no longer opens
+  // (moved or deleted), which would otherwise be re-entered at once.
   const lastProject = recents[0];
-  if (lastProject) {
+  if (lastProject && searchParams.get("launcher") !== "1") {
     const view = searchParams.get("home") === "1" ? "?view=home" : "";
     return <Navigate replace to={`/p/${rootToSlug(lastProject.root)}/graph${view}`} />;
   }

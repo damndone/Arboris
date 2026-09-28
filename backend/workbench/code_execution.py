@@ -251,6 +251,12 @@ def _read_frame(path):
         frame = pd.read_parquet(target)
     elif suffix in (".xlsx", ".xls"):
         frame = pd.read_excel(target)
+    elif suffix in (".sav", ".zsav"):
+        import pyreadstat
+        frame, _meta = pyreadstat.read_sav(str(target), user_missing=True, apply_value_formats=False)
+    elif suffix == ".dta":
+        import pyreadstat
+        frame, _meta = pyreadstat.read_dta(str(target), apply_value_formats=False)
     else:
         raise RuntimeError("unsupported source format: " + (suffix or "<none>"))
     sidecar = target.with_name(target.stem + ".schema.json")

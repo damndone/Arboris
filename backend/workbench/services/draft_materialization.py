@@ -343,7 +343,26 @@ def _genesis_model_editor_schema(
 
     entry = model_entries[selected]
     recipe = recipe_contract_for_model_type(selected)
-    family = None if recipe is not None else model_family_contract(selected)
+    # "Auto (infer from y)" is the wizard's default: a selector, not a family.
+    # It picks OLS, logit, Poisson, ... from y when the run starts and needs
+    # only y and x here. Every other entry is a family or a Recipe, and a
+    # broken family lookup must still fail loudly.
+    is_selector = entry.get("group") == "auto"
+    if is_selector:
+        # Its controls are those of the families it can choose (by y type),
+        # minus each family's own model_options object: the run applies the
+        # ones that fit the family it picks, as the classic run form did.
+        from ..engine.registry import DEFAULT_BY_Y_TYPE
+
+        params: list[Mapping[str, Any]] = [{"key": "model_type", "kind": "select", "label": "Model"}]
+        seen = {"model_type", "model_options"}
+        for key in sorted(set(DEFAULT_BY_Y_TYPE.values())):
+            for item in (model_entries.get(key) or {}).get("params") or ():
+                if isinstance(item, Mapping) and item.get("key") not in seen:
+                    seen.add(str(item.get("key")))
+                    params.append(item)
+        entry = {**entry, "params": params}
+    family = None if recipe is not None or is_selector else model_family_contract(selected)
     projected_params, projected_aliases = (
         _family_wire_projection(selected, family)
         if family is not None

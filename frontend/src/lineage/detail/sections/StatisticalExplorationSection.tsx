@@ -315,6 +315,7 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
                 <option value="summarize">Summarize</option>
                 <option value="summarize_detail">Summarize detail</option>
                 <option value="misstable">Missing values</option>
+                <option value="tabulate">Frequencies</option>
                 <option value="corr">Correlation</option>
                 <option value="derive_boolean">Derived percentile variable</option>
                 <option value="scatter">Scatter plot</option>

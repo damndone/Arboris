@@ -18,6 +18,7 @@ import pytest
 from tests.test_data_column_cast import _source_project
 from tests.workflow_fixtures import composed_plan
 from workbench.agent.workflow import (
+    WorkflowExecutionError,
     WorkflowExecutor,
     WorkflowStepResult,
     compile_workflow,
@@ -1006,6 +1007,21 @@ def _post_estimation_results(project, run_id, state, step_ids):
 def _curved_post_estimation_state(tmp_path, covariance: str):
     """Run the same curved design under one declared covariance."""
 
+    project, run_id, draft = _curved_post_estimation_draft(tmp_path, covariance)
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+    assert state.status == "completed", {
+        step_id: step.error for step_id, step in state.steps.items() if step.error
+    }
+    return _post_estimation_results(
+        project, run_id, state, ["joint", "stationary"]
+    )
+
+
+def _curved_post_estimation_draft(tmp_path, covariance: str):
+    """A curved OLS design followed by two post-estimation steps."""
+
     rows = 48
     exposure = [float(index - 24) for index in range(rows)]
     frame = pd.DataFrame(
@@ -1075,15 +1091,204 @@ def _curved_post_estimation_state(tmp_path, covariance: str):
             },
         ],
     )
+    return project, run_id, draft
+
+
+def test_post_estimation_resumes_against_the_model_fitted_before_interruption(
+    tmp_path,
+) -> None:
+    """Resume must rebind post-estimation to the already-fitted model branch.
+
+    Completed steps are rebuilt from the state file on resume, so the model
+    step's branches have to be persisted there. Otherwise a workflow that was
+    interrupted after estimation can never finish its post-estimation steps.
+    """
+
+    project, run_id, draft = _curved_post_estimation_draft(tmp_path / "resumed", "robust")
+    real = build_workflow_step_executor(project, draft)
+
+    def interrupted(step, previous):
+        if step.step_id == "joint":
+            raise WorkflowExecutionError("simulated interruption")
+        return real(step, previous)
+
+    first = WorkflowExecutor(project).execute(draft, interrupted)
+    assert first.steps["estimate"].status == "completed"
+    assert first.steps["joint"].status == "failed"
+    model_artifacts = first.steps["estimate"].artifact_ids
+
+    # A fresh executor stands in for a restarted backend process: only the
+    # state file carries the earlier pass forward. The model must not refit.
+    fresh = build_workflow_step_executor(project, draft)
+    calls: list[str] = []
+
+    def counting(step, previous):
+        calls.append(step.step_id)
+        return fresh(step, previous)
+
+    resumed = WorkflowExecutor(project).execute(draft, counting)
+
+    assert resumed.status == "completed", {
+        step_id: step.error for step_id, step in resumed.steps.items() if step.error
+    }
+    assert "estimate" not in calls
+    assert resumed.steps["estimate"].artifact_ids == model_artifacts
+    after_resume = _post_estimation_results(
+        project, run_id, resumed, ["joint", "stationary"]
+    )
+    uninterrupted = _curved_post_estimation_state(tmp_path / "direct", "robust")
+    assert after_resume["joint"]["covariance"] == "robust"
+    assert after_resume["joint"]["f_statistic"] == pytest.approx(
+        uninterrupted["joint"]["f_statistic"], rel=1e-9
+    )
+    assert after_resume["stationary"]["stationary_point"] == pytest.approx(
+        uninterrupted["stationary"]["stationary_point"], rel=1e-9
+    )
+
+
+def test_genesis_with_measurement_level_declarations_executes(tmp_path) -> None:
+    """A genesis step may declare measurement levels alongside its branches.
+
+    The run form carries `labels` as an object. Encoding it to JSON text on the
+    way in failed every such step with MODEL_OPTIONS_NOT_OBJECT, so adding a
+    categorical regressor together with its declaration could never run.
+    """
+
+    frame = _frame(36).assign(region=[("north", "south", "east")[index % 3] for index in range(36)])
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="labels.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "labels.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="labels-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-genesis-labels",
+        steps=[
+            {
+                "step_id": "estimate",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "ols",
+                    "covariance": "robust",
+                    "labels": {"measurement_level": {"region": "nominal", "outcome": "scale"}},
+                    "branches": [
+                        {
+                            "branch_id": "main",
+                            "outcome": "outcome",
+                            "predictors": ["rate_a"],
+                            "categorical": ["region"],
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
     state = WorkflowExecutor(project).execute(
         draft, build_workflow_step_executor(project, draft)
     )
-    assert state.status == "completed", {
-        step_id: step.error for step_id, step in state.steps.items() if step.error
-    }
-    return _post_estimation_results(
-        project, run_id, state, ["joint", "stationary"]
+
+    assert state.status == "completed", state.steps["estimate"].error
+    branch_run = state.steps["estimate"].artifact_ids[0].split(":", 1)[0]
+    form = json.loads(
+        (project / "runs" / branch_run / "run_inputs.json").read_text(encoding="utf-8")
+    )["form"]
+    assert form["labels"]["measurement_level"] == {"region": "nominal", "outcome": "scale"}
+
+
+_OLS_ONLY_POST_ESTIMATION = (
+    ("model.joint_f_test", {"term_selectors": [{"kind": "polynomial", "column": "exposure"}]}),
+    ("model.white_test", {}),
+    ("model.quadratic_stationary_point", {"column": "exposure"}),
+)
+
+
+@pytest.mark.parametrize("model_family", ("logit", "probit", "poisson"))
+@pytest.mark.parametrize(("operation_id", "extra_spec"), _OLS_ONLY_POST_ESTIMATION)
+def test_ols_post_estimation_refuses_a_non_ols_upstream_model(
+    tmp_path, model_family: str, operation_id: str, extra_spec: dict
+) -> None:
+    """An OLS-only test must not answer for a GLM the user actually fitted.
+
+    These steps refit the branch by OLS. On a logit/probit/poisson branch that
+    silently reports a linear-probability (or linear-count) F statistic under
+    the GLM's provenance. The step has to refuse and persist nothing.
+    """
+
+    import numpy as np
+
+    rng = np.random.default_rng(7)
+    nobs = 200
+    exposure = rng.normal(size=nobs)
+    linear = -0.2 + 0.5 * exposure - 0.15 * exposure**2
+    if model_family == "poisson":
+        outcome = rng.poisson(np.exp(0.4 + 0.1 * linear))
+    else:
+        outcome = rng.binomial(1, 1 / (1 + np.exp(-linear)))
+    frame = pd.DataFrame({"outcome": outcome, "exposure": exposure})
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="glm.csv"
     )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "glm.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="glm-post-estimation-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id=f"wf-{model_family}-{operation_id}",
+        steps=[
+            {
+                "step_id": "estimate",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": model_family,
+                    "branches": [
+                        {
+                            "branch_id": "curved",
+                            "outcome": "outcome",
+                            "predictors": ["exposure"],
+                            "polynomials": [{"column": "exposure", "degree": 2}],
+                        }
+                    ],
+                },
+            },
+            {
+                "step_id": "post",
+                "operation_id": operation_id,
+                "depends_on": ["estimate"],
+                "spec": {"branch_id": "curved", **extra_spec},
+            },
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.steps["estimate"].status == "completed", state.steps["estimate"].error
+    post = state.steps["post"]
+    assert post.status == "failed"
+    assert not post.artifact_ids
+    assert model_family in (post.error or "")
+    assert "ols" in (post.error or "").lower()
 
 
 def test_post_estimation_inference_uses_the_model_declared_covariance(tmp_path) -> None:

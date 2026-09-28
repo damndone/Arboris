@@ -130,13 +130,28 @@ def _read_post_estimation_artifact_records(run_dir: Path) -> list[Any]:
     return records
 
 
+def count_post_estimation_results(root: Path, run_id: str) -> int:
+    """How many post-estimation entries belong to ``run_id``, without a limit."""
+
+    return len(collect_post_estimation_results(root, run_id, limit=10**9))
+
+
 def collect_post_estimation_results(
     root: Path,
     run_id: str,
     *,
     limit: int = MAX_PROJECTED_POST_ESTIMATION_RESULTS,
+    workflow_id: str | None = None,
+    keep_latest: bool = False,
 ) -> list[dict[str, Any]]:
     """Project durable workflow-analysis evidence that belongs to one run.
+
+    ``workflow_id`` narrows to one workflow before the limit applies: the run
+    accumulates evidence from every workflow ever run on it, and one
+    workflow's receipt must not fail because earlier ones exist.
+    ``keep_latest`` returns the most recently registered ``limit`` entries
+    instead of refusing when there are more (the run detail view shows the
+    newest and says how many it left out).
 
     A completed workflow is not an answered question: the step writes a
     provenance-carrying artifact, but nothing renders it, so the user who
@@ -182,8 +197,13 @@ def collect_post_estimation_results(
             entry = _read_post_estimation_entry(run_dir, record)
             if entry["run_id"] != run_id and entry["model_run_id"] != run_id:
                 continue
+            if workflow_id is not None and entry.get("workflow_id") != workflow_id:
+                continue
             collected.append(entry)
 
+    if keep_latest and len(collected) > limit:
+        # Index order is registration order: keep the newest.
+        collected = collected[-limit:]
     collected.sort(key=lambda item: (item["run_id"], item["artifact_id"]))
     if len(collected) > limit:
         raise WorkflowExecutionError(
@@ -2355,6 +2375,14 @@ def _refit_completed_ols_branch(
     branch_spec = branch.get("branch_spec")
     if not isinstance(branch_spec, Mapping):
         raise WorkflowExecutionError("completed model branch lacks a branch specification")
+    # Every caller refits by OLS. On a GLM/panel/IV branch that would report
+    # OLS inference under that model's provenance, so refuse instead.
+    model_family = branch_spec.get("model_family")
+    if model_family != "ols":
+        raise WorkflowExecutionError(
+            f"this post-estimation step is defined for OLS models only; branch "
+            f"{branch.get('branch_id')} was estimated as {model_family or 'an undeclared family'}"
+        )
     try:
         branch_frame, predictor_columns, _references = expand_branch_terms(
             source_frame,
@@ -2473,7 +2501,8 @@ def _persist_model_post_estimation_result(
     run_root = root / "runs" / str(draft.target["run_id"])
     token = str(step.fingerprint).removeprefix("sha256:")[:24]
     operation_token = str(step.operation_id).replace(".", "_")
-    artifact_id = f"workflow_{operation_token}_{token}"
+    workflow_token = hashlib.sha256(draft.workflow_id.encode("utf-8")).hexdigest()[:16]
+    artifact_id = f"workflow_{operation_token}_{workflow_token}_{token}"
     artifact_path = run_root / "artifacts" / artifact_type / f"{artifact_id}.json"
     payload = {
         "schema_version": "workbench.workflow.post-estimation/v1",
@@ -2631,7 +2660,10 @@ def _persist_workflow_capability_result(
     request_fingerprint = _workflow_request_fingerprint(request)
     result_payload = dict(execution.payload)
     if execution.output_frame is None:
-        artifact_id = f"workflow_capability_{operation_token}_{token}"
+        # One artifact per workflow: the same step asked for again (a second
+        # conversation, a repeated question) is a new run with its own record.
+        workflow_token = hashlib.sha256(draft.workflow_id.encode("utf-8")).hexdigest()[:16]
+        artifact_id = f"workflow_capability_{operation_token}_{workflow_token}_{token}"
         artifact_path = run_root / "artifacts" / "workflow_capability" / f"{artifact_id}.json"
         result_digest = hashlib.sha256(
             json.dumps(result_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")

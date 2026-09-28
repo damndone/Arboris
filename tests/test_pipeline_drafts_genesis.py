@@ -1510,3 +1510,32 @@ def test_list_summary_shows_genesis_model_type(tmp_path):
     listed = client.get(f"/pipeline-drafts?project_root={root}").json()["drafts"]
     mine = next(item for item in listed if item["draft_id"] == did)
     assert mine["model_type"] == "ols"
+
+
+def test_the_default_auto_model_type_can_be_saved_validated_and_run(tmp_path):
+    # "Auto (infer from y)" is the wizard's default; saving it used to fail
+    # with "model_family must be a workflow-executable family" (v1.8.8).
+    root = _mkproject(tmp_path)
+    rows = "\n".join(f"{2 + 0.5 * i + (i % 3) * 0.1},{i}" for i in range(40))
+    d = _genesis(root, data=f"y,x\n{rows}\n".encode())
+    did = d["draft"]["draft_id"]
+    client.patch(
+        f"/pipeline-drafts/{did}/nodes/table_1?project_root={root}",
+        json={"params": {"sheet_name": None, "transpose": False}, "columns": ["y", "x"]},
+    )
+    saved = client.patch(
+        f"/pipeline-drafts/{did}/nodes/model_1?project_root={root}",
+        json={"params": {"model_type": "auto", "y": "y", "x": ["x"], "covariance": "robust"}},
+    )
+    assert saved.status_code == 200, saved.text
+    validated = _validate(root, did).json()
+    assert validated["executable"] is True, validated
+    executed = client.post(
+        f"/pipeline-drafts/{did}/execute?project_root={root}",
+        json={"execution_mode": "genesis", "validated_draft_hash": validated["validated_draft_hash"]},
+    )
+    assert executed.status_code == 200, executed.text
+    run_id = executed.json()["run_id"]
+    _wait_terminal(root, run_id)
+    detail = client.get(f"/runs/{run_id}", params={"project_root": root}).json()
+    assert detail["status"] == "completed", detail.get("status")

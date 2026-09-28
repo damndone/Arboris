@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -10,6 +12,7 @@ from fastapi import APIRouter
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..analysis_ledger import record_ui_action
 from ..artifacts import read_json
 
 from ..agent.chains import ChainHeadConflict, ensure_chain_root
@@ -130,7 +133,9 @@ class DataTransformRequest(BaseModel):
     source_run_id: str = Field(min_length=1, max_length=200)
     source_node_id: str = Field(min_length=1, max_length=300)
     source_artifact_id: str = Field(min_length=1, max_length=200)
-    operation: Literal["merge", "append", "reshape", "subset"]
+    # Admission is by the data-operation registry (DataTransformSpecV1), so a
+    # newly declared operation needs no change here.
+    operation: str = Field(min_length=1, max_length=64)
     parameters: dict[str, Any] = Field(default_factory=dict)
     secondary_run_id: str | None = Field(default=None, max_length=200)
     secondary_node_id: str | None = Field(default=None, max_length=300)
@@ -210,10 +215,11 @@ def _preview_or_error(root, spec: DataColumnCastSpecV1, *, confirm: bool):
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
             code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            # The reason is the validation text the user can act on.
             message=(
-                "The source data context changed before confirmation."
+                f"The source data context changed before confirmation: {exc}"
                 if confirm
-                else "The typed data operation cannot be previewed."
+                else f"The typed data operation cannot be previewed: {exc}"
             ),
             details={"operation_id": "data.column.cast", "reason": str(exc)},
         ) from exc
@@ -244,10 +250,11 @@ def _batch_preview_or_error(root, spec: DataColumnsCastSpecV1, *, confirm: bool)
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
             code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            # The reason is the validation text the user can act on.
             message=(
-                "The source data context changed before confirmation."
+                f"The source data context changed before confirmation: {exc}"
                 if confirm
-                else "The typed data operation cannot be previewed."
+                else f"The typed data operation cannot be previewed: {exc}"
             ),
             details={"operation_id": "data.columns.cast", "reason": str(exc)},
         ) from exc
@@ -293,10 +300,11 @@ def _feature_recipe_preview_or_error(root, spec: FeatureRecipeOperationSpecV1, *
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
             code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            # The reason is the validation text the user can act on.
             message=(
-                "The FeatureRecipe source changed before confirmation."
+                f"The FeatureRecipe source changed before confirmation: {exc}"
                 if confirm
-                else "The typed FeatureRecipe cannot be previewed."
+                else f"The typed FeatureRecipe cannot be previewed: {exc}"
             ),
             details={"operation_id": "data.feature_recipe", "reason": str(exc)},
         ) from exc
@@ -318,7 +326,7 @@ def _data_transform_spec(body: DataTransformRequest) -> DataTransformSpecV1:
         raise WorkbenchAPIError(
             status_code=422,
             code="DATA_OPERATION_INVALID",
-            message="The typed data transform specification is invalid.",
+            message=f"The typed data transform specification is invalid: {exc}",
             details={"operation_id": f"data.{body.operation}", "reason": str(exc)},
         ) from exc
 
@@ -330,10 +338,11 @@ def _data_transform_preview_or_error(root, spec: DataTransformSpecV1, *, confirm
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
             code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            # The reason is the validation text the user can act on.
             message=(
-                "The data transform source changed before confirmation."
+                f"The data transform source changed before confirmation: {exc}"
                 if confirm
-                else "The typed data transform cannot be previewed."
+                else f"The typed data transform cannot be previewed: {exc}"
             ),
             details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
         ) from exc
@@ -447,10 +456,11 @@ def _code_preview_or_error(root, spec: CodeExecuteSpecV1, *, confirm: bool):
         raise WorkbenchAPIError(
             status_code=409 if confirm else 422,
             code="DATA_OPERATION_STALE" if confirm else "DATA_OPERATION_INVALID",
+            # The reason is the validation text the user can act on.
             message=(
-                "The source data context changed before confirmation."
+                f"The source data context changed before confirmation: {exc}"
                 if confirm
-                else "The typed data operation cannot be previewed."
+                else f"The typed data operation cannot be previewed: {exc}"
             ),
             details={"operation_id": "code.execute", "reason": str(exc)},
         ) from exc
@@ -955,6 +965,10 @@ def confirm_feature_recipe_route(
             message="The FeatureRecipe could not be applied because its source changed.",
             details={"operation_id": "data.feature_recipe", "reason": str(exc)},
         ) from exc
+    record_ui_action(
+        root, source="POST /data-operations/feature-recipe/confirm", steps=["data.feature_recipe"],
+        run_id=spec.source_run_id, node_id=spec.source_node_id,
+    )
     return {"status": "completed", "effect": effect.to_dict(), "preview": preview.to_dict()}
 
 
@@ -990,6 +1004,11 @@ def confirm_data_transform_route(
             message="The data transform could not be applied because its source changed.",
             details={"operation_id": f"data.{spec.operation}", "reason": str(exc)},
         ) from exc
+    record_ui_action(
+        root, source="POST /data-operations/transform/confirm", steps=[f"data.{spec.operation}"],
+        run_id=spec.source_run_id, node_id=spec.source_node_id,
+        summary=json.dumps(dict(spec.parameters), ensure_ascii=False, sort_keys=True, default=str)[:500],
+    )
     return {"status": "completed", "effect": effect.to_dict(), "preview": preview.to_dict()}
 
 
@@ -1053,6 +1072,11 @@ def start_model_from_data_node_route(
             message="The data node could not be submitted to the existing model lifecycle.",
             details={"reason": str(exc), "source_node_id": source_node_id},
         ) from exc
+    record_ui_action(
+        root, source="POST /data-operations/model-run", steps=["run.submit"],
+        run_id=body.source_run_id, node_id=source_node_id, produced_run_id=str(result["run_id"]),
+        summary=f"model_type={body.model_type}",
+    )
     return {
         "status": result["status"],
         "run_id": result["run_id"],

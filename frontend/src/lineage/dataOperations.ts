@@ -160,7 +160,18 @@ export interface FeatureRecipeConfirmResponse {
   preview: FeatureRecipePreview;
 }
 
-export type DataTransformOperation = "merge" | "append" | "reshape" | "subset";
+export type DataTransformOperation =
+  | "merge"
+  | "append"
+  | "reshape"
+  | "subset"
+  | "dedupe"
+  | "rename"
+  | "aggregate"
+  | "fill_missing"
+  | "tsset"
+  | "lag"
+  | "recode";
 
 export type DataTransformHow = "left" | "right" | "inner" | "outer";
 export type DataTransformSchemaPolicy = "exact" | "union";

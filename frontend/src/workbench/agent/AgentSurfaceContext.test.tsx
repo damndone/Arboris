@@ -281,6 +281,7 @@ describe("AgentSurfaceProvider", () => {
       "agent_chain_new",
       "先检查这个图",
       expect.any(AbortSignal),
+      undefined, // a chain session's context is bound by the server, not refreshed per turn
     ));
   });
 

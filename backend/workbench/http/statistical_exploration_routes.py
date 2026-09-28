@@ -9,6 +9,7 @@ import pandas as pd
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..analysis_ledger import record_ui_action
 from ..api_errors import WorkbenchAPIError
 from ..data_operations import DataColumnCastValidationError
 from ..statistical_exploration import (
@@ -191,6 +192,10 @@ def confirm_statistical_exploration(
             message="The exploration artifact could not be durably bound to the source.",
             details={"reason": str(exc)},
         ) from exc
+    record_ui_action(
+        root, source="POST /statistical-explorations/confirm", steps=["statistical.explore"],
+        run_id=body.source_run_id, node_id=body.source_node_id, summary=f"operation={spec.operation}",
+    )
     response: dict[str, Any] = {"status": "completed", "exploration": record, "result": result}
     if "derived" in record:
         response["derived"] = record["derived"]

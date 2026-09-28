@@ -34,6 +34,24 @@ class SourceStage:
         )
         env.step("ingestion", "complete", f"Ingested {len(frames)} file(s)")
 
+        labels = ctx.artifacts.get("_labels", {})
+        declared_missing = (
+            labels.get("user_missing_values") if isinstance(labels, dict) else None
+        )
+        if declared_missing:
+            from ...artifacts import write_json
+            from ...user_missing import apply_user_missing
+
+            records = []
+            for key, source_frame in list(frames.items()):
+                converted_frame, record = apply_user_missing(source_frame, declared_missing)
+                converted_frame.attrs.update(source_frame.attrs)
+                frames[key] = converted_frame
+                records.append(record)
+            applied = records[0] if len(records) == 1 else {"schema_version": 1, "files": records}
+            write_json(env.run_root / "measurement" / "user_missing.json", applied)
+            ctx.artifacts["_user_missing_applied"] = applied
+
         env.step("schema", "start", "Inferring schema...")
         schema = infer_schema("dataset_1", frames, env.run_root)
         env.step(

@@ -103,6 +103,17 @@ describe("LauncherRoute", () => {
     expect(screen.queryByText(/Econometrics/i)).toBeNull();
   });
 
+  it("?launcher=1 stays on the launcher, the way out of a project that no longer opens", async () => {
+    touchRecent("/tmp/deleted-project");
+    installFetchRouter((url) => {
+      if (url.includes("/runs")) return jsonResponse({ detail: "Project not found" }, { status: 404 });
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    renderAt("/?launcher=1");
+    expect(screen.getByRole("button", { name: "New project" })).toBeInTheDocument();
+    expect(screen.queryByTestId("project-graph-route")).toBeNull();
+  });
+
   it("V10: ?home=1 aliases the latest project Workbench Home", async () => {
     touchRecent("/tmp/alpha");
     installFetchRouter((url) => {

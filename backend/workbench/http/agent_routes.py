@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal
@@ -66,6 +67,10 @@ from ..agent.session import EntryRef, JsonlSessionRepository
 from ..agent.tools import ToolRegistry
 from ..api_errors import WorkbenchAPIError
 from ..control_plane import control_plane_capability
+from ..agent.analysis_integrity import ANALYSIS_INTEGRITY_RULES
+from ..agent.proposal_text import proposal_lines
+from ..services.dataset_view import run_labels
+from ..egress import egress_project
 from ..llm.config import load_llm_config
 from ..lineage.node_index import NODE_INDEX_FILENAME
 
@@ -90,6 +95,11 @@ DEFAULT_TIMEOUT_S = 120.0
 # prompt text, provider secret, or replay state and is always cleared in the
 # turn route's finally block.
 _ACTIVE_TURNS: dict[tuple[str, str], AgentCore] = {}
+# A turn is reserved under this lock before any setup, so two turns sent
+# together cannot both pass the in-progress check (requests may run on
+# different threads).
+_TURN_RESERVATION_LOCK = threading.Lock()
+_RESERVED_TURNS: set[tuple[str, str]] = set()
 
 
 def _active_turn_key(project_root: Path, session_id: str) -> tuple[str, str]:
@@ -97,6 +107,7 @@ def _active_turn_key(project_root: Path, session_id: str) -> tuple[str, str]:
 
 CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - You are the Workbench Chain Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
+- Reply in the language of the user's most recent message (Chinese when they write Chinese), even when tool results, labels or earlier turns are in another language.
 - Read-only inspection tools are the evidence source for this turn.
 - When the user asks for an OLS conventional-to-clustered Analysis Loop proposal, call propose_analysis_loop with the exact source_run_id, source_node_ref, active_head_run_id, cluster_variable, and (when supplied) result_id. This typed tool resolves the source facts and creates the PlanDiff binding.
 - When the user asks for a multi-step statistical workflow over the selected Raw data node (for example: grouped descriptive statistics, missing-value checks, a correlation matrix, percentile-derived group comparisons, scatter plots, and one or more regressions), use operation.multi_step@v1 as a SINGLE workflow proposal covering the whole request.
@@ -108,8 +119,9 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - The server owns statistical semantics: percentile method, missing-value policy, covariance validation, diagnostics and artifacts. Choose which steps to run over which columns; do not restate those fixed semantics in changes.
 - The plan's length, ordering and column choices belong to the request being answered. There is no fixed number of steps.
 - For other registered mutations, you must call propose_operation with a complete structured payload; a JSON or Markdown proposal in ordinary text is not a submitted proposal.
-- propose_operation creates a reviewable pending proposal only; it does not execute a Workbench mutation. Never claim that a run, graph, or data change was executed from this tool.
-- A successful propose_operation ends your turn: reply with a short summary of what you proposed and call no further tools. Continuing past it spends the step budget and can end the turn in an error even though the proposal was created.
+- propose_operation creates a reviewable pending proposal (requires_confirmation: true) for anything that changes data, metadata, a model or a report; it does not execute it. Never claim that a run, graph, or data change was executed from such a result.
+- A multi-step workflow whose every step only reads data (descriptive statistics, tabulations, inferential tests) runs at once: propose_operation then returns executed: true with each step's results. Answer the user's question from those results in this turn, citing the step and artifact ids; if it returns executed: false, explain the error and report no result. Do not split a question into many small workflows to run more tests. Analysis steps name the columns they use: do not add a data.subset step only to choose columns, and do not re-run a test already answered in this conversation.
+- A propose_operation result with requires_confirmation: true ends your turn: reply with a short summary of what you proposed and call no further tools. Continuing past it spends the step budget and can end the turn in an error even though the proposal was created.
 - Inspect only what the request needs. Calling every inspect tool wastes steps; tools for other model families return nothing useful about this node.
 - propose_analysis_loop also creates a reviewable pending proposal only; it never confirms or executes the rerun.
 - Use the exact operation_id and operation_version returned by inspect_operation_contract. For model.rerun, target contains run_id, node_ref, node_hash, and forest_node_key; map the inspection field op_node_id to node_ref, and do not put active_head_run_id in target. For graph.fork, the backend binds target.source_session_entry_id to the current Chain leaf; do not invent an Agent entry id. In preconditions, include exactly context_version, context_fingerprint, active_head_run_id, and owner_resolution.
@@ -122,13 +134,16 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - After a confirmed operation completes, its status is not numerical evidence. First use inspect_completed_operations for the current node, then inspect_operation_artifact only with an emitted artifact_id; cite that artifact id in the answer. A confirmed Notebook composed workflow has its own receipt lifecycle: when the question concerns sibling models or post-estimation results from that workflow, first use inspect_notebook_workflow_results. It discloses only committed workflows that contain the current run; use its returned branch run_ids with inspect_project_model_coefficients, and cite its returned post_estimation_evidence directly. That post_estimation_evidence is already the final bounded public result for the receipt: never call inspect_operation_artifact for those ids, because that separate tool intentionally admits only Agent operation records. Do not conclude that no composed workflow exists merely because inspect_completed_operations is empty. inspect_artifact_preview also exposes bounded public_result_evidence for already-persisted UI statistical artifacts that explicitly descend from the selected data node, and numeric figure_evidence for the selected model run. Cite the artifact id and state when figure evidence is run-scoped. If no public result view is available, say that the result cannot yet be verified. Never request raw rows, a filesystem path, or infer a figure from its title alone.
 - When interpreting a quadratic stationary point, use only the server-reported observed_min, observed_max, and stationary_point_within_observed_range fields. Never infer whether it is in range from a column name, label, or a typical domain.
 """
+CHAIN_AGENT_PROTOCOL += ANALYSIS_INTEGRITY_RULES
 
 MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):
 - You are the Workbench Global Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
+- Reply in the language of the user's most recent message (Chinese when they write Chinese), even when tool results, labels or earlier turns are in another language.
 - You are the project-level advisory Agent. Use the bounded project overview and durable summaries supplied in the context packet.
 - You may summarize families, runs, heads, chains, and visible risks, and suggest questions or evidence-gathering steps.
 - Never invent raw-data facts, model metrics, run results, chain state, or unsupported causal claims.
 - You have no mutation or execution tools in this scope. Never claim that a proposal, run, graph mutation, or file change was created or executed.
+- A Chain session's run carries its own fitted model. Never say that no model, coefficient or result exists because inspect_completed_operations or inspect_notebook_workflow_results came back empty: those list later operations, not the run's model. Call inspect_project_model_coefficients with the current run id first; only its answer can show that a model or term is missing.
 - inspect_project_model_coefficients is a bounded, read-only evidence tool. When the user asks for an exact coefficient, standard error, p value, confidence interval, R-squared, adjusted R-squared, outcome, fixed-effect identifier, residual/model degrees of freedom, covariance details, or a side-by-side comparison from one or more visible runs, call it with the run ids and at most four exact persisted term names per call from the overview; split a longer list across calls. Report only its returned values and cite its run_id/model_id evidence_ref; do not calculate a new interval, read a report file, or infer a missing coefficient or specification field.
 - inspect_project_dataset_schema is a bounded, read-only evidence tool. Before stating that a column is absent or suggesting a typed model composition for a visible run, call it with that run id when the bounded overview does not already establish the relevant column names. It returns names, dtypes, missingness, and unique counts only; never infer category labels, raw values, or a formula from it.
 - inspect_project_notebook_workflow_results is the project-level receipt reader for a committed Notebook workflow. When a question concerns sibling models or post-estimation tests from such a workflow, make one receipt lookup with up to sixteen visible candidate run ids from the overview. From a returned completed receipt, use branch_runs to select model evidence and cite its returned post_estimation_evidence directly; do not claim a workflow exists without this receipt evidence.
@@ -147,6 +162,7 @@ MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):
 - Before sending a numeric answer, mechanically copy those returned fields rather than recalculate or silently retype them. Check that the displayed estimate, standard error, p value, and interval endpoints are mutually consistent with the returned record; if your prose rendering of a confidence interval contradicts the returned p value or interval endpoints, re-read the same evidence tool and report only its latest fields.
 - If the bounded overview is insufficient to identify the relevant run or exact term, say what evidence is missing and ask the user to select a chain or node for a narrower evidence packet.
 """
+MAIN_AGENT_PROTOCOL += ANALYSIS_INTEGRITY_RULES
 
 
 def _step_vocabulary_lines() -> str:
@@ -221,6 +237,10 @@ class AgentTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
+    # The panel's current project context. A Main session's overview was
+    # written once, at creation, so runs made afterwards (a metadata edit, a
+    # rerun) were invisible and the Agent kept reading the old run.
+    context_packet: dict[str, Any] | None = None
 
 
 class AgentProposalConfirmRequest(BaseModel):
@@ -567,6 +587,44 @@ def _authoritative_active_head(
         ) from exc
 
 
+def _refresh_main_context(
+    repository: JsonlSessionRepository, session_id: str, packet: dict[str, Any]
+) -> None:
+    """Append the current project overview when it differs from the last one.
+
+    Earlier overviews stay in the session log (the record of what the Agent was
+    told when); the newest one is last, and says it supersedes the others.
+    """
+
+    serialized, fingerprint = _context_serialized(packet)
+    # Compare what the Agent was told, not the packet's declared fingerprint:
+    # the panel derives that from family heads only, so a new run inside an
+    # existing family left it unchanged while run_count and the active head moved.
+    latest = None
+    for entry in repository.get_branch(session_id):
+        payload = entry.payload
+        if entry.entry_type == "custom_message" and payload.get("name") == "workbench_context":
+            content = str(payload.get("content") or "")
+            latest = content.split("\n", 1)[1] if "\n" in content else content
+    if latest == serialized:
+        return
+    repository.append(
+        session_id,
+        "custom_message",
+        {
+            "message_type": "agent_context",
+            "audience": "model",
+            "name": "workbench_context",
+            "content": (
+                "Workbench read-only context, refreshed: this supersedes every earlier context "
+                "message; runs listed here are the project's current ones. Do not invent facts "
+                "or execute actions.\n" + serialized
+            ),
+            "metadata": {"context_fingerprint": fingerprint, "refreshed": True},
+        },
+    )
+
+
 def _context_serialized(packet: dict[str, Any]) -> tuple[str, str]:
     serialized = json.dumps(
         packet,
@@ -669,6 +727,8 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
             "stop_reason": entry.payload.get("stop_reason"),
             "error": entry.payload.get("error"),
         }
+        if isinstance(entry.payload.get("numeric_check"), dict):
+            message["numeric_check"] = entry.payload["numeric_check"]
         try:
             message["navigation"] = [
                 link.to_dict()
@@ -717,6 +777,9 @@ def _public_proposals(store: ProposalStore, session_id: str) -> list[dict[str, A
     for revision in store.latest_revisions_for_session(session_id):
         proposal = revision.to_dict()
         proposal["status"] = store.latest_status(revision.proposal_id)
+        # The session's list is what the transcript cards show, confirmed and
+        # executed ones included: sentences there too, not raw steps.
+        proposal["readable"] = proposal_lines(proposal, _proposal_labels(store, proposal))
         confirmation = store.latest_confirmation(revision.proposal_id)
         if confirmation is not None:
             proposal["confirmation"] = confirmation.to_dict()
@@ -755,10 +818,26 @@ def _proposal_for_session(
     return proposal
 
 
+def _proposal_labels(store: ProposalStore, proposal: dict[str, Any]) -> dict[str, str]:
+    run_id = (proposal.get("target") or {}).get("run_id")
+    if not run_id:
+        return {}
+    try:
+        # ProposalStore lives under <project>/workbench.
+        labels = run_labels(Path(store.root).parent, str(run_id))
+    except (OSError, ValueError):
+        return {}
+    variable_labels = labels.get("variable_labels")
+    return dict(variable_labels) if isinstance(variable_labels, dict) else {}
+
+
 def _public_proposal(store: ProposalStore, proposal_id: str) -> dict[str, Any]:
     revision = store.latest_revision(proposal_id)
     proposal = revision.to_dict()
     proposal["status"] = store.latest_status(proposal_id)
+    # What it will do, in sentences with the data's own variable labels; the
+    # raw changes stay beside it for anyone who wants to check them.
+    proposal["readable"] = proposal_lines(proposal, _proposal_labels(store, proposal))
     confirmation = store.latest_confirmation(proposal_id)
     if confirmation is not None:
         proposal["confirmation"] = confirmation.to_dict()
@@ -835,7 +914,7 @@ def _current_proposal_context_fingerprint(
     )
     if proposal.operation_id == "data.columns.cast":
         return _current_data_columns_cast_fingerprint(root, proposal)
-    if proposal.operation_id not in {"model.rerun", "graph.fork", "operation.multi_step"}:
+    if proposal.operation_id not in {"model.rerun", "metadata.edit", "graph.fork", "operation.multi_step"}:
         raise WorkbenchAPIError(
             status_code=422,
             code="AGENT_PROPOSAL_OPERATION_UNSUPPORTED",
@@ -1844,6 +1923,39 @@ def revise_agent_proposal(
     }
 
 
+async def _run_read_only_proposal(root: Path, orchestrator: WorkbenchOrchestrator, proposal) -> Any:
+    """Confirm and execute a read-only workflow under the read-only policy.
+
+    The same checks as a user's confirmation -- current context fingerprint
+    and authoritative active head -- with the policy as the actor, so the
+    operation record says who allowed it."""
+
+    from ..agent.read_only_policy import ACTOR
+
+    active_head_run_id = _authoritative_active_head(
+        root,
+        chain_id=str(proposal.chain_id),
+        requested_active_head_run_id=proposal.preconditions.get("active_head_run_id"),
+    )
+    fingerprint = _current_proposal_context_fingerprint(
+        root, proposal, active_head_run_id=active_head_run_id
+    )
+    record = orchestrator.confirm_proposal(
+        proposal.proposal_id,
+        revision=proposal.revision,
+        fingerprint=proposal.fingerprint,
+        actor_type=ACTOR,
+        current_context_fingerprint=fingerprint,
+        current_active_head_run_id=active_head_run_id,
+    )
+    return await orchestrator.execute_confirmed_operation(
+        record.record_id,
+        project_root=root,
+        current_context_fingerprint=fingerprint,
+        current_active_head_run_id=active_head_run_id,
+    )
+
+
 @router.post("/agent/sessions/{session_id}/proposals/{proposal_id}/confirm")
 async def confirm_agent_proposal(
     session_id: str,
@@ -2024,13 +2136,31 @@ async def run_agent_turn(
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
     turn_key = _active_turn_key(root, session_id)
-    if turn_key in _ACTIVE_TURNS:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="AGENT_TURN_IN_PROGRESS",
-            message="This Agent session already has a running turn.",
-            details={"session_id": session_id},
-        )
+    with _TURN_RESERVATION_LOCK:
+        if turn_key in _ACTIVE_TURNS or turn_key in _RESERVED_TURNS:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_TURN_IN_PROGRESS",
+                message="This Agent session already has a running turn.",
+                details={"session_id": session_id},
+            )
+        _RESERVED_TURNS.add(turn_key)
+    try:
+        return await _run_reserved_agent_turn(root, session_id, body, repository, events, metadata, turn_key)
+    finally:
+        with _TURN_RESERVATION_LOCK:
+            _RESERVED_TURNS.discard(turn_key)
+
+
+async def _run_reserved_agent_turn(
+    root: Path,
+    session_id: str,
+    body: AgentTurnRequest,
+    repository: Any,
+    events: Any,
+    metadata: dict[str, Any],
+    turn_key: tuple[str, str],
+) -> dict[str, Any]:
     config = load_llm_config()
     if not config.is_configured():
         raise WorkbenchAPIError(
@@ -2050,6 +2180,8 @@ async def run_agent_turn(
     tool_context: dict[str, Any] | None = None
     if metadata.get("role") == "main":
         _ensure_current_global_protocol(repository, session_id)
+        if body.context_packet:
+            _refresh_main_context(repository, session_id, body.context_packet)
     if metadata.get("role") == "chain":
         # Handoff §7 slice: the ROUTE registers the chain-scoped read-only
         # tools through the existing orchestrator boundary — the model never
@@ -2065,6 +2197,7 @@ async def run_agent_turn(
             context_provider=NodeOperationContextProvider(root),
         )
         orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
+        orchestrator.read_only_runner = lambda proposal: _run_read_only_proposal(root, orchestrator, proposal)
         tool_context = {
             "allowed_operations": operation_registry.natural_language_operation_ids(
                 scope_requirements=("chain", "active_head")
@@ -2078,11 +2211,12 @@ async def run_agent_turn(
         agent.attach_tools(registry.descriptors(), registry)
     _ACTIVE_TURNS[turn_key] = agent
     try:
-        await agent.prompt(
-            body.question.strip(),
-            budget={"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S},
-            tool_context=tool_context,
-        )
+        with egress_project(root):
+            await agent.prompt(
+                body.question.strip(),
+                budget={"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S},
+                tool_context=tool_context,
+            )
     finally:
         if _ACTIVE_TURNS.get(turn_key) is agent:
             _ACTIVE_TURNS.pop(turn_key, None)

@@ -647,7 +647,7 @@ function ForestWorkbench({
       <ErrorBanner
         error={error}
         onRetry={refetch}
-        onHome={() => navigate("/")}
+        onHome={() => navigate("/?launcher=1")}
       />
     );
   }
@@ -1260,7 +1260,7 @@ function LegacyGraphWorkbench({
       <ErrorBanner
         error={error}
         onRetry={refetch}
-        onHome={() => navigate("/")}
+        onHome={() => navigate("/?launcher=1")}
       />
     );
   }

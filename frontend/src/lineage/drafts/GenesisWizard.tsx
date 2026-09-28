@@ -527,7 +527,7 @@ export function GenesisWizard({
     if (!nextFile) return;
     setBusy("file");
     try {
-      const nextPreview = await previewFile(nextFile);
+      const nextPreview = await previewFile(nextFile, undefined, undefined, projectRoot);
       applyPreview(nextPreview);
       const upload = await uploadDataset(projectRoot, nextFile);
       const created = await createGenesisDraft(projectRoot, {
@@ -628,7 +628,7 @@ export function GenesisWizard({
     try {
       let nextPreview = preview;
       if (file) {
-        nextPreview = await previewFile(file, sheetName || undefined, transpose);
+        nextPreview = await previewFile(file, sheetName || undefined, transpose, projectRoot);
         applyPreview(nextPreview, false);
       }
       const columns =
@@ -1033,7 +1033,7 @@ export function GenesisWizard({
           <input
             aria-label="Dataset file"
             type="file"
-            accept=".csv,.xlsx,.xls"
+            accept=".csv,.xlsx,.xls,.sav,.zsav,.dta"
             onChange={(event) => handleFileChange(event.currentTarget.files?.[0] ?? null)}
             disabled={busy !== null}
           />

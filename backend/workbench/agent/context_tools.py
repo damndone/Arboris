@@ -209,6 +209,18 @@ class WorkbenchContextProvider(Protocol):
         """Return provider-owned, scope-bound read-only tool definitions."""
 
 
+_FOREST_NODE_KEY = re.compile(r"[0-9a-f]{64}::(?P<node>.+)")
+
+
+def _run_local_node_id(node_id: str) -> str:
+    """``stage:raw`` from either ``stage:raw`` or the forest key
+    ``<node_hash>::stage:raw`` the Main Agent sees in its project context.
+    The run is named separately, so the hash adds nothing here."""
+
+    match = _FOREST_NODE_KEY.fullmatch(node_id)
+    return match.group("node") if match else node_id
+
+
 class NodeOperationContextProvider:
     """Read node-operation context from one explicitly scoped project."""
 
@@ -597,7 +609,108 @@ class NodeOperationContextProvider:
                 ListProjectDatasetsRequest(detail_for=tuple(detail_for))
             )
 
+        def export_dataset(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            from ..data_operations import DataColumnCastValidationError
+            from ..services.data_export import export_dataset as write_export
+            from ..tabular_io import StatisticalFileError
+
+            run_id = str(arguments.get("run_id") or "")
+            self._project_run_root(run_id)  # refuses anything but a project run id
+            options = {
+                key: arguments[key]
+                for key in ("format", "columns", "filters", "dta_version", "value_labels", "missing_codes", "filename")
+                if key in arguments
+            }
+            try:
+                exported = write_export(
+                    self.project_root,
+                    run_id,
+                    _run_local_node_id(str(arguments.get("node_id") or "")),
+                    options,
+                )
+            except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
+                raise ToolVisibleError(f"DATASET_EXPORT_UNAVAILABLE: {exc}") from exc
+            from ..analysis_ledger import record_agent_action
+
+            # The same record a UI export leaves, so the ledger shows every export.
+            record_agent_action(
+                self.project_root,
+                source="agent.export_dataset",
+                steps=["export.dataset"],
+                session_id=context.session_id,
+                run_id=run_id,
+                node_id=_run_local_node_id(str(arguments.get("node_id") or "")),
+                summary=json.dumps(options, ensure_ascii=False, sort_keys=True)[:300],
+            )
+            report = exported["report"]
+            return {
+                "artifact_id": exported["artifact_id"],
+                "filename": exported["filename"],
+                "download_url": exported["download_url"],
+                "rows": report["rows"],
+                "columns": report["columns"],
+                "renamed": report["renamed"],
+                # What the format could not hold; tell the user every item.
+                "notes": report["notes"][:40],
+                "notes_omitted": max(len(report["notes"]) - 40, 0),
+            }
+
         return [
+            self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project", "chain")),
+            self.calculate_tool(session_id=session_id, scope_requirements=("project", "chain")),
+            ToolDefinition(
+                tool_id="export_dataset",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_id", "node_id", "format"],
+                    "properties": {
+                        "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "node_id": {"type": "string", "minLength": 1, "maxLength": 300},
+                        "format": {"type": "string", "enum": ["sav", "zsav", "dta", "csv", "xlsx"]},
+                        "columns": {
+                            "type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1,
+                            "description": "Variables to export, in this order; all when omitted.",
+                        },
+                        "filters": {
+                            "type": "array", "maxItems": 20, "items": {"type": "object"},
+                            "description": "Rows to keep, in data.subset filter form {column, op, value}.",
+                        },
+                        "dta_version": {
+                            "type": "integer", "enum": [13, 14, 15],
+                            "description": "13 = Stata 13; 14 = Stata 14-18 (default); 15 = over 32,767 variables.",
+                        },
+                        "value_labels": {
+                            "type": "string", "enum": ["labels", "strings", "none"],
+                            "description": "labels: codes with label sets; strings: label text instead of codes; none: codes only.",
+                        },
+                        "missing_codes": {
+                            "type": "string", "enum": ["as_missing", "keep_codes"],
+                            "description": "as_missing: declared missing codes become missing; keep_codes: keep them as values.",
+                        },
+                        "filename": {"type": "string", "minLength": 1, "maxLength": 120},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="artifact",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=export_dataset,
+                description=(
+                    "Write one dataset node (e.g. stage:raw, stage:cleaned or a derived "
+                    "dataset) as SPSS (.sav/.zsav), Stata (.dta), CSV or Excel, with its "
+                    "declared labels -- choosing the variables, the rows, the Stata "
+                    "version, how value labels and missing codes are written, and the "
+                    "file name when the user asks. Creates a downloadable file only; "
+                    "changes no data or results. Report every item in notes to the user: "
+                    "they are labels or missing codes the format could not hold."
+                ),
+            ),
             ToolDefinition(
                 tool_id="list_project_datasets",
                 version="v1",
@@ -1059,12 +1172,148 @@ class NodeOperationContextProvider:
             ),
         ]
 
+    def show_dataset_rows_tool(
+        self, *, session_id: str, scope_requirements: tuple[str, ...]
+    ) -> ToolDefinition:
+        """Rows for the user's screen; the provider receives only the summary
+        unless the project's sharing policy allows rows (workbench.egress)."""
+
+        def show_dataset_rows(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered scope")
+            from ..data_operations import DataColumnCastValidationError
+            from ..services.dataset_view import dataset_page
+
+            run_id = str(arguments.get("run_id") or "")
+            node_id = _run_local_node_id(str(arguments.get("node_id") or ""))
+            self._project_run_root(run_id)
+            offset = int(arguments.get("offset") or 0)
+            limit = int(arguments.get("limit") or 20)
+            try:
+                page = dataset_page(self.project_root, run_id, node_id, offset=offset, limit=limit)
+            except (DataColumnCastValidationError, ValueError, FileNotFoundError) as exc:
+                raise ToolVisibleError(f"DATASET_ROWS_UNAVAILABLE: {exc}") from exc
+            requested = [str(column) for column in arguments.get("columns") or []]
+            unknown = [column for column in requested if column not in page["columns"]]
+            if unknown:
+                raise ToolVisibleError(
+                    f"DATASET_ROWS_UNAVAILABLE: unknown columns {unknown}; the dataset has {page['columns']}"
+                )
+            columns = requested or page["columns"]
+            rows = [{column: row.get(column) for column in columns} for row in page["rows"]]
+            shown = len(rows)
+            first = offset + 1 if shown else offset
+            return {
+                "run_id": run_id,
+                "node_id": node_id,
+                "columns": columns,
+                "total_rows": page["total_rows"],
+                "offset": offset,
+                "row_numbers": page["row_numbers"],
+                "rows": rows,
+                # The only part of this result a remote provider receives under
+                # the default data-sharing policy (see workbench.egress).
+                "egress_summary": (
+                    f"Rows {first}-{offset + shown} of {page['total_rows']} "
+                    f"({len(columns)} column{'s' if len(columns) != 1 else ''}) "
+                    f"of {node_id} in run {run_id} are shown to the user in Workbench."
+                ),
+            }
+
+
+        return ToolDefinition(
+            tool_id="show_dataset_rows",
+            version="v1",
+            input_schema={
+                "type": "object",
+                "required": ["run_id", "node_id"],
+                "properties": {
+                    "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "node_id": {"type": "string", "minLength": 1, "maxLength": 300},
+                    "offset": {"type": "integer", "minimum": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "maxItems": 40,
+                    },
+                },
+                "additionalProperties": False,
+            },
+            side_effect="none",
+            scope_requirements=scope_requirements,
+            max_output_budget=16384,
+            handler=show_dataset_rows,
+            description=(
+                "Show rows of one dataset node (e.g. stage:raw, stage:cleaned or a "
+                "derived dataset) to the user as a table in Workbench, when the user "
+                "asks to see records. Under the project's data-sharing policy the rows "
+                "may stay on the user's computer: you then receive only a summary of "
+                "what was shown. Do not repeat or guess row values; describe data with "
+                "summaries, frequencies or models instead."
+            ),
+        )
+
+    def calculate_tool(
+        self, *, session_id: str, scope_requirements: tuple[str, ...]
+    ) -> ToolDefinition:
+        """Arithmetic on result values, done in code (agent.numeric_grounding)."""
+
+        def calculate(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered scope")
+            from .numeric_grounding import calculate as run
+
+            return run(arguments.get("calculations") or ())
+
+        return ToolDefinition(
+            tool_id="calculate",
+            version="v1",
+            input_schema={
+                "type": "object",
+                "required": ["calculations"],
+                "properties": {
+                    "calculations": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 20,
+                        "items": {
+                            "type": "object",
+                            "required": ["expression"],
+                            "properties": {
+                                "label": {"type": "string", "maxLength": 120},
+                                "expression": {"type": "string", "minLength": 1, "maxLength": 400},
+                            },
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "additionalProperties": False,
+            },
+            side_effect="none",
+            scope_requirements=scope_requirements,
+            max_output_budget=8192,
+            handler=calculate,
+            description=(
+                "Do arithmetic on numbers from results: differences, ratios, sums, "
+                "percentages, odds ratios (exp), logs, square roots. Write each "
+                "expression with the full values copied from the results, e.g. "
+                "'5.1234 - 4.0221' or 'exp(0.4312)'. Never compute or round a number "
+                "yourself: every number in your answer is checked against the results "
+                "and this tool's values before the user sees it."
+            ),
+        )
+
     def global_tool_definitions(self, *, session_id: str) -> list[ToolDefinition]:
         """Expose bounded project evidence readers to the Main Agent.
 
         The Main Agent remains unable to mutate a graph or run.  It may only
         inspect server-persisted aggregate evidence, without transferring model
-        payloads or data rows into its context.
+        payloads into its context. It can show data rows to the user; they
+        reach the model only when the project's sharing policy allows rows.
         """
 
         def inspect_project_model_coefficients(
@@ -1185,6 +1434,8 @@ class NodeOperationContextProvider:
             )
 
         return [
+            self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project",)),
+            self.calculate_tool(session_id=session_id, scope_requirements=("project",)),
             ToolDefinition(
                 tool_id="inspect_project_model_coefficients",
                 version="v1",
@@ -1830,6 +2081,9 @@ class NodeOperationContextProvider:
                     "columns_omitted": columns_omitted,
                     "columns_without_missing": public_no_missing,
                 }
+                declared_metadata = _bounded_declared_metadata(_run_declared_labels(run_root))
+                if declared_metadata is not None:
+                    entry["declared_metadata"] = declared_metadata
                 if (run_id, node.id) in detail_keys:
                     entry["column_details"] = [
                         self._dataset_column_detail(frame, column)
@@ -1933,11 +2187,13 @@ class NodeOperationContextProvider:
         models: list[dict[str, Any]] = []
         for run_id in request.run_ids:
             run_root = self._project_run_root(run_id)
+            labeler = _run_term_labeler(run_root)
             for result in read_model_results(run_root):
                 public_model = _public_requested_model_coefficients(
                     run_id=run_id,
                     result=result,
                     requested_terms=request.terms,
+                    labeler=labeler,
                 )
                 if public_model is not None:
                     models.append(public_model)
@@ -1970,18 +2226,32 @@ class NodeOperationContextProvider:
             raise ToolVisibleError(
                 "PROJECT_DATASET_SCHEMA_UNAVAILABLE: the persisted dataset schema has no columns."
             )
+        declared = _run_declared_labels(run_root)
         columns: list[dict[str, Any]] = []
         for name, metadata in sorted(source_columns.items(), key=lambda item: str(item[0])):
             if not isinstance(name, str) or not name or not isinstance(metadata, dict):
                 continue
-            columns.append(
-                {
-                    "name": name,
-                    "dtype": metadata.get("dtype") if isinstance(metadata.get("dtype"), str) else None,
-                    "missing_rate": _public_stat_number(metadata.get("missing_rate")),
-                    "unique_count": _public_positive_int(metadata.get("unique_count")),
+            column: dict[str, Any] = {
+                "name": name,
+                "dtype": metadata.get("dtype") if isinstance(metadata.get("dtype"), str) else None,
+                "missing_rate": _public_stat_number(metadata.get("missing_rate")),
+                "unique_count": _public_positive_int(metadata.get("unique_count")),
+            }
+            for field, key in (
+                ("variable_labels", "variable_label"),
+                ("measurement_level", "measurement_level"),
+                ("user_missing_values", "user_missing_values"),
+            ):
+                mapping = declared.get(field)
+                if isinstance(mapping, dict) and name in mapping:
+                    column[key] = mapping[name]
+            value_labels = declared.get("value_labels")
+            if isinstance(value_labels, dict) and isinstance(value_labels.get(name), dict):
+                mapping = value_labels[name]
+                column["value_labels"] = {
+                    key: mapping[key] for key in sorted(mapping)[:_MAX_VALUE_LABELS_PER_COLUMN]
                 }
-            )
+            columns.append(column)
         public_columns = columns[:64]
         return {
             "run_id": request.run_id,
@@ -2755,6 +3025,44 @@ class NodeOperationContextProvider:
             "omitted_sections": omitted_sections,
         }
 
+    def executed_workflow_results(self, record: Any, *, max_chars: int = 6000) -> list[dict[str, Any]]:
+        """Public results of a just-executed workflow, step by step.
+
+        The same public-result view inspect_operation_artifact serves, handed
+        to the model with the execution receipt so a read-only workflow is
+        answered in the turn that ran it.
+        """
+
+        run_id = str((record.target or {}).get("run_id") or "")
+        state = ((record.outputs or {}).get("workflow_state") or {}).get("steps") or {}
+        steps = {item.get("step_id"): item for item in (record.changes or {}).get("steps") or () if isinstance(item, dict)}
+        results: list[dict[str, Any]] = []
+        for step_id, step_state in state.items():
+            entry: dict[str, Any] = {
+                "step_id": step_id,
+                "operation_id": (steps.get(step_id) or {}).get("operation_id"),
+                "status": step_state.get("status"),
+                "artifacts": [],
+            }
+            for artifact_id in step_state.get("artifact_ids") or ():
+                artifact = resolve_registered_artifact(self.project_root / "runs" / run_id, str(artifact_id))
+                if artifact is None:
+                    entry["artifacts"].append({"artifact_id": artifact_id, "available": False})
+                    continue
+                artifact_type, _sha256, payload = artifact
+                public_result, _omitted = _public_operation_artifact_result(artifact_type, payload)
+                item: dict[str, Any] = {"artifact_id": artifact_id, "artifact_type": artifact_type}
+                if public_result is None:
+                    item["available"] = False
+                elif len(json.dumps(public_result, ensure_ascii=False, default=str)) > max_chars:
+                    item["available"] = False
+                    item["reason"] = "too large to include; read it with inspect_operation_artifact"
+                else:
+                    item["result"] = public_result
+                entry["artifacts"].append(item)
+            results.append(entry)
+        return results
+
     def inspect_notebook_workflow_results(
         self,
         request: InspectNotebookWorkflowResultsRequest,
@@ -2948,6 +3256,16 @@ class NodeOperationContextProvider:
                 "row_count": context["row_count"],
                 "columns": context["columns"],
                 "downstream_invalidation": context["downstream_invalidation"],
+                **(
+                    {"declared_metadata": declared_metadata}
+                    if (
+                        declared_metadata := _bounded_declared_metadata(
+                            _run_declared_labels(self.project_root / "runs" / request.owner_run_id)
+                        )
+                    )
+                    is not None
+                    else {}
+                ),
             },
             "omitted_sections": ["source_artifact_id", "raw_rows"],
         }
@@ -3118,6 +3436,7 @@ def _public_requested_model_coefficients(
     run_id: str,
     result: dict[str, Any],
     requested_terms: tuple[str, ...],
+    labeler: Any = None,
 ) -> dict[str, Any] | None:
     """Project one stored result into term-specific, non-row evidence."""
 
@@ -3133,9 +3452,11 @@ def _public_requested_model_coefficients(
         if not isinstance(coefficient, dict):
             missing_terms.append(term)
             continue
+        label = labeler.label(term) if labeler is not None else term
         public_coefficients.append(
             {
                 "term": term,
+                **({"label": label} if label != term else {}),
                 "estimate": _public_stat_number(coefficient.get("estimate")),
                 "std_error": _public_stat_number(coefficient.get("std_error")),
                 "p_value": _public_stat_number(coefficient.get("p_value")),
@@ -3206,12 +3527,82 @@ def _public_requested_model_coefficients(
         },
         "coefficients": public_coefficients,
         "missing_terms": missing_terms,
+        # When a requested term is absent, name the terms that do exist, so a
+        # request for `region` can find C(Q('region'))[T.2] instead of guessing.
+        **(
+            {
+                "available_terms": [
+                    {"term": str(term), "label": labeler.label(str(term)) if labeler is not None else str(term)}
+                    for term in list(coefficients)[:_MAX_AVAILABLE_TERMS]
+                ]
+            }
+            if missing_terms
+            else {}
+        ),
         "evidence_ref": {
             "run_id": run_id,
             "model_id": model_id,
             "result_ref": f"model_results:{model_id}",
         },
     }
+
+
+_MAX_METADATA_COLUMNS = 64
+_MAX_VALUE_LABELS_PER_COLUMN = 32
+_MAX_AVAILABLE_TERMS = 48
+
+
+def _run_declared_labels(run_root: Path) -> dict[str, Any]:
+    """The labels a run was executed with, as recorded in its inputs."""
+
+    try:
+        form = (read_json(run_root / "run_inputs.json") or {}).get("form") or {}
+    except (FileNotFoundError, OSError, ValueError):
+        return {}
+    labels = form.get("labels") if isinstance(form, dict) else None
+    return labels if isinstance(labels, dict) else {}
+
+
+def _bounded_declared_metadata(labels: dict[str, Any]) -> dict[str, Any] | None:
+    """Declared metadata trimmed to a size an Agent turn can carry."""
+
+    out: dict[str, Any] = {}
+    omitted: list[str] = []
+    for field in ("variable_labels", "measurement_level", "user_missing_values"):
+        mapping = labels.get(field)
+        if isinstance(mapping, dict) and mapping:
+            keys = sorted(mapping)[:_MAX_METADATA_COLUMNS]
+            if len(mapping) > len(keys):
+                omitted.append(field)
+            out[field] = {key: mapping[key] for key in keys}
+    value_labels = labels.get("value_labels")
+    if isinstance(value_labels, dict) and value_labels:
+        bounded: dict[str, Any] = {}
+        for column in sorted(value_labels)[:_MAX_METADATA_COLUMNS]:
+            mapping = value_labels[column]
+            if not isinstance(mapping, dict):
+                continue
+            keys = sorted(mapping)[:_MAX_VALUE_LABELS_PER_COLUMN]
+            if len(mapping) > len(keys):
+                omitted.append(f"value_labels.{column}")
+            bounded[column] = {key: mapping[key] for key in keys}
+        if bounded:
+            out["value_labels"] = bounded
+    if not out:
+        return None
+    if omitted:
+        out["omitted"] = omitted
+    return out
+
+
+def _run_term_labeler(run_root: Path) -> Any:
+    from ..term_labels import TermLabeler
+
+    labels = _run_declared_labels(run_root)
+    return TermLabeler(
+        variable_labels=labels.get("variable_labels") if isinstance(labels.get("variable_labels"), dict) else {},
+        value_labels=labels.get("value_labels") if isinstance(labels.get("value_labels"), dict) else {},
+    )
 
 
 def _public_stat_number(value: Any) -> int | float | None:
@@ -4122,12 +4513,51 @@ def _public_operation_artifact_result(
         "statistical_test",
         "post_estimation",
         "p7_analysis",
+        "workflow_capability_result",
     }:
         return None, ["raw_artifact_payloads"]
     result = payload.get("result")
     if not isinstance(result, dict):
         return None, ["raw_artifact_payloads"]
+    if artifact_type == "workflow_capability_result" and isinstance(result.get("result"), dict):
+        # {operation_id, family, source_columns, result: {...}}: the inner
+        # result holds the statistics; lifting it keeps them inside the
+        # projection's nesting limit.
+        result = {
+            "operation_id": result.get("operation_id"),
+            "source_columns": result.get("source_columns"),
+            **result["result"],
+        }
+    if (
+        artifact_type == "statistical_exploration"
+        and result.get("operation") == "tabulate"
+        and isinstance(result.get("rows"), list)
+    ):
+        # A frequency table is an aggregate. Its entries are stored under
+        # `rows` for the UI table, a key the projection withholds as raw data.
+        result = {**{key: value for key, value in result.items() if key != "rows"}, "frequencies": result["rows"]}
+    if artifact_type == "statistical_exploration":
+        # Grouped statistics sit at groups[i].variables[name].percentiles --
+        # one level deeper than any other result. Lifting each group's
+        # variables into the group, and allowing one more level, keeps every
+        # group's numbers; before, the Agent saw only "[omitted: nesting
+        # limit]" and could not answer "mean wage by sex".
+        if isinstance(result.get("groups"), list):
+            result = {**result, "groups": [_lift_group_variables(group) for group in result["groups"]]}
+        return (
+            _bounded_public_result_value(result, budget=_PublicResultBudget(remaining_items=320), max_depth=5),
+            ["raw_artifact_payloads", "raw_rows"],
+        )
     return _bounded_public_result_value(result), ["raw_artifact_payloads", "raw_rows"]
+
+
+def _lift_group_variables(group: Any) -> Any:
+    if not isinstance(group, dict) or not isinstance(group.get("variables"), dict):
+        return group
+    lifted = {key: value for key, value in group.items() if key not in {"variables", "filters"}}
+    for name, statistics in group["variables"].items():
+        lifted[name if name not in lifted else f"variable:{name}"] = statistics
+    return lifted
 
 
 def _node_public_result_evidence(
@@ -4527,6 +4957,7 @@ def _bounded_public_result_value(
     *,
     depth: int = 0,
     budget: _PublicResultBudget | None = None,
+    max_depth: int = 4,
 ) -> Any:
     """Keep a numerical result compact and reject row-shaped/raw payload fields."""
 
@@ -4542,11 +4973,13 @@ def _bounded_public_result_value(
         if limit <= 0:
             budget.omitted_items += 1
             return "[omitted: result string budget]"
-        budget.remaining_string_characters -= limit
+        # Charge what is kept, not the cap: charging the cap let seven short
+        # labels exhaust the budget and blank out every later test name.
+        budget.remaining_string_characters -= min(len(value), limit)
         if len(value) > limit:
             budget.omitted_items += 1
         return value[:limit]
-    if depth >= 4:
+    if depth >= max_depth:
         budget.omitted_items += 1
         return "[omitted: nesting limit]"
     if isinstance(value, list):
@@ -4557,7 +4990,7 @@ def _bounded_public_result_value(
                 break
             if isinstance(item, (dict, list, str, int, float, bool)) or item is None:
                 bounded_list.append(
-                    _bounded_public_result_value(item, depth=depth + 1, budget=budget)
+                    _bounded_public_result_value(item, depth=depth + 1, budget=budget, max_depth=max_depth)
                 )
         return bounded_list
     if not isinstance(value, dict):
@@ -4587,7 +5020,7 @@ def _bounded_public_result_value(
             budget.omitted_items += 1
             continue
         bounded[bounded_key] = _bounded_public_result_value(
-            value[key], depth=depth + 1, budget=budget
+            value[key], depth=depth + 1, budget=budget, max_depth=max_depth
         )
     omitted_here = budget.omitted_items - omissions_at_entry
     if omitted_here:

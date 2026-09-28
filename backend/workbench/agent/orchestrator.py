@@ -8,6 +8,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
+from collections.abc import Awaitable, Callable
 from typing import Any, Iterable
 from uuid import uuid4
 
@@ -55,7 +56,13 @@ from .execution import (
     merge_execution,
 )
 from .events import AgentEventStream
-from .operations import OperationRecord, OperationRecordStore, OperationRegistry
+from .operations import (
+    RERUN_OPERATIONS,
+    OperationRecord,
+    OperationRecordStore,
+    OperationRegistry,
+    is_rerun_operation,
+)
 from .proposals import (
     ProposalConfirmation,
     ProposalConfirmationError,
@@ -524,6 +531,40 @@ def _overrides_from_proposal_changes(changes: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _require_editable_rerun_target(
+    run_root: Path, run_id: str, arguments: dict[str, Any]
+) -> None:
+    """Refuse a rerun aimed at a node execution will refuse as not editable.
+
+    Labels and missing codes belong to the data, so an Agent naturally
+    targets the data node; execution only reruns from an editable (model)
+    node. Saying so here, with the node to use, lets it re-plan.
+    """
+
+    from ..services.rerun_service import editable_rerun_nodes
+
+    node_ref = (arguments.get("target") or {}).get("node_ref")
+    if not isinstance(node_ref, str) or not node_ref:
+        return
+    try:
+        candidates = editable_rerun_nodes(run_root.parent.parent, run_id)
+        from ..graph_store import GraphStore
+
+        known = GraphStore(runs_root=run_root.parent).read(run_id).nodes
+    except Exception:
+        return
+    if node_ref not in known or node_ref in candidates:
+        return
+    from .tools import ToolVisibleError
+
+    raise ToolVisibleError(
+        f"MODEL_RERUN_TARGET_NOT_EDITABLE: {node_ref} cannot be rerun. model.rerun "
+        "edits a model node; target "
+        + (", ".join(candidates) if candidates else "a model node")
+        + ". Labels and missing codes declared there apply to the whole run."
+    )
+
+
 class WorkbenchOrchestrator:
     """Bind Main/Chain roles to AgentCore without leaking Workbench state into it."""
 
@@ -558,6 +599,10 @@ class WorkbenchOrchestrator:
         self._commands: dict[str, AgentCommand] = {}
         self._execution_locks: dict[str, asyncio.Lock] = {}
         self._operation_locks: dict[str, asyncio.Lock] = {}
+        # Set by the HTTP layer, which owns the context-fingerprint and active
+        # head checks a confirmation needs. When absent, every proposal waits
+        # for the user (see read_only_policy).
+        self.read_only_runner: Callable[[Any], Awaitable[OperationRecord]] | None = None
         self._lease_owner = f"agent:{uuid4().hex}"
 
     def _compile_workflow_record(
@@ -618,13 +663,9 @@ class WorkbenchOrchestrator:
 
         from .workflow_runtime import collect_post_estimation_results
 
-        return [
-            entry
-            for entry in collect_post_estimation_results(
-                Path(project_root), str(draft.target["run_id"])
-            )
-            if entry["workflow_id"] == draft.workflow_id
-        ]
+        return collect_post_estimation_results(
+            Path(project_root), str(draft.target["run_id"]), workflow_id=draft.workflow_id
+        )
 
     def _persist_workflow_step_audit(
         self,
@@ -717,6 +758,55 @@ class WorkbenchOrchestrator:
             )
         except KeyError:
             return requested_active_head_run_id
+
+    def _preflight_model_rerun_declarations(
+        self, arguments: dict[str, Any], *, metadata_edit: bool = False
+    ) -> None:
+        """Refuse, before the user is asked, a rerun that cannot do what it says.
+
+        Execution applies the same shared check; running it here too means the
+        Agent hears the reason while it can still propose the right operation,
+        instead of the user confirming a proposal that is then refused.
+        """
+
+        from ..lineage.upload_store import verify_upload
+        from ..repository.run_repository import _resolve_run_root
+        from ..services.run_service import (
+            RerunDeclarationError,
+            reject_invalid_rerun_declarations,
+        )
+
+        project_root = getattr(self.context_provider, "project_root", None)
+        run_id = (arguments.get("target") or {}).get("run_id")
+        if project_root is None or not isinstance(run_id, str) or not run_id:
+            return
+        try:
+            run_root = _resolve_run_root(str(project_root), run_id)
+        except Exception:
+            return
+        _require_editable_rerun_target(run_root, run_id, arguments)
+        try:
+            inputs = read_run_inputs(run_root)
+            upload_bytes = verify_upload(
+                Path(project_root), str((inputs.get("upload") or {}).get("sha256") or "")
+            ).read_bytes()
+        except Exception:
+            # Unreadable inputs are execution's to report, with its own codes.
+            return
+        try:
+            reject_invalid_rerun_declarations(
+                inputs["form"],
+                _overrides_from_proposal_changes(dict(arguments.get("changes") or {})),
+                upload_bytes,
+                str((inputs.get("upload") or {}).get("filename") or ""),
+                metadata_edit=metadata_edit,
+            )
+        except RerunDeclarationError as exc:
+            from .tools import ToolVisibleError
+
+            # A plain ValueError reaches the model as its type name only; this
+            # message is what lets the Agent re-plan.
+            raise ToolVisibleError(f"{exc.code}: {exc}") from exc
 
     def create_proposal(
         self,
@@ -1300,6 +1390,8 @@ class WorkbenchOrchestrator:
                     from_node=request.source_node_ref,
                     op_overrides=_overrides_from_proposal_changes(request.changes),
                     rerun_reason="agent_confirmed",
+                    # metadata.edit may declare columns outside the model.
+                    metadata_edit=request.operation_id == "metadata.edit",
                     rerun_from={
                         "owner_run_id": request.source_run_id,
                         "op_node_id": request.source_node_ref,
@@ -1724,7 +1816,7 @@ class WorkbenchOrchestrator:
             raise ValueError("completed operation has no child chain")
         if not isinstance(fork_id, str) or not fork_id:
             raise ValueError("completed operation has no fork")
-        if record.operation_id == "model.rerun":
+        if is_rerun_operation(record.operation_id):
             target_run_id = effect.outputs.get("target_run_id") or bindings.get(
                 "child_run_id"
             )
@@ -1928,7 +2020,10 @@ class WorkbenchOrchestrator:
             failpoint=self.failpoint,
             risk_authorization_store=self.risk_authorization_store,
         )
-        return await lifecycle.execute(record_id)
+        terminal = await lifecycle.execute(record_id)
+        if terminal.status in {"completed", "failed"}:
+            _record_operation_in_ledger(project_root, terminal)
+        return terminal
 
     async def recover_operations(
         self,
@@ -1962,7 +2057,7 @@ class WorkbenchOrchestrator:
                 target_run_id = bindings.get("child_run_id") or record.outputs.get(
                     "target_run_id"
                 )
-                if record.operation_id == "model.rerun" and isinstance(
+                if is_rerun_operation(record.operation_id) and isinstance(
                     target_run_id, str
                 ) and target_run_id:
                     if record.outputs.get("target_run_id") != target_run_id:
@@ -2504,6 +2599,59 @@ class WorkbenchOrchestrator:
         target["artifact_id"] = str(context["source_artifact_id"])
         return {**arguments, "target": target}
 
+    def _bind_workflow_preconditions(
+        self, arguments: dict[str, Any], *, session_id: str
+    ) -> dict[str, Any]:
+        """Derive a workflow's preconditions from the node it actually targets.
+
+        A workflow runs on a dataset node, but the Agent copies preconditions
+        from whatever node it inspected -- the selected model node, when the
+        user had clicked one. Confirmation re-derives the fingerprint of the
+        target node, so every such proposal was rejected as stale although
+        nothing had changed. The backend derives them here, from the target,
+        as it already does for reruns.
+        """
+
+        inspect = getattr(self.context_provider, "inspect_node_context", None)
+        target = dict(arguments.get("target") or {})
+        preconditions = dict(arguments.get("preconditions") or {})
+        if inspect is None or not target.get("run_id") or not target.get("node_ref"):
+            return arguments
+        from .context_tools import InspectNodeContextRequest
+
+        try:
+            chain_id = self.repository.get_metadata(session_id).get("chain_id")
+        except (KeyError, FileNotFoundError, ValueError):
+            chain_id = None
+        active_head = str(preconditions.get("active_head_run_id") or target["run_id"])
+        if isinstance(chain_id, str) and chain_id:
+            try:
+                active_head = self._resolve_chain_head(chain_id, active_head)
+            except ChainHeadConflict as exc:
+                raise ValueError("active_head_run_id: " + str(exc)) from exc
+        try:
+            snapshot = inspect(
+                InspectNodeContextRequest(
+                    request_id=f"propose:{target['run_id']}",
+                    owner_run_id=str(target["run_id"]),
+                    op_node_id=str(target["node_ref"]),
+                    active_head_run_id=active_head,
+                )
+            )
+        except (KeyError, OSError, ValueError):
+            # An unresolvable target is the typed validator's to report.
+            return arguments
+        fingerprint = snapshot.get("context_fingerprint")
+        if not isinstance(fingerprint, str) or not fingerprint:
+            return arguments
+        preconditions.update(
+            context_version=snapshot["context_version"],
+            context_fingerprint=fingerprint,
+            owner_resolution=snapshot["owner_resolution"],
+            active_head_run_id=snapshot["active_head_run_id"],
+        )
+        return {**arguments, "preconditions": preconditions}
+
     def _create_analysis_loop_proposal_from_agent_arguments(
         self,
         *,
@@ -2686,8 +2834,10 @@ class WorkbenchOrchestrator:
         if operation_id == "data.columns.cast":
             return self._canonicalize_data_columns_cast_arguments(arguments)
         if operation_id == "operation.multi_step":
-            return self._canonicalize_workflow_arguments(arguments)
-        if self.context_provider is None or operation_id not in {"model.rerun", "graph.fork"}:
+            return self._bind_workflow_preconditions(
+                self._canonicalize_workflow_arguments(arguments), session_id=session_id
+            )
+        if self.context_provider is None or operation_id not in {*RERUN_OPERATIONS, "graph.fork"}:
             return arguments
         inspect = getattr(self.context_provider, "inspect_node_context", None)
         if inspect is None:
@@ -2783,7 +2933,7 @@ class WorkbenchOrchestrator:
             ):
                 registry.register(definition)
 
-        def propose_operation(arguments: dict[str, Any], context) -> dict[str, Any]:
+        async def propose_operation(arguments: dict[str, Any], context) -> dict[str, Any]:
             if context.session_id != session_id:
                 raise ValueError("tool session is outside the registered chain scope")
             operation_id = str(arguments["operation_id"])
@@ -2825,6 +2975,10 @@ class WorkbenchOrchestrator:
                     },
                     metadata=metadata,
                 )
+            if is_rerun_operation(operation_id):
+                self._preflight_model_rerun_declarations(
+                    arguments, metadata_edit=operation_id == "metadata.edit"
+                )
             proposal = self.create_proposal(
                 chain_id=chain_id,
                 operation_id=operation_id,
@@ -2837,7 +2991,7 @@ class WorkbenchOrchestrator:
                 risks=arguments["risks"],
                 command_id=command_id,
             )
-            return {"requires_confirmation": True, "proposal": proposal.to_dict()}
+            return await self._run_or_await_confirmation(proposal, session_id=session_id)
 
         def propose_analysis_loop(arguments: dict[str, Any], context) -> dict[str, Any]:
             if context.session_id != session_id:
@@ -2894,6 +3048,67 @@ class WorkbenchOrchestrator:
             )
         )
         return registry
+
+    async def _run_or_await_confirmation(self, proposal: Any, *, session_id: str) -> dict[str, Any]:
+        """Run a read-only workflow now; leave anything else for the user.
+
+        The model receives the executed workflow's results in the same turn,
+        so it answers with the numbers instead of asking for a click.
+        """
+
+        from ..analysis_ledger import inferential_count, read as read_ledger
+        from .read_only_policy import ACTOR, decide
+
+        project_root = getattr(self.context_provider, "project_root", None)
+        if self.read_only_runner is None or project_root is None:
+            return {"requires_confirmation": True, "proposal": proposal.to_dict()}
+        prior = inferential_count(read_ledger(project_root), session_id=session_id)
+        decision = decide(proposal.operation_id, proposal.changes, prior_inferential_steps=prior)
+        if not decision.allowed:
+            return {
+                "requires_confirmation": True,
+                "proposal": proposal.to_dict(),
+                "confirmation_reason": decision.reason,
+            }
+        try:
+            record = await self.read_only_runner(proposal)
+        except Exception as exc:  # noqa: BLE001 - reported to the model, never swallowed
+            # A tool exception would end the turn as a runtime error; the user
+            # is better served by the Agent explaining what stopped the run.
+            detail = getattr(exc, "message", None) or str(exc) or type(exc).__name__
+            return {
+                "executed": False,
+                "proposal_id": proposal.proposal_id,
+                "error": f"{type(exc).__name__}: {detail}",
+                "guidance": (
+                    "The read-only workflow could not run. Tell the user what stopped it; "
+                    "do not report any result."
+                ),
+            }
+        results = []
+        results_reader = getattr(self.context_provider, "executed_workflow_results", None)
+        if record.status == "completed" and results_reader is not None:
+            results = results_reader(record)
+        tests_run = prior + (decision.inferential_steps if record.status == "completed" else 0)
+        return {
+            "executed": True,
+            "authorized_by": ACTOR,
+            "proposal_id": proposal.proposal_id,
+            "operation": {
+                "record_id": record.record_id,
+                "status": record.status,
+                "error": record.error,
+            },
+            "results": results,
+            "inferential_tests_run_this_session": tests_run,
+            "guidance": (
+                "This read-only workflow ran without a confirmation and is recorded in the "
+                "analysis ledger. Answer from these results only; say how many tests were run "
+                "in this session when you report a p-value."
+                if record.status == "completed"
+                else "The workflow failed; tell the user what failed from operation.error."
+            ),
+        }
 
     def dispatch_to_chain(
         self,
@@ -3004,3 +3219,36 @@ class WorkbenchOrchestrator:
             if event.event_type == "command_completed" and event.payload.get("command_id") == command_id:
                 return str(event.payload.get("result", ""))
         return None
+
+
+def _record_operation_in_ledger(project_root: Any, record: OperationRecord) -> None:
+    """Every executed Agent operation enters the analysis ledger."""
+
+    from ..analysis_ledger import LedgerEntry, LedgerStep, record as record_entry
+
+    if record.operation_id == "operation.multi_step":
+        steps = tuple(
+            LedgerStep.of(str(step.get("operation_id", "")), str(step.get("step_id", "")))
+            for step in (record.changes.get("steps") or ())
+            if isinstance(step, dict)
+        )
+    else:
+        steps = (LedgerStep.of(record.operation_id),)
+    outputs = record.outputs or {}
+    record_entry(
+        project_root,
+        LedgerEntry(
+            # Typed UI data operations run through the same lifecycle as
+            # Agent proposals; their records carry actor_type "human_ui".
+            actor="user" if record.actor_type == "human_ui" else "agent",
+            authorized_by="read_only_policy" if record.actor_type == "read_only_policy" else "user",
+            source=record.operation_id,
+            status="completed" if record.status == "completed" else "failed",
+            steps=steps,
+            run_id=str(record.target.get("run_id") or "") or None,
+            node_id=str(record.target.get("node_ref") or "") or None,
+            produced_run_id=str(outputs.get("child_run_id") or outputs.get("run_id") or "") or None,
+            session_id=record.agent_session_id,
+            record_id=record.record_id,
+        ),
+    )

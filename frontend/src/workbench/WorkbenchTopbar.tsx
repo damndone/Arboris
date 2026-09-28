@@ -39,6 +39,7 @@ interface TabSpec {
 export const VIEW_TABS: TabSpec[] = [
   { id: "notebook", label: "Notebook" },
   { id: "graph", label: "Graph" },
+  { id: "data", label: "Data" },
   { id: "table", label: "Table" },
   { id: "report", label: "Report" },
 ];

@@ -17,6 +17,8 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
+from .storage import _exclusive_jsonl_lock
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -151,7 +153,7 @@ class JsonlSessionRepository:
 
         if not isinstance(status, str) or not status:
             raise ValueError("status must be a non-empty string")
-        with self._lock:
+        with self._lock, _exclusive_jsonl_lock(self._session_path(session_id)):
             metadata = self.get_metadata(session_id)
             metadata["status"] = status
             self._atomic_write_json(self._metadata_path(session_id), metadata)
@@ -167,7 +169,10 @@ class JsonlSessionRepository:
 
         if not entry_type:
             raise ValueError("entry_type must not be empty")
-        with self._lock:
+        # Every request builds its own repository, so the instance lock alone
+        # does not serialize two requests writing one session; the file lock
+        # does (threads and processes alike).
+        with self._lock, _exclusive_jsonl_lock(self._session_path(session_id)):
             metadata = self.get_metadata(session_id)
             previous = metadata.get("leaf_entry_id")
             parent_ref = EntryRef(session_id, previous) if previous else None

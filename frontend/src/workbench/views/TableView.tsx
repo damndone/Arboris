@@ -52,6 +52,7 @@ import {
   ARMA_GARCH_CHART_IDS,
   useArmaGarchCharts,
 } from "../../runResult/useArmaGarchCharts";
+import { DatasetExportPanel } from "./DatasetExportPanel";
 import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
 import { resolveTableRunScope } from "./tableRunScope";
 import { PredictionResearchEvidenceCard } from "../../runResult/PredictionResearchEvidenceCard";
@@ -259,9 +260,15 @@ function tableViewExtensions(detail: RunDetail | null): TableViewRunDetailExtens
 
 function variableLabelsForTable(detail: RunDetail | null): Readonly<Record<string, string>> {
   const extensions = tableViewExtensions(detail);
-  return extensions.variable_labels
+  const variableLabels = extensions.variable_labels
     ?? extensions.labels?.variable_labels
     ?? EMPTY_VARIABLE_LABELS;
+  const termLabels = detail?.term_labels;
+  // The server renders coefficient terms (dummies, polynomials, interactions)
+  // with the declared labels; a plain variable label is the fallback.
+  return termLabels && Object.keys(termLabels).length > 0
+    ? { ...variableLabels, ...termLabels }
+    : variableLabels;
 }
 
 function TableViewEvidenceStatus({
@@ -477,7 +484,13 @@ function PostEstimationResultTable({ entry }: { entry: PostEstimationResult }) {
   );
 }
 
-function CoefficientTable({ model }: { model: ModelResult }) {
+function CoefficientTable({
+  model,
+  termLabels = EMPTY_VARIABLE_LABELS,
+}: {
+  model: ModelResult;
+  termLabels?: Readonly<Record<string, string>>;
+}) {
   const repeatedMeasures = buildRepeatedMeasuresViewModel(model);
   const rows = repeatedMeasures.kind === "complete"
     ? [[repeatedMeasures.primaryCoefficient.result_id, repeatedMeasures.primaryCoefficient] as const]
@@ -515,7 +528,11 @@ function CoefficientTable({ model }: { model: ModelResult }) {
         <tbody>
           {rows.map(([term, c]) => (
             <tr key={term} style={{ borderTop: "1px solid var(--separator)" }}>
-              <td style={{ padding: "2px 8px", fontFamily: "var(--font-mono, monospace)" }}>{term}</td>
+              {termLabels[term] && termLabels[term] !== term ? (
+                <td style={{ padding: "2px 8px" }} title={term}>{termLabels[term]}</td>
+              ) : (
+                <td style={{ padding: "2px 8px", fontFamily: "var(--font-mono, monospace)" }}>{term}</td>
+              )}
               <td style={{ padding: "2px 8px" }}>{fmt(c.estimate)}</td>
               <td style={{ padding: "2px 8px" }}>{fmt(c.std_error)}</td>
               <td style={{ padding: "2px 8px" }}>
@@ -1096,7 +1113,7 @@ function RunResultsPanel({
         <section data-testid="table-view-coefficients">
           <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>Coefficients</h3>
           {models.map((m) => (
-            <CoefficientTable key={m.model_id} model={m} />
+            <CoefficientTable key={m.model_id} model={m} termLabels={variableLabels} />
           ))}
         </section>
       )}
@@ -1167,6 +1184,10 @@ function RunResultsPanel({
             </div>
           </div>
         </section>
+      )}
+
+      {!loading && !error && detail && projectRoot && (
+        <DatasetExportPanel projectRoot={projectRoot} runId={runId} />
       )}
 
       {!loading && !error && otherArtifacts.length > 0 && (

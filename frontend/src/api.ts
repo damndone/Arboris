@@ -239,6 +239,7 @@ export type RunDetail = RunSummary & {
   /** Durable deterministic report packets projected from diagnostic_summary. */
   table_1?: Array<Record<string, unknown>>;
   statistical_evidence?: Record<string, unknown> | null;
+  term_labels?: Record<string, string>;
   labels?: {
     variable_labels?: Record<string, string>;
     value_labels?: Record<string, Record<string, string>>;
@@ -732,27 +733,107 @@ function columnStats(name: string, rows: Record<string, unknown>[]): ColumnPrevi
   };
 }
 
+type DeclaredMissingCode = number | string | { low: number; high: number };
+
+function isDeclaredMissing(value: unknown, codes: DeclaredMissingCode[]): boolean {
+  if (value === null || value === undefined) return false;
+  const numeric = typeof value === "number" ? value : Number(value);
+  return codes.some((code) => {
+    if (code !== null && typeof code === "object") {
+      return Number.isFinite(numeric) && numeric >= code.low && numeric <= code.high;
+    }
+    return typeof code === "number" ? numeric === code : String(value) === code;
+  });
+}
+
+/** Rows with each column's declared missing-value codes (SPSS user-missing,
+ * e.g. -100 "inapplicable") read as missing, so the column cards' mean,
+ * spread and unique count describe answers, not codes. The preview table
+ * keeps the codes as stored. */
+export function withoutDeclaredMissing(
+  rows: Record<string, unknown>[],
+  declared: unknown,
+): Record<string, unknown>[] {
+  if (!declared || typeof declared !== "object") return rows;
+  const entries = Object.entries(declared as Record<string, unknown>).filter(
+    (entry): entry is [string, DeclaredMissingCode[]] => Array.isArray(entry[1]) && entry[1].length > 0,
+  );
+  if (entries.length === 0) return rows;
+  return rows.map((row) => {
+    const next = { ...row };
+    for (const [column, codes] of entries) {
+      if (isDeclaredMissing(next[column], codes)) next[column] = null;
+    }
+    return next;
+  });
+}
+
+const STATISTICAL_FILE_PATTERN = /\.(sav|zsav|dta)$/i;
+
+/** SPSS/Stata files carry metadata the browser cannot parse; the server reads them. */
+export function isStatisticalFile(name: string): boolean {
+  return STATISTICAL_FILE_PATTERN.test(name);
+}
+
+type StatisticalUploadPreview = {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total_rows: number;
+  labels: Record<string, unknown>;
+};
+
+async function readStatisticalRows(
+  projectRoot: string,
+  file: File,
+): Promise<StatisticalUploadPreview> {
+  const form = new FormData();
+  form.append("project_root", projectRoot);
+  form.append("file", file);
+  const response = await fetch(apiUrl("/uploads/preview"), { method: "POST", body: form });
+  return readResponse<StatisticalUploadPreview>(response);
+}
+
 export async function previewFile(
   file: File,
   sheetName?: string,
   transpose?: boolean,
+  projectRoot?: string,
 ): Promise<FilePreview> {
-  const buffer =
-    typeof file.arrayBuffer === "function"
-      ? await file.arrayBuffer()
-      : await new Promise<ArrayBuffer>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as ArrayBuffer);
-          reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
-          reader.readAsArrayBuffer(file);
-        });
-  const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-  const selectedSheet = sheetName ?? workbook.SheetNames[0];
-  const sheet = workbook.Sheets[selectedSheet];
-  let rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-    defval: null,
-    raw: true,
-  });
+  let rows: Record<string, unknown>[];
+  let sheetNames: string[] = [];
+  let selectedSheet = "";
+  let headerNames: string[];
+  let totalRows: number | null = null;
+  let declaredMissing: unknown = null;
+  if (isStatisticalFile(file.name)) {
+    if (!projectRoot) {
+      throw new Error("Previewing an SPSS or Stata file needs an open project.");
+    }
+    const statistical = await readStatisticalRows(projectRoot, file);
+    rows = statistical.rows;
+    headerNames = statistical.columns;
+    totalRows = statistical.total_rows;
+    declaredMissing = (statistical.labels as { user_missing_values?: unknown } | undefined)?.user_missing_values;
+  } else {
+    const buffer =
+      typeof file.arrayBuffer === "function"
+        ? await file.arrayBuffer()
+        : await new Promise<ArrayBuffer>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as ArrayBuffer);
+            reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+            reader.readAsArrayBuffer(file);
+          });
+    const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+    sheetNames = workbook.SheetNames;
+    selectedSheet = sheetName ?? workbook.SheetNames[0];
+    const sheet = workbook.Sheets[selectedSheet];
+    rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: null,
+      raw: true,
+    });
+    headerNames = (XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 })[0] ?? []).map(String);
+  }
   if (transpose && rows.length > 0) {
     const originalKeys = Object.keys(rows[0]);
     const firstKey = originalKeys[0];
@@ -770,11 +851,9 @@ export async function previewFile(
     }
     rows = transposed;
   }
-  const columnNames =
-    rows.length > 0
-      ? Object.keys(rows[0])
-      : XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 })[0] ?? [];
-  const columns = columnNames.map((name) => columnStats(String(name), rows));
+  const columnNames = rows.length > 0 ? Object.keys(rows[0]) : headerNames;
+  const statisticsRows = withoutDeclaredMissing(rows, declaredMissing);
+  const columns = columnNames.map((name) => columnStats(String(name), statisticsRows));
   const suggestedY =
     columns.find((column) => column.suggestedRole === "y" && column.dtype === "numeric")?.name ??
     columns.find(
@@ -823,9 +902,10 @@ export async function previewFile(
 
   return {
     fileName: file.name,
-    sheetNames: workbook.SheetNames,
+    sheetNames,
     selectedSheet,
-    rowCount: rows.length,
+    // A server preview samples the first rows; the count is the whole file.
+    rowCount: totalRows ?? rows.length,
     columnCount: columns.length,
     columns,
     previewRows: rows.slice(0, 10),
@@ -1681,4 +1761,83 @@ export async function deleteCompareNode(
     { method: "DELETE" },
   );
   return readResponse<{ deleted: string }>(response);
+}
+
+// v1.8.9 step 5 — SPSS/Stata dataset export with a loss report.
+
+export type DatasetExportFormat = "sav" | "zsav" | "dta" | "csv" | "xlsx";
+
+export type DatasetExportNote = { column: string; field: string; message: string };
+
+export type DatasetExportResult = {
+  artifact_id: string;
+  filename: string;
+  download_url: string;
+  report: {
+    format: DatasetExportFormat;
+    rows: number;
+    columns: number;
+    renamed: Record<string, string>;
+    notes: DatasetExportNote[];
+  };
+};
+
+export type DatasetExportFilter = { column: string; op: string; value?: unknown };
+
+/** What to export and how, like Stata's export/save options. */
+export type DatasetExportOptions = {
+  format: DatasetExportFormat;
+  columns?: string[] | null;
+  filters?: DatasetExportFilter[];
+  dta_version?: 13 | 14 | 15;
+  value_labels?: "labels" | "strings" | "none";
+  missing_codes?: "as_missing" | "keep_codes";
+  filename?: string | null;
+};
+
+export type DatasetExportPreview = DatasetExportResult["report"] & {
+  source_rows: number;
+  column_names: string[];
+  sample: Record<string, unknown>[];
+  filename: string;
+};
+
+function exportBody(nodeId: string, options: DatasetExportFormat | DatasetExportOptions): string {
+  const chosen = typeof options === "string" ? { format: options } : options;
+  const body: Record<string, unknown> = { node_id: nodeId, ...chosen };
+  for (const key of Object.keys(body)) {
+    if (body[key] === null || body[key] === undefined || body[key] === "") delete body[key];
+  }
+  return JSON.stringify(body);
+}
+
+export async function exportDataset(
+  projectRoot: string,
+  runId: string,
+  nodeId: string,
+  options: DatasetExportFormat | DatasetExportOptions,
+): Promise<DatasetExportResult> {
+  const response = await fetch(
+    apiUrl(
+      `/runs/${encodeURIComponent(runId)}/datasets/export?project_root=${encodeURIComponent(projectRoot)}`,
+    ),
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: exportBody(nodeId, options) },
+  );
+  return readResponse<DatasetExportResult>(response);
+}
+
+/** Exactly what the file will contain, without writing it. */
+export async function previewDatasetExport(
+  projectRoot: string,
+  runId: string,
+  nodeId: string,
+  options: DatasetExportOptions,
+): Promise<DatasetExportPreview> {
+  const response = await fetch(
+    apiUrl(
+      `/runs/${encodeURIComponent(runId)}/datasets/export/preview?project_root=${encodeURIComponent(projectRoot)}`,
+    ),
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: exportBody(nodeId, options) },
+  );
+  return readResponse<DatasetExportPreview>(response);
 }

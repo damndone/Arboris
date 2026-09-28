@@ -99,6 +99,7 @@ class ExplorationSpec:
             "summarize",
             "summarize_detail",
             "misstable",
+            "tabulate",
             "corr",
             "derive_boolean",
             "scatter",
@@ -202,20 +203,27 @@ def execute_exploration(frame: Any, spec: ExplorationSpec) -> dict[str, Any]:
         }
 
     if spec.operation == "summarize":
+        numeric, skipped = _split_numeric(filtered, spec.selected_columns)
         return {
             **base,
             "missing_policy": "variablewise",
-            "variables": _summary_variables(filtered, spec.selected_columns),
+            "variables": _summary_variables(filtered, tuple(numeric)),
+            **({"non_numeric_columns": skipped} if skipped else {}),
         }
 
     if spec.operation == "summarize_detail":
         quantile_method = _quantile_method(spec.options)
+        numeric, skipped = _split_numeric(filtered, spec.selected_columns)
         return {
             **base,
             "missing_policy": "variablewise",
             "quantile_method": quantile_method,
-            "variables": _detail_variables(filtered, spec.selected_columns, spec.options),
+            "variables": _detail_variables(filtered, tuple(numeric), spec.options),
+            **({"non_numeric_columns": skipped} if skipped else {}),
         }
+
+    if spec.operation == "tabulate":
+        return {**base, "missing_policy": "variablewise", **_frequency_tables(filtered, spec.selected_columns)}
 
     if spec.operation == "misstable":
         columns = _selected_columns(frame, spec.selected_columns)
@@ -891,6 +899,73 @@ def _selected_columns(frame: pd.DataFrame, selected: tuple[str, ...]) -> list[st
     return columns
 
 
+def _split_numeric(frame: pd.DataFrame, selected: tuple[str, ...]) -> tuple[list[str], list[str]]:
+    """Numeric columns to summarise, and the others, reported rather than refused.
+
+    A mean of a text column does not exist; like Stata's summarize, such a
+    column is left out -- but named in the result, and a request with no
+    numeric column at all is refused with where to go instead.
+    """
+
+    columns = _selected_columns(frame, selected)
+    numeric = [
+        column for column in columns
+        if pd.api.types.is_numeric_dtype(frame[column]) and not pd.api.types.is_bool_dtype(frame[column])
+    ]
+    skipped = [column for column in columns if column not in numeric]
+    if not numeric:
+        raise StatisticalExplorationValidationError(
+            "no numeric columns to summarize ("
+            + ", ".join(skipped)
+            + "); use tabulate for frequency tables of categorical variables"
+        )
+    return numeric, skipped
+
+
+MAX_TABULATE_VALUES = 100
+
+
+def _frequency_tables(frame: pd.DataFrame, selected: tuple[str, ...]) -> dict[str, Any]:
+    """Frequencies per value (SPSS FREQUENCIES / Stata tabulate), any column type."""
+
+    columns = _selected_columns(frame, selected)
+    variables: dict[str, dict[str, Any]] = {}
+    rows: list[dict[str, Any]] = []
+    for column in columns:
+        series = frame[column]
+        valid = series.dropna()
+        counts = valid.value_counts(sort=True)
+        shown = counts.head(MAX_TABULATE_VALUES)
+        variables[column] = {
+            "obs": int(len(series)),
+            "valid": int(len(valid)),
+            "missing": int(series.isna().sum()),
+            "distinct": int(len(counts)),
+            "truncated": bool(len(counts) > MAX_TABULATE_VALUES),
+        }
+        for value, count in shown.items():
+            rows.append(
+                {
+                    "variable": column,
+                    "value": value.item() if hasattr(value, "item") else value,
+                    "count": int(count),
+                    "percent": _safe_number(100.0 * count / len(series)) if len(series) else None,
+                    "valid_percent": _safe_number(100.0 * count / len(valid)) if len(valid) else None,
+                }
+            )
+        if variables[column]["missing"]:
+            rows.append(
+                {
+                    "variable": column,
+                    "value": None,
+                    "count": variables[column]["missing"],
+                    "percent": _safe_number(100.0 * variables[column]["missing"] / len(series)),
+                    "valid_percent": None,
+                }
+            )
+    return {"variables": variables, "rows": rows}
+
+
 def _numeric_columns(frame: pd.DataFrame, selected: tuple[str, ...]) -> list[str]:
     columns = _selected_columns(frame, selected)
     invalid = [column for column in columns if not pd.api.types.is_numeric_dtype(frame[column])]
@@ -1006,9 +1081,12 @@ def _detail_variables(
     quantile_method = _quantile_method(options or {})
     details: dict[str, dict[str, Any]] = {}
     for column, summary in _summary_variables(frame, tuple(columns)).items():
-        series = frame[column].dropna()
+        series = frame[column].dropna().astype(float)
         details[column] = {
             **summary,
+            **_stata_moments(series),
+            "smallest": [_safe_number(value) for value in series.nsmallest(4).tolist()],
+            "largest": [_safe_number(value) for value in series.nlargest(4).sort_values().tolist()],
             "quantile_method": quantile_method,
             "percentiles": {
                 f"p{percentile}": _safe_number(_stata_percentile(series, percentile))
@@ -1016,6 +1094,26 @@ def _detail_variables(
             },
         }
     return details
+
+
+def _stata_moments(series: pd.Series) -> dict[str, Any]:
+    """Variance, sum, skewness and kurtosis as ``summarize, detail`` reports them.
+
+    Skewness and kurtosis use population moments (m3/m2^1.5 and m4/m2^2, not
+    bias-corrected), so a normal variable has kurtosis near 3, as in Stata.
+    """
+
+    n = int(series.size)
+    if n == 0:
+        return {"variance": None, "sum": None, "skewness": None, "kurtosis": None}
+    deviations = series - series.mean()
+    m2 = float((deviations**2).mean())
+    return {
+        "variance": _safe_number(series.var(ddof=1)) if n > 1 else None,
+        "sum": _safe_number(series.sum()),
+        "skewness": _safe_number(float((deviations**3).mean()) / m2**1.5) if m2 > 0 else None,
+        "kurtosis": _safe_number(float((deviations**4).mean()) / m2**2) if m2 > 0 else None,
+    }
 
 
 def _summarize_groups(

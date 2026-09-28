@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import math
-from statistics import variance as sample_variance
+from statistics import StatisticsError
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
@@ -1062,13 +1063,31 @@ def _summary_row(row: dict[str, Any]) -> dict[str, Any]:
 # --- v1.8.6 independent statistical evidence slice ---
 
 
+def sample_variance(values: Sequence[float]) -> float:
+    """Sample variance (ddof=1), as ``statistics.variance`` computes it.
+
+    ``statistics.variance`` works in exact fractions: correct, and minutes long
+    on a million observations. This is the compensated two-pass algorithm in
+    numpy; a constant sequence is exactly 0.0, so the zero-variance
+    rejections that depend on it still fire.
+    """
+
+    array = np.asarray(values, dtype=float)
+    if array.size < 2:
+        raise StatisticsError("variance requires at least two data points")
+    if array.max() == array.min():
+        return 0.0
+    deviations = array - array.mean()
+    return float((np.dot(deviations, deviations) - deviations.sum() ** 2 / array.size) / (array.size - 1))
+
+
 def _finite_values(values: Sequence[float], *, label: str, minimum: int = 2) -> list[float]:
-    result = [float(value) for value in values]
-    if len(result) < minimum:
+    array = np.asarray(values, dtype=float)
+    if array.size < minimum:
         raise ValueError(f"{label} requires at least two observations")
-    if not all(math.isfinite(value) for value in result):
+    if not np.isfinite(array).all():
         raise ValueError(f"{label} requires finite observations")
-    return result
+    return array.tolist()
 
 
 def _evidence_result(
@@ -1117,33 +1136,40 @@ def cohens_d(left: Sequence[float], right: Sequence[float]) -> dict[str, Any]:
     }
 
 
-def eta_squared(groups: Mapping[str, Sequence[float]]) -> dict[str, Any]:
-    arrays = {str(name): _finite_values(values, label=f"group {name}") for name, values in groups.items()}
+def _group_sums_of_squares(groups: Mapping[str, Sequence[float]], name: str) -> tuple[float, float, int, int]:
+    """Between- and within-group sums of squares, each group's mean computed once."""
+
+    arrays = {str(key): np.asarray(_finite_values(values, label=f"group {key}"), dtype=float) for key, values in groups.items()}
     if len(arrays) < 2:
-        raise ValueError("eta_squared requires at least two groups")
-    all_values = [value for values in arrays.values() for value in values]
-    grand_mean = sum(all_values) / len(all_values)
-    between = sum(len(values) * (sum(values) / len(values) - grand_mean) ** 2 for values in arrays.values())
-    total = sum((value - grand_mean) ** 2 for value in all_values)
+        raise ValueError(f"{name} requires at least two groups")
+    total_n = sum(array.size for array in arrays.values())
+    grand_mean = sum(float(array.sum()) for array in arrays.values()) / total_n
+    between = 0.0
+    within = 0.0
+    for array in arrays.values():
+        mean = float(array.mean())
+        between += array.size * (mean - grand_mean) ** 2
+        deviations = array - mean
+        within += float(np.dot(deviations, deviations))
+    return between, within, len(arrays), total_n
+
+
+def eta_squared(groups: Mapping[str, Sequence[float]]) -> dict[str, Any]:
+    between, within, _groups, total_n = _group_sums_of_squares(groups, "eta_squared")
+    total = between + within
     if total == 0:
         raise ValueError("eta_squared requires non-constant observations")
-    return {"effect_size_name": "eta_squared", "value": between / total, "nobs": len(all_values)}
+    return {"effect_size_name": "eta_squared", "value": between / total, "nobs": total_n}
 
 
 def omega_squared(groups: Mapping[str, Sequence[float]]) -> dict[str, Any]:
-    arrays = {str(name): _finite_values(values, label=f"group {name}") for name, values in groups.items()}
-    if len(arrays) < 2:
-        raise ValueError("omega_squared requires at least two groups")
-    all_values = [value for values in arrays.values() for value in values]
-    grand_mean = sum(all_values) / len(all_values)
-    between = sum(len(values) * (sum(values) / len(values) - grand_mean) ** 2 for values in arrays.values())
-    within = sum(sum((value - sum(values) / len(values)) ** 2 for value in values) for values in arrays.values())
-    degrees_between = len(arrays) - 1
-    degrees_within = len(all_values) - len(arrays)
+    between, within, group_count, total_n = _group_sums_of_squares(groups, "omega_squared")
+    degrees_between = group_count - 1
+    degrees_within = total_n - group_count
     mean_within = within / degrees_within if degrees_within else 0.0
     denominator = between + within + mean_within
     value = (between - degrees_between * mean_within) / denominator if denominator else 0.0
-    return {"effect_size_name": "omega_squared", "value": value, "nobs": len(all_values)}
+    return {"effect_size_name": "omega_squared", "value": value, "nobs": total_n}
 
 
 def posthoc_anova(groups: Mapping[str, Sequence[float]], *, correction: str) -> dict[str, Any]:

@@ -3,6 +3,7 @@ import { useAgentSurface } from "./AgentSurfaceContext";
 import { agentAuditExportUrl } from "./agentApi";
 import { AgentComposer } from "./AgentComposer";
 import type { AgentMessage } from "./agentTypes";
+import { AgentRowsTable, shownRows } from "./AgentRowsTable";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
 
@@ -41,6 +42,7 @@ function formatAgentResultValue(value: unknown): string {
 function observableActivity(eventType: string | null): string {
   if (!eventType) return "Preparing the bounded context";
   const normalized = eventType.toLowerCase();
+  if (normalized === "provider_retry") return "The provider connection dropped; retrying";
   if (normalized.includes("tool")) return "Checking evidence";
   if (normalized.includes("proposal")) return "Preparing a reviewable proposal";
   if (normalized.includes("message") || normalized.includes("response")) return "Drafting the response";
@@ -52,21 +54,22 @@ function terminalFailureMessage(
   transportError: string | null,
   hasPendingProposal: boolean,
 ): string | null {
-  const terminal = [...messages]
-    .reverse()
-    .find((message) => message.role === "assistant" && message.stop_reason === "error");
+  // Only the latest reply decides: a turn that failed earlier and was then
+  // asked again and answered is over.
+  const latest = [...messages].reverse().find((message) => message.role === "assistant");
+  const terminal = latest?.stop_reason === "error" ? latest : undefined;
   const error = terminal?.error ?? transportError;
   if (!error) return null;
   if (error === "max_steps_exceeded" && hasPendingProposal) {
     return "The Agent reached its step limit after creating a proposal that is still awaiting your review. The proposal will not execute automatically; confirm, revise, or decline it below.";
   }
-  if (error === "LLMUpstreamError") {
-    return "The configured provider did not return a usable response. Check the selected model in Settings, then retry. No proposal or analysis was executed.";
+  if (error === "LLMUpstreamError" || error.startsWith("LLMUpstreamError:")) {
+    return "The configured provider did not return a usable response. Check the selected model in Settings, then retry. Nothing in your data or models was changed.";
   }
   if (error === "tool_runtime_error") {
-    return "The Agent tool runtime stopped unexpectedly. Retry the request; no proposal or analysis was executed.";
+    return "The Agent tool runtime stopped unexpectedly. Retry the request; nothing in your data or models was changed.";
   }
-  return `The Agent stopped before completing the request (${error}). No proposal or analysis was executed.`;
+  return `The Agent stopped before completing the request (${error}). Nothing in your data or models was changed.`;
 }
 
 function useElapsedSeconds(startedAt: number | null | undefined, active: boolean): number {
@@ -93,7 +96,7 @@ function transcriptIsAtBottom(element: HTMLElement): boolean {
  * shows what happened (tool id, ok/error, proposal-ready) instead of dumping
  * the bounded output payload into the transcript. Unparseable content falls
  * back to the raw string so nothing is silently hidden. */
-function toolStatusLine(content: string, toolName?: string | null): string {
+export function toolStatusLine(content: string, toolName?: string | null): string {
   let payload: unknown;
   try {
     payload = JSON.parse(content);
@@ -105,7 +108,14 @@ function toolStatusLine(content: string, toolName?: string | null): string {
     tool_id?: unknown;
     ok?: unknown;
     error?: unknown;
-    output?: { requires_confirmation?: unknown; proposal?: { proposal_id?: unknown } };
+    output?: {
+      requires_confirmation?: unknown;
+      proposal?: { proposal_id?: unknown };
+      confirmation_reason?: unknown;
+      executed?: unknown;
+      inferential_tests_run_this_session?: unknown;
+      operation?: { status?: unknown };
+    };
   };
   const toolId =
     typeof record.tool_id === "string"
@@ -117,10 +127,36 @@ function toolStatusLine(content: string, toolName?: string | null): string {
     const error = typeof record.error === "string" ? record.error : "failed";
     return `${toolId} ✗ ${error}`;
   }
+  const calculations = (record.output as { results?: unknown } | undefined)?.results;
+  if (toolId === "calculate" && Array.isArray(calculations)) {
+    // Arithmetic done in code, so the answer can quote it (numeric check).
+    const lines = calculations.map((item) => {
+      const entry = item as { label?: unknown; expression?: unknown; value?: unknown; error?: unknown };
+      const name = typeof entry.label === "string" && entry.label ? `${entry.label}: ` : "";
+      return typeof entry.value === "string"
+        ? `${name}${String(entry.expression)} = ${entry.value}`
+        : `${name}${String(entry.expression)} ✗ ${String(entry.error)}`;
+    });
+    return `calculate ✓ ${lines.join("; ")}`;
+  }
+  if (record.output?.executed === true) {
+    // Read-only workflows run without a click; say so, and how many tests
+    // this session has run -- the count the report discloses.
+    const tests = record.output.inferential_tests_run_this_session;
+    const count = typeof tests === "number" ? ` · ${tests} test${tests === 1 ? "" : "s"} run this session` : "";
+    const status = record.output.operation?.status;
+    return status === "completed"
+      ? `${toolId} ✓ read-only analysis ran without confirmation (recorded)${count}`
+      : `${toolId} ✗ read-only analysis ${typeof status === "string" ? status : "failed"}`;
+  }
+  if (record.output?.executed === false) {
+    return `${toolId} ✗ read-only analysis could not run`;
+  }
   if (record.output?.requires_confirmation === true) {
     const proposalId = record.output.proposal?.proposal_id;
     const ref = typeof proposalId === "string" ? ` ${proposalId}` : "";
-    return `${toolId} ✓ proposal ready${ref} — awaiting confirmation`;
+    const reason = record.output.confirmation_reason;
+    return `${toolId} ✓ proposal ready${ref} — awaiting confirmation${typeof reason === "string" ? ` (${reason})` : ""}`;
   }
   return `${toolId} ✓ ok`;
 }
@@ -144,13 +180,19 @@ function transcriptTurns(messages: AgentMessage[]): TranscriptTurn[] {
       current = { user: null, reasoning: [], responses: [] };
       turns.push(current);
     }
-    if (message.role === "tool" || message.stop_reason === "tool_calls") {
+    if (message.role === "tool" || message.stop_reason === "tool_calls" || message.stop_reason === "revised") {
       current.reasoning.push(message);
     } else {
       current.responses.push(message);
     }
   }
   return turns;
+}
+
+function withdrawnNumbers(message: AgentMessage): string {
+  const unverified = message.numeric_check?.unverified ?? [];
+  const numbers = unverified.map((item) => item.text).filter(Boolean);
+  return numbers.length > 0 ? numbers.join(", ") : "some numbers";
 }
 
 function visibleReasoningEntries(messages: AgentMessage[]): AgentMessage[] {
@@ -265,6 +307,11 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
           </span>
         ) : message.role === "assistant" ? (
           <div className="wb-agent-terminal-content wb-agent-terminal-markdown">
+            {message.stop_reason === "revised" && (
+              <p data-testid="agent-withdrawn-draft" className="wb-agent-withdrawn-draft">
+                Draft withdrawn by the numeric check: {withdrawnNumbers(message)} matched no result. The Agent rewrote the answer.
+              </p>
+            )}
             {renderMarkdown(message.content)}
           </div>
         ) : (
@@ -428,6 +475,10 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
                   </div>
                 </details>
               )}
+              {turn.reasoning.map((message) => {
+                const shown = shownRows(message);
+                return shown ? <AgentRowsTable key={`rows-${message.entry_id}`} shown={shown} /> : null;
+              })}
               {turn.responses.map(renderTranscriptMessage)}
             </div>
           );
@@ -553,7 +604,23 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
               <span>revision {proposal.revision}</span>
               <span className="wb-agent-proposal-status">{proposal.status}</span>
             </div>
-            <div className="wb-agent-proposal-change">{changeSummary(proposal.changes)}</div>
+            {proposal.readable && proposal.readable.length > 0 ? (
+              <>
+                <ol data-testid="agent-proposal-readable" className="wb-agent-proposal-change" style={{ margin: "4px 0", paddingLeft: 18 }}>
+                  {proposal.readable.map((line, index) => (
+                    <li key={index}>{line}</li>
+                  ))}
+                </ol>
+                <details className="wb-agent-proposal-detail">
+                  <summary>Technical parameters</summary>
+                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, margin: 0 }}>
+                    {JSON.stringify(proposal.changes, null, 2)}
+                  </pre>
+                </details>
+              </>
+            ) : (
+              <div className="wb-agent-proposal-change">{changeSummary(proposal.changes)}</div>
+            )}
             {proposal.expected_effect.length > 0 && (
               <div className="wb-agent-proposal-detail">Expected: {proposal.expected_effect.join("; ")}</div>
             )}

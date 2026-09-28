@@ -26,12 +26,33 @@ from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import verify_upload
 from ..model_options import ModelOptionsError
 from ..repository.run_repository import _read_manifest, _resolve_run_root
-from .run_service import _submit_run, merge_form_overrides
+from .run_service import (
+    RerunDeclarationError,
+    _submit_run,
+    merge_form_overrides,
+    reject_invalid_rerun_declarations,
+)
 
 
 TERMINAL_RUN_STATUSES = frozenset(
     {"completed", "failed", "cancelled", "interrupted", "partial", "blocked"}
 )
+
+
+def editable_rerun_nodes(project_root: Path | str, run_id: str) -> list[str]:
+    """Nodes of a run that a rerun can start from (its editable stages)."""
+
+    runs_root = Path(project_root) / "runs"
+    graph = GraphStore(runs_root=runs_root).read(run_id)
+    manifest = _read_manifest(runs_root / run_id)
+    return sorted(
+        node_id
+        for node_id, node in graph.nodes.items()
+        if resolve_operation_contract(
+            stage=node.stage.value if node.stage is not None else None, manifest=manifest
+        )
+        is not None
+    )
 
 
 class RerunServiceError(RuntimeError):
@@ -56,6 +77,9 @@ class RerunSubmissionRequest:
     rerun_from: dict[str, Any] | None = None
     workbench_context: dict[str, Any] | None = None
     before_dispatch: Callable[[str], None] | None = None
+    # True only for an explicit variable-metadata edit, which may declare
+    # columns outside the model (see reject_invalid_rerun_declarations).
+    metadata_edit: bool = False
 
 
 @dataclass(frozen=True)
@@ -214,6 +238,17 @@ class RerunService:
             upload_bytes = verify_upload(self.project_root, parent_sha).read_bytes()
         except (OSError, ValueError) as exc:
             raise RerunServiceError("unusable_parent_upload", str(exc)) from exc
+
+        try:
+            reject_invalid_rerun_declarations(
+                inputs["form"],
+                request.op_overrides,
+                upload_bytes,
+                str((inputs.get("upload") or {}).get("filename") or ""),
+                metadata_edit=request.metadata_edit,
+            )
+        except RerunDeclarationError as exc:
+            raise RerunServiceError(exc.code, str(exc)) from exc
 
         try:
             merged_form = merge_form_overrides(inputs["form"], request.op_overrides)

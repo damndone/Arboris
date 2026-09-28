@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from ..egress import EgressPolicyError, guard_outgoing_messages
 from .config import LLMConfig
 
 # Test seam: monkeypatch to inject httpx.MockTransport-backed clients.
@@ -64,6 +65,19 @@ def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
     if is_deepseek and model.startswith("deepseek-v4"):
         return {"thinking": {"type": "disabled"}, "max_tokens": 8192}
     return {}
+
+
+# A streaming provider sends bytes continuously (tokens, reasoning or
+# keep-alives). Seen live: DeepSeek connections that went silent for the whole
+# 60 s timeout before failing, so each retry cost a minute. Silence this long
+# means the connection is dead; give up and let the adapter retry.
+STREAM_SILENCE_S = 30.0
+
+
+def _stream_timeout(config: LLMConfig) -> httpx.Timeout:
+    # Only silence after the connection is up is shortened: connecting can
+    # legitimately be slow (a TLS handshake took 10-14 s in the same session).
+    return httpx.Timeout(config.timeout_s, read=min(config.timeout_s, STREAM_SILENCE_S))
 
 
 def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
@@ -225,7 +239,7 @@ async def async_stream_chat_completion(
                     "Content-Type": "application/json",
                 },
                 json=request_payload,
-                timeout=config.timeout_s,
+                timeout=_stream_timeout(config),
             ) as response:
                 if response.status_code < 200 or response.status_code >= 300:
                     raise LLMUpstreamError(
@@ -316,9 +330,20 @@ def _chat_request_payload(
     model_config: Mapping[str, Any] | None = None,
     stream: bool = False,
 ) -> dict[str, Any]:
+    # The single egress checkpoint: every provider call is built here.
+    try:
+        guarded = guard_outgoing_messages(
+            messages,
+            base_url=config.base_url,
+            provider_id=config.provider_id,
+            model=config.model,
+        )
+    except EgressPolicyError as exc:
+        # A broken policy blocks the call; it never falls back to sending more.
+        raise LLMUpstreamError(f"Data-sharing policy is invalid: {exc}") from exc
     payload: dict[str, Any] = {
         "model": config.model,
-        "messages": messages,
+        "messages": guarded,
         "stream": stream,
     }
     if tools:

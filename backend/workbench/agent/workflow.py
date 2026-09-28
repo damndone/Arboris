@@ -23,6 +23,12 @@ WORKFLOW_SCHEMA_VERSION = "workflow.v1"
 # workflow_contracts), which is exactly why it is singled out here.
 PERSISTED_STEP_OUTPUT = "produced_dataset"
 
+# The fitted model branches a model step publishes. Post-estimation steps bind
+# to them through `depends_on`, so they must survive a resume as well; they are
+# persisted under their own name and restored to the payload key they came from.
+PERSISTED_MODEL_BRANCHES = "model_branches"
+MODEL_BRANCHES_PAYLOAD_KEY = "branches"
+
 
 def _canonical(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -112,6 +118,21 @@ def _publishable_binding(result: "WorkflowStepResult") -> dict[str, Any] | None:
     return dict(produced)
 
 
+def _publishable_model_branches(result: "WorkflowStepResult") -> list[dict[str, Any]] | None:
+    """The fitted model branches to carry into persisted state, if any."""
+
+    if MODEL_BRANCHES_PAYLOAD_KEY not in result.payload:
+        return None
+    branches = result.payload[MODEL_BRANCHES_PAYLOAD_KEY]
+    if not isinstance(branches, list) or not all(isinstance(item, Mapping) for item in branches):
+        raise WorkflowExecutionError(
+            "workflow step published model branches that must be a list of objects"
+        )
+    # Normalize to plain JSON now, so a value the state file cannot hold fails
+    # this step instead of surfacing later as a resume that cannot bind.
+    return json.loads(_canonical([dict(item) for item in branches]))
+
+
 @dataclass(frozen=True)
 class WorkflowStepResult:
     """Bounded result returned by one workflow step executor."""
@@ -145,6 +166,7 @@ class WorkflowStepState:
     # happened to put there" -- the coupling this composition seam exists to
     # keep narrow. A new consumable output must be added here on purpose.
     produced_dataset: dict[str, Any] | None = None
+    model_branches: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -157,6 +179,11 @@ class WorkflowStepState:
             "result_fingerprint": self.result_fingerprint,
             PERSISTED_STEP_OUTPUT: (
                 dict(self.produced_dataset) if self.produced_dataset is not None else None
+            ),
+            PERSISTED_MODEL_BRANCHES: (
+                [dict(item) for item in self.model_branches]
+                if self.model_branches is not None
+                else None
             ),
         }
 
@@ -173,6 +200,15 @@ class WorkflowStepState:
                 f"{PERSISTED_STEP_OUTPUT} that must be an object, got "
                 f"{type(produced).__name__}"
             )
+        branches = value.get(PERSISTED_MODEL_BRANCHES)
+        if branches is not None and (
+            not isinstance(branches, list)
+            or not all(isinstance(item, Mapping) for item in branches)
+        ):
+            raise WorkflowExecutionError(
+                f"workflow step state {value.get('step_id')!r} carries "
+                f"{PERSISTED_MODEL_BRANCHES} that must be a list of objects"
+            )
         return cls(
             step_id=str(value["step_id"]),
             fingerprint=str(value["fingerprint"]),
@@ -182,7 +218,21 @@ class WorkflowStepState:
             error=value.get("error"),
             result_fingerprint=value.get("result_fingerprint"),
             produced_dataset=dict(produced) if produced is not None else None,
+            model_branches=(
+                [dict(item) for item in branches] if branches is not None else None
+            ),
         )
+
+
+def _restored_payload(step_state: WorkflowStepState) -> dict[str, Any]:
+    """Rebuild only the persisted, declared outputs of a completed step."""
+
+    payload: dict[str, Any] = {}
+    if step_state.produced_dataset is not None:
+        payload[PERSISTED_STEP_OUTPUT] = dict(step_state.produced_dataset)
+    if step_state.model_branches is not None:
+        payload[MODEL_BRANCHES_PAYLOAD_KEY] = [dict(item) for item in step_state.model_branches]
+    return payload
 
 
 @dataclass(frozen=True)
@@ -288,11 +338,7 @@ class WorkflowExecutor:
                 # `is not None`, matching `from_dict`: absence and emptiness are
                 # one question, and answering it two ways in two places is how
                 # the halves of a round trip drift apart.
-                payload=(
-                    {PERSISTED_STEP_OUTPUT: dict(step_state.produced_dataset)}
-                    if step_state.produced_dataset is not None
-                    else {}
-                ),
+                payload=_restored_payload(step_state),
                 restored_from_state=True,
             )
             for step_id, step_state in states.items()
@@ -346,6 +392,7 @@ class WorkflowExecutor:
                     row_counts=dict(result.row_counts),
                     result_fingerprint=(result.result_fingerprint or step.fingerprint),
                     produced_dataset=_publishable_binding(result),
+                    model_branches=_publishable_model_branches(result),
                 )
                 states[step.step_id] = completed
                 completed_results[step.step_id] = result

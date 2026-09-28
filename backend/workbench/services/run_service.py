@@ -66,8 +66,17 @@ def _normalize_labels(value: object) -> dict[str, object]:
 
     if value is None or value == "":
         return {}
+    from ..user_missing import FIELD as USER_MISSING_FIELD, normalize_user_missing
+
+    # Validated before canonicalization so a malformed code (NaN, a bare
+    # number) is reported against this field rather than as a generic error.
+    user_missing = (
+        normalize_user_missing(value[USER_MISSING_FIELD])
+        if isinstance(value, Mapping) and USER_MISSING_FIELD in value
+        else None
+    )
     payload = canonicalize_model_options(value)
-    allowed = {"variable_labels", "value_labels", "measurement_level"}
+    allowed = {"variable_labels", "value_labels", "measurement_level", USER_MISSING_FIELD}
     unknown = sorted(set(payload) - allowed)
     if unknown:
         raise ValueError(f"labels contains unknown field(s): {', '.join(unknown)}")
@@ -118,7 +127,75 @@ def _normalize_labels(value: object) -> dict[str, object]:
     # run, which is a behaviour change -- not allowed in a wiring block.
     if normalized_levels:
         normalized["measurement_level"] = normalized_levels
+    if user_missing:
+        normalized[USER_MISSING_FIELD] = user_missing
     return normalized
+
+
+def _upload_header(upload_bytes: bytes, upload_filename: str) -> Any:
+    """Column header of an upload in any supported format."""
+
+    import io
+    import tempfile
+
+    import pandas as pd
+
+    from ..tabular_io import read_table, statistical_format
+
+    if statistical_format(upload_filename or "") is None:
+        return pd.read_csv(io.BytesIO(upload_bytes), nrows=0)
+    with tempfile.TemporaryDirectory(prefix="workbench-header-") as directory:
+        path = Path(directory) / f"upload{Path(upload_filename).suffix.lower()}"
+        path.write_bytes(upload_bytes)
+        return read_table(path, nrows=0)
+
+
+def _statistical_file_labels(upload_bytes: bytes, upload_filename: str) -> dict[str, object]:
+    """Read an SPSS/Stata upload's metadata as run labels; {} for other files."""
+
+    import tempfile
+
+    from ..tabular_io import read_statistical_labels, statistical_format
+
+    fmt = statistical_format(upload_filename or "")
+    if fmt is None:
+        return {}
+    suffix = Path(upload_filename).suffix.lower()
+    with tempfile.TemporaryDirectory(prefix="workbench-labels-") as directory:
+        path = Path(directory) / f"upload{suffix}"
+        path.write_bytes(upload_bytes)
+        return read_statistical_labels(path, fmt)
+
+
+def merge_labels(base: object, patch: object) -> dict[str, object]:
+    """Layer a labels patch over existing labels, column by column.
+
+    A patch changes only what it names: relabelling one variable must not drop
+    the value labels, measurement levels or missing codes already declared --
+    losing a missing code silently re-admits it as a valid value. ``None``
+    removes a field or a column's declaration.
+    """
+
+    merged: dict[str, object] = {
+        key: dict(value) for key, value in (base or {}).items() if isinstance(value, Mapping)
+    } if isinstance(base, Mapping) else {}
+    if not isinstance(patch, Mapping):
+        return merged
+    for field_name, columns in patch.items():
+        if columns is None:
+            merged.pop(field_name, None)
+            continue
+        if not isinstance(columns, Mapping):
+            merged[field_name] = columns  # left for _normalize_labels to reject
+            continue
+        current = dict(merged.get(field_name) or {})
+        for column, value in columns.items():
+            if value is None:
+                current.pop(column, None)
+            else:
+                current[column] = value
+        merged[field_name] = current
+    return {key: value for key, value in merged.items() if value != {}}
 
 
 class LmmExecutionAdmissionError(RuntimeError):
@@ -407,9 +484,11 @@ def merge_form_overrides(
         {
             key: encode_form_override(key, value)
             for key, value in overrides.items()
-            if key not in {"model_options", "model_options_binding"}
+            if key not in {"model_options", "model_options_binding", "labels"}
         }
     )
+    if "labels" in overrides:
+        merged["labels"] = merge_labels(source_form.get("labels"), overrides["labels"])
     return merged
 
 
@@ -453,6 +532,113 @@ def parse_column_selector(raw: str, field: str = "x") -> list[str]:
     return [part.strip() for part in text.split(",") if part.strip()]
 
 
+class RerunDeclarationError(ValueError):
+    """A rerun patch whose declarations cannot do what they claim."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _declared_levels(overrides: Mapping[str, object]) -> dict[str, object]:
+    labels = overrides.get("labels")
+    if not isinstance(labels, Mapping):
+        return {}
+    levels = labels.get("measurement_level")
+    return dict(levels) if isinstance(levels, Mapping) else {}
+
+
+def reject_invalid_rerun_declarations(
+    source_form: Mapping[str, Any],
+    overrides: Mapping[str, object],
+    upload_bytes: bytes,
+    upload_filename: str = "",
+    *,
+    metadata_edit: bool = False,
+) -> None:
+    """Refuse measurement-level declarations that cannot take effect.
+
+    Shared by the manual rerun route and the Agent rerun service, so both paths
+    enforce the same rules:
+
+    - a declared column must exist in the data (v1.8.7 A2-6: an invented name
+      would apply to nothing while the user believes it was declared);
+    - a patch whose only change is declaring columns outside the model must not
+      run. A measurement level changes how a model column is treated; it never
+      adds a column to the model. Running it produced a child identical to its
+      parent under a proposal that said the column had been added.
+    """
+
+    import io
+
+    import pandas as pd
+
+    from ..cleaning import normalize_column_name
+
+    levels = _declared_levels(overrides)
+    labels_patch = overrides.get("labels")
+    declared_missing = (
+        labels_patch.get("user_missing_values") if isinstance(labels_patch, Mapping) else None
+    )
+    # Both act in the pipeline on the uploaded data, so both must name its
+    # columns; display labels may also name columns derived later.
+    acting = {**levels, **(dict(declared_missing) if isinstance(declared_missing, Mapping) else {})}
+    if not acting:
+        return
+
+    try:
+        header = _upload_header(upload_bytes, upload_filename)
+    except Exception:
+        header = None
+    if header is not None:
+        known = {str(name) for name in header.columns}
+        known |= {normalize_column_name(str(name)) for name in header.columns}
+        missing = sorted(str(column) for column in acting if str(column) not in known)
+        if missing:
+            raise RerunDeclarationError(
+                "MEASUREMENT_LEVEL_UNKNOWN_COLUMN",
+                "measurement_level names column(s) not present in the dataset: "
+                + ", ".join(missing),
+            )
+
+    if metadata_edit:
+        # An explicit metadata edit (the Variable view) may declare any column;
+        # it claims no model effect, so there is nothing to mislead about.
+        return
+    other_changes = set(overrides) - {"labels"}
+    labels = overrides.get("labels")
+    other_label_changes = (
+        {key for key, value in labels.items() if key != "measurement_level" and value}
+        if isinstance(labels, Mapping)
+        else set()
+    )
+    if other_changes or other_label_changes:
+        return
+    y = str(source_form.get("y") or "").strip()
+    x = parse_column_selector(str(source_form.get("x") or ""))
+    if not y or not x:
+        # Automatic variable selection: which columns the model uses is not
+        # known until it runs, so a declaration may still matter.
+        return
+    model_columns = {normalize_column_name(name) for name in (y, *x)}
+    outside = sorted(
+        str(column)
+        for column in levels
+        if normalize_column_name(str(column)) not in model_columns
+    )
+    if len(outside) == len(levels):
+        raise RerunDeclarationError(
+            "RERUN_HAS_NO_MODEL_EFFECT",
+            "This rerun would leave the model unchanged: "
+            + ", ".join(outside)
+            + f" is not a model variable (model: {y} ~ {' + '.join(x)}). A measurement "
+            "level only changes how a column already in the model is treated; it never "
+            "adds a column. To add a column as a regressor, propose model.genesis with "
+            "it in predictors or categorical; to only record the declaration, propose "
+            "metadata.edit.",
+        )
+
+
 def _submit_run(
     root: Path,
     *,
@@ -494,7 +680,18 @@ def _submit_run(
         if bound_model_options.binding is not None
         else None
     )
-    labels = _normalize_labels(form.get("labels", {}))
+    declared_labels = form.get("labels", {})
+    if rerun_of is None:
+        # An SPSS/Stata upload brings its own variable metadata. It becomes the
+        # run's declared labels, under anything the user declared explicitly.
+        # Reruns inherit the merged labels from their parent instead, so a
+        # label the user removed is not read back from the file.
+        file_labels = _statistical_file_labels(upload_bytes, upload_filename)
+        if file_labels:
+            if isinstance(declared_labels, str) and declared_labels:
+                declared_labels = parse_model_options(declared_labels)
+            declared_labels = merge_labels(file_labels, declared_labels or {})
+    labels = _normalize_labels(declared_labels)
     statistical_tests_request = form.get("statistical_tests") or None
     if form.get("model_type", "auto") == "ols" and model_options:
         from ..contracts.model.ols import effective_ols_covariance

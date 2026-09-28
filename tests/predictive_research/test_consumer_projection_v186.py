@@ -152,7 +152,8 @@ def test_run_detail_route_exposes_legacy_projection_to_table_consumer(
     )
     monkeypatch.setattr(runs_routes, "_model_results", lambda _run_root: [])
     monkeypatch.setattr(runs_routes, "build_diagnostic_summary_preview", lambda *args: {})
-    monkeypatch.setattr(runs_routes, "collect_post_estimation_results", lambda *args: [])
+    monkeypatch.setattr(runs_routes, "collect_post_estimation_results", lambda *args, **kwargs: [])
+    monkeypatch.setattr(runs_routes, "count_post_estimation_results", lambda *args, **kwargs: 0)
 
     detail = runs_routes.get_run_endpoint("run-legacy", str(project_root))
 

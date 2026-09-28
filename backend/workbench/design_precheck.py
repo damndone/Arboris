@@ -87,8 +87,12 @@ def collect_design_findings(
 
     if survey_design:
         findings.extend(_design_effect_findings(survey_design))
+        # The analysis sample is the rows complete on every modelled column:
+        # listwise deletion at estimation drops rows just as cleaning would.
+        present = [column for column in modelled_columns if column in frame.columns]
+        rows_analysed = int(frame[present].notna().all(axis=1).sum()) if present else len(frame)
         findings.extend(
-            _filtered_data_findings(len(frame), rows_before_cleaning)
+            _filtered_data_findings(rows_analysed, rows_before_cleaning)
         )
 
     if weight_column and weight_column in frame.columns:
@@ -230,8 +234,7 @@ def _filtered_data_findings(
 ) -> list[dict[str, Any]]:
     """A design declared over data that lost rows before it was applied.
 
-    Not a refusal -- dropping duplicated or incomplete rows is ordinary and
-    usually right. But the design names the population the *original* frame was
+    Not a refusal -- dropping incomplete rows is ordinary and usually right. But the design names the population the *original* frame was
     drawn from, and the analysis sample no longer is that frame. Weights still
     sum to the population total, so nothing in the output shows the gap.
     """
