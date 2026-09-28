@@ -133,6 +133,8 @@ pip install -e ".[imbalanced]"  # imbalanced-learn, for SMOTE and resampling
 - [Developer handbook](docs/manual/README.md#for-people-extending-arboris) — architecture,
   adding a capability, testing and releasing.
 - [Release notes](docs/releases/) — one per version.
+- [History and archives](docs/history/README.md) — every version, every past
+  development worktree and stash, archived as git tags, and how to open any of them.
 
 ## Where it is going
 

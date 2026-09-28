@@ -19,9 +19,10 @@
 
 > 本节是最新状态，覆盖下方 §0/§0.1 的旧结论（那两节记录到 v1.8.6/v1.8.7，未逐条清理）。
 
-**v1.8.9 = 日常可用（重建版）**，在 `.worktrees/workbench-v1.8.9`（分支 `workbench-v1.8.9`，基线 `f3836408`）。
-立项 `objectives/2026-09-25-v1.8.9-objective.md` 的 8 步全部交付；另做了信任与易用性一轮、数字核对、手册
-（`docs/manual/`）。证据：`evaluations/2026-09-26-v1.8.9-trust-round.md`。**尚未 merge / tag / push**。
+**v1.8.9 = 日常可用（重建版）**，**已发布**（2026-09-28，main `23c26072`，tag `v1.8.9`，
+发布说明 `docs/releases/v1.8.9-release-notes.md`）。立项 `objectives/2026-09-25-v1.8.9-objective.md` 的 8 步全部交付；
+另做了信任与易用性一轮、数字核对、手册（`docs/manual/`）、反脆弱测试。证据：`evaluations/2026-09-26-v1.8.9-trust-round.md`。
+历史与存档（全部 worktree、残留文件、stash）：`docs/history/`。
 Codex 的 v1.8.9 spec 与 11 份计划为“部分采纳”，每份文件顶部已标注去向。
 
 ### 0.2 v1.8.9 延后与未实现
@@ -51,7 +52,12 @@ Codex 的 v1.8.9 spec 与 11 份计划为“部分采纳”，每份文件顶部
 | V189-MODEL-LIST-AUTODETECT | D | 服务商模型列表自动刷新（后端已有 `/llm/providers/{id}/models/refresh`），保留手填；去掉写死的版本名 | 等用户定方向 | 用户 |
 | V189-PROVIDER-FAILOVER | D | 主服务商连续失败时切备用服务商（需用户显式开启：数据会发往另一家） | 等用户定方向 | 新 |
 | V189-DATA-TAB-AGENT-SCOPE | P | Data 页的 Agent 应作用于正在查看的数据集（Chain 作用域），而不是只读的项目级 Agent | 现在从 Data 页提问得到的是不能运行分析的 Main Agent；验收发现 | 验收 |
-| V189-LIVE-EVAL-FULL | 发版前 | 网络正常时全量真机评测（32 条 × 3） | 2026-09-27 实测时 DeepSeek TLS 握手 10–14 s，结果主要反映网络 | 新 |
+| V189-P7-TESTS-PORT | F | 从 P7 分支 `0ef1110c`（tag `archive/worktree/workbench-v1.8.8-p7-multivariate`）移植 main 缺失的独立契约与数值对照测试：replicate/combine、survey replicate adapter、bootstrap/permutation（含 R 对照）、IV/GMM、Scheffé/Games–Howell、非参数、空间统计、合成控制、GLM 扩展、模型诊断、P7 元数据、VECM/VAR/IRF；`test_matching_contract.py` 适配新合同，`test_matching_oracle.py` 只取增量断言，`test_statistical_extensions.py` 选择性提取 | Codex 2026-09-28 核查：分支 40 个提交未进 main，101 相同 / 25 不同 / 46 缺失；不能整批合并（main 已改进 matching、hurdle 近似推断标识）；无条件 skip 的占位测试不补。清单见 `handoffs/2026-09-28-codex-verification-request.md` 与 Codex 回复 | Codex 核查 |
+| V189-MI-POOLING-E2E | F | 多重插补端到端：按 m 生成多份数据与 manifest，每份分别拟合再 Rubin 合并，不以第一份的残差/拟合优度冒充合并结果，不支持的组合明确阻断 | main 的 `imputation.py` 只保存一份插补数据（`rubin_pool()` 已在 main，但端到端接线没有）。作为独立功能评审移植（imputation、engine stages、report 构建与相应测试），保留 main 之后的 survey 样本一致性修复与标签展示 | Codex 核查 |
+| V189-EVIDENCE-TRUST-TESTS | P | 结果防伪造测试：按现行可信边界验证来源（服务端身份/来源/摘要），而不是“所有旧结果不可显示” | Codex 8/19 的两份测试（`archive/stash/b065b0bd-…`）只凭 mock 名字判断，且与 v1.8.9 的展示行为冲突，不恢复原断言 | Codex 核查 |
+| V189-CLASSIFICATION-SEARCH-REF | E | v1.8.11 分类 ML 参考 Codex 的分类搜索 objective（OOF 选择、holdout 封存、预算与参数校验） | 在 `archive/leftovers/main-codex-v1.8.9-program` 的 `docs/superpowers/objectives/2026-08-21-v1.8.9-classification-search-objective.md`；实现在 `archive/v1.8.9-codex-wip` | Codex 核查 |
+| V189-V173-HARNESS-REF | 参考 | v1.7.3 评测 collector / strict runner 的 6 处未提交加固（selector 失败清理、隐藏 index flag 检查、fork/execve 防护、冻结执行器缺失拒绝启动） | `archive/leftovers/v173-evaluation-harness`；该 collector 当时处于阻塞状态，不直接并入 | Codex 核查 |
+| V189-LIVE-EVAL-FULL | ✅ | 全量真机评测（32 条 × 3）88/96，失败例重跑 24/24；反脆弱轮见评测文档 | 2026-09-27/28 完成 | 新 |
 | V189-AGENT-TURN-BUDGET | 观察 | Agent 单轮 120 s 上限与慢服务商 + 重试的关系 | 流静默已限 30 s；若仍常超时再调预算 | 新 |
 
 ## 0. 一句话结论
