@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "test_type": "nonparametric",
+  "results": [
+    {
+      "test_id": "kruskal_wallis:outcome:policy_intensity",
+      "test_type": "kruskal_wallis",
+      "outcome": "outcome",
+      "group": "policy_intensity",
+      "groups": [
+        "0.76",
+        "0.843",
+        "0.903",
+        "0.953",
+        "1.011",
+        "1.15",
+        "1.204",
+        "1.21",
+        "1.368",
+        "1.801",
+        "2.391",
+        "2.402"
+      ],
+      "nobs": 120,
+      "statistic": 55.11327531964242,
+      "p_value": 7.388565115496964e-08,
+      "effect": {
+        "group_medians": {
+          "0.76": 4.9465,
+          "0.843": 8.3185,
+          "0.903": 4.765499999999999,
+          "0.953": 6.438,
+          "1.011": 5.2585,
+          "1.15": 6.3294999999999995,
+          "1.204": 5.0809999999999995,
+          "1.21": 4.1185,
+          "1.368": 6.7989999999999995,
+          "1.801": 7.2075,
+          "2.391": 6.0325,
+          "2.402": 8.065999999999999
+        }
+      },
+      "source_id": "statistical_tests.nonparametric.kruskal_wallis.outcome.policy_intensity",
+      "p_value_corrected": 1.847141278874241e-07,
+      "correction_method": "fdr_bh"
+    }
+  ]
+}

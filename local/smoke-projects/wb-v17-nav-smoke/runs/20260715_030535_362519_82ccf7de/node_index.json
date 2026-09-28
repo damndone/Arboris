@@ -1,0 +1,74 @@
+{
+  "stage:raw": {
+    "node_hash": "753a1c105115cb83e9377fc2425b469d6268944388d87c6b00970e863add39a5",
+    "producing_stage": "ingestion",
+    "cas_ref": {
+      "node_hash": "753a1c105115cb83e9377fc2425b469d6268944388d87c6b00970e863add39a5",
+      "artifact": "_uploads"
+    }
+  },
+  "stage:cleaned": {
+    "node_hash": "67c3a8cf10e53064532f5d011ab75becbef9e1729cbae2803c9bee19ff7ff652",
+    "producing_stage": "cleaning",
+    "cas_ref": {
+      "node_hash": "67c3a8cf10e53064532f5d011ab75becbef9e1729cbae2803c9bee19ff7ff652",
+      "artifact": "processed/cleaned_dataset.parquet"
+    }
+  },
+  "var:wage:cleaned": {
+    "node_hash": "67c3a8cf10e53064532f5d011ab75becbef9e1729cbae2803c9bee19ff7ff652",
+    "producing_stage": "cleaning",
+    "cas_ref": {
+      "node_hash": "67c3a8cf10e53064532f5d011ab75becbef9e1729cbae2803c9bee19ff7ff652",
+      "artifact": "processed/cleaned_dataset.parquet"
+    }
+  },
+  "var:education:cleaned": {
+    "node_hash": "67c3a8cf10e53064532f5d011ab75becbef9e1729cbae2803c9bee19ff7ff652",
+    "producing_stage": "cleaning",
+    "cas_ref": {
+      "node_hash": "67c3a8cf10e53064532f5d011ab75becbef9e1729cbae2803c9bee19ff7ff652",
+      "artifact": "processed/cleaned_dataset.parquet"
+    }
+  },
+  "var:experience:cleaned": {
+    "node_hash": "67c3a8cf10e53064532f5d011ab75becbef9e1729cbae2803c9bee19ff7ff652",
+    "producing_stage": "cleaning",
+    "cas_ref": {
+      "node_hash": "67c3a8cf10e53064532f5d011ab75becbef9e1729cbae2803c9bee19ff7ff652",
+      "artifact": "processed/cleaned_dataset.parquet"
+    }
+  },
+  "var:region:cleaned": {
+    "node_hash": "67c3a8cf10e53064532f5d011ab75becbef9e1729cbae2803c9bee19ff7ff652",
+    "producing_stage": "cleaning",
+    "cas_ref": {
+      "node_hash": "67c3a8cf10e53064532f5d011ab75becbef9e1729cbae2803c9bee19ff7ff652",
+      "artifact": "processed/cleaned_dataset.parquet"
+    }
+  },
+  "model:ols_1": {
+    "node_hash": "fb405838d1bcd3886c339136f4c653094afc6a8c9a150d2326cf57bb7cf8eb59",
+    "producing_stage": "estimation",
+    "cas_ref": {
+      "node_hash": "fb405838d1bcd3886c339136f4c653094afc6a8c9a150d2326cf57bb7cf8eb59",
+      "artifact": "model_results/ols_1.json"
+    }
+  },
+  "report:html": {
+    "node_hash": "cc46e9e41e142bd54cdcd84184e00b78629890fd12b21b22bc745bcaafd99e86",
+    "producing_stage": "report",
+    "cas_ref": {
+      "node_hash": "cc46e9e41e142bd54cdcd84184e00b78629890fd12b21b22bc745bcaafd99e86",
+      "artifact": "reports/report.html"
+    }
+  },
+  "code-exec:ccb1824f1a7a461e0a78bd3ea3eaa76b": {
+    "node_hash": "8394115da8cb86645d287c2fccd410f2f7ad02e2a9887e536d301e47c061a0cf",
+    "producing_stage": "code.execute",
+    "cas_ref": {
+      "node_hash": "8394115da8cb86645d287c2fccd410f2f7ad02e2a9887e536d301e47c061a0cf",
+      "artifact": "derived/code_execute/ccb1824f1a7a461e0a78bd3ea3eaa76b/data.csv"
+    }
+  }
+}

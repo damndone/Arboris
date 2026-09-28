@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>OLS with robust standard errors</title>
+    <style>
+      .critical-error { background: #fff0f0; border-left: 4px solid #e00; padding: 8px; margin: 4px 0; }
+      .warning { background: #fff8f0; border-left: 4px solid #f80; padding: 8px; margin: 4px 0; }
+      .caution { background: #fffff0; border-left: 4px solid #ee0; padding: 8px; margin: 4px 0; }
+      .system-note { background: #f8f8f8; border-left: 4px solid #999; padding: 8px; margin: 4px 0; color: #666; }
+      .fact-item { margin: 2px 0; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+      th { background: #f5f5f5; }
+    </style>
+  </head>
+  <body>
+    <h1>OLS with robust standard errors</h1>
+
+    
+
+    <section id="facts">
+      <h2>Facts</h2>
+      <ul>
+        
+        <li class="fact-item">Model: OLS with robust standard errors</li>
+        
+        <li class="fact-item">y = wage;  X = education, experience, region</li>
+        
+        <li class="fact-item">Rows used: 30 · Columns: 6</li>
+        
+        <li class="fact-item">Dataset kind: cross_section</li>
+        
+        <li class="fact-item">Categorical variable(s): region (dummy-coded in model)</li>
+        
+      </ul>
+    </section>
+
+    
+    <section id="data-diagnostics">
+      <h2>Data Diagnostics</h2>
+      
+      <div class="system-note">Column &#39;region&#39; was detected as categorical and automatically dummy-coded.</div>
+      
+    </section>
+    
+
+    
+
+    
+    <section id="regression-diagnostics">
+      <h2>Regression Diagnostics</h2>
+      
+      <h3>diagnostics_ols_1</h3>
+      
+      
+      <h4>Multicollinearity (VIF)</h4>
+      <table>
+        <thead><tr><th>Variable</th><th>VIF</th></tr></thead>
+        <tbody>
+          
+          
+          
+          
+          <tr>
+            <td>education</td>
+            <td>
+              —
+              
+            </td>
+          </tr>
+          
+          
+          
+          <tr>
+            <td>experience</td>
+            <td>
+              —
+              
+            </td>
+          </tr>
+          
+          
+          
+          <tr>
+            <td>region</td>
+            <td>
+              —
+              
+            </td>
+          </tr>
+          
+          
+        </tbody>
+      </table>
+      
+      
+      
+      <p>Breusch-Pagan (heteroskedasticity): LM = 29.42, p &lt; 0.001</p>
+      
+      
+      
+      <p>Durbin-Watson: 0.010</p>
+      
+      
+    </section>
+    
+
+    
+    <section id="coefficient-interpretation">
+      <h2>Coefficient Interpretation</h2>
+      <ul>
+        
+        <li>The region[South] coefficient (+0.0000) represents the difference from the reference category (1). This association is not statistically significant at conventional levels.</li>
+        
+        <li>The region[West] coefficient (+0.0000) represents the difference from the reference category (1). This association is not statistically significant at conventional levels.</li>
+        
+        <li>Holding other selected regressors constant, each one-unit increase in education is associated with an average change of +1.0000 in wage. This association is significant at the 1% level.</li>
+        
+        <li>Holding other selected regressors constant, each one-unit increase in experience is associated with an average change of +1.0000 in wage. This association is significant at the 1% level.</li>
+        
+      </ul>
+    </section>
+    
+
+    <section id="causal-caution">
+      <h2>Causal Caution</h2>
+      <p>These estimates are associations, not necessarily causal effects. Statistical significance does not imply causality.</p>
+    </section>
+
+    
+    <section id="descriptive-stats">
+      <h2>Descriptive Statistics</h2>
+      <table>
+        <thead><tr><th>Column</th><th>Dtype</th><th>Count</th><th>Missing</th><th>Mean</th><th>Std</th></tr></thead>
+        <tbody>
+          
+          <tr><td>wage</td><td>int64</td><td>30</td><td>0.0%</td><td>34.5</td><td>8.8034</td></tr>
+          
+          <tr><td>education</td><td>int64</td><td>30</td><td>0.0%</td><td>19.0</td><td>4.3944</td></tr>
+          
+          <tr><td>experience</td><td>int64</td><td>30</td><td>0.0%</td><td>9.5</td><td>4.4237</td></tr>
+          
+          <tr><td>region</td><td>str</td><td>30</td><td>0.0%</td><td>—</td><td>—</td></tr>
+          
+        </tbody>
+      </table>
+    </section>
+    
+
+    
+    <section id="statistical-tests">
+      <h2>Statistical Tests</h2>
+      
+      <ul>
+        
+        <li>Spearman correlation: wage vs experience: Statistic 0.9984; p &lt; 0.001.</li>
+        
+        <li>Pearson correlation: wage vs experience: Statistic 0.9984; p &lt; 0.001.</li>
+        
+        <li>Spearman correlation: wage vs education: Statistic 0.9983; p &lt; 0.001.</li>
+        
+        <li>Pearson correlation: wage vs education: Statistic 0.9983; p &lt; 0.001.</li>
+        
+        <li>ANOVA: wage by education: Statistic 320.0000; p &lt; 0.001.</li>
+        
+        <li>ANOVA: wage by experience: Statistic 280.0000; p &lt; 0.001.</li>
+        
+        <li>Kendall correlation: wage vs experience: Statistic 0.9838; p &lt; 0.001.</li>
+        
+        <li>Kendall correlation: wage vs education: Statistic 0.9826; p &lt; 0.001.</li>
+        
+        <li>Kruskal-Wallis: wage by education: Statistic 28.9032; p = 0.011.</li>
+        
+        <li>Kruskal-Wallis: wage by region: Statistic 1.0323; p = 0.597.</li>
+        
+        <li>ANOVA: wage by region: Statistic 0.4983; p = 0.613.</li>
+        
+      </ul>
+      
+    </section>
+    
+  </body>
+</html>

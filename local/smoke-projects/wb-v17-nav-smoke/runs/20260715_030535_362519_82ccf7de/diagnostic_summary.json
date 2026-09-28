@@ -1,0 +1,470 @@
+{
+  "schema_version": "1.0",
+  "run_id": "20260715_030535_362519_82ccf7de",
+  "run_status": {
+    "model_fit_status": "success",
+    "report_render_status": "pending",
+    "has_blockers": false,
+    "has_warnings": false,
+    "model_results_available": true,
+    "report_available": false,
+    "safe_to_generate_report": true
+  },
+  "model_identity": {
+    "model_family": "ols_robust",
+    "model_label": "OLS with robust standard errors",
+    "y_variable": "wage",
+    "x_variables": [
+      "education",
+      "experience",
+      "region"
+    ],
+    "n_observations": 30,
+    "n_predictors_original": 3,
+    "n_predictors_after_encoding": 5,
+    "dataset_kind": "cross_section",
+    "interpretation_mode": "associational"
+  },
+  "preprocessing": {
+    "variable_roles": {
+      "education": {
+        "roles": [
+          {
+            "role": "treatment",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 15
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "categorical",
+            "status": "candidate",
+            "confidence": 0.55,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 15
+            },
+            "needs_user_confirmation": true
+          },
+          {
+            "role": "proxy",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 15
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "exposure",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 15
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "id",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 15
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "time",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 15
+            },
+            "needs_user_confirmation": false
+          }
+        ]
+      },
+      "experience": {
+        "roles": [
+          {
+            "role": "treatment",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 16
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "categorical",
+            "status": "candidate",
+            "confidence": 0.55,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 16
+            },
+            "needs_user_confirmation": true
+          },
+          {
+            "role": "proxy",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 16
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "exposure",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 16
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "id",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 16
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "time",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "positive_numeric",
+                "integer",
+                "low_unique_numeric",
+                "numeric",
+                "no_missing"
+              ],
+              "unique_count": 16
+            },
+            "needs_user_confirmation": false
+          }
+        ]
+      },
+      "region": {
+        "roles": [
+          {
+            "role": "treatment",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "non_numeric",
+                "string_dtype",
+                "no_missing"
+              ],
+              "unique_count": 3
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "categorical",
+            "status": "confirmed_by_rules",
+            "confidence": 0.95,
+            "evidence": {
+              "name_hints": [
+                "region"
+              ],
+              "data_hints": [
+                "non_numeric",
+                "string_dtype",
+                "no_missing"
+              ],
+              "unique_count": 3
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "proxy",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "non_numeric",
+                "string_dtype",
+                "no_missing"
+              ],
+              "unique_count": 3
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "exposure",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "non_numeric",
+                "string_dtype",
+                "no_missing"
+              ],
+              "unique_count": 3
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "id",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "non_numeric",
+                "string_dtype",
+                "no_missing"
+              ],
+              "unique_count": 3
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "time",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "non_numeric",
+                "string_dtype",
+                "no_missing"
+              ],
+              "unique_count": 3
+            },
+            "needs_user_confirmation": false
+          }
+        ]
+      }
+    },
+    "categorical_encoded": [
+      {
+        "variable": "region",
+        "n_levels": 2,
+        "reference": "1",
+        "method": "treatment_dummy"
+      }
+    ],
+    "exposure_variable": null,
+    "variables_dropped": [],
+    "coercions_applied": [],
+    "imputation": {},
+    "column_count_after_encoding": 6
+  },
+  "diagnostics": {
+    "blockers": [],
+    "warnings": [],
+    "cautions": [],
+    "info": [
+      {
+        "severity": "INFO",
+        "code": "CATEGORICAL_AUTO_DUMMY_CODED",
+        "message": "Column 'region' was detected as categorical and automatically dummy-coded.",
+        "evidence": {
+          "column": "region",
+          "preprocessing": "dummy_coded"
+        },
+        "issue_id": "diag_001",
+        "affected_stage": "",
+        "variables": [],
+        "metric": "",
+        "value": null,
+        "threshold": null,
+        "template_key": "",
+        "template_params": {},
+        "recommended_action_key": "",
+        "is_user_action_required": false
+      }
+    ]
+  },
+  "coefficients_summary": {
+    "interpretation_mode": "associational",
+    "rows": [
+      {
+        "variable": "C(Q('region'))[T.South]",
+        "display_name": "region",
+        "level": "South",
+        "estimate": 0.0,
+        "std_error": 0.0,
+        "p_value": 1.0,
+        "significance_label": "not statistically significant at conventional levels",
+        "interpretation_guide": "categorical_level",
+        "linked_issues": [],
+        "template_key": "coef_categorical"
+      },
+      {
+        "variable": "C(Q('region'))[T.West]",
+        "display_name": "region",
+        "level": "West",
+        "estimate": 0.0,
+        "std_error": 0.0,
+        "p_value": 0.9604,
+        "significance_label": "not statistically significant at conventional levels",
+        "interpretation_guide": "categorical_level",
+        "linked_issues": [],
+        "template_key": "coef_categorical"
+      },
+      {
+        "variable": "education",
+        "display_name": "education",
+        "level": "",
+        "estimate": 1.0,
+        "std_error": 0.0,
+        "p_value": 0.0,
+        "significance_label": "significant at the 1% level",
+        "interpretation_guide": "standard",
+        "linked_issues": [],
+        "template_key": "coef_continuous_association"
+      },
+      {
+        "variable": "experience",
+        "display_name": "experience",
+        "level": "",
+        "estimate": 1.0,
+        "std_error": 0.0,
+        "p_value": 0.0,
+        "significance_label": "significant at the 1% level",
+        "interpretation_guide": "standard",
+        "linked_issues": [],
+        "template_key": "coef_continuous_association"
+      }
+    ],
+    "full_table_ref": "model_results/ols_1.json"
+  },
+  "model_quality": {
+    "metrics": {
+      "r_squared": 1.0,
+      "aic": -1691.6713847733613,
+      "bic": -1684.6653978650504,
+      "llf": 850.8356923866806
+    },
+    "primary_metric_keys": [
+      "r_squared",
+      "aic",
+      "bic"
+    ],
+    "metric_notes": []
+  },
+  "narrative_contract": {
+    "summary": "OLS with robust standard errors with categorical auto-encoding and no major diagnostic concerns.",
+    "constraints": {
+      "causal_language_allowed": false,
+      "allowed_effect_language": "association_only",
+      "must_not_claim_policy_effect": true,
+      "must_not_interpret_treatment_independently": false,
+      "must_acknowledge_treatment_proxy_correlation": false,
+      "must_note_categorical_encoded": true,
+      "must_not_hide_blockers": true,
+      "must_not_change_severity": true,
+      "must_not_add_uncomputed_statistics": true
+    },
+    "required_mentions": [
+      "categorical auto-encoding"
+    ],
+    "forbidden_claims": [
+      "causal effect of treatment",
+      "one-hot encoding required",
+      "X causes Y",
+      "treatment improves Y"
+    ]
+  }
+}

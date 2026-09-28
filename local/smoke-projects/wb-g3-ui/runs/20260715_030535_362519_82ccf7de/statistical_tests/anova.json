@@ -1,0 +1,274 @@
+{
+  "schema_version": 1,
+  "test_type": "anova",
+  "results": [
+    {
+      "test_id": "anova:wage:education",
+      "test_type": "one_way_anova",
+      "outcome": "wage",
+      "group": "education",
+      "groups": [
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+        "20",
+        "21",
+        "22",
+        "23",
+        "24",
+        "25",
+        "26"
+      ],
+      "nobs": 30,
+      "statistic": 320.0,
+      "p_value": 5.976812236389135e-16,
+      "effect": {
+        "group_means": {
+          "12": 20.5,
+          "13": 22.5,
+          "14": 24.5,
+          "15": 26.5,
+          "16": 28.5,
+          "17": 30.5,
+          "18": 32.5,
+          "19": 34.5,
+          "20": 36.5,
+          "21": 38.5,
+          "22": 40.5,
+          "23": 42.5,
+          "24": 44.5,
+          "25": 46.5,
+          "26": 48.5
+        }
+      },
+      "source_id": "statistical_tests.anova.wage.education",
+      "p_value_corrected": 2.049192766761989e-15,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "anova:wage:experience",
+      "test_type": "one_way_anova",
+      "outcome": "wage",
+      "group": "experience",
+      "groups": [
+        "10",
+        "11",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ],
+      "nobs": 28,
+      "statistic": 280.0,
+      "p_value": 1.4027487937085562e-14,
+      "effect": {
+        "group_means": {
+          "10": 35.5,
+          "11": 37.5,
+          "12": 39.5,
+          "13": 41.5,
+          "14": 43.5,
+          "15": 45.5,
+          "16": 47.5,
+          "17": 49.0,
+          "2": 20.0,
+          "3": 21.5,
+          "4": 23.5,
+          "5": 25.5,
+          "6": 27.5,
+          "7": 29.5,
+          "8": 31.5,
+          "9": 33.5
+        }
+      },
+      "source_id": "statistical_tests.anova.wage.experience",
+      "p_value_corrected": 4.2082463811256686e-14,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "anova:wage:region",
+      "test_type": "one_way_anova",
+      "outcome": "wage",
+      "group": "region",
+      "groups": [
+        "East",
+        "South",
+        "West"
+      ],
+      "nobs": 30,
+      "statistic": 0.49826989619377166,
+      "p_value": 0.6130585836638394,
+      "effect": {
+        "group_means": {
+          "East": 32.5,
+          "South": 36.5,
+          "West": 34.5
+        }
+      },
+      "source_id": "statistical_tests.anova.wage.region",
+      "p_value_corrected": 0.642879953904341,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "anova:education:experience",
+      "test_type": "one_way_anova",
+      "outcome": "education",
+      "group": "experience",
+      "groups": [
+        "10",
+        "11",
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ],
+      "nobs": 28,
+      "statistic": 70.0,
+      "p_value": 2.008225897505783e-10,
+      "effect": {
+        "group_means": {
+          "10": 19.5,
+          "11": 20.5,
+          "12": 21.5,
+          "13": 22.5,
+          "14": 23.5,
+          "15": 24.5,
+          "16": 25.5,
+          "17": 26.0,
+          "2": 12.0,
+          "3": 12.5,
+          "4": 13.5,
+          "5": 14.5,
+          "6": 15.5,
+          "7": 16.5,
+          "8": 17.5,
+          "9": 18.5
+        }
+      },
+      "source_id": "statistical_tests.anova.education.experience",
+      "p_value_corrected": 3.7074939646260616e-10,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "anova:education:region",
+      "test_type": "one_way_anova",
+      "outcome": "education",
+      "group": "region",
+      "groups": [
+        "East",
+        "South",
+        "West"
+      ],
+      "nobs": 30,
+      "statistic": 0.5,
+      "p_value": 0.6120365987940524,
+      "effect": {
+        "group_means": {
+          "East": 18.0,
+          "South": 20.0,
+          "West": 19.0
+        }
+      },
+      "source_id": "statistical_tests.anova.education.region",
+      "p_value_corrected": 0.642879953904341,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "anova:experience:education",
+      "test_type": "one_way_anova",
+      "outcome": "experience",
+      "group": "education",
+      "groups": [
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+        "20",
+        "21",
+        "22",
+        "23",
+        "24",
+        "25",
+        "26"
+      ],
+      "nobs": 30,
+      "statistic": 80.0,
+      "p_value": 1.7242675641659094e-11,
+      "effect": {
+        "group_means": {
+          "12": 2.5,
+          "13": 3.5,
+          "14": 4.5,
+          "15": 5.5,
+          "16": 6.5,
+          "17": 7.5,
+          "18": 8.5,
+          "19": 9.5,
+          "20": 10.5,
+          "21": 11.5,
+          "22": 12.5,
+          "23": 13.5,
+          "24": 14.5,
+          "25": 15.5,
+          "26": 16.5
+        }
+      },
+      "source_id": "statistical_tests.anova.experience.education",
+      "p_value_corrected": 3.448535128331819e-11,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "anova:experience:region",
+      "test_type": "one_way_anova",
+      "outcome": "experience",
+      "group": "region",
+      "groups": [
+        "East",
+        "South",
+        "West"
+      ],
+      "nobs": 30,
+      "statistic": 0.4931506849315068,
+      "p_value": 0.6160932891583268,
+      "effect": {
+        "group_means": {
+          "East": 8.5,
+          "South": 10.5,
+          "West": 9.5
+        }
+      },
+      "source_id": "statistical_tests.anova.experience.region",
+      "p_value_corrected": 0.642879953904341,
+      "correction_method": "fdr_bh"
+    }
+  ]
+}

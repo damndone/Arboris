@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "test_type": "correlations",
+  "results": [
+    {
+      "test_id": "correlation:wage:education",
+      "test_type": "pearson_correlation",
+      "variables": [
+        "wage",
+        "education"
+      ],
+      "nobs": 30,
+      "statistic": 0.9983300851137158,
+      "p_value": 3.17850943241814e-36,
+      "effect": {
+        "r": 0.9983300851137158
+      },
+      "source_id": "statistical_tests.correlations.wage.education",
+      "p_value_corrected": 1.9071056594508838e-35,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "correlation:wage:experience",
+      "test_type": "pearson_correlation",
+      "variables": [
+        "wage",
+        "experience"
+      ],
+      "nobs": 30,
+      "statistic": 0.9983521726869069,
+      "p_value": 2.6383037481554085e-36,
+      "effect": {
+        "r": 0.9983521726869069
+      },
+      "source_id": "statistical_tests.correlations.wage.experience",
+      "p_value_corrected": 1.9071056594508838e-35,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "correlation:education:experience",
+      "test_type": "pearson_correlation",
+      "variables": [
+        "education",
+        "experience"
+      ],
+      "nobs": 30,
+      "statistic": 0.9933700926488389,
+      "p_value": 7.456156975267334e-28,
+      "effect": {
+        "r": 0.9933700926488389
+      },
+      "source_id": "statistical_tests.correlations.education.experience",
+      "p_value_corrected": 2.9824627901069337e-27,
+      "correction_method": "fdr_bh"
+    }
+  ]
+}

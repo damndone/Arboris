@@ -1,0 +1,14 @@
+{
+  "chain_id": "chain_7953d09ad0634ac08b621676a06308ae",
+  "created_at": "2026-07-15T03:08:13.287168+00:00",
+  "inherited_parent_ref": {
+    "entry_id": "9a0ad4e5a0134d90adb17b82014a08d8",
+    "session_id": "chain-session"
+  },
+  "leaf_entry_id": "eb5bff26486244e28cdb89431709cd93",
+  "role": "chain",
+  "root_entry_id": "eb5bff26486244e28cdb89431709cd93",
+  "schema_version": "agent.session.v1",
+  "session_id": "session_chain_7953d09ad0634ac08b621676a06308ae",
+  "status": "idle"
+}

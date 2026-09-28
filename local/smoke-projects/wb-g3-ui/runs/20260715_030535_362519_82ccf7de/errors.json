@@ -1,0 +1,26 @@
+{
+  "schema_version": "legacy",
+  "run_id": "20260715_030535_362519_82ccf7de",
+  "issues": [
+    {
+      "severity": "INFO",
+      "code": "CATEGORICAL_AUTO_DUMMY_CODED",
+      "message": "Column 'region' was detected as categorical and automatically dummy-coded.",
+      "evidence": {
+        "column": "region",
+        "preprocessing": "dummy_coded"
+      },
+      "issue_id": "diag_001",
+      "affected_stage": "",
+      "variables": [],
+      "metric": "",
+      "value": null,
+      "threshold": null,
+      "template_key": "",
+      "template_params": {},
+      "recommended_action_key": "",
+      "is_user_action_required": false
+    }
+  ],
+  "superseded_by": "diagnostic_summary.json"
+}

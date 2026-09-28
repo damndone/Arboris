@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>cs_did</title>
+    <style>
+      .critical-error { background: #fff0f0; border-left: 4px solid #e00; padding: 8px; margin: 4px 0; }
+      .warning { background: #fff8f0; border-left: 4px solid #f80; padding: 8px; margin: 4px 0; }
+      .caution { background: #fffff0; border-left: 4px solid #ee0; padding: 8px; margin: 4px 0; }
+      .system-note { background: #f8f8f8; border-left: 4px solid #999; padding: 8px; margin: 4px 0; color: #666; }
+      .fact-item { margin: 2px 0; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+      th { background: #f5f5f5; }
+    </style>
+  </head>
+  <body>
+    <h1>cs_did</h1>
+
+    
+
+    <section id="facts">
+      <h2>Facts</h2>
+      <ul>
+        
+        <li class="fact-item">Model: cs_did</li>
+        
+        <li class="fact-item">y = outcome;  X = policy_intensity</li>
+        
+        <li class="fact-item">Rows used: 120 · Columns: 5</li>
+        
+        <li class="fact-item">Dataset kind: panel</li>
+        
+      </ul>
+    </section>
+
+    
+    <section id="data-diagnostics">
+      <h2>Data Diagnostics</h2>
+      
+      <div class="system-note">Variable &#39;policy_intensity&#39; was dropped due to perfect collinearity.</div>
+      
+      <div class="system-note">Dataset detected as panel-like, but this run used a pooled cs_did model without fixed effects or clustered standard errors.</div>
+      
+    </section>
+    
+
+    
+
+    
+
+    
+    <section id="coefficient-interpretation">
+      <h2>Coefficient Interpretation</h2>
+      <ul>
+        
+        <li>Holding other selected regressors constant, each one-unit increase in ATT is associated with an average change of +2.0189 in outcome. This association is not reported.</li>
+        
+      </ul>
+    </section>
+    
+
+    <section id="causal-caution">
+      <h2>Causal Caution</h2>
+      <p>These estimates are associations, not necessarily causal effects. Statistical significance does not imply causality.</p>
+    </section>
+
+    
+    <section id="descriptive-stats">
+      <h2>Descriptive Statistics</h2>
+      <table>
+        <thead><tr><th>Column</th><th>Dtype</th><th>Count</th><th>Missing</th><th>Mean</th><th>Std</th></tr></thead>
+        <tbody>
+          
+          <tr><td>state</td><td>str</td><td>120</td><td>0.0%</td><td>—</td><td>—</td></tr>
+          
+          <tr><td>year</td><td>int64</td><td>120</td><td>0.0%</td><td>2014.5</td><td>2.8843</td></tr>
+          
+          <tr><td>first_treated_year</td><td>int64</td><td>120</td><td>0.0%</td><td>1511.25</td><td>876.1801</td></tr>
+          
+          <tr><td>policy_intensity</td><td>float64</td><td>120</td><td>0.0%</td><td>1.333</td><td>0.5461</td></tr>
+          
+          <tr><td>outcome</td><td>float64</td><td>120</td><td>0.0%</td><td>6.1588</td><td>1.8387</td></tr>
+          
+        </tbody>
+      </table>
+    </section>
+    
+
+    
+    <section id="statistical-tests">
+      <h2>Statistical Tests</h2>
+      
+      <ul>
+        
+        <li>ANOVA: outcome by policy_intensity: Statistic 8.4711; p &lt; 0.001.</li>
+        
+        <li>Kruskal-Wallis: outcome by policy_intensity: Statistic 55.1133; p &lt; 0.001.</li>
+        
+        <li>Pearson correlation: outcome vs policy_intensity: Statistic 0.1636; p = 0.074.</li>
+        
+        <li>Kendall correlation: outcome vs policy_intensity: Statistic 0.0761; p = 0.235.</li>
+        
+        <li>Spearman correlation: outcome vs policy_intensity: Statistic 0.1013; p = 0.271.</li>
+        
+      </ul>
+      
+    </section>
+    
+  </body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "run_id": "20260718_034919_009041_f98bcd3a",
+  "mode": "auto",
+  "status": "completed",
+  "started_at": "2026-07-18T03:49:19.008645+00:00",
+  "y": "outcome",
+  "x": [
+    "policy_intensity"
+  ],
+  "lineage": [
+    {
+      "source": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.7/local/demo-projects/cs-did-staggered/runs/20260718_034919_009041_f98bcd3a/_uploads/cs_did_staggered.csv",
+      "artifact_id": "raw_cs_did_staggered.csv"
+    }
+  ],
+  "requested_model_type": "cs_did",
+  "model_routing": {
+    "requested_model_type": "cs_did",
+    "current_y": "outcome",
+    "dtype": "float64",
+    "min": 3.198,
+    "max": 10.998,
+    "unique": 118,
+    "integer_like": false,
+    "data_detected_y_type": "continuous",
+    "effective_y_type": "continuous",
+    "effective_model_id": "cs_did_1",
+    "effective_model_type": "cs_did"
+  }
+}

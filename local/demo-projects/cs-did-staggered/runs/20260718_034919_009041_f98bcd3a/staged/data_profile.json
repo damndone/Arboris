@@ -1,0 +1,70 @@
+{
+  "row_count": 120,
+  "column_count": 5,
+  "columns": {
+    "state": {
+      "dtype": "str",
+      "missing_rate": 0.0,
+      "unique_count": 12,
+      "unique_ratio": 0.1
+    },
+    "year": {
+      "dtype": "int64",
+      "missing_rate": 0.0,
+      "unique_count": 10,
+      "unique_ratio": 0.08333333333333333,
+      "mean": 2014.5,
+      "std": 2.884324484362402
+    },
+    "first_treated_year": {
+      "dtype": "int64",
+      "missing_rate": 0.0,
+      "unique_count": 4,
+      "unique_ratio": 0.03333333333333333,
+      "mean": 1511.25,
+      "std": 876.1801285392512
+    },
+    "policy_intensity": {
+      "dtype": "float64",
+      "missing_rate": 0.0,
+      "unique_count": 12,
+      "unique_ratio": 0.1,
+      "mean": 1.3330000000000004,
+      "std": 0.546112771928899
+    },
+    "outcome": {
+      "dtype": "float64",
+      "missing_rate": 0.0,
+      "unique_count": 118,
+      "unique_ratio": 0.9833333333333333,
+      "mean": 6.1588,
+      "std": 1.838718422884663
+    }
+  },
+  "correlations": {
+    "year": {
+      "year": 1.0,
+      "first_treated_year": 1.827697099324367e-14,
+      "policy_intensity": -1.3661670568272984e-14,
+      "outcome": 0.6291262424509537
+    },
+    "first_treated_year": {
+      "year": 1.827697099324367e-14,
+      "first_treated_year": 1.0,
+      "policy_intensity": -0.17960215689148692,
+      "outcome": 0.395809458648488
+    },
+    "policy_intensity": {
+      "year": -1.3661670568272984e-14,
+      "first_treated_year": -0.17960215689148692,
+      "policy_intensity": 1.0,
+      "outcome": 0.1636162818608683
+    },
+    "outcome": {
+      "year": 0.6291262424509537,
+      "first_treated_year": 0.395809458648488,
+      "policy_intensity": 0.1636162818608683,
+      "outcome": 1.0
+    }
+  }
+}

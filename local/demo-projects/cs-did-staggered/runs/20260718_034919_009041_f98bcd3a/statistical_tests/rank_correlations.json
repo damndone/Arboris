@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "test_type": "rank_correlations",
+  "results": [
+    {
+      "test_id": "spearman_correlation:outcome:policy_intensity",
+      "test_type": "spearman_correlation",
+      "variables": [
+        "outcome",
+        "policy_intensity"
+      ],
+      "nobs": 120,
+      "statistic": 0.10132852713990563,
+      "p_value": 0.2708021231868147,
+      "effect": {
+        "rho": 0.10132852713990563
+      },
+      "source_id": "statistical_tests.rank_correlations.spearman.outcome.policy_intensity",
+      "p_value_corrected": 0.2708021231868147,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "kendall_correlation:outcome:policy_intensity",
+      "test_type": "kendall_correlation",
+      "variables": [
+        "outcome",
+        "policy_intensity"
+      ],
+      "nobs": 120,
+      "statistic": 0.07605193413786523,
+      "p_value": 0.23458819571692235,
+      "effect": {
+        "tau": 0.07605193413786523
+      },
+      "source_id": "statistical_tests.rank_correlations.kendall.outcome.policy_intensity",
+      "p_value_corrected": 0.2708021231868147,
+      "correction_method": "fdr_bh"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "test_type": "correlations",
+  "results": [
+    {
+      "test_id": "correlation:outcome:policy_intensity",
+      "test_type": "pearson_correlation",
+      "variables": [
+        "outcome",
+        "policy_intensity"
+      ],
+      "nobs": 120,
+      "statistic": 0.1636162818608681,
+      "p_value": 0.07416083014434434,
+      "effect": {
+        "r": 0.1636162818608681
+      },
+      "source_id": "statistical_tests.correlations.outcome.policy_intensity",
+      "p_value_corrected": 0.12360138357390724,
+      "correction_method": "fdr_bh"
+    }
+  ]
+}

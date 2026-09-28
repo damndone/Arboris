@@ -1,0 +1,48 @@
+{
+  "dataset_id": "dataset_1",
+  "source_files": [
+    "cross_section.csv"
+  ],
+  "columns": [
+    {
+      "name": "wage",
+      "dtype": "int64",
+      "semantic_role": "numeric_measure",
+      "confidence": 0.7,
+      "source_file": "cross_section.csv",
+      "evidence": [
+        "unique_column"
+      ]
+    },
+    {
+      "name": "education",
+      "dtype": "int64",
+      "semantic_role": "numeric_measure",
+      "confidence": 0.7,
+      "source_file": "cross_section.csv",
+      "evidence": []
+    },
+    {
+      "name": "experience",
+      "dtype": "int64",
+      "semantic_role": "numeric_measure",
+      "confidence": 0.7,
+      "source_file": "cross_section.csv",
+      "evidence": []
+    },
+    {
+      "name": "region",
+      "dtype": "str",
+      "semantic_role": "categorical",
+      "confidence": 0.5,
+      "source_file": "cross_section.csv",
+      "evidence": []
+    }
+  ],
+  "primary_key_candidates": [
+    "wage"
+  ],
+  "time_candidates": [],
+  "id_candidates": [],
+  "transformations": []
+}

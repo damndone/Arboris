@@ -1,0 +1,32 @@
+{
+  "run_id": "20260715_030535_362519_82ccf7de",
+  "mode": "auto",
+  "status": "completed",
+  "started_at": "2026-07-15T03:05:35.390416+00:00",
+  "y": "wage",
+  "x": [
+    "education",
+    "experience",
+    "region"
+  ],
+  "lineage": [
+    {
+      "source": "examples/datasets/cross_section.csv",
+      "artifact_id": "raw_cross_section.csv"
+    }
+  ],
+  "requested_model_type": "auto",
+  "model_routing": {
+    "requested_model_type": "auto",
+    "current_y": "wage",
+    "dtype": "int64",
+    "min": 20.0,
+    "max": 49.0,
+    "unique": 30,
+    "integer_like": true,
+    "data_detected_y_type": "continuous",
+    "effective_y_type": "continuous",
+    "effective_model_id": "ols_1",
+    "effective_model_type": "ols_robust"
+  }
+}

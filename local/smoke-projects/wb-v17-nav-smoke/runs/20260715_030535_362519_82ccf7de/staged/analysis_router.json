@@ -1,0 +1,8 @@
+{
+  "kind": "cross_section",
+  "confidence": 0.75,
+  "secondary_labels": [],
+  "evidence": [
+    "no_time_candidate"
+  ]
+}

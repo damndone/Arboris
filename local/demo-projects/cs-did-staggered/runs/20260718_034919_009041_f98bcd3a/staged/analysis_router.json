@@ -1,0 +1,11 @@
+{
+  "kind": "panel",
+  "confidence": 0.85,
+  "secondary_labels": [
+    "panel_balanced"
+  ],
+  "evidence": [
+    "id=state",
+    "time=year"
+  ]
+}

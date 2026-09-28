@@ -1,0 +1,13 @@
+{
+  "actions": [
+    {
+      "action": "normalize_column_names",
+      "details": {
+        "wage": "wage",
+        "education": "education",
+        "experience": "experience",
+        "region": "region"
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "actions": [
+    {
+      "action": "normalize_column_names",
+      "details": {
+        "state": "state",
+        "year": "year",
+        "first_treated_year": "first_treated_year",
+        "policy_intensity": "policy_intensity",
+        "outcome": "outcome"
+      }
+    }
+  ]
+}

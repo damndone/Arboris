@@ -1,0 +1,437 @@
+{
+  "schema_version": 3,
+  "run_id": "20260715_030535_362519_82ccf7de",
+  "nodes": {
+    "stage:raw": {
+      "id": "stage:raw",
+      "kind": "dataset_stage",
+      "display_label": "Raw input data",
+      "created_at": "2026-07-15T03:05:35.398970+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": null,
+      "decision_points": [],
+      "summary": "Raw: 30 rows × 4 cols",
+      "annotations": [],
+      "stage": "source"
+    },
+    "stage:cleaned": {
+      "id": "stage:cleaned",
+      "kind": "dataset_stage",
+      "display_label": "Cleaned data",
+      "created_at": "2026-07-15T03:05:35.477953+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "processed/cleaned_dataset.parquet",
+      "decision_points": [
+        {
+          "decision_id": "handle_missing_values",
+          "decision_id_alias": [],
+          "selected": "drop_rows_with_missing_required_fields",
+          "candidates": [
+            "drop_rows_with_missing_required_fields",
+            "mean_imputation",
+            "median_imputation",
+            "group_median_imputation",
+            "mode_imputation",
+            "missing_as_category",
+            "forward_fill",
+            "backward_fill",
+            "linear_interpolation",
+            "spline_interpolation",
+            "moving_average_imputation",
+            "knn_imputation",
+            "regression_imputation",
+            "random_forest_imputation",
+            "multiple_imputation",
+            "kalman_smoothing",
+            "matrix_completion",
+            "model_native_missing_handling"
+          ],
+          "source": "system_default",
+          "contestability": {
+            "is_contestable": true,
+            "assumption_checks_needed": [
+              "missingness_mechanism_audit"
+            ],
+            "warnings": [
+              "Listwise deletion assumes MCAR. May bias estimates under MAR/MNAR.",
+              "Consider per-variable strategy for time series / panel / causal contexts."
+            ],
+            "review_status": "needed"
+          },
+          "reason": {
+            "reason_type": "system_default",
+            "explanation": "Pipeline drops rows with any missing value in y or x. No per-column strategy.",
+            "chosen_params_schema": "MissingValueStrategy.v1",
+            "chosen_params": {
+              "method": "drop_rows_with_missing_required_fields",
+              "variables": [
+                "wage",
+                "education",
+                "experience",
+                "region"
+              ],
+              "scope": "dataset",
+              "group_by": [],
+              "time_variable": null,
+              "max_gap": null,
+              "add_missing_indicator": false
+            }
+          }
+        }
+      ],
+      "summary": "Cleaned: 30 rows",
+      "annotations": [],
+      "stage": "clean"
+    },
+    "var:wage:cleaned": {
+      "id": "var:wage:cleaned",
+      "kind": "variable",
+      "display_label": "wage (cleaned)",
+      "created_at": "2026-07-15T03:05:35.477972+00:00",
+      "parent_stage_id": "stage:cleaned",
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": null,
+      "decision_points": [],
+      "summary": "Kept as numeric",
+      "annotations": [],
+      "stage": "transform"
+    },
+    "var:education:cleaned": {
+      "id": "var:education:cleaned",
+      "kind": "variable",
+      "display_label": "education (cleaned)",
+      "created_at": "2026-07-15T03:05:35.477978+00:00",
+      "parent_stage_id": "stage:cleaned",
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": null,
+      "decision_points": [],
+      "summary": "Kept as numeric",
+      "annotations": [],
+      "stage": "transform"
+    },
+    "var:experience:cleaned": {
+      "id": "var:experience:cleaned",
+      "kind": "variable",
+      "display_label": "experience (cleaned)",
+      "created_at": "2026-07-15T03:05:35.477981+00:00",
+      "parent_stage_id": "stage:cleaned",
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": null,
+      "decision_points": [],
+      "summary": "Kept as numeric",
+      "annotations": [],
+      "stage": "transform"
+    },
+    "var:region:cleaned": {
+      "id": "var:region:cleaned",
+      "kind": "variable",
+      "display_label": "region (cleaned)",
+      "created_at": "2026-07-15T03:05:35.477985+00:00",
+      "parent_stage_id": "stage:cleaned",
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": null,
+      "decision_points": [
+        {
+          "decision_id": "categorical_auto_dummy",
+          "decision_id_alias": [],
+          "selected": "dummy_encode",
+          "candidates": [
+            "dummy_encode",
+            "leave_as_continuous",
+            "drop"
+          ],
+          "source": "data_driven_default",
+          "contestability": {
+            "is_contestable": true,
+            "assumption_checks_needed": [
+              "categorical_candidate"
+            ],
+            "warnings": [
+              "Column had ≤ threshold unique values; may be ordinal rather than categorical."
+            ],
+            "review_status": "needed"
+          },
+          "reason": {
+            "reason_type": "data_driven_default",
+            "explanation": "Column 'region' has 3 unique non-null values; dummy-encoded.",
+            "chosen_params_schema": null,
+            "chosen_params": {
+              "variable": "region",
+              "n_unique": 3,
+              "reference_level": "East"
+            }
+          }
+        }
+      ],
+      "summary": "Dummy-encoded (3 levels, ref='East')",
+      "annotations": [],
+      "stage": "transform"
+    },
+    "model:ols_1": {
+      "id": "model:ols_1",
+      "kind": "model",
+      "display_label": "ols_robust (primary)",
+      "created_at": "2026-07-15T03:05:35.477991+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "caution",
+      "trust_reason": "data source changed; rerun required",
+      "archived": false,
+      "payload_ref": "model_results/ols_1.json",
+      "decision_points": [
+        {
+          "decision_id": "model_type_auto_select",
+          "decision_id_alias": [],
+          "selected": "continuous",
+          "candidates": [
+            "ols",
+            "logit",
+            "poisson"
+          ],
+          "source": "data_driven_default",
+          "contestability": {
+            "is_contestable": true,
+            "assumption_checks_needed": [
+              "variable_role_inference"
+            ],
+            "warnings": [
+              "Auto-selected based on y dtype and unique-value count; verify domain fit."
+            ],
+            "review_status": "needed"
+          },
+          "reason": {
+            "reason_type": "data_driven_default",
+            "explanation": "y has 30 unique values; selected 'continuous'.",
+            "chosen_params_schema": null,
+            "chosen_params": {
+              "y_unique": 30,
+              "y_dtype": "int64"
+            }
+          }
+        },
+        {
+          "decision_id": "ols_default_robust_se",
+          "decision_id_alias": [],
+          "selected": "HC1",
+          "candidates": [],
+          "source": "system_default",
+          "contestability": {
+            "is_contestable": true,
+            "assumption_checks_needed": [
+              "breusch_pagan",
+              "white_test"
+            ],
+            "warnings": [
+              "Robust SE is hardcoded default. Confirm heteroskedasticity or revisit."
+            ],
+            "review_status": "needed"
+          },
+          "reason": {
+            "reason_type": "system_default",
+            "explanation": "OLS pipeline always applies HC1; not data-driven.",
+            "chosen_params_schema": null,
+            "chosen_params": {
+              "se_type": "robust",
+              "variant": "HC1"
+            }
+          }
+        }
+      ],
+      "summary": "OLS (HC1, n=30)",
+      "annotations": [
+        {
+          "type": "downstream_invalidation",
+          "reason": "code_execute",
+          "source_node_id": "stage:cleaned",
+          "child_node_id": "code-exec:ccb1824f1a7a461e0a78bd3ea3eaa76b",
+          "rerun_required": true
+        }
+      ],
+      "stage": "model"
+    },
+    "report:html": {
+      "id": "report:html",
+      "kind": "report",
+      "display_label": "HTML report",
+      "created_at": "2026-07-15T03:05:35.477996+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "reports/report.html",
+      "decision_points": [],
+      "summary": "HTML report",
+      "annotations": [],
+      "stage": "report"
+    },
+    "code-exec:ccb1824f1a7a461e0a78bd3ea3eaa76b": {
+      "id": "code-exec:ccb1824f1a7a461e0a78bd3ea3eaa76b",
+      "kind": "dataset_stage",
+      "display_label": "Run code",
+      "created_at": "2026-07-16T11:32:45.521831+00:00",
+      "parent_stage_id": "stage:cleaned",
+      "branch_id": "code-exec:ccb1824f1a7a461e0a78",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "derived/code_execute/ccb1824f1a7a461e0a78bd3ea3eaa76b/data.csv",
+      "decision_points": [],
+      "summary": "30 rows; +1 columns; downstream rerun required",
+      "annotations": [
+        {
+          "type": "data_operation",
+          "operation_id": "code.execute",
+          "execution_key": "exec_ccb1824f1a7a461e0a78bd3ea3eaa76b",
+          "recipe_path": "derived/code_execute/ccb1824f1a7a461e0a78bd3ea3eaa76b/recipe.json",
+          "schema_fingerprint": "2d82a7c905fc093c5afa2676e5bd44c50f5043aa29c97a528d24bfc9fa07e764",
+          "language": "python",
+          "code_sha256": "d3f7d967d73bdffc6474e846a8c87702e8e4f3e68230672164ca6059b3dd8eb0"
+        }
+      ],
+      "stage": "transform"
+    }
+  },
+  "edges": {
+    "e:raw-cleaned": {
+      "id": "e:raw-cleaned",
+      "source_id": "stage:raw",
+      "target_id": "stage:cleaned",
+      "op": "clean_frame",
+      "params": {
+        "cleaning_actions_count": 1
+      },
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:cleaned-model-primary": {
+      "id": "e:cleaned-model-primary",
+      "source_id": "stage:cleaned",
+      "target_id": "model:ols_1",
+      "op": "ols_robust.fit",
+      "params": {},
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:model-report": {
+      "id": "e:model-report",
+      "source_id": "model:ols_1",
+      "target_id": "report:html",
+      "op": "render_report",
+      "params": {},
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:role:wage:outcome": {
+      "id": "e:role:wage:outcome",
+      "source_id": "var:wage:cleaned",
+      "target_id": "model:ols_1",
+      "op": "enters_as_outcome",
+      "params": {
+        "role": "outcome",
+        "source": "outcome",
+        "estimator_family": "regression",
+        "dropped": false
+      },
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:role:education:explanatory_unspecified": {
+      "id": "e:role:education:explanatory_unspecified",
+      "source_id": "var:education:cleaned",
+      "target_id": "model:ols_1",
+      "op": "enters_as_explanatory_unspecified",
+      "params": {
+        "role": "explanatory_unspecified",
+        "source": "rhs",
+        "estimator_family": "regression",
+        "dropped": false
+      },
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:role:experience:explanatory_unspecified": {
+      "id": "e:role:experience:explanatory_unspecified",
+      "source_id": "var:experience:cleaned",
+      "target_id": "model:ols_1",
+      "op": "enters_as_explanatory_unspecified",
+      "params": {
+        "role": "explanatory_unspecified",
+        "source": "rhs",
+        "estimator_family": "regression",
+        "dropped": false
+      },
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:role:region:explanatory_unspecified": {
+      "id": "e:role:region:explanatory_unspecified",
+      "source_id": "var:region:cleaned",
+      "target_id": "model:ols_1",
+      "op": "enters_as_explanatory_unspecified",
+      "params": {
+        "role": "explanatory_unspecified",
+        "source": "rhs",
+        "estimator_family": "regression",
+        "dropped": false
+      },
+      "reversible": false,
+      "inverse_op": null
+    },
+    "edge:code-exec:ccb1824f1a7a461e0a78bd3ea3eaa76b": {
+      "id": "edge:code-exec:ccb1824f1a7a461e0a78bd3ea3eaa76b",
+      "source_id": "stage:cleaned",
+      "target_id": "code-exec:ccb1824f1a7a461e0a78bd3ea3eaa76b",
+      "op": "code.execute",
+      "params": {
+        "language": "python",
+        "code_sha256": "d3f7d967d73bdffc6474e846a8c87702e8e4f3e68230672164ca6059b3dd8eb0",
+        "execution_key": "exec_ccb1824f1a7a461e0a78bd3ea3eaa76b",
+        "schema_fingerprint_before": "82e51b66044a4e1416a168608598ed0a9012179192bf01ba8114350437c02196",
+        "schema_fingerprint_after": "2d82a7c905fc093c5afa2676e5bd44c50f5043aa29c97a528d24bfc9fa07e764"
+      },
+      "reversible": false,
+      "inverse_op": null
+    }
+  },
+  "branches": {
+    "main": {
+      "id": "main",
+      "forked_from_node_id": null,
+      "head_node_ids": [
+        "model:ols_1",
+        "report:html"
+      ],
+      "archived": false
+    },
+    "code-exec:ccb1824f1a7a461e0a78": {
+      "id": "code-exec:ccb1824f1a7a461e0a78",
+      "forked_from_node_id": "stage:cleaned",
+      "head_node_ids": [
+        "code-exec:ccb1824f1a7a461e0a78bd3ea3eaa76b"
+      ],
+      "archived": false
+    }
+  },
+  "legacy": false
+}

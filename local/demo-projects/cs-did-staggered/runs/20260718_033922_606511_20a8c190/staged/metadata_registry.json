@@ -1,0 +1,59 @@
+{
+  "dataset_id": "dataset_1",
+  "source_files": [
+    "cs_did_staggered.csv"
+  ],
+  "columns": [
+    {
+      "name": "state",
+      "dtype": "str",
+      "semantic_role": "categorical",
+      "confidence": 0.5,
+      "source_file": "cs_did_staggered.csv",
+      "evidence": []
+    },
+    {
+      "name": "year",
+      "dtype": "int64",
+      "semantic_role": "time",
+      "confidence": 0.85,
+      "source_file": "cs_did_staggered.csv",
+      "evidence": [
+        "name_matches_time_token"
+      ]
+    },
+    {
+      "name": "first_treated_year",
+      "dtype": "int64",
+      "semantic_role": "time",
+      "confidence": 0.85,
+      "source_file": "cs_did_staggered.csv",
+      "evidence": [
+        "name_matches_time_token"
+      ]
+    },
+    {
+      "name": "policy_intensity",
+      "dtype": "float64",
+      "semantic_role": "numeric_measure",
+      "confidence": 0.7,
+      "source_file": "cs_did_staggered.csv",
+      "evidence": []
+    },
+    {
+      "name": "outcome",
+      "dtype": "float64",
+      "semantic_role": "numeric_measure",
+      "confidence": 0.7,
+      "source_file": "cs_did_staggered.csv",
+      "evidence": []
+    }
+  ],
+  "primary_key_candidates": [],
+  "time_candidates": [
+    "year",
+    "first_treated_year"
+  ],
+  "id_candidates": [],
+  "transformations": []
+}

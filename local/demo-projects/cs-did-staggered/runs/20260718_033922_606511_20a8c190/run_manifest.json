@@ -1,0 +1,17 @@
+{
+  "run_id": "20260718_033922_606511_20a8c190",
+  "mode": "auto",
+  "status": "running",
+  "started_at": "2026-07-18T03:39:22.606094+00:00",
+  "y": "outcome",
+  "x": [
+    "policy_intensity"
+  ],
+  "lineage": [
+    {
+      "source": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.7/local/demo-projects/cs-did-staggered/runs/20260718_033922_606511_20a8c190/_uploads/cs_did_staggered.csv",
+      "artifact_id": "raw_cs_did_staggered.csv"
+    }
+  ],
+  "requested_model_type": "cs_did"
+}

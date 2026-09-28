@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "model_id": "cs_did_1",
+  "model_type": "cs_did",
+  "engine": "workbench",
+  "nobs": 12,
+  "r_squared": null,
+  "coefficients": {
+    "ATT": {
+      "estimate": 2.018869840812357,
+      "std_error": 0.12502990938283692,
+      "p_value": null,
+      "source_id": "model_results.cs_did_1.coefficients.ATT"
+    }
+  },
+  "warnings": [
+    "Event time -6.0 is supported by a single cohort.",
+    "Event time -5.0 is supported by a single cohort.",
+    "Event time 5.0 is supported by a single cohort.",
+    "Event time 6.0 is supported by a single cohort."
+  ]
+}

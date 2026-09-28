@@ -1,0 +1,11 @@
+{
+  "chain_id": "chain:20260715_030535_362519_82ccf7de",
+  "created_at": "2026-07-16T12:50:01.751085+00:00",
+  "inherited_parent_ref": null,
+  "leaf_entry_id": "3ce26ffeca724ce0a498f4300b9dad96",
+  "role": "chain",
+  "root_entry_id": "261370efa8754ff0b3502fa18347af81",
+  "schema_version": "agent.session.v1",
+  "session_id": "agent_chain_c4082a280b134a099be0e03babd5130e",
+  "status": "failed"
+}

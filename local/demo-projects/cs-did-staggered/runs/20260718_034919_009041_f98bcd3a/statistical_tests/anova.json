@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "test_type": "anova",
+  "results": [
+    {
+      "test_id": "anova:outcome:policy_intensity",
+      "test_type": "one_way_anova",
+      "outcome": "outcome",
+      "group": "policy_intensity",
+      "groups": [
+        "0.76",
+        "0.843",
+        "0.903",
+        "0.953",
+        "1.011",
+        "1.15",
+        "1.204",
+        "1.21",
+        "1.368",
+        "1.801",
+        "2.391",
+        "2.402"
+      ],
+      "nobs": 120,
+      "statistic": 8.471056465822114,
+      "p_value": 1.326357563971219e-10,
+      "effect": {
+        "group_means": {
+          "0.76": 5.5136,
+          "0.843": 8.8504,
+          "0.903": 4.583,
+          "0.953": 6.545999999999999,
+          "1.011": 5.2185,
+          "1.15": 6.030099999999999,
+          "1.204": 5.7591,
+          "1.21": 4.1134,
+          "1.368": 6.8643,
+          "1.801": 6.7700000000000005,
+          "2.391": 6.013800000000001,
+          "2.402": 7.6434000000000015
+        }
+      },
+      "source_id": "statistical_tests.anova.outcome.policy_intensity",
+      "p_value_corrected": 6.631787819856094e-10,
+      "correction_method": "fdr_bh"
+    }
+  ]
+}

@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "test_type": "nonparametric",
+  "results": [
+    {
+      "test_id": "kruskal_wallis:wage:education",
+      "test_type": "kruskal_wallis",
+      "outcome": "wage",
+      "group": "education",
+      "groups": [
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+        "20",
+        "21",
+        "22",
+        "23",
+        "24",
+        "25",
+        "26"
+      ],
+      "nobs": 30,
+      "statistic": 28.903225806451616,
+      "p_value": 0.010769882420194834,
+      "effect": {
+        "group_medians": {
+          "12": 20.5,
+          "13": 22.5,
+          "14": 24.5,
+          "15": 26.5,
+          "16": 28.5,
+          "17": 30.5,
+          "18": 32.5,
+          "19": 34.5,
+          "20": 36.5,
+          "21": 38.5,
+          "22": 40.5,
+          "23": 42.5,
+          "24": 44.5,
+          "25": 46.5,
+          "26": 48.5
+        }
+      },
+      "source_id": "statistical_tests.nonparametric.kruskal_wallis.wage.education",
+      "p_value_corrected": 0.017231811872311733,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "kruskal_wallis:wage:region",
+      "test_type": "kruskal_wallis",
+      "outcome": "wage",
+      "group": "region",
+      "groups": [
+        "East",
+        "South",
+        "West"
+      ],
+      "nobs": 30,
+      "statistic": 1.0322580645161281,
+      "p_value": 0.5968263778505604,
+      "effect": {
+        "group_medians": {
+          "East": 32.5,
+          "South": 36.5,
+          "West": 34.5
+        }
+      },
+      "source_id": "statistical_tests.nonparametric.kruskal_wallis.wage.region",
+      "p_value_corrected": 0.642879953904341,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "kruskal_wallis:education:region",
+      "test_type": "kruskal_wallis",
+      "outcome": "education",
+      "group": "region",
+      "groups": [
+        "East",
+        "South",
+        "West"
+      ],
+      "nobs": 30,
+      "statistic": 1.035714285714285,
+      "p_value": 0.5957958865191353,
+      "effect": {
+        "group_medians": {
+          "East": 18.0,
+          "South": 20.0,
+          "West": 19.0
+        }
+      },
+      "source_id": "statistical_tests.nonparametric.kruskal_wallis.education.region",
+      "p_value_corrected": 0.642879953904341,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "kruskal_wallis:experience:education",
+      "test_type": "kruskal_wallis",
+      "outcome": "experience",
+      "group": "education",
+      "groups": [
+        "12",
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+        "20",
+        "21",
+        "22",
+        "23",
+        "24",
+        "25",
+        "26"
+      ],
+      "nobs": 30,
+      "statistic": 28.634345012274046,
+      "p_value": 0.011706550514837944,
+      "effect": {
+        "group_medians": {
+          "12": 2.5,
+          "13": 3.5,
+          "14": 4.5,
+          "15": 5.5,
+          "16": 6.5,
+          "17": 7.5,
+          "18": 8.5,
+          "19": 9.5,
+          "20": 10.5,
+          "21": 11.5,
+          "22": 12.5,
+          "23": 13.5,
+          "24": 14.5,
+          "25": 15.5,
+          "26": 16.5
+        }
+      },
+      "source_id": "statistical_tests.nonparametric.kruskal_wallis.experience.education",
+      "p_value_corrected": 0.01755982577225692,
+      "correction_method": "fdr_bh"
+    },
+    {
+      "test_id": "kruskal_wallis:experience:region",
+      "test_type": "kruskal_wallis",
+      "outcome": "experience",
+      "group": "region",
+      "groups": [
+        "East",
+        "South",
+        "West"
+      ],
+      "nobs": 30,
+      "statistic": 0.9843561704976596,
+      "p_value": 0.6112934937844949,
+      "effect": {
+        "group_medians": {
+          "East": 8.5,
+          "South": 10.5,
+          "West": 9.5
+        }
+      },
+      "source_id": "statistical_tests.nonparametric.kruskal_wallis.experience.region",
+      "p_value_corrected": 0.642879953904341,
+      "correction_method": "fdr_bh"
+    }
+  ]
+}

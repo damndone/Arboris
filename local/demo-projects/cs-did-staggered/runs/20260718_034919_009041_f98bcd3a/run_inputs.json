@@ -1,0 +1,42 @@
+{
+  "run_input_schema_version": 1,
+  "form": {
+    "mode": "auto",
+    "model_type": "cs_did",
+    "y": "outcome",
+    "x": "policy_intensity",
+    "sheet_name": "",
+    "transpose": "false",
+    "imputation": "",
+    "entity_col": "state",
+    "time_col": "year",
+    "covariance": "",
+    "prediction_model_type": "",
+    "prediction_cv_folds": "0",
+    "prediction_sampling_method": "",
+    "iv_endog": "",
+    "iv_instruments": "",
+    "did_mode": "cohort",
+    "did_cohort_col": "first_treated_year",
+    "did_treat_col": "",
+    "did_post_col": "",
+    "did_status_col": "",
+    "did_treatment_path": "",
+    "cs_control_group": "never",
+    "cs_est_method": "dr",
+    "cs_base_period": "",
+    "cs_cluster_var": "",
+    "cs_anticipation": "0",
+    "honest_did": "false",
+    "focal_x": ""
+  },
+  "upload": {
+    "sha256": "9a8bfc5d711e759013429b25c0055fd4cf62bc072827e82cbdfae4c3a8feda75",
+    "filename": "cs_did_staggered.csv"
+  },
+  "rerun_of": null,
+  "from_node": null,
+  "rerun_reason": "initial",
+  "override_hash": null,
+  "dag_hash": "ce5ae0cec02d254e4c4b6c88f3cbd7e69633a99a8d0b7767f0833b60d360a83c"
+}

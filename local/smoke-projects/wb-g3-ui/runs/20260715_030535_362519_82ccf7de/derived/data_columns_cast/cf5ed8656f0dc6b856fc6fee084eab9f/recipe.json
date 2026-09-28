@@ -1,0 +1,92 @@
+{
+  "schema_version": "data-columns-cast.v1",
+  "execution_key": "exec_cf5ed8656f0dc6b856fc6fee084eab9f",
+  "spec": {
+    "operation_id": "data.columns.cast",
+    "operation_version": "v1",
+    "source_run_id": "20260715_030535_362519_82ccf7de",
+    "source_node_id": "stage:cleaned",
+    "source_artifact_id": "cleaned_dataset",
+    "casts": [
+      {
+        "column": "wage",
+        "target_dtype": "string"
+      },
+      {
+        "column": "education",
+        "target_dtype": "string"
+      }
+    ],
+    "output_format": "csv"
+  },
+  "preview": {
+    "operation_id": "data.columns.cast",
+    "operation_version": "v1",
+    "source_run_id": "20260715_030535_362519_82ccf7de",
+    "source_node_id": "stage:cleaned",
+    "source_artifact_id": "cleaned_dataset",
+    "casts": [
+      {
+        "column": "wage",
+        "target_dtype": "string"
+      },
+      {
+        "column": "education",
+        "target_dtype": "string"
+      }
+    ],
+    "source_sha256": "9c5cd3f620d323fb9c8a6dc574ac4f072ccc6adb84bc0583f6a638d9c52b96ce",
+    "row_count": 30,
+    "items": [
+      {
+        "column": "wage",
+        "target_dtype": "string",
+        "before_dtype": "int64",
+        "after_dtype": "string",
+        "success_count": 30,
+        "failure_count": 0,
+        "failure_examples": [],
+        "new_missing_count": 0,
+        "status": "ready"
+      },
+      {
+        "column": "education",
+        "target_dtype": "string",
+        "before_dtype": "int64",
+        "after_dtype": "string",
+        "success_count": 30,
+        "failure_count": 0,
+        "failure_examples": [],
+        "new_missing_count": 0,
+        "status": "ready"
+      }
+    ],
+    "schema_fingerprint_before": "82e51b66044a4e1416a168608598ed0a9012179192bf01ba8114350437c02196",
+    "schema_fingerprint_after": "0dd7f530137c8ac838a88d4897aa18c0bac9fbbbfe91667ceb1f87d4dba885e1",
+    "fingerprint": "3e339f166d61e1e22290563a6bd8c3833f6cec769c31ffa1c8b851069026ea59",
+    "downstream_invalidation": [
+      "model:ols_1"
+    ],
+    "status": "ready"
+  },
+  "casts": [
+    {
+      "column": "wage",
+      "target_dtype": "string"
+    },
+    {
+      "column": "education",
+      "target_dtype": "string"
+    }
+  ],
+  "source": {
+    "artifact_id": "cleaned_dataset",
+    "sha256": "9c5cd3f620d323fb9c8a6dc574ac4f072ccc6adb84bc0583f6a638d9c52b96ce",
+    "path": "processed/cleaned_dataset.parquet"
+  },
+  "result": {
+    "artifact_id": "data_casts_cf5ed8656f0dc6b856fc6fee084eab9f",
+    "path": "derived/data_columns_cast/cf5ed8656f0dc6b856fc6fee084eab9f/data.csv",
+    "schema_fingerprint": "0dd7f530137c8ac838a88d4897aa18c0bac9fbbbfe91667ceb1f87d4dba885e1"
+  }
+}

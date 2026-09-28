@@ -1,0 +1,9 @@
+{
+  "dtypes": {
+    "wage": "int64",
+    "education": "int64",
+    "experience": "int64",
+    "region": "str",
+    "senior": "bool"
+  }
+}

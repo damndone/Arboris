@@ -1,0 +1,53 @@
+{
+  "row_count": 30,
+  "column_count": 4,
+  "columns": {
+    "wage": {
+      "dtype": "int64",
+      "missing_rate": 0.0,
+      "unique_count": 30,
+      "unique_ratio": 1.0,
+      "mean": 34.5,
+      "std": 8.803408430829505
+    },
+    "education": {
+      "dtype": "int64",
+      "missing_rate": 0.0,
+      "unique_count": 15,
+      "unique_ratio": 0.5,
+      "mean": 19.0,
+      "std": 4.394353744020411
+    },
+    "experience": {
+      "dtype": "int64",
+      "missing_rate": 0.0,
+      "unique_count": 16,
+      "unique_ratio": 0.5333333333333333,
+      "mean": 9.5,
+      "std": 4.423682348139543
+    },
+    "region": {
+      "dtype": "str",
+      "missing_rate": 0.0,
+      "unique_count": 3,
+      "unique_ratio": 0.1
+    }
+  },
+  "correlations": {
+    "wage": {
+      "wage": 1.0,
+      "education": 0.9983300851137158,
+      "experience": 0.9983521726869071
+    },
+    "education": {
+      "wage": 0.9983300851137158,
+      "education": 1.0,
+      "experience": 0.993370092648839
+    },
+    "experience": {
+      "wage": 0.9983521726869071,
+      "education": 0.993370092648839,
+      "experience": 1.0
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "schema_version": "code-execute.v1",
+  "execution_key": "exec_ccb1824f1a7a461e0a78bd3ea3eaa76b",
+  "spec": {
+    "operation_id": "code.execute",
+    "operation_version": "v1",
+    "source_run_id": "20260715_030535_362519_82ccf7de",
+    "source_node_id": "stage:cleaned",
+    "source_artifact_id": "cleaned_dataset",
+    "language": "python",
+    "code": "print('rows in:', len(df))\nresult = df.assign(wage_sqrt=(df['wage'] ** 0.5).round(3))\n",
+    "code_sha256": "d3f7d967d73bdffc6474e846a8c87702e8e4f3e68230672164ca6059b3dd8eb0",
+    "output_format": "csv"
+  },
+  "preview": {
+    "operation_id": "code.execute",
+    "operation_version": "v1",
+    "source_run_id": "20260715_030535_362519_82ccf7de",
+    "source_node_id": "stage:cleaned",
+    "source_artifact_id": "cleaned_dataset",
+    "language": "python",
+    "code": "print('rows in:', len(df))\nresult = df.assign(wage_sqrt=(df['wage'] ** 0.5).round(3))\n",
+    "code_sha256": "d3f7d967d73bdffc6474e846a8c87702e8e4f3e68230672164ca6059b3dd8eb0",
+    "output_format": "csv",
+    "source_sha256": "9c5cd3f620d323fb9c8a6dc574ac4f072ccc6adb84bc0583f6a638d9c52b96ce",
+    "row_count_before": 30,
+    "row_count_after": 30,
+    "columns_added": [
+      "wage_sqrt"
+    ],
+    "columns_removed": [],
+    "dtype_changes": [],
+    "schema_fingerprint_before": "82e51b66044a4e1416a168608598ed0a9012179192bf01ba8114350437c02196",
+    "schema_fingerprint_after": "2d82a7c905fc093c5afa2676e5bd44c50f5043aa29c97a528d24bfc9fa07e764",
+    "result_fingerprint": "9ef616d1489161428c9c1fdce2866ceb5e4c87b8f94f240d29d283ce40887f31",
+    "result_preview_rows": [
+      {
+        "wage": 20,
+        "education": 12,
+        "experience": 2,
+        "region": "East",
+        "wage_sqrt": 4.472
+      },
+      {
+        "wage": 21,
+        "education": 12,
+        "experience": 3,
+        "region": "East",
+        "wage_sqrt": 4.583
+      },
+      {
+        "wage": 22,
+        "education": 13,
+        "experience": 3,
+        "region": "West",
+        "wage_sqrt": 4.69
+      },
+      {
+        "wage": 23,
+        "education": 13,
+        "experience": 4,
+        "region": "West",
+        "wage_sqrt": 4.796
+      },
+      {
+        "wage": 24,
+        "education": 14,
+        "experience": 4,
+        "region": "South",
+        "wage_sqrt": 4.899
+      }
+    ],
+    "stdout": "rows in: 30\n",
+    "fingerprint": "87426d241173464217c7bfe7c54bd80fc108a85620770c32aebbc93b7cc78145",
+    "downstream_invalidation": [
+      "model:ols_1"
+    ],
+    "status": "ready",
+    "error": null
+  },
+  "source": {
+    "artifact_id": "cleaned_dataset",
+    "sha256": "9c5cd3f620d323fb9c8a6dc574ac4f072ccc6adb84bc0583f6a638d9c52b96ce",
+    "path": "processed/cleaned_dataset.parquet"
+  },
+  "result": {
+    "artifact_id": "code_exec_ccb1824f1a7a461e0a78bd3ea3eaa76b",
+    "path": "derived/code_execute/ccb1824f1a7a461e0a78bd3ea3eaa76b/data.csv",
+    "schema_fingerprint": "2d82a7c905fc093c5afa2676e5bd44c50f5043aa29c97a528d24bfc9fa07e764",
+    "result_fingerprint": "9ef616d1489161428c9c1fdce2866ceb5e4c87b8f94f240d29d283ce40887f31"
+  }
+}

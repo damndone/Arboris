@@ -1,0 +1,113 @@
+%PDF-1.3
+%“Œ‹ž ReportLab Generated PDF document (opensource)
+1 0 obj
+<<
+/F1 2 0 R /F2 3 0 R
+>>
+endobj
+2 0 obj
+<<
+/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
+>>
+endobj
+3 0 obj
+<<
+/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding /Name /F2 /Subtype /Type1 /Type /Font
+>>
+endobj
+4 0 obj
+<<
+/Contents 8 0 R /MediaBox [ 0 0 612 792 ] /Parent 7 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 /Trans <<
+
+>> 
+  /Type /Page
+>>
+endobj
+5 0 obj
+<<
+/PageMode /UseNone /Pages 7 0 R /Type /Catalog
+>>
+endobj
+6 0 obj
+<<
+/Author (anonymous) /CreationDate (D:20260717234919-04'00') /Creator (anonymous) /Keywords () /ModDate (D:20260717234919-04'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+  /Subject (unspecified) /Title (untitled) /Trapped /False
+>>
+endobj
+7 0 obj
+<<
+/Count 1 /Kids [ 4 0 R ] /Type /Pages
+>>
+endobj
+8 0 obj
+<<
+/Length 3369
+>>
+stream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+BT /F2 14 Tf 16.8 TL ET
+BT 1 0 0 1 72 720 Tm (Econometrics Report) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 688 Tm (Facts) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 670 Tm (- Model: cs_did) Tj T* ET
+BT 1 0 0 1 90 656 Tm (- y = outcome;  X = policy_intensity) Tj T* ET
+BT 1 0 0 1 90 642 Tm (- Rows used: 120 \267 Columns: 5) Tj T* ET
+BT 1 0 0 1 90 628 Tm (- Dataset kind: panel) Tj T* ET
+BT 1 0 0 1 90 614 Tm (- Variables dropped from model: policy_intensity \(dropped due to perfect collinearity\)) Tj T* ET
+BT 1 0 0 1 90 600 Tm (- Note: variable importance is based on marginal \(univariate\) association with the outcome and may differ from multivariable regression results after controlling for other predictors.) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 576 Tm (Descriptive statistics) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 558 Tm (- state \(str\): missing=0 unique=12) Tj T* ET
+BT 1 0 0 1 90 544 Tm (- year \(int64\): mean=2014.5000 std=2.8843 min=2010.0000 max=2019.0000 missing=0 unique=10) Tj T* ET
+BT 1 0 0 1 90 530 Tm (- first_treated_year \(int64\): mean=1511.2500 std=876.1801 min=0.0000 max=2017.0000 missing=0 unique=4) Tj T* ET
+BT 1 0 0 1 90 516 Tm (- policy_intensity \(float64\): mean=1.3330 std=0.5461 min=0.7600 max=2.4020 missing=0 unique=12) Tj T* ET
+BT 1 0 0 1 90 502 Tm (- outcome \(float64\): mean=6.1588 std=1.8387 min=3.1980 max=10.9980 missing=0 unique=118) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 478 Tm (Interpretation) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 460 Tm (- In cs_did_1, holding other selected regressors constant, each one-unit increase in ATT is associated with an average change of 2.0189 in the dependent variable; statistical significance was not reported. [source: model_results.cs_did_1.coefficients.ATT]) Tj T* ET
+BT 1 0 0 1 90 446 Tm (- Variable 'policy_intensity' was dropped due to perfect collinearity. [source: diagnostics.warnings] [confidence: 1.0]) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 422 Tm (Statistical tests \(outcome-related\)) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 404 Tm (- ANOVA: outcome by policy_intensity: Statistic 8.4711; p < 0.001. [source: statistical_tests.anova.outcome.policy_intensity]) Tj T* ET
+BT 1 0 0 1 90 390 Tm (- Kruskal-Wallis: outcome by policy_intensity: Statistic 55.1133; p < 0.001. [source: statistical_tests.nonparametric.kruskal_wallis.outcome.policy_intensity]) Tj T* ET
+BT 1 0 0 1 90 376 Tm (- Pearson correlation: outcome vs policy_intensity: Statistic 0.1636; p = 0.074. [source: statistical_tests.correlations.outcome.policy_intensity]) Tj T* ET
+BT 1 0 0 1 90 362 Tm (- Kendall correlation: outcome vs policy_intensity: Statistic 0.0761; p = 0.235. [source: statistical_tests.rank_correlations.kendall.outcome.policy_intensity]) Tj T* ET
+BT 1 0 0 1 90 348 Tm (- Spearman correlation: outcome vs policy_intensity: Statistic 0.1013; p = 0.271. [source: statistical_tests.rank_correlations.spearman.outcome.policy_intensity]) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 324 Tm (Warnings) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 306 Tm (- Variable 'policy_intensity' was dropped due to perfect collinearity.) Tj T* ET
+BT 1 0 0 1 90 292 Tm (- Dataset detected as panel-like, but this run used a pooled cs_did model without fixed effects or clustered standard errors.) Tj T* ET
+ 
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000061 00000 n 
+0000000102 00000 n 
+0000000209 00000 n 
+0000000321 00000 n 
+0000000514 00000 n 
+0000000582 00000 n 
+0000000843 00000 n 
+0000000902 00000 n 
+trailer
+<<
+/ID 
+[<2de3605a04878fd8cf32566b560a3a45><2de3605a04878fd8cf32566b560a3a45>]
+% ReportLab generated PDF document -- digest (opensource)
+
+/Info 6 0 R
+/Root 5 0 R
+/Size 9
+>>
+startxref
+4322
+%%EOF

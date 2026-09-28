@@ -1,0 +1,157 @@
+%PDF-1.3
+%“Œ‹ž ReportLab Generated PDF document (opensource)
+1 0 obj
+<<
+/F1 2 0 R /F2 3 0 R
+>>
+endobj
+2 0 obj
+<<
+/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
+>>
+endobj
+3 0 obj
+<<
+/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding /Name /F2 /Subtype /Type1 /Type /Font
+>>
+endobj
+4 0 obj
+<<
+/Contents 9 0 R /MediaBox [ 0 0 612 792 ] /Parent 8 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 /Trans <<
+
+>> 
+  /Type /Page
+>>
+endobj
+5 0 obj
+<<
+/Contents 10 0 R /MediaBox [ 0 0 612 792 ] /Parent 8 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 /Trans <<
+
+>> 
+  /Type /Page
+>>
+endobj
+6 0 obj
+<<
+/PageMode /UseNone /Pages 8 0 R /Type /Catalog
+>>
+endobj
+7 0 obj
+<<
+/Author (anonymous) /CreationDate (D:20260714230544-04'00') /Creator (anonymous) /Keywords () /ModDate (D:20260714230544-04'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+  /Subject (unspecified) /Title (untitled) /Trapped /False
+>>
+endobj
+8 0 obj
+<<
+/Count 2 /Kids [ 4 0 R 5 0 R ] /Type /Pages
+>>
+endobj
+9 0 obj
+<<
+/Length 6054
+>>
+stream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+BT /F2 14 Tf 16.8 TL ET
+BT 1 0 0 1 72 720 Tm (Econometrics Report) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 688 Tm (Facts) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 670 Tm (- Model: OLS \(robust SE\)) Tj T* ET
+BT 1 0 0 1 90 656 Tm (- y = wage;  X = education, experience, region) Tj T* ET
+BT 1 0 0 1 90 642 Tm (- Rows used: 30 \267 Columns: 4) Tj T* ET
+BT 1 0 0 1 90 628 Tm (- Dataset kind: cross_section) Tj T* ET
+BT 1 0 0 1 90 614 Tm (- Categorical variable\(s\): region \(dummy-coded in model\)) Tj T* ET
+BT 1 0 0 1 90 600 Tm (- Note: variable importance is based on marginal \(univariate\) association with the outcome and may differ from multivariable regression results after controlling for other predictors.) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 576 Tm (Descriptive statistics) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 558 Tm (- wage \(int64\): mean=34.5000 std=8.8034 min=20.0000 max=49.0000 missing=0 unique=30) Tj T* ET
+BT 1 0 0 1 90 544 Tm (- education \(int64\): mean=19.0000 std=4.3944 min=12.0000 max=26.0000 missing=0 unique=15) Tj T* ET
+BT 1 0 0 1 90 530 Tm (- experience \(int64\): mean=9.5000 std=4.4237 min=2.0000 max=17.0000 missing=0 unique=16) Tj T* ET
+BT 1 0 0 1 90 516 Tm (- region \(str\): missing=0 unique=3) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 492 Tm (Interpretation) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 474 Tm (- In ols_1, region is a categorical variable \(dummy-coded\). Each coefficient represents the difference from the reference category. [source: model_results.ols_1.categorical.region] [confidence: 1.0]) Tj T* ET
+BT 1 0 0 1 90 460 Tm (- In ols_1, holding other selected regressors constant, each one-unit increase in education is associated with an average change of 1.0000 in the dependent variable; this is significant at the 1% level. [source: model_results.ols_1.coefficients.education]) Tj T* ET
+BT 1 0 0 1 90 446 Tm (- In ols_1, holding other selected regressors constant, each one-unit increase in experience is associated with an average change of 1.0000 in the dependent variable; this is significant at the 1% level. [source: model_results.ols_1.coefficients.experience]) Tj T* ET
+BT 1 0 0 1 90 432 Tm (- Model ols_1 \(R\262\) explains 100.0% of dependent-variable variation. [source: model_results.ols_1.r_squared] [confidence: 1.0]) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 408 Tm (Statistical tests \(outcome-related\)) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 390 Tm (- Spearman correlation: wage vs experience: Statistic 0.9984; p < 0.001. [source: statistical_tests.rank_correlations.spearman.wage.experience]) Tj T* ET
+BT 1 0 0 1 90 376 Tm (- Pearson correlation: wage vs experience: Statistic 0.9984; p < 0.001. [source: statistical_tests.correlations.wage.experience]) Tj T* ET
+BT 1 0 0 1 90 362 Tm (- Spearman correlation: wage vs education: Statistic 0.9983; p < 0.001. [source: statistical_tests.rank_correlations.spearman.wage.education]) Tj T* ET
+BT 1 0 0 1 90 348 Tm (- Pearson correlation: wage vs education: Statistic 0.9983; p < 0.001. [source: statistical_tests.correlations.wage.education]) Tj T* ET
+BT 1 0 0 1 90 334 Tm (- ANOVA: wage by education: Statistic 320.0000; p < 0.001. [source: statistical_tests.anova.wage.education]) Tj T* ET
+BT 1 0 0 1 90 320 Tm (- ANOVA: wage by experience: Statistic 280.0000; p < 0.001. [source: statistical_tests.anova.wage.experience]) Tj T* ET
+BT 1 0 0 1 90 306 Tm (- Kendall correlation: wage vs experience: Statistic 0.9838; p < 0.001. [source: statistical_tests.rank_correlations.kendall.wage.experience]) Tj T* ET
+BT 1 0 0 1 90 292 Tm (- Kendall correlation: wage vs education: Statistic 0.9826; p < 0.001. [source: statistical_tests.rank_correlations.kendall.wage.education]) Tj T* ET
+BT 1 0 0 1 90 278 Tm (- Kruskal-Wallis: wage by education: Statistic 28.9032; p = 0.011. [source: statistical_tests.nonparametric.kruskal_wallis.wage.education]) Tj T* ET
+BT 1 0 0 1 90 264 Tm (- Kruskal-Wallis: wage by region: Statistic 1.0323; p = 0.597. [source: statistical_tests.nonparametric.kruskal_wallis.wage.region]) Tj T* ET
+BT 1 0 0 1 90 250 Tm (- ANOVA: wage by region: Statistic 0.4983; p = 0.613. [source: statistical_tests.anova.wage.region]) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 226 Tm (Other tests \(+0 truncated\)) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 208 Tm (- Spearman correlation: education vs experience: Statistic 0.9936; p < 0.001. [source: statistical_tests.rank_correlations.spearman.education.experience]) Tj T* ET
+BT 1 0 0 1 90 194 Tm (- Pearson correlation: education vs experience: Statistic 0.9934; p < 0.001. [source: statistical_tests.correlations.education.experience]) Tj T* ET
+BT 1 0 0 1 90 180 Tm (- Kendall correlation: education vs experience: Statistic 0.9655; p < 0.001. [source: statistical_tests.rank_correlations.kendall.education.experience]) Tj T* ET
+BT 1 0 0 1 90 166 Tm (- ANOVA: experience by education: Statistic 80.0000; p < 0.001. [source: statistical_tests.anova.experience.education]) Tj T* ET
+BT 1 0 0 1 90 152 Tm (- ANOVA: education by experience: Statistic 70.0000; p < 0.001. [source: statistical_tests.anova.education.experience]) Tj T* ET
+BT 1 0 0 1 90 138 Tm (- Chi-square: education vs region: Statistic 60.0000; p < 0.001. [source: statistical_tests.chi_square.education.region]) Tj T* ET
+BT 1 0 0 1 90 124 Tm (- Kruskal-Wallis: experience by education: Statistic 28.6343; p = 0.012. [source: statistical_tests.nonparametric.kruskal_wallis.experience.education]) Tj T* ET
+BT 1 0 0 1 90 110 Tm (- Chi-square: education vs experience: Statistic 210.0000; p = 0.487. [source: statistical_tests.chi_square.education.experience]) Tj T* ET
+BT 1 0 0 1 90 96 Tm (- Kruskal-Wallis: education by region: Statistic 1.0357; p = 0.596. [source: statistical_tests.nonparametric.kruskal_wallis.education.region]) Tj T* ET
+BT 1 0 0 1 90 82 Tm (- Kruskal-Wallis: experience by region: Statistic 0.9844; p = 0.611. [source: statistical_tests.nonparametric.kruskal_wallis.experience.region]) Tj T* ET
+ 
+endstream
+endobj
+10 0 obj
+<<
+/Length 701
+>>
+stream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 720 Tm (- ANOVA: education by region: Statistic 0.5000; p = 0.612. [source: statistical_tests.anova.education.region]) Tj T* ET
+BT 1 0 0 1 90 706 Tm (- ANOVA: experience by region: Statistic 0.4932; p = 0.616. [source: statistical_tests.anova.experience.region]) Tj T* ET
+BT 1 0 0 1 90 692 Tm (- Chi-square: experience vs region: Statistic 18.0000; p = 0.959. [source: statistical_tests.chi_square.experience.region]) Tj T* ET
+BT /F2 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 668 Tm (Warnings) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 90 650 Tm (- Column 'region' was detected as categorical and automatically dummy-coded.) Tj T* ET
+ 
+endstream
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000061 00000 n 
+0000000102 00000 n 
+0000000209 00000 n 
+0000000321 00000 n 
+0000000514 00000 n 
+0000000708 00000 n 
+0000000776 00000 n 
+0000001037 00000 n 
+0000001102 00000 n 
+0000007207 00000 n 
+trailer
+<<
+/ID 
+[<fd1ba94c351335852b663cce08aeb0c8><fd1ba94c351335852b663cce08aeb0c8>]
+% ReportLab generated PDF document -- digest (opensource)
+
+/Info 7 0 R
+/Root 6 0 R
+/Size 11
+>>
+startxref
+7959
+%%EOF

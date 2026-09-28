@@ -1,0 +1,14 @@
+{
+  "schema_version": "fork.v1",
+  "fork_id": "fork_9d499bd0000646de8daaea6dd146ed98",
+  "source_chain_id": "chain-a",
+  "source_node_ref": "model:ols_1",
+  "source_session_id": "chain-session",
+  "source_session_entry_id": "9a0ad4e5a0134d90adb17b82014a08d8",
+  "inherited_context_fingerprint": "context-1",
+  "child_chain_id": "chain_7953d09ad0634ac08b621676a06308ae",
+  "child_agent_id": "session_chain_7953d09ad0634ac08b621676a06308ae",
+  "child_session_id": "session_chain_7953d09ad0634ac08b621676a06308ae",
+  "graph_fork_node_id": "fork:fork_9d499bd0000646de8daaea6dd146ed98",
+  "status": "active"
+}

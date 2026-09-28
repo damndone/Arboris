@@ -1,0 +1,83 @@
+[
+  {
+    "stage": "source",
+    "node_hash": "f6d826ce7709ae6adc2ebbae8b6965cd2b72dcf76ce8ee121997eb579df5056f",
+    "op_spec_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "status": "recomputed_same_hash",
+    "parents": [
+      "9a8bfc5d711e759013429b25c0055fd4cf62bc072827e82cbdfae4c3a8feda75"
+    ]
+  },
+  {
+    "stage": "cleaning",
+    "node_hash": "2ae1f89aa07792224e4bfac0cacd5d26a929154821f89a42cbe9433b18a7ff59",
+    "op_spec_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "status": "recomputed_same_hash",
+    "parents": [
+      "f6d826ce7709ae6adc2ebbae8b6965cd2b72dcf76ce8ee121997eb579df5056f"
+    ]
+  },
+  {
+    "stage": "profile",
+    "node_hash": "56a207fa8b5677f3bf514077aa09eed1c9ca70409e8088a8c7f1c35121b7c231",
+    "op_spec_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "status": "recomputed_same_hash",
+    "parents": [
+      "2ae1f89aa07792224e4bfac0cacd5d26a929154821f89a42cbe9433b18a7ff59"
+    ]
+  },
+  {
+    "stage": "validation",
+    "node_hash": "af844f82f7083ac8b5bad8b13c640875038b65ccf602160e52475127f6189d6f",
+    "op_spec_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "status": "recomputed_same_hash",
+    "parents": [
+      "56a207fa8b5677f3bf514077aa09eed1c9ca70409e8088a8c7f1c35121b7c231"
+    ]
+  },
+  {
+    "stage": "routing",
+    "node_hash": "6ff21e96949c9520c26ebf411586da835e37187373e921c96ad80ef1c087ab32",
+    "op_spec_hash": "4b029b8bcfe5d2dba24f19309b145b06ee637c187e1ca7fb3a8f716d28cab705",
+    "status": "recomputed_same_hash",
+    "parents": [
+      "af844f82f7083ac8b5bad8b13c640875038b65ccf602160e52475127f6189d6f"
+    ]
+  },
+  {
+    "stage": "imputation",
+    "node_hash": "2554dfed4d6796e16a61e25013db8c430f1cfd017c353ec7cd8c0915dfa22fe2",
+    "op_spec_hash": "74b865baaed50a28cd9d63ea8899d4bfd68edbee6561dd7180e564a5d3ad1e3d",
+    "status": "recomputed_same_hash",
+    "parents": [
+      "6ff21e96949c9520c26ebf411586da835e37187373e921c96ad80ef1c087ab32"
+    ]
+  },
+  {
+    "stage": "estimation",
+    "node_hash": "904fbd20c8cc35c1b400e29b6fbe95ef563db9e2bedb2293b218c5436f4898e2",
+    "op_spec_hash": "8b5721e28aaf229ea3f6749333a3515b85ac96e6d6a32bffaf7315fd24f24233",
+    "status": "miss_executed",
+    "parents": [
+      "2554dfed4d6796e16a61e25013db8c430f1cfd017c353ec7cd8c0915dfa22fe2"
+    ]
+  },
+  {
+    "stage": "diagnostics",
+    "node_hash": "2cc9136e6ba095473ce043eee7be6c78da111797a8a1919dde365b60b66695ec",
+    "op_spec_hash": "f9e1308b991fd8a78c5e76903cabe558540d122337792fe78bfeac37b1ffcc47",
+    "status": "miss_executed",
+    "parents": [
+      "904fbd20c8cc35c1b400e29b6fbe95ef563db9e2bedb2293b218c5436f4898e2"
+    ]
+  },
+  {
+    "stage": "report",
+    "node_hash": "1033da25ad1e45dc88b28d1822b0294ba276d139b1aeb48f255af00c1df413f7",
+    "op_spec_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "status": "miss_executed",
+    "parents": [
+      "2cc9136e6ba095473ce043eee7be6c78da111797a8a1919dde365b60b66695ec"
+    ]
+  }
+]
