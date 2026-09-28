@@ -1,0 +1,43 @@
+<h2>V1.5.2 Workbench Spine</h2>
+<p class="subtitle">A foundation release: define stable extension seams first, then plug in editable rerun, AI audit, richer models, and Table/Pipeline views later.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Workbench shell contract</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-rows:auto 1fr auto;gap:10px;min-height:420px">
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center">
+        <div class="placeholder">SearchIndex: nodes / variables / models / decisions</div>
+        <button class="mock-button">Rerun</button>
+        <button class="mock-button">Generate report</button>
+      </div>
+      <div style="display:grid;grid-template-columns:220px 1fr 360px;gap:10px;min-height:280px">
+        <div class="mock-sidebar">RunHistory + future stage filters</div>
+        <div class="mock-content">
+          <div style="display:flex;gap:8px;margin-bottom:12px">
+            <button class="mock-button">Graph</button>
+            <button class="mock-button">Table</button>
+            <button class="mock-button">Pipeline</button>
+          </div>
+          <div class="placeholder" style="height:200px">Selection model: active tab highlights card; upstream path highlighted one level lower</div>
+        </div>
+        <div class="mock-sidebar">Detail tabs + node extension slots: AI / Ops / Code / Decisions / Artifacts</div>
+      </div>
+      <div class="placeholder">BottomPanel slots: Logs / Shell / Pending confirmations / Timeline</div>
+    </div>
+  </div>
+</div>
+
+<div class="cards">
+  <div class="card" data-choice="contract" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <h3>What V1.5.2 should actually ship</h3>
+      <p>Contracts and visible placeholders: route slots, command slots, selection/path model, search index, bottom panel framework, context menu registry, node extension registry.</p>
+    </div>
+  </div>
+  <div class="card" data-choice="defer" onclick="toggleSelect(this)">
+    <div class="card-body">
+      <h3>What stays deferred</h3>
+      <p>Real partial rerun semantics, real code execution sandbox, real LLM calls, report generation backend, Pipeline persistence, model registry beyond lightweight descriptors.</p>
+    </div>
+  </div>
+</div>

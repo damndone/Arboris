@@ -1,0 +1,36 @@
+<h2>V1.5.2: extension-first direction</h2>
+<p class="subtitle">The goal is not to ship every prototype feature at once, but to land the backbone that lets complex models, editable operations, AI audit, and richer views plug in later without rewiring the app.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Workbench Spine</h3>
+      <p>Build the durable shell: Graph/Table/Pipeline route slots, search command model, bottom panel framework, top-right action slots, node context menu, selection/path highlighting, and node-level AI/edit placeholders.</p>
+      <p><strong>Best foundation.</strong> Mostly frontend contracts and state boundaries; avoids premature backend commitments.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Editable Rerun MVP</h3>
+      <p>Make clean/transform/model nodes actually editable: structured op controls, code editor window, dirty state, discard/commit-and-rerun, downstream highlighting, and run event timeline.</p>
+      <p><strong>Most user-visible.</strong> Requires stronger backend contracts for partial rerun and audit snapshots.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Platform Leap</h3>
+      <p>Introduce Pipeline as a first-class entity, model registry, node execution records, artifact references, LLM audit records, and report-generation endpoints.</p>
+      <p><strong>Most future-proof long term.</strong> Too large for a narrow V1.5.2 unless split into a design-only milestone.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Recommended sequence</h3>
+  <p>A in V1.5.2, then B in V1.5.3, then model registry / Table / Pipeline depth in V1.6+. C should become the V2.0 platform spec, not a single sprint.</p>
+</div>

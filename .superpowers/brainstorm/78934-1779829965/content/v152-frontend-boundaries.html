@@ -1,0 +1,44 @@
+<h2>V1.5.2 Frontend Boundaries</h2>
+<p class="subtitle">The current LineageContext is graph-specific. V1.5.2 should add a Workbench layer above it, so future Table, Pipeline, AI, report, and editable rerun features do not depend on React Flow internals.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Proposed ownership model</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:1fr;gap:10px">
+      <div class="placeholder">WorkbenchRouteContainer: run snapshot + URL state + view mode</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="placeholder">WorkbenchStateProvider<br>selection, tabs, search, actions, bottom panel</div>
+        <div class="placeholder">RunSnapshotAdapter<br>nodes, variables, models, decisions, artifacts</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="placeholder">GraphView<br>React Flow only</div>
+        <div class="placeholder">TableView<br>slot in V1.5.2</div>
+        <div class="placeholder">PipelineView<br>slot in V1.5.2</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="placeholder">NodeActionRegistry</div>
+        <div class="placeholder">NodeExtensionRegistry</div>
+        <div class="placeholder">BottomPanelRegistry</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>Why this is extensible</h4>
+    <ul>
+      <li>Graph, Table, and Pipeline share one selection/search/action model.</li>
+      <li>Node AI, edit controls, code, artifacts, and decisions become plugins into the drawer.</li>
+      <li>Partial rerun can land later by enabling actions, not rewriting UI ownership.</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>What it costs</h4>
+    <ul>
+      <li>More upfront interface design.</li>
+      <li>Some V1.5.1 Lineage code moves into a new workbench folder.</li>
+      <li>Tests must focus on contracts, not only rendered buttons.</li>
+    </ul>
+  </div>
+</div>
