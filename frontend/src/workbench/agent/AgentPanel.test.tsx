@@ -179,7 +179,43 @@ describe("AgentPanel", () => {
       "The configured provider did not return a usable response",
     );
     expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
-      "No proposal or analysis was executed",
+      "Nothing in your data or models was changed",
+    );
+  });
+
+  it("clears the failure once a later turn in the session answers", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({
+        sessionStatus: "completed",
+        messages: [
+          { entry_id: "u1", role: "user", content: "Is the gap significant?", stop_reason: null },
+          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "LLMUpstreamError:upstream_503" },
+          { entry_id: "u2", role: "user", content: "Try again", stop_reason: null },
+          { entry_id: "a2", role: "assistant", content: "Yes, t = 8.03, p < 0.001.", stop_reason: "stop" },
+        ],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    expect(screen.queryByTestId("agent-turn-error")).toBeNull();
+  });
+
+  it("reads a provider failure that carries its upstream status as a provider failure", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({
+        sessionStatus: "failed",
+        messages: [
+          { entry_id: "u1", role: "user", content: "Is the gap significant?", stop_reason: null },
+          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "LLMUpstreamError:upstream_503" },
+        ],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
+      "The configured provider did not return a usable response",
     );
   });
 
@@ -240,7 +276,7 @@ describe("AgentPanel", () => {
       "will not execute automatically",
     );
     expect(screen.getByTestId("agent-turn-error")).not.toHaveTextContent(
-      "No proposal or analysis was executed",
+      "Nothing in your data or models was changed",
     );
   });
 

@@ -21,6 +21,7 @@ from .tools import ToolResult, ToolRuntime
 from .turn_messages import (
     budget_exhausted_message,
     detect_language,
+    interrupted_reply_note,
     matches_language,
     proposal_summary,
     provider_failure_message,
@@ -491,6 +492,8 @@ class AgentCore:
         if finish_reason == "error" and not content.strip() and not tool_calls and error != "tool_runtime_unavailable":
             # An empty failed turn reads as a hang; say what happened instead.
             content = provider_failure_message(detect_language(getattr(self, "_user_text", None)), str(error))
+        elif finish_reason == "error" and content.strip() and error not in {"aborted", "tool_runtime_unavailable"}:
+            content = f"{content}\n\n{interrupted_reply_note(detect_language(getattr(self, '_user_text', None)))}"
         numeric_findings: tuple[numeric_grounding.Finding, ...] = ()
         numeric_check_failed = False
         if finish_reason == "stop" and not tool_calls and content.strip():

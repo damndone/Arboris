@@ -54,21 +54,22 @@ function terminalFailureMessage(
   transportError: string | null,
   hasPendingProposal: boolean,
 ): string | null {
-  const terminal = [...messages]
-    .reverse()
-    .find((message) => message.role === "assistant" && message.stop_reason === "error");
+  // Only the latest reply decides: a turn that failed earlier and was then
+  // asked again and answered is over.
+  const latest = [...messages].reverse().find((message) => message.role === "assistant");
+  const terminal = latest?.stop_reason === "error" ? latest : undefined;
   const error = terminal?.error ?? transportError;
   if (!error) return null;
   if (error === "max_steps_exceeded" && hasPendingProposal) {
     return "The Agent reached its step limit after creating a proposal that is still awaiting your review. The proposal will not execute automatically; confirm, revise, or decline it below.";
   }
-  if (error === "LLMUpstreamError") {
-    return "The configured provider did not return a usable response. Check the selected model in Settings, then retry. No proposal or analysis was executed.";
+  if (error === "LLMUpstreamError" || error.startsWith("LLMUpstreamError:")) {
+    return "The configured provider did not return a usable response. Check the selected model in Settings, then retry. Nothing in your data or models was changed.";
   }
   if (error === "tool_runtime_error") {
-    return "The Agent tool runtime stopped unexpectedly. Retry the request; no proposal or analysis was executed.";
+    return "The Agent tool runtime stopped unexpectedly. Retry the request; nothing in your data or models was changed.";
   }
-  return `The Agent stopped before completing the request (${error}). No proposal or analysis was executed.`;
+  return `The Agent stopped before completing the request (${error}). Nothing in your data or models was changed.`;
 }
 
 function useElapsedSeconds(startedAt: number | null | undefined, active: boolean): number {

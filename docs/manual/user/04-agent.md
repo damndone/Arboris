@@ -108,8 +108,15 @@ These hold even when you ask otherwise.
 A request that fails before the model has said anything (a dropped
 connection, a server error) is retried twice automatically; the activity line
 shows *The provider connection dropped; retrying*. If it still fails, the reply
-says so and that nothing was run — try again, or check the provider in
-Settings. A rejected API key is not retried.
+says so — try again, or check the provider in Settings. A rejected API key is
+not retried. A failure never changes your data or models (a change needs your
+confirmation); a read-only test the Agent had already run in that turn stays
+recorded.
+
+If the connection drops while the answer is being written, what arrived is
+kept and marked as cut off: its numbers have not been checked, so ask again
+rather than rely on it. Asking again in the same conversation works — the
+failed turn does not get in the way of the next one.
 
 ## What the provider sees
 

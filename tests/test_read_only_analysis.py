@@ -217,8 +217,8 @@ def test_choosing_columns_is_not_a_data_change_but_choosing_rows_is() -> None:
 def test_a_failed_provider_call_leaves_an_explanation_not_an_empty_reply() -> None:
     from workbench.agent.turn_messages import provider_failure_message
 
-    assert "没有执行任何操作" in provider_failure_message("zh", "LLMUpstreamError")
-    assert "nothing was run" in provider_failure_message("en", "LLMUpstreamError")
+    assert "没有改动你的数据或模型" in provider_failure_message("zh", "LLMUpstreamError")
+    assert "nothing in your data or models was changed" in provider_failure_message("en", "LLMUpstreamError")
 
 
 def test_many_workflows_on_one_run_do_not_break_the_next_one(tmp_path: Path) -> None:

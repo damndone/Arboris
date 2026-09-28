@@ -916,3 +916,30 @@ def test_agent_core_records_a_provider_retry_and_keeps_the_answer(tmp_path: Path
 
     retries = [event for event in events.replay("session-a") if event.event_type == "provider_retry"]
     assert [event.payload["error"] for event in retries] == ["LLMUpstreamError"]
+
+
+class CutMidAnswerAdapter:
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        yield ModelStreamEvent.text_delta(request.request_id, "The mean wage gap is 1,234.5, and")
+        yield ModelStreamEvent.from_error(request.request_id, "LLMUpstreamError")
+
+
+def test_a_reply_cut_off_by_the_provider_says_so_and_that_its_numbers_were_not_checked(tmp_path: Path) -> None:
+    """Found by the chaos evaluation: a stream dropped halfway through the
+    answer left the partial text standing as if it were the reply, and the
+    numeric check -- which runs only on a finished reply -- never saw it."""
+
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("session-a", chain_id="chain-a", role="chain")
+    events = AgentEventStream(tmp_path / "workbench")
+    agent = AgentCore(repository, events, CutMidAnswerAdapter(), session_id="session-a")
+
+    asyncio.run(agent.prompt("What is the wage gap?"))
+
+    reply = [
+        entry.payload for entry in repository.get_branch("session-a")
+        if entry.payload.get("role") == "assistant"
+    ][-1]
+    assert reply["stop_reason"] == "error"
+    assert reply["content"].startswith("The mean wage gap is 1,234.5, and")
+    assert "cut off" in reply["content"] and "not checked" in reply["content"]
