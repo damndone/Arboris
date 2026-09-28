@@ -229,27 +229,42 @@ def _install_in_process_guards() -> None:
     subprocess.call = blocked_process  # type: ignore[assignment]
     subprocess.check_call = blocked_process  # type: ignore[assignment]
     subprocess.check_output = blocked_process  # type: ignore[assignment]
-    os.system = blocked_process  # type: ignore[assignment]
-    os.popen = blocked_process  # type: ignore[assignment]
-    for name in (
-        "fork",
-        "forkpty",
-        "posix_spawn",
-        "posix_spawnp",
-        "setpgid",
-        "setpgrp",
-        "setsid",
-        "spawnl",
-        "spawnle",
-        "spawnlp",
-        "spawnlpe",
-        "spawnv",
-        "spawnve",
-        "spawnvp",
-        "spawnvpe",
-    ):
-        if hasattr(os, name):
-            setattr(os, name, blocked_process)
+    process_modules = [os]
+    if os.name == "posix":
+        process_modules.append(importlib.import_module("posix"))
+    for process_module in process_modules:
+        if hasattr(process_module, "system"):
+            setattr(process_module, "system", blocked_process)
+        if hasattr(process_module, "popen"):
+            setattr(process_module, "popen", blocked_process)
+        for name in (
+            "execl",
+            "execle",
+            "execlp",
+            "execlpe",
+            "execv",
+            "execve",
+            "execvp",
+            "execvpe",
+            "fexecve",
+            "fork",
+            "forkpty",
+            "posix_spawn",
+            "posix_spawnp",
+            "setpgid",
+            "setpgrp",
+            "setsid",
+            "spawnl",
+            "spawnle",
+            "spawnlp",
+            "spawnlpe",
+            "spawnv",
+            "spawnve",
+            "spawnvp",
+            "spawnvpe",
+        ):
+            if hasattr(process_module, name):
+                setattr(process_module, name, blocked_process)
 
 
 def _prepare_import_path(candidate_root: Path, evaluator_root: Path) -> None:

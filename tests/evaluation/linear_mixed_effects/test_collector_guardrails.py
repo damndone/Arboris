@@ -9,6 +9,7 @@ import signal
 import statistics
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType
@@ -528,6 +529,46 @@ def test_evaluator_preflight_rejects_a_dirty_evaluator_worktree(tmp_path: Path) 
         collector._preflight_evaluator(evaluator_root, [])
 
 
+def test_evaluator_preflight_rejects_hidden_index_flags(tmp_path: Path) -> None:
+    collector = _load_collector()
+    evaluator_root, _ = _candidate_repo(tmp_path)
+    _git(evaluator_root, "update-index", "--assume-unchanged", "README.md")
+    (evaluator_root / "README.md").write_text("dirty evaluator source\n", encoding="utf-8")
+
+    with pytest.raises(collector.EvidenceCollectionError, match="hidden index flags"):
+        collector._preflight_evaluator(evaluator_root, [])
+
+
+def test_evaluator_preflight_rejects_a_mismatched_git_worktree_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    evaluator_root, _ = _candidate_repo(tmp_path)
+    alternate_worktree = tmp_path / "alternate-worktree"
+    alternate_worktree.mkdir()
+
+    def fake_git_output(
+        _root: Path,
+        arguments: list[str],
+        _records: list[dict[str, object]],
+        **_kwargs: object,
+    ) -> str:
+        if arguments == ["rev-parse", "--show-toplevel"]:
+            return str(alternate_worktree)
+        if arguments == ["rev-parse", "HEAD"]:
+            return "e" * 40
+        if arguments == ["status", "--porcelain=v1", "--untracked-files=all"]:
+            return ""
+        if arguments == ["ls-files", "-t", "-v", "-z"]:
+            return "H README.md\0"
+        raise AssertionError(arguments)
+
+    monkeypatch.setattr(collector, "_git_output", fake_git_output)
+
+    with pytest.raises(collector.EvidenceCollectionError, match="evaluator Git worktree"):
+        collector._preflight_evaluator(evaluator_root, [])
+
+
 def test_candidate_preflight_rejects_the_contract_lock_itself(tmp_path: Path) -> None:
     collector = _load_collector()
     root, contract_lock = _candidate_repo(tmp_path)
@@ -590,6 +631,29 @@ def test_candidate_preflight_uses_hermetic_git_and_detects_fsmonitor_hidden_chan
     assert "candidate-git-hook-sentinel" not in json.dumps(records)
 
 
+def test_candidate_preflight_forces_stat_cache_validation_against_hostile_local_config(
+    tmp_path: Path,
+) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    feature = root / "backend" / "workbench" / "engine" / "packs" / "linear_mixed_effects" / "feature.py"
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(root, "candidate feature")
+    time.sleep(1.1)
+    assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    original_stat = feature.stat()
+    _git(root, "config", "core.trustctime", "false")
+    _git(root, "config", "core.checkStat", "minimal")
+    feature.write_text("FEATURE = Evil\n", encoding="utf-8")
+    os.utime(feature, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+
+    assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    with pytest.raises(collector.EvidenceCollectionError, match="dirty"):
+        collector._resolve_candidate(root, candidate, [])
+
+
 def test_candidate_preflight_pins_git_worktree_to_the_supplied_directory(
     tmp_path: Path,
 ) -> None:
@@ -648,6 +712,67 @@ def test_candidate_preflight_pins_a_gitdir_file_worktree_to_the_supplied_directo
         collector._resolve_candidate(linked_worktree, candidate, [])
 
 
+@pytest.mark.parametrize(
+    "index_flags",
+    [
+        ("--assume-unchanged",),
+        ("--skip-worktree",),
+        ("--assume-unchanged", "--skip-worktree"),
+        ("--skip-worktree", "--assume-unchanged"),
+    ],
+)
+def test_candidate_preflight_rejects_hidden_index_flags_on_actual_source(
+    tmp_path: Path, index_flags: tuple[str, ...]
+) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    feature = root / "backend" / "workbench" / "engine" / "packs" / "linear_mixed_effects" / "feature.py"
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(root, "candidate feature")
+    for index_flag in index_flags:
+        _git(root, "update-index", index_flag, str(feature.relative_to(root)))
+    feature.write_text("FEATURE = False\n", encoding="utf-8")
+
+    with pytest.raises(collector.EvidenceCollectionError, match="hidden index flags"):
+        collector._resolve_candidate(root, candidate, [])
+
+
+def test_candidate_preflight_rejects_hidden_index_flags_in_a_gitdir_file_worktree(
+    tmp_path: Path,
+) -> None:
+    collector = _load_collector()
+    primary, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    feature = (
+        primary
+        / "backend"
+        / "workbench"
+        / "engine"
+        / "packs"
+        / "linear_mixed_effects"
+        / "feature.py"
+    )
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(primary, "candidate feature")
+    linked_worktree = tmp_path / "linked-worktree"
+    _git(primary, "worktree", "add", "--detach", str(linked_worktree), candidate)
+    assert (linked_worktree / ".git").is_file()
+    linked_feature = linked_worktree / feature.relative_to(primary)
+    _git(
+        linked_worktree,
+        "update-index",
+        "--assume-unchanged",
+        str(linked_feature.relative_to(linked_worktree)),
+    )
+    linked_feature.write_text("FEATURE = False\n", encoding="utf-8")
+
+    with pytest.raises(collector.EvidenceCollectionError, match="hidden index flags"):
+        collector._resolve_candidate(linked_worktree, candidate, [])
+
+
 def test_git_audit_discards_raw_stdout_and_stderr(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -684,6 +809,10 @@ def test_git_audit_discards_raw_stdout_and_stderr(
     assert "GIT_DIR" not in environment
     assert environment["GIT_CONFIG_GLOBAL"] == os.devnull
     assert f"--work-tree={tmp_path.resolve()}" in observed["command"]
+    assert "core.trustctime=true" in observed["command"]
+    assert "core.checkStat=default" in observed["command"]
+    assert "core.ignoreStat=false" in observed["command"]
+    assert "core.fileMode=true" in observed["command"]
 
 
 def test_failed_manifest_uses_a_static_error_when_git_paths_are_candidate_controlled(
@@ -815,61 +944,80 @@ def test_post_execution_audit_rejects_fixture_mutation(tmp_path: Path) -> None:
         collector._post_execution_audit(root, candidate, preflight, records)
 
 
-def test_collector_runs_the_strict_subprocess_before_performance(
+def test_collector_refuses_to_spawn_a_candidate_without_frozen_containment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     collector = _load_collector()
     root = tmp_path / "candidate"
     root.mkdir()
-    fixture_sha256 = _write_candidate_fixture(root)
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
-    observed: list[list[str]] = []
+    spawned = False
 
-    def fake_run(command: list[str], **_kwargs: object) -> object:
-        observed.append(command)
-        artifact_dir = Path(command[command.index("--artifact-dir") + 1])
-        _write_passing_strict_payload(
-            artifact_dir,
-            candidate_root=root,
-            candidate_sha="a" * 40,
-            fixture_sha256=fixture_sha256,
-        )
-        return _strict_subprocess_result(
-            collector,
-            stdout=b"simulated-parent-stream-secret",
-            stderr=b"simulated-parent-stream-secret",
-        )
+    def forbidden_spawn(*_args: object, **_kwargs: object) -> object:
+        nonlocal spawned
+        spawned = True
+        raise AssertionError("candidate subprocess must not start without frozen containment")
 
-    monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
+    monkeypatch.setattr(collector, "_run_strict_subprocess", forbidden_spawn)
     records: list[dict[str, object]] = []
 
-    payload = collector._run_strict_candidate_evaluation(
-        root=root,
-        candidate_sha="a" * 40,
-        evaluator_root=REPO_ROOT,
-        artifact_root=artifact_root,
-        command_records=records,
-    )
+    with pytest.raises(collector.EvidenceCollectionError, match="frozen containment"):
+        collector._run_strict_candidate_evaluation(
+            root=root,
+            candidate_sha="a" * 40,
+            evaluator_root=REPO_ROOT,
+            artifact_root=artifact_root,
+            command_records=records,
+        )
 
-    assert payload["status"] == "passed"
-    assert observed and Path(observed[0][1]).name == "strict_runner.py"
-    assert str(REPO_ROOT / "tests" / "evaluation" / "linear_mixed_effects") not in observed[0]
-    assert records[0]["exit_code"] == 0
-    assert (artifact_root / "strict-runner.output.json").is_file()
-    metadata = json.loads((artifact_root / "strict-runner.output.json").read_text())
-    assert metadata["capture_policy"] == collector.COLLECTOR_BINARY_STREAM_CAPTURE_POLICY
-    assert metadata["stdout_sha256"] == hashlib.sha256(
-        b"simulated-parent-stream-secret"
-    ).hexdigest()
-    assert metadata["capture_error_code"] is None
-    assert not (artifact_root / "strict-runner.stdout.txt").exists()
-    assert not (artifact_root / "strict-runner.stderr.txt").exists()
-    assert all(
-        b"simulated-parent-stream-secret" not in path.read_bytes()
-        for path in artifact_root.rglob("*")
-        if path.is_file()
+    assert spawned is False
+    assert records == []
+    assert not (artifact_root / "strict-runner.output.json").exists()
+
+
+def test_main_writes_a_static_failure_before_any_candidate_spawn_without_containment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    feature = root / "backend" / "workbench" / "engine" / "packs" / "linear_mixed_effects" / "feature.py"
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(root, "candidate feature")
+    output = tmp_path / "failed-evidence.json"
+    spawned = False
+
+    def forbidden_spawn(*_args: object, **_kwargs: object) -> object:
+        nonlocal spawned
+        spawned = True
+        raise AssertionError("candidate subprocess must not start without frozen containment")
+
+    monkeypatch.setattr(
+        collector,
+        "_preflight_evaluator",
+        lambda *_args, **_kwargs: {"evaluator_commit": "e" * 40},
     )
+    monkeypatch.setattr(collector, "_run_strict_subprocess", forbidden_spawn)
+
+    assert collector.main(
+        [
+            "--candidate",
+            candidate,
+            "--candidate-worktree",
+            str(root),
+            "--output",
+            str(output),
+        ]
+    ) == 1
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["error"] == "EVIDENCE_COLLECTION_REJECTED"
+    assert collector.FROZEN_CONTAINMENT_REQUIRED_ERROR not in output.read_text(encoding="utf-8")
+    assert spawned is False
+    artifact_root = collector._evidence_artifact_root(output)
+    assert not (artifact_root / "strict-runner.output.json").exists()
 
 
 def test_bounded_strict_subprocess_discards_invalid_bytes_and_stops_overflow(
@@ -948,6 +1096,166 @@ def test_strict_subprocess_fails_closed_at_its_wall_clock_deadline(tmp_path: Pat
     assert json.loads(completed.stdout)["capture_error_code"] == "WALL_CLOCK_TIMEOUT"
 
 
+def test_strict_subprocess_does_not_busy_spin_after_its_wall_deadline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    observed_timeouts: list[float] = []
+    real_selector = collector.selectors.DefaultSelector
+
+    class RecordingSelector:
+        def __init__(self) -> None:
+            self._inner = real_selector()
+
+        def register(self, *args: object, **kwargs: object) -> object:
+            return self._inner.register(*args, **kwargs)
+
+        def unregister(self, *args: object, **kwargs: object) -> object:
+            return self._inner.unregister(*args, **kwargs)
+
+        def select(self, timeout: float | None = None) -> list[object]:
+            assert timeout is not None
+            observed_timeouts.append(timeout)
+            return self._inner.select(timeout)
+
+        def close(self) -> None:
+            self._inner.close()
+
+    monkeypatch.setattr(collector.selectors, "DefaultSelector", RecordingSelector)
+    monkeypatch.setattr(collector, "STRICT_SUBPROCESS_WALL_SECONDS", 0.05)
+    monkeypatch.setattr(collector, "STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS", 0.05)
+
+    result = collector._run_strict_subprocess(
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        cwd=tmp_path,
+        env={"PYTHONUNBUFFERED": "1"},
+    )
+
+    assert result.capture_error_code == "WALL_CLOCK_TIMEOUT"
+    assert observed_timeouts
+    assert all(timeout > 0.0 for timeout in observed_timeouts)
+
+
+def test_strict_subprocess_fails_closed_when_selector_setup_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    observed: dict[str, subprocess.Popen[bytes]] = {}
+    real_popen = collector.subprocess.Popen
+
+    def capturing_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        observed["process"] = process
+        return process
+
+    def failing_selector() -> object:
+        raise OSError("simulated selector setup failure")
+
+    monkeypatch.setattr(collector.subprocess, "Popen", capturing_popen)
+    monkeypatch.setattr(collector.selectors, "DefaultSelector", failing_selector)
+    monkeypatch.setattr(collector, "STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS", 0.05)
+
+    with pytest.raises(collector.EvidenceCollectionError, match="output pipes could not be initialized"):
+        collector._run_strict_subprocess(
+            [sys.executable, "-c", "import time; time.sleep(5)"],
+            cwd=tmp_path,
+            env={"PYTHONUNBUFFERED": "1"},
+        )
+
+    process = observed["process"]
+    assert process.poll() is not None
+    assert process.stdout is not None and process.stdout.closed
+    assert process.stderr is not None and process.stderr.closed
+
+
+def test_strict_subprocess_fails_closed_when_selector_registration_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    observed: dict[str, subprocess.Popen[bytes]] = {}
+    real_popen = collector.subprocess.Popen
+    real_selector = collector.selectors.DefaultSelector
+
+    def capturing_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        observed["process"] = process
+        return process
+
+    class FailingSecondRegistrationSelector:
+        def __init__(self) -> None:
+            self._inner = real_selector()
+            self._registrations = 0
+
+        def register(self, *args: object, **kwargs: object) -> object:
+            self._registrations += 1
+            if self._registrations == 2:
+                raise OSError("simulated selector registration failure")
+            return self._inner.register(*args, **kwargs)
+
+        def unregister(self, *args: object, **kwargs: object) -> object:
+            return self._inner.unregister(*args, **kwargs)
+
+        def close(self) -> None:
+            self._inner.close()
+
+    monkeypatch.setattr(collector.subprocess, "Popen", capturing_popen)
+    monkeypatch.setattr(
+        collector.selectors, "DefaultSelector", FailingSecondRegistrationSelector
+    )
+    monkeypatch.setattr(collector, "STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS", 0.05)
+
+    with pytest.raises(collector.EvidenceCollectionError, match="output pipes could not be initialized"):
+        collector._run_strict_subprocess(
+            [sys.executable, "-c", "import time; time.sleep(5)"],
+            cwd=tmp_path,
+            env={"PYTHONUNBUFFERED": "1"},
+        )
+
+    process = observed["process"]
+    assert process.poll() is not None
+    assert process.stdout is not None and process.stdout.closed
+    assert process.stderr is not None and process.stderr.closed
+
+
+def test_main_writes_a_static_failure_manifest_when_selector_setup_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    output = tmp_path / "failed-evidence.json"
+    candidate_root = tmp_path / "candidate"
+    candidate_root.mkdir()
+    sentinel = "simulated selector setup failure"
+
+    def failing_selector() -> object:
+        raise OSError(sentinel)
+
+    def run_only_strict_subprocess(**_kwargs: object) -> dict[str, object]:
+        return collector._run_strict_subprocess(
+            [sys.executable, "-c", "import time; time.sleep(5)"],
+            cwd=candidate_root,
+            env={"PYTHONUNBUFFERED": "1"},
+        )
+
+    monkeypatch.setattr(collector.selectors, "DefaultSelector", failing_selector)
+    monkeypatch.setattr(collector, "_collect", run_only_strict_subprocess)
+    monkeypatch.setattr(collector, "STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS", 0.05)
+
+    assert collector.main(
+        [
+            "--candidate",
+            "a" * 40,
+            "--candidate-worktree",
+            str(candidate_root),
+            "--output",
+            str(output),
+        ]
+    ) == 1
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["error"] == "EVIDENCE_COLLECTION_REJECTED"
+    assert sentinel not in output.read_text(encoding="utf-8")
+
+
 def test_bounded_strict_subprocess_uses_an_isolated_binary_process_session(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -994,7 +1302,7 @@ def test_collector_records_a_binary_capture_failure_without_raw_streams(
     records: list[dict[str, object]] = []
 
     with pytest.raises(collector.EvidenceCollectionError, match="output could not be drained safely"):
-        collector._run_strict_candidate_evaluation(
+        collector._run_strict_candidate_evaluation_after_frozen_containment(
             root=root,
             candidate_sha="a" * 40,
             evaluator_root=REPO_ROOT,
@@ -1030,7 +1338,7 @@ def test_collector_rejects_a_strict_stream_that_exceeds_the_hard_limit(
     records: list[dict[str, object]] = []
 
     with pytest.raises(collector.EvidenceCollectionError, match="raw stream safety limit"):
-        collector._run_strict_candidate_evaluation(
+        collector._run_strict_candidate_evaluation_after_frozen_containment(
             root=root,
             candidate_sha="a" * 40,
             evaluator_root=REPO_ROOT,
@@ -1114,7 +1422,7 @@ def test_collector_rejects_incomplete_or_incoherent_performance_evidence(
     monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
 
     with pytest.raises(collector.EvidenceCollectionError, match=error):
-        collector._run_strict_candidate_evaluation(
+        collector._run_strict_candidate_evaluation_after_frozen_containment(
             root=root,
             candidate_sha="a" * 40,
             evaluator_root=REPO_ROOT,
@@ -1148,7 +1456,7 @@ def test_collector_rejects_a_passing_strict_payload_from_the_wrong_candidate_roo
     monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
 
     with pytest.raises(collector.EvidenceCollectionError, match="candidate_root"):
-        collector._run_strict_candidate_evaluation(
+        collector._run_strict_candidate_evaluation_after_frozen_containment(
             root=root,
             candidate_sha="a" * 40,
             evaluator_root=REPO_ROOT,
@@ -1183,7 +1491,7 @@ def test_collector_rejects_a_passing_strict_payload_with_unparseable_junit(
     monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
 
     with pytest.raises(collector.EvidenceCollectionError, match="JUnit summary"):
-        collector._run_strict_candidate_evaluation(
+        collector._run_strict_candidate_evaluation_after_frozen_containment(
             root=root,
             candidate_sha="a" * 40,
             evaluator_root=REPO_ROOT,
@@ -1220,7 +1528,7 @@ def test_collector_rejects_a_claimed_pass_with_a_nonzero_full_suite(
     monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
 
     with pytest.raises(collector.EvidenceCollectionError, match="non-passing pytest suite"):
-        collector._run_strict_candidate_evaluation(
+        collector._run_strict_candidate_evaluation_after_frozen_containment(
             root=root,
             candidate_sha="a" * 40,
             evaluator_root=REPO_ROOT,
@@ -1336,7 +1644,7 @@ def test_passed_manifest_keeps_strict_provenance_but_not_acceptance(
     assert datetime.fromisoformat(payload["generated_at"]).tzinfo is not None
 
 
-def test_collector_runs_the_real_full_suite_before_it_can_fail_a_candidate(
+def test_collector_refuses_before_the_real_full_suite_can_start_without_containment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     collector = _load_collector()
@@ -1358,7 +1666,7 @@ def test_collector_runs_the_real_full_suite_before_it_can_fail_a_candidate(
         lambda *_args, **_kwargs: {"evaluator_commit": "h" * 40},
     )
 
-    with pytest.raises(collector.EvidenceCollectionError, match="strict candidate evaluation failed"):
+    with pytest.raises(collector.EvidenceCollectionError, match="frozen containment"):
         collector._collect(
             root=root,
             candidate=candidate,
@@ -1366,23 +1674,4 @@ def test_collector_runs_the_real_full_suite_before_it_can_fail_a_candidate(
             command_records=[],
         )
 
-    strict_result = json.loads(
-        (tmp_path / "evidence.artifacts" / "strict-suite" / "strict-suite.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert strict_result["status"] == "failed"
-    assert strict_result["suite_exit_code"] != 0
-    assert str(
-        REPO_ROOT
-        / "tests"
-        / "evaluation"
-        / "linear_mixed_effects"
-        / "test_contract_compatibility.py"
-    ) in strict_result["suite_command"]
-    assert (
-        tmp_path
-        / "evidence.artifacts"
-        / "strict-suite"
-        / "strict-suite.junit.summary.json"
-    ).is_file()
+    assert not (tmp_path / "evidence.artifacts" / "strict-suite").exists()

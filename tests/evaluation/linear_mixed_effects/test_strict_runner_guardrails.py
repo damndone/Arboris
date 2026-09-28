@@ -166,3 +166,71 @@ def test_process_guard_blocks_direct_os_fork_before_candidate_import() -> None:
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout == "blocked\n"
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="posix fork guard is only available on POSIX")
+def test_process_guard_blocks_the_posix_fork_alias_before_candidate_import() -> None:
+    runner_source = "\n".join(
+        (
+            "import importlib.util",
+            "import posix",
+            "import os",
+            "import sys",
+            f"spec = importlib.util.spec_from_file_location('strict_runner', {str(STRICT_RUNNER)!r})",
+            "module = importlib.util.module_from_spec(spec)",
+            "sys.modules[spec.name] = module",
+            "spec.loader.exec_module(module)",
+            "module._install_in_process_guards()",
+            "try:",
+            "    child = posix.fork()",
+            "except module.StrictEvaluationError:",
+            "    print('blocked')",
+            "    raise SystemExit(0)",
+            "if child == 0:",
+            "    os._exit(0)",
+            "os.waitpid(child, 0)",
+            "raise SystemExit(1)",
+        )
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", runner_source],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "blocked\n"
+
+
+@pytest.mark.skipif(not hasattr(os, "execve"), reason="execve guard is not available")
+def test_process_guard_blocks_direct_os_execve_before_candidate_import() -> None:
+    runner_source = "\n".join(
+        (
+            "import importlib.util",
+            "import os",
+            "import sys",
+            f"spec = importlib.util.spec_from_file_location('strict_runner', {str(STRICT_RUNNER)!r})",
+            "module = importlib.util.module_from_spec(spec)",
+            "sys.modules[spec.name] = module",
+            "spec.loader.exec_module(module)",
+            "module._install_in_process_guards()",
+            "try:",
+            "    os.execve(sys.executable, [sys.executable, '-c', 'raise SystemExit(1)'], {})",
+            "except module.StrictEvaluationError:",
+            "    print('blocked')",
+            "    raise SystemExit(0)",
+            "raise SystemExit(2)",
+        )
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", runner_source],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "blocked\n"

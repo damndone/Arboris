@@ -2,10 +2,9 @@
 """Collect strict, non-secret LMM evidence for one supplied candidate commit.
 
 This parent process never imports candidate code.  It verifies a clean,
-full-SHA candidate before launching the unique strict evaluation subprocess,
-then repeats the same Git and fixture audits afterwards.  A passed manifest
-therefore means the full strict suite and persistent local performance run
-completed against that exact unchanged candidate; it is not browser acceptance.
+full-SHA candidate before any future strict evaluation subprocess.  Strict
+candidate execution is currently fail-closed until a frozen source snapshot
+and OS-level containment executor exists; no manifest can pass without it.
 """
 
 from __future__ import annotations
@@ -51,7 +50,8 @@ RAW_STREAM_CAPTURE_POLICY = (
 )
 COLLECTOR_BINARY_STREAM_CAPTURE_POLICY = (
     "raw strict-runner stdout and stderr are discarded; binary hashes cover captured "
-    "OS-level bytes, and a non-null capture_error_code means completeness is not established"
+    "OS-level bytes, and a non-null capture_error_code or hard-limit flag means "
+    "completeness is not established"
 )
 GIT_OUTPUT_CAPTURE_POLICY = (
     "raw Git stdout and stderr are discarded; hashes cover complete streams"
@@ -67,6 +67,10 @@ INTEGRATION_EVIDENCE_OWNER = "v1.7.3 Integration Release Train owner"
 INTEGRATION_EVIDENCE_TRIGGER = (
     "after the Integration Release Train assembles a clean integration/v1.7.3 tip "
     "from merge-queue entries with independent lane evidence"
+)
+FROZEN_CONTAINMENT_REQUIRED_ERROR = (
+    "strict candidate evaluation requires a verified frozen containment executor; "
+    "refusing to launch candidate code without immutable source and evaluator inputs"
 )
 STRICT_RESULT_NAMES = (
     "contract_validation",
@@ -435,25 +439,29 @@ def _run_strict_subprocess(
         hard_limit_bytes=MAX_STRICT_SUBPROCESS_STREAM_BYTES
     )
     capture_error_code: str | None = None
-    selector = selectors.DefaultSelector()
-    streams: dict[int, tuple[object, _DigestingBinaryCapture]] = {
-        process.stdout.fileno(): (process.stdout, stdout_capture),
-        process.stderr.fileno(): (process.stderr, stderr_capture),
-    }
-    for file_descriptor, (stream, _capture) in streams.items():
-        selector.register(file_descriptor, selectors.EVENT_READ, stream)
+    selector: selectors.BaseSelector | None = None
+    streams: dict[int, tuple[object, _DigestingBinaryCapture]] = {}
 
     def close_streams() -> None:
         for file_descriptor, (stream, _capture) in tuple(streams.items()):
-            try:
-                selector.unregister(file_descriptor)
-            except (KeyError, ValueError):
-                pass
+            if selector is not None:
+                try:
+                    selector.unregister(file_descriptor)
+                except (KeyError, ValueError, OSError):
+                    pass
             try:
                 stream.close()
             except OSError:
                 pass
             del streams[file_descriptor]
+
+    def close_process_pipes() -> None:
+        close_streams()
+        for stream in (process.stdout, process.stderr):
+            try:
+                stream.close()
+            except OSError:
+                pass
 
     def signal_process_group(signal_number: int) -> bool:
         try:
@@ -468,6 +476,43 @@ def _run_strict_subprocess(
         except PermissionError:
             return process.poll() is not None
         return True
+
+    def wait_for_process_exit(deadline: float) -> None:
+        while process.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.05, remaining))
+
+    def cleanup_after_pipe_setup_failure() -> None:
+        """Close local FDs and bound the child lifecycle if selector setup fails."""
+
+        close_process_pipes()
+        now = time.monotonic()
+        signal_process_group(signal.SIGTERM)
+        wait_for_process_exit(now + STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS)
+        if process.poll() is None:
+            now = time.monotonic()
+            signal_process_group(signal.SIGKILL)
+            wait_for_process_exit(now + STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS)
+
+    try:
+        selector = selectors.DefaultSelector()
+        for stream, capture in (
+            (process.stdout, stdout_capture),
+            (process.stderr, stderr_capture),
+        ):
+            file_descriptor = stream.fileno()
+            streams[file_descriptor] = (stream, capture)
+            selector.register(file_descriptor, selectors.EVENT_READ, stream)
+    except (OSError, ValueError) as error:
+        cleanup_after_pipe_setup_failure()
+        if selector is not None:
+            try:
+                selector.close()
+            except OSError:
+                pass
+        raise EvidenceCollectionError("strict candidate output pipes could not be initialized") from error
 
     started = time.monotonic()
     wall_deadline = started + STRICT_SUBPROCESS_WALL_SECONDS
@@ -539,14 +584,17 @@ def _run_strict_subprocess(
             if kill_deadline is not None and now >= kill_deadline:
                 break
 
-            deadlines = [wall_deadline]
-            if leader_drain_deadline is not None:
-                deadlines.append(leader_drain_deadline)
-            if termination_deadline is not None:
-                deadlines.append(termination_deadline)
-            if kill_deadline is not None:
-                deadlines.append(kill_deadline)
-            timeout = min(0.05, max(0.0, min(deadlines) - now))
+            deadlines = [
+                deadline
+                for deadline in (
+                    wall_deadline,
+                    leader_drain_deadline,
+                    termination_deadline,
+                    kill_deadline,
+                )
+                if deadline is not None and deadline > now
+            ]
+            timeout = min(0.05, min(deadlines) - now) if deadlines else 0.05
             if not streams:
                 time.sleep(timeout)
                 continue
@@ -586,7 +634,11 @@ def _run_strict_subprocess(
                     output_limit_reached = True
     finally:
         close_streams()
-        selector.close()
+        if selector is not None:
+            try:
+                selector.close()
+            except OSError:
+                pass
 
     return _StrictSubprocessResult(
         returncode=process.poll(),
@@ -677,6 +729,14 @@ def _run_git(
         "core.untrackedCache=false",
         "-c",
         "core.hooksPath=/dev/null",
+        "-c",
+        "core.trustctime=true",
+        "-c",
+        "core.checkStat=default",
+        "-c",
+        "core.ignoreStat=false",
+        "-c",
+        "core.fileMode=true",
         "-C",
         str(resolved_root),
         f"--work-tree={resolved_root}",
@@ -723,6 +783,58 @@ def _git_output(
         command_records,
         artifact_root=artifact_root,
     ).stdout.strip()
+
+
+def _assert_git_worktree_identity(
+    root: Path,
+    command_records: list[dict[str, object]],
+    *,
+    artifact_root: Path | None = None,
+    label: str,
+) -> None:
+    supplied_worktree = root.resolve()
+    git_worktree = Path(
+        _git_output(
+            root,
+            ["rev-parse", "--show-toplevel"],
+            command_records,
+            artifact_root=artifact_root,
+        )
+    ).resolve()
+    if git_worktree != supplied_worktree:
+        raise EvidenceCollectionError(
+            f"{label} Git worktree does not match the supplied directory"
+        )
+
+
+def _assert_no_hidden_index_flags(
+    root: Path,
+    command_records: list[dict[str, object]],
+    *,
+    artifact_root: Path | None = None,
+    label: str,
+) -> None:
+    """Refuse index flags that let Git status omit candidate/evaluator source changes."""
+
+    entries = _git_output(
+        root,
+        ["ls-files", "-t", "-v", "-z"],
+        command_records,
+        artifact_root=artifact_root,
+    ).split("\0")
+    hidden_paths: list[str] = []
+    for entry in entries:
+        if not entry:
+            continue
+        if len(entry) < 3 or entry[1] != " ":
+            raise EvidenceCollectionError(f"{label} Git index flag audit has invalid output")
+        if entry[0].islower() or entry[0] == "S":
+            hidden_paths.append(entry[2:])
+    if hidden_paths:
+        raise EvidenceCollectionError(
+            f"{label} Git worktree has hidden index flags; strict evidence refuses "
+            + ", ".join(hidden_paths)
+        )
 
 
 def _changed_paths(
@@ -796,17 +908,18 @@ def _resolve_candidate(
         raise EvidenceCollectionError(f"candidate worktree does not exist: {root}")
     if not (root / ".git").exists():
         raise EvidenceCollectionError(f"candidate worktree is not a Git checkout: {root}")
-    supplied_worktree = root.resolve()
-    git_worktree = Path(
-        _git_output(
-            root,
-            ["rev-parse", "--show-toplevel"],
-            command_records,
-            artifact_root=artifact_root,
-        )
-    ).resolve()
-    if git_worktree != supplied_worktree:
-        raise EvidenceCollectionError("candidate Git worktree does not match the supplied directory")
+    _assert_git_worktree_identity(
+        root,
+        command_records,
+        artifact_root=artifact_root,
+        label="candidate",
+    )
+    _assert_no_hidden_index_flags(
+        root,
+        command_records,
+        artifact_root=artifact_root,
+        label="candidate",
+    )
 
     resolved_command = _run_git(
         root,
@@ -953,6 +1066,18 @@ def _preflight_evaluator(
 
     if not root.is_dir() or not (root / ".git").exists():
         raise EvidenceCollectionError(f"evaluator root is not a Git checkout: {root}")
+    _assert_git_worktree_identity(
+        root,
+        command_records,
+        artifact_root=artifact_root,
+        label="evaluator",
+    )
+    _assert_no_hidden_index_flags(
+        root,
+        command_records,
+        artifact_root=artifact_root,
+        label="evaluator",
+    )
     commit = _git_output(
         root,
         ["rev-parse", "HEAD"],
@@ -1401,6 +1526,20 @@ def _run_strict_candidate_evaluation(
     command_records: list[dict[str, object]],
     expected_fixture_sha256: str | None = None,
 ) -> dict[str, object]:
+    raise EvidenceCollectionError(FROZEN_CONTAINMENT_REQUIRED_ERROR)
+
+
+def _run_strict_candidate_evaluation_after_frozen_containment(
+    *,
+    root: Path,
+    candidate_sha: str,
+    evaluator_root: Path,
+    artifact_root: Path,
+    command_records: list[dict[str, object]],
+    expected_fixture_sha256: str | None = None,
+) -> dict[str, object]:
+    """Future-only execution path; call only after immutable containment is verified."""
+
     strict_runner = evaluator_root / STRICT_RUNNER_RELATIVE_PATH
     if not strict_runner.is_file():
         raise EvidenceCollectionError(f"strict evaluation entrypoint is missing: {strict_runner}")
