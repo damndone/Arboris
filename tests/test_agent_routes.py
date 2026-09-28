@@ -2043,3 +2043,61 @@ def test_a_main_session_sees_runs_made_after_it_started(tmp_path) -> None:
     contexts = [m for m in ContextBuilder(repository).build("main-1").messages if m.get("name") == "workbench_context"]
     assert len(contexts) == 4
     assert '"run_count":3' in contexts[-1]["content"] and "supersedes" in contexts[-1]["content"]
+
+
+def test_two_turns_sent_at_once_to_one_session_run_one_and_refuse_the_other(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Found by the chaos evaluation: the in-progress check and the
+    registration of the running turn were separate steps, so two turns sent
+    together both passed the check and wrote one session concurrently."""
+
+    import time
+    from threading import Barrier, Thread
+
+    from workbench.http import agent_routes
+
+    def slow_config() -> LLMConfig:
+        time.sleep(0.3)  # widen the window between the check and the start
+        return _config()
+
+    monkeypatch.setattr(agent_routes, "load_llm_config", slow_config)
+    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    # Without the context manager every request gets its own event loop and
+    # thread, so the two turns really overlap.
+    client = TestClient(app)
+    created = client.post(
+        "/agent/sessions",
+        params={"project_root": str(project_root)},
+        json={"role": "chain", "chain_id": "chain-a", "run_id": "run-a", "context_packet": _context_packet()},
+    )
+    session_id = created.json()["session_id"]
+    barrier = Barrier(2)
+    statuses: list[int] = []
+
+    def send() -> None:
+        barrier.wait()
+        response = client.post(
+            f"/agent/sessions/{session_id}/turns",
+            params={"project_root": str(project_root)},
+            json={"question": "看一下模型"},
+        )
+        statuses.append(response.status_code)
+
+    threads = [Thread(target=send) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    after = client.post(
+        f"/agent/sessions/{session_id}/turns",
+        params={"project_root": str(project_root)},
+        json={"question": "再看一下"},
+    )
+
+    assert sorted(statuses) == [200, 409]
+    assert after.status_code == 200

@@ -12,6 +12,8 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
+from .storage import _exclusive_jsonl_lock
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -80,7 +82,9 @@ class AgentEventStream:
     ) -> AgentEvent:
         if not event_type:
             raise ValueError("event_type must not be empty")
-        with self._lock:
+        # The file lock serializes emitters in other requests and processes;
+        # the instance lock alone would let two of them take the same seq.
+        with self._lock, _exclusive_jsonl_lock(self._path(session_id)):
             events = self._read(session_id)
             requested_id = event_id or uuid4().hex
             for event in events:

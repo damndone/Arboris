@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal
@@ -94,6 +95,11 @@ DEFAULT_TIMEOUT_S = 120.0
 # prompt text, provider secret, or replay state and is always cleared in the
 # turn route's finally block.
 _ACTIVE_TURNS: dict[tuple[str, str], AgentCore] = {}
+# A turn is reserved under this lock before any setup, so two turns sent
+# together cannot both pass the in-progress check (requests may run on
+# different threads).
+_TURN_RESERVATION_LOCK = threading.Lock()
+_RESERVED_TURNS: set[tuple[str, str]] = set()
 
 
 def _active_turn_key(project_root: Path, session_id: str) -> tuple[str, str]:
@@ -2129,13 +2135,31 @@ async def run_agent_turn(
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
     turn_key = _active_turn_key(root, session_id)
-    if turn_key in _ACTIVE_TURNS:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="AGENT_TURN_IN_PROGRESS",
-            message="This Agent session already has a running turn.",
-            details={"session_id": session_id},
-        )
+    with _TURN_RESERVATION_LOCK:
+        if turn_key in _ACTIVE_TURNS or turn_key in _RESERVED_TURNS:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_TURN_IN_PROGRESS",
+                message="This Agent session already has a running turn.",
+                details={"session_id": session_id},
+            )
+        _RESERVED_TURNS.add(turn_key)
+    try:
+        return await _run_reserved_agent_turn(root, session_id, body, repository, events, metadata, turn_key)
+    finally:
+        with _TURN_RESERVATION_LOCK:
+            _RESERVED_TURNS.discard(turn_key)
+
+
+async def _run_reserved_agent_turn(
+    root: Path,
+    session_id: str,
+    body: AgentTurnRequest,
+    repository: Any,
+    events: Any,
+    metadata: dict[str, Any],
+    turn_key: tuple[str, str],
+) -> dict[str, Any]:
     config = load_llm_config()
     if not config.is_configured():
         raise WorkbenchAPIError(

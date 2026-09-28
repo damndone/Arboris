@@ -943,3 +943,37 @@ def test_a_reply_cut_off_by_the_provider_says_so_and_that_its_numbers_were_not_c
     assert reply["stop_reason"] == "error"
     assert reply["content"].startswith("The mean wage gap is 1,234.5, and")
     assert "cut off" in reply["content"] and "not checked" in reply["content"]
+
+
+def test_concurrent_writers_to_one_session_lose_nothing(tmp_path: Path) -> None:
+    """Found by the chaos evaluation: two requests on one session each build
+    their own repository, so the per-instance lock did not serialize their
+    read-then-replace appends; one request's entries vanished and the other's
+    next read failed with "unknown session entry"."""
+
+    from threading import Barrier, Thread
+
+    root = tmp_path / "workbench"
+    JsonlSessionRepository(root).create_session("session-a", chain_id="chain-a", role="chain")
+    writers, per_writer = 6, 15
+    barrier = Barrier(writers)
+
+    def write(index: int) -> None:
+        repository = JsonlSessionRepository(root)
+        events = AgentEventStream(root)
+        barrier.wait()
+        for step in range(per_writer):
+            repository.append("session-a", "message", {"role": "user", "content": f"{index}-{step}"})
+            events.emit("session-a", "message_update", {"delta": f"{index}-{step}"})
+
+    threads = [Thread(target=write, args=(index,)) for index in range(writers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    branch = JsonlSessionRepository(root).get_branch("session-a")
+    assert len(branch) == writers * per_writer
+    replayed = AgentEventStream(root).replay("session-a")
+    assert len(replayed) == writers * per_writer
+    assert [event.seq for event in replayed] == list(range(1, writers * per_writer + 1))
