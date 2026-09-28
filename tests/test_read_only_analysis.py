@@ -219,6 +219,10 @@ def test_a_failed_provider_call_leaves_an_explanation_not_an_empty_reply() -> No
 
     assert "没有改动你的数据或模型" in provider_failure_message("zh", "LLMUpstreamError")
     assert "nothing in your data or models was changed" in provider_failure_message("en", "LLMUpstreamError")
+    # A rejected key is not a transient failure: point at the key, not at retrying.
+    assert "API key" in provider_failure_message("zh", "LLMUpstreamError:upstream_401")
+    assert "稍后重试" not in provider_failure_message("zh", "LLMUpstreamError:upstream_401")
+    assert "Check this provider's API key" in provider_failure_message("en", "LLMUpstreamError:upstream_403")
 
 
 def test_many_workflows_on_one_run_do_not_break_the_next_one(tmp_path: Path) -> None:

@@ -84,6 +84,18 @@ def provider_failure_message(language: str, error: str) -> str:
     analysis the Agent ran earlier in the turn did run and stays recorded.
     """
 
+    if error.endswith(("upstream_401", "upstream_403")):
+        # Retrying cannot help a rejected key; say where to fix it.
+        if language == "zh":
+            return (
+                f"AI 服务商拒绝了这次请求（{error}），通常是 API key 无效、过期或没有权限。"
+                "我没有给出回答，也没有改动你的数据或模型。请在设置里检查这个服务商的 API key。"
+            )
+        return (
+            f"The AI provider rejected the request ({error}), usually because the API key is invalid, expired or "
+            "lacks access. There is no answer and nothing in your data or models was changed. "
+            "Check this provider's API key in Settings."
+        )
     if language == "zh":
         return (
             f"AI 服务商这次没有正常响应（{error}），我没有给出回答，也没有改动你的数据或模型。"
