@@ -1,0 +1,74 @@
+<h2>统一角色词表 —— 一套语义覆盖回归族 + 因果/面板族</h2>
+<p class="subtitle">核心：treatment / endogenous 本质就是「焦点解释变量」。下面用 OLS / IV / DID 三个代表验证通用性。</p>
+
+<style>
+  .node{border:2px solid #c7c7cc;border-radius:9px;padding:6px 10px;text-align:center;
+        font-size:12px;background:#ffffff;color:#1c1c1e;font-weight:600;}
+  .arrow{text-align:center;color:#8e8e93;font-size:12px;margin:3px 0;font-weight:600;}
+  .role-out{border-color:#2da84e;background:rgba(45,168,78,0.12);}
+  .role-focal{border-color:#e0860a;background:rgba(224,134,10,0.14);}
+  .role-ctrl{border-color:#3a7bd5;background:rgba(58,123,213,0.14);}
+  .role-iv{border-color:#9b3fd1;background:rgba(155,63,209,0.14);}
+  .role-dim{border-color:#5a6270;background:rgba(120,130,150,0.14);}
+  .role-model{border-color:#9b3fd1;background:#fff;}
+  .grp{border:2px solid;border-radius:11px;padding:8px;margin:5px 0;}
+  .glabel{font-size:10px;font-weight:700;margin-bottom:4px;letter-spacing:.03em;}
+  .row{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin:10px 0 18px;font-size:12px;color:#1c1c1e;}
+  .legend span{display:inline-flex;align-items:center;gap:5px;}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block;border:2px solid;}
+</style>
+
+<div class="legend">
+  <span><i class="dot" style="border-color:#2da84e;background:rgba(45,168,78,.2)"></i>Outcome (Y)</span>
+  <span><i class="dot" style="border-color:#e0860a;background:rgba(224,134,10,.2)"></i>Focal / Treatment (X·D)</span>
+  <span><i class="dot" style="border-color:#3a7bd5;background:rgba(58,123,213,.2)"></i>Covariates (Z)</span>
+  <span><i class="dot" style="border-color:#9b3fd1;background:rgba(155,63,209,.2)"></i>Instruments</span>
+  <span><i class="dot" style="border-color:#5a6270;background:rgba(120,130,150,.2)"></i>Unit / Time（结构维度）</span>
+</div>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">OLS / Logit / Probit / Poisson / GLM（回归族）</div>
+    <div class="mockup-body">
+      <div class="grp role-out"><div class="glabel" style="color:#2da84e">Outcome (Y)</div><div class="row"><div class="node role-out">income</div></div></div>
+      <div class="grp role-focal"><div class="glabel" style="color:#e0860a">Focal (X) · 用户声明</div><div class="row"><div class="node role-focal">education</div></div></div>
+      <div class="grp role-ctrl"><div class="glabel" style="color:#3a7bd5">Covariates (Z)</div><div class="row"><div class="node role-ctrl">age</div><div class="node role-ctrl">region</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node role-model">ols_robust<br><small style="font-weight:400;color:#555">OLS · HC1 · n=36</small></div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">IV / 2SLS</div>
+    <div class="mockup-body">
+      <div class="grp role-out"><div class="glabel" style="color:#2da84e">Outcome (Y)</div><div class="row"><div class="node role-out">wage</div></div></div>
+      <div class="grp role-focal"><div class="glabel" style="color:#e0860a">Focal = Endogenous (X)</div><div class="row"><div class="node role-focal">schooling</div></div></div>
+      <div class="grp role-iv"><div class="glabel" style="color:#9b3fd1">Instruments</div><div class="row"><div class="node role-iv">quarter_of_birth</div></div></div>
+      <div class="grp role-ctrl"><div class="glabel" style="color:#3a7bd5">Covariates (Z)</div><div class="row"><div class="node role-ctrl">age</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node role-model">iv_2sls<br><small style="font-weight:400;color:#555">2SLS · n=…</small></div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:14px">
+  <div class="mockup-header">DID / CS / SA / dCDH（因果/面板族）—— treatment/entity/time 不再隐形</div>
+  <div class="mockup-body">
+    <div class="split">
+      <div>
+        <div class="grp role-out"><div class="glabel" style="color:#2da84e">Outcome (Y)</div><div class="row"><div class="node role-out">employment</div></div></div>
+        <div class="grp role-focal"><div class="glabel" style="color:#e0860a">Focal = Treatment (D)</div><div class="row"><div class="node role-focal">min_wage_hike</div></div></div>
+        <div class="grp role-ctrl"><div class="glabel" style="color:#3a7bd5">Covariates (Z)</div><div class="row"><div class="node role-ctrl">sector</div></div></div>
+      </div>
+      <div>
+        <div class="grp role-dim"><div class="glabel" style="color:#8e96a6">Unit (entity)</div><div class="row"><div class="node role-dim">county_id</div></div></div>
+        <div class="grp role-dim"><div class="glabel" style="color:#8e96a6">Time</div><div class="row"><div class="node role-dim">year</div></div></div>
+        <div class="arrow" style="margin-top:18px">↓ 全部流入 ↓</div>
+        <div class="node role-model">cs_did<br><small style="font-weight:400;color:#555">Callaway-Sant'Anna · ATT(g,t)</small></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:14px;color:#aeaeb2">同一套角色词表 {Outcome · Focal/Treatment · Covariates · Instruments · Unit · Time · Exposure} 把全部方法族统一；FE 角色分组通用渲染，不为每个估计量写死。</p>

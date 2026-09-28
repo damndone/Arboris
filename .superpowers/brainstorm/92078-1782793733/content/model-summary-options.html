@@ -1,0 +1,72 @@
+<h2>角色正名 + model 节点摘要的三种写法</h2>
+<p class="subtitle">上：角色已正名 Y / X / Z。下：model 节点摘要应承载什么——选 A/B/C。</p>
+
+<style>
+  .node{border:2px solid #c7c7cc;border-radius:10px;padding:8px 12px;margin:0 auto;text-align:center;
+        font-size:13px;line-height:1.4;max-width:340px;background:#ffffff;color:#1c1c1e;font-weight:600;}
+  .node small{display:block;color:#555;font-size:11px;margin-top:3px;font-weight:400;}
+  .node .formula{display:block;color:#1c1c1e;font-size:12px;margin-top:4px;font-family:ui-monospace,monospace;}
+  .arrow{text-align:center;color:#8e8e93;font-size:13px;margin:5px 0;font-weight:600;}
+  .role-out{border-color:#2da84e;} .role-focal{border-color:#e0860a;}
+  .role-ctrl{border-color:#3a7bd5;} .role-model{border-color:#9b3fd1;}
+  .group{border:2px solid;border-radius:12px;padding:10px;margin:6px auto;max-width:360px;}
+  .grp-out{background:rgba(45,168,78,0.10);border-color:#2da84e;}
+  .grp-focal{background:rgba(224,134,10,0.12);border-color:#e0860a;}
+  .grp-ctrl{background:rgba(58,123,213,0.12);border-color:#3a7bd5;}
+  .glabel{font-size:11px;letter-spacing:.04em;font-weight:700;margin-bottom:6px;}
+  .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
+  .row .node{margin:0;max-width:150px;}
+  .badge{display:inline-block;font-size:10px;border:1px solid #c7c7cc;border-radius:6px;padding:1px 6px;
+         margin-top:6px;color:#1c1c1e;background:#f2f2f7;font-weight:600;}
+</style>
+
+<div class="group" style="border-style:dashed;border-color:#b0b0b5;max-width:420px;background:rgba(255,255,255,0.03)">
+  <div class="glabel" style="color:#aeaeb2">MODEL INPUTS（正名后）</div>
+  <div class="group grp-out"><div class="glabel" style="color:#34c759">Outcome Variable (Y)</div>
+    <div class="row"><div class="node role-out">income</div></div></div>
+  <div class="group grp-focal"><div class="glabel" style="color:#ff9f0a">Focal Explanatory Variable (X) · ≥1</div>
+    <div class="row"><div class="node role-focal">education</div></div></div>
+  <div class="group grp-ctrl"><div class="glabel" style="color:#5e9eff">Covariates (Z) · 0+</div>
+    <div class="row"><div class="node role-ctrl">age</div><div class="node role-ctrl">region</div></div></div>
+</div>
+
+<div class="arrow">↓ 这些一起流入 ↓</div>
+
+<h3 style="text-align:center;margin-top:14px">model 节点摘要：A / B / C</h3>
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>只承载估计身份（推荐）</h3>
+      <div class="node role-model" style="margin:8px auto">ols_robust (primary)
+        <small>OLS · HC1 · n = 36</small>
+        <span class="badge">…021506 · #bb21b · source</span>
+      </div>
+      <p>变量名不重复（已在上游角色节点）。完整公式 <code>income ~ education + age + region</code> 放在节点详情抽屉里。最精简、零冗余。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>摘要里带完整公式</h3>
+      <div class="node role-model" style="margin:8px auto">ols_robust (primary)
+        <span class="formula">income ~ education + age + region</span>
+        <small>OLS · HC1 · n = 36</small>
+        <span class="badge">…021506 · #bb21b · source</span>
+      </div>
+      <p>节点单看就自含完整规格，但和上游角色节点的变量名重复，图密时显冗长。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>符号公式 + 角色计数</h3>
+      <div class="node role-model" style="margin:8px auto">ols_robust (primary)
+        <span class="formula">Y ~ X + Z　(1 focal, 2 covariates)</span>
+        <small>OLS · HC1 · n = 36</small>
+        <span class="badge">…021506 · #bb21b · source</span>
+      </div>
+      <p>用 Y/X/Z 符号表达设定结构、不重复具体名字，又点明焦点/协变量个数。科学但稍抽象。</p>
+    </div>
+  </div>
+</div>
