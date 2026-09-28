@@ -254,8 +254,20 @@ _ADAPTERS = {
 
 def _classification_provider_declaration(catalog: Any) -> tuple[Any, Any]:
     from workbench.agent.trusted_executor_registry import TrustedExecutorRegistryError
+    from workbench.providers.catalog import ProviderCatalogV1
 
-    providers = tuple(getattr(catalog, "providers", ()))
+    if type(catalog) is not ProviderCatalogV1:
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_CATALOG_REQUIRED",
+            "classification runtime requires the server-loaded ProviderCatalogV1",
+        )
+    if catalog.catalog_digest != sha256_canonical(catalog.digest_payload()):
+        raise TrustedExecutorRegistryError(
+            "CLASSIFICATION_PROVIDER_CATALOG_INVALID",
+            "classification provider catalog digest is invalid",
+        )
+
+    providers = catalog.providers
     matches = [provider for provider in providers if provider.provider_id == CLASSIFICATION_PROVIDER_ID]
     if len(matches) != 1:
         raise TrustedExecutorRegistryError(
@@ -312,22 +324,18 @@ def _validate_classification_runtime_result(result: Mapping[str, Any]) -> None:
         raise TrustedExecutorRegistryError("RUNTIME_RESULT_INVALID", "classification runtime result model_id is invalid")
 
 
-def classification_runtime_registry(catalog: Any | None = None) -> TrustedExecutorRegistry:
-    """Build the server-owned classification runtime join.
+def build_classification_runtime_contribution(catalog: Any) -> ProviderRuntimeContributionV1:
+    """Build the server-owned classification contribution for *catalog*.
 
-    The JSON manifest contributes only opaque contract identities.  This
-    factory supplies the trusted callable and binds it to the fixed builtin
-    catalog before a production entrypoint may accept the registry.
+    The returned contribution is intentionally unbound.  A bootstrapper may
+    compose it with contributions from the complete provider catalog and let
+    ``TrustedExecutorRegistry.bind_catalog`` perform the one-to-one join.
     """
 
-    from workbench.agent.trusted_executor_registry import (
-        ProviderRuntimeContributionV1,
-        TrustedExecutorRegistry,
-    )
+    from workbench.agent.trusted_executor_registry import ProviderRuntimeContributionV1
 
-    source_catalog = load_builtin_catalog() if catalog is None else catalog
-    provider, declaration = _classification_provider_declaration(source_catalog)
-    contribution = ProviderRuntimeContributionV1(
+    provider, declaration = _classification_provider_declaration(catalog)
+    return ProviderRuntimeContributionV1(
         provider_id=provider.provider_id,
         adapter_id=declaration.adapter_id,
         executor_ref=declaration.executor_ref,
@@ -345,6 +353,21 @@ def classification_runtime_registry(catalog: Any | None = None) -> TrustedExecut
             "adapter_id": CLASSIFICATION_RUNTIME_ADAPTER_ID,
         },
     )
+
+
+def classification_runtime_registry(catalog: Any | None = None) -> TrustedExecutorRegistry:
+    """Build the server-owned classification runtime join.
+
+    The JSON manifest contributes only opaque contract identities.  This
+    factory supplies the trusted callable and binds it to the fixed builtin
+    catalog before a production entrypoint may accept the registry.
+    """
+
+    from workbench.agent.trusted_executor_registry import TrustedExecutorRegistry, TrustedExecutorRegistryError
+
+    source_catalog = load_builtin_catalog() if catalog is None else catalog
+    contribution = build_classification_runtime_contribution(source_catalog)
+    provider, _declaration = _classification_provider_declaration(source_catalog)
     if len(tuple(source_catalog.providers)) == 1:
         bind_catalog = source_catalog
     else:
@@ -484,6 +507,7 @@ __all__ = [
     "LogisticRegressionAdapterV1",
     "RandomForestAdapterV1",
     "adapter_registry",
+    "build_classification_runtime_contribution",
     "classification_runtime_registry",
     "dispatch_classification_runtime_binding",
     "get_classification_adapter",
