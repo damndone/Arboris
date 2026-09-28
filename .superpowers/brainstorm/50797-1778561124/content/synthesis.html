@@ -1,0 +1,77 @@
+<h2>V1.4 决策合并 + 剩余 3 个技术点</h2>
+<p class="subtitle">左边是已经定的，右边是写设计文档前最后要确认的几个点。</p>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+
+  <!-- LEFT: Decided -->
+  <div style="background: rgba(72, 187, 120, 0.06); padding: 20px; border-radius: 8px; border-left: 3px solid #48bb78;">
+    <h3 style="color: #48bb78; margin-top: 0;">✓ 已决定</h3>
+    <div style="font-size: 13px; line-height: 1.8;">
+      <p><strong>路线形态</strong><br/>B 垂直切片驱动</p>
+      <p><strong>切片选择</strong><br/>数据血缘图谱（V1.4）</p>
+      <p><strong>节点粒度</strong><br/>C+ 多分辨率：底层变量级，UI 默认折叠到阶段级，可下钻；展开后内部变量保留对外边</p>
+      <p><strong>面包屑</strong><br/>双重：📁 嵌套位置 + 🧬 血缘路径，每段可点跳转，支持复制</p>
+      <p><strong>"复制路径"语义</strong><br/>= 从该节点分叉，在新分支上尝试新操作</p>
+      <p><strong>分叉拓扑</strong><br/>B 一个 Run 内部分支树。V1.4 限制为"线性 + 一次回滚 + 一次分叉"，不做无限嵌套</p>
+      <p><strong>删除语义</strong><br/>软删除（archived 标记）+ 永远可恢复 + 永不物理删除（除明确 purge）</p>
+      <p><strong>多元宇宙</strong><br/>V1.5+ 实现 UI；V1.4 数据模型预留 decision_point 字段，强制诚实显示</p>
+      <p><strong>防爆炸</strong><br/>双击切换折叠（像 macOS 叠放）+ "全部折叠"按钮 + archived 默认隐藏</p>
+    </div>
+  </div>
+
+  <!-- RIGHT: Remaining -->
+  <div style="background: rgba(214, 158, 46, 0.06); padding: 20px; border-radius: 8px; border-left: 3px solid #d69e2e;">
+    <h3 style="color: #d69e2e; margin-top: 0;">? 剩余 3 个技术点</h3>
+    <div style="font-size: 13px; line-height: 1.7;">
+
+      <p style="margin-top:0;"><strong>1. Pipeline 模式 vs 交互模式</strong></p>
+      <p style="margin: 4px 0 12px 0; padding-left: 12px; color: #cbd5e0;">
+        我建议：<strong>pipeline 仍端到端跑（不变）</strong>，跑完后用户可以从图谱任意节点分叉/回滚/再跑。AI（V1.6+）以"节点旁建议"形式出现，不打断 pipeline。<br/>
+        <span style="color:#a0aec0;">→ 替代方案是用户驱动每一步，但那是大改，且你的需求看起来不需要。</span>
+      </p>
+
+      <p><strong>2. AI 介入的"挂载点"形态</strong></p>
+      <p style="margin: 4px 0 12px 0; padding-left: 12px; color: #cbd5e0;">
+        基于你"AI 只做客观判断和数学，主观判断/解释才介入"的原则，V1.4 数据模型为这两类挂载点留位置：<br/>
+        • <strong>节点注释</strong>（read-only，AI 评论某个变量/阶段）<br/>
+        • <strong>建议分叉</strong>（AI 提议"从此处试 X"，以"幽灵"分支预览，用户决定是否物化）<br/>
+        <span style="color:#a0aec0;">→ <strong>不</strong>做：AI 自主修改图谱、自主跑分析。</span>
+      </p>
+
+      <p><strong>3. 现有代码的改造范围</strong></p>
+      <p style="margin: 4px 0 0 0; padding-left: 12px; color: #cbd5e0;">
+        V1.4 必然要动的：<br/>
+        • <code style="color:#fbd38d;">orchestrator.py</code> 改造为往图谱写节点（向后兼容）<br/>
+        • 新增 <code style="color:#fbd38d;">graph_model.py</code>、<code style="color:#fbd38d;">graph_store.py</code><br/>
+        • 新增 <code style="color:#fbd38d;">/runs/{id}/graph</code> 系列 API<br/>
+        • 前端新增 Lineage Tab<br/>
+        顺手做但不强制：拆分 <code style="color:#fbd38d;">diagnostic_preview.py</code>（你之前提的脆弱点之一）。<br/>
+        <span style="color:#a0aec0;">→ 是否同意"顺手拆 diagnostic_preview"也算 V1.4 范围？</span>
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="options" style="margin-top: 24px;">
+  <div class="option" data-choice="all-yes" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>三点全同意，开始写设计文档</h3>
+      <p>Pipeline 模式 / AI 双挂载点 / 顺手拆 diagnostic_preview 都按你说的来。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="discuss" onclick="toggleSelect(this)">
+    <div class="letter">~</div>
+    <div class="content">
+      <h3>有要讨论的</h3>
+      <p>选这个之后告诉我哪一点要调（1 / 2 / 3）。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="more" onclick="toggleSelect(this)">
+    <div class="letter">+</div>
+    <div class="content">
+      <h3>我还有别的想加进 V1.4</h3>
+      <p>选这个之后告诉我要加什么，我评估对周期的影响。</p>
+    </div>
+  </div>
+</div>

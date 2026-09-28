@@ -1,0 +1,105 @@
+<h2>分叉怎么组织：Run 内部分支 vs 多个 Run</h2>
+<p class="subtitle">这决定 API、存储、process tracker 形态，以及未来 AI 能否在一个视图里对比分支。</p>
+
+<div class="options">
+  <!-- A: Each fork = new run -->
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>每个分叉 = 新 Run（parent 指针 + fork_node）</h3>
+      <p style="margin-bottom: 12px;">从 log_income 分叉就生成 run_43，记录 parent=run_42, fork_at=log_income。Run 模型几乎不动。</p>
+      <div style="background: #0e1014; padding: 12px; border-radius: 6px; margin: 8px 0;">
+        <svg viewBox="0 0 480 130" style="width: 100%; height: 130px;">
+          <line x1="60" y1="40" x2="140" y2="40" stroke="#4a5568"/>
+          <line x1="180" y1="40" x2="260" y2="40" stroke="#4a5568"/>
+          <line x1="180" y1="40" x2="260" y2="90" stroke="#fbd38d" stroke-dasharray="4,2"/>
+          <rect x="20" y="25" width="80" height="30" rx="4" fill="#2d3748" stroke="#718096"/><text x="60" y="44" text-anchor="middle" fill="#cbd5e0" font-size="10">run_41</text>
+          <rect x="140" y="25" width="80" height="30" rx="4" fill="#2d3748" stroke="#718096"/><text x="180" y="44" text-anchor="middle" fill="#cbd5e0" font-size="10">run_42</text>
+          <rect x="260" y="25" width="80" height="30" rx="4" fill="#2d3748" stroke="#718096"/><text x="300" y="44" text-anchor="middle" fill="#cbd5e0" font-size="10">run_43</text>
+          <rect x="260" y="75" width="80" height="30" rx="4" fill="#553c2c" stroke="#d69e2e"/><text x="300" y="94" text-anchor="middle" fill="#fbd38d" font-size="10">run_44 (分叉)</text>
+          <text x="350" y="92" fill="#fbd38d" font-size="9">fork_at=log_income</text>
+        </svg>
+      </div>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4 style="font-size: 11px;">优点</h4><ul style="font-size: 11px;"><li>现有 run 模型几乎不改</li><li>每个 run 单结果语义清晰</li><li>API 兼容性好</li></ul></div>
+        <div class="cons"><h4 style="font-size: 11px;">缺点</h4><ul style="font-size: 11px;"><li>分叉多了 run 列表爆炸</li><li>对比分支要并排打开两个 run</li><li>AI 跨分支分析要多次查询</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- B: One run with internal branches -->
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>一个 Run 内部树状分支（Run 模型升级为图）</h3>
+      <p style="margin-bottom: 12px;">run_42 内部就是一棵分支树。所有分叉、回滚的中间产物都在同一个 run 里。Run 列表数量保持稳定。</p>
+      <div style="background: #0e1014; padding: 12px; border-radius: 6px; margin: 8px 0;">
+        <svg viewBox="0 0 480 150" style="width: 100%; height: 150px;">
+          <rect x="20" y="15" width="440" height="125" rx="8" fill="rgba(43,108,176,0.06)" stroke="#63b3ed" stroke-dasharray="4,2"/>
+          <text x="240" y="10" text-anchor="middle" fill="#63b3ed" font-size="10">run_42</text>
+
+          <line x1="80" y1="55" x2="160" y2="55" stroke="#4a5568"/>
+          <line x1="200" y1="55" x2="280" y2="55" stroke="#4a5568"/>
+          <line x1="200" y1="55" x2="280" y2="100" stroke="#fbd38d" stroke-dasharray="3,2"/>
+          <line x1="320" y1="55" x2="400" y2="55" stroke="#48bb78"/>
+          <line x1="320" y1="100" x2="400" y2="100" stroke="#48bb78"/>
+
+          <rect x="40" y="40" width="60" height="28" rx="4" fill="#2d3748" stroke="#718096"/><text x="70" y="58" text-anchor="middle" fill="#cbd5e0" font-size="9">原始</text>
+          <rect x="160" y="40" width="60" height="28" rx="4" fill="#2d3748" stroke="#718096"/><text x="190" y="58" text-anchor="middle" fill="#cbd5e0" font-size="9">log</text>
+          <rect x="280" y="40" width="60" height="28" rx="4" fill="#2b6cb0" stroke="#63b3ed"/><text x="310" y="58" text-anchor="middle" fill="#fff" font-size="9">main 分支</text>
+          <rect x="280" y="85" width="60" height="28" rx="4" fill="#553c2c" stroke="#d69e2e"/><text x="310" y="103" text-anchor="middle" fill="#fbd38d" font-size="8">try_sqrt</text>
+          <rect x="400" y="40" width="60" height="28" rx="4" fill="#22543d" stroke="#48bb78"/><text x="430" y="58" text-anchor="middle" fill="#fff" font-size="9">模型 main</text>
+          <rect x="400" y="85" width="60" height="28" rx="4" fill="#22543d" stroke="#48bb78"/><text x="430" y="103" text-anchor="middle" fill="#fff" font-size="9">模型 sqrt</text>
+        </svg>
+      </div>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4 style="font-size: 11px;">优点</h4><ul style="font-size: 11px;"><li>所有分支一图见</li><li>分叉成本低（共享上游）</li><li>AI 对比分支天然</li><li>process tracker = 分支图</li></ul></div>
+        <div class="cons"><h4 style="font-size: 11px;">缺点</h4><ul style="font-size: 11px;"><li>Run 模型大改</li><li>API 需要"分支地址"概念</li><li>现有 run-detail UI 要重做</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- C: Hybrid -->
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>混合：内部轻量分支 + "提升为新 Run" 按钮</h3>
+      <p style="margin-bottom: 12px;">默认像 B，run 内部支持快速试错分支。当某个分支证明有价值，可以"promote"成独立 run（变成 A 的形态），便于分享、归档、报告。</p>
+      <div style="background: #0e1014; padding: 12px; border-radius: 6px; margin: 8px 0;">
+        <svg viewBox="0 0 480 150" style="width: 100%; height: 150px;">
+          <rect x="20" y="15" width="290" height="125" rx="8" fill="rgba(43,108,176,0.06)" stroke="#63b3ed" stroke-dasharray="4,2"/>
+          <text x="165" y="10" text-anchor="middle" fill="#63b3ed" font-size="10">run_42 (含试错分支)</text>
+
+          <line x1="70" y1="55" x2="140" y2="55" stroke="#4a5568"/>
+          <line x1="170" y1="55" x2="230" y2="55" stroke="#4a5568"/>
+          <line x1="170" y1="55" x2="230" y2="100" stroke="#fbd38d" stroke-dasharray="3,2"/>
+          <rect x="40" y="40" width="60" height="28" rx="4" fill="#2d3748" stroke="#718096"/><text x="70" y="58" text-anchor="middle" fill="#cbd5e0" font-size="9">原始</text>
+          <rect x="140" y="40" width="60" height="28" rx="4" fill="#2d3748" stroke="#718096"/><text x="170" y="58" text-anchor="middle" fill="#cbd5e0" font-size="9">log</text>
+          <rect x="230" y="40" width="60" height="28" rx="4" fill="#2b6cb0" stroke="#63b3ed"/><text x="260" y="58" text-anchor="middle" fill="#fff" font-size="9">main</text>
+          <rect x="230" y="85" width="60" height="28" rx="4" fill="#553c2c" stroke="#d69e2e"/><text x="260" y="103" text-anchor="middle" fill="#fbd38d" font-size="8">try_sqrt</text>
+
+          <line x1="290" y1="100" x2="360" y2="100" stroke="#fbd38d" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <text x="325" y="92" text-anchor="middle" fill="#fbd38d" font-size="9">promote</text>
+          <rect x="360" y="85" width="100" height="28" rx="4" fill="#22543d" stroke="#48bb78"/><text x="410" y="103" text-anchor="middle" fill="#fff" font-size="9">run_43 (独立)</text>
+          <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#fbd38d"/></marker></defs>
+        </svg>
+      </div>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4 style="font-size: 11px;">优点</h4><ul style="font-size: 11px;"><li>试错便宜（B 的好处）</li><li>正式产出干净（A 的好处）</li><li>未来"分享/导出"清晰</li></ul></div>
+        <div class="cons"><h4 style="font-size: 11px;">缺点</h4><ul style="font-size: 11px;"><li>两个概念要学：分支 vs run</li><li>实现成本最高</li><li>promote 语义要细想</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px; padding: 16px; background: rgba(255,255,255,0.04); border-radius: 8px;">
+  <p class="label">我的倾向</p>
+  <p><strong>B</strong>，但分阶段实现：</p>
+  <ul style="font-size: 13px; line-height: 1.7; margin-top: 8px;">
+    <li><strong>V1.4</strong>：实现 B 的<u>数据模型</u>（run 内部支持分支树）+ 简单 UI（先只允许"线性 + 一次回滚 + 一次分叉"，不做无限嵌套分支）</li>
+    <li><strong>V1.5+</strong>：放开任意分叉、增加分支命名、增加跨分支 diff 视图</li>
+    <li><strong>更晚</strong>：如果 promote 需求真的出现，再加 C 的语义（不预先做）</li>
+  </ul>
+  <p style="margin-top: 12px;"><strong>为什么不选 A</strong>：你明确想要"流程 tracker 自己查看 + 回滚历史"。如果分叉 = 新 run，回滚就要在 run 列表里跳，体验割裂。AI 对比分支也要多次跨 run 查询，未来重做的概率极高。</p>
+  <p style="margin-top: 8px;"><strong>为什么不选 C</strong>：promote 在没有真实场景需求前是过度设计。等用户真的喊"我想分享某个分支"再加。</p>
+</div>

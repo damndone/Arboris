@@ -1,0 +1,103 @@
+<h2>软删除 + 未来的多元宇宙入口</h2>
+<p class="subtitle">V1.4 实现软删除；多元宇宙分析作为 V1.5+ 计划，但 V1.4 数据模型为它留出位置。</p>
+
+<div class="mockup">
+  <div class="mockup-header">Lineage Tab — run_42 含 main、archived 分支、未来的 multiverse 入口</div>
+  <div class="mockup-body" style="padding: 20px; background: #1a1d24;">
+
+    <!-- Top: graph with main + archived branches -->
+    <div style="background: #0e1014; border-radius: 8px; padding: 20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="font-size: 11px; color: #888; letter-spacing: 0.5px;">LINEAGE GRAPH</div>
+        <div style="display:flex;gap:8px;font-size:11px;">
+          <span style="color:#888;cursor:pointer;">▢ 显示 archived (3)</span>
+          <span style="color:#888;cursor:pointer;">⊟ 全部折叠</span>
+        </div>
+      </div>
+
+      <svg viewBox="0 0 720 220" style="width: 100%; height: 220px;">
+        <!-- main path (active) -->
+        <line x1="60" y1="60" x2="160" y2="60" stroke="#4a5568" stroke-width="1.5"/>
+        <line x1="200" y1="60" x2="300" y2="60" stroke="#4a5568" stroke-width="1.5"/>
+        <line x1="340" y1="60" x2="440" y2="60" stroke="#48bb78" stroke-width="2"/>
+        <line x1="480" y1="60" x2="580" y2="60" stroke="#48bb78" stroke-width="2"/>
+
+        <!-- archived branch (faded) -->
+        <line x1="300" y1="80" x2="340" y2="120" stroke="#4a5568" stroke-width="1" stroke-dasharray="3,3" opacity="0.4"/>
+        <line x1="380" y1="120" x2="440" y2="120" stroke="#4a5568" stroke-width="1" stroke-dasharray="3,3" opacity="0.4"/>
+
+        <!-- Active main nodes -->
+        <circle cx="40" cy="60" r="20" fill="#2d3748" stroke="#718096"/><text x="40" y="64" text-anchor="middle" fill="#cbd5e0" font-size="9">原始</text>
+        <circle cx="180" cy="60" r="20" fill="#2d3748" stroke="#718096"/><text x="180" y="64" text-anchor="middle" fill="#cbd5e0" font-size="9">清洗</text>
+        <circle cx="320" cy="60" r="20" fill="#2b6cb0" stroke="#63b3ed"/><text x="320" y="64" text-anchor="middle" fill="#fff" font-size="9">log</text>
+        <circle cx="460" cy="60" r="20" fill="#22543d" stroke="#48bb78"/><text x="460" y="64" text-anchor="middle" fill="#fff" font-size="9">模型A</text>
+        <circle cx="600" cy="60" r="20" fill="#22543d" stroke="#48bb78"/><text x="600" y="64" text-anchor="middle" fill="#fff" font-size="9">报告</text>
+
+        <!-- Archived branch -->
+        <circle cx="360" cy="120" r="18" fill="#1a1d24" stroke="#4a5568" stroke-dasharray="2,2" opacity="0.5"/>
+        <text x="360" y="124" text-anchor="middle" fill="#718096" font-size="8" opacity="0.8">sqrt</text>
+        <circle cx="460" cy="120" r="18" fill="#1a1d24" stroke="#4a5568" stroke-dasharray="2,2" opacity="0.5"/>
+        <text x="460" y="124" text-anchor="middle" fill="#718096" font-size="8" opacity="0.8">模型B</text>
+
+        <!-- Archived label -->
+        <text x="410" y="150" text-anchor="middle" fill="#718096" font-size="9" opacity="0.7">↑ archived (可恢复)</text>
+
+        <!-- Branch from log to "ready to fork" hint -->
+        <text x="320" y="35" text-anchor="middle" fill="#888" font-size="9">↓ 双击折叠 / 右键分叉</text>
+
+        <!-- Future combinatorial entry -->
+        <rect x="20" y="170" width="680" height="38" rx="6" fill="rgba(214,158,46,0.08)" stroke="#d69e2e" stroke-dasharray="4,3"/>
+        <text x="40" y="184" fill="#d69e2e" font-size="10">⌘ 多元宇宙分析（V1.5 计划）</text>
+        <text x="40" y="198" fill="#a0aec0" font-size="10">枚举所有 [变换 × 候选变量 × 子集] 组合 — 一键批量生成分支 — 查看结果分布</text>
+        <text x="650" y="194" text-anchor="end" fill="#718096" font-size="10">未启用 →</text>
+      </svg>
+    </div>
+
+    <!-- Side panel emphasizing soft delete behavior -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
+      <div style="background: #0e1014; border-radius: 8px; padding: 16px;">
+        <div style="font-size: 10px; color: #fbd38d; letter-spacing: 0.5px; margin-bottom: 8px;">⚙ 删除按钮的实际行为</div>
+        <div style="font-size: 12px; color: #cbd5e0; line-height: 1.7;">
+          <div>• 普通"删除"按钮 → 软删除（archived=true）</div>
+          <div>• 节点/分支变灰，默认隐藏</div>
+          <div>• 顶部"显示 archived (3)" 切换可见</div>
+          <div>• 右键 archived → 恢复 / 从此处再分叉</div>
+          <div style="margin-top:8px;color:#fc8181;">• "彻底清除" 是 run 级菜单的危险操作，需要二次确认</div>
+        </div>
+      </div>
+      <div style="background: #0e1014; border-radius: 8px; padding: 16px;">
+        <div style="font-size: 10px; color: #d69e2e; letter-spacing: 0.5px; margin-bottom: 8px;">🔮 V1.4 数据模型为 V1.5 多元宇宙留的位置</div>
+        <div style="font-size: 12px; color: #cbd5e0; line-height: 1.7;">
+          <div>• 每个分叉点存"我从哪几个候选里选的"（decision_point）</div>
+          <div>• 路径可被表示为决策选择的组合</div>
+          <div>• 未来 multiverse UI = 枚举未走的路径 + 批量生成 archived 分支让用户挑</div>
+          <div style="margin-top:8px;color:#fbd38d;">• 强制诚实：UI 默认显示分布，不允许按显著性排序</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options" style="margin-top: 24px;">
+  <div class="option" data-choice="ok" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>对，就这样</h3>
+      <p>软删除 + 数据模型预留 multiverse。继续下一个设计问题。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="multiverse-now" onclick="toggleSelect(this)">
+    <div class="letter">!</div>
+    <div class="content">
+      <h3>多元宇宙我想 V1.4 就要</h3>
+      <p>把它纳入 V1.4 范围（会延长 V1.4，需要重新评估时间）。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="adjust" onclick="toggleSelect(this)">
+    <div class="letter">~</div>
+    <div class="content">
+      <h3>还有要调的</h3>
+      <p>选这个之后告诉我哪里不对。</p>
+    </div>
+  </div>
+</div>

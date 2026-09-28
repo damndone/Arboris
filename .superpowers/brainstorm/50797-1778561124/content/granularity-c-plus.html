@@ -1,0 +1,151 @@
+<h2>C+ 修正版：真展开 + 双重面包屑</h2>
+<p class="subtitle">展开节点的内部变量保留对外边；详情面板同时显示嵌套路径和血缘路径。</p>
+
+<div class="mockup">
+  <div class="mockup-header">Lineage Tab — "变换"阶段已展开，选中 log_income</div>
+  <div class="mockup-body" style="padding: 20px; background: #1a1d24;">
+
+    <!-- Graph area showing mixed folded + expanded -->
+    <div style="background: #0e1014; border-radius: 8px; padding: 20px; min-height: 280px;">
+      <div style="font-size: 11px; color: #888; letter-spacing: 0.5px; margin-bottom: 8px;">LINEAGE GRAPH（混排：折叠 + 展开）</div>
+
+      <svg viewBox="0 0 720 230" style="width: 100%; height: 230px;">
+        <!-- Folded nodes (raw, cleaned) -->
+        <line x1="60" y1="115" x2="160" y2="115" stroke="#4a5568" stroke-width="1.5"/>
+
+        <!-- Edges from "清洗" (folded) into expanded variables in "变换" -->
+        <line x1="200" y1="115" x2="320" y2="65" stroke="#4a5568" stroke-width="1"/>
+        <line x1="200" y1="115" x2="320" y2="115" stroke="#4a5568" stroke-width="1"/>
+        <line x1="200" y1="115" x2="320" y2="165" stroke="#4a5568" stroke-width="1"/>
+
+        <!-- Internal: expanded "变换" outer dashed group -->
+        <rect x="305" y="35" width="180" height="170" rx="8" fill="rgba(43,108,176,0.06)" stroke="#63b3ed" stroke-dasharray="5,3" stroke-width="1"/>
+        <text x="395" y="28" text-anchor="middle" fill="#63b3ed" font-size="10">变换 (展开 — 点折叠图标可收起)</text>
+        <text x="478" y="28" text-anchor="end" fill="#63b3ed" font-size="11" cursor="pointer">⊟</text>
+
+        <!-- Internal variables of 变换 — drawn as nodes with their own edges -->
+        <!-- log_income (selected, highlighted) -->
+        <rect x="320" y="50" width="60" height="28" rx="4" fill="#2b6cb0" stroke="#fbd38d" stroke-width="2"/>
+        <text x="350" y="68" text-anchor="middle" fill="#fff" font-size="9">log_income ★</text>
+        <!-- age_bin -->
+        <rect x="320" y="100" width="60" height="28" rx="4" fill="#2b6cb0" stroke="#63b3ed"/>
+        <text x="350" y="118" text-anchor="middle" fill="#fff" font-size="9">age_bin</text>
+        <!-- edu(d) - dummy expansion -->
+        <rect x="320" y="150" width="60" height="28" rx="4" fill="#553c2c" stroke="#d69e2e"/>
+        <text x="350" y="168" text-anchor="middle" fill="#fbd38d" font-size="9">edu_dummy</text>
+
+        <!-- Internal edges between expanded vars and to their downstream -->
+        <line x1="380" y1="64" x2="540" y2="100" stroke="#fbd38d" stroke-width="1.5"/>
+        <line x1="380" y1="114" x2="540" y2="115" stroke="#4a5568" stroke-width="1"/>
+        <line x1="380" y1="164" x2="540" y2="130" stroke="#4a5568" stroke-width="1"/>
+
+        <!-- Folded nodes (model A, B) downstream -->
+        <line x1="580" y1="115" x2="660" y2="115" stroke="#4a5568" stroke-width="1.5"/>
+
+        <circle cx="40" cy="115" r="22" fill="#2d3748" stroke="#718096"/><text x="40" y="119" text-anchor="middle" fill="#cbd5e0" font-size="10">原始</text>
+        <circle cx="180" cy="115" r="22" fill="#2d3748" stroke="#718096"/><text x="180" y="119" text-anchor="middle" fill="#cbd5e0" font-size="10">清洗</text>
+        <circle cx="560" cy="115" r="22" fill="#22543d" stroke="#48bb78"/><text x="560" y="119" text-anchor="middle" fill="#fff" font-size="10">模型A</text>
+        <circle cx="680" cy="115" r="22" fill="#22543d" stroke="#48bb78"/><text x="680" y="119" text-anchor="middle" fill="#fff" font-size="10">模型B</text>
+
+        <!-- Toggle hints on folded nodes -->
+        <text x="40" y="148" text-anchor="middle" fill="#888" font-size="9">⊞ 展开</text>
+        <text x="180" y="148" text-anchor="middle" fill="#888" font-size="9">⊞ 展开</text>
+        <text x="560" y="148" text-anchor="middle" fill="#888" font-size="9">⊞ 展开</text>
+        <text x="680" y="148" text-anchor="middle" fill="#888" font-size="9">⊞ 展开</text>
+      </svg>
+
+      <p style="font-size: 11px; color: #888; margin: 8px 0 0;">注意：变换内部的变量节点各自连到清洗节点（上游）和模型节点（下游），边能跨层级。高亮线 = 当前选中节点的相关边。</p>
+    </div>
+
+    <!-- Side detail panel BELOW (full width) showing breadcrumbs -->
+    <div style="background: #0e1014; border-radius: 8px; padding: 20px; margin-top: 16px;">
+      <div style="font-size: 11px; color: #888; letter-spacing: 0.5px; margin-bottom: 12px;">SELECTED NODE DETAIL</div>
+
+      <!-- Breadcrumb 1: containment path -->
+      <div style="margin-bottom: 14px;">
+        <div style="font-size: 10px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">📁 嵌套位置（包含关系，像访达）</div>
+        <div style="font-family: ui-monospace, monospace; font-size: 12px; color: #cbd5e0; background: #1a1d24; padding: 8px 12px; border-radius: 4px;">
+          <span style="color:#a0aec0;cursor:pointer;text-decoration:underline">run_42</span>
+          <span style="color:#4a5568"> › </span>
+          <span style="color:#a0aec0;cursor:pointer;text-decoration:underline">变换</span>
+          <span style="color:#4a5568"> › </span>
+          <span style="color:#fbd38d">log_income</span>
+        </div>
+      </div>
+
+      <!-- Breadcrumb 2: lineage path -->
+      <div style="margin-bottom: 14px;">
+        <div style="font-size: 10px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">🧬 数据血缘（来源链）</div>
+        <div style="font-family: ui-monospace, monospace; font-size: 12px; color: #cbd5e0; background: #1a1d24; padding: 8px 12px; border-radius: 4px; line-height: 1.8;">
+          <span style="color:#a0aec0;cursor:pointer;text-decoration:underline">income (原始)</span>
+          <span style="color:#4a5568"> ← drop_na ← </span>
+          <span style="color:#a0aec0;cursor:pointer;text-decoration:underline">income (清洗)</span>
+          <span style="color:#4a5568"> ← np.log(x+1) ← </span>
+          <span style="color:#fbd38d">log_income</span>
+        </div>
+        <div style="font-size: 11px; color: #718096; margin-top: 4px; font-style: italic;">下游：→ 模型A.β_log_income (β=0.42, p&lt;0.01)</div>
+      </div>
+
+      <!-- Node info -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
+        <div>
+          <div style="font-size: 10px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">基本信息</div>
+          <div style="font-size: 12px; color: #cbd5e0; line-height: 1.7;">
+            <div><span style="color:#888">类型:</span> 派生变量</div>
+            <div><span style="color:#888">操作:</span> np.log(x + 1)</div>
+            <div><span style="color:#888">n:</span> 4823 / 缺失 0</div>
+            <div><span style="color:#888">可逆:</span> ✓ exp(x) - 1</div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 10px; color: #fbd38d; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">⚠ 信任状态: CAUTION</div>
+          <div style="font-size: 12px; color: #cbd5e0; line-height: 1.7;">
+            原值含 0，已加 1 平移，估计需注意截距解释偏差
+          </div>
+          <div style="margin-top: 8px; display: flex; gap: 6px;">
+            <button class="mock-button" style="font-size: 11px;">查看产物</button>
+            <button class="mock-button" style="font-size: 11px;">回滚到此</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px;">
+  <div style="background: rgba(72, 187, 120, 0.08); padding: 16px; border-radius: 8px; border-left: 3px solid #48bb78;">
+    <p class="label" style="color: #48bb78;">这版相比原 C 的关键变化</p>
+    <ul style="font-size: 13px; line-height: 1.7; margin: 8px 0 0; padding-left: 18px;">
+      <li>展开节点的内部变量是<strong>真节点</strong>，有自己的入边/出边</li>
+      <li>边可以<strong>跨层级</strong>（折叠的"清洗"直连展开的"log_income"）</li>
+      <li>选中节点时<strong>高亮其相关边</strong>，其余边淡化</li>
+      <li>详情面板有两条面包屑：嵌套位置 + 血缘路径</li>
+      <li>面包屑里的每个节点都可点击跳转</li>
+    </ul>
+  </div>
+  <div style="background: rgba(255,255,255,0.04); padding: 16px; border-radius: 8px;">
+    <p class="label">需要确认的几个细节</p>
+    <ul style="font-size: 13px; line-height: 1.7; margin: 8px 0 0; padding-left: 18px;">
+      <li>多个上游时血缘路径怎么显示？（比如某变量由两列计算得来）→ 我倾向显示<strong>主上游 + "还有 N 个来源"折叠</strong></li>
+      <li>面包屑要不要支持"复制路径"按钮？（你提过想要客观可追溯）</li>
+      <li>展开太多时图会爆炸——需要"全部折叠"按钮 + 双击节点 = 切换折叠</li>
+    </ul>
+  </div>
+</div>
+
+<div class="options" style="margin-top: 24px;">
+  <div class="option" data-choice="ok" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>这版对了，继续</h3>
+      <p>进入下一个设计问题（图谱在哪里存储 + 和现有 run 模型怎么挂）。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="adjust" onclick="toggleSelect(this)">
+    <div class="letter">~</div>
+    <div class="content">
+      <h3>还有要调的</h3>
+      <p>选这个之后告诉我哪里不对。</p>
+    </div>
+  </div>
+</div>

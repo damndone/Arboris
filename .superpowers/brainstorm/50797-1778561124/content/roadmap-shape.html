@@ -1,0 +1,39 @@
+<h2>三种路线形态，先选一个大方向</h2>
+<p class="subtitle">你的清单里大约 12 个想法，但你也明确说"先把框架基础打好，避免后期推倒重建"。这两个目标存在张力。下面是三种推进方式。</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>基础先行（Foundation-first）</h3>
+      <p><strong>形态：</strong>V1.4 / V1.5 整两个版本只做架构铺垫，几乎无用户可见新功能。包括：拆分 diagnostic_preview、统一 term parser、引入数据血缘图谱（artifact graph）作为一等公民、AI 介入契约层、i18n message registry、frontend runtime contract validator。</p>
+      <p><strong>适合：</strong>你愿意用 4-6 周不出可见功能，换来后续每个功能都"插上去就行"。</p>
+      <p><strong>风险：</strong>无成果展示期长；万一架构猜错方向，浪费更多。</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>垂直切片驱动（Vertical Slice）</h3>
+      <p><strong>形态：</strong>挑一个"压力测试"功能，要求它必须经过未来所有关键架构层——比如"数据血缘图谱"，它一个就能驱动出 artifact graph 模型、process tracker、回滚、AI 注释挂载点。把这个功能从后端到前端做完，过程中顺手把基础打好。</p>
+      <p><strong>适合：</strong>你想"既要架构又要可见成果"，每个版本都有看得见的东西。</p>
+      <p><strong>风险：</strong>压力测试功能选错就白搭；架构会带着这个功能的偏向。</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>平行双轨（Parallel Tracks）</h3>
+      <p><strong>形态：</strong>每个版本同时做一点架构 + 一个可见小功能。比如 V1.4 = 拆分 diagnostic_preview + i18n 切换；V1.5 = artifact graph 后端模型 + 多数据格式支持；V1.6 = AI 契约层 + 自动识别 y/x。</p>
+      <p><strong>适合：</strong>你害怕单点押注，希望发布节奏稳定。</p>
+      <p><strong>风险：</strong>每版精力分散；架构推进慢，容易做着做着又偏回纯功能。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 32px; padding: 16px; background: rgba(255,255,255,0.04); border-radius: 8px;">
+  <p class="label">我的倾向</p>
+  <p>倾向 <strong>B（垂直切片）</strong>，并且首选切片 = <strong>"数据血缘图谱 + 流程 tracker + 回滚"</strong>。理由：(1) 它是你清单里唯一一个能"反向逼出"几乎所有底层架构的功能（artifact graph、process tracker、AI 注释挂载点、export governance 都要它）；(2) 它在视觉上有强成果（用户能看见 Obsidian 风格图谱）；(3) 它自然导出 AI 介入边界——只在节点上挂注释，AI 不参与判断流程。</p>
+</div>
