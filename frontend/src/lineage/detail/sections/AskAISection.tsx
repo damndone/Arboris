@@ -12,6 +12,10 @@ import {
 } from "../../../aiActivity/aiActivityLog";
 import { renderMarkdown } from "../../../report/markdown";
 import type { GraphViewNode } from "../../api/graphViewTypes";
+import {
+  fetchAnalysisLoopPackets,
+  type AnalysisLoopPacketsResponse,
+} from "../../api/analysisLoop";
 import { ResolverFailureState } from "../ResolverFailureState";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
 import { askAiForNode, fetchLlmConfig, type LlmConfigInfo } from "./askAiClient";
@@ -22,10 +26,66 @@ const DEFAULT_QUESTION = "Explain this node and its risks.";
 export function AskAISection({ node }: { node: GraphViewNode }) {
   const askAIEnabled = isAskAIEnabled();
   const resolvedContext = useResolvedNodeOperationContext();
+  const projectRoot = useProjectRootOptional();
+  const resolvedNodeContext =
+    resolvedContext?.ok === true ? resolvedContext.context : null;
+  const analysisLoopRunId = resolvedNodeContext?.run_rerun_from
+    ? resolvedNodeContext.ownership.owner_run_id
+    : null;
+  const analysisLoopRequestKey = resolvedNodeContext && analysisLoopRunId
+    ? `${resolvedNodeContext.context_fingerprint}:${analysisLoopRunId}`
+    : null;
+  const [analysisLoopState, setAnalysisLoopState] = useState<{
+    key: string;
+    response: AnalysisLoopPacketsResponse;
+  } | null>(null);
+  const [analysisLoopSettledKey, setAnalysisLoopSettledKey] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (
+      !projectRoot ||
+      !analysisLoopRunId ||
+      !analysisLoopRequestKey
+    ) {
+      setAnalysisLoopState(null);
+      setAnalysisLoopSettledKey(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setAnalysisLoopState(null);
+    setAnalysisLoopSettledKey(null);
+    fetchAnalysisLoopPackets(projectRoot, analysisLoopRunId)
+      .then((response) => {
+        if (!cancelled) {
+          setAnalysisLoopState({
+            key: analysisLoopRequestKey,
+            response,
+          });
+          setAnalysisLoopSettledKey(analysisLoopRequestKey);
+        }
+      })
+      .catch(() => {
+        // Analysis Loop evidence is additive.  A missing or unavailable
+        // packet must not make the ordinary read-only Ask AI surface fail.
+        if (!cancelled) {
+          setAnalysisLoopState(null);
+          setAnalysisLoopSettledKey(analysisLoopRequestKey);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [analysisLoopRequestKey, analysisLoopRunId, projectRoot]);
   const packet = useMemo(
     () =>
       askAIEnabled && resolvedContext?.ok === true
-        ? buildAskAIContextPacket(resolvedContext.context)
+        ? buildAskAIContextPacket(
+            resolvedContext.context,
+            analysisLoopState?.key === analysisLoopRequestKey
+              ? analysisLoopState.response
+              : null,
+          )
         : null,
     [
       askAIEnabled,
@@ -36,7 +96,12 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
       resolvedContext?.ok === true
         ? resolvedContext.context.selection.forest_node_key
         : null,
+      analysisLoopRequestKey,
+      analysisLoopState,
     ],
+  );
+  const analysisLoopLoading = Boolean(
+    analysisLoopRequestKey && analysisLoopSettledKey !== analysisLoopRequestKey,
   );
   const packetPreview = useMemo(
     () => (packet ? JSON.stringify(packet, null, 2) : null),
@@ -56,7 +121,6 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
   const [llmConfig, setLlmConfig] = useState<LlmConfigInfo | null>(null);
   // v1.6.12 (V6): per-node Q&A history — regenerating no longer erases the
   // previous answer; every exchange lands in the typed AI activity log.
-  const projectRoot = useProjectRootOptional();
   const nodeKey = packet?.selection.forest_node_key ?? null;
   const [history, setHistory] = useState<AskAiActivityRecord[]>([]);
 
@@ -93,7 +157,12 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
   async function ask(questionText: string) {
     const question = questionText;
     const requestIdentity = contextIdentity;
-    if (!packet || !requestIdentity || question.trim() === "") return;
+    if (
+      !packet ||
+      analysisLoopLoading ||
+      !requestIdentity ||
+      question.trim() === ""
+    ) return;
     const requestVersion = requestVersionRef.current + 1;
     requestVersionRef.current = requestVersion;
 
@@ -279,22 +348,31 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
           />
           <button
             type="submit"
-            disabled={!packet || isSubmitting || question.trim() === ""}
+            disabled={
+              !packet ||
+              analysisLoopLoading ||
+              isSubmitting ||
+              question.trim() === ""
+            }
             data-testid="ask-ai-section-button"
+            aria-busy={analysisLoopLoading}
+            title={analysisLoopLoading ? "Loading deterministic analysis evidence" : undefined}
             style={{
               alignSelf: "flex-start",
               padding: "6px 12px",
               borderRadius: 6,
               border: "1px solid var(--separator)",
-              background: packet
+              background: packet && !analysisLoopLoading
                 ? "var(--accent, rgba(40,120,255,0.18))"
                 : "transparent",
-              color: packet
+              color: packet && !analysisLoopLoading
                 ? "var(--label-primary)"
                 : "var(--label-tertiary)",
-              cursor: packet && !isSubmitting ? "pointer" : "not-allowed",
+              cursor: packet && !analysisLoopLoading && !isSubmitting
+                ? "pointer"
+                : "not-allowed",
               fontSize: 12,
-              opacity: !packet || isSubmitting ? 0.7 : 1,
+              opacity: !packet || analysisLoopLoading || isSubmitting ? 0.7 : 1,
             }}
           >
             Ask AI about this node

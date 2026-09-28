@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
@@ -40,6 +41,7 @@ from ..repository.run_repository import (
     _resolve_run_root,
     _summarize_manifest,
 )
+from ..report_export import ReportExportError, export_report
 from ..services.results_service import _model_results, _normalize_issue_stream
 from ..services.run_service import (
     _mark_interrupted_if_dead,
@@ -52,6 +54,20 @@ from ..services.run_service import (
 from ._deps import BYTES_PER_GB
 
 router = APIRouter()
+
+
+class ReportExportFigure(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    artifact_id: str = Field(min_length=1, max_length=200)
+    chart_type: str | None = Field(default=None, max_length=300)
+
+
+class ReportExportRequest(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    markdown: str = Field(min_length=1, max_length=2_000_000)
+    figures: list[ReportExportFigure] = Field(default_factory=list)
 
 _TERMINAL_EVENTS = {
     "workflow_completed", "workflow_blocked",
@@ -214,7 +230,13 @@ def list_runs_endpoint(project_root: str) -> dict:
         manifest_path = entry / "run_manifest.json"
         if not manifest_path.is_file():
             continue
-        summaries.append(_summarize_manifest(read_json(manifest_path), run_id=entry.name))
+        manifest = read_json(manifest_path)
+        # A server restart can leave a manifest in ``running`` while the worker
+        # no longer exists. The list is the run rail's primary source, so it
+        # must perform the same cheap dead-worker reconciliation as detail/SSE.
+        if manifest.get("status") == "running":
+            _mark_interrupted_if_dead(entry, manifest)
+        summaries.append(_summarize_manifest(manifest, run_id=entry.name))
     return {"runs": summaries}
 
 
@@ -237,6 +259,63 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
         "model_results": model_results,
         "diagnostic_summary_preview": preview,
     }
+
+
+@router.post("/runs/{run_id}/cancel")
+def cancel_run_endpoint(run_id: str, project_root: str) -> dict:
+    run_root = _resolve_run_root(project_root, run_id)
+    manifest = _read_manifest(run_root)
+    if manifest.get("status") != "running":
+        return {"run_id": run_id, "status": manifest.get("status")}
+    status = _mark_interrupted_if_dead(run_root, manifest)
+    if status == "interrupted":
+        return {"run_id": run_id, "status": "interrupted"}
+
+    events = get_event_manager()
+    if not events.request_cancel(run_id):
+        # A running manifest without an active worker is a dead run; reconcile
+        # it instead of claiming that cancellation was accepted.
+        _mark_interrupted_if_dead(run_root, manifest)
+        return {"run_id": run_id, "status": manifest.get("status", "interrupted")}
+    events.emit(
+        run_id,
+        {
+            "event": "workflow_cancel_requested",
+            "step": None,
+            "message": "Cancellation requested; the worker will stop at its next checkpoint.",
+            "status": "cancelling",
+        },
+    )
+    return {"run_id": run_id, "status": "cancelling"}
+
+
+@router.post("/runs/{run_id}/report/export")
+def export_report_endpoint(
+    run_id: str,
+    project_root: str,
+    format: str,
+    request: ReportExportRequest,
+) -> Response:
+    run_root = _resolve_run_root(project_root, run_id)
+    try:
+        payload, media_type, filename = export_report(
+            run_root,
+            markdown=request.markdown,
+            figures=[figure.model_dump() for figure in request.figures],
+            format=format,
+        )
+    except ReportExportError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="REPORT_EXPORT_INVALID",
+            message=str(exc),
+            details={"format": format},
+        ) from exc
+    return Response(
+        content=payload,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/runs/{run_id}/artifacts")

@@ -109,6 +109,21 @@ def test_cs_did_artifact_present_and_valid(tmp_path):
     assert set(artifact["aggregations"]) >= {"simple", "dynamic", "group", "calendar"}
     assert "metadata" in artifact
 
+    summary = read_json(run_root / "diagnostic_summary.json")
+    assert summary["run_status"]["report_render_status"] == "complete"
+    assert summary["run_status"]["report_available"] is True
+    assert summary["run_status"]["has_warnings"] is True
+    assert any(
+        issue["code"] == "DID_DYNAMIC_THIN_SUPPORT"
+        for issue in summary["diagnostics"]["warnings"]
+    )
+    summary_record = next(
+        item for item in read_json(run_root / "artifacts_index.json")["artifacts"]
+        if item["artifact_id"] == "diagnostic_summary"
+    )
+    from workbench.artifacts import sha256_file
+    assert summary_record["sha256"] == sha256_file(run_root / "diagnostic_summary.json")
+
     # registered in the artifact index
     index = read_json(run_root / "artifacts_index.json")
     ids = {a["artifact_id"] for a in index["artifacts"]}

@@ -23,6 +23,87 @@ export interface ReportScope {
   node_keys: string[];
 }
 
+export interface FigureFactInput {
+  artifact_id: string;
+  chart_type: string;
+  source?: {
+    preview_json?: string;
+    preview_truncated?: boolean;
+    [key: string]: unknown;
+  } | null;
+}
+
+const MAX_FIGURE_FACTS = 80;
+
+/** Extract only bounded numeric leaves from the serve-time figure source. */
+export function buildFigureFacts(
+  figures: FigureFactInput[],
+  startAt = 0,
+): CitableFact[] {
+  const facts: CitableFact[] = [];
+  let counter = startAt;
+  const nextId = () => `c${++counter}`;
+
+  for (const figure of figures) {
+    const source = figure.source;
+    if (source?.preview_truncated) {
+      facts.push({
+        id: nextId(),
+        node_key: `figure:${figure.artifact_id}`,
+        node_label: figure.chart_type,
+        field: `figure:${figure.artifact_id}:preview_truncated`,
+        label: `${figure.chart_type} numeric preview truncated`,
+        value: true,
+      });
+    }
+    if (!source?.preview_json) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(source.preview_json) as unknown;
+    } catch {
+      continue;
+    }
+    const leaves: Array<{ path: string; value: number }> = [];
+    collectNumericLeaves(parsed, "source", leaves, MAX_FIGURE_FACTS);
+    for (const leaf of leaves) {
+      facts.push({
+        id: nextId(),
+        node_key: `figure:${figure.artifact_id}`,
+        node_label: figure.chart_type,
+        field: `figure:${figure.artifact_id}:${leaf.path}`,
+        label: `${figure.chart_type} · ${leaf.path}`,
+        value: leaf.value,
+      });
+    }
+  }
+  return facts;
+}
+
+function collectNumericLeaves(
+  value: unknown,
+  path: string,
+  leaves: Array<{ path: string; value: number }>,
+  limit: number,
+): void {
+  if (leaves.length >= limit) return;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    leaves.push({ path, value });
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      collectNumericLeaves(item, `${path}[${index}]`, leaves, limit);
+    });
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      collectNumericLeaves(item, `${path}.${key}`, leaves, limit);
+      if (leaves.length >= limit) return;
+    }
+  }
+}
+
 export function buildFactTable(
   forest: ForestViewModel,
   activeRunId: string,

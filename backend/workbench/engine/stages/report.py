@@ -5,6 +5,30 @@ from typing import Any
 from ..context import ModelingContext, RunEnv
 
 
+def _refresh_artifact_checksum(run_root, artifact_id: str, path) -> None:
+    """Keep an artifact index hash correct after serve-time metadata finalization."""
+
+    from ...artifacts import read_json, sha256_file, write_json
+
+    index_path = run_root / "artifacts_index.json"
+    try:
+        index = read_json(index_path)
+        records = index.get("artifacts", [])
+        changed = False
+        digest = sha256_file(path)
+        for record in records:
+            if record.get("artifact_id") == artifact_id:
+                record["sha256"] = digest
+                changed = True
+                break
+        if changed:
+            write_json(index_path, index)
+    except (OSError, ValueError, KeyError):
+        # The report itself remains authoritative; a malformed index is handled
+        # by the existing artifact/preview contract rather than failing a run.
+        return
+
+
 class ReportStage:
     """Assemble the report facts/descriptive-stats/variable-importance, build
     the diagnostic summary, render the HTML report, export PDF/XLSX, flush the
@@ -39,6 +63,7 @@ class ReportStage:
         from ...domain import GuardrailIssue, Severity
 
         build_diagnostic_summary = _orch.build_diagnostic_summary
+        from ...diagnostic_summary import finalize_diagnostic_summary
         render_html_report = _orch.render_html_report
         export_pdf = _orch.export_pdf
         export_xlsx = _orch.export_xlsx
@@ -191,6 +216,8 @@ class ReportStage:
         })
 
         # Render HTML report via view_model
+        report_render_status = "pending"
+        report_available = False
         env.step("reporting", "start", "Rendering report...")
         try:
             from ...report_view_model import build_report_view_model
@@ -200,6 +227,8 @@ class ReportStage:
                 statistical_tests=statistical_test_summaries,
             )
             render_html_report(view_model, run_root)
+            report_render_status = "complete"
+            report_available = (run_root / "reports" / "report.html").is_file()
             env.step("reporting", "complete", "Rendered HTML report")
         except Exception as exc:
             issue_dicts.append(GuardrailIssue(
@@ -208,6 +237,8 @@ class ReportStage:
                 f"HTML report generation failed: {exc}. Model results are still available.",
                 {"error": str(exc)},
             ).to_dict())
+            report_render_status = "failed"
+            report_available = False
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("reporting", "complete", "Report render failed — model results available")
 
@@ -228,6 +259,29 @@ class ReportStage:
             ).to_dict())
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("export", "complete", "Export failed — model results available")
+
+        # Late issues (render/export) and the actual report file must be
+        # reflected in the same summary consumed by diagnostic preview and the
+        # Agent. Assign IDs before the final write because the initial summary
+        # was intentionally built before rendering.
+        for idx, issue in enumerate(issue_dicts):
+            if not issue.get("issue_id"):
+                issue["issue_id"] = f"diag_{idx + 1:03d}"
+        diagnostic_summary = finalize_diagnostic_summary(
+            diagnostic_summary,
+            issue_dicts=issue_dicts,
+            report_render_status=report_render_status,
+            report_available=report_available,
+        )
+        summary_path = run_root / "diagnostic_summary.json"
+        write_json(summary_path, diagnostic_summary)
+        _refresh_artifact_checksum(run_root, "diagnostic_summary", summary_path)
+        write_json(run_root / "errors.json", {
+            "schema_version": "legacy",
+            "run_id": run_id,
+            "issues": issue_dicts,
+            "superseded_by": "diagnostic_summary.json",
+        })
 
         _safe_flush_recorder(_recorder, context="success")
 

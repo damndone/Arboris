@@ -51,6 +51,14 @@ class ModelingContext:
         return replace(self, data=handle)
 
 
+class RunInterruptionRequested(RuntimeError):
+    """Cooperative cancellation/timeout signal for a background run."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
 @dataclass
 class RunEnv:
     """Side-effecting dependencies, kept OUT of ModelingContext so the
@@ -60,7 +68,22 @@ class RunEnv:
     run_id: str
     recorder: Any
     on_step: Callable[[str, str, str], None] | None = None
+    stop_reason: Callable[[], str | None] | None = None
+
+    def checkpoint(self, message: str = "") -> None:
+        if self.stop_reason is not None:
+            reason = self.stop_reason()
+            if reason:
+                raise RunInterruptionRequested(reason)
 
     def step(self, name: str, state: str, message: str) -> None:
+        self.checkpoint(message)
         if self.on_step:
             self.on_step(name, state, message)
+
+    def progress(self, name: str, message: str) -> None:
+        """Emit a durable heartbeat without changing stage terminal semantics."""
+
+        self.checkpoint(message)
+        if self.on_step:
+            self.on_step(name, "progress", message)

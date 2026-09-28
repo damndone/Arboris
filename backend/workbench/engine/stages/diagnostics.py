@@ -7,6 +7,57 @@ import numpy as np
 import pandas as pd
 
 from ..context import ModelingContext, RunEnv
+from ...domain import GuardrailIssue, Severity
+
+
+def _promote_did_warnings(
+    result: dict[str, Any],
+    *,
+    model_type: str,
+    artifact_id: str,
+    issue_dicts: list[dict[str, Any]],
+) -> None:
+    """Expose estimator warnings through the shared diagnostic contract.
+
+    CS/SA-DiD produce their own result artifact during estimation. Keeping the
+    raw strings there is useful for detail views, but leaving them there makes
+    the diagnostic summary and Agent context falsely look clean. Aggregate by
+    stable warning family while retaining every raw warning as evidence.
+    """
+
+    raw_warnings = result.get("warnings")
+    if not isinstance(raw_warnings, list):
+        return
+    groups: dict[str, list[str]] = {
+        "DID_DYNAMIC_THIN_SUPPORT": [],
+        "DID_CELL_OMITTED": [],
+        "DID_ESTIMATOR_WARNING": [],
+    }
+    for warning in raw_warnings:
+        text = str(warning)
+        lowered = text.lower()
+        if "single cohort" in lowered:
+            groups["DID_DYNAMIC_THIN_SUPPORT"].append(text)
+        elif "omitted" in lowered:
+            groups["DID_CELL_OMITTED"].append(text)
+        else:
+            groups["DID_ESTIMATOR_WARNING"].append(text)
+
+    for code, warnings in groups.items():
+        if not warnings:
+            continue
+        issue_dicts.append(
+            GuardrailIssue(
+                Severity.WARNING,
+                code,
+                f"{model_type} diagnostic warning(s): " + " ".join(warnings),
+                {
+                    "artifact_id": artifact_id,
+                    "model_type": model_type,
+                    "warnings": warnings,
+                },
+            ).to_dict()
+        )
 
 
 def _json_safe(obj: Any) -> Any:
@@ -203,6 +254,13 @@ class DiagnosticsStage:
                     "econometrics",
                     model_input_ids,
                 )
+                _promote_did_warnings(
+                    cs_artifact,
+                    model_type=model_type,
+                    artifact_id="cs_did",
+                    issue_dicts=issue_dicts,
+                )
+                write_json(run_root / "errors.json", {"issues": issue_dicts})
 
         if model_type == "sa_did":
             sa_result = ctx.artifacts.get("_sa_did_result")
@@ -226,6 +284,13 @@ class DiagnosticsStage:
                     "econometrics",
                     model_input_ids,
                 )
+                _promote_did_warnings(
+                    sa_artifact,
+                    model_type=model_type,
+                    artifact_id="sa_did",
+                    issue_dicts=issue_dicts,
+                )
+                write_json(run_root / "errors.json", {"issues": issue_dicts})
 
         if model_type == "dcdh":
             dcdh_result = ctx.artifacts.get("_dcdh_result")

@@ -8,6 +8,9 @@ const mockWb = vi.hoisted(() => ({ current: null as unknown }));
 const mockGenerate = vi.hoisted(() => ({
   current: vi.fn() as ReturnType<typeof vi.fn>,
 }));
+const mockFigureArtifacts = vi.hoisted(() => ({ groups: [] as unknown[] }));
+const mockFigureContext = vi.hoisted(() => vi.fn());
+const mockFigureArtifactsError = vi.hoisted(() => ({ current: null as Error | null }));
 
 vi.mock("../workbench/ForestContext", () => ({
   useForest: () => mockForest.current,
@@ -21,6 +24,19 @@ vi.mock("./reportClient", async (importOriginal) => {
     ...original,
     generateReport: (...args: unknown[]) => mockGenerate.current(...args),
   };
+});
+vi.mock("../api", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../api")>();
+  return {
+    ...original,
+    fetchRunArtifacts: () => mockFigureArtifactsError.current
+      ? Promise.reject(mockFigureArtifactsError.current)
+      : Promise.resolve(mockFigureArtifacts),
+  };
+});
+vi.mock("../workbench/views/figureAi", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../workbench/views/figureAi")>();
+  return { ...original, fetchFigureAiContext: (...args: unknown[]) => mockFigureContext(...args) };
 });
 
 function seedForest() {
@@ -42,6 +58,9 @@ describe("ReportView", () => {
       dispatch: { setView: vi.fn(), selectByCanvasClick: vi.fn() },
     };
     mockGenerate.current = vi.fn();
+    mockFigureArtifacts.groups = [];
+    mockFigureArtifactsError.current = null;
+    mockFigureContext.mockReset();
   });
 
   it("shows the deterministic fact table before any AI call", () => {
@@ -87,10 +106,86 @@ describe("ReportView", () => {
     expect(screen.getByRole("alert").textContent).toContain("LLM is not configured");
   });
 
+  it("sends figure source packets and expands [[fig:...]] in the generated report", async () => {
+    mockFigureArtifacts.groups = [
+      {
+        artifact_type: "figure",
+        items: [{ artifact_id: "coef_plot", path: "figures/coef_plot.png", artifact_type: "figure" }],
+      },
+    ];
+    mockFigureContext.mockResolvedValue({
+      figure: { artifact_id: "coef_plot", path: "figures/coef_plot.png", chart_type: "coefficient plot", sha256: null },
+      source: { artifact_id: "ols_1", kind: "model", preview_json: '{"estimate":2.0}', sha256: null, path: "model_results/ols_1.json", preview_truncated: false },
+    });
+    mockGenerate.current = vi.fn().mockResolvedValue({
+      text: "# Results\n\n[[fig:coef_plot]]",
+      model: "m",
+    });
+    render(<ReportView projectRoot="/tmp/projA" />);
+
+    await waitFor(() => expect(mockFigureContext).toHaveBeenCalledWith("/tmp/projA", "run_c", "coef_plot"));
+    fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
+    await waitFor(() => expect(screen.getByTestId("report-figure-coef_plot")).toBeInTheDocument());
+
+    const sent = mockGenerate.current.mock.calls[0][0] as {
+      facts: Array<{ field: string; value: unknown }>;
+      figures: Array<{ artifact_id: string; source: unknown }>;
+    };
+    expect(sent.figures).toHaveLength(1);
+    expect(sent.figures[0].artifact_id).toBe("coef_plot");
+    expect(sent.figures[0].source).toEqual({
+      artifact_id: "ols_1",
+      kind: "model",
+      preview_json: '{"estimate":2.0}',
+      sha256: null,
+      path: "model_results/ols_1.json",
+      preview_truncated: false,
+    });
+    expect(sent.facts.some((fact: { field: string; value: unknown }) =>
+      fact.field === "figure:coef_plot:source.estimate" && fact.value === 2,
+    )).toBe(true);
+    expect(screen.getByTestId("report-figure-coef_plot").getAttribute("src")).toContain("coef_plot");
+  });
+
+  it("surfaces a backend contract error when the model omits a marker", async () => {
+    mockFigureArtifacts.groups = [
+      {
+        artifact_type: "figure",
+        items: [{ artifact_id: "coef_plot", path: "figures/coef_plot.png", artifact_type: "figure" }],
+      },
+    ];
+    mockFigureContext.mockResolvedValue({
+      figure: { artifact_id: "coef_plot", path: "figures/coef_plot.png", chart_type: "coefficient plot", sha256: null },
+      source: null,
+    });
+    mockGenerate.current = vi.fn().mockRejectedValue(
+      new Error("LLM_RESPONSE_CONTRACT_INVALID"),
+    );
+    render(<ReportView projectRoot="/tmp/projA" />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(screen.getByRole("alert").textContent).toContain("LLM_RESPONSE_CONTRACT_INVALID");
+    expect(screen.queryByTestId("report-body")).not.toBeInTheDocument();
+  });
+
   it("without an active run, asks the user to pick one", () => {
     mockForest.current = null;
     render(<ReportView />);
     expect(screen.getByText(/pick a run/i)).toBeInTheDocument();
+  });
+
+  it("does not generate a report when the run figure inventory cannot load", async () => {
+    mockFigureArtifactsError.current = new Error("artifact inventory unavailable");
+    render(<ReportView projectRoot="/tmp/projA" />);
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(screen.getByRole("alert").textContent).toContain("figure inventory");
+    expect(screen.getByRole("button", { name: /generate report/i })).toBeDisabled();
+    expect(mockGenerate.current).not.toHaveBeenCalled();
   });
 });
 
@@ -104,6 +199,9 @@ describe("ReportView curation & history (C-3)", () => {
       dispatch: { setView: vi.fn(), selectByCanvasClick: vi.fn() },
     };
     mockGenerate.current = vi.fn().mockResolvedValue({ text: "ok [[c:c1]]", model: "m" });
+    mockFigureArtifacts.groups = [];
+    mockFigureArtifactsError.current = null;
+    mockFigureContext.mockReset();
   });
 
   it("unticking a fact excludes it from generation and discloses the exclusion", async () => {
@@ -115,6 +213,9 @@ describe("ReportView curation & history (C-3)", () => {
       "excluded by user",
     );
 
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
     await waitFor(() => expect(screen.getByTestId("report-body")).toBeInTheDocument());
 
@@ -138,6 +239,9 @@ describe("ReportView curation & history (C-3)", () => {
 
   it("generated reports persist to history and reopen from it", async () => {
     render(<ReportView projectRoot="/tmp/projA" />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
     await waitFor(() => expect(screen.getByTestId("report-history")).toBeInTheDocument());
 
@@ -157,6 +261,9 @@ describe("ReportView curation & history (C-3)", () => {
 
   it("deleting a history record removes it", async () => {
     render(<ReportView projectRoot="/tmp/projB" />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
     await waitFor(() => expect(screen.getByTestId("report-history")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /delete report/i }));

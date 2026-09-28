@@ -111,3 +111,38 @@ def test_adapter_sd_scale_clamped():
     out = honest_did_from_cs_dynamic(agg, row_cluster=rc, n_total=2,
                                      mbar_grid=[0, 1], alpha=0.05, grid_points=150)
     assert out["sd"]["scale"] >= HONEST_SD_SCALE_FLOOR
+
+
+def test_adapter_parallel_workers_preserve_serial_results():
+    agg, b = _dyn()
+    kwargs = dict(
+        row_cluster=b.aux["row_cluster"],
+        n_total=int(b.aux["n_total"]),
+        mbar_grid=[0, 1],
+        m_mult=[0, 1],
+        alpha=0.05,
+        grid_points=20,
+    )
+    serial = honest_did_from_cs_dynamic(agg, workers=1, **kwargs)
+    parallel = honest_did_from_cs_dynamic(agg, workers=2, **kwargs)
+    assert parallel == serial
+
+
+def test_adapter_parallel_replays_progress_heartbeats():
+    agg, b = _dyn()
+    messages: list[str] = []
+    out = honest_did_from_cs_dynamic(
+        agg,
+        row_cluster=b.aux["row_cluster"],
+        n_total=int(b.aux["n_total"]),
+        mbar_grid=[0],
+        m_mult=[0],
+        alpha=0.05,
+        grid_points=10,
+        workers=2,
+        progress=messages.append,
+    )
+    assert out["rm"]["status"] == "ok"
+    assert out["sd"]["status"] == "ok"
+    assert any(message.startswith("ΔRM M=") for message in messages)
+    assert any(message.startswith("ΔSD M=") for message in messages)

@@ -63,6 +63,33 @@ describe("resolveNodeOperationContext", () => {
     );
   });
 
+  it("uses the active head's rerun provenance for a shared node", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const runRerunFrom = {
+      owner_run_id: "run_source",
+      op_node_id: seed.sharedOpNodeId,
+      node_hash: "hash_source_model",
+      context_fingerprint: "nocv1:source",
+      rerun_request_id: "req_active_head",
+    };
+    const result = resolveNodeOperationContext({
+      forest: {
+        ...seed.forest,
+        heads: seed.forest.heads.map((head) =>
+          head.runId === seed.activeHeadRunId
+            ? { ...head, runRerunFrom }
+            : head,
+        ),
+      },
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.context.run_rerun_from).toEqual(runRerunFrom);
+  });
+
   it("returns ambiguous_owner_run instead of falling back to first candidate", () => {
     const seed = makeOwnerResolutionSeedFixture();
     const result = resolveNodeOperationContext({

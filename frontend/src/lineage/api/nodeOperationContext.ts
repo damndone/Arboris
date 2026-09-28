@@ -250,7 +250,10 @@ export function resolveNodeOperationContext(
   const sharedByRunIds = [...node.runs];
   const activeHeadPathContainsNode = Boolean(activeRef);
   const nodeRerunFrom = node.rerunFrom;
-  const runRerunFrom = node.runRerunFrom;
+  // A deduped forest node can be shared by several runs.  In that case the
+  // node-level adapter intentionally has no single provenance value; the
+  // active owner head is the authoritative run-scoped provenance instead.
+  const runRerunFrom = ownerHead?.runRerunFrom ?? node.runRerunFrom;
   const resolverTrace = [
     `selected forest node: ${input.selected_forest_node_key}`,
     `active_head_run_id: ${input.active_head_run_id ?? "none"}`,

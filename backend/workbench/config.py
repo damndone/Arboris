@@ -27,6 +27,10 @@ class WorkbenchConfig:
     prediction_model_type: str = ""
     prediction_cv_folds: int = 5
     prediction_sampling_method: str = ""
+    # Long-running estimators (notably honest-DiD) are cooperative: they check
+    # this deadline at stage/heartbeat checkpoints and terminalise as
+    # interrupted rather than holding the single worker slot forever.
+    run_timeout_s: float = 1800.0
 
 
 def load_config(path: Path | None) -> WorkbenchConfig:

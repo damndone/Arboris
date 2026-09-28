@@ -200,6 +200,7 @@ def run_workflow(
     cs_anticipation: int = 0,
     cs_cluster_var: str = "",
     honest_did: bool = False,
+    stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
     from ..lineage.hashing import dag_hash
     from ..lineage.run_inputs import write_run_inputs
@@ -323,6 +324,7 @@ def run_workflow(
             cs_anticipation=cs_anticipation,
             cs_cluster_var=cs_cluster_var,
             honest_did=honest_did,
+            stop_reason=stop_reason,
         )
     except OptionalDependencyNotInstalled as exc:
         details = exc.to_issue_details()
@@ -482,6 +484,7 @@ def _run_workflow(
     cs_anticipation: int = 0,
     cs_cluster_var: str = "",
     honest_did: bool = False,
+    stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
     terminal_status. All per-stage work lives in ``backend/workbench/engine/stages/``
@@ -493,7 +496,13 @@ def _run_workflow(
     _graph_store = GraphStore(runs_root=run_root.parent)
     _recorder = GraphRecorder(run_id=run_id, store=_graph_store)
 
-    env = RunEnv(run_root=run_root, run_id=run_id, recorder=_recorder, on_step=on_step)
+    env = RunEnv(
+        run_root=run_root,
+        run_id=run_id,
+        recorder=_recorder,
+        on_step=on_step,
+        stop_reason=stop_reason,
+    )
     ctx = ModelingContext(
         data=DataHandle(
             frame=pd.DataFrame(),
@@ -565,6 +574,7 @@ def _run_workflow(
         "imputation_m": getattr(config, "imputation_m", 5),
         "imputation_max_iter": getattr(config, "imputation_max_iter", 10),
         "max_missing_rate": getattr(config, "max_missing_rate", 0.4),
+        "run_timeout_s": getattr(config, "run_timeout_s", 1800.0),
     }
     ctx = run_pipeline_traced(
         PIPELINE, ctx, env, form=form, config=cfg,

@@ -6,6 +6,7 @@ import {
   type AnalysisLoopPacketsResponse,
 } from "../../api/analysisLoop";
 import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
+import { useForest } from "../../../workbench/ForestContext";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -27,8 +28,11 @@ function textValue(value: unknown): string {
   }
 }
 
-function runIdForNode(node: GraphViewNode): string | null {
+function runIdForNode(node: GraphViewNode, activeRunId?: string | null): string | null {
   const runs = (node as GraphViewNode & { runs?: unknown }).runs;
+  if (activeRunId && Array.isArray(runs) && runs.includes(activeRunId)) {
+    return activeRunId;
+  }
   if (Array.isArray(runs) && typeof runs[0] === "string" && runs[0]) return runs[0];
   const raw = record(node.raw);
   return raw && typeof raw.run_id === "string" && raw.run_id ? raw.run_id : null;
@@ -66,7 +70,8 @@ function PacketStatus({ packet }: { packet: AnalysisLoopPacketBundle }) {
 
 export function AnalysisLoopSection({ node }: { node: GraphViewNode }) {
   const projectRoot = useProjectRootOptional();
-  const runId = runIdForNode(node);
+  const forest = useForest();
+  const runId = runIdForNode(node, forest?.activeRunId);
   const [data, setData] = useState<AnalysisLoopPacketsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

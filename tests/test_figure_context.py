@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from workbench.app import app
-from workbench.artifacts import write_json
+from workbench.artifacts import read_json, write_json
 
 
 def _run_with_figures(tmp_path: Path) -> tuple[Path, str]:
@@ -63,6 +63,66 @@ def test_figure_context_resolves_profile_source_for_histograms(tmp_path: Path) -
     ctx = resolve_figure_ai_context(project, run_id=run_id, artifact_id="histograms")
     assert ctx["source"]["artifact_id"] == "data_profile"
     assert ctx["source"]["kind"] == "profile"
+
+
+def test_figure_context_resolves_event_study_dynamic_source(tmp_path: Path) -> None:
+    from workbench.figure_context import resolve_figure_ai_context
+
+    project, run_id = _run_with_figures(tmp_path)
+    run_root = project / "runs" / run_id
+    (run_root / "figures" / "event_study.png").write_bytes(b"\x89PNG event")
+    write_json(
+        run_root / "cs_did.json",
+        {
+            "aggregations": {
+                "dynamic": {
+                    "label_kind": "event_time",
+                    "event_time": [-1, 0, 1],
+                    "estimate": [0.0, 2.001, 2.4],
+                    "se": [0.2, 0.3, 0.4],
+                    "pointwise_ci": [[-0.4, 0.4], [1.4, 2.6], [1.6, 3.2]],
+                    "uniform_band": [[-0.5, 0.5], [1.2, 2.8], [1.3, 3.5]],
+                }
+            }
+        },
+    )
+    index = read_json(run_root / "artifacts_index.json")
+    index["artifacts"].extend([
+        {"artifact_id": "event_study", "path": "figures/event_study.png", "artifact_type": "figure", "step": "visualization", "sha256": "e", "inputs": []},
+        {"artifact_id": "cs_did", "path": "cs_did.json", "artifact_type": "model_diagnostic", "step": "econometrics", "sha256": "f", "inputs": []},
+    ])
+    write_json(run_root / "artifacts_index.json", index)
+
+    ctx = resolve_figure_ai_context(project, run_id=run_id, artifact_id="event_study")
+    assert ctx["source"]["artifact_id"] == "cs_did"
+    assert "2.001" in ctx["source"]["preview_json"]
+    assert "uniform_band" in ctx["source"]["preview_json"]
+
+
+def test_figure_context_resolves_time_trend_from_cleaned_data(tmp_path: Path) -> None:
+    import pandas as pd
+
+    from workbench.figure_context import resolve_figure_ai_context
+
+    project, run_id = _run_with_figures(tmp_path)
+    run_root = project / "runs" / run_id
+    (run_root / "figures" / "time_trend.png").write_bytes(b"\x89PNG trend")
+    (run_root / "processed").mkdir(parents=True)
+    pd.DataFrame({"year": [2, 1], "outcome": [20.0, 10.0]}).to_parquet(
+        run_root / "processed" / "cleaned_dataset.parquet", index=False
+    )
+    write_json(run_root / "run_inputs.json", {"form": {"time_col": "year"}})
+    index = read_json(run_root / "artifacts_index.json")
+    index["artifacts"].extend([
+        {"artifact_id": "time_trend", "path": "figures/time_trend.png", "artifact_type": "figure", "step": "visualization", "sha256": "g", "inputs": []},
+        {"artifact_id": "cleaned_dataset", "path": "processed/cleaned_dataset.parquet", "artifact_type": "dataset", "step": "cleaning", "sha256": "h", "inputs": []},
+    ])
+    write_json(run_root / "artifacts_index.json", index)
+
+    ctx = resolve_figure_ai_context(project, run_id=run_id, artifact_id="time_trend")
+    assert ctx["source"]["kind"] == "time_trend"
+    assert '"year": 1' in ctx["source"]["preview_json"]
+    assert '"outcome": 10.0' in ctx["source"]["preview_json"]
 
 
 def test_figure_context_rejects_non_figure_and_missing(tmp_path: Path) -> None:

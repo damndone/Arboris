@@ -52,7 +52,23 @@ class RecordingStage:
 
         primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
         drop_check_x = poisson_x if primary_type == "poisson_rate" else normalized_x
-        dropped_vars = _check_dropped_variables(drop_check_x, model_results, cleaned, issue_dicts, run_root, categorical_vars=categorical_vars)
+        declared_model_variables: set[str] = set()
+        if primary_type in {"cs_did", "sa_did"}:
+            did_result = ctx.artifacts.get(f"_{primary_type}_result")
+            metadata = did_result.get("metadata", {}) if isinstance(did_result, dict) else {}
+            declared_model_variables = {
+                str(value) for value in metadata.get("covariates", [])
+                if isinstance(value, str)
+            }
+        dropped_vars = _check_dropped_variables(
+            drop_check_x,
+            model_results,
+            cleaned,
+            issue_dicts,
+            run_root,
+            categorical_vars=categorical_vars,
+            model_declared_variables=declared_model_variables,
+        )
 
         _dropped_dps: dict[str, Any] = {}
         _dropped_reason_display: dict[str, str] = {}

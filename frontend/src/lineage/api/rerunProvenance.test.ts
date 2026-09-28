@@ -150,9 +150,16 @@ describe("getCompareWithSourceGate", () => {
     expect(result).toEqual({ ok: false, reason: "provenance_mismatch" });
   });
 
-  it("allows run-level fallback only for a strict single-candidate context", () => {
+  it("allows run-level fallback for the authoritative active head of a shared node", () => {
     const result = getCompareWithSourceGate(
-      context({ run_rerun_from: sourceProvenance }),
+      context({
+        run_rerun_from: sourceProvenance,
+        ownership: {
+          ...context().ownership,
+          candidate_run_ids: ["run_source", "run_child"],
+          shared_by_run_ids: ["run_source", "run_child"],
+        },
+      }),
     );
 
     expect(result.ok).toBe(true);
@@ -161,7 +168,7 @@ describe("getCompareWithSourceGate", () => {
     expect(result.rerun_from).toEqual(sourceProvenance);
   });
 
-  it("rejects run-level fallback when ownership has multiple candidate runs", () => {
+  it("rejects run-level fallback when the owner is not the active head", () => {
     const result = getCompareWithSourceGate(
       context({
         run_rerun_from: sourceProvenance,
@@ -169,6 +176,8 @@ describe("getCompareWithSourceGate", () => {
           ...context().ownership,
           candidate_run_ids: ["run_source", "run_child"],
           shared_by_run_ids: ["run_source", "run_child"],
+          owner_run_id: "run_source",
+          active_head_run_id: "run_child",
         },
       }),
     );

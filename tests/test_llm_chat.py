@@ -338,27 +338,96 @@ class TestReportMode:
                     {"id": "c1", "node_key": "k1", "label": "R²", "value": 0.86},
                     {"id": "c2", "node_key": "k2", "label": "covariance", "value": "HC1"},
                 ],
+                "figures": [
+                    {
+                        "artifact_id": "coef_plot",
+                        "chart_type": "coefficient plot",
+                        "source": {"estimate": 0.42, "se": 0.08},
+                    }
+                ],
             },
             "response_guardrails": {"advisory_text_only": True},
         }
 
     def test_report_mode_accepted(self, api: TestClient, configured_env, monkeypatch):
-        _install_upstream(monkeypatch, lambda request: _ok_upstream("# Report [[c:c1]]"))
+        _install_upstream(
+            monkeypatch,
+            lambda request: _ok_upstream(
+                "# Report [[c:c1]]\n[[fig:coef_plot]]"
+            ),
+        )
         response = api.post("/llm/chat", json=self._report_body())
         assert response.status_code == 200
         assert response.json()["text"].startswith("# Report")
 
+    def test_invalid_report_is_retried_once_with_contract_correction(
+        self, api: TestClient, configured_env, monkeypatch
+    ):
+        responses = iter(
+            [
+                _ok_upstream("# Report [[c:source:coef_plot]]"),
+                _ok_upstream("# Report [[c:c1]]\n[[fig:coef_plot]]"),
+            ]
+        )
+        seen = _install_upstream(monkeypatch, lambda request: next(responses))
+
+        response = api.post("/llm/chat", json=self._report_body())
+
+        assert response.status_code == 200, response.text
+        assert response.json()["text"] == "# Report [[c:c1]]\n[[fig:coef_plot]]"
+        assert len(seen) == 2
+        retry_messages = json.loads(seen[1].content)["messages"]
+        assert "contract" in retry_messages[-1]["content"].lower()
+
+    def test_invalid_report_after_retry_fails_closed(
+        self, api: TestClient, configured_env, monkeypatch
+    ):
+        seen = _install_upstream(
+            monkeypatch,
+            lambda request: _ok_upstream("# Report [[c:c1]]"),
+        )
+
+        response = api.post("/llm/chat", json=self._report_body())
+
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "LLM_RESPONSE_CONTRACT_INVALID"
+        assert len(seen) == 2
+
     def test_report_prompt_carries_cite_rule_and_fact_table(
         self, api: TestClient, configured_env, monkeypatch
     ):
-        seen = _install_upstream(monkeypatch, lambda request: _ok_upstream())
+        seen = _install_upstream(
+            monkeypatch,
+            lambda request: _ok_upstream(
+                "# Report [[c:c1]]\n[[fig:coef_plot]]"
+            ),
+        )
         api.post("/llm/chat", json=self._report_body())
         system_prompt = json.loads(seen[0].content)["messages"][0]["content"]
         assert "[[c:ID]]" in system_prompt
         assert "fact_table" in system_prompt
         assert "\"c1\"" in system_prompt and "0.86" in system_prompt
+        assert "[[fig:artifact_id]]" in system_prompt
+        assert "coef_plot" in system_prompt
+        assert "numeric source summary" in system_prompt
         # the node-context header must NOT leak into report mode
         assert "node assistant" not in system_prompt
+
+    def test_invalid_report_packet_is_rejected_before_provider_call(
+        self, api: TestClient, configured_env, monkeypatch
+    ):
+        seen = _install_upstream(
+            monkeypatch,
+            lambda request: pytest.fail("invalid packet reached provider"),
+        )
+        body = self._report_body()
+        body["packet"]["fact_table"].append(body["packet"]["fact_table"][0])
+
+        response = api.post("/llm/chat", json=body)
+
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "LLM_REPORT_PACKET_INVALID"
+        assert seen == []
 
     def test_figure_mode_prompt_forbids_pixels_and_isolates_headers(
         self, api: TestClient, configured_env, monkeypatch

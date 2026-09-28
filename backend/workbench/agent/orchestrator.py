@@ -41,7 +41,7 @@ from .chains import (
     RerunExecutionResult,
     RerunExecutor,
 )
-from .context_tools import WorkbenchContextProvider
+from .context_tools import InspectNodeContextRequest, WorkbenchContextProvider
 from .core import AgentCore
 from .execution import (
     ChainExecutionLease,
@@ -2216,6 +2216,167 @@ class WorkbenchOrchestrator:
             "changes": changes,
         }
 
+    def _create_analysis_loop_proposal_from_agent_arguments(
+        self,
+        *,
+        chain_id: str,
+        session_id: str,
+        arguments: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create the typed OLS proposal from backend-resolved source facts.
+
+        The generic ``model.rerun`` registry remains available for operations
+        outside v1.7.2.  A conventional-to-clustered OLS request, however,
+        must enter the Analysis Loop seam so its PlanDiff binding is present
+        before confirmation.  This method is shared by the dedicated typed
+        tool and the compatibility path that older Agents already call.
+        """
+
+        project_root = self.data_operation_project_root
+        if project_root is None:
+            raise ValueError("analysis_loop_project_root_unavailable")
+        provider = self.context_provider
+        inspect = getattr(provider, "inspect_node_context", None)
+        if inspect is None:
+            raise ValueError("analysis_loop_context_provider_unavailable")
+
+        target = dict(arguments.get("target") or {})
+        source_run_id = str(
+            arguments.get("source_run_id") or target.get("run_id") or ""
+        )
+        source_node_ref = str(
+            arguments.get("source_node_ref") or target.get("node_ref") or ""
+        )
+        requested_active_head = str(
+            arguments.get("active_head_run_id")
+            or (arguments.get("preconditions") or {}).get("active_head_run_id")
+            or ""
+        )
+        cluster_variable = str(arguments.get("cluster_variable") or "")
+        if not source_run_id or not source_node_ref:
+            raise ValueError("analysis_loop_source_identity_required")
+        if not cluster_variable:
+            raise ValueError("analysis_loop_cluster_variable_required")
+
+        active_head_run_id = self._resolve_chain_head(
+            chain_id,
+            requested_active_head,
+        )
+        if not active_head_run_id:
+            raise ValueError("analysis_loop_active_head_required")
+
+        snapshot = inspect(
+            InspectNodeContextRequest(
+                request_id=f"analysis-loop-proposal:{source_run_id}:{source_node_ref}",
+                owner_run_id=source_run_id,
+                op_node_id=source_node_ref,
+                active_head_run_id=str(active_head_run_id),
+            )
+        )
+        if snapshot.get("active_head_run_id") != active_head_run_id:
+            raise ValueError("analysis_loop_active_head_context_mismatch")
+        context_fingerprint = str(snapshot.get("context_fingerprint") or "")
+        if not context_fingerprint:
+            raise ValueError("analysis_loop_context_fingerprint_missing")
+        command_context_fingerprint = (metadata or {}).get("context_fingerprint")
+        if (
+            command_context_fingerprint is not None
+            and context_fingerprint != command_context_fingerprint
+        ):
+            raise ValueError("context_fingerprint_mismatch")
+
+        from ..analysis_loop.lifecycle import create_analysis_loop_proposal
+        from ..analysis_loop.resolver import resolve_analysis_loop_inputs
+        from ..analysis_loop.storage import PlanDiffStore
+
+        resolved = resolve_analysis_loop_inputs(
+            project_root,
+            run_id=source_run_id,
+            cluster_variable=cluster_variable,
+        )
+        if resolved.source.run_id != source_run_id:
+            raise ValueError("analysis_loop_source_identity_mismatch")
+
+        proposal = create_analysis_loop_proposal(
+            orchestrator=self,
+            chain_id=chain_id,
+            command_id=(metadata or {}).get("command_id"),
+            plan_store=PlanDiffStore(self.repository.root, create=False),
+            source=resolved.source,
+            intent={
+                "action_id": "ols.use_clustered_covariance_v1",
+                "patch": {
+                    "covariance": "clustered",
+                    "cluster_variable": cluster_variable,
+                },
+            },
+            cluster_values=resolved.cluster_values,
+            model_row_ids=resolved.model_row_ids,
+            requested_result_id=arguments.get("result_id"),
+            source_context_fingerprint=context_fingerprint,
+            source_identity={
+                "run_id": source_run_id,
+                "node_ref": source_node_ref,
+                "node_hash": str(snapshot.get("node_hash") or ""),
+                "forest_node_key": str(snapshot.get("forest_node_key") or ""),
+            },
+            active_head_run_id=str(active_head_run_id),
+            owner_resolution=str(snapshot.get("owner_resolution") or ""),
+        )
+        plan_store = PlanDiffStore(self.repository.root, create=False)
+        packet = plan_store.get_terminal_packet(
+            str(proposal.preconditions.get("plan_logical_key") or "")
+        )
+        if packet is None:
+            raise ValueError("analysis_loop_plan_missing")
+
+        source_facts = {
+            "run_id": resolved.source.run_id,
+            "status": resolved.source.status,
+            "model": resolved.source.model,
+            "covariance": resolved.source.covariance,
+            "contract_version": resolved.source.contract_version,
+            "result_ids": list(resolved.source.result_ids),
+            "primary_estimand": (
+                dict(resolved.source.primary_estimand)
+                if resolved.source.primary_estimand is not None
+                else None
+            ),
+            "analysis_row_count": len(resolved.source.analysis_row_ids),
+        }
+        return {
+            "requires_confirmation": True,
+            "proposal": proposal.to_dict(),
+            "plan_diff": packet.plan_diff.to_dict(),
+            "analysis_loop": {
+                "status": "pending",
+                "action_id": "ols.use_clustered_covariance_v1",
+                "source": source_facts,
+                "plan_diff": packet.plan_diff.to_dict(),
+            },
+        }
+
+    @staticmethod
+    def _clustered_analysis_loop_intent(arguments: dict[str, Any]) -> str | None:
+        """Extract an exact cluster field from a legacy generic proposal."""
+
+        def new_value(value: Any) -> Any:
+            return value.get("new") if isinstance(value, dict) and "new" in value else value
+
+        changes = arguments.get("changes")
+        if not isinstance(changes, dict):
+            return None
+        covariance = new_value(changes.get("covariance"))
+        if covariance != "clustered":
+            return None
+        cluster = new_value(changes.get("cluster_variable"))
+        if cluster is None:
+            cluster = new_value(changes.get("entity_col"))
+        if type(cluster) is not str or not cluster:
+            raise ValueError("analysis_loop_cluster_variable_required")
+        return cluster
+
     def _canonicalize_proposal_arguments(
         self,
         operation_id: str,
@@ -2322,6 +2483,22 @@ class WorkbenchOrchestrator:
             command_id = metadata.get("command_id")
             if command_id is not None and not isinstance(command_id, str):
                 raise ValueError("invalid_command_id")
+            cluster_variable = self._clustered_analysis_loop_intent(arguments)
+            if operation_id == "model.rerun" and cluster_variable is not None:
+                return self._create_analysis_loop_proposal_from_agent_arguments(
+                    chain_id=chain_id,
+                    session_id=session_id,
+                    arguments={
+                        **arguments,
+                        "source_run_id": arguments["target"]["run_id"],
+                        "source_node_ref": arguments["target"]["node_ref"],
+                        "active_head_run_id": arguments["preconditions"][
+                            "active_head_run_id"
+                        ],
+                        "cluster_variable": cluster_variable,
+                    },
+                    metadata=metadata,
+                )
             proposal = self.create_proposal(
                 chain_id=chain_id,
                 operation_id=operation_id,
@@ -2335,6 +2512,50 @@ class WorkbenchOrchestrator:
                 command_id=command_id,
             )
             return {"requires_confirmation": True, "proposal": proposal.to_dict()}
+
+        def propose_analysis_loop(arguments: dict[str, Any], context) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            metadata = context.metadata
+            allowed_operations = metadata.get("allowed_operations")
+            if allowed_operations is not None and "model.rerun" not in {
+                str(item) for item in (allowed_operations or [])
+            }:
+                raise PermissionError("operation_not_allowed")
+            return self._create_analysis_loop_proposal_from_agent_arguments(
+                chain_id=chain_id,
+                session_id=session_id,
+                arguments=arguments,
+                metadata=metadata,
+            )
+
+        registry.register(
+            ToolDefinition(
+                tool_id="propose_analysis_loop",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "source_run_id",
+                        "source_node_ref",
+                        "active_head_run_id",
+                        "cluster_variable",
+                    ],
+                    "properties": {
+                        "source_run_id": {"type": "string", "minLength": 1},
+                        "source_node_ref": {"type": "string", "minLength": 1},
+                        "active_head_run_id": {"type": "string", "minLength": 1},
+                        "cluster_variable": {"type": "string", "minLength": 1},
+                        "result_id": {"type": "string", "minLength": 1},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="proposal",
+                scope_requirements=("chain", "active_head"),
+                max_output_budget=24_000,
+                handler=propose_analysis_loop,
+            )
+        )
 
         registry.register(
             ToolDefinition(

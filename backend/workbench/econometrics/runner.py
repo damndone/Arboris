@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 import numpy as np
@@ -30,6 +31,10 @@ HONEST_MBAR_GRID = [0.0, 0.5, 1.0, 1.5, 2.0]
 HONEST_GRID_POINTS = 1000
 HONEST_SD_M_MULT = [0.0, 0.5, 1.0, 1.5, 2.0]
 HONEST_SD_SCALE_FLOOR = 1e-8
+# Honest-DID's per-target LP/SLSQP paths are independent. Keep the production
+# fan-out bounded so a long sensitivity run uses available CPU without creating
+# an unbounded thread storm; tests may monkeypatch this module-level value.
+HONEST_DID_WORKERS = max(1, min(4, os.cpu_count() or 1))
 
 
 def _formula_term(column: str, categorical: bool = False) -> str:
@@ -1038,7 +1043,7 @@ def run_event_study(
     }
 
 
-def _finalize_did_bundle(bundle, *, seed, B, alpha, honest_did, extra_metadata):
+def _finalize_did_bundle(bundle, *, seed, B, alpha, honest_did, extra_metadata, progress=None):
     """Estimator-agnostic downstream for a DID EffectEstimateBundle: att_gt cell
     table, four aggregations + multiplier-bootstrap sup-t bands, warnings,
     metadata, opt-in honest-DID (ΔRM + ΔSD/FLCI), and the assembled result dict.
@@ -1137,7 +1142,8 @@ def _finalize_did_bundle(bundle, *, seed, B, alpha, honest_did, extra_metadata):
                 agg_by_kind["dynamic"], row_cluster=row_cluster, n_total=G,
                 mbar_grid=HONEST_MBAR_GRID, alpha=alpha,
                 grid_points=HONEST_GRID_POINTS,
-                m_mult=HONEST_SD_M_MULT, scale_floor=HONEST_SD_SCALE_FLOOR)
+                m_mult=HONEST_SD_M_MULT, scale_floor=HONEST_SD_SCALE_FLOOR,
+                progress=progress, workers=HONEST_DID_WORKERS)
         except Exception as exc:            # honest-DID must NEVER fail the run
             reason = f"HONEST_INTERNAL_ERROR: {exc}"
             hd = {"rm": {"status": "degraded", "reason": reason},
@@ -1152,7 +1158,7 @@ def _finalize_did_bundle(bundle, *, seed, B, alpha, honest_did, extra_metadata):
 
 def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
                anticipation, cluster_var, seed=20260615, B=1000, alpha=0.05,
-               honest_did=False):
+               honest_did=False, progress=None):
     """Callaway-Sant'Anna group-time ATT end to end. Returns a structured dict:
     att_gt cell table, four aggregations (each with point estimates + analytical SE +
     multiplier-bootstrap pointwise/uniform bands), diagnostics, warnings, metadata.
@@ -1173,10 +1179,12 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
           "base_period": base_period, "anticipation": anticipation,
           "covariates": list(covariates), "cluster_var": cluster_var}
     return _finalize_did_bundle(bundle, seed=seed, B=B, alpha=alpha,
-                                honest_did=honest_did, extra_metadata=md)
+                                honest_did=honest_did, extra_metadata=md,
+                                progress=progress)
 
 
-def run_sa_did(norm, *, cluster_var, seed=20260615, B=1000, alpha=0.05, honest_did=False):
+def run_sa_did(norm, *, cluster_var, seed=20260615, B=1000, alpha=0.05,
+               honest_did=False, progress=None):
     """Sun-Abraham interaction-weighted event study end to end. Constructs the SA
     bundle then defers ENTIRELY to _finalize_did_bundle (estimator-slot validation)."""
     from ..engine.sa_attgt import estimate_sa
@@ -1184,7 +1192,8 @@ def run_sa_did(norm, *, cluster_var, seed=20260615, B=1000, alpha=0.05, honest_d
     bundle = estimate_sa(norm, cluster_var=cluster_var)
     md = {"estimator": "sun_abraham", "cluster_var": cluster_var}
     return _finalize_did_bundle(bundle, seed=seed, B=B, alpha=alpha,
-                                honest_did=honest_did, extra_metadata=md)
+                                honest_did=honest_did, extra_metadata=md,
+                                progress=progress)
 
 
 def _json_safe_dcdh(obj):

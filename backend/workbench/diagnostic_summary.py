@@ -195,6 +195,51 @@ def build_diagnostic_summary(
     }
 
 
+def finalize_diagnostic_summary(
+    summary: dict[str, Any],
+    *,
+    issue_dicts: list[dict[str, Any]],
+    report_render_status: str,
+    report_available: bool,
+) -> dict[str, Any]:
+    """Finalize the status fields after report rendering actually runs.
+
+    ``build_diagnostic_summary`` deliberately runs before the HTML renderer so
+    the renderer can consume a stable model summary. This second, small
+    decorate step makes the persisted summary agree with the final files and
+    with late warnings such as ``REPORT_RENDER_FAILED``.
+    """
+
+    if report_render_status not in {"pending", "complete", "failed"}:
+        raise ValueError(f"unsupported report_render_status: {report_render_status}")
+
+    buckets = {"blockers": [], "warnings": [], "cautions": [], "info": []}
+    for issue in issue_dicts:
+        severity = issue.get("severity")
+        if severity == "BLOCKER":
+            buckets["blockers"].append(issue)
+        elif severity == "WARNING":
+            buckets["warnings"].append(issue)
+        elif severity == "CAUTION":
+            buckets["cautions"].append(issue)
+        else:
+            buckets["info"].append(issue)
+
+    result = dict(summary)
+    result["diagnostics"] = buckets
+    result["run_status"] = {
+        **dict(summary.get("run_status") or {}),
+        "report_render_status": report_render_status,
+        "report_available": bool(report_available),
+        "has_blockers": bool(buckets["blockers"]),
+        "has_warnings": bool(buckets["warnings"]),
+        "model_results_available": bool(
+            (summary.get("run_status") or {}).get("model_results_available")
+        ),
+    }
+    return result
+
+
 def _model_label(primary_type: str) -> str:
     labels = {
         "ols": "OLS",

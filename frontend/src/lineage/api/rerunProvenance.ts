@@ -33,9 +33,18 @@ export function getCompareWithSourceGate(
       rerun_from: context.rerun_from,
     };
   }
+  const ownerIsAuthoritativeActiveHead =
+    context.ownership.active_head_run_id !== null &&
+    context.ownership.owner_run_id === context.ownership.active_head_run_id &&
+    context.ownership.candidate_run_refs.some(
+      (candidate) =>
+        candidate.run_id === context.ownership.owner_run_id &&
+        candidate.is_active_head,
+    );
   if (
     context.run_rerun_from &&
-    context.ownership.candidate_run_ids.length === 1
+    (context.ownership.candidate_run_ids.length === 1 ||
+      ownerIsAuthoritativeActiveHead)
   ) {
     return {
       ok: true,
