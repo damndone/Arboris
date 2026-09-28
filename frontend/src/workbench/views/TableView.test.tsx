@@ -113,6 +113,31 @@ describe("TableView", () => {
     expect(artifactCalls.current[0]).toEqual(["/tmp/from-slug", "run-slug"]);
   });
 
+  it("does not display raw model/post-estimation fields or load artifact JSON", async () => {
+    mockDetail.current = {
+      model_results: [{
+        model_id: "forged-model",
+        model_type: "ols",
+        coefficients: { leaked: { estimate: 999.0 } },
+      }],
+      post_estimation_results: [{
+        artifact_id: "forged-post-estimation",
+        artifact_type: "post_estimation",
+        payload: { leaked: 888.0 },
+      }],
+      artifact_counts: {},
+    } as unknown as RunDetail;
+
+    renderTable();
+
+    expect(await screen.findByTestId("typed-evidence-unavailable")).toBeInTheDocument();
+    expect(screen.queryByTestId("table-view-coefficients")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("table-view-post-estimation")).not.toBeInTheDocument();
+    expect(screen.queryByText("999")).not.toBeInTheDocument();
+    expect(screen.queryByText("888")).not.toBeInTheDocument();
+    expect(artifactJsonMock).not.toHaveBeenCalled();
+  });
+
   it("renders a coefficient table from model_results", async () => {
     mockDetail.current = {
       model_results: [

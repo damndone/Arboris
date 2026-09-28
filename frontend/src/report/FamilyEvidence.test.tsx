@@ -107,6 +107,24 @@ const quantileResult = {
 } as unknown as FamilyModelResult;
 
 describe("FamilyEvidence", () => {
+  it("returns unavailable instead of rendering raw model or artifact fallback data", () => {
+    render(
+      <FamilyEvidence
+        modelResults={[ordinalResult]}
+        allowLegacyPresentation
+        artifacts={{
+          diagnostics_ordinal_logit_1: {
+            parallel_lines: { status: "computed", slope_ranges: { education: 0.31 } },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("typed-evidence-unavailable")).toBeInTheDocument();
+    expect(screen.queryByTestId("model-family-evidence")).not.toBeInTheDocument();
+    expect(screen.queryByText("2.15")).not.toBeInTheDocument();
+  });
+
   it("consumes serialized ordered and multinomial model packets plus ordinal diagnostics", () => {
     render(
       <FamilyEvidence
