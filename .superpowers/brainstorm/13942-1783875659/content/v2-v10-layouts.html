@@ -1,0 +1,44 @@
+<h2>V2 + V10 界面方向</h2>
+<p class="subtitle">先看布局关系，不是最终视觉稿。点击你更喜欢的一组。</p>
+
+<div class="split">
+  <div class="mockup" data-choice="a" onclick="toggleSelect(this)" style="cursor:pointer">
+    <div class="mockup-header">A · 推荐：WorkBench 内聚合</div>
+    <div class="mockup-body" style="padding:0;background:#101114;color:#e9e9ec;min-height:470px">
+      <div style="height:42px;border-bottom:1px solid #303137;display:flex;align-items:center;gap:14px;padding:0 14px;font-size:12px">
+        <strong>当前项目 ▾</strong><span style="color:#858792">Graph</span><span style="color:#858792">Table</span><span style="color:#858792">Report</span><span style="margin-left:auto;color:#aeb6ff">⚙ 设置</span>
+      </div>
+      <div style="display:flex;min-height:428px">
+        <div style="width:180px;border-right:1px solid #303137;padding:14px">
+          <div style="font-size:11px;color:#858792;margin-bottom:8px">最近项目</div>
+          <div style="padding:9px;border-radius:7px;background:#272a36;margin-bottom:6px">安全边际筛选</div>
+          <div style="padding:9px;border-radius:7px;color:#b3b5bd">劳动经济学 demo</div>
+          <button class="mock-button" style="margin-top:18px;width:100%">＋ 新建项目</button>
+        </div>
+        <div style="flex:1;padding:18px">
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:16px"><strong style="font-size:18px">Workbench Home</strong><span style="font-size:11px;color:#858792">项目入口和工作区在同一层</span></div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">
+            <div style="border:1px solid #3a3d47;border-radius:9px;padding:12px"><div style="font-size:11px;color:#858792">最近打开</div><strong>安全边际筛选</strong><div style="font-size:11px;color:#858792;margin-top:6px">继续进入项目森林图</div></div>
+            <div style="border:1px solid #3a3d47;border-radius:9px;padding:12px"><div style="font-size:11px;color:#858792">LLM 状态</div><strong>deepseek-chat</strong><div style="font-size:11px;color:#72d6a1;margin-top:6px">已配置 · 上下文可用</div></div>
+          </div>
+          <div style="margin-top:14px;border:1px solid #3a3d47;border-radius:9px;padding:14px">
+            <div style="display:flex;justify-content:space-between"><strong>LLM 设置</strong><span style="font-size:11px;color:#858792">本机配置</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:11px;color:#b3b5bd"><div>API Base URL<br><code style="color:#e9e9ec">api.deepseek.com</code></div><div>模型<br><code style="color:#e9e9ec">deepseek-chat</code></div><div>API Key<br><span style="color:#72d6a1">● 已保存，不回显</span></div><div>上下文<br><span style="color:#e9e9ec">当前节点摘要 · 6.2 KB</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A：Workbench 内的 Home 面板</h3><p>Home、最近项目、新建项目、LLM 设置都在同一个工作区层级，项目图仍是主工作面。</p></div>
+  </div>
+
+  <div class="mockup" data-choice="b" onclick="toggleSelect(this)" style="cursor:pointer">
+    <div class="mockup-header">B · 保守：保留独立 Home</div>
+    <div class="mockup-body" style="padding:0;background:#f6f6f7;color:#202124;min-height:470px">
+      <div style="height:42px;border-bottom:1px solid #d5d6da;display:flex;align-items:center;gap:14px;padding:0 14px;font-size:12px;background:white"><strong>Home</strong><span style="color:#777982">Workbench</span><span style="margin-left:auto;color:#5559a9">⚙ 设置</span></div>
+      <div style="padding:20px"><div style="font-size:18px;font-weight:700;margin-bottom:14px">最近项目</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px"><div style="background:white;border:1px solid #d5d6da;border-radius:9px;padding:14px"><strong>安全边际筛选</strong><div style="font-size:11px;color:#777982;margin-top:7px">上次打开 · 继续</div></div><div style="background:white;border:1px solid #d5d6da;border-radius:9px;padding:14px"><strong>劳动经济学 demo</strong><div style="font-size:11px;color:#777982;margin-top:7px">上次打开 · 继续</div></div></div><button class="mock-button" style="margin-top:14px">＋ 新建项目</button><div style="background:white;border:1px solid #d5d6da;border-radius:9px;padding:14px;margin-top:16px"><strong>LLM 设置</strong><p style="font-size:11px;color:#777982">点击进入独立设置页，保存后返回 Workbench。</p><button class="mock-button">打开设置</button></div></div>
+    </div>
+    <div class="card-body"><h3>B：Home 和设置独立成页</h3><p>改动较少，但用户仍需要在 Home、Workbench、设置之间切换，整合感弱一些。</p></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px"><span class="label">V2 设置面板本身</span><p>无论选 A 还是 B，我建议设置内容采用同一套：API Base URL、API Key（只写不读）、模型名、请求超时、当前节点上下文摘要/字节数、保存并测试连接。</p></div>
