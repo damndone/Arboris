@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "event_id": "1e6b4c8d-2f70-4a59-b3c1-7d8e0f5a9246",
+  "timestamp": "2026-07-26T22:50:00.000Z",
+  "type": "FAILURE",
+  "subtype": "tdd_red_before_planner_projection",
+  "stage": "implementation",
+  "cause_status": "known",
+  "cause": "The real planner projection test requires the not-yet-created server-owned planner_projection registration seam.",
+  "evidence": {
+    "kind": "pytest",
+    "ref": "tests/test_notebook_routes.py -k real_planner_reads_current_server_owned_custom_projection",
+    "observed_at": "2026-07-26T22:50:00.000Z",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "impact": "No planner or service code was accepted as passing before the projection boundary existed.",
+  "preventability": "not_preventable",
+  "resolution": "open",
+  "lesson": "Write the real planner projection test before adding dynamic declarations or artifact vocabulary.",
+  "lesson_key": "tdd-red-before-planner-projection",
+  "incident_id": "a4c8e2f6-9b1d-47e5-80c3-6f7a2d9e5b14",
+  "links": ["tests/test_notebook_routes.py", "backend/workbench/capability_factory/notebook_catalog.py"]
+}
