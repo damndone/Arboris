@@ -1,6 +1,6 @@
 # Arboris manual
 
-Arboris (the Econometrics Workbench) is a local statistics workbench: SPSS- and
+Arboris is a local statistics workbench: SPSS- and
 Stata-style data management and analysis, a lineage graph that records every
 step, and an AI Agent that runs analyses from plain language — under rules it
 cannot talk its way around.
