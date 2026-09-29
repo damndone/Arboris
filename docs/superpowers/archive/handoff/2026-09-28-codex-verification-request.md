@@ -132,3 +132,54 @@ v1.8.9 的行为相反（渲染模型结果、显著性与检验表）。它们�
 |---|---|---|---|---|
 
 第 1 项如有遗漏，请另附“应补回 main 的文件清单”。
+
+---
+
+## Codex 的回复（2026-09-28，经用户转交，原文）
+
+只读核查完成。基准为当前 main：`a653693f`。没有修改、删除、推送、合并或打 tag；没有运行测试，因此以下是代码与存档核查结论，不是新的测试通过证明。
+
+**最重要的结论：P7 分支没有被 main 完整取代，但也不能整批合并回来。存在真正遗漏，也存在 main 已修正、旧分支反而落后的部分。**
+
+| # | 项目 | 结论 | 证据 | 建议动作 |
+|---|---|---|---|---|
+| 1 | `workbench-v1.8.8-p7-multivariate` | **有遗漏** | 按提交树核对，确认 101 个相同、25 个不同、46 个 main 缺失；40 个提交没有被 main 包含，分支 tip `0ef1110c` 也不在现有 tag/远端引用中。实质遗漏包括多重插补接入估计阶段，以及独立契约、数值对照测试。 | 保留分支及未跟踪文档，先存档。v1.8.10 按下方清单选择性移植，不整批合并。 |
+| 2 | `v173-evaluation-harness` 六处修改 | **需保留作参考** | 六文件 +686 / −153。包括 selector 初始化失败清理、隐藏 Git index flags 检查、`posix.fork`/`execve` 防护，以及冻结执行器缺失时拒绝启动。main 没有这套 collector/strict runner；虽有生产侧 containment gate，但不等于吸收了这些修改。 | 六文件连同基线 `97c40de7` 一起存档。不要直接移入当前主线：该版本 collector 明确处于阻塞状态，不是可用的完整评估器。 |
+| 3 | 主目录未跟踪资料 | **需保留作参考** | 逐文件与 `archive/v1.8.9-codex-wip` 比较，大部分没有同路径、同内容副本。分类搜索 objective 包含 OOF 选择、holdout 封存、预算与参数校验要求；对应 retrospective 只有 STARTED，没有完成证据。分类搜索实现存在于 archive、main 中没有。 | 分类材料留作 v1.8.11 参考，其余交接资料统一存档后可移出工作目录。三条旧 devline 仅作历史材料，不作为当前正式完成证据。 |
+| 4 | stash `b065b0bd` 两份测试 | **需保留作参考；不应恢复原断言** | `git stash show -p` 确认它们要求屏蔽 `model_results`/artifact 展示。TableView 测试中的 “forged” 只是 mock 数据名字，没有检验真实来源、签名或服务端身份。 | 不直接 apply。防伪造的目标值得保留，但应按现行可信边界重新设计测试。 |
+| 5 | Codex 的 `c373`、`c3f1` worktree | **可丢弃工作目录** | 两者 `git status --porcelain --ignored` 均为空；`90799cd7` 均为 archive tag 的祖先。 | 可在执行前再次确认无占用后移除。 |
+| 6 | 其他本机遗留 | **有遗漏，不能统一当缓存清理** | 扫描了 83 个注册 worktree；另有 11 个 stash，`stash@{10}` 还包含 9 个未跟踪文件。根目录 `build/` 的 528 个文件与 backend 对应源文件逐字节相同。 | 清理前逐项保存 dirty/untracked/stash；`build/` 可作为可重建副本清理。 |
+
+### 应补回 main 的文件清单（移植候选，不代表可原样复制后立即通过；来源均为 P7 分支 `0ef1110c`）
+
+**1. 优先补回独立契约与数值验证（22 个文件，均在 `tests/`）**
+
+| 分类 | 文件 | 原因 |
+|---|---|---|
+| 重复执行与抽样适配 | `test_replicate_combine.py`、`test_survey_replicate_adapter.py` | 预算、注册边界、证据篡改、聚合结果及 survey adapter 验证 |
+| 重抽样 | `test_resampling_bootstrap.py`、`test_resampling_permutation.py`、`test_resampling_contract.py`、`test_resampling_oracle.py` | main 的调用覆盖不能替代 BCa 退化、精确置换、预算和独立 R 对照 |
+| IV/GMM | `test_iv_gmm_contract.py`、`test_iv_gmm_oracle.py` | 结果合同，以及与 statsmodels IVGMM/IV2SLS 的数值比较 |
+| 多重比较 | `test_multiple_comparisons_contract.py`、`test_multiple_comparisons_oracle.py` | Scheffé/Games–Howell 的合同及 R 数值对照 |
+| 非参数 | `test_nonparametric_contract.py`、`test_nonparametric_oracle.py` | 序列化边界、SciPy/R 对照 |
+| 空间统计 | `test_spatial_statistics_contract.py`、`test_spatial_statistics_oracle.py` | 权重声明、独立公式及 R 对照 |
+| 合成控制 | `test_synthetic_control_contract.py`、`test_synthetic_control_oracle.py` | 显式策略、digest、独立约束优化对照 |
+| GLM 扩展 | `test_glm_extensions_contract.py`、`test_glm_extensions_oracle.py` | 通用合同与数值覆盖，但必须保留 main 新增的 hurdle 近似推断标识 |
+| 模型诊断 | `test_model_diagnostics_contract.py`、`test_model_diagnostics_oracle.py` | main 已有 statsmodels 对照；旧文件的合同及直接公式验证可作补充，去掉重复部分 |
+| 扩展与时序 | `test_p7_extension_metadata.py`、`test_time_series_models.py` | 元数据边界，以及 VECM 秩、VAR 稳定性、IRF 等针对性验证 |
+
+另外 3 个缺失文件应选择性提取：
+- `test_matching_contract.py`：适配 main 新合同后补一般边界测试，不能恢复旧的 `distance_policy`、`trim` 语义。
+- `test_matching_oracle.py`：不建议整体补回。main 的 `tests/test_matching_pack.py` 已有更完整的 R 对照（含匹配几何区分案例），旧 R 输出解析也已不匹配当前 fixture；仅提取确有增量的断言。
+- `test_statistical_extensions.py`：提取 CA/MCA、聚类、判别等数值和安全测试；不能保留“没有 Agent 注册”这种已过时的预期。
+
+某些旧测试只是无条件 `skip` 的可选外部 oracle 占位，不能算独立验证成果，也没必要为恢复文件数量而补回。
+
+**2. 多重插补是真正的功能遗漏。** 当前 main 的 `backend/workbench/imputation.py` 只保存一份插补数据，并明确提示没有生成 pooled estimates。旧 P7 分支额外实现了：按 `m` 生成多份数据及 manifest；对每份数据分别拟合 OLS，再做 Rubin 合并；不把第一份数据的残差、拟合优度冒充合并结果；不支持的模型组合及不完整插补明确阻断。独立的 `rubin_pool()` 已进入 main，不等于上述端到端流程已进入 main。应单独评审并移植（不是覆盖文件）：`backend/workbench/imputation.py`、`engine/stages/imputation.py`、`engine/stages/estimation.py`、`engine/stages/diagnostics.py`、`orchestrator/_report_build.py`、`report_view_model.py`、`tests/test_imputation_mice.py`、`tests/contracts/imputation_summary.mice.sample.json`、`tests/contracts/test_schema_imputation_summary.py`，同时带上 imputation、golden、fork、lineage 配套测试改动；移植时必须保留 main 后续增加的 survey 样本一致性修复、标签展示和其他改进。
+
+### 建议的执行顺序
+1. 先存档 P7 分支、六份 harness 修改和全部未跟踪资料（2026-09-28 已完成，见 `docs/history/`）。
+2. v1.8.10 优先补测试缺口，保留 main 已改进的 matching/hurdle 实现。
+3. 将“多重插补端到端接线”作为独立功能事项评审，不能混在“补测试”里悄悄引入。
+4. 存档确认后再清理两个 Codex worktree、重复 build 和历史散落资料（2026-09-28 已完成）。
+
+本次覆盖的是本仓库、注册 worktree、stash 和现有本地引用；没有扫描整台机器，也没有 fetch。
