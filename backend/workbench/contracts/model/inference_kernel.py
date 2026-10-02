@@ -38,6 +38,9 @@ MAX_FULL_VCOV_PARAMS = 300
 KERNEL_INTERFACES = ("coef_vcov", "loglik")
 REFERENCE_DISTRIBUTIONS = ("t", "z")
 VCOV_SCOPES = ("full", "focal", "unavailable")
+#: How the estimation sample was weighted. A likelihood-ratio test is invalid
+#: under sampling (probability) weights, so post-estimation must know.
+WEIGHT_KINDS = ("none", "frequency", "analysis", "sampling")
 
 _FIELDS = frozenset(
     {
@@ -55,6 +58,7 @@ _FIELDS = frozenset(
         "nobs",
         "covariance_estimator",
         "estimation_sample_fingerprint",
+        "weights",
         "interfaces",
         "unavailable",
     }
@@ -122,6 +126,7 @@ def build_inference_kernel(
     nobs: int,
     covariance_estimator: str | None,
     estimation_sample_fingerprint: str | None = None,
+    weights: str = "none",
     focal_param_names: Sequence[str] | None = None,
     unavailable: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -203,6 +208,7 @@ def build_inference_kernel(
         "nobs": nobs,
         "covariance_estimator": covariance_estimator,
         "estimation_sample_fingerprint": estimation_sample_fingerprint,
+        "weights": weights,
         "interfaces": interfaces,
         "unavailable": reasons,
     }
@@ -230,6 +236,7 @@ def unavailable_inference_kernel(
         "nobs": nobs if isinstance(nobs, int) and not isinstance(nobs, bool) and nobs >= 0 else None,
         "covariance_estimator": None,
         "estimation_sample_fingerprint": None,
+        "weights": "none",
         "interfaces": [],
         "unavailable": {interface: reason for interface in KERNEL_INTERFACES},
     }
@@ -259,6 +266,8 @@ def validate_inference_kernel(kernel: Any) -> None:
             raise InferenceKernelError(
                 f"{interface} must be either provided or explained, not both or neither"
             )
+    if kernel["weights"] not in WEIGHT_KINDS:
+        raise InferenceKernelError("weights is not a recognised weight kind")
     if kernel["vcov_scope"] not in VCOV_SCOPES:
         raise InferenceKernelError("vcov_scope is not recognised")
     names = kernel["param_names"]
@@ -415,6 +424,25 @@ def kernel_from_fitted(
         )
 
 
+def declared_weights(primary: Mapping[str, Any]) -> str:
+    """The weight kind a result packet says its estimation used."""
+    if isinstance(primary.get("survey_design"), Mapping):
+        return "sampling"
+    weights = primary.get("weights")
+    if isinstance(weights, Mapping) and weights.get("executed") is not False:
+        kind = weights.get("kind")
+        if kind in WEIGHT_KINDS:
+            return str(kind)
+    return "none"
+
+
+def _with_declared_weights(kernel: Mapping[str, Any], primary: Mapping[str, Any]) -> dict[str, Any]:
+    out = dict(kernel)
+    out["weights"] = declared_weights(primary)
+    validate_inference_kernel(out)
+    return out
+
+
 def resolve_inference_kernel(
     *,
     model_id: str,
@@ -434,7 +462,7 @@ def resolve_inference_kernel(
     nobs = nobs if isinstance(nobs, int) and not isinstance(nobs, bool) else None
     if recorded is not None:
         validate_inference_kernel(recorded)
-        return dict(recorded)
+        return _with_declared_weights(recorded, primary)
     extracted = kernel_from_fitted(
         fitted,
         model_id=model_id,
@@ -443,7 +471,7 @@ def resolve_inference_kernel(
         public_name=public_name,
     )
     if extracted is not None:
-        return extracted
+        return _with_declared_weights(extracted, primary)
     return unavailable_inference_kernel(
         model_id=model_id,
         model_type=model_type,

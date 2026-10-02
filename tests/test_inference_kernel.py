@@ -197,6 +197,7 @@ def test_survey_design_kernel_carries_the_design_variance_not_the_naive_one(tmp_
     assert kernel["df_resid"] == packet["survey_design"]["residual_degf"]
     assert "loglik" not in kernel["interfaces"]
     assert "design-based" in kernel["unavailable"]["loglik"]
+    assert kernel["weights"] == "sampling"
 
 
 def test_clustered_ols_kernel_matches_the_reported_cluster_standard_errors(tmp_path: Path) -> None:
@@ -397,3 +398,17 @@ def test_the_sample_fingerprint_identifies_the_rows_a_model_used(tmp_path: Path)
     fewer = _kernel(_run(tmp_path / "c", gappy, model_type="logit", y="yb", x=["x1", "x2"]), "logit_1")
     assert fewer["nobs"] == 280
     assert fewer["estimation_sample_fingerprint"] != same_a["estimation_sample_fingerprint"]
+
+
+@pytest.mark.parametrize(
+    ("weight_kwargs", "expected"),
+    # Sampling weights come with a design; the survey test above covers them.
+    [({}, "none"), ({"analysis_weight": "w"}, "analysis"), ({"frequency_weight": "w"}, "frequency")],
+)
+def test_the_kernel_says_how_the_sample_was_weighted(tmp_path: Path, weight_kwargs, expected) -> None:
+    """A likelihood-ratio test is not valid under probability weights; the
+    kernel is all post-estimation reads, so it has to carry the fact."""
+    frame = _cross()
+    frame["w"] = 1 + (np.arange(len(frame)) % 3)
+    run_root = _run(tmp_path, frame, model_type="ols", y="y", x=["x1", "x2"], **weight_kwargs)
+    assert _kernel(run_root, "ols_1")["weights"] == expected
