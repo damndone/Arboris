@@ -37,7 +37,7 @@ BASELINE_NAMES = frozenset({
     '_model_id_for_type', '_model_summary', '_normalized_existing',
     '_primary_model_summary', '_run_workflow', '_safe_flush_recorder',
     '_select_valid_exposure_col', '_validate_requested_model_type',
-    '_variable_summary', '_write_manifest', '_write_model_result',
+    '_variable_summary', '_write_inference_kernel', '_write_manifest', '_write_model_result',
     'annotations', 'build_claims', 'build_diagnostic_summary',
     'classify_dataset', 'clean_frame', 'compute_diagnostics', 'create_figures',
     'create_run', 'datetime', 'detect_y_kind', 'dpf', 'export_pdf',

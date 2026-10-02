@@ -20,6 +20,9 @@
       "cleaned_dataset"
     ],
     "histograms": [],
+    "inference_kernel_logit_1": [
+      "logit_1"
+    ],
     "kde_plots": [],
     "logit_1": [
       "cleaned_dataset"

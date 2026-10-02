@@ -6,12 +6,13 @@ workbench.orchestrator.* namespace.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from ..artifacts import register_artifact, write_json
+from ..artifacts import register_artifact, write_json, write_text_durable
 
 
 def _variable_summary(cat_dp: Any, coer_dp: Any) -> str:
@@ -70,6 +71,36 @@ def _write_model_result(
         "model_result",
         "econometrics",
         inputs or ["cleaned_dataset"],
+    )
+
+
+def _write_inference_kernel(
+    run_root: Path,
+    kernel: dict[str, Any],
+    *,
+    inputs: list[str],
+) -> None:
+    """Persist the kernel post-estimation reads instead of refitting."""
+    from ..contracts.model.inference_kernel import (
+        kernel_artifact_id,
+        kernel_relative_path,
+        validate_inference_kernel,
+    )
+
+    validate_inference_kernel(kernel)
+    model_id = kernel["model_id"]
+    kernel_path = run_root / kernel_relative_path(model_id)
+    kernel_path.parent.mkdir(parents=True, exist_ok=True)
+    # Compact on purpose: a 300-parameter covariance is 1.7 MB this way and
+    # several times that indented. Nobody reads this file by eye.
+    write_text_durable(kernel_path, json.dumps(kernel, ensure_ascii=False, separators=(",", ":")))
+    register_artifact(
+        run_root,
+        kernel_artifact_id(model_id),
+        kernel_path,
+        "inference_kernel",
+        "econometrics",
+        inputs,
     )
 
 

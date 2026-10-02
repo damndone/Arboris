@@ -14,7 +14,10 @@ from workbench.evaluator_harness_manifest import (
 )
 
 
-LANE = Path("/Users/jiayuanren/项目规划/.worktrees/v173-evaluation-harness")
+# The lane is identified by its commit, which lives in the shared object store;
+# any checkout of this repository can read it. The lane's own worktree was
+# archived and removed on 2026-09-28, and pointing at it broke these tests.
+LANE = Path(__file__).resolve().parents[1]
 MANIFEST = Path(__file__).parents[1] / "backend/workbench/evaluator_harness_manifest_v1.json"
 INTEGRATION_BASE_SHA = "0251f0a30d984bdbb2cfab404e6c646deab60cae"
 LANE_SHA = "97c40de7e5f2e6fb5d97e41ef2831f102aee3229"

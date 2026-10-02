@@ -4,7 +4,20 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..context import ModelingContext, RunEnv
+from ..inference_kernels import (
+    record_inference_kernel,
+    record_single_estimate_kernel,
+    recorded_inference_kernel,
+)
 from ..pack import AnalysisPack, RerunAction, register_pack
+from ...contracts.model.inference_kernel import (
+    InferenceKernelError,
+    build_inference_kernel,
+    kernel_from_fitted,
+    resolve_inference_kernel,
+    unavailable_inference_kernel,
+)
+from ...econometrics.normalize import _public_term
 from ..registry import (
     ModelHandler,
     ModelOptionsValidationError,
@@ -52,6 +65,29 @@ def _validate_model_family_weights(
             f"model family {model_type} does not declare support for "
             f"{', '.join(unsupported)} weight(s); allowed: {allowed_text}"
         )
+
+
+def _record_fitted_kernel(ctx, fitted, *, model_id: str, model_type: str) -> None:
+    """Record the kernel of the fit whose covariance the result reports."""
+    kernel = kernel_from_fitted(
+        fitted, model_id=model_id, model_type=model_type,
+        nobs=int(getattr(fitted, "nobs", 0) or 0), public_name=_public_term,
+    )
+    if kernel is not None:
+        record_inference_kernel(ctx, kernel)
+
+
+def _kernel_source_packet(result: dict[str, Any]) -> dict[str, Any]:
+    """The packet whose sample size and fingerprint the kernel repeats.
+
+    Envelope-style results (model packs, LMM) carry their figures one level
+    down; reading the outer object would record no sample size.
+    """
+    for key in ("result", "payload"):
+        nested = result.get(key)
+        if isinstance(nested, dict) and "nobs" in nested:
+            return nested
+    return result
 
 
 def _result_for_downstream(model_type: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -109,7 +145,14 @@ def _fit_panel_ols(ctx, env):
         model_id="panel_ols_1",
         covariance=covariance,
     )
-    # NB: today's code does NOT store panel_ols fitted; preserve that.
+    # NB: today's code does NOT store panel_ols fitted; preserve that, but hand
+    # the stage its kernel so post-estimation does not need the fitted object.
+    kernel = kernel_from_fitted(
+        fitted, model_id="panel_ols_1", model_type="panel_ols",
+        nobs=int(primary.get("nobs") or 0), public_name=_public_term,
+    )
+    if kernel is not None:
+        record_inference_kernel(ctx, kernel)
     return "panel_ols_1", primary, None
 
 
@@ -259,6 +302,10 @@ def _fit_cs_did(ctx, env):
             "source_id": "model_results.cs_did_1.coefficients.ATT"}},
         "warnings": result["warnings"],
     }
+    record_single_estimate_kernel(
+        ctx, model_id="cs_did_1", model_type="cs_did", name="ATT",
+        estimate=simple["overall"], std_error=simple["overall_se"], nobs=primary["nobs"],
+    )
     return "cs_did_1", primary, None     # no fitted object; diagnostics reads _cs_did_result
 
 
@@ -291,6 +338,10 @@ def _fit_sa_did(ctx, env):
         "coefficients": {"ATT": {"estimate": simple["overall"], "std_error": simple["overall_se"],
             "p_value": None, "source_id": "model_results.sa_did_1.coefficients.ATT"}},
         "warnings": result["warnings"]}
+    record_single_estimate_kernel(
+        ctx, model_id="sa_did_1", model_type="sa_did", name="ATT",
+        estimate=simple["overall"], std_error=simple["overall_se"], nobs=primary["nobs"],
+    )
     return "sa_did_1", primary, None
 
 
@@ -317,6 +368,10 @@ def _fit_dcdh(ctx, env):
         "coefficients": {"ATT": {"estimate": oa["estimate"], "std_error": oa["se"],
             "p_value": None, "source_id": "model_results.dcdh_1.coefficients.ATT"}},
         "warnings": result["warnings"]}
+    record_single_estimate_kernel(
+        ctx, model_id="dcdh_1", model_type="dcdh", name="ATT",
+        estimate=oa["estimate"], std_error=oa["se"], nobs=primary["nobs"],
+    )
     return "dcdh_1", primary, None
 
 
@@ -441,6 +496,9 @@ def _fit_ols(ctx, env):
         focal_x=persisted_form.get("focal_x"),
         primary_estimand=persisted_form.get("primary_estimand"),
         weights=_ols_weight_spec(ctx),
+        fitted_sink=lambda covariance_fit: _record_fitted_kernel(
+            ctx, covariance_fit, model_id="ols_1", model_type="ols"
+        ),
     )
     _apply_survey_design_variance(ctx, "ols", primary)
     return "ols_1", primary, fitted
@@ -527,6 +585,41 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
             2 * stats.t.sf(abs(estimate / se), result.residual_degf)
         ) if se > 0 else float("nan")
         entry["variance_source"] = "survey_design"
+
+    # The kernel must carry the variance the user now sees. Without this a joint
+    # test would read the naive covariance still attached to the fitted object.
+    import numpy as np
+
+    payload_terms = list(coefficients)
+    positions = [result.terms.index(_design_term(term)) for term in payload_terms]
+    model_id = str(primary.get("model_id"))
+    nobs = int(primary.get("nobs") or 0)
+    try:
+        kernel = build_inference_kernel(
+            model_id=model_id,
+            model_type=model_type,
+            param_names=payload_terms,
+            params=[result.estimates[_design_term(term)] for term in payload_terms],
+            vcov=np.asarray(result.covariance, dtype=float)[np.ix_(positions, positions)],
+            reference_distribution="t",
+            df_resid=float(result.residual_degf),
+            loglik=None,
+            nobs=nobs,
+            covariance_estimator=f"survey_design_{result.method}",
+            unavailable={
+                "loglik": (
+                    "The variance is design-based, so a likelihood-ratio test is not valid; "
+                    "joint tests use the design-based Wald test."
+                ),
+            },
+        )
+    except InferenceKernelError as error:
+        # Never fall back to the naive covariance still on the fitted object.
+        kernel = unavailable_inference_kernel(
+            model_id=model_id, model_type=model_type, nobs=nobs,
+            reason=f"The design-based covariance matrix could not be used: {error}.",
+        )
+    record_inference_kernel(ctx, kernel)
 
     effects = design.design_effects(ctx.artifacts["_normalized_y"])
     summary = result.replicate_summary
@@ -790,6 +883,7 @@ class EstimationStage:
         # Lazy imports to avoid circular deps with orchestrator helpers/state.
         from ...orchestrator import (
             _model_failure_details,
+            _write_inference_kernel,
             _write_model_result,
             _write_manifest,
             _safe_flush_recorder,
@@ -997,6 +1091,18 @@ class EstimationStage:
             # never create a competing legacy ``model_results/*.json`` copy.
             if handler.model_type != "linear_mixed_effects":
                 _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
+            _write_inference_kernel(
+                run_root,
+                resolve_inference_kernel(
+                    model_id=model_id,
+                    model_type=handler.model_type,
+                    primary=_kernel_source_packet(primary),
+                    fitted=fitted,
+                    recorded=recorded_inference_kernel(ctx, model_id),
+                    public_name=_public_term,
+                ),
+                inputs=[model_id] if handler.model_type != "linear_mixed_effects" else list(model_input_ids),
+            )
             if handler.model_type != "linear_mixed_effects":
                 _persist_model_options_execution_binding(
                     run_root,
@@ -1177,6 +1283,18 @@ class EstimationStage:
 
             _robust_se_dp = _ols_robust_se_decision(ctx)
             _write_model_result(run_root, "ols_1", ols_result, inputs=model_input_ids)
+            _write_inference_kernel(
+                run_root,
+                resolve_inference_kernel(
+                    model_id="ols_1",
+                    model_type="ols",
+                    primary=ols_result,
+                    fitted=ols_fitted,
+                    recorded=None,
+                    public_name=_public_term,
+                ),
+                inputs=["ols_1"],
+            )
             _persist_ols_contract_metadata(run_root, ols_result)
             model_results.append(("ols_1", ols_result))
             fitted_models["ols_1"] = ols_fitted

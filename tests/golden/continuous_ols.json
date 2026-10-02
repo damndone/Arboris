@@ -21,6 +21,9 @@
     ],
     "fitted_vs_x": [],
     "histograms": [],
+    "inference_kernel_ols_1": [
+      "ols_1"
+    ],
     "kde_plots": [],
     "ols_1": [
       "cleaned_dataset"

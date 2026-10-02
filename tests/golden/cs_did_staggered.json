@@ -24,6 +24,9 @@
     "diagnostic_summary": [],
     "event_study": [],
     "histograms": [],
+    "inference_kernel_cs_did_1": [
+      "cs_did_1"
+    ],
     "kde_plots": [],
     "raw_data.csv": [],
     "report_html": [],

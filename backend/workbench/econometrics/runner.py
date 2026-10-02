@@ -738,6 +738,7 @@ def run_ols(
     intercept: bool = True,
     missing_policy: str = "statsmodels_patsy_drop_rows",
     solver_options: Any = None,
+    fitted_sink: Any = None,
 ) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     frame = _ensure_numeric_x(frame, x)
@@ -882,6 +883,12 @@ def run_ols(
         missing_policy=missing_policy,
         solver_options=solver_options or {"engine": "statsmodels", "method": "ols"},
     )
+    if fitted_sink is not None:
+        # The caller keeps receiving the plain fit (diagnostics need it); the
+        # fit that carries the reported covariance goes to whoever records the
+        # inference kernel, so post-estimation uses the same variance as the
+        # standard errors on screen.
+        fitted_sink(fitted)
     return _add_engine(result), original
 
 

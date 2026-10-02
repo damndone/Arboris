@@ -20,6 +20,9 @@
       "cleaned_dataset"
     ],
     "histograms": [],
+    "inference_kernel_iv_2sls_1": [
+      "iv_2sls_1"
+    ],
     "iv_2sls_1": [
       "cleaned_dataset"
     ],

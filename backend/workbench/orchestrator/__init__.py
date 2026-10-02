@@ -803,5 +803,6 @@ from ._report_build import (
     _mice_imputation_fact,
     _model_summary,
     _variable_summary,
+    _write_inference_kernel,
     _write_model_result,
 )

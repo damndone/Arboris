@@ -21,6 +21,9 @@
     ],
     "fitted_vs_x": [],
     "histograms": [],
+    "inference_kernel_poisson_1": [
+      "poisson_1"
+    ],
     "kde_plots": [],
     "outcome_counts": [],
     "poisson_1": [

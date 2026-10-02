@@ -22,7 +22,9 @@ from ....contracts.model.ordered_logit import OrderedLogitRequest
 from ....contracts.model.quantile_regression import QuantileRegressionRequest
 from ....contracts.model.survival import SurvivalCoxRequest
 from ....contracts.common.envelope import ContractError as TypedContractError
+from ....contracts.model.inference_kernel import kernel_from_fitted
 from ....model_options import ModelOptionsContract
+from ...inference_kernels import record_inference_kernel
 from ...registry import ModelHandler, ModelOptionsValidationError
 
 
@@ -242,6 +244,13 @@ def _ordered_categories(target: pd.Series, options: Mapping[str, Any]) -> list[s
     return sorted(observed)
 
 
+def _record_kernel(ctx: Any, fitted: Any, *, model_id: str, model_type: str, nobs: int, names: list[str]) -> None:
+    """Hand the estimation stage a kernel named the way this packet names terms."""
+    kernel = kernel_from_fitted(fitted, model_id=model_id, model_type=model_type, nobs=nobs, param_names=names)
+    if kernel is not None:
+        record_inference_kernel(ctx, kernel)
+
+
 def fit_ordinal(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
     from statsmodels.miscmodels.ordinal_model import OrderedModel
 
@@ -310,6 +319,7 @@ def fit_ordinal(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         "validation": _validation_metadata("ordinal_logit"),
     }
     OrdinalResultContract.from_dict(primary)
+    _record_kernel(ctx, fitted, model_id="ordinal_logit_1", model_type="ordinal_logit", nobs=int(len(frame)), names=names)
     return "ordinal_logit_1", primary, None
 
 
@@ -431,6 +441,10 @@ def fit_multinomial(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
             "nobs": int(len(frame)),
             "validation": _validation_metadata("multinomial_logit"),
         },
+    )
+    _record_kernel(
+        ctx, fitted, model_id="multinomial_logit_1", model_type="multinomial_logit", nobs=int(len(frame)),
+        names=[f"{category}:{name}" for category in non_base for name in names],
     )
     return "multinomial_logit_1", primary, None
 
@@ -563,6 +577,7 @@ def fit_survival(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         "hazard_ratios": {name: values.get("hazard_ratio") for name, values in coefficient_map.items()},
         "survival_evidence_artifact": "survival_evidence",
     }
+    _record_kernel(ctx, fitted, model_id="survival_cox_1", model_type="survival_cox", nobs=int(len(frame)), names=names)
     return "survival_cox_1", primary, None
 
 
