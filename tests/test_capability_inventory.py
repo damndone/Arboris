@@ -265,7 +265,7 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (131, 5, 124, 129, 2, 0)  # v1.8.9: +data.recode, +metadata.edit; step identities composable only
+    ) == (136, 5, 129, 134, 2, 0)  # v1.8.10: +5 postestimation.* steps (wald, lincom, nlcom, lr, margins), composable
     assert {item.capability_id for item in report.gaps} == set()
     assert {item.capability_id for item in report.exempt} == {
         "code.execute",

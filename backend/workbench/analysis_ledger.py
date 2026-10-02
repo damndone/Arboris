@@ -98,6 +98,7 @@ _PREFIXES: tuple[tuple[str, str], ...] = (
     ("resampling.", "inferential"),
     ("repeated_measures_anova.", "inferential"),
     ("synthetic_control.", "inferential"),
+    ("postestimation.", "inferential"),
 )
 
 

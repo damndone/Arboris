@@ -2371,6 +2371,8 @@ from .workflow_capability_registry import workflow_capability_step_contracts  # 
 WORKFLOW_STEP_SPEC_CONTRACTS.update(_p5_workflow_step_contracts())
 WORKFLOW_STEP_SPEC_CONTRACTS.update(p7_workflow_step_contracts())
 WORKFLOW_STEP_SPEC_CONTRACTS.update(workflow_capability_step_contracts())
+from .postestimation_steps import postestimation_step_contracts  # noqa: E402
+WORKFLOW_STEP_SPEC_CONTRACTS.update(postestimation_step_contracts())
 _refresh_workflow_contract_views()
 
 
@@ -2862,6 +2864,11 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
         _validate_data_management_step(operation_id, spec)
         return
     if validator_key == "capability_factory.custom_operation":
+        return
+    if validator_key == "postestimation":
+        from .postestimation_steps import validate_postestimation_spec
+
+        validate_postestimation_spec(operation_id, spec)
         return
     if validator_key == "p7.pack":
         from .p7_pack_registry import p7_pack_registry

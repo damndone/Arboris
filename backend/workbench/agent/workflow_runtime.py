@@ -1970,6 +1970,22 @@ def build_workflow_step_executor(
                 step,
                 raw_source_frame=source_frame,
             )
+        if dispatcher_key == "workbench.agent.workflow_runtime.postestimation":
+            from .postestimation_steps import execute_postestimation_step
+
+            result, model_run_id, model_id = execute_postestimation_step(
+                root, str(draft.target["run_id"]), step
+            )
+            return _persist_model_post_estimation_result(
+                root,
+                draft,
+                step,
+                artifact_type="post_estimation",
+                result=result,
+                model_run_id=model_run_id,
+                model_artifact_id=model_id,
+                lineage=lineage,
+            )
         if dispatcher_key == "workbench.agent.workflow_runtime.model_joint_f_test":
             return _execute_model_joint_f_test(
                 root, draft, lineage, step_frame, step, previous
@@ -2495,8 +2511,13 @@ def _persist_model_post_estimation_result(
     result: Mapping[str, Any],
     model_run_id: str,
     lineage: Mapping[str, str],
+    model_artifact_id: str = "ols_1",
 ) -> WorkflowStepResult:
-    """Persist one durable, idempotent post-estimation artifact on the source run."""
+    """Persist one durable, idempotent post-estimation artifact on the source run.
+
+    ``model_artifact_id`` defaults to the OLS branch the older model.* steps
+    refit; the kernel-based postestimation.* steps name the model they read.
+    """
 
     run_root = root / "runs" / str(draft.target["run_id"])
     token = str(step.fingerprint).removeprefix("sha256:")[:24]
@@ -2515,7 +2536,7 @@ def _persist_model_post_estimation_result(
             "artifact_id": str(lineage["artifact_id"]),
             "sha256": str(lineage["sha256"]),
             "model_run_id": model_run_id,
-            "model_artifact_id": "ols_1",
+            "model_artifact_id": model_artifact_id,
             "workflow_id": draft.workflow_id,
             "workflow_step_id": step.step_id,
             "workflow_step_fingerprint": step.fingerprint,
