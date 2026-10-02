@@ -1112,7 +1112,10 @@ class EstimationStage:
                 run_root,
                 resolve_inference_kernel(
                     model_id=model_id,
-                    model_type=handler.model_type,
+                    # The packet may refine the handler's family (a Poisson fit
+                    # with an exposure is `poisson_rate`); the kernel names
+                    # what the packet names.
+                    model_type=str(primary.get("model_type") or handler.model_type),
                     primary=_kernel_source_packet(primary),
                     fitted=fitted,
                     recorded=recorded_inference_kernel(ctx, model_id),

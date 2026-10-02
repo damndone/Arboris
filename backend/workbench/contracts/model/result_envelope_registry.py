@@ -90,6 +90,11 @@ class ResultEnvelopeDeclaration:
     fields: tuple[EvidenceField, ...] = ()
     report_document: str | None = None
     report_packet_keys: tuple[str, ...] = ()
+    #: How the linear predictor maps to the predicted mean, for predictions and
+    #: marginal effects: "identity", "logit", "probit" or "log". None when the
+    #: family's prediction needs more than the coefficients and the regressors
+    #: (an exposure, thresholds, several equations) and is not declared yet.
+    inverse_link: str | None = None
 
     @property
     def model_types(self) -> tuple[str, ...]:
@@ -104,9 +109,13 @@ def _field(key: str, kind: str, *, source_key: str | None = None, sidecar: str |
     )
 
 
-def _core(family: str, result_shape: str = "coefficient_intervals", *aliases: str) -> ResultEnvelopeDeclaration:
+def _core(
+    family: str, result_shape: str = "coefficient_intervals", *aliases: str, inverse_link: str | None = None
+) -> ResultEnvelopeDeclaration:
     """A family whose result is fully described by the shared envelope."""
-    return ResultEnvelopeDeclaration(family=family, result_shape=result_shape, packet_model_types=aliases)
+    return ResultEnvelopeDeclaration(
+        family=family, result_shape=result_shape, packet_model_types=aliases, inverse_link=inverse_link
+    )
 
 
 def _aggregated_effects(family: str) -> ResultEnvelopeDeclaration:
@@ -135,10 +144,13 @@ _ORDINAL_DIAGNOSTICS = "model_results/diagnostics_ordinal_logit_1.json"
 _MULTINOMIAL_DIAGNOSTICS = "model_results/diagnostics_multinomial_logit_1.json"
 
 _DECLARATIONS: tuple[ResultEnvelopeDeclaration, ...] = (
-    _core("ols", "coefficient_intervals", "ols_robust", "ols_clustered"),
-    _core("logit"),
-    _core("probit"),
-    _core("poisson", "coefficient_intervals", "poisson_rate"),
+    _core("ols", "coefficient_intervals", "ols_robust", "ols_clustered", inverse_link="identity"),
+    _core("logit", inverse_link="logit"),
+    _core("probit", inverse_link="probit"),
+    _core("poisson", inverse_link="log"),
+    # A rate model predicts with its exposure, which the coefficients alone do
+    # not carry; its prediction is not declared until the exposure is.
+    _core("poisson_rate"),
     _core("negative_binomial"),
     _core("glm:binomial", "coefficient_intervals", "glm"),
     _core("glm:poisson"),

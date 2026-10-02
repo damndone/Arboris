@@ -412,3 +412,14 @@ def test_the_kernel_says_how_the_sample_was_weighted(tmp_path: Path, weight_kwar
     frame["w"] = 1 + (np.arange(len(frame)) % 3)
     run_root = _run(tmp_path, frame, model_type="ols", y="y", x=["x1", "x2"], **weight_kwargs)
     assert _kernel(run_root, "ols_1")["weights"] == expected
+
+
+def test_the_kernel_names_the_model_type_the_result_packet_names(tmp_path: Path) -> None:
+    """A Poisson fit with an exposure is recorded as `poisson_rate`; its
+    predictions need the exposure, so post-estimation must see the same name."""
+    frame = _cross()
+    frame["exposure"] = 1.0 + (np.arange(len(frame)) % 4)
+    run_root = _run(tmp_path, frame, model_type="poisson", y="yc", x=["x1", "x2", "exposure"])
+    packet = read_json(run_root / "model_results" / "poisson_1.json")
+    assert packet["model_type"] == "poisson_rate"
+    assert _kernel(run_root, "poisson_1")["model_type"] == "poisson_rate"

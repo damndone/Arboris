@@ -16,6 +16,9 @@
 #     symbolically; Workbench differentiates numerically, so agreement checks
 #     both the gradient and the variance algebra.
 #   * LR: lmtest::lrtest; an independent implementation.
+#   * Marginal effects: marginaleffects::avg_slopes (average) and
+#     slopes(newdata = "mean") (at the means), which differentiate numerically
+#     and apply the delta method; an independent implementation.
 #   * probit covariance: R's glm reports the EXPECTED information, while Stata's
 #     `probit` (and statsmodels) report the OBSERVED information; for a
 #     non-canonical link the two differ (about 1% here). The probit oracle uses
@@ -27,7 +30,7 @@
 #   Stata is not installed here; every figure below is R's.
 
 source("tests/fixtures/_r_oracle_env.R")
-PKGS <- c("car", "lmtest", "sandwich", "MASS", "nnet", "jsonlite")
+PKGS <- c("car", "lmtest", "sandwich", "MASS", "nnet", "marginaleffects", "jsonlite")
 require_oracle_packages(PKGS)
 suppressMessages({
   library(car)
@@ -35,6 +38,7 @@ suppressMessages({
   library(sandwich)
   library(MASS)
   library(nnet)
+  library(marginaleffects)
   library(jsonlite)
 })
 
@@ -90,6 +94,18 @@ H_SHIFTED <- c("x1 - x2 = 1")
 LINCOM <- "x1 + 2*x2 - 0.5"
 NLCOM <- "x1 / x2"
 
+margins_case <- function(fit, vcov. = NULL) {
+  v <- if (is.null(vcov.)) TRUE else vcov.
+  pick <- function(x) {
+    x <- data.frame(x)
+    setNames(lapply(seq_len(nrow(x)), function(i) list(estimate = x$estimate[i], std_error = x$std.error[i])), x$term)
+  }
+  list(
+    average = pick(avg_slopes(fit, variables = c("x1", "x2"), vcov = v)),
+    at_means = pick(slopes(fit, variables = c("x1", "x2"), newdata = "mean", vcov = v))
+  )
+}
+
 family_case <- function(full, restricted, test, vcov. = NULL) {
   out <- list(
     params = as.list(coef(full)),
@@ -99,6 +115,7 @@ family_case <- function(full, restricted, test, vcov. = NULL) {
     nlcom = delta(full, NLCOM, vcov.)
   )
   if (!is.null(restricted)) out$lr_drop_x2_x3 <- lr(full, restricted)
+  if (!is.null(restricted)) out$margins <- margins_case(full, vcov.)
   out
 }
 

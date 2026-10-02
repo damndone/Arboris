@@ -39,6 +39,8 @@ DIDmultiplegtDYN # tests/fixtures/dcdh/generate_oracle.R
 lmtest          # lrtest -- likelihood-ratio oracle
 sandwich        # vcovHC -- HC1 covariance for the robust Wald oracle
 # car (Anova, above) also supplies linearHypothesis and deltaMethod.
+marginaleffects # avg_slopes / slopes -- average and at-means marginal effects
+mice            # pool -- Rubin's rules for the multiple-imputation combinator (step 5)
 
 # --- shared ---
 jsonlite        # every generator writes JSON fixtures
