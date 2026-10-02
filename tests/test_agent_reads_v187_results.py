@@ -131,7 +131,7 @@ def test_every_family_with_its_own_result_shape_is_readable_by_the_agent():
     result summary; the ones listed here carry a shape of their own, and each
     needs a declared projection.
     """
-    from workbench.agent.context_tools import FAMILY_EVIDENCE_PROJECTIONS
+    from workbench.contracts.model.result_envelope_registry import declaration_for
     from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
 
     # `coefficient_intervals` is the ordinary coefficient table, which the
@@ -146,10 +146,11 @@ def test_every_family_with_its_own_result_shape_is_readable_by_the_agent():
     assert shaped, "no family declares a non-standard result shape; the scan is vacuous"
     assert "anova" in shaped, "the family this guard was written for left the scan"
 
-    # The DID families predate this projection and read through their own
-    # diagnostics cards; recorded as a known gap rather than silently excluded.
-    known_gaps = {"cs_did", "sa_did", "dcdh"}
-    missing = sorted(shaped - set(FAMILY_EVIDENCE_PROJECTIONS) - known_gaps)
+    # The DID families were a known gap until v1.8.10 declared their evidence.
+    missing = sorted(
+        family for family in shaped
+        if declaration_for(family) is None or not declaration_for(family).fields
+    )
     assert not missing, (
         f"{missing} declare their own result shape but project nothing to the "
         "Agent, so it can ask for them and cannot read the answer"
