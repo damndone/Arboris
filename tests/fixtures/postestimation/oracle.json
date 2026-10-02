@@ -9,6 +9,7 @@
       "lmtest": "0.9.40",
       "sandwich": "3.1.1",
       "MASS": "7.3.65",
+      "nnet": "7.3.20",
       "jsonlite": "2.0.0"
     }
   },
@@ -199,25 +200,79 @@
       },
       "wald_joint": {
         "distribution": "chi2",
-        "statistic": 69.8273436304959,
+        "statistic": 73.6632356225689,
         "df_num": 2,
-        "p_value": 6.87361159030498e-16
+        "p_value": 1.00979130078979e-16
       },
       "wald_shifted": {
         "distribution": "chi2",
-        "statistic": 15.319326401017,
+        "statistic": 16.1437713756835,
         "df_num": 1,
-        "p_value": 9.07829796358779e-05
+        "p_value": 5.87113248949466e-05
       },
       "lincom": {
         "estimate": -0.718015326911864,
-        "std_error": 0.122183582700036
+        "std_error": 0.122668934781767
       },
       "nlcom": {
         "estimate": -1.27248130738599,
-        "std_error": 0.302716390590116
+        "std_error": 0.305658308862664
       },
       "theta": 2.25928104184904
+    },
+    "ordinal_logit": {
+      "params": {
+        "x1": 0.888912911722936,
+        "x2": -0.654394145981723,
+        "x3": 0.187437567488462
+      },
+      "wald_joint": {
+        "distribution": "chi2",
+        "statistic": 64.8648640023907,
+        "df_num": 2,
+        "p_value": 8.21814400736417e-15
+      },
+      "lincom": {
+        "estimate": -0.919875380240511,
+        "std_error": 0.228573673558321
+      }
+    },
+    "multinomial_logit": {
+      "params": {
+        "b:(Intercept)": -0.263307439948711,
+        "b:x1": 0.579949669829744,
+        "b:x2": -0.167039297744642,
+        "b:x3": 0.406134243453699,
+        "c:(Intercept)": -0.869901699687252,
+        "c:x1": -0.631345994125474,
+        "c:x2": 0.196642104905807,
+        "c:x3": 1.06798359916729
+      },
+      "wald_joint": {
+        "distribution": "chi2",
+        "statistic": 11.9706648763038,
+        "df_num": 2,
+        "p_value": 0.00251537737206479
+      },
+      "lincom": {
+        "estimate": -0.25412892565954,
+        "std_error": 0.308008960528743
+      }
+    }
+  },
+  "tolerances": {
+    "default": 1e-06,
+    "negative_binomial": {
+      "rel": 0.0001,
+      "reason": "the joint observed information is differentiated numerically (optimHess) from an analytic gradient"
+    },
+    "ordinal_logit": {
+      "rel": 0.0001,
+      "reason": "polr's Hessian is computed numerically by optim"
+    },
+    "multinomial_logit": {
+      "rel": 0.0001,
+      "reason": "multinom's Hessian is computed numerically"
     }
   }
 }

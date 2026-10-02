@@ -27,13 +27,14 @@
 #   Stata is not installed here; every figure below is R's.
 
 source("tests/fixtures/_r_oracle_env.R")
-PKGS <- c("car", "lmtest", "sandwich", "MASS", "jsonlite")
+PKGS <- c("car", "lmtest", "sandwich", "MASS", "nnet", "jsonlite")
 require_oracle_packages(PKGS)
 suppressMessages({
   library(car)
   library(lmtest)
   library(sandwich)
   library(MASS)
+  library(nnet)
   library(jsonlite)
 })
 
@@ -50,6 +51,13 @@ d <- data.frame(
   ynb = rnbinom(n, mu = exp(0.5 + 0.4 * x1 - 0.3 * x2), size = 2),
   x1 = x1, x2 = x2, x3 = x3
 )
+# Drawn after the columns above, so adding them left those columns unchanged.
+latent <- 0.8 * x1 - 0.6 * x2 + 0.3 * x3 + rlogis(n)
+d$yo <- cut(latent, c(-Inf, -0.4, 0.9, Inf), labels = c("low", "mid", "high"))
+util_b <- 0.2 + 0.7 * x1 - 0.3 * x2
+util_c <- -0.1 - 0.5 * x1 + 0.6 * x3
+u <- cbind(0, util_b, util_c) + matrix(-log(-log(runif(3 * n))), n, 3)
+d$ym <- c("a", "b", "c")[max.col(u)]
 write.csv(d, "tests/fixtures/postestimation/data.csv", row.names = FALSE)
 
 wald <- function(fit, hyp, test, vcov. = NULL) {
@@ -117,6 +125,59 @@ probit_r <- glm(yb ~ x1, family = binomial("probit"), data = d, control = TIGHT)
 poisson <- glm(yc ~ x1 + x2 + x3, family = poisson("log"), data = d, control = TIGHT)
 poisson_r <- glm(yc ~ x1, family = poisson("log"), data = d, control = TIGHT)
 negbin <- glm.nb(ynb ~ x1 + x2 + x3, data = d, control = TIGHT)
+# glm.nb reports the expected information with theta held fixed; Stata's
+# `nbreg` and statsmodels report the observed information of the joint
+# likelihood in (beta, alpha). The log link is not canonical for NB2, so the
+# two differ (about 5% on the Wald statistic here). The oracle uses the joint
+# observed information: the Hessian of the full log-likelihood at the MLE, with
+# an analytic gradient so optimHess differentiates only once.
+negbin_oim_vcov <- function(fit) {
+  X <- model.matrix(fit)
+  y <- fit$y
+  k <- ncol(X)
+  nll <- function(par) {
+    mu <- exp(as.vector(X %*% par[1:k]))
+    -sum(dnbinom(y, size = par[k + 1], mu = mu, log = TRUE))
+  }
+  grad <- function(par) {
+    theta <- par[k + 1]
+    mu <- exp(as.vector(X %*% par[1:k]))
+    d_eta <- (y - mu) * theta / (theta + mu)
+    d_theta <- digamma(y + theta) - digamma(theta) + log(theta / (theta + mu)) + (mu - y) / (theta + mu)
+    -c(colSums(X * d_eta), sum(d_theta))
+  }
+  par <- c(coef(fit), fit$theta)
+  v <- solve(optimHess(par, nll, grad, control = list(ndeps = rep(1e-6, k + 1))))[1:k, 1:k]
+  dimnames(v) <- list(names(coef(fit)), names(coef(fit)))
+  v
+}
+# polr and multinom estimate their Hessians numerically (optim), so they agree
+# with Workbench's analytic Hessians only to about 1e-4; the tolerance used is
+# recorded below with the reason.
+ordinal <- polr(factor(yo, levels = c("low", "mid", "high")) ~ x1 + x2 + x3, data = d,
+                Hess = TRUE, control = list(reltol = 1e-14, maxit = 1000))
+multinomial <- multinom(factor(ym) ~ x1 + x2 + x3, data = d, Hess = TRUE, trace = FALSE,
+                        reltol = 1e-14, maxit = 1000)
+
+# Wald and lincom on slopes only: the families' threshold and intercept
+# parameterisations differ between R and Workbench, the slopes do not.
+slopes_case <- function(fit, prefix = "") {
+  b <- coef(fit)
+  if (is.matrix(b)) b <- setNames(as.vector(t(b)), paste0(rep(rownames(b), each = ncol(b)), ":", colnames(b)))
+  v <- vcov(fit)
+  name <- function(term) paste0(prefix, term)
+  idx <- c(name("x1"), name("x2"))
+  bj <- b[idx]
+  vj <- v[idx, idx]
+  stat <- as.numeric(t(bj) %*% solve(vj) %*% bj)
+  w <- c(1, 2)
+  list(
+    params = as.list(b),
+    wald_joint = list(distribution = "chi2", statistic = stat, df_num = 2,
+                      p_value = pchisq(stat, 2, lower.tail = FALSE)),
+    lincom = list(estimate = sum(w * bj) - 0.5, std_error = sqrt(as.numeric(t(w) %*% vj %*% w)))
+  )
+}
 
 oracle <- list(
   generator = "tests/fixtures/postestimation/generate_oracle.R",
@@ -131,7 +192,17 @@ oracle <- list(
     logit = family_case(logit, logit_r, "Chisq"),
     probit = family_case(probit, probit_r, "Chisq", probit_oim_vcov(probit)),
     poisson = family_case(poisson, poisson_r, "Chisq"),
-    negative_binomial = family_case(negbin, NULL, "Chisq")
+    negative_binomial = family_case(negbin, NULL, "Chisq", negbin_oim_vcov(negbin)),
+    ordinal_logit = slopes_case(ordinal),
+    multinomial_logit = slopes_case(multinomial, "b:")
+  ),
+  tolerances = list(
+    default = 1e-6,
+    negative_binomial = list(rel = 1e-4, reason = paste(
+      "the joint observed information is differentiated numerically (optimHess)",
+      "from an analytic gradient")),
+    ordinal_logit = list(rel = 1e-4, reason = "polr's Hessian is computed numerically by optim"),
+    multinomial_logit = list(rel = 1e-4, reason = "multinom's Hessian is computed numerically")
   )
 )
 oracle$families$negative_binomial$theta <- negbin$theta
